@@ -130,7 +130,10 @@ def read_kfd(root: str | Path = KFD_ROOT) -> dict[str, dict]:
         loc, domain = props.get("location_id", 0), props.get("domain", 0)
         bdf = f"{domain:04x}:{loc >> 8:02x}:{(loc >> 3) & 0x1f:02x}.{loc & 0x7}"
         out[bdf] = {"node": node.name, "gfx": decode_gfx(props.get("gfx_target_version")),
-                    "cpu_cores": props.get("cpu_cores_count", 0), "simd": props.get("simd_count", 0)}
+                    "cpu_cores": props.get("cpu_cores_count", 0), "simd": props.get("simd_count", 0),
+                    # What ROCr calls the agent's UUID (rocminfo "Uuid: GPU-…"), and the render
+                    # node (/dev/dri/renderD<minor>) that a container needs for this card only.
+                    "unique_id": props.get("unique_id"), "render_minor": props.get("drm_render_minor")}
     return out
 
 
@@ -178,6 +181,10 @@ def make_card(*, index: int, model: Optional[str], gfx: Optional[str], uuid: Opt
     why = unified_reason(gfx, node)
     total, used = vram_total, vram_used
     detail: dict[str, Any] = {"pci_bus_id": bdf, "source": source}
+    if node and node.get("unique_id"):
+        detail["rocr_uuid"] = f"GPU-{node['unique_id']:016x}"
+    if node and node.get("render_minor"):
+        detail["render_minor"] = node["render_minor"]
     if gtt_total is not None:
         detail["gtt_total"], detail["gtt_used"] = gtt_total, gtt_used
     if why:

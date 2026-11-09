@@ -1,0 +1,249 @@
+"""The container runtime: Docker or Podman, driven through their CLI.
+
+Every container carries labels (`forgeyard.agent`, `forgeyard.replica`, `forgeyard.generation`,
+`forgeyard.workload`, `forgeyard.ports`), so a restarted agent finds and adopts what it started
+instead of starting it twice, and removes what nobody wants any more. Containers run with the
+engine's defaults plus `--security-opt no-new-privileges`, never `--privileged`, with only the
+assigned GPUs, and their host ports bound to one address.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Callable, Optional
+
+from forgeyard.agent.workloads import plan
+from forgeyard.agent.workloads.records import Record, RecordStore
+from forgeyard.agent.workloads.runtime import Observation, StartError
+from forgeyard.workloads.spec import ContainerRuntime as ContainerSpec, WorkloadSpec
+
+log = logging.getLogger("forgeyard.agent")
+
+ENGINES = ("docker", "podman")
+CDI_DIRS = ("/etc/cdi", "/var/run/cdi")
+PULL_TIMEOUT = 1800.0
+
+Runner = Callable[..., subprocess.CompletedProcess]
+
+
+def _run(argv: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
+    # The engine CLI needs nothing from the agent's environment but where to find things.
+    env = {"PATH": os.environ.get("PATH", plan.BASIC_PATH), "HOME": os.environ.get("HOME", "/root")}
+    for key in ("DOCKER_HOST", "DOCKER_CONFIG", "CONTAINER_HOST", "XDG_RUNTIME_DIR"):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
+
+
+def nvidia_cdi_present(dirs=CDI_DIRS) -> bool:
+    for d in dirs:
+        p = Path(d)
+        if p.is_dir() and any(f.name.startswith("nvidia") for f in p.iterdir()):
+            return True
+    return False
+
+
+def detect(engine: str = "auto", run: Runner = _run, which=shutil.which, cdi=nvidia_cdi_present) -> dict:
+    """Which engine works here, and whether it can pass NVIDIA GPUs into containers."""
+    if engine == "none":
+        return {"ok": False, "reason": "disabled with --container-engine none"}
+    candidates = ENGINES if engine == "auto" else (engine,)
+    tried = []
+    for name in candidates:
+        path = which(name) if "/" not in name else (name if os.access(name, os.X_OK) else None)
+        if not path:
+            tried.append(f"{name} not found")
+            continue
+        try:
+            r = run([path, "info", "--format", "{{json .}}"], timeout=20)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            tried.append(f"{name}: {e}")
+            continue
+        if r.returncode != 0:
+            tried.append(f"{name} info failed: {(r.stderr or r.stdout).strip()[:160]}")
+            continue
+        try:
+            info = json.loads(r.stdout or "{}")
+        except ValueError:
+            info = {}
+        kind = "podman" if "podman" in Path(path).name or "host" in info and "version" in info else "docker"
+        out = {"ok": True, "engine": kind, "path": path}
+        if kind == "docker":
+            out["version"] = info.get("ServerVersion")
+            runtimes = sorted((info.get("Runtimes") or {}).keys())
+            out["runtimes"] = runtimes
+            out["default_runtime"] = info.get("DefaultRuntime")
+            if "nvidia" in runtimes or which("nvidia-container-runtime-hook"):
+                out["nvidia"], out["gpu_mode"] = True, "gpus"
+            elif cdi():
+                out["nvidia"], out["gpu_mode"] = True, "cdi"
+            else:
+                out["nvidia"], out["gpu_mode"] = False, None
+        else:
+            out["version"] = (info.get("version") or {}).get("Version")
+            out["nvidia"] = cdi()
+            out["gpu_mode"] = "cdi" if out["nvidia"] else None
+        return out
+    return {"ok": False, "reason": "; ".join(tried) or "no container engine"}
+
+
+def render_devices(gpus: list[dict]) -> list[str]:
+    """/dev/dri/renderD<minor> for each assigned AMD card: from the KFD topology, else from sysfs."""
+    out = []
+    for g in gpus:
+        if g.get("vendor") != "amd":
+            continue
+        minor = g.get("render_minor")
+        if minor:
+            out.append(f"/dev/dri/renderD{minor}")
+            continue
+        bdf = g.get("pci_bus_id")
+        found = sorted(Path(f"/sys/bus/pci/devices/{bdf}/drm").glob("renderD*")) if bdf else []
+        if not found:
+            raise StartError(f"cannot find the render node of AMD GPU #{g.get('index')}")
+        out.append(f"/dev/dri/{found[0].name}")
+    return out
+
+
+class ContainerRuntime:
+    name = "container"
+
+    def __init__(self, store: RecordStore, *, agent_id: str, engine: str = "auto", log_max_bytes: int = 10 * 1024**2,
+                 run: Runner = _run, which=shutil.which, cdi=nvidia_cdi_present, info: Optional[dict] = None):
+        self.store = store
+        self.agent_id = agent_id
+        self.log_max_bytes = log_max_bytes
+        self._run = run
+        self._info = info if info is not None else detect(engine, run=run, which=which, cdi=cdi)
+        self.engine = self._info.get("path") or "docker"
+
+    def info(self) -> dict:
+        return {k: v for k, v in self._info.items() if k != "path"}
+
+    def _cli(self, *args: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
+        return self._run([self.engine, *args], timeout=timeout)
+
+    def labels(self, rec: Record) -> dict[str, str]:
+        return {"forgeyard.agent": self.agent_id, "forgeyard.replica": rec.id,
+                "forgeyard.generation": str(rec.generation), "forgeyard.workload": rec.workload,
+                "forgeyard.ports": json.dumps(rec.ports, separators=(",", ":"))}
+
+    def start(self, rec: Record, address: str) -> None:
+        if not self._info.get("ok"):
+            raise StartError(self._info.get("reason") or "no container engine")
+        spec = WorkloadSpec.model_validate(rec.spec)
+        rt = spec.runtime
+        assert isinstance(rt, ContainerSpec)
+        if any(g.get("vendor") == "nvidia" for g in rec.gpus) and not self._info.get("nvidia"):
+            raise StartError("this container engine cannot pass NVIDIA GPUs (no NVIDIA runtime or CDI)")
+        name = plan.container_name(rec.workload, rec.id)
+        self._cli("rm", "-f", name)  # a leftover of this replica that was never recorded
+        log_dir = self.store.log_dir(rec.id)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(log_dir, 0o700)
+        env_file = log_dir / "env"
+        env = plan.container_env(spec.env, rec.gpus, rec.ports, replica_id=rec.id, workload=rec.workload,
+                                 ordinal=rec.ordinal)
+        fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(plan.env_file_text(env))
+        amd = [g for g in rec.gpus if g.get("vendor") == "amd"]
+        devices = render_devices(rec.gpus) if amd else []
+        gids = sorted({os.stat(d).st_gid for d in ["/dev/kfd", *devices] if os.path.exists(d)}) if amd else []
+        argv = plan.container_run_argv(
+            self.engine, name=name, image=rt.image, command=rt.command, args=rt.args, env_file=str(env_file),
+            labels=self.labels(rec), ports=rec.ports, bind=address, cpu=spec.resources.cpu,
+            memory=spec.resources.memory, gpus=rec.gpus, gpu_mode=self._info.get("gpu_mode"),
+            render_devices=devices, render_gids=gids, log_max_bytes=self.log_max_bytes)
+        try:
+            r = self._run(argv, timeout=PULL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise StartError("the container did not start within 30 minutes (image pull?)") from None
+        finally:
+            env_file.unlink(missing_ok=True)
+        if r.returncode != 0:
+            raise StartError(f"{Path(self.engine).name} run failed: {(r.stderr or r.stdout).strip()[-300:]}")
+        rec.container = name
+        rec.pid = None
+
+    def _inspect(self, name: str) -> Optional[dict]:
+        r = self._cli("inspect", "--format", "{{json .State}}", name)
+        if r.returncode != 0:
+            return None
+        try:
+            return json.loads(r.stdout)
+        except ValueError:
+            return None
+
+    def observe(self, rec: Record) -> Observation:
+        if not rec.container:
+            return Observation(alive=False, missing=True)
+        state = self._inspect(rec.container)
+        if state is None:
+            return Observation(alive=False, missing=True)
+        status = (state.get("Status") or "").lower()
+        if status in ("running", "restarting", "paused", "created"):
+            rec.pid = state.get("Pid") or None
+            return Observation(alive=True)
+        return Observation(alive=False, exit_code=state.get("ExitCode"))
+
+    def stop(self, rec: Record, grace: float) -> None:
+        if rec.container:
+            try:
+                self._cli("stop", "-t", str(int(grace)), rec.container, timeout=grace + 30)
+            except subprocess.TimeoutExpired:
+                self._cli("kill", rec.container)
+
+    def cleanup(self, rec: Record) -> None:
+        pass
+
+    def remove(self, rec: Record) -> None:
+        if rec.container:
+            self._cli("rm", "-f", rec.container)
+        shutil.rmtree(self.store.log_dir(rec.id), ignore_errors=True)
+
+    def remove_name(self, name: str) -> None:
+        self._cli("rm", "-f", name)
+
+    def tail(self, rec: Record, lines: int) -> tuple[str, bool]:
+        if not rec.container:
+            return "", False
+        r = self._run([self.engine, "logs", "--tail", str(lines + 1), rec.container], timeout=15)
+        text = (r.stdout or "") + (r.stderr or "")
+        parts = text.splitlines()
+        return "\n".join(parts[-lines:]), len(parts) > lines
+
+    def trim(self, rec: Record, max_bytes: int) -> None:
+        pass  # the engine's log driver keeps the size (--log-opt max-size)
+
+    def owned(self) -> dict[str, dict]:
+        """Containers this agent started: {replica id: {name, generation, ports}}."""
+        if not self._info.get("ok"):
+            return {}
+        r = self._cli("ps", "-a", "-q", "--filter", f"label=forgeyard.agent={self.agent_id}")
+        ids = [x for x in (r.stdout or "").split() if x]
+        if r.returncode != 0 or not ids:
+            return {}
+        r = self._cli("inspect", *ids)
+        try:
+            items = json.loads(r.stdout or "[]")
+        except ValueError:
+            return {}
+        out = {}
+        for item in items:
+            labels = (item.get("Config") or {}).get("Labels") or {}
+            if labels.get("forgeyard.agent") != self.agent_id or not labels.get("forgeyard.replica"):
+                continue
+            try:
+                ports = json.loads(labels.get("forgeyard.ports") or "[]")
+                generation = int(labels.get("forgeyard.generation") or 0)
+            except ValueError:
+                ports, generation = [], 0
+            out[labels["forgeyard.replica"]] = {"name": (item.get("Name") or "").lstrip("/"),
+                                                "generation": generation, "ports": ports}
+        return out
