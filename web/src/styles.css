@@ -195,6 +195,72 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .add-user-grid { display: grid; grid-template-columns: 1fr 1fr 180px; gap: 14px; }
 .add-user .muted { margin: 12px 0; }
 
+/* ---------------------------------------------------------------- machines */
+.add-machine p { margin: 0 0 12px; color: var(--ink-2); }
+.steps { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 6px; color: var(--ink-2); max-width: 80ch; }
+.waiting { display: flex; align-items: center; gap: 8px; color: var(--muted); margin: 4px 0 10px !important; }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--heat); box-shadow: 0 0 0 0 rgb(240 160 32 / 0.6); animation: pulse 1.6s ease-out infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 8px rgb(240 160 32 / 0); } 100% { box-shadow: 0 0 0 0 rgb(240 160 32 / 0); } }
+.tokens-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: -6px 0 16px; color: var(--muted); }
+.token-chip { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px; border: 1px dashed var(--line-strong); border-radius: var(--radius); font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+
+.fleet { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0 0 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.fleet > div { padding: 12px 16px; border-left: 1px solid var(--line); min-width: 0; }
+.fleet > div:first-child { border-left: 0; }
+.fleet dt { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.fleet dd { margin: 2px 0 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; }
+.fleet-online { color: var(--ok); }
+
+.machines { display: grid; gap: 14px; }
+.machine { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px 12px; min-width: 0; }
+.machine-online { box-shadow: inset 3px 0 0 var(--ok); }
+.machine-offline { background: var(--surface-2); }
+.machine-offline .accels, .machine-revoked .accels { opacity: 0.6; }
+.machine-revoked { background: var(--surface-2); border-style: dashed; }
+.machine-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.machine-title { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.machine-title h2 { font-size: 15px; font-weight: 600; margin-right: 2px; overflow-wrap: anywhere; }
+.machine-title .chip + .chip { margin-left: 0; }
+.machine-actions { display: flex; gap: 2px; flex: none; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--line-strong); }
+.dot-online { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.dot-revoked { background: var(--bad); }
+.chip-machine-online { background: var(--ok-soft); border-color: #bfe0cc; color: var(--ok); }
+.chip-machine-offline { background: var(--surface); color: var(--muted); }
+.chip-machine-revoked { background: var(--bad-soft); border-color: #f2c4c0; color: var(--bad); }
+.chip-simulated { background: var(--heat-soft); border: 1px dashed var(--heat); color: var(--heat-ink); }
+.chip-unified { background: var(--info-soft); border-color: #c7d9eb; color: var(--info); }
+.machine-meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 6px 0 0 17px; font-size: 13px; color: var(--muted); }
+.meta-offline { color: var(--ink-2); font-weight: 550; }
+.machine-summary { margin: 10px 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.machine-summary strong { font-weight: 600; }
+
+.accels { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.accel { display: grid; grid-template-columns: 112px minmax(0, 1.5fr) minmax(200px, 1.1fr) 92px; gap: 14px; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--line); }
+.accel:last-child { border-bottom: 0; }
+.accel-id { display: flex; align-items: center; gap: 6px; }
+.vendor { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); }
+.vendor-nvidia { border-color: #c9d9a3; background: #f2f7e4; color: #4a6211; }
+.vendor-amd { border-color: #f0c4bd; background: #fcefed; color: #8f2a1c; }
+.accel-index { font-size: 11px; color: var(--muted); }
+.accel-model { display: grid; gap: 2px; min-width: 0; }
+.accel-name { font-weight: 550; font-size: 14px; overflow-wrap: anywhere; }
+.accel-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 12.5px; }
+.accel-sub .chip { height: 19px; }
+.accel-mem { display: grid; gap: 5px; min-width: 0; }
+.mem-text { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mem-text strong { font-weight: 650; }
+.bar { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--steel-3); }
+.bar-tight > span { background: var(--heat); }
+.accel-live { display: flex; justify-content: flex-end; gap: 10px; font-size: 11.5px; color: var(--ink-2); }
+.detection { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.detection summary { cursor: pointer; width: max-content; }
+.detection ul { margin: 6px 0 2px; padding-left: 18px; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.action-machine { background: var(--steel); border-color: var(--steel); color: #fff; }
+
 /* ---------------------------------------------------------------- empty shells */
 .empty { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 36px; align-items: center;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 36px; }
@@ -213,7 +279,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .kind-name { font-weight: 600; font-size: 14px; }
 .kind-detail { font-size: 12.5px; color: var(--muted); }
 @keyframes glow { 50% { box-shadow: 0 0 4px rgb(240 160 32 / 0.2) inset; } }
-@media (prefers-reduced-motion: reduce) { .slot-hot, .plate-hot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .slot-hot, .plate-hot, .pulse { animation: none; } }
 
 /* ---------------------------------------------------------------- sign-in screens */
 .auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 560px); }
@@ -239,6 +305,10 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 /* ---------------------------------------------------------------- narrow screens */
 @media (max-width: 980px) {
   .columns { grid-template-columns: minmax(0, 1fr); }
+  .fleet { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fleet > div:nth-child(4) { border-left: 0; }
+  .fleet > div:nth-child(n+4) { border-top: 1px solid var(--line); }
+  .accel { grid-template-columns: 96px minmax(0, 1fr) minmax(170px, 0.9fr) 80px; gap: 10px; }
   .empty { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 24px; }
   .empty-art { max-width: 320px; }
 }
@@ -268,6 +338,20 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
   .panel { padding: 16px; }
   .add-user-grid { grid-template-columns: minmax(0, 1fr); }
   .kinds { grid-template-columns: minmax(0, 1fr); }
+  .fleet { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fleet > div:nth-child(n) { border-left: 0; border-top: 1px solid var(--line); }
+  .fleet > div:nth-child(-n+2) { border-top: 0; }
+  .fleet > div:nth-child(even) { border-left: 1px solid var(--line); }
+  .fleet > div:last-child { grid-column: 1 / -1; border-left: 0; }
+  .fleet dd { font-size: 17px; }
+  .machine { padding: 14px 14px 10px; }
+  .machine-head { flex-direction: column; gap: 8px; }
+  .machine-meta { margin-left: 0; }
+  .accel { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id live" "model model" "mem mem"; gap: 4px 10px; padding: 10px 0; }
+  .accel-id { grid-area: id; }
+  .accel-live { grid-area: live; }
+  .accel-model { grid-area: model; }
+  .accel-mem { grid-area: mem; }
 
   /* Tables become one card per row. */
   .table-wrap { background: none; border: 0; }
