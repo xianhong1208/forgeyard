@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Failed sign-ins per IP within 15 minutes before that IP must wait.
     login_ip_failures: int = 30
 
+    # Machines: agents send a heartbeat this often, and a machine with nothing heard for
+    # agent_offline_seconds is shown offline (a server-side check, so a silent network drop counts).
+    agent_heartbeat_seconds: int = 10
+    agent_offline_seconds: int = 30
+
     @field_validator("registration")
     @classmethod
     def _registration(cls, v: str) -> str:

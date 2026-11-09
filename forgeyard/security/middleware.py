@@ -8,11 +8,15 @@
    cross-site form cannot send without a CORS preflight, which we never grant) and, when
    the browser sends Origin or Referer, it must be our own origin.
 3. A per-IP request budget for /api (429, never a sign-out).
+
+GuardMiddleware only sees HTTP requests; WebSocketHostGuard applies the same host check to
+WebSocket handshakes (the agent stream), answering 421 before anything else runs.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import json
 from urllib.parse import urlsplit
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -95,3 +99,27 @@ class GuardMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
+
+
+class WebSocketHostGuard:
+    """Pure ASGI: the host check for WebSocket handshakes (BaseHTTPMiddleware skips them)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "websocket":
+            host = dict(scope.get("headers") or []).get(b"host", b"").decode("latin-1")
+            if not host_allowed(host):
+                await receive()  # websocket.connect
+                if "websocket.http.response" in scope.get("extensions", {}):
+                    body = json.dumps({"detail": {"code": "host_not_allowed",
+                                                  "message": "This server does not answer to that host name."}}).encode()
+                    await send({"type": "websocket.http.response.start", "status": 421,
+                                "headers": [(b"content-type", b"application/json"),
+                                            (b"content-length", str(len(body)).encode())]})
+                    await send({"type": "websocket.http.response.body", "body": body})
+                else:
+                    await send({"type": "websocket.close", "code": 1008})
+                return
+        await self.app(scope, receive, send)
