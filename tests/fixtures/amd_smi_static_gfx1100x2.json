@@ -1,0 +1,44 @@
+[
+  {
+    "gpu": 0,
+    "asic": {
+      "market_name": "AMD Radeon RX 7900 XTX",
+      "target_graphics_version": "gfx1100"
+    },
+    "bus": {
+      "bdf": "0000:03:00.0"
+    },
+    "driver": {
+      "name": "amdgpu",
+      "version": "6.10.5"
+    },
+    "vram": {
+      "type": "GDDR6",
+      "size": {
+        "value": 24560,
+        "unit": "MB"
+      }
+    }
+  },
+  {
+    "gpu": 1,
+    "asic": {
+      "market_name": "AMD Radeon RX 7900 XTX",
+      "target_graphics_version": "gfx1100"
+    },
+    "bus": {
+      "bdf": "0000:83:00.0"
+    },
+    "driver": {
+      "name": "amdgpu",
+      "version": "6.10.5"
+    },
+    "vram": {
+      "type": "GDDR6",
+      "size": {
+        "value": 24560,
+        "unit": "MB"
+      }
+    }
+  }
+]

@@ -1,0 +1,82 @@
+[
+  {
+    "gpu": 0,
+    "usage": {
+      "gfx_activity": {
+        "value": 88,
+        "unit": "%"
+      }
+    },
+    "temperature": {
+      "edge": {
+        "value": 61,
+        "unit": "C"
+      }
+    },
+    "mem_usage": {
+      "total_vram": {
+        "value": 24560,
+        "unit": "MB"
+      },
+      "used_vram": {
+        "value": 18432,
+        "unit": "MB"
+      },
+      "free_vram": {
+        "value": 6128,
+        "unit": "MB"
+      },
+      "total_gtt": {
+        "value": 65536,
+        "unit": "MB"
+      },
+      "used_gtt": {
+        "value": 20,
+        "unit": "MB"
+      },
+      "free_gtt": {
+        "value": 65516,
+        "unit": "MB"
+      }
+    }
+  },
+  {
+    "gpu": 1,
+    "usage": {
+      "gfx_activity": "N/A"
+    },
+    "temperature": {
+      "edge": "N/A",
+      "hotspot": {
+        "value": 52,
+        "unit": "C"
+      }
+    },
+    "mem_usage": {
+      "total_vram": {
+        "value": 24560,
+        "unit": "MB"
+      },
+      "used_vram": {
+        "value": 512,
+        "unit": "MB"
+      },
+      "free_vram": {
+        "value": 24048,
+        "unit": "MB"
+      },
+      "total_gtt": {
+        "value": 65536,
+        "unit": "MB"
+      },
+      "used_gtt": {
+        "value": 20,
+        "unit": "MB"
+      },
+      "free_gtt": {
+        "value": 65516,
+        "unit": "MB"
+      }
+    }
+  }
+]
