@@ -53,9 +53,14 @@ def mark_all_offline(db: DbSession) -> None:
 
 
 def _sweep_once() -> None:
+    from forgeyard.workloads.placement import place_and_poke
+
     db = new_session()
     try:
         sweep(db)
+        # Replicas waiting for room (a machine coming online, a card freed) are placed here
+        # too, so nothing depends on one event having been seen.
+        place_and_poke(db)
     finally:
         db.close()
 

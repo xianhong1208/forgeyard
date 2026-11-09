@@ -20,6 +20,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     create_engine,
     event,
 )
@@ -143,6 +144,13 @@ class Node(Base):
     last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Which accelerators Forgeyard may assign, by key. NULL: all of them. A key that disappears
+    # from the inventory (card swapped) is simply not allowed any more: it fails closed.
+    gpu_allowlist: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # What the agent can run with ({"process": {...}, "container": {...}}), from its hello.
+    runtime_info: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Protocol features the agent declared ("workloads"). An M1 agent declares none.
+    features: Mapped[list] = mapped_column(JSON, default=list)
 
     accelerators: Mapped[list["Accelerator"]] = relationship(
         back_populates="node", cascade="all, delete-orphan", order_by="Accelerator.position"
@@ -179,6 +187,80 @@ class Accelerator(Base):
     node: Mapped[Node] = relationship(back_populates="accelerators")
 
     __table_args__ = (Index("ix_accelerators_node_key", "node_id", "key", unique=True),)
+
+
+class Workload(Base):
+    """Something to run: a service or a task. Its spec never changes after creation."""
+
+    __tablename__ = "workloads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(48), unique=True)
+    kind: Mapped[str] = mapped_column(String(16))                         # service | task
+    runtime: Mapped[str] = mapped_column(String(16))                      # container | process
+    spec: Mapped[dict] = mapped_column(JSON)
+    desired_state: Mapped[str] = mapped_column(String(16), default="running")  # running | stopped
+    # Bumped on every (re)start: the agent replaces a replica whose generation differs.
+    generation: Mapped[int] = mapped_column(Integer, default=1)
+    owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    replicas: Mapped[list["Replica"]] = relationship(
+        back_populates="workload", cascade="all, delete-orphan", order_by="Replica.ordinal"
+    )
+
+
+class Replica(Base):
+    """One copy of a workload, placed on one machine, with the state its agent reports."""
+
+    __tablename__ = "replicas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # What the agent knows it by, and the label on its container. Random, so a reinstalled server
+    # never collides with what an agent still runs from before.
+    uid: Mapped[str] = mapped_column(String(32), unique=True, default=lambda: uuid.uuid4().hex)
+    workload_id: Mapped[int] = mapped_column(ForeignKey("workloads.id", ondelete="CASCADE"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer, default=0)
+    node_id: Mapped[Optional[int]] = mapped_column(ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True, index=True)
+    generation: Mapped[int] = mapped_column(Integer, default=1)
+    # [{"key", "vendor", "index", "uuid", "pci_bus_id", "model"}] — assigned exclusively.
+    gpus: Mapped[list] = mapped_column(JSON, default=list)
+    # pending | starting | running | healthy | unhealthy | backoff | exited | failed | stopping | stopped
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    reason: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    exit_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    restarts: Mapped[int] = mapped_column(Integer, default=0)
+    # The agent will not act on it again (a task that ended, a service that may not restart):
+    # it leaves the desired state and its resources are free.
+    final: Mapped[bool] = mapped_column(Boolean, default=False)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    container: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # [{"name", "port", "host_port", "address"}]
+    ports: Mapped[list] = mapped_column(JSON, default=list)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # The last lines of output the agent sent when the replica ended (shown once it is gone).
+    log_tail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    workload: Mapped[Workload] = relationship(back_populates="replicas")
+    node: Mapped[Optional[Node]] = relationship()
+
+
+class WorkloadEvent(Base):
+    """What happened to a workload: created, placed, started, exited, stopped… (its detail page)."""
+
+    __tablename__ = "workload_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    workload_id: Mapped[int] = mapped_column(ForeignKey("workloads.id", ondelete="CASCADE"), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    replica: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # ordinal
+    kind: Mapped[str] = mapped_column(String(32))
+    message: Mapped[str] = mapped_column(String(500))
 
 
 _engine = None

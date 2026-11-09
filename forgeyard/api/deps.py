@@ -51,6 +51,21 @@ def require_admin(caller: Caller = Depends(current)) -> Caller:
     return caller
 
 
+# Who may create, stop and delete workloads. Creating one is running code on a machine, so
+# only roles trusted with that (see the design's security section); users get API keys in M4.
+WORKLOAD_ROLES = ("admin", "operator")
+
+
+def can_run_workloads(user: User) -> bool:
+    return user.role in WORKLOAD_ROLES
+
+
+def require_operator(caller: Caller = Depends(current)) -> Caller:
+    if not can_run_workloads(caller.user):
+        raise fail(403, "forbidden", "Only admins and operators can do this.")
+    return caller
+
+
 def cookie_secure(request: Request) -> bool:
     mode = get_settings().cookie_secure.strip().lower()
     if mode in ("true", "1", "yes"):
