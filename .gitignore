@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime state
+data/
+*.db
+*.log
+
+# Frontend
+web/node_modules/
+web/dist/
+forgeyard/static/
+
+# Local config
+.env
