@@ -1,0 +1,88 @@
+{
+  "_comment": "Simulated inventory for development and tests (forgeyard agent --simulate-inventory). Not a real machine; GPU values are modelled on recorded tool output in tests/fixtures.",
+  "accelerators": [
+    {
+      "key": "nvidia:GPU-ef4c1186-e312-54d0-aa7a-dfc51874fe7b",
+      "vendor": "nvidia",
+      "index": 0,
+      "model": "NVIDIA GeForce RTX 4090",
+      "arch": "8.9",
+      "uuid": "GPU-ef4c1186-e312-54d0-aa7a-dfc51874fe7b",
+      "vram_total": 25757220864,
+      "vram_free": 24683479040,
+      "vram_used": 1073741824,
+      "unified_memory": false,
+      "driver": "550.54.14",
+      "utilization": 12,
+      "temperature": 48,
+      "detail": {
+        "sm": "sm_89",
+        "pci_bus_id": "00000000:01:00.0"
+      }
+    },
+    {
+      "key": "nvidia:GPU-3ad565b4-caed-5465-955a-bdf5bf0ddbbe",
+      "vendor": "nvidia",
+      "index": 1,
+      "model": "NVIDIA GeForce RTX 4090",
+      "arch": "8.9",
+      "uuid": "GPU-3ad565b4-caed-5465-955a-bdf5bf0ddbbe",
+      "vram_total": 25757220864,
+      "vram_free": 5356126208,
+      "vram_used": 20401094656,
+      "unified_memory": false,
+      "driver": "550.54.14",
+      "utilization": 97,
+      "temperature": 71,
+      "detail": {
+        "sm": "sm_89",
+        "pci_bus_id": "00000000:21:00.0"
+      }
+    },
+    {
+      "key": "cpu:0",
+      "vendor": "cpu",
+      "index": 0,
+      "model": "AMD Ryzen 9 7950X 16-Core Processor",
+      "arch": "x86_64",
+      "vram_total": 134217728000,
+      "vram_free": 100663296000,
+      "vram_used": 33554432000,
+      "unified_memory": false,
+      "driver": null,
+      "utilization": 4,
+      "temperature": null,
+      "detail": {
+        "cores": 16,
+        "threads": 32,
+        "sockets": 1,
+        "isa": [
+          "avx",
+          "avx2",
+          "fma",
+          "f16c",
+          "avx512f",
+          "avx512_bf16",
+          "avx512_vnni"
+        ]
+      }
+    }
+  ],
+  "collectors": {
+    "nvidia": {
+      "ok": true,
+      "count": 2,
+      "source": "nvml"
+    },
+    "amd": {
+      "ok": false,
+      "count": 0,
+      "reason": "amdsmi Python library not importable (No module named 'amdsmi'); amd-smi not on PATH; rocm-smi not on PATH"
+    },
+    "cpu": {
+      "ok": true,
+      "count": 1,
+      "source": "/proc"
+    }
+  }
+}

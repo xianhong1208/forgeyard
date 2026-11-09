@@ -1,0 +1,215 @@
+{
+  "_comment": "Simulated inventory for development and tests (forgeyard agent --simulate-inventory). Not a real machine; GPU values are modelled on recorded tool output in tests/fixtures.",
+  "accelerators": [
+    {
+      "key": "nvidia:GPU-2eee5cf1-10e5-5231-be07-cf90ee0fd99e",
+      "vendor": "nvidia",
+      "index": 0,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-2eee5cf1-10e5-5231-be07-cf90ee0fd99e",
+      "vram_total": 85899345920,
+      "vram_free": 4023779328,
+      "vram_used": 81071308800,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 36,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:17:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-8b3f6d37-6d2d-54a5-841b-f37a80df251f",
+      "vendor": "nvidia",
+      "index": 1,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-8b3f6d37-6d2d-54a5-841b-f37a80df251f",
+      "vram_total": 85899345920,
+      "vram_free": 7219380224,
+      "vram_used": 77875707904,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 38,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:31:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-36dd1705-90de-574b-ae46-32694919a1d0",
+      "vendor": "nvidia",
+      "index": 2,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-36dd1705-90de-574b-ae46-32694919a1d0",
+      "vram_total": 85899345920,
+      "vram_free": 6169165824,
+      "vram_used": 78925922304,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 41,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:4B:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-471e7863-5d75-5a30-ae00-c2f55114aefc",
+      "vendor": "nvidia",
+      "index": 3,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-471e7863-5d75-5a30-ae00-c2f55114aefc",
+      "vram_total": 85899345920,
+      "vram_free": 9480110080,
+      "vram_used": 75614978048,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 37,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:65:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-b7b76308-f240-5154-a1cf-fce203592490",
+      "vendor": "nvidia",
+      "index": 4,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-b7b76308-f240-5154-a1cf-fce203592490",
+      "vram_total": 85899345920,
+      "vram_free": 48294330368,
+      "vram_used": 36800757760,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 42,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:98:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-7ce30e55-b2f6-5cd2-9f5a-c6dbc13f9f94",
+      "vendor": "nvidia",
+      "index": 5,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-7ce30e55-b2f6-5cd2-9f5a-c6dbc13f9f94",
+      "vram_total": 85899345920,
+      "vram_free": 15321071616,
+      "vram_used": 69774016512,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 39,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:B1:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-7b8afe2f-f54c-5a9f-9256-9897d6bd431b",
+      "vendor": "nvidia",
+      "index": 6,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-7b8afe2f-f54c-5a9f-9256-9897d6bd431b",
+      "vram_total": 85899345920,
+      "vram_free": 9689825280,
+      "vram_used": 75405262848,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 40,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:CA:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "nvidia:GPU-e9f25cbc-52ec-546a-8975-062ebaa3222d",
+      "vendor": "nvidia",
+      "index": 7,
+      "model": "NVIDIA A100 80GB PCIe",
+      "arch": "8.0",
+      "uuid": "GPU-e9f25cbc-52ec-546a-8975-062ebaa3222d",
+      "vram_total": 85899345920,
+      "vram_free": 7716405248,
+      "vram_used": 77378682880,
+      "unified_memory": false,
+      "driver": "580.178.04",
+      "utilization": 0,
+      "temperature": 38,
+      "detail": {
+        "sm": "sm_80",
+        "cuda": "13.0",
+        "pci_bus_id": "00000000:E3:00.0",
+        "vram_reserved": 804257792
+      }
+    },
+    {
+      "key": "cpu:0",
+      "vendor": "cpu",
+      "index": 0,
+      "model": "AMD EPYC 7543 32-Core Processor",
+      "arch": "x86_64",
+      "vram_total": 1081822150656,
+      "vram_free": 719407022080,
+      "vram_used": 362415128576,
+      "unified_memory": false,
+      "driver": null,
+      "utilization": 4,
+      "temperature": null,
+      "detail": {
+        "cores": 64,
+        "threads": 128,
+        "sockets": 2,
+        "isa": [
+          "avx",
+          "avx2",
+          "fma",
+          "f16c"
+        ]
+      }
+    }
+  ],
+  "collectors": {
+    "nvidia": {
+      "ok": true,
+      "count": 8,
+      "source": "nvml"
+    },
+    "amd": {
+      "ok": false,
+      "count": 0,
+      "reason": "amdsmi Python library not importable (No module named 'amdsmi'); amd-smi not on PATH; rocm-smi not on PATH"
+    },
+    "cpu": {
+      "ok": true,
+      "count": 1,
+      "source": "/proc"
+    }
+  }
+}

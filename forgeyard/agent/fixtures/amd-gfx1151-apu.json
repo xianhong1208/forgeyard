@@ -1,0 +1,75 @@
+{
+  "_comment": "Simulated inventory for development and tests (forgeyard agent --simulate-inventory). Not a real machine; GPU values are modelled on recorded tool output in tests/fixtures.",
+  "accelerators": [
+    {
+      "key": "amd:00ff1586-0000-1000-80c5-000000000000",
+      "vendor": "amd",
+      "index": 0,
+      "model": "AMD Radeon 8060S",
+      "arch": "gfx1151",
+      "uuid": "00ff1586-0000-1000-80c5-000000000000",
+      "vram_total": 118111600640,
+      "vram_free": 111669149696,
+      "vram_used": 6442450944,
+      "unified_memory": true,
+      "driver": "6.14.0",
+      "utilization": 3,
+      "temperature": 47,
+      "detail": {
+        "pci_bus_id": "0000:c5:00.0",
+        "source": "amdsmi",
+        "gtt_total": 118111600640,
+        "gtt_used": 6442450944,
+        "vram_carveout": 536870912,
+        "unified_by": "gfx1151 is an APU target",
+        "pool": "gtt"
+      }
+    },
+    {
+      "key": "cpu:0",
+      "vendor": "cpu",
+      "index": 0,
+      "model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+      "arch": "x86_64",
+      "vram_total": 136365211648,
+      "vram_free": 107374182400,
+      "vram_used": 28991029248,
+      "unified_memory": false,
+      "driver": null,
+      "utilization": 4,
+      "temperature": null,
+      "detail": {
+        "cores": 16,
+        "threads": 32,
+        "sockets": 1,
+        "isa": [
+          "avx",
+          "avx2",
+          "fma",
+          "f16c",
+          "avx512f",
+          "avx512_bf16",
+          "avx512_vnni"
+        ]
+      }
+    }
+  ],
+  "collectors": {
+    "nvidia": {
+      "ok": false,
+      "count": 0,
+      "source": "nvml",
+      "reason": "nvidia-ml-py is not installed (uv sync --extra nvidia)"
+    },
+    "amd": {
+      "ok": true,
+      "count": 1,
+      "source": "amdsmi"
+    },
+    "cpu": {
+      "ok": true,
+      "count": 1,
+      "source": "/proc"
+    }
+  }
+}
