@@ -1,0 +1,39 @@
+[project]
+name = "forgeyard"
+version = "0.1.0"
+description = "Forgeyard: one control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.120",
+    "uvicorn[standard]>=0.35",
+    "sqlalchemy>=2.0.40",
+    "alembic>=1.16",
+    "pydantic-settings>=2.10",
+    "argon2-cffi>=25.1",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "httpx>=0.28",
+    "ruff>=0.12",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = ["web", "forgeyard/static"]
+
+[tool.ruff.lint]
+# Correctness rules, the same baseline as Tony's other projects.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
