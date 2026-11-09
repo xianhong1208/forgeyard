@@ -135,10 +135,13 @@ def test_fy_col_013_kfd_topology_parsing(tmp_path):
     root = make_kfd(tmp_path / "nodes", [
         {"cpu_cores_count": 16, "simd_count": 0},
         {"cpu_cores_count": 0, "simd_count": 80, "gfx_target_version": 110501, "location_id": kfd_location(0xc5), "domain": 0},
-        {"simd_count": 192, "gfx_target_version": 90010, "location_id": kfd_location(0x83, 1, 0), "domain": 1}])
+        {"simd_count": 192, "gfx_target_version": 90010, "location_id": kfd_location(0x83, 1, 0), "domain": 1,
+         "unique_id": 11400983651823780603, "drm_render_minor": 129}])
     kfd = read_kfd(root)
-    assert kfd == {"0000:c5:00.0": {"node": "1", "gfx": "gfx1151", "cpu_cores": 0, "simd": 80},
-                   "0001:83:01.0": {"node": "2", "gfx": "gfx90a", "cpu_cores": 0, "simd": 192}}
+    assert kfd == {"0000:c5:00.0": {"node": "1", "gfx": "gfx1151", "cpu_cores": 0, "simd": 80, "unique_id": None,
+                                    "render_minor": None},
+                   "0001:83:01.0": {"node": "2", "gfx": "gfx90a", "cpu_cores": 0, "simd": 192,
+                                    "unique_id": 11400983651823780603, "render_minor": 129}}
     assert read_kfd(tmp_path / "missing") == {}
 
 
