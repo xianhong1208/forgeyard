@@ -3,8 +3,8 @@
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器，之後也包括租用的雲端機器。
 每台機器上的 agent 回報硬體；你在上面跑 service、task 與開發環境，並用配方部署模型，統一走一個 OpenAI 相容的 gateway。
 
-> **狀態：里程碑 M0（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成。Machines 與 Deployments
-> 兩頁目前是空殼，要等 agent（M1）與 workload（M2）。
+> **狀態：里程碑 M0 與 M1（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成，機器可以透過 agent
+> 加入並回報硬體。Deployments 頁要等 workload（M2）才有內容。
 
 [English](README.md)
 
@@ -24,6 +24,45 @@ uv run python main.py                        # http://127.0.0.1:7860，啟動時
 
 設定來自環境變數或 `.env`，見 [.env.example](.env.example)。`HOST=0.0.0.0` 對 LAN 開放。改用 PostgreSQL：
 `uv sync --extra postgres` 並設定 `DATABASE_URL=postgresql+psycopg://…`。
+
+## 機器
+
+每台機器跑 **Forgeyard agent**（同一個 repo，`python -m forgeyard agent`）。由 agent 主動連到 server，
+server 不需要能連到機器。
+
+1. admin 在 **Machines → Add machine** 取得一行指令，內含**一次性加入 token**（只能用一次、15 分鐘內有效、
+   只顯示一次、伺服器只存雜湊）。
+2. 在那台機器的 Forgeyard 目錄裡（先 `uv sync`，NVIDIA 機器加 `--extra nvidia`）執行：
+
+   ```bash
+   uv run --no-sync python -m forgeyard agent --server http://<server>:7860 --join-token fyj_…
+   ```
+
+   agent 用 token 換到**這台機器專屬的憑證**，存在 state 目錄（root 時是 `/var/lib/forgeyard-agent`，
+   否則 `~/.local/state/forgeyard-agent`；可用 `--state-dir` 指定），權限 0600；server 只存它的 SHA-256。
+   之後啟動不需要 token：`python -m forgeyard agent`。
+3. agent 以 `Authorization: Bearer <憑證>` 開 WebSocket 到 `/agent/v1/stream`，先送完整 inventory，之後每 10 秒
+   送一次 heartbeat，只帶會變的值（可用／已用記憶體、使用率、溫度）。硬體有變動時再送一次完整 inventory。
+
+- **Inventory：** NVIDIA 用 NVML（`nvidia-ml-py`）：型號、UUID、compute capability 當作 `arch`（`8.0`）、記憶體、
+  driver。AMD 用 ROCm 附的 `amdsmi` 函式庫，沒有時退回 `amd-smi` CLI，再退回 `rocm-smi`；`arch` 是 gfx target
+  （`gfx1100`、`gfx1151`）。Strix Halo 這類 APU 會標示 **unified memory**，大小取 VRAM carve-out 與 GTT 中較大者。
+  CPU 與系統記憶體一定會列成一筆。某個 collector 找不到東西時會說明原因，不會讓 agent 停掉。這些都是唯讀查詢：
+  不配置 GPU 記憶體，也不碰執行中的程序。
+- **`python -m forgeyard agent inventory [--json] [--raw]`** 不加入 server，只印出 agent 偵測到的硬體。
+- **上線／離線：** 30 秒沒收到任何訊息，server 就把機器標成離線。這是 server 每 2 秒自己檢查一次，所以拔網路線
+  或 agent 卡住、TCP 連線看起來還在時也抓得到。agent 會自己重連，指數退避加隨機抖動，最長 15 秒。
+- **撤銷與移除**（admin）：憑證立即失效，開著的連線也立刻被關掉（agent 會結束）。登入的人都能看 Machines 頁，
+  只有 admin 能新增、撤銷、移除機器。建立 token、加入、被拒絕的加入、撤銷與移除都記在稽核紀錄。
+- **傳輸：** Forgeyard 假設在 LAN 或 VPN 上，所以用一般的 `ws://` 即可；要 `wss://` 就把 server 放在 TLS
+  reverse proxy 或 Tailscale 後面，並用 `https://` 網址。Host 檢查對 agent 也適用：agent 若用名稱而不是 IP
+  連 server，該名稱要列在 `ALLOWED_HOSTS`（或設為 `PUBLIC_URL`）。agent 端點永遠不接受瀏覽器的 session cookie，
+  且拒絕任何帶 `Origin` 標頭的請求。
+- **模擬 inventory**（只供開發與測試）：`--simulate-inventory nvidia-a100x8 | nvidia-rtx4090x2 | amd-gfx1151-apu |
+  <file.json>` 用 fixture 取代真實硬體。必須同時設 `FORGEYARD_AGENT_SIMULATION=1` 才能用，server 會把這種機器標成
+  *simulated inventory*。
+
+這個里程碑的真機驗收步驟見 [docs/acceptance-m1.md](docs/acceptance-m1.md)（英文）。
 
 ## 帳號與登入
 
