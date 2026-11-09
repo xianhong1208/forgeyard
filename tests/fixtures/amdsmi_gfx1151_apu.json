@@ -1,0 +1,46 @@
+{
+  "_comment": "Representative Strix Halo (Ryzen AI Max+ 395, gfx1151) with a 512 MB carve-out and GTT raised to 110 GiB. Field names from the amdsmi Python API reference; values not yet confirmed on hardware.",
+  "handles": [
+    {
+      "asic_info": {
+        "market_name": "AMD Radeon 8060S",
+        "vendor_id": "0x1002",
+        "vendor_name": "Advanced Micro Devices Inc. [AMD/ATI]",
+        "device_id": "0x1586",
+        "rev_id": "0xc1",
+        "asic_serial": "N/A",
+        "num_of_compute_units": 40,
+        "target_graphics_version": "gfx1151"
+      },
+      "driver_info": {
+        "driver_name": "amdgpu",
+        "driver_version": "6.14.0",
+        "driver_date": "2015/01/01 00:00"
+      },
+      "uuid": "00ff1586-0000-1000-80c5-000000000000",
+      "bdf": "0000:c5:00.0",
+      "memory": {
+        "VRAM": [
+          536870912,
+          315621376
+        ],
+        "VIS_VRAM": [
+          536870912,
+          315621376
+        ],
+        "GTT": [
+          118111600640,
+          6442450944
+        ]
+      },
+      "activity": {
+        "gfx_activity": 3,
+        "umc_activity": 1,
+        "mm_activity": "N/A"
+      },
+      "temperature": {
+        "EDGE": 47
+      }
+    }
+  ]
+}

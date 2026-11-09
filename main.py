@@ -1,13 +1,11 @@
-"""Start Forgeyard: `uv run python main.py` (migrations run on boot)."""
+"""Start Forgeyard: `uv run python main.py` (migrations run on boot).
 
-import logging
+Same as `python -m forgeyard`; `python main.py agent ...` runs the agent (see forgeyard/cli.py).
+"""
 
-import uvicorn
+import sys
 
-from forgeyard.app import create_app
-from forgeyard.config import get_settings
+from forgeyard.cli import main
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    settings = get_settings()
-    uvicorn.run(create_app(), host=settings.host, port=settings.port, proxy_headers=False)
+    sys.exit(main())

@@ -1,0 +1,56 @@
+processor	: 0
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 0
+core id		: 0
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 1
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 0
+core id		: 0
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 2
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 0
+core id		: 1
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 3
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 0
+core id		: 1
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 4
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 1
+core id		: 0
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 5
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 1
+core id		: 0
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 6
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 1
+core id		: 1
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+
+processor	: 7
+vendor_id	: GenuineIntel
+model name	: Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz
+physical id	: 1
+core id		: 1
+flags		: fpu sse sse2 avx avx2 fma f16c avx512f avx512_vnni
+

@@ -1,0 +1,143 @@
+{
+  "_comment": "Values recorded from a real 8 x A100 80GB PCIe host (busy with other work); UUIDs and bus ids are made up.",
+  "driver": "580.178.04",
+  "cuda_driver": 13000,
+  "devices": [
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-2eee5cf1-10e5-5231-be07-cf90ee0fd99e",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 4023779328,
+        "used": 81071308800,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 36,
+      "pci_bus_id": "00000000:17:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-8b3f6d37-6d2d-54a5-841b-f37a80df251f",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 7219380224,
+        "used": 77875707904,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 38,
+      "pci_bus_id": "00000000:31:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-36dd1705-90de-574b-ae46-32694919a1d0",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 6169165824,
+        "used": 78925922304,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 41,
+      "pci_bus_id": "00000000:4B:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-471e7863-5d75-5a30-ae00-c2f55114aefc",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 9480110080,
+        "used": 75614978048,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 37,
+      "pci_bus_id": "00000000:65:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-b7b76308-f240-5154-a1cf-fce203592490",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 48294330368,
+        "used": 36800757760,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 42,
+      "pci_bus_id": "00000000:98:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-7ce30e55-b2f6-5cd2-9f5a-c6dbc13f9f94",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 15321071616,
+        "used": 69774016512,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 39,
+      "pci_bus_id": "00000000:B1:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-7b8afe2f-f54c-5a9f-9256-9897d6bd431b",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 9689825280,
+        "used": 75405262848,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 40,
+      "pci_bus_id": "00000000:CA:00.0"
+    },
+    {
+      "name": "NVIDIA A100 80GB PCIe",
+      "uuid": "GPU-e9f25cbc-52ec-546a-8975-062ebaa3222d",
+      "compute_capability": [
+        8,
+        0
+      ],
+      "memory": {
+        "total": 85899345920,
+        "free": 7716405248,
+        "used": 77378682880,
+        "reserved": 804257792
+      },
+      "utilization": 0,
+      "temperature": 38,
+      "pci_bus_id": "00000000:E3:00.0"
+    }
+  ]
+}

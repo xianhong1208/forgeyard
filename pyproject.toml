@@ -11,10 +11,15 @@ dependencies = [
     "alembic>=1.16",
     "pydantic-settings>=2.10",
     "argon2-cffi>=25.1",
+    # The agent's connection to the server (uvicorn[standard] also uses it on the server side).
+    "websockets>=15",
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
+# Agent on NVIDIA machines: NVML bindings (read-only; no CUDA context, no GPU memory).
+# AMD machines use the amdsmi library that ships with ROCm (see docs/acceptance-m1.md).
+nvidia = ["nvidia-ml-py>=12.535"]
 
 [dependency-groups]
 dev = [

@@ -1,41 +1,370 @@
-import { IconCpu, IconCloud, IconServer2 } from "@tabler/icons-react";
+import { IconCpu, IconPlus, IconServer2 } from "@tabler/icons-react";
+import { useCallback, useEffect, useState } from "react";
 
-import { PageHeader } from "../components/ui";
+import { CopyBox, Notice, PageHeader } from "../components/ui";
+import { api, errorText } from "../lib/api";
+import { exact } from "../lib/format";
+import {
+  VENDOR_NAME,
+  ageSeconds,
+  ago,
+  archLabel,
+  bytes,
+  cardSummary,
+  gpus,
+  memoryTotals,
+  toMs,
+  usedFraction,
+} from "../lib/machines";
+import type { Accelerator, JoinToken, Machine, MachinesResponse, NewJoinToken } from "../lib/types";
+import { useApi } from "../lib/useApi";
+
+// Machines change state on their own (heartbeats, a dropped network): poll so the page follows.
+export const POLL_MS = 5000;
 
 const KINDS = [
   { icon: IconServer2, name: "NVIDIA", detail: "CUDA cards, read through NVML" },
-  { icon: IconServer2, name: "AMD", detail: "ROCm cards, read through amd-smi" },
+  { icon: IconServer2, name: "AMD", detail: "ROCm cards and APUs, read through AMD SMI" },
   { icon: IconCpu, name: "CPU only", detail: "Machines without a GPU" },
-  { icon: IconCloud, name: "Cloud", detail: "Rented machines, added later" },
 ];
 
+function isLoopback(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "[::1]" || host.startsWith("127.");
+  } catch {
+    return false;
+  }
+}
+
 export function MachinesPage() {
+  const { data, error: loadError, reload } = useApi<MachinesResponse>("/machines");
+  const canManage = data?.can_manage ?? false;
+  const [tokens, setTokens] = useState<JoinToken[]>([]);
+  const reloadTokens = useCallback(() => {
+    if (!canManage) return;
+    api<{ tokens: JoinToken[] }>("/machines/join-tokens").then(
+      (r) => setTokens(r.tokens),
+      () => undefined, // the list of unused tokens is a convenience; the page works without it
+    );
+  }, [canManage]);
+  const [adding, setAdding] = useState(false);
+  const [issued, setIssued] = useState<NewJoinToken | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    reloadTokens();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      reload();
+      reloadTokens();
+    }, POLL_MS);
+    return () => window.clearInterval(id);
+  }, [reload, reloadTokens]);
+
+  const createToken = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setIssued(await api<NewJoinToken>("/machines/join-tokens", { method: "POST" }));
+      reloadTokens();
+    } catch (e) {
+      setMessage({ tone: "error", text: errorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setMessage(null);
+    try {
+      await fn();
+      setMessage({ tone: "ok", text: ok });
+      reload();
+      reloadTokens();
+    } catch (e) {
+      setMessage({ tone: "error", text: errorText(e) });
+    }
+  };
+
+  const revoke = (m: Machine) => {
+    if (!window.confirm(`Revoke ${m.name}? Its agent is disconnected now and its credential stops working. To bring it back it has to join again with a new token.`)) return;
+    void run(() => api(`/machines/${m.id}/revoke`, { method: "POST" }), `Revoked ${m.name}; its agent was disconnected.`);
+  };
+
+  const remove = (m: Machine) => {
+    const extra = m.status === "revoked" ? "" : " Its agent is disconnected and its credential stops working.";
+    if (!window.confirm(`Remove ${m.name} from the list?${extra} This cannot be undone.`)) return;
+    void run(() => api(`/machines/${m.id}`, { method: "DELETE" }), `Removed ${m.name}.`);
+  };
+
+  const closeAdd = () => {
+    setAdding(false);
+    setIssued(null);
+  };
+
+  const machines = data?.machines ?? null;
+  const joinedSince = issued && machines ? machines.filter((m) => toMs(m.joined_at) >= toMs(issued.created_at)) : [];
+  const waiting = canManage ? tokens.filter((t) => t.id !== issued?.id) : [];
+
   return (
     <>
-      <PageHeader index="01 · Machines" title="Machines" lead="Every computer Forgeyard can run work on, with its cards, memory and load." />
-      <section className="empty">
-        <div className="empty-art" aria-hidden="true">
-          {Array.from({ length: 12 }, (_, i) => (
-            <span key={i} className={`slot${i === 5 ? " slot-hot" : ""}`} />
+      <PageHeader
+        index="01 · Machines"
+        title="Machines"
+        lead="Every computer Forgeyard can run work on, with its cards, memory and load. Each one runs the Forgeyard agent, which keeps a connection to this server."
+        actions={
+          canManage && (
+            <button type="button" className="btn btn-primary" onClick={() => (adding ? closeAdd() : setAdding(true))} aria-expanded={adding}>
+              <IconPlus size={16} aria-hidden="true" /> Add machine
+            </button>
+          )
+        }
+      />
+      {loadError && <Notice tone="error">{loadError}</Notice>}
+      {message && <Notice tone={message.tone}>{message.text}</Notice>}
+
+      {adding && (
+        <section className="panel panel-link add-machine" aria-labelledby="add-machine-title">
+          <h2 id="add-machine-title">{issued ? "Run this on the new machine" : "Add a machine"}</h2>
+          {!issued ? (
+            <>
+              <ol className="steps">
+                <li>
+                  On the machine, get Forgeyard and run <code>uv sync</code> — with <code>--extra nvidia</code> on NVIDIA machines.
+                  AMD machines use the <code>amdsmi</code> library that comes with ROCm.
+                </li>
+                <li>Create a join command here and run it there, in the Forgeyard folder. It works once, within 15 minutes.</li>
+                <li>The machine appears below within seconds, and reconnects by itself after a restart or a network drop.</li>
+              </ol>
+              <div className="row-gap">
+                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void createToken()}>
+                  {busy ? "Creating…" : "Create join command"}
+                </button>
+                <button type="button" className="btn btn-quiet" onClick={closeAdd}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p>
+                Works once and expires at <strong>{new Date(issued.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>{" "}
+                ({issued.valid_minutes} minutes). It is shown only now; the server keeps just a hash.
+              </p>
+              <CopyBox value={issued.command} label="Join command" />
+              {isLoopback(issued.server_url) && (
+                <Notice>
+                  <strong>{issued.server_url}</strong> only works on this computer. For other machines, start the server with{" "}
+                  <code>HOST=0.0.0.0</code> and set <code>PUBLIC_URL</code> to an address they can reach (a LAN IP or a Tailscale name),
+                  or replace the address in the command.
+                </Notice>
+              )}
+              <p className="muted small">
+                The agent connects with plain <code>ws://</code> on a LAN or VPN; put the server behind a TLS reverse proxy or
+                Tailscale for <code>wss://</code>.
+              </p>
+              {joinedSince.length > 0 ? (
+                <Notice tone="ok">{joinedSince.map((m) => m.name).join(", ")} joined.</Notice>
+              ) : (
+                <p className="waiting small" role="status">
+                  <span className="pulse" aria-hidden="true" /> Waiting for the machine to join…
+                </p>
+              )}
+              <button type="button" className="btn btn-quiet" onClick={closeAdd}>Done</button>
+            </>
+          )}
+        </section>
+      )}
+
+      {canManage && waiting.length > 0 && (
+        <div className="tokens-line small">
+          {waiting.length} unused join token{waiting.length > 1 ? "s" : ""}:
+          {waiting.map((t) => (
+            <span key={t.id} className="token-chip">
+              expires {new Date(t.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              <button type="button" className="btn btn-quiet btn-small"
+                onClick={() => void run(() => api(`/machines/join-tokens/${t.id}`, { method: "DELETE" }), "Join token cancelled.")}>
+                Cancel
+              </button>
+            </span>
           ))}
         </div>
-        <div className="empty-copy">
-          <h2>No machines yet</h2>
-          <p>
-            A machine joins when the Forgeyard agent runs on it and reports its hardware. Adding agents is the next
-            milestone; this page lists them once they can join.
-          </p>
-          <ul className="kinds">
-            {KINDS.map(({ icon: Icon, name, detail }) => (
-              <li key={name}>
-                <Icon size={18} stroke={1.6} aria-hidden="true" />
-                <span className="kind-name">{name}</span>
-                <span className="kind-detail">{detail}</span>
-              </li>
+      )}
+
+      {machines && machines.length === 0 && <EmptyMachines canManage={canManage} />}
+      {machines && machines.length > 0 && data && (
+        <>
+          <Fleet machines={machines} />
+          <div className="machines">
+            {machines.map((m) => (
+              <MachineCard key={m.id} m={m} serverTime={data.server_time} canManage={canManage}
+                onRevoke={revoke} onRemove={remove} />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function EmptyMachines({ canManage }: { canManage: boolean }) {
+  return (
+    <section className="empty">
+      <div className="empty-art" aria-hidden="true">
+        {Array.from({ length: 12 }, (_, i) => (
+          <span key={i} className={`slot${i === 5 ? " slot-hot" : ""}`} />
+        ))}
+      </div>
+      <div className="empty-copy">
+        <h2>No machines yet</h2>
+        <p>
+          A machine joins when the Forgeyard agent runs on it and reports its hardware.{" "}
+          {canManage ? "Use Add machine to get a one-time join command." : "Ask an admin to add one."}
+        </p>
+        <ul className="kinds">
+          {KINDS.map(({ icon: Icon, name, detail }) => (
+            <li key={name}>
+              <Icon size={18} stroke={1.6} aria-hidden="true" />
+              <span className="kind-name">{name}</span>
+              <span className="kind-detail">{detail}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+function Fleet({ machines }: { machines: Machine[] }) {
+  const online = machines.filter((m) => m.status === "online");
+  const offline = machines.filter((m) => m.status === "offline").length;
+  const revoked = machines.filter((m) => m.status === "revoked").length;
+  const cards = online.flatMap(gpus);
+  const mem = memoryTotals(cards);
+  return (
+    <dl className="fleet" aria-label="Fleet">
+      <div><dt>Machines</dt><dd>{machines.length}</dd></div>
+      <div><dt>Online</dt><dd className="fleet-online">{online.length}</dd></div>
+      <div><dt>Offline</dt><dd>{offline}{revoked > 0 && <span className="muted small"> + {revoked} revoked</span>}</dd></div>
+      <div><dt>GPUs online</dt><dd>{cards.length}</dd></div>
+      <div><dt>GPU memory free</dt><dd>{bytes(mem.free)} <span className="muted small">of {bytes(mem.total)}</span></dd></div>
+    </dl>
+  );
+}
+
+function MachineCard({ m, serverTime, canManage, onRevoke, onRemove }: {
+  m: Machine; serverTime: string; canManage: boolean;
+  onRevoke: (m: Machine) => void; onRemove: (m: Machine) => void;
+}) {
+  const age = ageSeconds(serverTime, m.last_heartbeat_at);
+  const cards = gpus(m);
+  const mem = memoryTotals(cards);
+  const platform = [m.platform.distro || m.platform.os, m.platform.arch].filter(Boolean).join(" · ");
+  const failed = Object.entries(m.collectors).filter(([, s]) => !s.ok && s.reason);
+  return (
+    <article className={`machine machine-${m.status}`} aria-label={`Machine ${m.name}`}>
+      <header className="machine-head">
+        <div className="machine-title">
+          <span className={`dot dot-${m.status}`} aria-hidden="true" />
+          <h2 className="mono">{m.name}</h2>
+          <span className={`chip chip-machine-${m.status}`}>{m.status}</span>
+          {m.simulated && (
+            <span className="chip chip-simulated" title="This agent reports made-up hardware from a fixture (development and tests only).">
+              simulated inventory
+            </span>
+          )}
+          {Object.entries(m.labels).map(([k, v]) => (
+            <span key={k} className="chip">{k}={v}</span>
+          ))}
+        </div>
+        {canManage && (
+          <div className="machine-actions">
+            {m.status !== "revoked" && (
+              <button type="button" className="btn btn-quiet btn-small" onClick={() => onRevoke(m)}>Revoke</button>
+            )}
+            <button type="button" className="btn btn-danger btn-small" onClick={() => onRemove(m)}>Remove</button>
+          </div>
+        )}
+      </header>
+      <p className="machine-meta">
+        {m.status === "revoked" ? (
+          <span title={exact(m.revoked_at)}>Revoked {ago(ageSeconds(serverTime, m.revoked_at))}{m.revoked_by ? ` by ${m.revoked_by}` : ""}</span>
+        ) : m.status === "offline" ? (
+          <span className="meta-offline" title={exact(m.last_heartbeat_at)}>
+            Offline · last heartbeat {ago(age)}
+          </span>
+        ) : (
+          <span title={exact(m.last_heartbeat_at)}>Heartbeat {ago(age)}</span>
+        )}
+        {m.agent_version && <span>agent {m.agent_version}</span>}
+        {platform && <span>{platform}</span>}
+        {m.ip && <span className="mono">{m.ip}</span>}
+      </p>
+      <p className="machine-summary">
+        <strong>{cardSummary(m)}</strong>
+        {cards.length > 0 && (
+          <span className="muted"> · {bytes(mem.free)} free of {bytes(mem.total)}</span>
+        )}
+      </p>
+      <ul className="accels">
+        {m.accelerators.map((a) => (
+          <AcceleratorRow key={a.key} a={a} />
+        ))}
+      </ul>
+      {failed.length > 0 && (
+        <details className="detection">
+          <summary>Detection notes</summary>
+          <ul>
+            {failed.map(([name, s]) => (
+              <li key={name}><span className="mono">{name}</span>: {s.reason}</li>
             ))}
           </ul>
-        </div>
-      </section>
-    </>
+        </details>
+      )}
+    </article>
+  );
+}
+
+function AcceleratorRow({ a }: { a: Accelerator }) {
+  const frac = usedFraction(a);
+  const arch = archLabel(a);
+  const cpu = a.vendor === "cpu";
+  const tight = frac !== null && frac >= 0.9;
+  const cores = cpu ? [a.detail.cores && `${a.detail.cores} cores`, a.detail.threads && `${a.detail.threads} threads`].filter(Boolean).join(" · ") : "";
+  return (
+    <li className={`accel accel-${a.vendor}`}>
+      <span className="accel-id">
+        <span className={`vendor vendor-${a.vendor}`}>{VENDOR_NAME[a.vendor] ?? a.vendor}</span>
+        {!cpu && <span className="accel-index mono">#{a.index}</span>}
+      </span>
+      <span className="accel-model">
+        <span className="accel-name">{a.model}</span>
+        <span className="accel-sub">
+          <span className="mono" title={a.vendor === "nvidia" ? "CUDA compute capability" : a.vendor === "amd" ? "gfx target" : "Machine architecture"}>
+            {arch.main}{arch.sub && <span className="muted"> {arch.sub}</span>}
+          </span>
+          {a.unified_memory && (
+            <span className="chip chip-unified" title="Shares system memory with the CPU. The size shown is the larger of the VRAM carve-out and the GTT pool.">
+              unified memory
+            </span>
+          )}
+          {cpu && cores && <span className="muted">{cores}</span>}
+          {a.driver && <span className="muted">driver {a.driver}</span>}
+        </span>
+      </span>
+      <span className="accel-mem">
+        <span className="mem-text">
+          <strong>{bytes(a.vram_free)}</strong> free <span className="muted">of {bytes(a.vram_total)}{cpu ? " RAM" : ""}</span>
+        </span>
+        <span className={`bar${tight ? " bar-tight" : ""}`} role="meter" aria-label={`${a.model} memory used`}
+          aria-valuemin={0} aria-valuemax={100} aria-valuenow={frac === null ? undefined : Math.round(frac * 100)}>
+          <span style={{ width: `${frac === null ? 0 : Math.round(frac * 100)}%` }} />
+        </span>
+      </span>
+      <span className="accel-live mono">
+        <span title="Utilisation">{a.utilization === null ? "—" : `${a.utilization}%`}</span>
+        <span title="Temperature">{a.temperature === null ? "" : `${a.temperature}°C`}</span>
+      </span>
+    </li>
   );
 }

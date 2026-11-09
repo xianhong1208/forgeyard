@@ -11,7 +11,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, create_engine, event
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    create_engine,
+    event,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from forgeyard.config import get_settings
@@ -91,6 +102,85 @@ class AuditEvent(Base):
     __table_args__ = (Index("ix_audit_actor_at", "actor_id", "at"),)
 
 
+class JoinToken(Base):
+    """A one-time token an admin hands to a new machine. Only its SHA-256 is stored."""
+
+    __tablename__ = "join_tokens"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)           # sha256(token) hex
+    # What the UI shows and uses to cancel a token; never the token or its hash.
+    public_id: Mapped[str] = mapped_column(String(36), unique=True, default=lambda: str(uuid.uuid4()))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    node_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # the machine it admitted
+
+
+class Node(Base):
+    """A machine, represented by its agent."""
+
+    __tablename__ = "nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    hostname: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # sha256 of the machine's credential. NULL once revoked: nothing can match it again.
+    credential_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="offline")    # online | offline | revoked
+    labels: Mapped[dict] = mapped_column(JSON, default=dict)
+    runtimes: Mapped[list] = mapped_column(JSON, default=list)
+    platform: Mapped[dict] = mapped_column(JSON, default=dict)              # os, kernel, arch, python
+    # Per collector: {"nvidia": {"ok": false, "reason": "..."}, ...}
+    collectors: Mapped[dict] = mapped_column(JSON, default=dict)
+    # The agent was started with a fixture instead of real hardware (development and tests only).
+    simulated: Mapped[bool] = mapped_column(Boolean, default=False)
+    agent_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    protocol: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    accelerators: Mapped[list["Accelerator"]] = relationship(
+        back_populates="node", cascade="all, delete-orphan", order_by="Accelerator.position"
+    )
+
+
+class Accelerator(Base):
+    """One card (or the CPU, so CPU-only machines go through the same scheduling later)."""
+
+    __tablename__ = "accelerators"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
+    # Stable per machine: "<vendor>:<uuid or index>"; heartbeats refer to cards by it.
+    key: Mapped[str] = mapped_column(String(160))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    vendor: Mapped[str] = mapped_column(String(16))                        # nvidia | amd | cpu
+    index: Mapped[int] = mapped_column(Integer, default=0)
+    model: Mapped[str] = mapped_column(String(160))
+    # CUDA compute capability ("8.0") or the AMD gfx target ("gfx1151"); the CPU's machine arch.
+    arch: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    uuid: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Bytes. For the CPU row: system RAM. For a unified-memory APU: the GPU-usable pool.
+    vram_total: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    vram_free: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    vram_used: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    unified_memory: Mapped[bool] = mapped_column(Boolean, default=False)
+    driver: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    utilization: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # percent
+    temperature: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # degrees C
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[Node] = relationship(back_populates="accelerators")
+
+    __table_args__ = (Index("ix_accelerators_node_key", "node_id", "key", unique=True),)
+
+
 _engine = None
 _SessionLocal = None
 
@@ -133,6 +223,12 @@ def get_db() -> Iterator:
         yield db
     finally:
         db.close()
+
+
+def new_session():
+    """A database session outside a request (WebSocket handlers, background tasks). Close it."""
+    get_engine()
+    return _SessionLocal()
 
 
 def as_utc(value: Optional[datetime]) -> Optional[datetime]:

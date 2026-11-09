@@ -1,0 +1,32 @@
+{
+  "card0": {
+    "Card Series": "Navi 31 [Radeon RX 7900 XT/7900 XTX]",
+    "Card Model": "0x744c",
+    "Card Vendor": "Advanced Micro Devices, Inc. [AMD/ATI]",
+    "Card SKU": "EXT94393",
+    "GFX Version": "gfx1100",
+    "PCI Bus": "0000:03:00.0",
+    "Unique ID": "0x5c8a1b2c3d4e5f60",
+    "GPU use (%)": "88",
+    "Temperature (Sensor edge) (C)": "61.0",
+    "VRAM Total Memory (B)": "25753026560",
+    "VRAM Total Used Memory (B)": "19327352832",
+    "GTT Total Memory (B)": "68719476736",
+    "GTT Total Used Memory (B)": "20971520"
+  },
+  "card1": {
+    "Card series": "Navi 31 [Radeon RX 7900 XT/7900 XTX]",
+    "GFX Version": "gfx1100",
+    "PCI Bus": "0000:83:00.0",
+    "Unique ID": "N/A",
+    "GPU use (%)": "0",
+    "Temperature (Sensor edge) (C)": "40.0",
+    "VRAM Total Memory (B)": "25753026560",
+    "VRAM Total Used Memory (B)": "536870912",
+    "GTT Total Memory (B)": "68719476736",
+    "GTT Total Used Memory (B)": "20971520"
+  },
+  "system": {
+    "Driver version": "6.10.5"
+  }
+}

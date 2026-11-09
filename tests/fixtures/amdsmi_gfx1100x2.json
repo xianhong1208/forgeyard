@@ -1,0 +1,76 @@
+{
+  "_comment": "Representative 2 x Radeon RX 7900 XTX (gfx1100). Card 1 reports millidegrees and N/A activity.",
+  "handles": [
+    {
+      "asic_info": {
+        "market_name": "AMD Radeon RX 7900 XTX",
+        "device_id": "0x744c",
+        "target_graphics_version": "gfx1100"
+      },
+      "driver_info": {
+        "driver_name": "amdgpu",
+        "driver_version": "6.10.5"
+      },
+      "uuid": "ab744c00-0000-1000-8003-111111111111",
+      "bdf": "0000:03:00.0",
+      "memory": {
+        "VRAM": [
+          25753026560,
+          19327352832
+        ],
+        "VIS_VRAM": [
+          25753026560,
+          19327352832
+        ],
+        "GTT": [
+          68719476736,
+          20971520
+        ]
+      },
+      "activity": {
+        "gfx_activity": 88,
+        "umc_activity": 40,
+        "mm_activity": 0
+      },
+      "temperature": {
+        "EDGE": 61
+      }
+    },
+    {
+      "asic_info": {
+        "market_name": "AMD Radeon RX 7900 XTX",
+        "device_id": "0x744c",
+        "target_graphics_version": "gfx1100"
+      },
+      "driver_info": {
+        "driver_name": "amdgpu",
+        "driver_version": "6.10.5"
+      },
+      "uuid": "ab744c00-0000-1000-8083-222222222222",
+      "bdf": "0000:83:00.0",
+      "memory": {
+        "VRAM": [
+          25753026560,
+          536870912
+        ],
+        "VIS_VRAM": [
+          25753026560,
+          536870912
+        ],
+        "GTT": [
+          68719476736,
+          20971520
+        ]
+      },
+      "activity": {
+        "gfx_activity": "N/A",
+        "umc_activity": "N/A",
+        "mm_activity": "N/A"
+      },
+      "temperature": {
+        "EDGE": null,
+        "HOTSPOT": 52000
+      }
+    }
+  ]
+}
