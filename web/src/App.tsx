@@ -7,7 +7,6 @@ import { Splash } from "./components/Splash";
 import { loginPath } from "./lib/nav";
 import { AccountPage } from "./pages/Account";
 import { AuditPage } from "./pages/Audit";
-import { DeploymentsPage } from "./pages/Deployments";
 import { LoginPage } from "./pages/Login";
 import { MachinesPage } from "./pages/Machines";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
@@ -15,6 +14,9 @@ import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
 import { SetupPage } from "./pages/Setup";
 import { UsersPage } from "./pages/Users";
+import { WorkloadDetailPage } from "./pages/WorkloadDetail";
+import { WorkloadNewPage } from "./pages/WorkloadNew";
+import { WorkloadsPage } from "./pages/Workloads";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { state, loadError, user, ended, reload } = useAuth();
@@ -46,7 +48,11 @@ export default function App() {
       >
         <Route index element={<Navigate to="/machines" replace />} />
         <Route path="/machines" element={<MachinesPage />} />
-        <Route path="/deployments" element={<DeploymentsPage />} />
+        <Route path="/workloads" element={<WorkloadsPage />} />
+        <Route path="/workloads/new" element={<WorkloadNewPage />} />
+        <Route path="/workloads/:id" element={<WorkloadDetailPage />} />
+        {/* M0/M1 called this placeholder "Deployments"; model deployments come with M3. */}
+        <Route path="/deployments" element={<Navigate to="/workloads" replace />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="/audit" element={<AdminOnly><AuditPage /></AdminOnly>} />

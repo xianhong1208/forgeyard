@@ -72,7 +72,7 @@ export function UsersPage() {
       <PageHeader
         index="03 · Users"
         title="Users"
-        lead="Who can sign in, and with which role. Admins manage users; operators will run machines and deployments; users deploy their own work."
+        lead="Who can sign in, and with which role. Admins manage users; operators run workloads; users can look (and get API keys in M4)."
         actions={
           <button type="button" className="btn btn-primary" onClick={() => setAdding((v) => !v)} aria-expanded={adding}>
             <IconPlus size={16} aria-hidden="true" /> Add user

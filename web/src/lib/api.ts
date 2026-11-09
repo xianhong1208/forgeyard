@@ -29,7 +29,7 @@ export function setUnauthorizedHandler(handler: Handler | null) {
 }
 
 export type RequestOptions = {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   // Sign-in style calls answer 401 for a wrong password: that is not an ended session.
   expect401?: boolean;

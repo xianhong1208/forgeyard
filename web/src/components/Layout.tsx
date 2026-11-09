@@ -27,7 +27,7 @@ export function Layout() {
 
   const links = [
     { to: "/machines", label: "Machines" },
-    { to: "/deployments", label: "Deployments" },
+    { to: "/workloads", label: "Workloads" },
     ...(user?.role === "admin"
       ? [
           { to: "/users", label: "Users" },
