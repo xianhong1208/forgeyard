@@ -219,7 +219,11 @@ export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: Mach
 
 export type EstimateResponse = { estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string };
 
-export type Endpoint = { replica: number; machine: string | null; state: string; ready: boolean; url: string };
+export type Endpoint = {
+  replica: number; machine: string | null; state: string; ready: boolean; url: string;
+  // M4: whether the engine requires its internal key, and what the gateway sent it since the server started.
+  protected?: boolean; served?: number; in_flight?: number;
+};
 
 export type LiveCard = { replica: number; machine: string | null; key: string; index: number | null; vendor: string; model: string; total: number | null; free: number | null; used: number | null; reserved: number | null; updated_at: string };
 
@@ -229,6 +233,7 @@ export type Deployment = {
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
+  usage?: { days: number; total: UsageRow; by_day: UsageRow[] };
 };
 
 export type DeploymentsResponse = { deployments: Deployment[]; server_time: string; can_manage: boolean };
@@ -236,3 +241,31 @@ export type DeploymentsResponse = { deployments: Deployment[]; server_time: stri
 export type DeploymentResponse = { deployment: Deployment; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
 
 export type TryResponse = { status: number; ok: boolean; api: string; endpoint: string; request: Record<string, unknown>; summary: string; answer: unknown; ms: number };
+
+// ---------------------------------------------------------------- gateway (M4)
+export type KeyLimits = { default_rpm: number | null; default_tpm: number | null; max_rpm: number | null; max_tpm: number | null };
+
+export type ApiKey = {
+  id: string; name: string; prefix: string; models: string[] | null; rpm: number | null; tpm: number | null;
+  effective_rpm: number | null; effective_tpm: number | null; expires_at: string | null; created_at: string;
+  last_used_at: string | null; revoked_at: string | null; revoked_by: string | null; status: "active" | "revoked" | "expired";
+  user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };
+};
+
+export type KeysResponse = {
+  keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; models: { name: string; api: string }[];
+};
+
+export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string };
+
+export type UsageRow = {
+  id: string; name: string; requests: number; errors: number; limited: number; prompt_tokens: number; completion_tokens: number;
+  tokens: number; latency_avg_ms: number | null; latency_p50_ms: number | null; latency_p95_ms: number | null;
+};
+
+export type UsageResponse = {
+  from: string; to: string; days: number; group_by: string; total: UsageRow; rows: UsageRow[]; everyone: boolean; is_admin: boolean;
+};
+
+export type RouteInfo = { served_name: string; api: string; upstream_model: string; deployment_id: number; workload_id: number;
+  endpoints: Endpoint[] };

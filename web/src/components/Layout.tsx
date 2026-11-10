@@ -29,6 +29,9 @@ export function Layout() {
     { to: "/machines", label: "Machines" },
     { to: "/workloads", label: "Workloads" },
     { to: "/models", label: "Models" },
+    { to: "/playground", label: "Playground" },
+    { to: "/keys", label: "API keys" },
+    { to: "/usage", label: "Usage" },
     ...(user?.role === "admin"
       ? [
           { to: "/users", label: "Users" },

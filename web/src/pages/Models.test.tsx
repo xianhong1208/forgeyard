@@ -135,7 +135,7 @@ describe("models", () => {
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/3"));
   });
 
-  it("FY-WEB-050 the detail page: estimate vs live memory, endpoint, try it", async () => {
+  it("FY-WEB-050 the detail page: estimate vs live memory, the gateway, try it", async () => {
     const fetch = server((url, init) => {
       if (url === "/api/deployments/3/try" && init?.method === "POST") return { status: 200, body: { status: 200, ok: true, api: "openai-chat",
         endpoint: "http://10.0.0.5:31800/v1/chat/completions", request: {}, summary: "A GPU is a processor.", answer: {}, ms: 812 } };
@@ -146,7 +146,11 @@ describe("models", () => {
     });
     mount("/models/deployments/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
-    expect(screen.getByLabelText("Endpoint of replica 0").textContent).toBe("http://10.0.0.5:31800/v1/chat/completions");
+    const gw = screen.getByRole("region", { name: "Through the gateway" });
+    expect(within(gw).getByText("qwen3-4b").tagName).toBe("CODE");
+    expect(within(gw).getByText(`${window.location.origin}/v1/chat/completions`)).toBeTruthy();
+    expect(within(gw).getByText("#0 on a100")).toBeTruthy();
+    expect(within(gw).getByText("http://10.0.0.5:31800/")).toBeTruthy();
     expect(screen.getByText(/this replica reserves 14.38 GiB/)).toBeTruthy();
     expect(screen.getByText(/50 GiB used of 80 GiB/)).toBeTruthy();
     expect(screen.getByText(/gpu_memory_utilization 0.174/)).toBeTruthy();
