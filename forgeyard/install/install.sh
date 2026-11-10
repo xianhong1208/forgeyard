@@ -34,6 +34,9 @@ STATE_DIR="${FORGEYARD_AGENT_STATE_DIR:-/var/lib/forgeyard-agent}"
 UNIT_DIR="${FORGEYARD_UNIT_DIR:-/etc/systemd/system}"
 BIN_DIR="${FORGEYARD_BIN_DIR:-/usr/local/bin}"
 SYSTEMD="${FORGEYARD_SYSTEMD:-auto}"
+# 1: do not insist on root (the tests run it as a normal user, with every path above moved into a
+# directory of theirs). A real install needs root: it writes /etc and /opt and creates an account.
+ANY_USER="${FORGEYARD_INSTALL_ANY_USER:-0}"
 UNIT="forgeyard-agent.service"
 VENV="$HOME_DIR/venv"
 
@@ -106,7 +109,7 @@ use_systemd() {
 
 # ------------------------------------------------------------------ uninstall
 if [ "$UNINSTALL" = 1 ]; then
-    [ "$(id -u)" = 0 ] || die "run it as root (sudo sh -s -- --uninstall)"
+    [ "$(id -u)" = 0 ] || [ "$ANY_USER" = 1 ] || die "run it as root (sudo sh -s -- --uninstall)"
     step "Removing the Forgeyard agent"
     if use_systemd && [ -f "$UNIT_DIR/$UNIT" ]; then
         systemctl disable --now "$UNIT" || true
@@ -141,7 +144,7 @@ case "$(uname -m)" in
     x86_64|amd64|aarch64|arm64) ;;
     *) die "unsupported CPU architecture $(uname -m): x86_64 and aarch64 are supported" ;;
 esac
-[ "$(id -u)" = 0 ] || die "run it as root: ... | sudo sh -s -- --join ... (it creates a service and an account)"
+[ "$(id -u)" = 0 ] || [ "$ANY_USER" = 1 ] || die "run it as root: ... | sudo sh -s -- --join ... (it creates a service and an account)"
 have curl || die "curl is needed"
 case "$SERVER" in
     https://*) ;;

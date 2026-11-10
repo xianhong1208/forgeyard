@@ -254,6 +254,7 @@ class Box:
             "FORGEYARD_AGENT_STATE_DIR": str(root / "state"), "FORGEYARD_UNIT_DIR": str(root / "systemd"),
             "FORGEYARD_BIN_DIR": str(root / "bin"), "FORGEYARD_SYSTEMD": "yes", "FAKE_SYSTEMD": str(self.fake),
             "FORGEYARD_AGENT_SIMULATION": "1", "FORGEYARD_PORT_RANGE": "47300-47309",
+            "FORGEYARD_INSTALL_ANY_USER": "1",  # CI runs the tests as a normal user
         }
         for key in ("UV_CACHE_DIR", "XDG_CACHE_HOME", "UV_PYTHON_DOWNLOADS", "UV_PYTHON_PREFERENCE", "UV_INDEX_URL",
                     "PIP_INDEX_URL"):
