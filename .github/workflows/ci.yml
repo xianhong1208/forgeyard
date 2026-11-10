@@ -65,3 +65,20 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  agent-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - run: python -m pip install uv
+      - name: shellcheck install.sh and the smoke test
+        run: shellcheck -s sh forgeyard/install/install.sh && shellcheck scripts/agent_image_smoke.sh
+      - name: Build the agent image
+        run: docker build -f Dockerfile.agent -t forgeyard-agent:ci .
+      - name: Smoke test (contents, simulation, a real join and a restart)
+        run: scripts/agent_image_smoke.sh forgeyard-agent:ci
+      - name: Image size
+        run: docker image ls forgeyard-agent:ci

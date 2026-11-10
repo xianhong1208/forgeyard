@@ -1,6 +1,8 @@
 import { IconCpu, IconLock, IconPlus, IconServer2 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { AddMachineWays } from "../components/AddMachine";
+import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact } from "../lib/format";
@@ -125,6 +127,11 @@ export function MachinesPage() {
           )
         }
       />
+      <HelpLinks>
+        <HelpLink page="quick-start" anchor="3-add-a-machine">How do I add a machine?</HelpLink>
+        <HelpLink page="how-to" anchor="restrict-gpus-on-a-shared-machine">Restrict GPUs on a shared machine</HelpLink>
+        <HelpLink page="troubleshooting" anchor="an-agent-shows-offline">An agent shows offline</HelpLink>
+      </HelpLinks>
       {loadError && <Notice tone="error">{loadError}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
@@ -134,11 +141,11 @@ export function MachinesPage() {
           {!issued ? (
             <>
               <ol className="steps">
+                <li>Create a join command here. It works once, within 15 minutes, and is shown only once.</li>
                 <li>
-                  On the machine, get Forgeyard and run <code>uv sync</code> — with <code>--extra nvidia</code> on NVIDIA machines.
-                  AMD machines use the <code>amdsmi</code> library that comes with ROCm.
+                  Run it on the new machine: a <strong>one-line install</strong> that sets the agent up as a service, a{" "}
+                  <strong>Docker</strong> container, or the agent from a Forgeyard checkout with a config file.
                 </li>
-                <li>Create a join command here and run it there, in the Forgeyard folder. It works once, within 15 minutes.</li>
                 <li>The machine appears below within seconds, and reconnects by itself after a restart or a network drop.</li>
               </ol>
               <div className="row-gap">
@@ -154,7 +161,7 @@ export function MachinesPage() {
                 Works once and expires at <strong>{new Date(issued.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>{" "}
                 ({issued.valid_minutes} minutes). It is shown only now; the server keeps just a hash.
               </p>
-              <CopyBox value={issued.command} label="Join command" />
+              <AddMachineWays issued={issued} />
               {isLoopback(issued.server_url) && (
                 <Notice>
                   <strong>{issued.server_url}</strong> only works on this computer. For other machines, start the server with{" "}
@@ -251,7 +258,7 @@ function EmptyMachines({ canManage, adding, onAdd }: { canManage: boolean; addin
           Forgeyard runs models and workloads on machines you add: GPU servers, workstations, or computers with only a CPU.
           Each one runs the Forgeyard agent, which reports its hardware and keeps a connection to this server.{" "}
           {canManage
-            ? "To add one, install Forgeyard on it, then run the one-time join command you get here."
+            ? "To add one, create a join command here and paste it on the machine: one line installs the agent as a service (or run it in Docker)."
             : "An admin adds machines; ask one to add yours."}
         </p>
         {canManage && !adding && (

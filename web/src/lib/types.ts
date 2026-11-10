@@ -116,6 +116,14 @@ export type NewJoinToken = JoinToken & {
   // The CA the join command pins (null: plain HTTP, or a publicly trusted certificate), and the
   // one-time command for agents that joined before.
   ca_fingerprint?: string | null; trust_command?: string | null;
+  // The three ways to add the machine (forgeyard/install/commands.py): null install_command when the
+  // server is not reached over HTTPS (install.sh is served over HTTPS only).
+  install_command?: string | null;
+  docker_build_command?: string;
+  docker_commands?: { nvidia: string; amd: string; cpu: string };
+  config_file?: string;
+  manual_commands?: string[];
+  version?: string;
 };
 
 export type WorkloadKind = "service" | "task";

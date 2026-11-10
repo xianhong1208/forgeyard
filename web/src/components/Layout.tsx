@@ -1,4 +1,4 @@
-import { IconChecklist, IconChevronDown, IconLock, IconLogout, IconMenu2, IconUserCircle, IconX } from "@tabler/icons-react";
+import { IconBook2, IconChecklist, IconChevronDown, IconLock, IconLogout, IconMenu2, IconUserCircle, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
@@ -69,6 +69,9 @@ export function Layout() {
             <NavLink to="/start" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
               Get started
             </NavLink>
+            <NavLink to="/guide" onClick={() => setNav(false)} className="only-narrow">
+              Guide
+            </NavLink>
             <NavLink to="/account" onClick={() => setNav(false)} className={({ isActive }) => `only-narrow${isActive ? " active" : ""}`}>
               My account
             </NavLink>
@@ -87,6 +90,9 @@ export function Layout() {
               <div className="usermenu-panel" role="menu">
                 <NavLink to="/start" role="menuitem" onClick={() => setMenu(false)}>
                   <IconChecklist size={16} aria-hidden="true" /> Get started
+                </NavLink>
+                <NavLink to="/guide" role="menuitem" onClick={() => setMenu(false)}>
+                  <IconBook2 size={16} aria-hidden="true" /> Guide
                 </NavLink>
                 <NavLink to="/account" role="menuitem" onClick={() => setMenu(false)}>
                   <IconUserCircle size={16} aria-hidden="true" /> My account and sessions
