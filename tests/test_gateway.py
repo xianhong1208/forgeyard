@@ -419,3 +419,21 @@ def test_fy_gw_017_a_failed_replica_is_tried_last_until_it_is_ready_again():
     assert orders == {("u0", "u1"), ("u1", "u0")}  # back in turn
     t["mono"] += 16  # the penalty is over anyway
     assert {tuple(x.uid for x in b.order("m", [a0, a1])) for _ in range(2)} == {("u0", "u1"), ("u1", "u0")}
+
+
+def test_fy_gw_018_an_all_deployments_key_covers_later_ones_a_list_does_not(gw):
+    """FY-GW-018: a key without a model list ("every deployment") also covers a deployment created after
+    the key: it is listed and callable. A key with a list keeps exactly its list: the later deployment is
+    neither listed nor callable (403 model_not_allowed)."""
+    every = api_client(gw.owner, new_key(gw.owner, "every")["key"])
+    only = api_client(gw.owner, new_key(gw.owner, "chat-only", models=["chat"])["key"])
+    deploy(gw.owner, "chat-later", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0, "threads": 2}, wait=True)
+    make_ready("chat-later", [(gw.a, gw.e1.port, gw.e1.secret)])
+    assert [m["id"] for m in every.get("/v1/models").json()["data"]] == ["asr", "chat", "chat-later", "embed", "rerank"]
+    assert every.get("/v1/models/chat-later").status_code == 200
+    r = chat(every, model="chat-later")
+    assert r.status_code == 200 and r.headers["x-forgeyard-replica"] == "chat-later#0"
+    assert [m["id"] for m in only.get("/v1/models").json()["data"]] == ["chat"]
+    r = chat(only, model="chat-later")
+    assert r.status_code == 403 and err(r)["code"] == "model_not_allowed"
+    assert chat(only).status_code == 200

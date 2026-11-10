@@ -17,6 +17,9 @@ dependencies = [
     "pyyaml>=6",
     # The gateway's client to the replicas (M4): async, streaming. Was a dev dependency (tests).
     "httpx>=0.28",
+    # The agent's key guard in front of model replicas: HTTP/1.1 parsing for its reverse proxy.
+    # Already installed through httpx (httpcore) and uvicorn; listed because it is used.
+    "h11>=0.16",
 ]
 
 [project.optional-dependencies]

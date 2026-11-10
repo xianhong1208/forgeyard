@@ -311,7 +311,8 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
             agent = Agent(server, joined["credential"], SimulatedInventory("nvidia-rtx4090x2", environ={SIMULATION_ENV: "1"}),
                           backoff=Backoff(base=0.05, cap=0.2), supervisor=sup1)
             run = asyncio.create_task(agent.run())
-            assert await _wait(lambda: api("GET", "/api/machines")["machines"][0]["features"] == ["workloads", "replica_keys"])
+            assert await _wait(lambda: api("GET", "/api/machines")["machines"][0]["features"] == ["workloads", "replica_keys",
+                                                                                          "replica_guard"])
             job = api("POST", "/api/workloads", {"name": "job", "kind": "task",
                                                  "runtime": {"type": "process", "command": "sh",
                                                              "args": ["-c", "echo working; exit 0"]}})["workload"]

@@ -118,6 +118,45 @@ def find_leader(rec_id: str) -> Optional[tuple[int, int, int]]:
     return None
 
 
+def _address(hexaddr: str) -> str:
+    """An address from /proc/net/tcp{,6} (little-endian 32-bit words) as text."""
+    import ipaddress
+
+    raw = bytes.fromhex(hexaddr)
+    raw = b"".join(raw[i:i + 4][::-1] for i in range(0, len(raw), 4))
+    return str(ipaddress.ip_address(raw))
+
+
+def beyond_loopback(ports: list[int], proc_net: Path = Path("/proc/net")) -> list[str]:
+    """Listening sockets on these ports bound to anything but loopback ("0.0.0.0:31001"). A guarded
+    engine must listen on 127.0.0.1 only; a recipe that ignores {host} would be reachable around
+    the agent's key guard."""
+    import ipaddress
+
+    wanted, out = set(ports), []
+    for name in ("tcp", "tcp6"):
+        try:
+            lines = (proc_net / name).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            cols = line.split()
+            if len(cols) < 4 or cols[3] != "0A":  # 0A: LISTEN
+                continue
+            hexaddr, _, hexport = cols[1].partition(":")
+            try:
+                port, addr = int(hexport, 16), _address(hexaddr)
+            except ValueError:
+                continue
+            if port not in wanted:
+                continue
+            ip = ipaddress.ip_address(addr)
+            mapped = getattr(ip, "ipv4_mapped", None)
+            if not (ip.is_loopback or (mapped is not None and mapped.is_loopback)):
+                out.append(f"{addr}:{port}" if ":" not in addr else f"[{addr}]:{port}")
+    return sorted(set(out))
+
+
 def systemd_running() -> bool:
     return Path("/run/systemd/system").is_dir() and shutil.which("systemd-run") is not None
 
@@ -215,7 +254,9 @@ class ProcessRuntime:
         if rec.model is not None:
             if not rec.paths:
                 raise StartError("the model is not in the cache")
-            extra = plan.model_values(rec.paths, container=False, model=rec.model, bind=address)
+            # Behind the guard the engine binds loopback only; the guard holds the published address.
+            bind = plan.LOOPBACK if plan.guarded(rec.ports) else address
+            extra = plan.model_values(rec.paths, container=False, model=rec.model, bind=bind)
         env = plan.process_env(spec.env, rec.gpus, rec.ports, home=str(home), user=self.user,
                                replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal, extra=extra,
                                secret=secret)
