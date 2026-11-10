@@ -5,10 +5,11 @@ on one LAN or VPN, later rented cloud machines too. Agents report each machine's
 you run services, tasks and dev environments on them, and deploy models from recipes behind
 one OpenAI-compatible gateway.
 
-> **Status: milestones M0, M1 and M2 (0.1.0, unreleased).** The server, database, web UI and
-> sign-in are in place; machines join through the agent and report their hardware; and you run
-> services and tasks on them, as containers or processes, with only the GPUs they were given.
-> Model deployments come with M3.
+> **Status: milestones M0 to M3 (0.1.0, unreleased).** The server, database, web UI and
+> sign-in are in place; machines join through the agent and report their hardware; you run
+> services and tasks on them, as containers or processes, with only the GPUs they were given; and
+> you deploy models from a catalog with engine recipes, placed by memory estimate. The unified
+> `/v1` gateway and API keys come with M4.
 
 [繁體中文說明](README.zh-TW.md)
 
@@ -109,7 +110,7 @@ workload**, or `POST /api/workloads` with the spec:
 | `env` | explicit variables only (see *Isolation*) |
 | `resources` | `cpu` (cores), `memory` (`4Gi`, `512Mi` or bytes), `gpus`: `{"count": n}` or `{"indices": [4]}` (on a chosen machine), optional `"vendor": "nvidia"/"amd"` |
 | `ports` | services: `[{"name", "port"}]`. The agent picks the **host port** from its range (30000-32767 by default) and the page shows the address. A process must listen on it: `$PORT`, or `${PORT}` / `${PORT_<NAME>}` in its arguments |
-| `health` | services: `{"type": "http" or "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay"}`. Shown as healthy / unhealthy; it does not restart anything |
+| `health` | services: `{"type": "http" or "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay", "start_period"}`. Shown as healthy / unhealthy; it does not restart anything. Failures within `start_period` (before the first success) do not count |
 | `restart` | services: `always` (default), `on-failure`, `never`. Restarts back off 1, 2, 4… s, at most 60 s |
 | `max_duration`, `retries`, `retry_backoff` | tasks: a run longer than `max_duration` seconds is stopped and fails (no retry); a non-zero exit is retried `retries` times, `retry_backoff` seconds apart, doubling, at most 5 min |
 | `replicas`, `machine_id` | how many copies; a machine, or `null` for the first online machine with room |
@@ -117,8 +118,9 @@ workload**, or `POST /api/workloads` with the spec:
 **Placement (M2):** the machine you chose, or the first online machine (by name) that has the
 runtime, enough free GPUs on its allowlist, and the CPU and memory the spec declares (counted
 against the replicas already there). GPUs are **exclusive**: one card, one replica. Something that
-does not fit waits as *pending* with the reason, and is placed as soon as room appears. The real
-scheduler (scoring, VRAM estimates, binpacking) is M3.
+does not fit waits as *pending* with the reason, and is placed as soon as room appears. A workload
+may also declare the memory it needs per card (`gpus.vram`) and share cards with others that do
+(`gpus.share: vram`); model deployments use the M3 scheduler (see *Models*).
 
 **Who:** admins and operators create, stop, start and delete workloads and read their output.
 Everyone signed in sees the list, the status and the events, but not environment values or output
@@ -191,15 +193,74 @@ again.
 - **Agent options:** `--workload-user`, `--work-dir` (one directory per process replica; default
   next to the state directory, never inside it), `--port-range` (30000-32767),
   `--bind-address`, `--container-engine auto|docker|podman|none|<path>`,
-  `--limits auto|systemd|rlimit`, `--log-max-mb`, `--no-workloads`. `python -m forgeyard agent
+  `--limits auto|systemd|rlimit`, `--log-max-mb`, `--no-workloads`; for models `--model-cache DIR`,
+  `--model-local-dir DIR` (repeatable) and `--allow-private-model-hosts`. `python -m forgeyard agent
   runtimes [--workload-user …]` prints what it can run here without joining.
 
 Real-hardware checks for workloads: [docs/acceptance-m2.md](docs/acceptance-m2.md).
 
+## Models
+
+**Models → Deploy a model**: pick a model from the catalog and a recipe, set the parameters, and
+the page shows how much memory one replica needs and where it would go, before anything is created
+or downloaded. A deployment is one service workload (it also appears under Workloads) plus a
+gateway route, which the M4 gateway will use; until then every replica answers on its own port
+(the page shows the URL and has a small **Try it**).
+
+- **Catalog** (admins): add `hf://<org>/<name>` (optionally a revision and, for GGUF repositories,
+  the file), a GGUF URL from an allowed host, or `local://<dir>` under an allowed directory. The
+  model is **inspected without downloading it**: the commit it pins to, the files and their size,
+  `config.json`, the safetensors headers (parameter counts) or the GGUF header (read with HTTP range
+  requests). A token for gated repositories is used for that only, never stored. Admins can add
+  engine arguments per recipe to a model (Qwen3-Reranker needs vLLM's `--hf-overrides`).
+- **Recipes** are YAML ([forgeyard/recipes](forgeyard/recipes)): tasks, formats, the protocol per
+  task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
+  NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
+  for CPUs without Docker, a pinned release the agent downloads and checks against its SHA-256.
+  Admins add custom recipes on the Models page. Built in:
+
+  | Recipe | Serves | Runs | Pinned |
+  |---|---|---|---|
+  | `vllm` | chat (safetensors) | NVIDIA, AMD | `vllm/vllm-openai:v0.32.0` (CUDA 13.0, driver ≥ 580), `-cu129` (≥ 575), `vllm/vllm-openai-rocm:v0.32.0` |
+  | `vllm-pooling` | embeddings, rerank | NVIDIA, AMD, shares a GPU by default | the same images, `--runner pooling` |
+  | `llama-cpp` | chat (GGUF) | NVIDIA, AMD, CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`, release `b11977` for the process |
+  | `faster-whisper` | speech to text | NVIDIA, CPU, shares a GPU by default | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
+
+- **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
+  bits) + KV cache (2 × layers × KV heads × head size × context × concurrent sequences × bytes) +
+  the recipe's engine overhead + the CUDA context (0.4 GiB, measured on an A100); GGUF = the exact
+  tensor sizes of the offloaded layers + their KV cache + the logits buffer + overhead; whisper =
+  the model files + overhead. A declared `vram` replaces it (required for `local://` models).
+- **Scheduling**: filter (a recipe variant for the hardware and driver, the runtime, the GPU
+  allowlist, enough memory), then score: **binpack** (the tightest card that fits; whole cards stay
+  free for big models), and on a tie the machine that already **has the model cached**. Memory is
+  what the agent reports **free** on the card (it may be shared with work outside Forgeyard), minus
+  Forgeyard's reservations that are not in that number yet, minus `VRAM_HEADROOM_MIB` (512). Never
+  the card's total. When nothing fits the deployment is refused and every machine says why and by
+  how much (`wait: true` queues it instead).
+- **Sharing a GPU** (`share: vram`): several replicas on one card, each held to its own
+  reservation; a shared card is never shared with an exclusive replica. vLLM's
+  `--gpu-memory-utilization` is a fraction of the card's **total** memory and vLLM refuses to start
+  unless that much is **free**, so a fixed 0.9 never starts on a shared card: Forgeyard sets it to
+  (reservation − CUDA context) / total, rounded down. Replicas on one card start one at a time (the
+  next once the previous is healthy), so two engines never size themselves against the same free
+  memory.
+- **Model cache** on each machine (`agent --model-cache DIR`): keyed by source and revision, laid out
+  like the Hugging Face cache, shared by every replica there, downloaded by the agent (resumable,
+  every file checked against its SHA-256 or git blob id, progress on the page), mounted
+  **read-only** into containers (the model's own directory, nothing else); files are read-only for
+  processes too. Downloads go through the same guard as the server: https and public addresses
+  only, every redirect checked (`--allow-private-model-hosts` for a LAN mirror).
+- **Who:** admins manage the catalog, recipes and model sources; admins and operators deploy;
+  everyone signed in sees deployments and can try them.
+
+Real-hardware checks: [docs/acceptance-m3.md](docs/acceptance-m3.md) and `scripts/accept_m3.py`.
+
 ## Accounts and sign-in
 
-- **Roles:** `admin` manages users, machines and their GPU allowlists and sees the audit log;
-  `operator` runs workloads; `user` can look (and gets API keys in M4). The **owner** (the first account) is always an
+- **Roles:** `admin` manages users, machines and their GPU allowlists, the model catalog, recipes
+  and sources, and sees the audit log; `operator` runs workloads and deploys models; `user` can
+  look and try deployed models (and gets API keys in M4). The **owner** (the first account) is always an
   admin and cannot be demoted, disabled or deleted, so nobody can lock administration out.
 - **Passwords:** argon2id; at least 12 characters; common passwords (also with digits or
   symbols tacked on) and passwords containing the username are refused.
@@ -249,6 +310,11 @@ project.
 | `forgeyard/api/` | `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads` |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
+| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF), estimates, recipes, the scheduler, routes |
+| `forgeyard/recipes/` | the built-in engine recipes (YAML) |
+| `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it, routes |
+| `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
+| `scripts/accept_m3.py` | the M3 acceptance run on a real machine, through the API |
 | `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state file |
 | `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, logs, health checks |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
