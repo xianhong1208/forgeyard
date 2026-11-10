@@ -6,12 +6,14 @@ Kept small and explicit on purpose:
     name       a-z, 0-9 and '-', unique
     kind       service (runs until stopped, health-checked, restarted) | task (runs to the end)
     runtime    {type: container, image, command?, args?} | {type: process, command, args?, workdir?}
+               ({type: model} is a model deployment's: the server renders a container or process
+               spec per replica, for the machine it is placed on)
     env        explicit key/values only. A workload starts from an EMPTY environment: never the
                agent's own, never host credentials. GPU visibility and FORGEYARD_* are set by
                Forgeyard and cannot be declared.
-    resources  cpu (cores), memory (bytes or "4Gi"), gpus {count | indices, vendor?}
+    resources  cpu (cores), memory (bytes or "4Gi"), gpus {count | indices, vendor?, vram?, share?}
     ports      services: [{name, port}]; the agent picks the host port from its range
-    health     services: {type: http|tcp, port, path, interval, timeout, failure_threshold}
+    health     services: {type: http|tcp, port, path, interval, timeout, failure_threshold, start_period}
     restart    services: always | on-failure | never
     max_duration, retries, retry_backoff   tasks
     replicas   1..16, fixed
@@ -138,7 +140,15 @@ class ProcessRuntime(_Model):
         return v
 
 
-Runtime = Annotated[Union[ContainerRuntime, ProcessRuntime], Field(discriminator="type")]
+class ModelRuntime(_Model):
+    """A model deployment's workload (M3). Only the server creates these; each replica gets a
+    container or process spec rendered for its machine, and that is what the agent runs."""
+    type: Literal["model"]
+    recipe: str = Field(max_length=40)
+    model: str = Field(max_length=64)
+
+
+Runtime = Annotated[Union[ContainerRuntime, ProcessRuntime, ModelRuntime], Field(discriminator="type")]
 
 
 class Gpus(_Model):
@@ -146,11 +156,23 @@ class Gpus(_Model):
     count: Optional[int] = Field(default=None, ge=0, le=MAX_GPUS)
     indices: Optional[list[Annotated[int, Field(ge=0, le=4096)]]] = Field(default=None, max_length=MAX_GPUS)
     vendor: Optional[Literal[VENDORS]] = None  # type: ignore[valid-type]
+    # Memory this workload needs on each card (bytes or "8Gi"). With share "vram" the card can be
+    # shared with other such workloads, each reserving its own amount; "exclusive" (the default)
+    # keeps the card to itself. Either way the card must have this much free.
+    vram: Optional[int] = None
+    share: Literal["exclusive", "vram"] = "exclusive"
+
+    @field_validator("vram", mode="before")
+    @classmethod
+    def _vram(cls, v):
+        return None if v in (None, "") else parse_bytes(v)
 
     @model_validator(mode="after")
     def _one_of(self) -> "Gpus":
         if self.count is not None and self.indices is not None:
             raise ValueError("give either gpus.count or gpus.indices, not both")
+        if self.share == "vram" and not self.vram:
+            raise ValueError("gpus.share vram needs gpus.vram: how much of each card it takes")
         if self.indices is not None:
             if len(set(self.indices)) != len(self.indices):
                 raise ValueError("gpus.indices has duplicates")
@@ -195,6 +217,8 @@ class Health(_Model):
     timeout: int = Field(default=3, ge=1, le=60)
     failure_threshold: int = Field(default=3, ge=1, le=20)
     initial_delay: int = Field(default=0, ge=0, le=3600)
+    # Failures before the first success do not count for this long (loading a model takes a while).
+    start_period: int = Field(default=0, ge=0, le=7200)
 
     @field_validator("path")
     @classmethod
@@ -275,6 +299,8 @@ class WorkloadSpec(_Model):
                 raise ValueError("gpus.indices can be used by one replica only (cards are not shared)")
         if gpus.wanted == 0:
             gpus.vendor = None
+            gpus.vram = None
+            gpus.share = "exclusive"
         return self
 
     @property

@@ -149,8 +149,10 @@ class Node(Base):
     gpu_allowlist: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     # What the agent can run with ({"process": {...}, "container": {...}}), from its hello.
     runtime_info: Mapped[dict] = mapped_column(JSON, default=dict)
-    # Protocol features the agent declared ("workloads"). An M1 agent declares none.
+    # Protocol features the agent declared ("workloads", "models"). An M1 agent declares none.
     features: Mapped[list] = mapped_column(JSON, default=list)
+    # The agent's model cache (M3): {"ok", "free_bytes", "cached": [cache keys]}.
+    model_cache: Mapped[dict] = mapped_column(JSON, default=dict)
 
     accelerators: Mapped[list["Accelerator"]] = relationship(
         back_populates="node", cascade="all, delete-orphan", order_by="Accelerator.position"
@@ -197,7 +199,7 @@ class Workload(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(48), unique=True)
     kind: Mapped[str] = mapped_column(String(16))                         # service | task
-    runtime: Mapped[str] = mapped_column(String(16))                      # container | process
+    runtime: Mapped[str] = mapped_column(String(16))                      # container | process | model
     spec: Mapped[dict] = mapped_column(JSON)
     desired_state: Mapped[str] = mapped_column(String(16), default="running")  # running | stopped
     # Bumped on every (re)start: the agent replaces a replica whose generation differs.
@@ -245,6 +247,17 @@ class Replica(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     # The last lines of output the agent sent when the replica ended (shown once it is gone).
     log_tail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Model deployments (M3): the spec rendered for the machine and recipe variant it was placed
+    # with (sent instead of the workload's), the model to fetch, a process engine to fetch, the
+    # VRAM reserved on each of its GPUs (or RAM for a CPU replica), and download progress.
+    spec: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    model: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    engine: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    vram: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    download: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # When it last became ready (healthy, or running without a health check). Until the agent's
+    # free-memory numbers are newer than this, its reservation still counts as not yet in use.
+    ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     workload: Mapped[Workload] = relationship(back_populates="replicas")
     node: Mapped[Optional[Node]] = relationship()
@@ -261,6 +274,93 @@ class WorkloadEvent(Base):
     replica: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # ordinal
     kind: Mapped[str] = mapped_column(String(32))
     message: Mapped[str] = mapped_column(String(500))
+
+
+class CatalogModel(Base):
+    """A model in the catalog: where it comes from (pinned), what it is, and what the estimator
+    needs (from inspecting it once, when it was added)."""
+
+    __tablename__ = "models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    title: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    source: Mapped[str] = mapped_column(String(1024))                     # hf://org/name | https://… | local://…
+    kind: Mapped[str] = mapped_column(String(8))                          # hf | url | local
+    ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)       # what was asked: main, a tag
+    revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)   # the commit it is pinned to
+    file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)      # the GGUF file
+    format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2
+    task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Extra engine arguments per recipe (e.g. Qwen3-Reranker's --hf-overrides for vllm-pooling).
+    engine_args: Mapped[dict] = mapped_column(JSON, default=dict)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CustomRecipe(Base):
+    """A recipe an admin added (the built-in ones ship as files with Forgeyard)."""
+
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(40), unique=True)
+    yaml: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Deployment(Base):
+    """A model served with a recipe: expands into one service workload and one gateway route."""
+
+    __tablename__ = "deployments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(48), unique=True)
+    model_id: Mapped[int] = mapped_column(ForeignKey("models.id", ondelete="RESTRICT"), index=True)
+    recipe: Mapped[str] = mapped_column(String(40))
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    served_name: Mapped[str] = mapped_column(String(128))
+    workload_id: Mapped[int] = mapped_column(ForeignKey("workloads.id", ondelete="CASCADE"), unique=True)
+    # The estimate when it was created: {"method", "device", "per_gpu", "ram", "parts", …}.
+    estimate: Mapped[dict] = mapped_column(JSON, default=dict)
+    # A Hugging Face token for gated repositories. Only ever sent to the agent that downloads;
+    # never returned by the API, logged or audited.
+    hf_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    model: Mapped[CatalogModel] = relationship()
+    workload: Mapped[Workload] = relationship()
+
+
+class GatewayRoute(Base):
+    """What the gateway (M4) needs: a model name, the protocol, and the service that serves it."""
+
+    __tablename__ = "gateway_routes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    served_name: Mapped[str] = mapped_column(String(128), unique=True)
+    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio
+    # The `model` value the engine expects (the served name, or the Hugging Face id for speaches).
+    upstream_model: Mapped[str] = mapped_column(String(256))
+    deployment_id: Mapped[int] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"), unique=True)
+    workload_id: Mapped[int] = mapped_column(ForeignKey("workloads.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ServerSetting(Base):
+    """Settings admins change at run time (model source allowlists)."""
+
+    __tablename__ = "server_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 _engine = None

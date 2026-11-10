@@ -144,6 +144,7 @@ def apply_hello(db: DbSession, node: Node, hello: HelloIn, ip: Optional[str]) ->
     node.runtimes = list(hello.runtimes)
     node.features = list(hello.features)
     node.runtime_info = dict(hello.runtime_info)
+    node.model_cache = dict(hello.model_cache or {})
     node.simulated = hello.simulated
     node.ip = ip
     node.connected_at = now

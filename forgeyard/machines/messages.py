@@ -60,6 +60,28 @@ def _detail(value: Any) -> dict:
     return value
 
 
+def _download(value: Any) -> Optional[dict]:
+    """{"phase": "model"|"engine", "done": bytes, "total": bytes, "file"?: name}: small, or dropped."""
+    if not isinstance(value, dict):
+        return None
+    out = {"phase": str(value.get("phase") or "model")[:16], "done": _bytes(value.get("done")) or 0,
+           "total": _bytes(value.get("total")) or 0}
+    if value.get("file"):
+        out["file"] = str(value["file"])[:200]
+    if value.get("waiting"):
+        out["waiting"] = str(value["waiting"])[:200]
+    return out
+
+
+def _model_cache(value: Any) -> Optional[dict]:
+    if not isinstance(value, dict):
+        return None
+    cached = [str(k)[:400] for k in (value.get("cached") or []) if isinstance(k, str)][:512]
+    return {"ok": bool(value.get("ok")), "free_bytes": _bytes(value.get("free_bytes")),
+            "total_bytes": _bytes(value.get("total_bytes")), "cached": cached,
+            "reason": (str(value["reason"])[:300] if value.get("reason") else None)}
+
+
 Bytes = Annotated[Optional[int], BeforeValidator(_bytes)]
 Percent = Annotated[Optional[int], BeforeValidator(_percent)]
 Celsius = Annotated[Optional[int], BeforeValidator(_celsius)]
@@ -124,6 +146,8 @@ class HelloIn(_Msg):
     # Added in M2, optional so an M1 agent's hello stays valid.
     features: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=16)
     runtime_info: Annotated[dict, BeforeValidator(_runtime_info)] = Field(default_factory=dict)
+    # Added in M3: the model cache (free space, cached models).
+    model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
 
 
 class MetricIn(_Msg):
@@ -169,6 +193,8 @@ class ReplicaStatusIn(_Msg):
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     log_tail: Annotated[Optional[str], BeforeValidator(_last(16384))] = None
+    # M3: a model or engine being downloaded before the replica starts.
+    download: Annotated[Optional[dict], BeforeValidator(_download)] = None
 
 
 class StatusIn(_Msg):
@@ -177,6 +203,8 @@ class StatusIn(_Msg):
     # True: every replica the agent knows is listed, so missing ones are not running there.
     full: bool = False
     replicas: list[ReplicaStatusIn] = Field(default_factory=list, max_length=512)
+    # M3: the agent's model cache, when it changed.
+    model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
 
 
 class LogsIn(_Msg):

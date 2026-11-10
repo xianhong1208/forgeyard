@@ -1,0 +1,55 @@
+# Embedding and rerank models on vLLM's pooling runner: the same pinned image as the vllm recipe
+# (one image to pull for three kinds of model), with defaults for small models that share a card.
+#
+# The KV cache only has to hold one full-length sequence (pooling requests are a single forward
+# pass), so the estimate counts one sequence, not `concurrency` of them. Model-specific flags
+# (for example Qwen3-Reranker's --hf-overrides, which turns the original checkpoint into a
+# sequence classifier) are set on the catalog entry, not here.
+#
+# Embeddings: POST /v1/embeddings. Rerank: POST /v1/rerank (Jina/Cohere shape) and /score.
+name: vllm-pooling
+title: vLLM embeddings and rerank
+description: >-
+  Embedding and reranker models on vLLM's pooling runner. Small enough to share one GPU: each
+  replica reserves its estimate and vLLM is held to it.
+engine: vllm
+version: "0.32.0"
+tasks: [embed, rerank]
+formats: [safetensors]
+api: {embed: openai-embeddings, rerank: rerank}
+upstream_model: served_name
+share: vram
+port: 8000
+health: {path: /health, start_period: 900, interval: 10, timeout: 5, failure_threshold: 3}
+estimate:
+  method: safetensors-kv
+  kv_sequences: one
+  overhead: 1GiB
+params:
+  context: {type: int, default: 8192, min: 256, max: 131072, label: Max input length (tokens)}
+  concurrency: {type: int, default: 32, min: 1, max: 1024, label: Inputs per batch}
+  dtype: {type: choice, default: auto, choices: [auto, bfloat16, float16], label: Weights dtype}
+args: ["{model_path}", --runner, pooling, --served-model-name, "{served_name}", --host, "{host}", --port, "{port}",
+       --max-model-len, "{context}", --max-num-seqs, "{concurrency}",
+       --gpu-memory-utilization, "{gpu_util}", --tensor-parallel-size, "{gpus}", --dtype, "{dtype}"]
+env:
+  HF_HUB_OFFLINE: "1"
+  HF_HUB_CACHE: "{model_hub}"
+  VLLM_NO_USAGE_STATS: "1"
+  DO_NOT_TRACK: "1"
+variants:
+  - name: cuda
+    when: {vendor: nvidia, compute_capability: ">=7.0", driver: ">=580"}
+    runtime: container
+    image: vllm/vllm-openai:v0.32.0
+    entrypoint: [vllm, serve]
+  - name: cuda-12.9
+    when: {vendor: nvidia, compute_capability: ">=7.0", driver: ">=575"}
+    runtime: container
+    image: vllm/vllm-openai:v0.32.0-cu129
+    entrypoint: [vllm, serve]
+  - name: rocm
+    when: {vendor: amd, arch: [gfx90a, gfx942, gfx950, gfx1100, gfx1101, gfx1150, gfx1151, gfx1200, gfx1201]}
+    runtime: container
+    image: vllm/vllm-openai-rocm:v0.32.0
+    entrypoint: [vllm, serve]

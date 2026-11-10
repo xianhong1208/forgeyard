@@ -15,9 +15,9 @@ from typing import Optional
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from forgeyard.db import Node, Replica, Workload, WorkloadEvent, utcnow
+from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, utcnow
 from forgeyard.machines.messages import StatusIn
-from forgeyard.machines.protocol import PROTOCOL_VERSION
+from forgeyard.machines.protocol import FEATURE_MODELS, PROTOCOL_VERSION
 
 MAX_EVENTS = 300
 # Agent states in which the replica is (or may be) running something.
@@ -43,15 +43,46 @@ def desired_replicas(db: DbSession, node_id: int) -> list[Replica]:
         .order_by(Replica.id)).all())
 
 
-def replica_desired(r: Replica) -> dict:
+def compat_spec(spec: dict) -> dict:
+    """A spec an M2 agent accepts: without the M3 fields at their defaults (its spec model
+    forbids unknown fields). Specs that use them are only placed on M3 agents anyway."""
+    spec = dict(spec)
+    res = dict(spec.get("resources") or {})
+    gpus = dict(res.get("gpus") or {})
+    if gpus.get("vram") is None and gpus.get("share", "exclusive") == "exclusive":
+        gpus.pop("vram", None)
+        gpus.pop("share", None)
+    if res:
+        res["gpus"] = gpus
+        spec["resources"] = res
+    if spec.get("health") and not spec["health"].get("start_period"):
+        spec["health"] = {k: v for k, v in spec["health"].items() if k != "start_period"}
+    return spec
+
+
+def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = None) -> dict:
     w = r.workload
-    return {"id": r.uid, "workload_id": w.id, "workload": w.name, "ordinal": r.ordinal, "generation": r.generation,
-            "kind": w.kind, "spec": w.spec, "gpus": r.gpus or []}
+    spec = r.spec or w.spec
+    out = {"id": r.uid, "workload_id": w.id, "workload": w.name, "ordinal": r.ordinal, "generation": r.generation,
+           "kind": w.kind, "spec": spec if models else compat_spec(spec), "gpus": r.gpus or []}
+    if r.model:
+        out["model"] = dict(r.model, token=token) if token else dict(r.model)
+    if r.engine:
+        out["engine"] = dict(r.engine)
+    return out
 
 
 def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
+    node = db.get(Node, node_id)
+    models = node is not None and FEATURE_MODELS in (node.features or [])
+    reps = desired_replicas(db, node_id)
+    tokens: dict[int, Optional[str]] = {}
+    ids = {r.workload_id for r in reps if r.model}
+    if ids:
+        for dep in db.scalars(select(Deployment).where(Deployment.workload_id.in_(ids))).all():
+            tokens[dep.workload_id] = dep.hf_token
     return {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
-            "replicas": [replica_desired(r) for r in desired_replicas(db, node_id)]}
+            "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id)) for r in reps]}
 
 
 # ------------------------------------------------------------------ status from the agent
@@ -82,6 +113,8 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
     rows = {r.uid: r for r in db.scalars(select(Replica).where(Replica.node_id == node.id)).all()}
     desired_changed = False
     now = utcnow()
+    if msg.model_cache is not None:
+        node.model_cache = dict(msg.model_cache)
     for st in msg.replicas:
         r = rows.get(st.id)
         if r is None or st.generation != r.generation:
@@ -103,11 +136,19 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         r.finished_at = _ts(st.finished_at) if state in ENDED_STATES or state == "backoff" else None
         if st.log_tail is not None:
             r.log_tail = st.log_tail
+        r.download = st.download if state in ("starting", "pending") else None
+        health = (r.spec or r.workload.spec or {}).get("health")
+        ready = state == "healthy" or (state == "running" and not health)
+        if ready and r.ready_at is None:
+            r.ready_at = now
+        elif state not in ("healthy", "running", "unhealthy"):
+            r.ready_at = None  # its memory is not in use (any more): the reservation counts again
         r.updated_at = now
         if st.final and not r.final and not stopping:
             r.final = True
             desired_changed = True
-        if before != (r.state, r.reason, r.exit_code):
+        progress_only = before[0] == r.state and st.download is not None and (before[1] or "").startswith("downloading")
+        if before != (r.state, r.reason, r.exit_code) and not progress_only:
             event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: "
                   f"{describe(r.state, r.reason, r.exit_code, r.pid)}", r.ordinal)
     if msg.full:
@@ -139,6 +180,12 @@ def reset_replica(r: Replica, generation: int) -> None:
     r.ports = []
     r.started_at = None
     r.finished_at = None
+    r.spec = None
+    r.model = None
+    r.engine = None
+    r.vram = None
+    r.download = None
+    r.ready_at = None
     r.updated_at = utcnow()
 
 

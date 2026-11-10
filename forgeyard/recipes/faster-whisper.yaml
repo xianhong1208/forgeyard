@@ -1,0 +1,60 @@
+# Speech to text with faster-whisper (CTranslate2), served by speaches, an OpenAI-compatible
+# server (POST /v1/audio/transcriptions): https://github.com/speaches-ai/speaches
+#
+# Pinned: speaches 0.8.3 (2025-09-19), its latest stable release (0.9.0 is still a release
+# candidate). Images: ghcr.io/speaches-ai/speaches:0.8.3-cuda (CUDA 12.9, driver >= 575),
+# 0.8.3-cuda-12.4.1 (driver >= 550) and 0.8.3-cpu. speaches finds models in a Hugging Face cache
+# (it scans HF_HUB_CACHE for models--<org>--<name>), which is the layout of Forgeyard's model
+# cache, so the mounted cache entry is used as is and nothing is downloaded at run time. It
+# expects the Hugging Face id in a request's `model` field, hence upstream_model: repo.
+# A model is loaded on the first request; WHISPER__TTL=-1 keeps it loaded.
+name: faster-whisper
+title: faster-whisper (speaches)
+description: >-
+  Speech recognition with faster-whisper models (CTranslate2) behind an OpenAI-compatible
+  /v1/audio/transcriptions. Small; shares a GPU by default.
+engine: speaches
+version: "0.8.3"
+tasks: [asr]
+formats: [ctranslate2]
+api: {asr: openai-audio}
+upstream_model: repo
+share: vram
+port: 8000
+health: {path: /health, start_period: 300, interval: 10, timeout: 5, failure_threshold: 3}
+estimate:
+  # The model files plus CTranslate2's workspace and the cuDNN/cuBLAS handles. CPU: measured with
+  # speaches 0.8.3 and faster-whisper-small after one transcription, RSS 1.43 GiB = 0.45 GiB of
+  # model + 0.98 GiB (docs/acceptance-m3.md); the GPU figure awaits the real host.
+  method: files
+  overhead: 1GiB
+  cpu_overhead: 1GiB
+params:
+  compute_type: {type: choice, default: default, choices: [default, float16, int8_float16, int8, float32],
+                 label: Compute type}
+env:
+  HF_HUB_OFFLINE: "1"
+  HF_HUB_CACHE: "{model_hub}"
+  UVICORN_HOST: "{host}"
+  UVICORN_PORT: "{port}"
+  ENABLE_UI: "false"
+  WHISPER__TTL: "-1"
+  WHISPER__COMPUTE_TYPE: "{compute_type}"
+  LOG_LEVEL: info
+  DO_NOT_TRACK: "1"
+variants:
+  - name: cuda
+    when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=575"}
+    runtime: container
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda
+    env: {WHISPER__INFERENCE_DEVICE: cuda}
+  - name: cuda-12.4
+    when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=550"}
+    runtime: container
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda-12.4.1
+    env: {WHISPER__INFERENCE_DEVICE: cuda}
+  - name: cpu
+    when: {vendor: cpu, arch: [x86_64, aarch64]}
+    runtime: container
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
+    env: {WHISPER__INFERENCE_DEVICE: cpu}

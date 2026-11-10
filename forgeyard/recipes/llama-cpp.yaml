@@ -1,0 +1,67 @@
+# llama.cpp's llama-server for GGUF models: NVIDIA, AMD and plain CPUs, in a container or (CPU)
+# as a process that needs no Docker.
+#
+# Pinned: build b11977 (2026-10-29). llama.cpp ships a build per merge rather than stable
+# releases, so the pin is one build for which the official images
+# (ghcr.io/ggml-org/llama.cpp:server-*-b11977) and the release archives exist, so every variant
+# runs the same code: https://github.com/ggml-org/llama.cpp/releases/tag/b11977. The CUDA image is
+# CUDA 12.8 (driver >= 570); the CPU process variant downloads the official Ubuntu x64 archive,
+# checked against the SHA-256 GitHub publishes for it.
+#
+# --fit off and explicit -c / -ngl keep its memory where the estimate puts it: by default
+# llama-server grows its context to fill whatever is free, which on a shared card is someone
+# else's memory.
+name: llama-cpp
+title: llama.cpp
+description: >-
+  GGUF (quantised) models with llama-server: on NVIDIA and AMD GPUs in a container, or on the CPU
+  in a container or as a plain process. OpenAI-compatible API.
+engine: llama.cpp
+version: b11977
+tasks: [chat]
+formats: [gguf]
+api: {chat: openai-chat}
+upstream_model: served_name
+share: exclusive
+port: 8080
+health: {path: /health, start_period: 600, interval: 5, timeout: 5, failure_threshold: 3}
+estimate:
+  method: gguf
+  kv_sequences: concurrency
+  # Compute buffers beyond the logits buffer that is counted from the vocabulary. CPU: measured on
+  # Qwen3-1.7B Q4_K_M, 4096 x 2 context, 8 threads: RSS 2.77 GiB = weights 1.19 + KV 0.88 + logits
+  # 0.29 + 0.42 GiB of other buffers (docs/acceptance-m3.md).
+  overhead: 512MiB
+  cpu_overhead: 512MiB
+params:
+  context: {type: int, default: 4096, min: 256, max: 1048576, label: Context length (tokens),
+            help: Per request. llama-server gets context x concurrency in one shared KV cache.}
+  concurrency: {type: int, default: 2, min: 1, max: 64, label: Concurrent requests}
+  gpu_layers: {type: int, default: 999, min: 0, max: 999, label: Layers on the GPU,
+               help: 999 = all. Ignored on the CPU.}
+  threads: {type: int, default: 8, min: 1, max: 1024, label: CPU threads,
+            help: "The cores it reserves on the CPU (counted for placement). Every core of a busy machine
+              makes llama.cpp slower, not faster."}
+args: [-m, "{model_file}", --alias, "{served_name}", --host, "{host}", --port, "{port}",
+       -c, "{kv_tokens}", -np, "{concurrency}", --kv-unified, -ngl, "{gpu_layers}", --fit, "off",
+       -t, "{threads}", --no-webui]
+variants:
+  - name: cuda
+    when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=570"}
+    runtime: container
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11977
+  - name: rocm
+    when: {vendor: amd}
+    runtime: container
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm-b11977
+  - name: cpu
+    when: {vendor: cpu, arch: [x86_64, aarch64]}
+    runtime: container
+    image: ghcr.io/ggml-org/llama.cpp:server-b11977
+  - name: cpu-process
+    when: {vendor: cpu, arch: [x86_64]}
+    runtime: process
+    engine:
+      url: https://github.com/ggml-org/llama.cpp/releases/download/b11977/llama-b11977-bin-ubuntu-x64.tar.gz
+      sha256: 3b0c3d7d7f7c492f59bb5625bd077727f5322fff72b964dfa32ceca45bbe5053
+      binary: llama-b11977/llama-server

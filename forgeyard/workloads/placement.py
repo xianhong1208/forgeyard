@@ -1,17 +1,25 @@
-"""Placement for M2: the machine the person picked, or the first online machine that has enough.
+"""Placement: the machine the person picked, or the first online machine that has enough.
 
-This is deliberately not the scheduler (M3 adds filter/score, VRAM estimates and binpacking).
-It does three things and nothing clever:
+M2 workloads keep their simple rules:
 
-- checks that the machine can run the workload at all (agent with workloads, the runtime,
+- the machine can run the workload at all (agent with workloads, the runtime,
   NVIDIA-in-containers support);
-- adds up the CPU and memory that the replicas already there declared, against the machine's
-  threads and RAM;
-- hands out GPUs **exclusively** and **only from the machine's allowlist** (all cards when no
-  allowlist is set). A card outside the allowlist is never assigned, whatever the spec asks.
+- the CPU and memory that the replicas already there declared are added up against the
+  machine's threads and RAM;
+- GPUs come **only from the machine's allowlist** (all cards when no allowlist is set), and are
+  **exclusive** by default: one card, one replica.
+
+M3 adds VRAM (forgeyard.models.scheduler builds on this for model deployments):
+
+- a workload may declare the memory it needs on each card (`gpus.vram`) and `share: vram`: such
+  workloads share a card, each **reserving** its amount;
+- what is available on a card is what its agent last reported **free** (the cards may be shared
+  with work outside Forgeyard), minus the reservations of Forgeyard replicas that are not yet
+  using their memory (pending, starting, or ready so recently that the agent's numbers predate
+  it), minus a small headroom. Never the card's total.
 
 Placement holds a process-wide lock, so two requests (or the background sweep) never give the
-same card to two replicas.
+same card, or the same memory, to two replicas.
 """
 
 from __future__ import annotations
@@ -23,7 +31,10 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard.db import Accelerator, Node, Replica, Workload, utcnow
+from datetime import timedelta
+
+from forgeyard.config import get_settings
+from forgeyard.db import Accelerator, Node, Replica, Workload, as_utc, utcnow
 from forgeyard.machines.protocol import FEATURE_WORKLOADS
 from forgeyard.workloads.spec import WorkloadSpec
 
@@ -58,24 +69,86 @@ def holding(db: DbSession, node_id: int) -> list[Replica]:
                                                  Replica.state != "stopped")).all())
 
 
+# The agent's free-memory numbers must be at least this much newer than the moment a replica
+# became ready before its reservation stops counting (the load itself is then in the numbers).
+SETTLE = timedelta(seconds=2)
+
+
+@dataclass
+class Hold:
+    """One replica's claim on a card (or, with key "cpu", on the machine's RAM)."""
+    workload: str
+    share: str               # exclusive | vram
+    vram: Optional[int]      # bytes reserved; None: an M2 exclusive workload that declared none
+    pending: bool            # the reservation is not yet visible in the reported free memory
+
+
 @dataclass
 class Usage:
     cpu: float = 0.0
     memory: int = 0
     gpu_keys: dict[str, str] = field(default_factory=dict)  # key -> workload name
+    cards: dict[str, list[Hold]] = field(default_factory=dict)
+    ram: list[Hold] = field(default_factory=list)
 
 
-def usage(db: DbSession, node_id: int, exclude: Optional[int] = None) -> Usage:
+def replica_spec(r: Replica) -> dict:
+    """What the replica runs: its own rendered spec (model deployments) or its workload's."""
+    return r.spec or r.workload.spec or {}
+
+
+def _pending(r: Replica, reported_at) -> bool:
+    if r.ready_at is None or r.state not in ("healthy", "running", "unhealthy"):
+        return True
+    reported = as_utc(reported_at)
+    return reported is None or reported < as_utc(r.ready_at) + SETTLE
+
+
+def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Optional[Node] = None) -> Usage:
     u = Usage()
+    node = node or db.get(Node, node_id)
+    seen = {a.key: a.updated_at for a in node.accelerators} if node is not None else {}
+    cpu_key = next((a.key for a in node.accelerators if a.vendor == "cpu"), None) if node is not None else None
     for r in holding(db, node_id):
         if r.id == exclude:
             continue
-        res = (r.workload.spec or {}).get("resources") or {}
+        spec = replica_spec(r)
+        res = spec.get("resources") or {}
         u.cpu += float(res.get("cpu") or 0)
         u.memory += int(res.get("memory") or 0)
+        gpus = res.get("gpus") or {}
+        share = gpus.get("share") or "exclusive"
         for g in r.gpus or []:
             u.gpu_keys[g["key"]] = r.workload.name
+            vram = r.vram if r.vram is not None else gpus.get("vram")
+            u.cards.setdefault(g["key"], []).append(
+                Hold(r.workload.name, share, vram, _pending(r, seen.get(g["key"]))))
+        if not r.gpus and r.vram:
+            u.ram.append(Hold(r.workload.name, "vram", r.vram, _pending(r, seen.get(cpu_key))))
     return u
+
+
+def headroom() -> int:
+    return max(0, get_settings().vram_headroom_mib) * 1024**2
+
+
+def available(a: Accelerator, holds: list[Hold]) -> int:
+    """Memory Forgeyard may still promise on this card (or the RAM of the CPU row): what the agent
+    reported free, minus reservations not yet in that number, minus the headroom."""
+    pending = sum(h.vram or 0 for h in holds if h.pending)
+    return int(a.vram_free or 0) - pending - headroom()
+
+
+def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[int]) -> Optional[str]:
+    """Why this card cannot take a replica wanting `vram` bytes with this sharing, or None."""
+    if holds and (share == "exclusive" or any(h.share != "vram" for h in holds)):
+        return f"GPU #{a.index} is in use by {holds[0].workload}"
+    if vram:
+        free = available(a, holds)
+        if free < vram:
+            return (f"GPU #{a.index} has {_size(max(0, free))} available, needs {_size(vram)} "
+                    f"({_size(vram - free)} short)")
+    return None
 
 
 def runtime_problem(node: Node, spec: WorkloadSpec) -> Optional[str]:
@@ -95,11 +168,15 @@ def runtime_problem(node: Node, spec: WorkloadSpec) -> Optional[str]:
 
 
 def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
-                container_nvidia: bool = True) -> tuple[Optional[list[Accelerator]], Optional[str]]:
-    """The cards for one replica, or the reason there are none. Only allowed, free cards."""
+                container_nvidia: bool = True, holds: Optional[dict[str, list[Hold]]] = None
+                ) -> tuple[Optional[list[Accelerator]], Optional[str]]:
+    """The cards for one replica, or the reason there are none. Only allowed, free cards (or, for
+    workloads sharing VRAM, cards shared only with such workloads and with enough memory left)."""
     want = spec.resources.gpus
     if want.wanted == 0:
         return [], None
+    if holds is None:
+        holds = {k: [Hold(w, "exclusive", None, False)] for k, w in taken.items()}
     vendor = want.vendor
     cards = [a for a in node.accelerators if is_gpu(a) and (vendor is None or a.vendor == vendor)]
     allowed = [a for a in cards if is_allowed(node, a)]
@@ -115,15 +192,18 @@ def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
             card = matches[0]
             if not is_allowed(node, card):
                 return None, f"GPU #{idx} is not allowed for Forgeyard here (allowed: {allowed_text})"
-            if card.key in taken:
-                return None, f"GPU #{idx} is in use by {taken[card.key]}"
+            problem = card_problem(card, holds.get(card.key, []), want.share, want.vram)
+            if problem:
+                return None, problem
             chosen.append(card)
         return chosen, None
-    free = [a for a in allowed if a.key not in taken]
+    free = [a for a in allowed if card_problem(a, holds.get(a.key, []), want.share, want.vram) is None]
+    if want.share == "vram":  # binpack: the fullest card that still fits first
+        free.sort(key=lambda a: available(a, holds.get(a.key, [])))
     if spec.runtime_type == "container" and not container_nvidia:
         free = [a for a in free if a.vendor != "nvidia"]
     by_vendor: dict[str, list[Accelerator]] = {}
-    for a in sorted(free, key=lambda a: (a.vendor, a.index)):
+    for a in (free if want.share == "vram" else sorted(free, key=lambda a: (a.vendor, a.index))):
         by_vendor.setdefault(a.vendor, []).append(a)
     for group in by_vendor.values():
         if len(group) >= want.count:
@@ -132,6 +212,8 @@ def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
     best = max((len(g) for g in by_vendor.values()), default=0)
     if not allowed:
         return None, f"no {label}GPU is allowed for Forgeyard here"
+    if want.vram and len(allowed) == 1:
+        return None, card_problem(allowed[0], holds.get(allowed[0].key, []), want.share, want.vram)
     return None, f"needs {want.count} free {label}GPU{'s' if want.count > 1 else ''}, {best} free of the allowed ({allowed_text})"
 
 
@@ -141,7 +223,7 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
     problem = runtime_problem(node, spec)
     if problem:
         return None, problem
-    used = usage(db, node.id, exclude)
+    used = usage(db, node.id, exclude, node=node)
     cpu_row = next((a for a in node.accelerators if a.vendor == "cpu"), None)
     res = spec.resources
     if res.cpu and cpu_row is not None:
@@ -153,7 +235,7 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
             free = max(0, cpu_row.vram_total - used.memory)
             return None, f"needs {_size(res.memory)} memory, {_size(free)} free of {_size(cpu_row.vram_total)}"
     container_nvidia = bool(((node.runtime_info or {}).get("container") or {}).get("nvidia"))
-    return choose_gpus(node, spec, used.gpu_keys, container_nvidia)
+    return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards)
 
 
 def gpu_ref(a: Accelerator) -> dict:
@@ -187,6 +269,13 @@ def place_pending(db: DbSession) -> set[int]:
                                                  Workload.desired_state == "running")
             .order_by(Workload.id, Replica.ordinal)).all()
         for r in rows:
+            if r.workload.runtime == "model":
+                from forgeyard.models import scheduler
+
+                placed = scheduler.place_replica(db, r)
+                if placed is not None:
+                    changed.add(placed)
+                continue
             spec = WorkloadSpec.model_validate(r.workload.spec)
             reasons = []
             nodes = _candidates(db, spec)
