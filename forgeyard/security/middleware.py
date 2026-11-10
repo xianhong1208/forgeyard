@@ -9,6 +9,9 @@
    the browser sends Origin or Referer, it must be our own origin.
 3. A per-IP request budget for /api (429, never a sign-out).
 
+The gateway (`/v1/*`, M4) gets only the host check: it takes API keys, never cookies, so a
+cross-site page cannot use a browser's credentials there.
+
 GuardMiddleware only sees HTTP requests; WebSocketHostGuard applies the same host check to
 WebSocket handshakes (the agent stream), answering 421 before anything else runs.
 """
@@ -19,7 +22,6 @@ import ipaddress
 import json
 from urllib.parse import urlsplit
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -78,27 +80,57 @@ def _error(status: int, code: str, message: str, headers: dict | None = None) ->
     return JSONResponse({"detail": {"code": code, "message": message}}, status_code=status, headers=headers)
 
 
-class GuardMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if not host_allowed(request.headers.get("host", "")):
-            return _error(421, "host_not_allowed", "This server does not answer to that host name.")
+class GuardMiddleware:
+    """Pure ASGI (not BaseHTTPMiddleware), so streamed answers from the gateway pass straight
+    through and a client that goes away is seen by the route at once.
 
-        if request.url.path.startswith("/api/"):
+    `/v1/*` is the OpenAI-compatible gateway for programs, not browsers: it takes API keys only,
+    never the console cookie, so neither the CSRF rule nor the console's per-IP budget applies
+    there (API keys have their own limits). The host check applies to everything."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        path = scope.get("path", "")
+        if not host_allowed(request.headers.get("host", "")):
+            message = "This server does not answer to that host name."
+            if path == "/v1" or path.startswith("/v1/"):  # the gateway answers in OpenAI's error shape
+                answer = JSONResponse({"error": {"message": message, "type": "invalid_request_error", "param": None,
+                                                 "code": "host_not_allowed"}}, status_code=421)
+            else:
+                answer = _error(421, "host_not_allowed", message)
+            await answer(scope, receive, send)
+            return
+        is_api = path.startswith("/api/")
+        if is_api:
             if request.method not in SAFE_METHODS:
                 if request.headers.get(CSRF_HEADER) != "1" or not same_origin(request):
-                    return _error(403, "csrf", "Cross-site request refused.")
+                    await _error(403, "csrf", "Cross-site request refused.")(scope, receive, send)
+                    return
             wait = limiter.hit(f"ip:{client_ip(request)}", get_settings().rate_limit_per_minute)
             if wait:
-                return _error(429, "rate_limited", "Too many requests. Try again shortly.",
-                              {"Retry-After": retry_after(wait)})
+                await _error(429, "rate_limited", "Too many requests. Try again shortly.",
+                             {"Retry-After": retry_after(wait)})(scope, receive, send)
+                return
+        extra = [(b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"same-origin"),
+                 (b"x-frame-options", b"DENY")]
+        if is_api or path.startswith("/v1/") or path == "/v1":
+            extra.append((b"cache-control", b"no-store"))
 
-        response = await call_next(request)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "same-origin")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        if request.url.path.startswith("/api/"):
-            response.headers.setdefault("Cache-Control", "no-store")
-        return response
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                present = {k.lower() for k, _ in headers}
+                headers += [(k, v) for k, v in extra if k not in present]
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 class WebSocketHostGuard:

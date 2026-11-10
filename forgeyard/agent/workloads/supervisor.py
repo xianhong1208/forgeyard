@@ -85,6 +85,9 @@ class Supervisor:
         # memory only), cancel switches for downloads in flight, and the stops in flight.
         self.models = models
         self.tokens: dict[str, str] = {}
+        # M4: each model replica's internal key, {replica id: (variable, key)}, from `desired`. In
+        # memory only: never in a record, a log line or a status message.
+        self.keys: dict[str, tuple[str, str]] = {}
         self.cancels: dict[str, threading.Event] = {}
         self.stopping: set[str] = set()
         self.cache_dirty = models is not None
@@ -117,6 +120,12 @@ class Supervisor:
             if isinstance(model, dict) and model.get("token"):
                 self.tokens[r["id"]] = str(model["token"])  # kept in memory only, never in a record
                 r = {**r, "model": {k: v for k, v in model.items() if k != "token"}}
+            key = r.get("replica_key")
+            if "replica_key" in r:
+                r = {k: v for k, v in r.items() if k != "replica_key"}
+                if isinstance(key, dict) and isinstance(key.get("env"), str) and key.get("value"):
+                    self.keys[r["id"]] = (key["env"], str(key["value"]))
+                    r["key_env"] = key["env"]
             desired[r["id"]] = r
         self.desired = desired
         self.full_due = True
@@ -274,6 +283,7 @@ class Supervisor:
                          ordinal=int(want.get("ordinal") or 0), kind=str(want.get("kind")),
                          runtime=str(((want.get("spec") or {}).get("runtime") or {}).get("type")),
                          spec=want.get("spec") or {}, gpus=list(want.get("gpus") or []))
+            rec.key_env = want.get("key_env")
             if rec.runtime not in self.runtimes:
                 rec.state, rec.final, rec.reason = "failed", True, f"this agent has no {rec.runtime} runtime"
             elif want.get("model") is not None or want.get("engine") is not None:
@@ -384,6 +394,17 @@ class Supervisor:
     # ------------------------------------------------------------------ operations
     async def _start(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
+        if rec.key_env and rec.id not in self.keys:
+            # Its internal key comes with the server's next `desired` (an agent restarted while the
+            # server is away does not know it). Never start the engine without it: it would answer
+            # anyone on its port.
+            rec.state, rec.next_start_at = "backoff", self.clock() + 2
+            reason = "waiting for the server (the engine's internal key is kept in memory only)"
+            if rec.reason != reason:
+                rec.reason = reason
+                self._save(rec)
+                self._notify(rec)
+            return
         try:
             spec = WorkloadSpec.model_validate(rec.spec)
         except ValidationError as e:
@@ -440,7 +461,11 @@ class Supervisor:
             self._save(rec)
             self._notify(rec)
         try:
-            await asyncio.to_thread(rt.start, rec, self.address)
+            key = self.keys.get(rec.id) if rec.key_env else None
+            if key is not None:
+                await asyncio.to_thread(rt.start, rec, self.address, {key[0]: key[1]})
+            else:
+                await asyncio.to_thread(rt.start, rec, self.address)
         except Exception as e:  # StartError, and anything unexpected: shown, never fatal
             reason = str(e) or type(e).__name__
             log.warning("Replica %s of %s could not start: %s", rec.id[:12], rec.workload, reason)
@@ -529,6 +554,7 @@ class Supervisor:
         finally:
             self.stopping.discard(rec.id)
             self.tokens.pop(rec.id, None)
+            self.keys.pop(rec.id, None)
 
     async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
@@ -571,6 +597,8 @@ class Supervisor:
         port = next((p for p in rec.ports if p["name"] == h.get("port")), rec.ports[0] if rec.ports else None)
         if port is None:
             return
+        if rec.key_env and rec.id not in self.keys:
+            return  # adopted after an agent restart; probed again once the server sent its key
         rec.last_probe_at = now
         # Processes usually listen on every address (probe loopback); a model engine run as a process
         # binds only the agent's address, like a container's published port.
@@ -581,8 +609,12 @@ class Supervisor:
         self.probes[rec.id] = asyncio.create_task(self._probe(rec, h, host, int(port["host_port"])))
 
     async def _probe(self, rec: Record, h: dict, host: str, port: int) -> None:
-        err = await asyncio.to_thread(self.prober, h.get("type", "http"), host, port, h.get("path") or "/",
-                                      float(h.get("timeout") or 3))
+        args = (h.get("type", "http"), host, port, h.get("path") or "/", float(h.get("timeout") or 3))
+        key = self.keys.get(rec.id) if rec.key_env else None
+        if key is not None:  # speaches guards /health too; vLLM and llama.cpp ignore it there
+            err = await asyncio.to_thread(self.prober, *args, headers={"Authorization": f"Bearer {key[1]}"})
+        else:
+            err = await asyncio.to_thread(self.prober, *args)
         if self.records.get(rec.id) is not rec or rec.state not in LIVE or rec.id in self.ops:
             return
         before = (rec.state, rec.reason)

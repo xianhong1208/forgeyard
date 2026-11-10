@@ -16,6 +16,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     args: [...]                      the engine's arguments, with {placeholders}
     optional_args: [{if: {param: value}, args: [...]}]
     env: {NAME: value}               with {placeholders}
+    api_key_env: VLLM_API_KEY        the variable the engine reads its API key from (M4): each
+                                     replica gets a random key there, which only the gateway
+                                     sends, so the replica's port cannot be used around it
     variants:                        tried in order; the first that fits a machine is used
       - name: cuda
         when: {vendor: nvidia, compute_capability: ">=8.0", driver: ">=580"}
@@ -256,6 +259,9 @@ class Recipe(_M):
     args: list[Annotated[str, Field(max_length=4096)]] = Field(default_factory=list, max_length=128)
     optional_args: list[OptionalArgs] = Field(default_factory=list, max_length=16)
     env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
+    # Where the engine reads its API key (M4). None: the engine has no key and its port answers
+    # anyone who can reach it (the gateway still works).
+    api_key_env: Optional[str] = Field(default=None, max_length=64)
     variants: list[Variant] = Field(min_length=1, max_length=16)
     builtin: bool = False
 
@@ -301,6 +307,12 @@ class Recipe(_M):
                 p.coerce(name, p.default)
             except ValueError as e:
                 raise ValueError(f"params.{name}: the default is not valid ({e})") from None
+        if self.api_key_env is not None:
+            key = self.api_key_env
+            if not ENV_KEY_RE.match(key) or key in RESERVED_ENV or key.startswith(RESERVED_ENV_PREFIXES):
+                raise ValueError(f"api_key_env: {key} cannot be used")
+            if key in envs:
+                raise ValueError(f"api_key_env: {key} is also set in env; Forgeyard sets it per replica")
         if self.estimate.method == "fixed" and not self.estimate.vram:
             raise ValueError("estimate: the fixed method needs vram")
         return self

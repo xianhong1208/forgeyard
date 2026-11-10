@@ -22,6 +22,7 @@ When nothing fits, every machine says why, and by how much memory it falls short
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -311,6 +312,9 @@ def place_replica(db: DbSession, r: Replica) -> Optional[int]:
     r.spec = spec
     r.model = model_block(ctx.model)
     r.engine = render.engine_block(ctx, opt.variant)
+    # A fresh internal key for every placement (M4): only the gateway, which adds it, can use the
+    # engine. None when the recipe's engine takes no key.
+    r.secret = secrets.token_urlsafe(32) if ctx.recipe.api_key_env else None
     r.state = "pending"
     r.download = None
     r.reason = None if opt.node.status == "online" else f"waiting for {opt.node.name} to come online"

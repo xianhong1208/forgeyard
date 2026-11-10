@@ -103,10 +103,15 @@ def _filled(spec_env: dict[str, str], values: Optional[dict[str, str]]) -> dict[
 
 
 def process_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *, home: str, user: str,
-                replica_id: str, workload: str, ordinal: int, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+                replica_id: str, workload: str, ordinal: int, extra: Optional[dict[str, str]] = None,
+                secret: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """`secret`: a model replica's internal key ({VLLM_API_KEY: …}, M4). Only ever placed in the
+    environment, which other users cannot read (/proc/<pid>/environ is the owner's and root's),
+    never in the arguments, which everyone sees in `ps`."""
     env = {"PATH": BASIC_PATH, "HOME": home, "LANG": "C.UTF-8", "USER": user, "LOGNAME": user}
     ports_env = port_env(ports, "process")
     env.update(_filled(spec_env, {**ports_env, **extra} if extra else None))  # reserved names cannot be declared
+    env.update(secret or {})
     env.update(gpu_env(gpus, "process"))
     env.update(ports_env)
     env.update(identity_env(replica_id, workload, ordinal))
@@ -114,9 +119,13 @@ def process_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *
 
 
 def container_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *, replica_id: str,
-                  workload: str, ordinal: int, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+                  workload: str, ordinal: int, extra: Optional[dict[str, str]] = None,
+                  secret: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """`secret` goes into the 0600 env file the engine CLI reads (--env-file), never into `-e`
+    arguments of the `docker run` command line."""
     ports_env = port_env(ports, "container")
     env = _filled(spec_env, {**ports_env, **extra} if extra else None)
+    env.update(secret or {})
     env.update(gpu_env(gpus, "container"))
     env.update(ports_env)
     env.update(identity_env(replica_id, workload, ordinal))

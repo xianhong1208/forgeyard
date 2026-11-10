@@ -190,7 +190,7 @@ class ProcessRuntime:
         return sorted(g for g in gids if g != 0)
 
     # ------------------------------------------------------------------ lifecycle
-    def start(self, rec: Record, address: str) -> None:
+    def start(self, rec: Record, address: str, secret: Optional[dict[str, str]] = None) -> None:
         if not self._info.get("ok"):
             raise StartError(self._info.get("reason") or "the process runtime is not available")
         spec = WorkloadSpec.model_validate(rec.spec)
@@ -203,7 +203,8 @@ class ProcessRuntime:
                 raise StartError("the model is not in the cache")
             extra = plan.model_values(rec.paths, container=False, model=rec.model, bind=address)
         env = plan.process_env(spec.env, rec.gpus, rec.ports, home=str(home), user=self.user,
-                               replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal, extra=extra)
+                               replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal, extra=extra,
+                               secret=secret)
         command = rec.engine_path or rt.command
         exe = command if "/" in command else shutil.which(command, path=env.get("PATH", plan.BASIC_PATH))
         if not exe or not os.path.isfile(exe):

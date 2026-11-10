@@ -258,6 +258,11 @@ class Replica(Base):
     # When it last became ready (healthy, or running without a health check). Until the agent's
     # free-memory numbers are newer than this, its reservation still counts as not yet in use.
     ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The replica's internal key (M4): generated when a model replica is placed, so a new placement
+    # (a restart from the UI, a move to another machine) gets a new one. The agent hands it to the
+    # engine through the environment and the gateway sends it upstream; it never leaves the server
+    # otherwise (not in the API, the spec, events or logs).
+    secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     workload: Mapped[Workload] = relationship(back_populates="replicas")
     node: Mapped[Optional[Node]] = relationship()
@@ -352,8 +357,66 @@ class GatewayRoute(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ApiKey(Base):
+    """A key for the gateway (/v1). Only the SHA-256 of the key is stored; the prefix is what
+    people see to tell their keys apart."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # What the UI and the API use to refer to a key; never the key or its hash.
+    public_id: Mapped[str] = mapped_column(String(36), unique=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    prefix: Mapped[str] = mapped_column(String(16))                       # "fyk_" + 8 characters
+    hash: Mapped[str] = mapped_column(String(64), unique=True)            # sha256(key) hex
+    # Served model names this key may call; NULL: every deployment its owner may use.
+    models: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Requests and tokens per minute; NULL: the server's default (admins set defaults and caps).
+    rpm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tpm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    user: Mapped[User] = relationship()
+
+
+class UsageDaily(Base):
+    """Gateway traffic per day, source, key, user and model: the Usage page and a deployment's
+    numbers. Counted in memory and written every few seconds. Rows outlive keys, users and
+    deployments (no foreign keys), so history stays readable."""
+
+    __tablename__ = "usage_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[str] = mapped_column(String(10))                          # YYYY-MM-DD, UTC
+    source: Mapped[str] = mapped_column(String(8))                        # api | console
+    key_id: Mapped[int] = mapped_column(Integer, default=0)               # 0: the console
+    user_id: Mapped[int] = mapped_column(Integer, default=0)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    model: Mapped[str] = mapped_column(String(128))                       # the served name asked for
+    deployment_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[int] = mapped_column(Integer, default=0)               # answered with a 4xx/5xx
+    limited: Mapped[int] = mapped_column(Integer, default=0)              # of which 429 from the key's limits
+    prompt_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    completion_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    latency_ms_sum: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Request counts per latency bucket (forgeyard/gateway/usage.py: BUCKETS_MS), for p50 / p95.
+    latency_buckets: Mapped[list] = mapped_column(JSON, default=list)
+
+    __table_args__ = (
+        Index("ix_usage_daily_slot", "day", "source", "key_id", "user_id", "model", unique=True),
+        Index("ix_usage_daily_user_day", "user_id", "day"),
+        Index("ix_usage_daily_deployment_day", "deployment_id", "day"),
+    )
+
+
 class ServerSetting(Base):
-    """Settings admins change at run time (model source allowlists)."""
+    """Settings admins change at run time (model source allowlists, API key limits)."""
 
     __tablename__ = "server_settings"
 

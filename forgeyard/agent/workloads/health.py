@@ -7,8 +7,10 @@ import socket
 from typing import Optional
 
 
-def probe(kind: str, host: str, port: int, path: str = "/", timeout: float = 3.0) -> Optional[str]:
-    """None when healthy, else a short reason. HTTP: any 2xx or 3xx answer. TCP: a connection."""
+def probe(kind: str, host: str, port: int, path: str = "/", timeout: float = 3.0,
+          headers: Optional[dict[str, str]] = None) -> Optional[str]:
+    """None when healthy, else a short reason. HTTP: any 2xx or 3xx answer. TCP: a connection.
+    `headers`: a model replica's internal key (M4), for engines that guard /health too (speaches)."""
     if kind == "tcp":
         try:
             with socket.create_connection((host, port), timeout=timeout) as s:
@@ -21,7 +23,7 @@ def probe(kind: str, host: str, port: int, path: str = "/", timeout: float = 3.0
             return f"tcp {host}:{port}: {e.strerror or e}"
     conn = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
-        conn.request("GET", path, headers={"User-Agent": "forgeyard-health"})
+        conn.request("GET", path, headers={"User-Agent": "forgeyard-health", **(headers or {})})
         status = conn.getresponse().status
     except (OSError, http.client.HTTPException) as e:
         return f"GET {path}: {getattr(e, 'strerror', None) or e or type(e).__name__}"

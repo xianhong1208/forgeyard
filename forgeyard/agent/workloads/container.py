@@ -164,7 +164,7 @@ class ContainerRuntime:
                 "forgeyard.generation": str(rec.generation), "forgeyard.workload": rec.workload,
                 "forgeyard.ports": json.dumps(rec.ports, separators=(",", ":"))}
 
-    def start(self, rec: Record, address: str) -> None:
+    def start(self, rec: Record, address: str, secret: Optional[dict[str, str]] = None) -> None:
         if not self._info.get("ok"):
             raise StartError(self._info.get("reason") or "no container engine")
         spec = WorkloadSpec.model_validate(rec.spec)
@@ -190,7 +190,7 @@ class ContainerRuntime:
                 raise StartError(f"cannot mount the model directory {host}")
             mounts = [(host, sources.container_paths(rec.model)["mount"])]
         env = plan.container_env(spec.env, rec.gpus, rec.ports, replica_id=rec.id, workload=rec.workload,
-                                 ordinal=rec.ordinal, extra=extra)
+                                 ordinal=rec.ordinal, extra=extra, secret=secret)
         fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(plan.env_file_text(env))
