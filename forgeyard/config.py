@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,8 +21,30 @@ class Settings(BaseSettings):
     # Extra host names the server answers to, comma-separated. localhost and IP addresses
     # are always allowed; any other Host gets 421 (DNS-rebinding guard).
     allowed_hosts: str = ""
-    # Proxies whose X-Forwarded-For is believed, comma-separated IPs. Empty: none.
+    # Proxies whose X-Forwarded-For (and X-Forwarded-Proto) is believed, comma-separated IPs. Empty: none.
     trusted_proxies: str = ""
+
+    # HTTPS (docs/https-and-trust.md). "on" (the default): the server speaks HTTPS with a certificate
+    # from Forgeyard's own certificate authority, made on first start in data_dir/tls, or with
+    # TLS_CERT_FILE / TLS_KEY_FILE when both are set. "off": plain HTTP, only behind a proxy that
+    # terminates TLS (admins are warned in the web UI when requests still arrive over plain HTTP).
+    tls: str = "on"
+    tls_cert_file: str = ""
+    tls_key_file: str = ""
+    # With your own certificate: the CA that issued it (a company CA). Agents then pin this CA
+    # instead of Forgeyard's. Leave empty for a publicly trusted certificate (the system store).
+    tls_ca_file: str = ""
+    # Extra names or IP addresses for Forgeyard's server certificate, comma-separated (an address
+    # behind NAT, a DNS alias). PUBLIC_URL's host, ALLOWED_HOSTS, the host name and the machine's
+    # own addresses are always included.
+    tls_extra_names: str = ""
+
+    # The key that encrypts stored secrets (Hugging Face tokens, replica keys, workload environment
+    # values). Empty: data_dir/secret.key, made on first start (mode 0600). Back it up apart from
+    # the database: without it those secrets cannot be read (docs/https-and-trust.md).
+    secret_key_file: str = ""
+    # Or the key itself (base64 of 32 bytes), e.g. from a secrets manager; never written to disk.
+    forgeyard_secret_key: str = ""
 
     # First-run owner, created at startup instead of through /setup.
     admin_username: str = ""
@@ -88,6 +110,51 @@ class Settings(BaseSettings):
         if v not in ("off", "approval"):
             raise ValueError("REGISTRATION must be 'off' or 'approval'")
         return v
+
+    # PUBLIC_URL said http:// while the server itself speaks HTTPS (a 1.0 setting): fixed, and logged.
+    _public_url_upgraded: bool = PrivateAttr(default=False)
+
+    @model_validator(mode="after")
+    def _public_url_scheme(self) -> "Settings":
+        """With TLS on, the server only speaks HTTPS, so an http:// PUBLIC_URL (kept from 1.0) would
+        put dead links in join commands, set-password links and the gateway address."""
+        if self.tls == "on" and self.public_url.strip().lower().startswith("http://"):
+            self.public_url = "https://" + self.public_url.strip()[len("http://"):]
+            self._public_url_upgraded = True
+        return self
+
+    @property
+    def public_url_upgraded(self) -> bool:
+        return self._public_url_upgraded
+
+    @field_validator("tls")
+    @classmethod
+    def _tls(cls, v: str) -> str:
+        v = v.strip().lower()
+        v = {"true": "on", "1": "on", "yes": "on", "false": "off", "0": "off", "no": "off"}.get(v, v)
+        if v not in ("on", "off"):
+            raise ValueError("TLS must be 'on' or 'off'")
+        return v
+
+    @property
+    def tls_on(self) -> bool:
+        return self.tls == "on"
+
+    @property
+    def own_certificate(self) -> bool:
+        return bool(self.tls_cert_file.strip() and self.tls_key_file.strip())
+
+    @property
+    def tls_dir(self) -> Path:
+        return self.data_dir / "tls"
+
+    @property
+    def secret_key_path(self) -> Path:
+        return Path(self.secret_key_file) if self.secret_key_file.strip() else self.data_dir / "secret.key"
+
+    @property
+    def tls_extra_name_list(self) -> list[str]:
+        return [h.strip() for h in self.tls_extra_names.split(",") if h.strip()]
 
     @property
     def db_url(self) -> str:

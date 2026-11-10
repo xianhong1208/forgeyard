@@ -45,15 +45,15 @@ variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=7.0", driver: ">=580"}
     runtime: container
-    image: vllm/vllm-openai:v0.32.0
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     entrypoint: [vllm, serve]
   - name: cuda-12.9
     when: {vendor: nvidia, compute_capability: ">=7.0", driver: ">=575"}
     runtime: container
-    image: vllm/vllm-openai:v0.32.0-cu129
+    image: vllm/vllm-openai:v0.32.0-cu129@sha256:bc0445dac61accbf1c3b17fbb524a71eee0b1b32f55ba45952095e3be8991c3f
     entrypoint: [vllm, serve]
   - name: rocm
     when: {vendor: amd, arch: [gfx90a, gfx942, gfx950, gfx1100, gfx1101, gfx1150, gfx1151, gfx1200, gfx1201]}
     runtime: container
-    image: vllm/vllm-openai-rocm:v0.32.0
+    image: vllm/vllm-openai-rocm:v0.32.0@sha256:14f6a575e1fb0a580b0f633c09e06f648709d60405b85f6a7ff3f80d49f39905
     entrypoint: [vllm, serve]

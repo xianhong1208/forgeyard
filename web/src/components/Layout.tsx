@@ -1,12 +1,15 @@
-import { IconChecklist, IconChevronDown, IconLogout, IconMenu2, IconUserCircle, IconX } from "@tabler/icons-react";
+import { IconChecklist, IconChevronDown, IconLock, IconLogout, IconMenu2, IconUserCircle, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { useAuth } from "../auth";
 import { Mark } from "./Mark";
+import { Notice } from "./ui";
 
 export function Layout() {
-  const { user, signOut } = useAuth();
+  const { user, state, signOut } = useAuth();
+  // TLS=off and this page came over plain HTTP (not through a TLS proxy): admins must know.
+  const plainHttp = user?.role === "admin" && state?.tls?.mode === "off" && !state.tls.https;
   const [menu, setMenu] = useState(false);
   const [nav, setNav] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -88,6 +91,9 @@ export function Layout() {
                 <NavLink to="/account" role="menuitem" onClick={() => setMenu(false)}>
                   <IconUserCircle size={16} aria-hidden="true" /> My account and sessions
                 </NavLink>
+                <NavLink to="/trust" role="menuitem" onClick={() => setMenu(false)}>
+                  <IconLock size={16} aria-hidden="true" /> Trust this server (HTTPS)
+                </NavLink>
                 <button type="button" role="menuitem" onClick={() => void signOut()}>
                   <IconLogout size={16} aria-hidden="true" /> Sign out
                 </button>
@@ -97,6 +103,15 @@ export function Layout() {
         </div>
       </header>
       <main className="content">
+        {plainHttp && (
+          <div className="plain-http">
+            <Notice tone="error">
+              <strong>Forgeyard is running without HTTPS.</strong> It was started with <code>TLS=off</code> and this page came over plain HTTP,
+              so passwords, session cookies and API keys cross the network unencrypted. Remove <code>TLS=off</code> to use Forgeyard's own
+              certificate authority, or put a proxy that terminates TLS in front of it. <NavLink to="/trust">What to do</NavLink>
+            </Notice>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

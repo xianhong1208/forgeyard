@@ -1,5 +1,6 @@
 import { IconAlertTriangle, IconCheck, IconCopy, IconInfoCircle } from "@tabler/icons-react";
 import { useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { Link } from "react-router";
 
 export function PageHeader({ index, title, lead, actions }: { index: string; title: string; lead?: string; actions?: ReactNode }) {
   return (
@@ -66,4 +67,14 @@ export function RoleChip({ role }: { role: string }) {
 
 export function StatusChip({ status }: { status: string }) {
   return <span className={`chip chip-status-${status}`}>{status}</span>;
+}
+
+// Next to the gateway address: programs must trust this server's own certificate authority.
+export function TrustHint({ url }: { url: string }) {
+  return (
+    <p className="muted small trust-hint" data-url={url}>
+      This server's HTTPS certificate comes from its own certificate authority: programs need its file,{" "}
+      <code>forgeyard-ca.pem</code>, from <Link to="/trust">Trust this server</Link>. The examples use it.
+    </p>
+  );
 }

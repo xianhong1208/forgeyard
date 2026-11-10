@@ -7,6 +7,7 @@ import json
 import logging
 import platform
 import socket
+import ssl
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -17,6 +18,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus, InvalidURI
 
 from forgeyard import __version__
+from forgeyard.agent import trust
 from forgeyard.agent.backoff import Backoff
 from forgeyard.agent.inventory import Inventory, fingerprint
 from forgeyard.machines.protocol import (
@@ -86,15 +88,19 @@ def platform_info() -> dict:
     return info
 
 
-def join(server: str, token: str, *, name: Optional[str] = None, timeout: float = 15.0) -> dict:
-    """Trade a join token for this machine's credential."""
+def join(server: str, token: str, *, name: Optional[str] = None, timeout: float = 15.0,
+         ssl_context: Optional[ssl.SSLContext] = None) -> dict:
+    """Trade a join token for this machine's credential. Over https the server is verified with
+    `ssl_context` (the pinned CA, see agent/trust.py), else with the system trust store."""
     body = json.dumps({"join_token": token, "protocol": PROTOCOL_VERSION, "name": name,
                        "hostname": socket.gethostname(), "agent_version": __version__}).encode()
     req = urllib.request.Request(server + JOIN_PATH, data=body, method="POST",
                                  headers={"Content-Type": "application/json", "Accept": "application/json",
                                           "User-Agent": f"forgeyard-agent/{__version__}"})
+    if ssl_context is None and server.startswith("https://"):
+        ssl_context = trust.context(None)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=ssl_context) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         try:
@@ -104,14 +110,17 @@ def join(server: str, token: str, *, name: Optional[str] = None, timeout: float 
         message = detail.get("message") if isinstance(detail, dict) else None
         raise JoinError(f"The server refused to join (HTTP {e.code}): {message or e.reason}") from None
     except (urllib.error.URLError, OSError) as e:
-        raise JoinError(f"Cannot reach {server}: {getattr(e, 'reason', e)}") from None
+        raise JoinError(trust.explain(e, server)) from None
 
 
 class Agent:
     def __init__(self, server: str, credential: str, inventory: Inventory, *, labels: Optional[dict] = None,
                  backoff: Optional[Backoff] = None, heartbeat: float = 10.0,
-                 connector: Callable = connect, supervisor=None):
+                 connector: Callable = connect, supervisor=None, ca_pem: Optional[str] = None):
         self.server = server
+        # wss:// is verified against the pinned CA only (agent/trust.py); None: the system store.
+        self.ssl_context = trust.context(ca_pem) if server.startswith("https://") else None
+        self._https_hint = False
         self.credential = credential
         self.inventory = inventory
         self.labels = labels or {}
@@ -183,8 +192,18 @@ class Agent:
                     log.error("The server refused the connection (HTTP 403).")
                     return EXIT_REFUSED
                 log.warning("Connection refused with HTTP %s; retrying.", status)
+            except ssl.SSLCertVerificationError as e:
+                # Retried (the server may come back with the right certificate), but said loudly.
+                log.error("%s", trust.explain(e, self.server))
             except (OSError, asyncio.TimeoutError, ConnectionClosed, InvalidHandshake, InvalidURI) as e:
                 log.warning("Connection to %s lost or refused: %s", self.server, e or type(e).__name__)
+                if (self.server.startswith("http://") and not self._https_hint
+                        and isinstance(e, (InvalidHandshake, ConnectionClosed, EOFError))):
+                    self._https_hint = True  # once per run: it would repeat on every retry
+                    log.warning("If the server now uses HTTPS (Forgeyard 1.1 and later do by default), run once: "
+                                "forgeyard agent trust --server https://%s --ca-fingerprint <fingerprint> (both are "
+                                "on the server's Machines page). The machine keeps its credential.",
+                                self.server.removeprefix("http://"))
             if self._stop.is_set():
                 break
             delay = self.backoff.next()
@@ -196,7 +215,8 @@ class Agent:
         return EXIT_OK
 
     async def _session(self, url: str) -> None:
-        async with self._connect(url, additional_headers={"Authorization": f"Bearer {self.credential}"},
+        extra = {"ssl": self.ssl_context} if self.ssl_context is not None else {}
+        async with self._connect(url, additional_headers={"Authorization": f"Bearer {self.credential}"}, **extra,
                                  user_agent_header=f"forgeyard-agent/{__version__}", open_timeout=10,
                                  ping_interval=10, ping_timeout=20, close_timeout=5, max_size=2**20) as ws:
             inventory = await asyncio.to_thread(self.inventory.full)

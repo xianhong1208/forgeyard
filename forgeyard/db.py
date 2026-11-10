@@ -27,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from forgeyard.config import get_settings
+from forgeyard.security.crypto import EncryptedText, SpecJSON
 
 
 def utcnow() -> datetime:
@@ -203,7 +204,8 @@ class Workload(Base):
     name: Mapped[str] = mapped_column(String(48), unique=True)
     kind: Mapped[str] = mapped_column(String(16))                         # service | task
     runtime: Mapped[str] = mapped_column(String(16))                      # container | process | model
-    spec: Mapped[dict] = mapped_column(JSON)
+    # Environment values are stored encrypted (forgeyard/security/crypto.py); code sees plain values.
+    spec: Mapped[dict] = mapped_column(SpecJSON("workloads.spec"))
     desired_state: Mapped[str] = mapped_column(String(16), default="running")  # running | stopped
     # Bumped on every (re)start: the agent replaces a replica whose generation differs.
     generation: Mapped[int] = mapped_column(Integer, default=1)
@@ -264,8 +266,8 @@ class Replica(Base):
     # The replica's internal key (M4): generated when a model replica is placed, so a new placement
     # (a restart from the UI, a move to another machine) gets a new one. The agent hands it to the
     # engine through the environment and the gateway sends it upstream; it never leaves the server
-    # otherwise (not in the API, the spec, events or logs).
-    secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # otherwise (not in the API, the spec, events or logs). Stored encrypted.
+    secret: Mapped[Optional[str]] = mapped_column(EncryptedText("replicas.secret"), nullable=True)
 
     workload: Mapped[Workload] = relationship(back_populates="replicas")
     node: Mapped[Optional[Node]] = relationship()
@@ -336,8 +338,8 @@ class Deployment(Base):
     # The estimate when it was created: {"method", "device", "per_gpu", "ram", "parts", …}.
     estimate: Mapped[dict] = mapped_column(JSON, default=dict)
     # A Hugging Face token for gated repositories. Only ever sent to the agent that downloads;
-    # never returned by the API, logged or audited.
-    hf_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # never returned by the API, logged or audited. Stored encrypted.
+    hf_token: Mapped[Optional[str]] = mapped_column(EncryptedText("deployments.hf_token"), nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

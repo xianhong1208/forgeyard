@@ -64,7 +64,56 @@ version until 1.0.
   with the recipe's defaults, and the scheduler's verdict per machine, so the page shows "fits on …"
   before the model is added. The deploy page takes `?recipe=` and `?device=` from "Deploy it".
 
+- **HTTPS out of the box, from Forgeyard's own certificate authority.** On the first start the server
+  makes a CA (EC P-256, 10 years, key 0600 in `data/tls`) and a server certificate signed by it
+  (397 days), naming `PUBLIC_URL`'s host, `ALLOWED_HOSTS`, `TLS_EXTRA_NAMES`, the host name, the
+  machine's own addresses and loopback. It is renewed 60 days before expiry, or when a name is
+  missing; a running server checks twice a day and switches certificates without a restart. Your own
+  certificate: `TLS_CERT_FILE` / `TLS_KEY_FILE` (reloaded when the files change), with `TLS_CA_FILE`
+  for the CA agents pin. A missing CA key next to existing certificates stops the start instead of
+  making a new CA. See [docs/https-and-trust.md](docs/https-and-trust.md).
+- **Agents pin the CA.** The join command carries `--ca-fingerprint sha256:…`. The agent fetches the
+  CA, refuses it unless the fingerprint matches, joins and connects over `https://` / `wss://`
+  verified against that CA only (not the system store), and keeps it as `server-ca.pem` in its state
+  directory. `--ca-file` pins a CA file instead. **`forgeyard agent trust --server https://…
+  --ca-fingerprint …`** switches an agent that joined over plain HTTP, keeping its credential. An old
+  agent that cannot connect logs that command.
+- **Trust this server** (`/trust`, public): why the browser warns, in plain words; the CA's
+  fingerprint and expiry; downloads as PEM and DER; steps for Windows, macOS, Linux (Chrome and the
+  system store), Firefox, iOS and Android, with the device's own steps opened first; curl and Python.
+  Admins also see the server certificate's names and expiry, and the trust command. Linked from the
+  sign-in page, the account menu, and the Machines page when machines are offline.
+  `GET /api/tls`, `/api/tls/ca.pem` and `/api/tls/ca.crt`.
+- `/v1` examples on the API keys page and in *Get started* trust the CA when the server uses its
+  own: `curl --cacert forgeyard-ca.pem`, and the OpenAI SDK with
+  `http_client=httpx.Client(verify=ssl.create_default_context(cafile="forgeyard-ca.pem"))`.
+- **Secrets encrypted at rest**: Hugging Face tokens, model replicas' internal keys and workload
+  environment values are stored with AES-256-GCM, each bound to its column, under a key that is not
+  in the database: `data/secret.key` (0600, made on the first start), `SECRET_KEY_FILE`, or
+  `FORGEYARD_SECRET_KEY`. Migration `0008_encrypt_secrets` encrypts existing rows (SQLite and
+  PostgreSQL); a plain-text value afterwards is an error. The database records the key's id, so a
+  missing or wrong key stops the start with what to do. `python -m forgeyard secrets reset --yes`
+  starts over after a lost key: Hugging Face tokens dropped, model replicas placed again with new
+  keys, and lost environment values emptied, with an event on each workload.
+- **Engine images pinned by digest**: every built-in recipe image is `repo:tag@sha256:…` (the
+  multi-architecture index digest of the tag, checked for linux/amd64 and, where a variant claims
+  aarch64, linux/arm64). The agent pulls and runs the digest; the UI shows the tag.
+  `scripts/pin_images.py` checks the digests against the registries, and `--write` re-resolves
+  them when an engine is bumped.
+
 ### Changed
+- **HTTPS is the default.** Plain HTTP only with `TLS=off`, meant for running behind a proxy that
+  terminates TLS (nginx and Caddy examples in the docs); while pages still arrive over plain HTTP,
+  every admin sees a warning at the top of each page, and the startup log warns too. Session cookies
+  are `Secure` under HTTPS (also behind a trusted proxy that says `X-Forwarded-Proto: https`).
+  `Strict-Transport-Security` is sent only with your own certificate: with Forgeyard's CA the
+  certificate warning must stay clickable until a device trusts the CA.
+- An `http://` `PUBLIC_URL` kept from 1.0 is read as `https://` while TLS is on, with a warning, so
+  join commands, set-password links and the gateway address keep working.
+- New dependency: `cryptography` (CA, certificates, AES-GCM).
+- `scripts/accept_m3.py` and `accept_m4.py` default to `https://127.0.0.1:7860` and take `--cacert`;
+  the SDK gets the CA through its `http_client`.
+- `npm run dev` proxies the API to `https://127.0.0.1:7860`.
 - Spreading a deployment's replicas over machines is documented as the default (unchanged).
 - Every empty page says what it is for and offers the next action: Machines (Add a machine, with
   how joining works), Workloads (New workload, or serve a model instead), Models (add a model first

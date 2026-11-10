@@ -66,21 +66,31 @@ def require_operator(caller: Caller = Depends(current)) -> Caller:
     return caller
 
 
-def cookie_secure(request: Request) -> bool:
-    mode = get_settings().cookie_secure.strip().lower()
-    if mode in ("true", "1", "yes"):
-        return True
-    if mode in ("false", "0", "no"):
-        return False
+def request_is_https(request: Request) -> bool:
+    """The browser talks HTTPS: to this server directly, or to a trusted proxy in front of it."""
     if request.url.scheme == "https":
         return True
     peer = request.client.host if request.client else ""
     return peer in get_settings().trusted_proxy_list and request.headers.get("x-forwarded-proto") == "https"
 
 
+def cookie_secure(request: Request) -> bool:
+    mode = get_settings().cookie_secure.strip().lower()
+    if mode in ("true", "1", "yes"):
+        return True
+    if mode in ("false", "0", "no"):
+        return False
+    return request_is_https(request)
+
+
 def public_base(request: Request) -> str:
     configured = get_settings().public_url.rstrip("/")
-    return configured or str(request.base_url).rstrip("/")
+    if configured:
+        return configured
+    base = str(request.base_url).rstrip("/")
+    if base.startswith("http://") and request_is_https(request):  # behind a TLS proxy
+        base = "https://" + base[len("http://"):]
+    return base
 
 
 def user_out(u: User) -> dict:

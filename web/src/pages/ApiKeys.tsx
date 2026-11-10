@@ -2,7 +2,7 @@ import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import { useAuth } from "../auth";
-import { CopyBox, Field, Notice, PageHeader } from "../components/ui";
+import { CopyBox, Field, Notice, PageHeader, TrustHint } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
 import { keyModels, num, snippets } from "../lib/gateway";
@@ -91,6 +91,7 @@ export function ApiKeysPage() {
           {data.models.length > 0 && (
             <p className="model-names">{data.models.map((m) => <code key={m.name}>{m.name}</code>)}</p>
           )}
+          {data.trust_url && <TrustHint url={data.trust_url} />}
         </section>
       )}
 
@@ -335,7 +336,7 @@ function IssuedKey({ issued, models, onDone }: { issued: NewKeyResponse; models:
   const k = issued.api_key;
   const first = k.models?.[0] ?? models.find((m) => m.api === "openai-chat")?.name ?? models[0]?.name ?? "my-model";
   const api_ = models.find((m) => m.name === first)?.api ?? "openai-chat";
-  const s = snippets(issued.gateway_url, issued.key, first, api_);
+  const s = snippets(issued.gateway_url, issued.key, first, api_, issued.trust_url);
   const [tab, setTab] = useState<"curl" | "python">("python");
   return (
     <section className="panel panel-link" aria-labelledby="issued-title">

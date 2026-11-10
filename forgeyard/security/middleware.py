@@ -8,6 +8,8 @@
    cross-site form cannot send without a CORS preflight, which we never grant) and, when
    the browser sends Origin or Referer, it must be our own origin.
 3. A per-IP request budget for /api (429, never a sign-out).
+4. Security headers on every answer; Strict-Transport-Security only with your own certificate
+   (see hsts()).
 
 The gateway (`/v1/*`, M4) gets only the host check: it takes API keys, never cookies, so a
 cross-site page cannot use a browser's credentials there.
@@ -30,6 +32,16 @@ from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+HSTS_VALUE = b"max-age=31536000"
+
+
+def hsts() -> bool:
+    """Strict-Transport-Security only with your own certificate (TLS_CERT_FILE). With Forgeyard's
+    CA a browser that does not trust it yet must be able to click past the warning once to reach
+    the "Trust this server" page; HSTS would turn that warning into a dead end for a year."""
+    s = get_settings()
+    return s.tls_on and s.own_certificate
+
 CSRF_HEADER = "x-forgeyard"
 
 
@@ -121,6 +133,8 @@ class GuardMiddleware:
                  (b"x-frame-options", b"DENY")]
         if is_api or path.startswith("/v1/") or path == "/v1":
             extra.append((b"cache-control", b"no-store"))
+        if scope.get("scheme") == "https" and hsts():
+            extra.append((b"strict-transport-security", HSTS_VALUE))
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":

@@ -16,7 +16,7 @@ import {
   toMs,
   usedFraction,
 } from "../lib/machines";
-import type { Accelerator, JoinToken, Machine, MachinesResponse, NewJoinToken } from "../lib/types";
+import type { Accelerator, JoinToken, Machine, MachinesResponse, NewJoinToken, TlsInfo } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { allowlistSummary, canRunWorkloads, gpuCards, runtimeLine } from "../lib/workloads";
 
@@ -41,6 +41,8 @@ function isLoopback(url: string): boolean {
 export function MachinesPage() {
   const { data, error: loadError, reload } = useApi<MachinesResponse>("/machines");
   const canManage = data?.can_manage ?? false;
+  // For admins: the one-time command for agents that joined before the server used HTTPS.
+  const { data: tlsInfo } = useApi<TlsInfo>("/tls");
   const [tokens, setTokens] = useState<JoinToken[]>([]);
   const reloadTokens = useCallback(() => {
     if (!canManage) return;
@@ -160,10 +162,25 @@ export function MachinesPage() {
                   or replace the address in the command.
                 </Notice>
               )}
-              <p className="muted small">
-                The agent connects with plain <code>ws://</code> on a LAN or VPN; put the server behind a TLS reverse proxy or
-                Tailscale for <code>wss://</code>.
-              </p>
+              {issued.ca_fingerprint ? (
+                <p className="muted small">
+                  The agent connects over <code>wss://</code> and trusts only the certificate authority with the fingerprint in the
+                  command (<code className="fingerprint">{issued.ca_fingerprint.slice(0, 23)}…</code>): a machine in between with another
+                  certificate is refused.
+                </p>
+              ) : issued.server_url.startsWith("http://") ? (
+                <p className="muted small">
+                  This server speaks plain HTTP (<code>TLS=off</code>): the agent's connection is not encrypted. Use it only behind a TLS
+                  proxy whose address is in <code>PUBLIC_URL</code>, or on a trusted network.
+                </p>
+              ) : null}
+              {issued.trust_command && (
+                <details className="trust-upgrade">
+                  <summary className="small">A machine joined before this server used HTTPS?</summary>
+                  <p className="small">Its agent stays offline until you run this once on it, then restart the agent. It keeps its credential.</p>
+                  <CopyBox value={issued.trust_command} label="Trust command" />
+                </details>
+              )}
               {joinedSince.length > 0 ? (
                 <Notice tone="ok">{joinedSince.map((m) => m.name).join(", ")} joined.</Notice>
               ) : (
@@ -190,6 +207,17 @@ export function MachinesPage() {
             </span>
           ))}
         </div>
+      )}
+
+      {canManage && tlsInfo?.admin?.trust_command && (machines ?? []).some((m) => m.status === "offline") && (
+        <details className="trust-upgrade trust-offline">
+          <summary className="small">Machines offline since this server switched to HTTPS?</summary>
+          <p className="small">
+            An agent that joined over plain HTTP keeps trying <code>http://</code> and stays offline. Run this once on its machine, in the
+            Forgeyard folder, then restart the agent. It keeps its credential: no new join token.
+          </p>
+          <CopyBox value={tlsInfo.admin.trust_command} label="Trust command" />
+        </details>
       )}
 
       {machines && machines.length === 0 && <EmptyMachines canManage={canManage} adding={adding} onAdd={() => setAdding(true)} />}

@@ -17,6 +17,22 @@ export type AuthState = {
   registration: "off" | "approval";
   user: User | null;
   ended?: string | null;
+  // forgeyard-ca | own | off, and whether this page came over HTTPS (directly or through a trusted proxy).
+  tls?: { mode: TlsMode; https: boolean };
+};
+
+export type TlsMode = "forgeyard-ca" | "own" | "off";
+
+export type TlsInfo = {
+  mode: TlsMode;
+  https: boolean;
+  hsts: boolean;
+  server_url: string;
+  ca: { name: string; expires_at: string; fingerprint: string; fingerprint_colons: string; own: boolean } | null;
+  admin?: {
+    trust_command: string | null;
+    server_certificate: { names: string[]; ips: string[]; expires_at: string; issuer: string } | null;
+  };
 };
 
 export type Vendor = "nvidia" | "amd" | "cpu";
@@ -95,7 +111,12 @@ export type MachinesResponse = {
 
 export type JoinToken = { id: string; created_at: string; expires_at: string; created_by: string | null };
 
-export type NewJoinToken = JoinToken & { token: string; command: string; server_url: string; valid_minutes: number };
+export type NewJoinToken = JoinToken & {
+  token: string; command: string; server_url: string; valid_minutes: number;
+  // The CA the join command pins (null: plain HTTP, or a publicly trusted certificate), and the
+  // one-time command for agents that joined before.
+  ca_fingerprint?: string | null; trust_command?: string | null;
+};
 
 export type WorkloadKind = "service" | "task";
 
@@ -256,10 +277,10 @@ export type ApiKey = {
 };
 
 export type KeysResponse = {
-  keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; models: { name: string; api: string }[];
+  keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; models: { name: string; api: string }[];
 };
 
-export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string };
+export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string; trust_url?: string | null };
 
 export type UsageRow = {
   id: string; name: string; requests: number; errors: number; limited: number; prompt_tokens: number; completion_tokens: number;

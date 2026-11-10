@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
-import { exact, when } from "../lib/format";
+import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import type { LogsResponse, Replica, Workload, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -224,7 +224,7 @@ function Spec({ w }: { w: Workload }) {
     facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
     if (w.deployment_id) facts.push(["Deployment", <Link key="d" to={`/models/deployments/${w.deployment_id}`}>open the deployment</Link>]);
   } else {
-    facts.push(rt.type === "container" ? ["Image", <code key="i">{rt.image}</code>] : ["Command", <code key="c">{rt.command}</code>]);
+    facts.push(rt.type === "container" ? ["Image", <code key="i" title={rt.image}>{imageTag(rt.image)}</code>] : ["Command", <code key="c">{rt.command}</code>]);
     if (rt.type === "container" && rt.command) facts.push(["Entrypoint", <code key="e">{rt.command.join(" ")}</code>]);
     if (rt.args.length) facts.push(["Arguments", <code key="a">{rt.args.join(" ")}</code>]);
   }

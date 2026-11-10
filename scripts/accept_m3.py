@@ -14,8 +14,10 @@ one after the other, and for each:
 
 then removes everything it created and prints a report (also written as JSON with --out).
 
-    python3 scripts/accept_m3.py --server http://127.0.0.1:7860 --user owner --machine <name>
-    (the password is read from FORGEYARD_PASSWORD, or asked for)
+    python3 scripts/accept_m3.py --server https://127.0.0.1:7860 --cacert forgeyard-ca.pem \
+        --user owner --machine <name>
+    (the password is read from FORGEYARD_PASSWORD, or asked for; forgeyard-ca.pem is the server's
+    CA, from its "Trust this server" page or data/tls/ca.crt on the server)
 
 It refuses to run unless the machine is online, serves models, and Forgeyard may use exactly one
 of its GPUs. Nothing outside that card (and the machine's CPU) is ever touched. Standard library
@@ -30,6 +32,7 @@ import http.cookiejar
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.error
@@ -65,11 +68,21 @@ class Fail(Exception):
     pass
 
 
+# The server's CA (--cacert): every https call verifies against it. None: the system trust store.
+TLS: ssl.SSLContext | None = None
+
+
+def use_cacert(path: str | None) -> None:
+    global TLS
+    TLS = ssl.create_default_context(cafile=path) if path else None
+
+
 class Client:
     def __init__(self, server: str):
         self.server = server.rstrip("/")
         self.jar = http.cookiejar.CookieJar()
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
+        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar),
+                                                  urllib.request.HTTPSHandler(context=TLS))
 
     def call(self, method: str, path: str, body=None, timeout: float = 120.0):
         data = None if body is None else json.dumps(body).encode()
@@ -100,7 +113,7 @@ def log(msg: str) -> None:
 def post_raw(url: str, body: bytes, ctype: str, timeout: float = 300.0) -> tuple[int, bytes]:
     req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": ctype})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=TLS) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
@@ -220,7 +233,8 @@ def exercise(key: str, base: str, model: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--server", default="http://127.0.0.1:7860")
+    ap.add_argument("--server", default="https://127.0.0.1:7860")
+    ap.add_argument("--cacert", help="the server's CA (forgeyard-ca.pem) when it uses Forgeyard's own CA")
     ap.add_argument("--user", default="owner")
     ap.add_argument("--machine", required=True, help="the machine to deploy on (its allowlist must be one GPU)")
     ap.add_argument("--only", default="chat,embed,rerank,asr,cpu", help="which of chat,embed,rerank,asr,cpu")
@@ -228,6 +242,7 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true", help="leave the deployments running afterwards")
     ap.add_argument("--out", help="also write the report as JSON here")
     args = ap.parse_args()
+    use_cacert(args.cacert)
     password = os.environ.get("FORGEYARD_PASSWORD") or getpass.getpass(f"Password for {args.user}: ")
 
     c = Client(args.server)

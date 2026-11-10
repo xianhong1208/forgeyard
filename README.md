@@ -21,13 +21,21 @@ Needs Python 3.13 with [uv](https://docs.astral.sh/uv/), and Node 22.12+ to buil
 ```bash
 cd web && npm ci && npm run build && cd ..   # builds the UI into forgeyard/static
 uv sync
-uv run python main.py                        # http://127.0.0.1:7860 — migrations run on boot
+uv run python main.py                        # https://127.0.0.1:7860 — migrations run on boot
 ```
+
+Forgeyard speaks **HTTPS from the first start**: it makes its own small certificate authority and a
+certificate for every address of this machine, and renews it by itself. Your browser warns until
+you trust that authority once on each device: click past the warning, follow **Trust this server**
+on the sign-in page, compare the fingerprint, install the CA. Agents pin it through the
+fingerprint in their join command. Your own certificate (`TLS_CERT_FILE`, `TLS_KEY_FILE`) or a
+reverse proxy (`TLS=off`) work too. All of it, with nginx and Caddy examples:
+[docs/https-and-trust.md](docs/https-and-trust.md).
 
 On the first start there is no account. The log prints a **one-time setup token**:
 
 ```
-Forgeyard has no owner yet. Open http://127.0.0.1:7860/setup and enter this setup token:
+Forgeyard has no owner yet. Open https://127.0.0.1:7860/setup and enter this setup token:
     3x…
 ```
 
@@ -51,6 +59,16 @@ Settings come from the environment or a `.env` file; see [.env.example](.env.exa
 `HOST=0.0.0.0` opens it to the LAN. PostgreSQL instead of SQLite:
 `uv sync --extra postgres` and `DATABASE_URL=postgresql+psycopg://…`.
 
+**Back up** the database, `data/secret.key` (it encrypts stored secrets: Hugging Face tokens,
+replicas' internal keys, workload environment values; keep it apart from the database backup) and
+`data/tls/` (the CA every device and agent trusts). See
+[docs/https-and-trust.md](docs/https-and-trust.md#what-to-back-up).
+
+**Upgrading from 1.0:** `uv sync` (1.1 adds `cryptography`), restart the server, then run the
+one-time `agent trust` command on every machine that joined over plain HTTP. It keeps the
+machine's credential. The steps are in
+[docs/https-and-trust.md](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http).
+
 ## Machines
 
 Each machine runs the **Forgeyard agent** (same repository, `python -m forgeyard agent`). The
@@ -61,10 +79,13 @@ agent dials out to the server, so the server never needs to reach the machine.
 2. On the machine, in a Forgeyard checkout (`uv sync`, plus `--extra nvidia` on NVIDIA machines):
 
    ```bash
-   uv run --no-sync python -m forgeyard agent --server http://<server>:7860 --join-token fyj_…
+   uv run --no-sync python -m forgeyard agent --server https://<server>:7860 --join-token fyj_… \
+       --ca-fingerprint sha256:…
    ```
 
-   The agent trades the token for **this machine's own credential**, which it keeps in its
+   The agent first fetches the server's CA and refuses it unless it matches the fingerprint; from
+   then on it trusts **that CA only** (not the system's list), over `https://` and `wss://`, so a
+   machine in the middle is refused. It then trades the token for **this machine's own credential**, which it keeps in its
    state directory (`/var/lib/forgeyard-agent` as root, else `~/.local/state/forgeyard-agent`;
    `--state-dir`) with mode 0600. The server keeps only its SHA-256. Later starts need no token:
    `python -m forgeyard agent`.
@@ -90,9 +111,11 @@ agent dials out to the server, so the server never needs to reach the machine.
   closed at once (the agent exits). Everyone signed in can see the Machines page; only admins
   add, revoke and remove machines. Join tokens, joins, refused joins, revokes and removals are
   in the audit log.
-- **Transport:** plain `ws://` is fine on a LAN or VPN, which Forgeyard assumes. For `wss://`
-  put the server behind a TLS reverse proxy or Tailscale and pass an `https://` URL. The host
-  check applies to agents too, so an agent reaching the server by a name rather than an IP
+- **Transport:** `wss://`, verified against the pinned CA (kept as `server-ca.pem` in the state
+  directory). An agent that joined over plain HTTP (1.0) switches once with
+  `python -m forgeyard agent trust --server https://<server>:7860 --ca-fingerprint sha256:…`, keeping
+  its credential; until then it stays offline and its log says so. `--ca-file` pins a CA file of
+  your own instead (a company CA, a TLS proxy). The host check applies to agents too, so an agent reaching the server by a name rather than an IP
   needs that name in `ALLOWED_HOSTS` (or as `PUBLIC_URL`). Agent endpoints never accept a
   browser's session cookie, and refuse any request carrying an `Origin` header.
 - **Simulated inventory** (development and tests only): `--simulate-inventory nvidia-a100x8 |
@@ -253,7 +276,13 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
   NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
   for CPUs without Docker, a pinned release the agent downloads and checks against its SHA-256.
-  Admins add custom recipes on the Models page. Built in:
+  Built-in images are pinned **by digest** as `repo:tag@sha256:…`: the agent pulls and runs the
+  digest, so a tag moved on the registry cannot change what runs. The UI shows the tag. To bump
+  an engine, change the tag, run `uv run --no-sync python scripts/pin_images.py --write` (it resolves
+  the multi-architecture digest from Docker Hub or GHCR and checks the platforms each variant
+  claims), and review the diff; without `--write` it checks that every digest still matches its
+  tag. A test fails if a built-in image has no digest. Admins add custom recipes on the Models page
+  (a digest is recommended there too). Built in:
 
   | Recipe | Serves | Runs | Pinned |
   |---|---|---|---|
@@ -296,16 +325,25 @@ Real-hardware checks: [docs/acceptance-m3.md](docs/acceptance-m3.md) and `script
 
 ## Gateway and API keys
 
-Every deployment answers at **`http://<server>:7860/v1`**, OpenAI-compatible, on the console's own
+Every deployment answers at **`https://<server>:7860/v1`**, OpenAI-compatible, on the console's own
 port: `GET /v1/models`, `POST /v1/chat/completions` and `/v1/completions` (streaming passed through),
 `/v1/embeddings`, `/v1/rerank` and `/v1/score` (vLLM's shapes), `/v1/audio/transcriptions` and
 `/translations` (multipart). The `model` is the deployment's served name. Any OpenAI client works:
 
 ```python
+import ssl
+
+import httpx
 from openai import OpenAI
-client = OpenAI(base_url="http://<server>:7860/v1", api_key="fyk_…")
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")   # the server's CA, from "Trust this server"
+client = OpenAI(base_url="https://<server>:7860/v1", api_key="fyk_…", http_client=httpx.Client(verify=ca))
 client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hi"}])
 ```
+
+With your own publicly trusted certificate, leave out `ca` and `http_client`. `curl --cacert
+forgeyard-ca.pem …` and `SSL_CERT_FILE=forgeyard-ca.pem` work as well. The examples on the API keys
+page contain these lines whenever the server uses its own CA.
 
 - **API keys** (page **API keys**): everyone creates their own; a key is `fyk_` + 43 random
   characters, **shown once** with a curl and a Python example; the server keeps its SHA-256 and a
@@ -387,7 +425,7 @@ Real-hardware checks: [docs/acceptance-m4.md](docs/acceptance-m4.md) and `script
   token sits in the URL fragment, so it never reaches server logs or a `Referer`.
 - **Self-registration** is off. `REGISTRATION=approval` lets people request an account; it waits
   as *pending* until an admin approves it.
-- **Sessions are server-side.** The cookie (`HttpOnly`, `SameSite=Strict`, `Secure` over https)
+- **Sessions are server-side.** The cookie (`HttpOnly`, `SameSite=Strict`, `Secure` over HTTPS)
   holds a random token; the database keeps only its SHA-256. Signing out, changing a password,
   disabling an account or an admin's *Sign out* end the session on the very next request — a
   copied cookie stops working. Sessions end after 2 h idle and 7 days at most, checked on the
@@ -399,6 +437,13 @@ Real-hardware checks: [docs/acceptance-m4.md](docs/acceptance-m4.md) and `script
   writes to `/api` need the `X-Forgeyard: 1` header and, when the browser sends one, a
   same-origin `Origin` / `Referer`.
 - **Audit log:** sign-ins, failed sign-ins and every account change, with who, what and from where.
+- **Secrets at rest:** Hugging Face tokens, replicas' internal keys and workload environment values
+  are stored encrypted (AES-256-GCM) with a server key that is not in the database
+  (`data/secret.key`, mode 0600, or `SECRET_KEY_FILE` / `FORGEYARD_SECRET_KEY`). The server refuses
+  to start with a missing or wrong key, instead of making a new one over the old secrets. If the
+  key is lost, `python -m forgeyard secrets reset --yes` starts over: the tokens are entered again,
+  and the replicas restart with new keys. Passwords, sessions, API keys and join tokens are
+  hashed, not encrypted.
 - The UI goes to the sign-in page only on **401**, never on 403, 429 or a server error, and comes
   back to the page you were on afterwards.
 
@@ -411,7 +456,7 @@ uv run --no-sync ruff check .
 TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db uv run --no-sync python -m pytest -q
                                                # same suite on PostgreSQL — WIPES that database
 cd web
-npm run dev                                   # UI on :5173, API proxied to :7860
+npm run dev                                   # UI on :5173, API proxied to https://127.0.0.1:7860
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 

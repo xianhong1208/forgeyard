@@ -12,6 +12,7 @@ from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.limits import key_limiter
 from forgeyard.gateway.usage import recorder
 from forgeyard.models.hub import hub
+from forgeyard.security import crypto, tls
 from forgeyard.security.ratelimit import limiter
 
 OWNER = ("owner", "harbour-lantern-71")
@@ -34,7 +35,8 @@ def _wipe(url: str) -> None:
 def isolated(tmp_path, monkeypatch):
     """Each test gets its own data dir (SQLite + secrets file) and fresh settings."""
     for key in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "FORGEYARD_SETUP_TOKEN", "DATABASE_URL", "PUBLIC_URL",
-                "ALLOWED_HOSTS", "TRUSTED_PROXIES", "REGISTRATION", "RATE_LIMIT_PER_MINUTE"):
+                "ALLOWED_HOSTS", "TRUSTED_PROXIES", "REGISTRATION", "RATE_LIMIT_PER_MINUTE", "TLS", "TLS_CERT_FILE",
+                "TLS_KEY_FILE", "TLS_CA_FILE", "TLS_EXTRA_NAMES", "SECRET_KEY_FILE", crypto.KEY_ENV):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", SETUP_TOKEN)
@@ -43,13 +45,13 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setenv("DATABASE_URL", PG_URL)
     get_settings.cache_clear()
     reset_engine()
-    for state in (limiter, balancer, key_limiter, recorder, hub):  # in-memory state of one server
+    for state in (limiter, balancer, key_limiter, recorder, hub, crypto, tls.live):  # in-memory state of one server
         state.reset()
     yield
     close_all_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
     reset_engine()
     get_settings.cache_clear()
-    for state in (limiter, balancer, key_limiter, recorder, hub):
+    for state in (limiter, balancer, key_limiter, recorder, hub, crypto, tls.live):
         state.reset()
 
 

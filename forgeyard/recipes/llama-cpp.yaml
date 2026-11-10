@@ -53,15 +53,15 @@ variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=570"}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11977
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11977@sha256:0283744a35a6e7698b4f7a2d63360233dc769ece51e84bdba7aa187a33978276
   - name: rocm
     when: {vendor: amd}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-rocm-b11977
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm-b11977@sha256:fbe8b1d0da8ff1fe62819fa2c2d6778d82fac4a9a91887ec7a15fc0c868e3502
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-b11977
+    image: ghcr.io/ggml-org/llama.cpp:server-b11977@sha256:01c2bc28d51291536df2ccebe5c6af1cdec9ea9b2bd98ac59556408caf96d3f8
   - name: cpu-process
     when: {vendor: cpu, arch: [x86_64]}
     runtime: process

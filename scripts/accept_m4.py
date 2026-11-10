@@ -24,8 +24,11 @@ Through Forgeyard's API only (an admin session), it:
 then removes everything it created (deployments, catalog entries, keys) and prints a report (also
 JSON with --out).
 
-    FORGEYARD_PASSWORD=… python3 scripts/accept_m4.py --server http://127.0.0.1:7860 --user tony \\
-        --machine <GPU host> --second-machine <other machine> --out accept-m4.json [--kill-local]
+    FORGEYARD_PASSWORD=… python3 scripts/accept_m4.py --server https://127.0.0.1:7860 --cacert forgeyard-ca.pem \\
+        --user tony --machine <GPU host> --second-machine <other machine> --out accept-m4.json [--kill-local]
+
+With Forgeyard's own CA, --cacert is the CA file (from "Trust this server", or data/tls/ca.crt on
+the server): the SDK gets it the documented way, http_client=httpx.Client(verify=<SSL context>).
 
 The official SDK: if `openai` cannot be imported, the script makes its own virtual environment
 (--venv, default ~/.cache/forgeyard-accept-m4; with uv when it is installed, else python -m venv and
@@ -55,6 +58,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import accept_m3  # noqa: E402
 from accept_m3 import CLIP, GIB, MODELS as M3_MODELS, Client, Fail, ensure_model, log, machine, the_card  # noqa: E402
 
 SDK_SPEC = "openai>=2,<4"
@@ -88,7 +92,7 @@ def ensure_sdk(venv: Path) -> None:
 def raw_post(url: str, body: bytes, ctype: str, headers: dict | None = None, timeout: float = 60) -> tuple[int, str]:
     req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": ctype, **(headers or {})})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=accept_m3.TLS) as resp:
             return resp.status, resp.read(4000).decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read(4000).decode("utf-8", "replace")
@@ -175,7 +179,8 @@ def _call(client, model: str, no_think: dict):
 # ------------------------------------------------------------------ the run
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--server", default="http://127.0.0.1:7860")
+    ap.add_argument("--server", default="https://127.0.0.1:7860")
+    ap.add_argument("--cacert", help="the server's CA (forgeyard-ca.pem) when it uses Forgeyard's own CA")
     ap.add_argument("--user", default="owner")
     ap.add_argument("--machine", required=True, help="the GPU machine (its allowlist must be exactly one GPU)")
     ap.add_argument("--second-machine", required=True, help="the other machine, for the second CPU replica")
@@ -189,7 +194,14 @@ def main() -> int:
     ap.add_argument("--out", help="also write the report as JSON here")
     args = ap.parse_args()
     ensure_sdk(Path(args.venv))
+    accept_m3.use_cacert(args.cacert)
+    import httpx
     import openai
+
+    def sdk_client(key: str) -> "openai.OpenAI":
+        """The official SDK; with Forgeyard's own CA, trusting it through its own httpx client."""
+        http = httpx.Client(verify=accept_m3.TLS, timeout=300) if accept_m3.TLS else None
+        return openai.OpenAI(base_url=gw, api_key=key, max_retries=0, timeout=300, http_client=http)
 
     password = os.environ.get("FORGEYARD_PASSWORD") or getpass.getpass(f"Password for {args.user}: ")
     c = Client(args.server)
@@ -263,7 +275,7 @@ def main() -> int:
         k = c.ok("POST", "/api/keys", {"name": "accept-m4"})
         keys.append(k["api_key"]["id"])
         gw = k["gateway_url"]
-        sdk = openai.OpenAI(base_url=gw, api_key=k["key"], max_retries=0, timeout=300)
+        sdk = sdk_client(k["key"])
         names = sorted(x.id for x in sdk.models.list())
         check("GET /v1/models lists the deployments", all(f"accept-{s['key']}" in names for s in wanted), ", ".join(names))
         no_think = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -337,7 +349,7 @@ def main() -> int:
 
         # ---- model allowlists
         names_all = sorted(f"accept-{s['key']}" for s in wanted)
-        every = openai.OpenAI(base_url=gw, api_key=k_all["key"], max_retries=0, timeout=300)
+        every = sdk_client(k_all["key"])
         listed = sorted(x.id for x in every.models.list())
         check("a key with no list, made before the deployments, lists every one of them",
               all(n in listed for n in names_all), ", ".join(listed))
@@ -349,7 +361,7 @@ def main() -> int:
         check("a key with no list reaches every deployment", all(v == 200 for v in reach.values()), json.dumps(reach))
         k1 = c.ok("POST", "/api/keys", {"name": "accept-m4-one", "models": [allowed]})
         keys.append(k1["api_key"]["id"])
-        one = openai.OpenAI(base_url=gw, api_key=k1["key"], max_retries=0, timeout=300)
+        one = sdk_client(k1["key"])
         listed = sorted(x.id for x in one.models.list())
         check(f"a key limited to {allowed}: GET /v1/models lists only it", listed == [allowed], ", ".join(listed))
         s1 = _call(one, allowed, no_think)
@@ -362,7 +374,7 @@ def main() -> int:
         # ---- limits and revoking
         k3 = c.ok("POST", "/api/keys", {"name": "accept-m4-rpm3", "rpm": 3})
         keys.append(k3["api_key"]["id"])
-        s3 = openai.OpenAI(base_url=gw, api_key=k3["key"], max_retries=0, timeout=300)
+        s3 = sdk_client(k3["key"])
         target = "accept-cpu" if "cpu" in deps else f"accept-{wanted[0]['key']}"
         codes, retry = [], None
         for _ in range(4):

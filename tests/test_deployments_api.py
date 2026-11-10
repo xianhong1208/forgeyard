@@ -134,8 +134,9 @@ def test_fy_dep_003_deployment_expands_into_workload_and_route(owner):
                           "upstream_model": "Systran/faster-whisper-small"}
     w = d["workload"]
     assert w["kind"] == "service" and w["runtime"] == "model" and w["spec"]["runtime"]["type"] == "model"
-    assert w["replica_list"][0]["runs"] == {"type": "container", "image": "ghcr.io/speaches-ai/speaches:0.8.3-cuda",
-                                            "command": None}
+    runs = w["replica_list"][0]["runs"]
+    assert runs["type"] == "container" and runs["command"] is None
+    assert runs["image"].startswith("ghcr.io/speaches-ai/speaches:0.8.3-cuda@sha256:")  # what the agent runs
     bad = {"name": "x", "kind": "service", "runtime": {"type": "model", "recipe": "vllm", "model": "qwen3-4b"}}
     assert owner.post("/api/workloads", json=bad).json()["detail"]["message"].startswith("runtime: model workloads")
     assert owner.post("/api/deployments", json={"name": "asr2", "model": "faster-whisper-small", "recipe": "faster-whisper",

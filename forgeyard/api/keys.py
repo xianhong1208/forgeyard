@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
+from forgeyard.api.tls import trust_page
 from forgeyard.db import ApiKey, Deployment, GatewayRoute, as_utc, get_db, utcnow
 from forgeyard.gateway import keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
@@ -127,7 +128,8 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
     limits = gkeys.get_limits(db)
     routes = db.execute(select(GatewayRoute.served_name, GatewayRoute.api).order_by(GatewayRoute.served_name)).all()
     return {"keys": [key_out(k, limits) for k in db.scalars(q).all()], "limits": limits, "is_admin": admin,
-            "gateway_url": gateway_url(request), "models": [{"name": n, "api": a} for n, a in routes]}
+            "gateway_url": gateway_url(request), "trust_url": trust_page(request),
+            "models": [{"name": n, "api": a} for n, a in routes]}
 
 
 @router.post("/keys", status_code=201)
@@ -147,7 +149,8 @@ def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current),
     db.commit()
     db.refresh(k)
     # The only time the key itself leaves the server.
-    return {"key": raw, "api_key": key_out(k, limits), "gateway_url": gateway_url(request)}
+    return {"key": raw, "api_key": key_out(k, limits), "gateway_url": gateway_url(request),
+            "trust_url": trust_page(request)}
 
 
 @router.patch("/keys/{key_id}")

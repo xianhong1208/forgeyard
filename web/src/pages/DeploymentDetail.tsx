@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
-import { exact, when } from "../lib/format";
+import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
 import { bytes } from "../lib/machines";
 import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
@@ -99,7 +99,7 @@ export function DeploymentDetailPage() {
                         </td>
                         <td data-label="Machine">{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}</td>
                         <td data-label="Device" className="mono">{r.gpus.length ? `GPU ${gpuLabel(r)}` : r.machine ? "CPU" : "—"}</td>
-                        <td data-label="Runs" className="mono small">{r.runs ? (r.runs.image ?? (Array.isArray(r.runs.command) ? r.runs.command.join(" ") : r.runs.command)) : "—"}
+                        <td data-label="Runs" className="mono small" title={r.runs?.image ?? undefined}>{r.runs ? (r.runs.image ? imageTag(r.runs.image) : (Array.isArray(r.runs.command) ? r.runs.command.join(" ") : r.runs.command)) : "—"}
                           {r.pid ? <div className="muted">pid {r.pid}</div> : r.container ? <div className="muted">{r.container}</div> : null}</td>
                         <td data-label="Reserved" className="small">{r.vram ? gib(r.vram) : "—"}</td>
                         <td data-label="Since" className="small" title={exact(r.started_at)}>{r.started_at ? when(r.started_at) : "—"}</td>
