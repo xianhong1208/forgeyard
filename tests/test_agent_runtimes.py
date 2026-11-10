@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from forgeyard.agent.workloads import logs, plan
-from forgeyard.agent.workloads.container import ContainerRuntime, detect
+from forgeyard.agent.workloads.container import ContainerRuntime, anonymous_config, detect
 from forgeyard.agent.workloads.process import ProcessRuntime
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
@@ -393,3 +393,59 @@ def test_fy_rt_021_a_reused_pid_is_never_mistaken_for_a_replica(tmp_path):
     finally:
         stranger.kill()
         stranger.wait(5)
+
+
+def _start_one(tmp_path, rt, spec):
+    async def scenario():
+        sup = Supervisor(tmp_path / "state", {"container": rt}, tick=0.05, port_range=(32100, 32110))
+        sup.set_desired(desired(replica("feedface01234567", spec)))
+        await converge(sup, lambda s: s.records["feedface01234567"].state in ("running", "backoff", "failed"))
+        return sup.records["feedface01234567"]
+
+    return asyncio.run(scenario())
+
+
+def test_fy_rt_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_path, monkeypatch):
+    """FY-RT-022: the image is not local and the CLI's credential helper fails under the agent
+    (seen on a real host: `docker run` gave "error getting credentials" for a public ghcr.io
+    image). The agent pulls it again with the helpers left out of a copy of the config, keeping
+    the rest, then starts the container: one replica, running."""
+    home = tmp_path / "home"
+    (home / ".docker" / "contexts").mkdir(parents=True)
+    (home / ".docker" / "config.json").write_text(json.dumps(
+        {"credsStore": "desktop", "credHelpers": {"ghcr.io": "pass"}, "currentContext": "default",
+         "auths": {"registry.example": {"auth": "dG9rZW4="}}}))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("DOCKER_CONFIG", raising=False)
+    fake = FakeDocker(tmp_path / "bin")
+    rt = _ctr(tmp_path, fake)
+
+    rec = _start_one(tmp_path, rt, container(image="credfail/llama.cpp:server"))
+
+    assert rec.state == "running" and rec.container == "fy-box-feedface0123"
+    pulls = [c for c in fake.calls() if c and c[0] == "pull"]
+    assert pulls == [["pull", "credfail/llama.cpp:server"]]
+    assert len(fake.state()) == 1  # the failed first attempt left nothing behind
+    conf = json.loads((tmp_path / "state" / "docker-anonymous" / "config.json").read_text())
+    assert "credsStore" not in conf and "credHelpers" not in conf
+    assert conf["currentContext"] == "default" and conf["auths"] == {"registry.example": {"auth": "dG9rZW4="}}
+    assert (tmp_path / "state" / "docker-anonymous" / "contexts").is_symlink()
+
+
+def test_fy_rt_023_other_start_failures_are_not_retried_as_a_pull(tmp_path):
+    """FY-RT-023: only the credential-helper failure triggers the anonymous pull; a real refusal
+    (pull access denied, a bad name) is reported as it was, without a pull."""
+    fake = FakeDocker(tmp_path / "bin")
+    rt = _ctr(tmp_path, fake)
+
+    rec = _start_one(tmp_path, rt, container(image="fail/private:1"))
+
+    assert rec.state in ("backoff", "failed") and "pull access denied" in (rec.reason or "")
+    assert not [c for c in fake.calls() if c and c[0] == "pull"]
+
+
+def test_fy_rt_024_anonymous_config_without_a_config_file(tmp_path):
+    """FY-RT-024: no config.json at all still gives a usable empty config (mode 0600, dir 0700)."""
+    conf = anonymous_config(str(tmp_path / "nothing-here"), tmp_path / "anon")
+    assert json.loads((conf / "config.json").read_text()) == {}
+    assert (conf / "config.json").stat().st_mode & 0o777 == 0o600 and conf.stat().st_mode & 0o777 == 0o700

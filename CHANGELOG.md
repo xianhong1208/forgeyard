@@ -59,6 +59,11 @@ version until 1.0.
 - Health checks have `start_period`: failures before the first success do not count during it.
 - The agent's reconciler only holds new starts back while replicas are being stopped (a slow start,
   such as an image pull or a download, no longer delays other replicas).
+- A container whose image is not on the machine yet still starts when the docker CLI's credential
+  helper (`credsStore` / `credHelpers`) fails under the agent. That failure stopped even public
+  images, such as the llama.cpp one on the first real run. The agent now pulls once more with a
+  copy of the CLI config that leaves out the helpers and keeps everything else, then starts the
+  container. Other start failures are reported as before.
 
 ### Added — M2: generic workloads
 - Workloads: **services** (run until stopped, health-checked, restarted with backoff) and **tasks**

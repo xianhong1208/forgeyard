@@ -31,6 +31,37 @@ PULL_TIMEOUT = 1800.0
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
+# What the docker CLI prints when its credential helper (credsStore / credHelpers in config.json)
+# fails. A helper that needs a desktop session, a keyring or a GPG agent can fail under the agent
+# even though it works in an interactive shell, and the CLI then gives up before pulling even a
+# public image, which needs no credentials at all.
+CREDENTIAL_HELPER_FAILED = "error getting credentials"
+
+
+def anonymous_config(src_dir: Optional[str], dest: Path) -> Path:
+    """A copy of the CLI's config.json without its credential helpers, for an anonymous pull.
+
+    Everything else is kept (`auths` with stored tokens, `currentContext`, proxies), and the
+    contexts directory is linked, so the pull talks to the same daemon. Returns the config dir."""
+    src = Path(src_dir) if src_dir else Path(os.environ.get("HOME", "/root")) / ".docker"
+    data: dict = {}
+    try:
+        data = json.loads((src / "config.json").read_text())
+    except (OSError, ValueError):
+        data = {}
+    data.pop("credsStore", None)
+    data.pop("credHelpers", None)
+    dest.mkdir(parents=True, exist_ok=True)
+    os.chmod(dest, 0o700)
+    fd = os.open(dest / "config.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    contexts = src / "contexts"
+    if contexts.is_dir() and not (dest / "contexts").exists():
+        (dest / "contexts").symlink_to(contexts)
+    return dest
+
+
 def _run(argv: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
     # The engine CLI needs nothing from the agent's environment but where to find things.
     env = {"PATH": os.environ.get("PATH", plan.BASIC_PATH), "HOME": os.environ.get("HOME", "/root")}
@@ -174,6 +205,15 @@ class ContainerRuntime:
             render_devices=devices, render_gids=gids, log_max_bytes=self.log_max_bytes, mounts=mounts)
         try:
             r = self._run(argv, timeout=PULL_TIMEOUT)
+            if r.returncode != 0 and CREDENTIAL_HELPER_FAILED in (r.stderr or ""):
+                # The image is not here and the CLI's credential helper is broken under the agent:
+                # pull it anonymously with the helpers left out, then start it again (it is local now).
+                pulled = self._pull_anonymously(rt.image)
+                if pulled.returncode == 0:
+                    self._cli("rm", "-f", name)
+                    r = self._run(argv, timeout=PULL_TIMEOUT)
+                else:
+                    r = pulled
         except subprocess.TimeoutExpired:
             raise StartError("the container did not start within 30 minutes (image pull?)") from None
         finally:
@@ -182,6 +222,13 @@ class ContainerRuntime:
             raise StartError(f"{Path(self.engine).name} run failed: {(r.stderr or r.stdout).strip()[-300:]}")
         rec.container = name
         rec.pid = None
+
+    def _pull_anonymously(self, image: str) -> subprocess.CompletedProcess:
+        """`docker pull` with a config that has no credential helpers (see anonymous_config)."""
+        log.warning("%s's credential helper failed; pulling %s without it",
+                    Path(self.engine).name, image)
+        conf = anonymous_config(os.environ.get("DOCKER_CONFIG"), self.store.dir.parent / "docker-anonymous")
+        return self._run(["env", f"DOCKER_CONFIG={conf}", self.engine, "pull", image], timeout=PULL_TIMEOUT)
 
     def _inspect(self, name: str) -> Optional[dict]:
         r = self._cli("inspect", "--format", "{{json .State}}", name)
