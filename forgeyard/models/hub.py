@@ -130,6 +130,14 @@ def summarise(m: dict) -> Optional[dict]:
     }
 
 
+def rank(q: Query, s: dict) -> tuple:
+    """Most downloaded first. A rerank search also asks for text classification (where many
+    rerankers are filed), which brings in sentiment and topic classifiers: models with "rerank" in
+    their name come first."""
+    reranker = q.task == "rerank" and "rerank" in s["id"].lower()
+    return (not reranker, -s["downloads"])
+
+
 class Hub:
     def __init__(self, clock: Callable[[], float] = time.monotonic,
                  getter: Callable[[str, fetch.Policy], bytes] | None = None):
@@ -171,7 +179,7 @@ class Hub:
                 s = summarise(m) if isinstance(m, dict) else None
                 if s and s["id"] not in merged:
                     merged[s["id"]] = s
-        results = sorted(merged.values(), key=lambda s: -s["downloads"])[: q.limit]
+        results = sorted(merged.values(), key=lambda s: rank(q, s))[: q.limit]
         with self._lock:
             if len(self._cache) >= CACHE_ENTRIES:
                 for k in [k for k, (exp, _) in self._cache.items() if exp <= now] or list(self._cache)[:CACHE_ENTRIES // 4]:

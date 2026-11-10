@@ -17,8 +17,9 @@ version until 1.0.
   and curl example for this server's `/v1` uses the ready deployment (chat first) and the key from
   `FORGEYARD_API_KEY`. `GET/PUT /api/onboarding`, `POST /api/onboarding/seen`; hiding is stored per
   person in the new `users.preferences` (migration `0006_preferences`).
-- **Recommended models** on Add a model, from `forgeyard/models/recommended.yaml` (22 entries in four
-  groups: Qwen3, other open chat models, speech to text, embeddings and rerank), checked at load
+- **Recommended models** on Add a model, from `forgeyard/models/recommended.yaml` (27 entries in four
+  groups: Qwen3, other open chat models, speech to text, embeddings and rerank; Gemma 4 E2B, E4B,
+  12B, 26B-A4B and 31B need no token, and vLLM 0.32.0 has both of their architectures), checked at load
   (catalog names, `hf://` sources, groups, a built-in recipe that serves the task and format, a GGUF
   file for GGUF entries only, a CPU variant for CPU entries, engine arguments) and by
   `scripts/check_recommended.py` against Hugging Face. Gated entries (Gemma 3, Llama) are marked as
@@ -27,7 +28,7 @@ version until 1.0.
   (admins), one request per Hugging Face pipeline tag of the task (embeddings: feature-extraction
   and sentence-similarity; rerank: text-ranking and text-classification), over the guarded fetcher to
   the configured `HF_ENDPOINT` only, 10 s timeout, results trimmed (no chat templates), merged and
-  sorted by downloads, cached 5 minutes, 30 searches per minute per person; 503 `hub_unreachable`
+  sorted by downloads (for rerank, names containing "rerank" first), cached 5 minutes, 30 searches per minute per person; 503 `hub_unreachable`
   when Hugging Face cannot be reached. A result on the recommended list is added the way the list
   says.
 - **Inspecting a model suggests how to run it**: `POST /api/models/inspect` also returns the recipe

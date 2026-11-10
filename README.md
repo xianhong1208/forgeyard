@@ -223,17 +223,20 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   - **Recommended**: a curated list ([forgeyard/models/recommended.yaml](forgeyard/models/recommended.yaml),
     easy to edit) of models known to work with the built-in recipes, grouped: Qwen3 (chat 0.6B to
     32B, two GGUF builds for the CPU, Embedding and Reranker 0.6B / 4B), other open chat models
-    (gpt-oss-20b, Gemma 3 4B / 12B / 27B, Llama 3.2 3B and 3.1 8B), speech to text (Whisper small and
+    (gpt-oss-20b, Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B, Gemma 3 4B / 12B / 27B, Llama 3.2 3B and
+    3.1 8B), speech to text (Whisper small and
     large-v3 turbo for faster-whisper) and BGE-M3 with its reranker. Each says its task, the
-    recipe it is meant for, about how much it downloads and how much memory one copy needs. Gemma
-    and Llama are **gated**: they need a Hugging Face token whose account accepted the licence.
+    recipe it is meant for, about how much it downloads and how much memory one copy needs. Gemma 3
+    and Llama are **gated**: they need a Hugging Face token whose account accepted the licence
+    (Gemma 4 is not).
     BGE-M3 is added at `refs/pr/130`, Hugging Face's own safetensors conversion (its main branch
     has PyTorch weights only). `python scripts/check_recommended.py` checks every entry against
     Hugging Face with Forgeyard's own inspector and estimator.
   - **Search Hugging Face**: the server asks `<HF_ENDPOINT>/api/models` (the browser never talks to
     Hugging Face), with filters for the task and the format (safetensors, GGUF, CTranslate2), most
-    downloaded first, and shows downloads, likes, last update, gated, and the size when Hugging Face
-    reports it. Answers are cached for 5 minutes; 30 searches per minute per admin. Without internet
+    downloaded first (a rerank search also covers text classification, where many rerankers are
+    filed, and lists names containing "rerank" first), and shows downloads, likes, last update, gated,
+    and the size when Hugging Face reports it. Answers are cached for 5 minutes; 30 searches per minute per admin. Without internet
     the page says so and the recommended list (and adding by source) still work.
   - **Enter a source**, as below.
 

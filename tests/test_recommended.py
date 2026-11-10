@@ -51,6 +51,9 @@ def test_fy_rec_001_the_shipped_list(owner):
     gated = {e.name for e in data.models if e.gated}
     assert gated == {"gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it", "llama-3.2-3b-instruct", "llama-3.1-8b-instruct"}
     assert not by["gpt-oss-20b"].gated
+    gemma4 = {"gemma-4-e2b-it", "gemma-4-e4b-it", "gemma-4-12b-it", "gemma-4-26b-a4b-it", "gemma-4-31b-it"}
+    assert gemma4 <= set(by) and not any(by[n].gated for n in gemma4)
+    assert all(by[n].recipe == "vllm" and by[n].source.startswith("hf://google/gemma-4-") for n in gemma4)
     assert {by["faster-whisper-small"].recipe, by["faster-whisper-large-v3-turbo"].recipe} == {"faster-whisper"}
     assert by["bge-m3"].revision == "refs/pr/130" and by["bge-reranker-v2-m3"].task == "rerank"
 

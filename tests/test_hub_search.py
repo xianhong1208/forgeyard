@@ -32,6 +32,11 @@ EMB_A = {"id": "Qwen/Qwen3-Embedding-0.6B", "downloads": 9042916, "pipeline_tag"
 EMB_B = {"id": "BAAI/bge-m3", "downloads": 29334229, "pipeline_tag": "sentence-similarity", "tags": ["pytorch"]}
 WHISPER = {"id": "Systran/faster-whisper-small", "downloads": 5792974, "pipeline_tag": "automatic-speech-recognition",
            "library_name": "ctranslate2", "tags": ["ctranslate2", "audio"]}
+RERANK = {"id": "BAAI/bge-reranker-v2-m3", "downloads": 14786395, "pipeline_tag": "text-classification",
+          "tags": ["safetensors"], "safetensors": {"total": 567755777, "parameters": {"F32": 567755777}}}
+SENTIMENT = {"id": "cardiffnlp/twitter-roberta-base-sentiment", "downloads": 90000000, "pipeline_tag": "text-classification",
+             "tags": ["safetensors"]}
+QWEN_RR = {"id": "Qwen/Qwen3-ReRanker-0.6B", "downloads": 1334528, "pipeline_tag": "text-ranking", "tags": ["safetensors"]}
 BAD = [{"id": "../etc/passwd"}, {"id": "a/b/c"}, {"modelId": "ok-org/ok-name", "downloads": 1}, "not a model"]
 
 
@@ -42,7 +47,8 @@ class FakeHub:
         self.queries: list[dict] = []
         self.mode = "ok"         # ok | error | junk | slow
         self.by_tag = {"text-generation": [QWEN, GEMMA], "feature-extraction": [EMB_A, QWEN],
-                       "sentence-similarity": [EMB_B], "automatic-speech-recognition": [WHISPER], None: [QWEN, GGUF, GEMMA]}
+                       "sentence-similarity": [EMB_B], "automatic-speech-recognition": [WHISPER], None: [QWEN, GGUF, GEMMA],
+                       "text-ranking": [QWEN_RR], "text-classification": [SENTIMENT, RERANK]}
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -135,6 +141,19 @@ def test_fy_hub_002_embeddings_search_both_tags_merged_by_downloads(owner, fake)
     assert body["results"][0]["recipes"] == []
     body = search(owner, task="asr").json()
     assert body["results"][0]["format"] == "ctranslate2" and body["results"][0]["recipes"] == ["faster-whisper"]
+
+
+def test_fy_hub_010_rerank_search_puts_rerankers_first(owner, fake):
+    """FY-HUB-010: a rerank search also asks for text classification (where many rerankers are filed),
+    so names with "rerank" (any case) come first, each part by downloads; other tasks keep plain
+    download order."""
+    body = search(owner, q="m3", task="rerank").json()
+    assert sorted(q["pipeline_tag"][0] for q in fake.queries) == ["text-classification", "text-ranking"]
+    assert [x["id"] for x in body["results"]] == ["BAAI/bge-reranker-v2-m3", "Qwen/Qwen3-ReRanker-0.6B",
+                                                   "cardiffnlp/twitter-roberta-base-sentiment"]
+    assert search(owner, q="m3", task="rerank", limit=2).json()["results"][1]["id"] == "Qwen/Qwen3-ReRanker-0.6B"
+    fake.by_tag[None] = [SENTIMENT, RERANK]
+    assert [x["id"] for x in search(owner, q="m3").json()["results"]] == [SENTIMENT["id"], RERANK["id"]]
 
 
 def test_fy_hub_003_answers_are_cached_failures_are_not(owner, fake):

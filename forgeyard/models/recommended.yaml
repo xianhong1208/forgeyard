@@ -29,7 +29,7 @@ groups:
     description: Open models from Alibaba's Qwen team in many sizes, with embedding and reranker models made to go with them.
   - id: llm
     title: Other open chat models
-    description: Well-known open models from OpenAI, Google and Meta.
+    description: Well-known open models from OpenAI, Google (Gemma 4 needs no token, Gemma 3 does) and Meta.
   - id: speech
     title: Speech to text
     description: Whisper models converted for faster-whisper, served through speaches.
@@ -179,6 +179,56 @@ models:
     download_gib: 12.8
     memory_gib: 16.7
     note: OpenAI's open-weight reasoning model (Apache 2.0); mixture of experts, quick for its size.
+  - name: gemma-4-e2b-it
+    title: Gemma 4 E2B
+    source: hf://google/gemma-4-E2B-it
+    group: llm
+    task: chat
+    format: safetensors
+    recipe: vllm
+    download_gib: 9.6
+    memory_gib: 13.0
+    note: Google's smallest Gemma 4 (about 2B effective parameters; the download includes its vision and audio parts). No token needed.
+  - name: gemma-4-e4b-it
+    title: Gemma 4 E4B
+    source: hf://google/gemma-4-E4B-it
+    group: llm
+    task: chat
+    format: safetensors
+    recipe: vllm
+    download_gib: 14.9
+    memory_gib: 19.9
+    note: Small Gemma 4 (about 4B effective parameters) for a 24 GB card. No token needed.
+  - name: gemma-4-12b-it
+    title: Gemma 4 12B
+    source: hf://google/gemma-4-12B-it
+    group: llm
+    task: chat
+    format: safetensors
+    recipe: vllm
+    download_gib: 22.3
+    memory_gib: 36.7
+    note: Mid-size Gemma 4 for a 40 GB or larger card. No token needed.
+  - name: gemma-4-26b-a4b-it
+    title: Gemma 4 26B-A4B
+    source: hf://google/gemma-4-26B-A4B-it
+    group: llm
+    task: chat
+    format: safetensors
+    recipe: vllm
+    download_gib: 48.1
+    memory_gib: 58.0
+    note: Mixture of experts (4B active), fast for its size; an 80 GB card. No token needed.
+  - name: gemma-4-31b-it
+    title: Gemma 4 31B
+    source: hf://google/gemma-4-31B-it
+    group: llm
+    task: chat
+    format: safetensors
+    recipe: vllm
+    download_gib: 58.3
+    memory_gib: 90.6
+    note: The largest Gemma 4. With the defaults it needs two 80 GB GPUs (set GPUs to 2 when deploying), or a shorter context.
   - name: gemma-3-4b-it
     title: Gemma 3 4B
     source: hf://google/gemma-3-4b-it

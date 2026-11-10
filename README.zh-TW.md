@@ -165,12 +165,12 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
 - **加入模型**（admin），在 **Models → Catalog and recipes → Add a model** 有三種方式：
   - **Recommended（推薦清單）**：一份精選清單（[forgeyard/models/recommended.yaml](forgeyard/models/recommended.yaml)，容易修改），
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
-    其他開放 chat 模型（gpt-oss-20b、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
-    large-v3 turbo），以及 BGE-M3 與它的 reranker。每一項標示 task、建議的配方、大約下載量與一份需要多少記憶體。Gemma 與 Llama 是
-    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
+    其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
+    large-v3 turbo），以及 BGE-M3 與它的 reranker。每一項標示 task、建議的配方、大約下載量與一份需要多少記憶體。Gemma 3 與 Llama 是
+    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
     safetensors 版本（main 分支只有 PyTorch 權重）。`python scripts/check_recommended.py` 會用 Forgeyard 自己的檢視與估算逐項對 Hugging Face 檢查。
   - **Search Hugging Face（搜尋）**：由 server 呼叫 `<HF_ENDPOINT>/api/models`（瀏覽器不會直接連 Hugging Face），可依 task 與格式
-    （safetensors、GGUF、CTranslate2）篩選，依下載數排序，顯示下載數、按讚數、最後更新、是否 gated，以及 Hugging Face 有提供時的大小。
+    （safetensors、GGUF、CTranslate2）篩選，依下載數排序（搜尋 rerank 時也會查 text classification，因為很多 reranker 被歸在那一類，並把名稱含 "rerank" 的排在前面），顯示下載數、按讚數、最後更新、是否 gated，以及 Hugging Face 有提供時的大小。
     結果快取 5 分鐘；每位 admin 每分鐘 30 次。沒有網路時頁面會說明，推薦清單（與直接輸入來源）照常可用。
   - **Enter a source（輸入來源）**，見下一點。
 
