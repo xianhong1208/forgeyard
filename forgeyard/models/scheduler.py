@@ -226,14 +226,19 @@ def candidates(db: DbSession, machine_id: Optional[int]) -> list[Node]:
     return list(db.scalars(q).all())
 
 
-def choose(verdicts: list[Verdict], machine_id: Optional[int], strategy: str = "binpack") -> Optional[Option]:
+def choose(verdicts: list[Verdict], machine_id: Optional[int], strategy: str = "binpack",
+           siblings: Optional[set[int]] = None) -> Optional[Option]:
+    """The best option: first a machine without another replica of the same deployment (`siblings`:
+    their machines), so replicas spread over machines and the gateway can balance and fail over
+    between them; then binpack; then a machine with the model cached; then by name."""
     usable = [v.option for v in verdicts if v.fits and (v.status == "online" or v.machine_id == machine_id)]
     if not usable:
         return None
     sign = 1 if strategy == "binpack" else -1
+    taken = siblings or set()
 
     def key(o: Option):
-        return (sign * (o.leftover // GIB), not o.cached, o.node.name, [a.index for a in o.cards])
+        return (o.node.id in taken, sign * (o.leftover // GIB), not o.cached, o.node.name, [a.index for a in o.cards])
 
     return min(usable, key=key)
 
@@ -253,7 +258,7 @@ def preview(db: DbSession, ctx: Context) -> dict:
         verdicts = evaluate(db, ctx, extra=extra)
         if first is None:
             first = verdicts
-        opt = choose(verdicts, ctx.machine_id)
+        opt = choose(verdicts, ctx.machine_id, siblings={p["machine_id"] for p in placed})
         if opt is None:
             return {"fits": False, "placed": placed, "failed_replica": i,
                     "machines": [v.as_dict() for v in verdicts], "summary": summary(verdicts, ctx)}
@@ -294,7 +299,8 @@ def place_replica(db: DbSession, r: Replica) -> Optional[int]:
             r.reason, r.updated_at = reason, utcnow()
         return None
     verdicts = evaluate(db, ctx, exclude=r.id)
-    opt = choose(verdicts, ctx.machine_id)
+    siblings = {o.node_id for o in r.workload.replicas if o.id != r.id and o.node_id is not None and not o.final}
+    opt = choose(verdicts, ctx.machine_id, siblings=siblings)
     if opt is None:
         reason = ("Cannot be placed: " + summary(verdicts, ctx))[:400]
         if reason != r.reason:

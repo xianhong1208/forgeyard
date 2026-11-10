@@ -187,7 +187,7 @@ def test_fy_sch_005_binpack_then_cached_then_name():
 
     class N:
         def __init__(self, name):
-            self.name, self.status = name, "online"
+            self.name, self.status, self.id = name, "online", ord(name[0])
 
     def opt(name, left, cached):
         return Option(N(name), None, [], left, cached)
@@ -199,6 +199,8 @@ def test_fy_sch_005_binpack_then_cached_then_name():
     assert scheduler.choose([v(same1), v(same2)], None) is same2
     assert scheduler.choose([v(opt("b", GIB, False)), v(opt("a", GIB, False))], None).node.name == "a"
     assert scheduler.choose([v(roomy), v(tight)], None, strategy="spread") is roomy
+    # A machine that already has a replica of the same deployment comes last (M4: spread).
+    assert scheduler.choose([v(roomy), v(tight)], None, siblings={tight.node.id}) is roomy
 
 
 def test_fy_sch_006_prefers_the_machine_with_the_model_cached(owner):
@@ -322,3 +324,24 @@ def test_fy_sch_011_several_replicas_are_placed_one_after_the_other(fleet):
     many = c.post("/api/deployments/estimate", json={"name": "e", "model": "qwen3-embedding-0.6b",
                                                      "recipe": "vllm-pooling", "replicas": 16}).json()["placement"]
     assert many["fits"] is False and many["failed_replica"] == 13  # 13 x 3.38 GiB fit in 44.5 GiB
+
+
+def test_fy_sch_012_replicas_of_one_deployment_spread_over_machines(owner):
+    """FY-SCH-012: two replicas go to two machines when both can take one (the gateway balances and
+    fails over between them); with one machine both go there."""
+    seed_catalog()
+    a = make_node("cpu-a", features=MODELS)
+    b = make_node("cpu-b", features=MODELS)
+    body = {"name": "g", "model": "qwen3-1.7b-gguf", "recipe": "llama-cpp", "replicas": 2, "params": {"gpus": 0, "threads": 2}}
+    plan = owner.post("/api/deployments/estimate", json=body).json()["placement"]
+    assert [p["machine"] for p in plan["placed"]] == ["cpu-a", "cpu-b"]
+    deploy(owner, "g", "qwen3-1.7b-gguf", "llama-cpp", replicas=2, params={"gpus": 0, "threads": 2})
+    db = new_session()
+    try:
+        from forgeyard.db import Workload
+        w = db.scalar(select(Workload).where(Workload.name == "g"))
+        assert sorted(r.node_id for r in w.replicas) == sorted([a, b])
+    finally:
+        db.close()
+    one = owner.post("/api/deployments/estimate", json={**body, "machine_id": a}).json()["placement"]
+    assert [p["machine"] for p in one["placed"]] == ["cpu-a", "cpu-a"]
