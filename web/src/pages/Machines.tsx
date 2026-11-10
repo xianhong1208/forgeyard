@@ -118,7 +118,7 @@ export function MachinesPage() {
         actions={
           canManage && (
             <button type="button" className="btn btn-primary" onClick={() => (adding ? closeAdd() : setAdding(true))} aria-expanded={adding}>
-              <IconPlus size={16} aria-hidden="true" /> Add machine
+              <IconPlus size={16} aria-hidden="true" /> Add a machine
             </button>
           )
         }
@@ -192,7 +192,7 @@ export function MachinesPage() {
         </div>
       )}
 
-      {machines && machines.length === 0 && <EmptyMachines canManage={canManage} />}
+      {machines && machines.length === 0 && <EmptyMachines canManage={canManage} adding={adding} onAdd={() => setAdding(true)} />}
       {machines && machines.length > 0 && data && (
         <>
           <Fleet machines={machines} />
@@ -209,7 +209,7 @@ export function MachinesPage() {
   );
 }
 
-function EmptyMachines({ canManage }: { canManage: boolean }) {
+function EmptyMachines({ canManage, adding, onAdd }: { canManage: boolean; adding: boolean; onAdd: () => void }) {
   return (
     <section className="empty">
       <div className="empty-art" aria-hidden="true">
@@ -220,9 +220,17 @@ function EmptyMachines({ canManage }: { canManage: boolean }) {
       <div className="empty-copy">
         <h2>No machines yet</h2>
         <p>
-          A machine joins when the Forgeyard agent runs on it and reports its hardware.{" "}
-          {canManage ? "Use Add machine to get a one-time join command." : "Ask an admin to add one."}
+          Forgeyard runs models and workloads on machines you add: GPU servers, workstations, or computers with only a CPU.
+          Each one runs the Forgeyard agent, which reports its hardware and keeps a connection to this server.{" "}
+          {canManage
+            ? "To add one, install Forgeyard on it, then run the one-time join command you get here."
+            : "An admin adds machines; ask one to add yours."}
         </p>
+        {canManage && !adding && (
+          <p className="empty-actions">
+            <button type="button" className="btn btn-primary" onClick={onAdd}><IconPlus size={16} aria-hidden="true" /> Add a machine</button>
+          </p>
+        )}
         <ul className="kinds">
           {KINDS.map(({ icon: Icon, name, detail }) => (
             <li key={name}>

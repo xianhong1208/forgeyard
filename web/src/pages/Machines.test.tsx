@@ -82,7 +82,10 @@ describe("machines page", () => {
     });
     mount();
     expect(await screen.findByText("No machines yet")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Add machine" }));
+    expect(screen.getByText(/install Forgeyard on it, then run the one-time join command/)).toBeTruthy();
+    const [, inEmpty] = screen.getAllByRole("button", { name: "Add a machine" });
+    fireEvent.click(inEmpty); // the empty page's own button opens the same form
+    expect(screen.getAllByRole("button", { name: "Add a machine" })).toHaveLength(1);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
     expect((await screen.findByLabelText("Join command")).textContent).toBe(created.command);
     expect(screen.getByText(/only works on this computer/)).toBeTruthy();
@@ -97,7 +100,7 @@ describe("machines page", () => {
     const fetch = server((url) => (url === "/api/machines" ? machines({ can_manage: false }) : undefined), { ...OWNER, role: "operator", is_owner: false });
     mount();
     await screen.findByRole("article", { name: "Machine a100-box" });
-    expect(screen.queryByRole("button", { name: "Add machine" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a machine" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
     expect(fetch.mock.calls.some(([u]) => u === "/api/machines/join-tokens")).toBe(false);

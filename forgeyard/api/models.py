@@ -3,6 +3,10 @@
 Everyone signed in sees the catalog and the recipes. Admins add and remove models, add, change
 and remove custom recipes, and set which URL hosts and local directories models may come from.
 Operators deploy (forgeyard.api.deployments).
+
+Adding a model starts from the recommended list (forgeyard/models/recommended.yaml), a Hugging Face
+search run by the server, or a source typed in. Inspecting one also says which recipe would serve
+it, what one replica would reserve, and on which machines it would fit right now.
 """
 
 from __future__ import annotations
@@ -10,16 +14,21 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
-from forgeyard.db import CatalogModel, CustomRecipe, Deployment, get_db, utcnow
-from forgeyard.models import catalog, inspect as inspector, recipes, sources
+from forgeyard.config import get_settings
+from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, utcnow
+from forgeyard.models import catalog, hub as hf_hub, inspect as inspector, recipes, recommended as rec, scheduler, sources
+from forgeyard.models.catalog import Context
+from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
+from forgeyard.security.ratelimit import limiter, retry_after
+from forgeyard.workloads import placement
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -140,15 +149,128 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
         raise fail(422, "cannot_inspect", str(e)) from None
 
 
+class InspectPreviewIn(InspectIn):
+    # What the suggestion is for: the task chosen (default: what Hugging Face says), the recipe
+    # and device to estimate with (default: the first recipe that serves it, on a GPU if one is free).
+    task: Optional[str] = Field(default=None, max_length=16)
+    recipe: Optional[str] = Field(default=None, max_length=40)
+    device: Optional[str] = Field(default=None, max_length=8)
+
+
+def _gpu_available(db: DbSession) -> bool:
+    """Some online machine has a GPU Forgeyard may use."""
+    nodes = db.scalars(select(Node).where(Node.status == "online").options(selectinload(Node.accelerators))).all()
+    return any(placement.is_gpu(a) and placement.is_allowed(n, a) for n in nodes for a in n.accelerators)
+
+
+def suggest(db: DbSession, meta: dict, task: Optional[str], recipe_name: Optional[str] = None,
+            device: Optional[str] = None) -> dict:
+    """The recipe to serve an inspected (not yet added) model with, what one replica would reserve
+    with that recipe's defaults, and where it would fit now."""
+    from forgeyard.api.deployments import normalise_params  # deployments imports this module's neighbours
+
+    all_r = catalog.all_recipes(db)
+    fmt = meta.get("format")
+    usable = [n for n, (r, _) in all_r.items() if fmt in r.formats and (task is None or task in r.tasks)]
+    if not usable:
+        what = f"{fmt} {TASK_LABEL.get(task, task).lower()}" if task else str(fmt)
+        return {"recipe": None, "recipes": [], "error": f"No recipe serves {what} models."}
+    name = recipe_name if recipe_name in usable else usable[0]
+    recipe = all_r[name][0]
+    has_gpu = any(v.gpu for v in recipe.variants)
+    has_cpu = any(not v.gpu for v in recipe.variants)
+    if device == "cpu" and has_cpu or device == "gpu" and has_gpu:
+        dev = device
+    else:
+        dev = "gpu" if has_gpu and (not has_cpu or _gpu_available(db)) else "cpu"
+    out: dict = {"recipe": name, "recipes": usable, "device": dev, "devices": (["gpu"] if has_gpu else []) + (["cpu"] if has_cpu else [])}
+    try:
+        params = normalise_params(recipe, {"gpus": 1 if dev == "gpu" else 0})
+        est = compute_estimate(meta, recipe, params, device=dev, gpu_context=scheduler.gpu_context())
+    except EstimateError as e:
+        out["error"] = str(e)
+        return out
+    except HTTPException as e:  # normalise_params: a custom recipe whose defaults do not validate
+        out["error"] = e.detail.get("message") if isinstance(e.detail, dict) else str(e.detail)
+        return out
+    model = CatalogModel(name="new-model", source=meta.get("repo") or "", kind=meta.get("kind") or "hf",
+                         revision=meta.get("revision"), file=meta.get("file"), format=fmt, task=task or "chat",
+                         meta=meta, engine_args={})
+
+    class _Dep:  # what rendering needs before the deployment exists
+        served_name = "new-model"
+
+    ctx = Context(_Dep(), model, recipe, params, est, dev, params["share"], params["gpus"], None, 1)  # type: ignore[arg-type]
+    pv = scheduler.preview(db, ctx)
+    machines = [{"name": m["name"], "status": m["status"], "fits": m["fits"], "reason": m["reason"],
+                 "gpus": m.get("gpus") or [], "short_by": m.get("short_by")} for m in pv.get("machines") or []]
+    out.update(params=params, estimate=est.as_dict(), fits=pv["fits"], machines=machines,
+               summary=pv.get("summary"))
+    return out
+
+
 @router.post("/models/inspect")
-def inspect_model(body: InspectIn, _: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+def inspect_model(body: InspectPreviewIn, _: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     meta = _inspect(db, body)
     all_r = catalog.all_recipes(db)
-    fmt, task = meta.get("format"), meta.get("task_hint")
+    fmt = meta.get("format")
+    task = body.task if body.task in recipes.TASKS else meta.get("task_hint")
     fits = [n for n, (r, _) in all_r.items() if fmt in r.formats and (task is None or task in r.tasks)]
     preview = {k: v for k, v in meta.items() if k not in ("files",)}
     preview["file_count"] = len(meta.get("files") or [])
-    return {"meta": preview, "recipes": fits}
+    return {"meta": preview, "recipes": fits,
+            "suggestion": suggest(db, meta, task, body.recipe, body.device if body.device in ("gpu", "cpu") else None)}
+
+
+# ------------------------------------------------------------------ recommended models, Hugging Face search
+def _catalog_names(db: DbSession) -> dict[tuple[str, Optional[str]], str]:
+    """(source, GGUF file) -> catalog name, for "already in the catalog"."""
+    return {(m.source, m.file): m.name for m in db.scalars(select(CatalogModel)).all()}
+
+
+@router.get("/models/recommended")
+def recommended_models(_: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    try:
+        data = rec.recommended()
+    except rec.RecommendedError as e:
+        raise fail(500, "recommended_broken", f"The recommended models file is broken: {e}") from None
+    have = _catalog_names(db)
+    return {"groups": [g.model_dump() for g in data.groups],
+            "models": [e.model_dump() | {"in_catalog": have.get((e.source, e.file))} for e in data.models]}
+
+
+# A person searching sends a request per keystroke pause; Hugging Face is asked at most this often.
+SEARCH_PER_MINUTE = 30
+
+
+@router.get("/models/search")
+def search_hub(q: str = Query(default="", max_length=200), task: Optional[str] = Query(default=None, max_length=16),
+               format: Optional[str] = Query(default=None, max_length=16), limit: int = Query(default=20),
+               caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """Search Hugging Face through the server (admins: the people who add models)."""
+    try:
+        query = hf_hub.make_query(q, task, format, limit)
+    except ValueError as e:
+        raise fail(422, "bad_search", str(e)) from None
+    wait = limiter.hit(f"hub-search:{caller.user.id}", SEARCH_PER_MINUTE)
+    if wait:
+        raise fail(429, "rate_limited", "Too many searches in a minute. Wait a moment.", retry_after=retry_after(wait))
+    s = get_settings()
+    try:
+        results, cached = hf_hub.hub.search(s.hf_endpoint, query, hf_hub.policy(s.model_allow_private_hosts))
+    except hf_hub.HubError as e:
+        raise fail(503, "hub_unreachable",
+                   f"Cannot reach Hugging Face from the server ({e}). The recommended models still work; "
+                   "a model can also be added by its source.") from None
+    have = {src: name for (src, _f), name in _catalog_names(db).items()}
+    all_r = catalog.all_recipes(db)
+    out = []
+    for r in results:
+        r = dict(r)
+        r["in_catalog"] = have.get(r["source"])
+        r["recipes"] = [n for n, (rc, _) in all_r.items() if r["format"] in rc.formats and (r["task"] is None or r["task"] in rc.tasks)]
+        out.append(r)
+    return {"results": out, "cached": cached, "endpoint": s.hf_endpoint.rstrip("/")}
 
 
 @router.post("/models", status_code=201)

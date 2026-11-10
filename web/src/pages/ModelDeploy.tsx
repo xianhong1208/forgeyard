@@ -19,7 +19,9 @@ export function ModelDeployPage() {
   const [search] = useSearchParams();
   const { data: cat } = useApi<CatalogResponse>("/models");
   const { data: machines } = useApi<MachinesResponse>("/machines");
-  const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "" }));
+  // ?model=…&recipe=…&device=… from "Deploy it" after adding a model (its suggested recipe and device).
+  const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "", recipe: search.get("recipe") ?? "",
+    device: search.get("device") === "cpu" ? "cpu" : "gpu" }));
   const [est, setEst] = useState<EstimateResponse | null>(null);
   const [estError, setEstError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,6 +83,12 @@ export function ModelDeployPage() {
       <p className="crumb"><Link to="/models">← Models</Link></p>
       <PageHeader index="03 · Models" title="Deploy a model"
         lead="Pick a model and a recipe; the estimate and where it would go update as you change the parameters. Nothing is downloaded until it is placed." />
+      {cat && cat.models.length === 0 && (
+        <Notice>
+          The catalog is empty, so there is nothing to deploy yet.{" "}
+          {cat.can_manage ? <Link to="/models?tab=catalog">Add a model to the catalog</Link> : "An admin adds models to the catalog."}
+        </Notice>
+      )}
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label="Deploy a model">
         <div>
           <section className="panel">

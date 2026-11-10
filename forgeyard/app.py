@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from forgeyard import __version__
-from forgeyard.api import audit_log, auth, deployments, gateway, keys, machines, models, users, workloads
+from forgeyard.api import audit_log, auth, deployments, gateway, keys, machines, models, onboarding, users, workloads
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import new_session
@@ -85,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(models.router)
     app.include_router(deployments.router)
     app.include_router(keys.router)
+    app.include_router(onboarding.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
     app.include_router(agent_api.router)

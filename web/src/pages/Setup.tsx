@@ -31,7 +31,7 @@ export function SetupPage() {
       void _c;
       const r = await api<{ user: User }>("/auth/setup", { method: "POST", body: { ...body, email: body.email || null }, expect401: true });
       setUser(r.user);
-      navigate("/machines", { replace: true });
+      navigate("/", { replace: true }); // the Get started list
     } catch (err) {
       setError(errorText(err));
     } finally {

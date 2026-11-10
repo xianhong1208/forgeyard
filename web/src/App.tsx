@@ -10,6 +10,7 @@ import { ApiKeysPage } from "./pages/ApiKeys";
 import { AuditPage } from "./pages/Audit";
 import { LoginPage } from "./pages/Login";
 import { DeploymentDetailPage } from "./pages/DeploymentDetail";
+import { GetStartedPage, HomePage } from "./pages/GetStarted";
 import { MachinesPage } from "./pages/Machines";
 import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
@@ -52,7 +53,8 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="/machines" replace />} />
+        <Route index element={<HomePage />} />
+        <Route path="/start" element={<GetStartedPage />} />
         <Route path="/machines" element={<MachinesPage />} />
         <Route path="/workloads" element={<WorkloadsPage />} />
         <Route path="/workloads/new" element={<WorkloadNewPage />} />

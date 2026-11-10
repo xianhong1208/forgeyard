@@ -11,6 +11,7 @@ from forgeyard.db import reset_engine
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.limits import key_limiter
 from forgeyard.gateway.usage import recorder
+from forgeyard.models.hub import hub
 from forgeyard.security.ratelimit import limiter
 
 OWNER = ("owner", "harbour-lantern-71")
@@ -42,13 +43,13 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setenv("DATABASE_URL", PG_URL)
     get_settings.cache_clear()
     reset_engine()
-    for state in (limiter, balancer, key_limiter, recorder):  # in-memory state of one server
+    for state in (limiter, balancer, key_limiter, recorder, hub):  # in-memory state of one server
         state.reset()
     yield
     close_all_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
     reset_engine()
     get_settings.cache_clear()
-    for state in (limiter, balancer, key_limiter, recorder):
+    for state in (limiter, balancer, key_limiter, recorder, hub):
         state.reset()
 
 

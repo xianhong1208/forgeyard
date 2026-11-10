@@ -1,7 +1,9 @@
 // Where to go after signing in. Only same-site paths are accepted, so a crafted
 // ?next=https://evil.example (or //evil.example) cannot bounce people off the site.
 
-export const HOME = "/machines";
+// "/" shows the Get started list until it is done or hidden, then sends people on to MACHINES.
+export const HOME = "/";
+export const MACHINES = "/machines";
 const AUTH_PAGES = ["/login", "/setup", "/set-password", "/register"];
 
 export function safeNext(next: string | null | undefined): string {

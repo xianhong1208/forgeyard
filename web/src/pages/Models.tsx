@@ -1,8 +1,9 @@
 import { IconBrain, IconCpu, IconMicrophone, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { Notice, PageHeader } from "../components/ui";
+import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
 import { bytes } from "../lib/machines";
@@ -32,7 +33,7 @@ export function ModelsPage() {
       <PageHeader
         index="03 · Models"
         title="Models"
-        lead="Models from the catalog, served with an engine recipe on the machine that fits them. Each deployment reserves the memory it was estimated to need; until the gateway (M4) each replica answers on its own port."
+        lead="Models run here as deployments: a model from the catalog, served by an engine on a machine where it fits. Every ready deployment answers at /v1 with an API key, and in the Playground."
         actions={canDeploy && (
           <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
@@ -53,7 +54,21 @@ export function ModelsPage() {
               </div>
               <div className="empty-copy">
                 <h2>No deployments yet</h2>
-                <p>{canDeploy ? "Pick a model from the catalog and a recipe: Deploy a model." : "Admins and operators deploy models; they show up here with their endpoints."}</p>
+                <p>
+                  A deployment runs a model on one of your machines and makes it callable at <code>/v1</code>.{" "}
+                  {!canDeploy ? "Admins and operators deploy models; once one is ready, try it in the Playground or call it with an API key."
+                    : cat.data && cat.data.models.length === 0 ? "Start by adding a model to the catalog, then deploy it."
+                      : "Choose a model from the catalog; Forgeyard estimates its memory and picks a machine where it fits."}
+                </p>
+                {canDeploy && (
+                  <p className="empty-actions">
+                    {cat.data && cat.data.models.length === 0
+                      ? (cat.data.can_manage
+                        ? <button type="button" className="btn btn-primary" onClick={() => setSearch({ tab: "catalog" })}><IconPlus size={16} aria-hidden="true" /> Add a model</button>
+                        : <span className="muted">The catalog is empty: an admin adds models.</span>)
+                      : <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>}
+                  </p>
+                )}
                 <ul className="kinds">
                   {KINDS.map(({ icon: Icon, name, detail }) => (
                     <li key={name}><Icon size={18} stroke={1.6} aria-hidden="true" /><span className="kind-name">{name}</span><span className="kind-detail">{detail}</span></li>
@@ -117,11 +132,13 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
   if (!data) return <p className="muted">Loading…</p>;
   return (
     <>
-      {data.can_manage && <AddModel onAdded={reload} />}
+      {data.can_manage && <AddModel onAdded={reload} empty={data.models.length === 0} />}
       <section className="panel" aria-labelledby="catalog-title">
         <div className="panel-head"><h2 id="catalog-title">Catalog</h2><span className="muted small">{data.models.length} model{data.models.length === 1 ? "" : "s"}</span></div>
         {data.models.length === 0 ? (
-          <p className="muted small">{data.can_manage ? "Nothing yet: add a model above (hf://org/name)." : "An admin adds models to the catalog."}</p>
+          <p className="muted small catalog-empty">{data.can_manage
+            ? "The catalog lists the models that can be deployed. It is empty: pick one of the recommended models above, or search Hugging Face."
+            : "The catalog lists the models that can be deployed. It is empty: an admin adds models."}</p>
         ) : (
           <div className="table-wrap">
             <table className="table catalog-table">
@@ -197,96 +214,6 @@ function RecipeCard({ r }: { r: Recipe }) {
         ))}
       </ul>
     </article>
-  );
-}
-
-const EXAMPLES = [
-  { source: "hf://Qwen/Qwen3-4B", name: "qwen3-4b", task: "chat" },
-  { source: "hf://Qwen/Qwen3-Embedding-0.6B", name: "qwen3-embedding-0.6b", task: "embed" },
-  { source: "hf://Qwen/Qwen3-Reranker-0.6B", name: "qwen3-reranker-0.6b", task: "rerank" },
-  { source: "hf://Systran/faster-whisper-small", name: "faster-whisper-small", task: "asr" },
-  { source: "hf://ggml-org/Qwen3-1.7B-GGUF", name: "qwen3-1.7b-q4km", task: "chat" },
-];
-
-type InspectMeta = { format: string; revision?: string; task_hint?: string | null; size_bytes: number; file?: string; file_count: number;
-  gguf_files?: { path: string; size: number }[]; config?: { layers: number; kv_heads: number; max_context: number; dtype: string };
-  weights?: { params: Record<string, number> }; gguf?: { layers: number; architecture: string; elements: number } };
-
-function AddModel({ onAdded }: { onAdded: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ source: "", revision: "", file: "", name: "", title: "", task: "", token: "" });
-  const [meta, setMeta] = useState<{ meta: InspectMeta; recipes: string[] } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const set = (k: keyof typeof f, v: string) => setF((cur) => ({ ...cur, [k]: v }));
-  const payload = () => ({ source: f.source.trim(), revision: f.revision.trim() || undefined, file: f.file.trim() || undefined,
-    token: f.token.trim() || undefined });
-  const inspect = async () => {
-    setBusy(true); setError(null); setMeta(null);
-    try {
-      const r = await api<{ meta: InspectMeta; recipes: string[] }>("/models/inspect", { method: "POST", body: payload() });
-      setMeta(r);
-      if (!f.task && r.meta.task_hint) set("task", r.meta.task_hint);
-      if (!f.name) set("name", f.source.split("/").pop()?.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") ?? "");
-    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
-  };
-  const add = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true); setError(null);
-    try {
-      await api("/models", { method: "POST", body: { ...payload(), name: f.name.trim(), title: f.title.trim() || undefined, task: f.task || undefined } });
-      setOpen(false); setMeta(null); setF({ source: "", revision: "", file: "", name: "", title: "", task: "", token: "" });
-      onAdded();
-    } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
-  };
-  if (!open) return <p><button type="button" className="btn" onClick={() => setOpen(true)}><IconPlus size={16} aria-hidden="true" /> Add a model to the catalog</button></p>;
-  const params = meta?.meta.weights ? Object.values(meta.meta.weights.params).reduce((a, b) => a + b, 0) : meta?.meta.gguf?.elements;
-  return (
-    <form className="panel panel-link" onSubmit={add} aria-label="Add a model">
-      <h2>Add a model</h2>
-      <p className="muted small">Hugging Face repositories (hf://org/name), a GGUF file from an allowed host, or a local directory allowed below. The model is inspected (config, headers) without downloading its weights, and pinned to the commit it resolves to.</p>
-      <p className="examples small">Examples: {EXAMPLES.map((x) => (
-        <button key={x.name} type="button" className="linklike" onClick={() => setF({ ...f, source: x.source, name: x.name, task: x.task })}>{x.source.replace("hf://", "")}</button>
-      ))}</p>
-      <div className="grid-3">
-        <div className="field"><label htmlFor="m-source">Source</label><input id="m-source" className="mono" value={f.source} onChange={(e) => set("source", e.target.value)} placeholder="hf://Qwen/Qwen3-4B" required /></div>
-        <div className="field"><label htmlFor="m-rev">Revision</label><input id="m-rev" value={f.revision} onChange={(e) => set("revision", e.target.value)} placeholder="main" /></div>
-        <div className="field"><label htmlFor="m-token">Hugging Face token</label><input id="m-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)} placeholder="only for gated models; not stored" /></div>
-      </div>
-      <div className="row-gap" style={{ marginTop: 12 }}>
-        <button type="button" className="btn" disabled={busy || !f.source.trim()} onClick={() => void inspect()}>{busy && !meta ? "Inspecting…" : "Inspect"}</button>
-        <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>Cancel</button>
-      </div>
-      {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
-      {meta && (
-        <>
-          <dl className="facts inspect-facts">
-            <div className="fact"><dt>Format</dt><dd>{meta.meta.format}{meta.meta.file ? ` · ${meta.meta.file}` : ""}</dd></div>
-            <div className="fact"><dt>Pinned to</dt><dd className="mono small">{meta.meta.revision ?? "—"}</dd></div>
-            <div className="fact"><dt>Download</dt><dd>{bytes(meta.meta.size_bytes)} in {meta.meta.file_count} files</dd></div>
-            {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
-            {meta.meta.config && <div className="fact"><dt>Shape</dt><dd>{meta.meta.config.layers} layers, {meta.meta.config.kv_heads} KV heads, {meta.meta.config.max_context} tokens, {meta.meta.config.dtype}</dd></div>}
-            <div className="fact"><dt>Recipes</dt><dd>{meta.recipes.join(", ") || "none"}</dd></div>
-          </dl>
-          {meta.meta.gguf_files && meta.meta.gguf_files.length > 1 && (
-            <div className="field narrow"><label htmlFor="m-file">GGUF file</label>
-              <select id="m-file" value={f.file || meta.meta.file || ""} onChange={(e) => set("file", e.target.value)}>
-                {meta.meta.gguf_files.map((g) => <option key={g.path} value={g.path}>{g.path} ({bytes(g.size)})</option>)}
-              </select></div>
-          )}
-          <div className="grid-3">
-            <div className="field"><label htmlFor="m-name">Name</label><input id="m-name" className="mono" value={f.name} onChange={(e) => set("name", e.target.value)} required /></div>
-            <div className="field"><label htmlFor="m-title">Title</label><input id="m-title" value={f.title} onChange={(e) => set("title", e.target.value)} /></div>
-            <div className="field"><label htmlFor="m-task">Task</label>
-              <select id="m-task" value={f.task} onChange={(e) => set("task", e.target.value)} required>
-                <option value="">Choose…</option>
-                {Object.entries(TASK_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select></div>
-          </div>
-          <div className="form-foot"><span /><button className="btn btn-primary" disabled={busy}>Add to the catalog</button></div>
-        </>
-      )}
-    </form>
   );
 }
 

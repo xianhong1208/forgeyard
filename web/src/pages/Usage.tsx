@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import { Notice, PageHeader } from "../components/ui";
+import { api } from "../lib/api";
 import { ms, num } from "../lib/gateway";
 import type { UsageResponse, UsageRow } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -24,6 +26,10 @@ export function UsagePage() {
   const t = data?.total;
   const max = Math.max(1, ...(data?.rows ?? []).map((r) => r.requests));
   const groups = GROUPS.filter((g) => !g.admin || (data?.is_admin && everyone));
+  // The last step of the users' Get started list is opening this page.
+  useEffect(() => {
+    api("/onboarding/seen", { method: "POST", body: { step: "usage" } }).catch(() => undefined);
+  }, []);
 
   return (
     <>
@@ -63,7 +69,16 @@ export function UsagePage() {
       )}
       {data && (
         data.rows.length === 0 ? (
-          <div className="panel"><p className="muted" style={{ margin: 0 }}>Nothing in this period yet. Requests show up here within a few seconds.</p></div>
+          <div className="panel usage-empty">
+            <p className="muted">
+              No requests in this period. This page counts every call through <code>/v1</code> with {data.everyone ? "anyone's" : "your"} API
+              keys and every message in the Playground; new ones show up within a few seconds.
+            </p>
+            <p className="row-gap">
+              <Link to="/keys" className="btn">Create an API key</Link>
+              <Link to="/playground" className="btn btn-quiet">Open the Playground</Link>
+            </p>
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="table usage-table">
