@@ -1,6 +1,6 @@
 [project]
 name = "forgeyard"
-version = "0.1.0"
+version = "1.0.0"
 description = "Forgeyard: one control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API."
 readme = "README.md"
 requires-python = ">=3.13"

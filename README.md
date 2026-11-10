@@ -5,7 +5,7 @@ on one LAN or VPN, later rented cloud machines too. Agents report each machine's
 you run services, tasks and dev environments on them, and deploy models from recipes behind
 one OpenAI-compatible gateway.
 
-> **Status: milestones M0 to M4, the MVP (0.1.0, unreleased).** The server, database, web UI and
+> **Status: milestones M0 to M4, the MVP (1.0.0).** The server, database, web UI and
 > sign-in are in place; machines join through the agent and report their hardware; you run
 > services and tasks on them, as containers or processes, with only the GPUs they were given; you
 > deploy models from a catalog with engine recipes, placed by memory estimate; and every deployment

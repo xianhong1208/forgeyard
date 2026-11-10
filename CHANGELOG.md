@@ -6,6 +6,10 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-11-10
+
+The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared card) plus a CPU machine.
+
 ### Added — M4: unified API (the MVP)
 - **Gateway** at `/v1` on the server's own port, OpenAI-compatible: `GET /v1/models` (and
   `/v1/models/{model}`), `POST /v1/chat/completions`, `/v1/completions` (SSE streaming passed through
