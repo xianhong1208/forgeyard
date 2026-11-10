@@ -3,7 +3,7 @@
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器，之後也包括租用的雲端機器。
 每台機器上的 agent 回報硬體；你在上面跑 service、task 與開發環境，並用配方部署模型，統一走一個 OpenAI 相容的 gateway。
 
-> **狀態：里程碑 M0 到 M4，MVP 完成（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
+> **狀態：里程碑 M0 到 M4，MVP 完成（1.0.0）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
 > 加入並回報硬體；可以在機器上跑 service 與 task，以容器或程序執行，而且只拿得到分配給它的 GPU；
 > 能從目錄挑模型、用引擎配方部署，依記憶體估算放到合適的機器上；所有部署都在同一個 OpenAI 相容的 `/v1` gateway 後面，
 > 有 API key、限流、用量統計與 playground。
