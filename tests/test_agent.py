@@ -269,3 +269,95 @@ def test_fy_agt_021_stop_closes_cleanly_and_the_machine_goes_offline(monkeypatch
             assert await _wait(lambda: status() == "offline", timeout=3)
 
         asyncio.run(scenario())
+
+
+def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_path):
+    """FY-AGT-030: over real HTTP and WebSocket: a task runs to the end, a service answers HTTP, live
+    logs come from the agent, the agent is replaced by a new one (as after kill -9) which adopts the
+    service (same pid, nothing started twice), and a stop from the API ends the process."""
+    import urllib.request
+
+    from forgeyard.agent.workloads.process import ProcessRuntime
+    from forgeyard.agent.workloads.records import RecordStore
+    from forgeyard.agent.workloads.supervisor import Supervisor
+    from tests.workload_helpers import alive
+
+    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    get_settings.cache_clear()
+    port, web_port = _free_port(), _free_port()
+    server = f"http://127.0.0.1:{port}"
+    state_dir = tmp_path / "agent"
+
+    made = []
+
+    def supervisor():
+        rt = ProcessRuntime(RecordStore(state_dir), tmp_path / "work", euid=lambda: 4242)
+        made.append(rt)
+        return Supervisor(state_dir, {"process": rt}, tick=0.1, port_range=(web_port, web_port)), rt
+
+    def api(method, path, body=None):
+        return _http(port, method, path, body, cookie)[0]
+
+    def replica0(wid):
+        return api("GET", f"/api/workloads/{wid}")["workload"]["replica_list"][0]
+
+    with LiveServer(port):
+        _, cookie = _http(port, "POST", "/api/auth/setup",
+                          {"setup_token": SETUP_TOKEN, "username": OWNER[0], "password": OWNER[1]})
+        joined = join(server, api("POST", "/api/machines/join-tokens", {})["token"], name="cpu")
+
+        async def scenario():
+            sup1, rt1 = supervisor()
+            agent = Agent(server, joined["credential"], SimulatedInventory("nvidia-rtx4090x2", environ={SIMULATION_ENV: "1"}),
+                          backoff=Backoff(base=0.05, cap=0.2), supervisor=sup1)
+            run = asyncio.create_task(agent.run())
+            assert await _wait(lambda: api("GET", "/api/machines")["machines"][0]["features"] == ["workloads"])
+            job = api("POST", "/api/workloads", {"name": "job", "kind": "task",
+                                                 "runtime": {"type": "process", "command": "sh",
+                                                             "args": ["-c", "echo working; exit 0"]}})["workload"]
+            assert await _wait(lambda: api("GET", f"/api/workloads/{job['id']}")["workload"]["status"] == "succeeded")
+            web = api("POST", "/api/workloads", {"name": "web", "kind": "service", "ports": [{"name": "http"}],
+                                                 "health": {"type": "http", "interval": 1},
+                                                 "runtime": {"type": "process", "command": "python3",
+                                                             "args": ["-m", "http.server", "${PORT}",
+                                                                      "--bind", "127.0.0.1"]}})["workload"]
+            assert await _wait(lambda: replica0(web["id"])["state"] == "healthy", timeout=20)
+            rep = replica0(web["id"])
+            assert rep["ports"][0]["host_port"] == web_port
+            body = await asyncio.to_thread(lambda: urllib.request.urlopen(f"http://127.0.0.1:{web_port}/", timeout=5).read())
+            assert b"Directory listing" in body
+            # Off this event loop: the agent answering the request runs on it.
+            logs = await asyncio.to_thread(api, "GET", f"/api/workloads/{web['id']}/replicas/0/logs")
+            assert logs["source"] == "live" and '"GET / HTTP/1.1" 200' in logs["text"]
+
+            # The agent goes away without stopping anything (kill -9), a new one takes over.
+            agent.stop()
+            await asyncio.wait_for(run, 10)
+            pid = rep["pid"]
+            assert alive(pid)
+            sup2, rt2 = supervisor()
+            again = Agent(server, joined["credential"], SimulatedInventory("nvidia-rtx4090x2", environ={SIMULATION_ENV: "1"}),
+                          backoff=Backoff(base=0.05, cap=0.2), supervisor=sup2)
+            run2 = asyncio.create_task(again.run())
+            assert await _wait(lambda: again.sessions >= 1 and sup2.desired is not None)
+            await asyncio.sleep(1.5)
+            assert sup2.started == 0 and sup2.records[rep["id"]].pid == pid and alive(pid)
+            assert replica0(web["id"])["pid"] == pid
+
+            api("POST", f"/api/workloads/{web['id']}/stop", {})
+            assert await _wait(lambda: replica0(web["id"])["state"] == "stopped")
+            rt1.children[rep["id"]].wait(5)  # the test process is still its parent
+            assert not alive(pid)
+            again.stop()
+            await asyncio.wait_for(run2, 10)
+
+        try:
+            asyncio.run(scenario())
+        finally:  # never leave a server process behind, even when an assertion failed
+            import signal
+
+            for rt in made:
+                for proc in rt.children.values():
+                    if proc.poll() is None:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait(5)

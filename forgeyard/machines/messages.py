@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from forgeyard.machines.protocol import VENDORS
+from forgeyard.machines.protocol import MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
 
 
 def _short(limit: int):
@@ -18,6 +18,14 @@ def _short(limit: int):
         return str(value).strip()[:limit]
 
     return BeforeValidator(cut)
+
+
+def _last(limit: int):
+    """Output text: the end is what matters, and whitespace is kept as it was."""
+    def cut(value: Any) -> Any:
+        return None if value is None else str(value)[-limit:]
+
+    return cut
 
 
 def _bytes(value: Any) -> Optional[int]:
@@ -91,6 +99,18 @@ class InventoryIn(_Msg):
     collectors: dict[Annotated[str, _short(32)], CollectorStatus] = Field(default_factory=dict, max_length=16)
 
 
+def _runtime_info(value: Any) -> dict:
+    """{"process": {...}, "container": {...}}: small dicts of what each runtime can do."""
+    if not isinstance(value, dict):
+        return {}
+    out = {}
+    for name in RUNTIMES:
+        item = value.get(name)
+        if isinstance(item, dict) and len(json.dumps(item, default=str)) <= 4096:
+            out[name] = item
+    return out
+
+
 class HelloIn(_Msg):
     v: int
     type: Literal["hello"]
@@ -101,6 +121,9 @@ class HelloIn(_Msg):
     runtimes: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=8)
     simulated: bool = False
     inventory: InventoryIn
+    # Added in M2, optional so an M1 agent's hello stays valid.
+    features: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=16)
+    runtime_info: Annotated[dict, BeforeValidator(_runtime_info)] = Field(default_factory=dict)
 
 
 class MetricIn(_Msg):
@@ -122,3 +145,46 @@ class InventoryMsgIn(_Msg):
     v: int
     type: Literal["inventory"]
     inventory: InventoryIn
+
+
+class PortOut(_Msg):
+    name: Annotated[str, _short(16)]
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+    host_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    address: Annotated[Optional[str], _short(64)] = None
+
+
+class ReplicaStatusIn(_Msg):
+    id: Annotated[str, _short(32)]
+    generation: int = Field(ge=0)
+    state: Literal[REPLICA_STATES]  # type: ignore[valid-type]
+    reason: Annotated[Optional[str], _short(400)] = None
+    exit_code: Optional[int] = Field(default=None, ge=-255, le=255)
+    attempt: int = Field(default=0, ge=0, le=10_000)
+    restarts: int = Field(default=0, ge=0, le=10**9)
+    final: bool = False
+    pid: Optional[int] = Field(default=None, ge=0, le=2**31)
+    container: Annotated[Optional[str], _short(128)] = None
+    ports: list[PortOut] = Field(default_factory=list, max_length=8)
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    log_tail: Annotated[Optional[str], BeforeValidator(_last(16384))] = None
+
+
+class StatusIn(_Msg):
+    v: int
+    type: Literal["status"]
+    # True: every replica the agent knows is listed, so missing ones are not running there.
+    full: bool = False
+    replicas: list[ReplicaStatusIn] = Field(default_factory=list, max_length=512)
+
+
+class LogsIn(_Msg):
+    v: int
+    type: Literal["logs"]
+    request_id: Annotated[str, _short(32)]
+    replica: Annotated[str, _short(32)]
+    ok: bool = True
+    text: str = Field(default="", max_length=MAX_LOG_CHARS)
+    truncated: bool = False
+    reason: Annotated[Optional[str], _short(400)] = None

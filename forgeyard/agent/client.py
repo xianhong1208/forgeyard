@@ -24,6 +24,7 @@ from forgeyard.machines.protocol import (
     CLOSE_REPLACED,
     CLOSE_REVOKED,
     FATAL_CLOSE_CODES,
+    FEATURE_WORKLOADS,
     JOIN_PATH,
     PROTOCOL_VERSION,
     STREAM_PATH,
@@ -106,7 +107,7 @@ def join(server: str, token: str, *, name: Optional[str] = None, timeout: float 
 class Agent:
     def __init__(self, server: str, credential: str, inventory: Inventory, *, labels: Optional[dict] = None,
                  backoff: Optional[Backoff] = None, heartbeat: float = 10.0,
-                 connector: Callable = connect):
+                 connector: Callable = connect, supervisor=None):
         self.server = server
         self.credential = credential
         self.inventory = inventory
@@ -118,18 +119,42 @@ class Agent:
         self._fingerprint: Optional[list] = None
         self.name: Optional[str] = None
         self.sessions = 0  # connections that got a welcome (tests and logs)
+        # Runs workloads (M2). None: an inventory-only agent, as in M1.
+        self.supervisor = supervisor
+        self.server_features: set[str] = set()
+        self._answers: set[asyncio.Task] = set()
 
     def stop(self) -> None:
         self._stop.set()
 
     def hello(self, inventory: dict) -> dict:
-        return {"v": PROTOCOL_VERSION, "type": "hello", "agent_version": __version__,
-                "hostname": socket.gethostname(), "labels": self.labels, "platform": platform_info(),
-                "runtimes": [], "simulated": self.inventory.simulated,
-                "inventory": {"accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}
+        msg = {"v": PROTOCOL_VERSION, "type": "hello", "agent_version": __version__,
+               "hostname": socket.gethostname(), "labels": self.labels, "platform": platform_info(),
+               "runtimes": [], "simulated": self.inventory.simulated,
+               "inventory": {"accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}
+        if self.supervisor is not None:
+            msg["features"] = [FEATURE_WORKLOADS]
+            msg["runtimes"] = self.supervisor.available()
+            msg["runtime_info"] = self.supervisor.runtime_info()
+        return msg
+
+    @property
+    def workloads(self) -> bool:
+        return self.supervisor is not None and FEATURE_WORKLOADS in self.server_features
 
     async def run(self) -> int:
-        """Connect, and reconnect after every drop, until stopped or refused for good."""
+        """Connect, and reconnect after every drop, until stopped or refused for good. Workloads
+        are supervised the whole time, connected or not."""
+        supervising = asyncio.create_task(self.supervisor.run()) if self.supervisor is not None else None
+        try:
+            return await self._run()
+        finally:
+            if supervising is not None:
+                supervising.cancel()
+                await asyncio.gather(supervising, return_exceptions=True)
+                await self.supervisor.close()
+
+    async def _run(self) -> int:
         url = stream_url(self.server)
         while not self._stop.is_set():
             try:
@@ -176,11 +201,18 @@ class Agent:
             self.backoff.reset()
             self.sessions += 1
             self.name = welcome.get("name")
+            self.server_features = set(welcome.get("features") or [])
             interval = float(welcome.get("heartbeat_interval") or self.heartbeat)
             log.info("Connected to %s as %r (%d accelerators; heartbeat every %.0f s).", self.server, self.name,
                      len(inventory["accelerators"]), interval)
             tasks = {asyncio.create_task(self._send_loop(ws, interval)), asyncio.create_task(self._receive_loop(ws)),
                      asyncio.create_task(self._stop.wait())}
+            if self.workloads:
+                local = getattr(ws, "local_address", None)
+                self.supervisor.set_address(local[0] if local else None)
+                tasks.add(asyncio.create_task(self._status_loop(ws)))
+            elif self.supervisor is not None:
+                log.warning("The server does not run workloads (an older Forgeyard); only reporting hardware.")
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             finally:
@@ -213,8 +245,34 @@ class Agent:
                 data = json.loads(message)
             except ValueError:
                 continue
-            if data.get("type") == "error":
+            kind = data.get("type")
+            if kind == "error":
                 log.warning("Server: %s (%s)", data.get("message"), data.get("code"))
+            elif kind == "desired" and self.workloads:
+                self.supervisor.set_desired(data)
+            elif kind == "logs_request" and self.workloads:
+                task = asyncio.create_task(self._answer_logs(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
+
+    async def _answer_logs(self, ws, data: dict) -> None:
+        replica = str(data.get("replica") or "")
+        try:
+            answer = await self.supervisor.logs(replica, int(data.get("lines") or 200))
+        except Exception as e:  # a log request must never take the connection down
+            answer = {"ok": False, "reason": f"could not read the output: {e}"}
+        await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "logs", "request_id": data.get("request_id"),
+                                  "replica": replica, **answer}))
+
+    async def _status_loop(self, ws) -> None:
+        sup = self.supervisor
+        sup.report_event.set()  # whatever changed while the connection was down
+        while True:
+            await sup.report_event.wait()
+            sup.report_event.clear()
+            msg = sup.take_report()
+            if msg is not None:
+                await ws.send(json.dumps(msg))
 
     async def _send_loop(self, ws, interval: float) -> None:
         seq = 0

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from forgeyard import __version__
-from forgeyard.api import audit_log, auth, machines, users
+from forgeyard.api import audit_log, auth, machines, users, workloads
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import new_session
@@ -72,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(audit_log.router)
     app.include_router(machines.router)
+    app.include_router(workloads.router)
     app.include_router(agent_api.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

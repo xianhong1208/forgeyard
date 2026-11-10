@@ -1,4 +1,4 @@
-import { IconCpu, IconPlus, IconServer2 } from "@tabler/icons-react";
+import { IconCpu, IconLock, IconPlus, IconServer2 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { CopyBox, Notice, PageHeader } from "../components/ui";
@@ -18,6 +18,7 @@ import {
 } from "../lib/machines";
 import type { Accelerator, JoinToken, Machine, MachinesResponse, NewJoinToken } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { allowlistSummary, canRunWorkloads, gpuCards, runtimeLine } from "../lib/workloads";
 
 // Machines change state on their own (heartbeats, a dropped network): poll so the page follows.
 export const POLL_MS = 5000;
@@ -198,7 +199,8 @@ export function MachinesPage() {
           <div className="machines">
             {machines.map((m) => (
               <MachineCard key={m.id} m={m} serverTime={data.server_time} canManage={canManage}
-                onRevoke={revoke} onRemove={remove} />
+                onRevoke={revoke} onRemove={remove} onChanged={(text) => { setMessage({ tone: "ok", text }); reload(); }}
+                onError={(text) => setMessage({ tone: "error", text })} />
             ))}
           </div>
         </>
@@ -252,9 +254,10 @@ function Fleet({ machines }: { machines: Machine[] }) {
   );
 }
 
-function MachineCard({ m, serverTime, canManage, onRevoke, onRemove }: {
+function MachineCard({ m, serverTime, canManage, onRevoke, onRemove, onChanged, onError }: {
   m: Machine; serverTime: string; canManage: boolean;
   onRevoke: (m: Machine) => void; onRemove: (m: Machine) => void;
+  onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
   const age = ageSeconds(serverTime, m.last_heartbeat_at);
   const cards = gpus(m);
@@ -306,9 +309,12 @@ function MachineCard({ m, serverTime, canManage, onRevoke, onRemove }: {
           <span className="muted"> · {bytes(mem.free)} free of {bytes(mem.total)}</span>
         )}
       </p>
+      {m.status !== "revoked" && (
+        <GpuAccess m={m} canManage={canManage} onChanged={onChanged} onError={onError} />
+      )}
       <ul className="accels">
         {m.accelerators.map((a) => (
-          <AcceleratorRow key={a.key} a={a} />
+          <AcceleratorRow key={a.key} a={a} restricted={m.gpu_allowlist !== null && m.gpu_allowlist !== undefined} />
         ))}
       </ul>
       {failed.length > 0 && (
@@ -325,14 +331,95 @@ function MachineCard({ m, serverTime, canManage, onRevoke, onRemove }: {
   );
 }
 
-function AcceleratorRow({ a }: { a: Accelerator }) {
+// Which GPUs Forgeyard may hand to workloads on this machine, and (for admins) the editor.
+function GpuAccess({ m, canManage, onChanged, onError }: {
+  m: Machine; canManage: boolean; onChanged: (text: string) => void; onError: (text: string) => void;
+}) {
+  const cards = gpuCards(m);
+  const [editing, setEditing] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const runtimes = m.runtime_info ?? {};
+  const workloads = canRunWorkloads(m);
+
+  const open = () => {
+    setPicked(m.gpu_allowlist ?? cards.map((a) => a.key));
+    setEditing(true);
+  };
+  const save = async () => {
+    const all = picked.length === cards.length;
+    const names = cards.filter((a) => picked.includes(a.key)).map((a) => `#${a.index}`).join(", ");
+    const text = all
+      ? `Let Forgeyard assign every GPU of ${m.name}?`
+      : picked.length
+        ? `Let Forgeyard assign only GPU ${names} on ${m.name}? No workload will ever get another card of this machine.`
+        : `Let Forgeyard assign no GPU on ${m.name}? Only CPU workloads will run there.`;
+    if (!window.confirm(text)) return;
+    setBusy(true);
+    try {
+      await api(`/machines/${m.id}/gpu-allowlist`, { method: "PUT", body: { keys: all ? null : picked } });
+      setEditing(false);
+      onChanged(all ? `Forgeyard may assign every GPU of ${m.name}.` : `Forgeyard may assign ${picked.length ? `only ${names}` : "no GPU"} on ${m.name}.`);
+    } catch (e) {
+      onError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="gpu-access">
+      <p className="gpu-access-line">
+        {cards.length > 0 && (
+          <span className={m.gpu_allowlist ? "gpu-access-limited" : undefined}>
+            {m.gpu_allowlist && <IconLock size={14} aria-hidden="true" />} Forgeyard may assign <strong>{allowlistSummary(m)}</strong>
+          </span>
+        )}
+        <span className="muted">
+          {workloads
+            ? `Runs ${runtimeLine(runtimes.process, "process")} · ${runtimeLine(runtimes.container, "container")}`
+            : "Its agent does not run workloads yet (update it)."}
+        </span>
+        {canManage && cards.length > 0 && !editing && (
+          <button type="button" className="btn btn-quiet btn-small" onClick={open}>Change GPU access</button>
+        )}
+      </p>
+      {editing && (
+        <fieldset className="allowlist">
+          <legend>GPUs Forgeyard may assign on {m.name}</legend>
+          <div className="allowlist-cards">
+            {cards.map((a) => (
+              <label key={a.key} className="card-pick">
+                <input type="checkbox" checked={picked.includes(a.key)}
+                  onChange={() => setPicked((p) => (p.includes(a.key) ? p.filter((k) => k !== a.key) : [...p, a.key]))} />
+                <span className="mono">#{a.index}</span>
+                <span className="small">{a.model}</span>
+                {a.assigned_to && <span className="chip chip-tone-run">in use: {a.assigned_to}</span>}
+              </label>
+            ))}
+          </div>
+          <div className="row-gap">
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => setPicked(cards.map((a) => a.key))}>All</button>
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => setPicked([])}>None</button>
+            <span className="grow" />
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => setEditing(false)}>Cancel</button>
+            <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void save()}>Save</button>
+          </div>
+          <p className="field-hint">A card in use cannot be taken off; stop its workload first. Every change is in the audit log.</p>
+        </fieldset>
+      )}
+    </div>
+  );
+}
+
+function AcceleratorRow({ a, restricted }: { a: Accelerator; restricted: boolean }) {
   const frac = usedFraction(a);
   const arch = archLabel(a);
   const cpu = a.vendor === "cpu";
   const tight = frac !== null && frac >= 0.9;
   const cores = cpu ? [a.detail.cores && `${a.detail.cores} cores`, a.detail.threads && `${a.detail.threads} threads`].filter(Boolean).join(" · ") : "";
   return (
-    <li className={`accel accel-${a.vendor}`}>
+    <li className={`accel accel-${a.vendor}${restricted && !cpu && a.allowed === false ? " accel-off" : ""}`}>
       <span className="accel-id">
         <span className={`vendor vendor-${a.vendor}`}>{VENDOR_NAME[a.vendor] ?? a.vendor}</span>
         {!cpu && <span className="accel-index mono">#{a.index}</span>}
@@ -349,6 +436,10 @@ function AcceleratorRow({ a }: { a: Accelerator }) {
             </span>
           )}
           {cpu && cores && <span className="muted">{cores}</span>}
+          {!cpu && restricted && a.allowed === false && (
+            <span className="chip chip-off" title="Not on this machine's allowlist: Forgeyard never assigns it.">not for Forgeyard</span>
+          )}
+          {!cpu && a.assigned_to && <span className="chip chip-tone-run">in use: {a.assigned_to}</span>}
           {a.driver && <span className="muted">driver {a.driver}</span>}
         </span>
       </span>

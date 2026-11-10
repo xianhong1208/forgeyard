@@ -3,6 +3,7 @@
     python -m forgeyard agent --server http://forge.lan:7860 --join-token fyj_...   # first start: join
     python -m forgeyard agent                                                      # later starts
     python -m forgeyard agent inventory [--json] [--raw]                           # what it detects
+    python -m forgeyard agent runtimes [--workload-user nobody]                     # what it can run
 """
 
 from __future__ import annotations
@@ -83,6 +84,62 @@ def _inventory_cmd(args) -> int:
     return 0
 
 
+def _make_supervisor(args, state_dir: Path):
+    """The workload side of the agent (M2): runtimes and the reconciler."""
+    from forgeyard.agent import state
+    from forgeyard.agent.workloads.container import ContainerRuntime
+    from forgeyard.agent.workloads.ports import parse_range
+    from forgeyard.agent.workloads.process import ProcessRuntime
+    from forgeyard.agent.workloads.records import RecordStore
+    from forgeyard.agent.workloads.supervisor import Supervisor
+
+    store = RecordStore(state_dir)
+    work_root = Path(args.work_dir) if args.work_dir else state.default_work_root(state_dir)
+    log_max = max(1, int(args.log_max_mb)) * 1024**2
+    runtimes = {
+        "process": ProcessRuntime(store, work_root, workload_user=args.workload_user, limits=args.limits),
+        "container": ContainerRuntime(store, agent_id=state.agent_id(state_dir), engine=args.container_engine,
+                                      log_max_bytes=log_max),
+    }
+    return Supervisor(state_dir, runtimes, port_range=parse_range(args.port_range), log_max_bytes=log_max,
+                      bind_address=args.bind_address or None)
+
+
+def _describe_runtimes(info: dict) -> list[str]:
+    lines = []
+    p = info.get("process", {})
+    if p.get("ok"):
+        lines.append(f"process   ok: runs as {p.get('user')} (uid {p.get('uid')}); limits: {p.get('limits')}")
+    else:
+        lines.append(f"process   unavailable: {p.get('reason')}")
+    c = info.get("container", {})
+    if c.get("ok"):
+        gpu = f"NVIDIA GPUs via {c.get('gpu_mode')}" if c.get("nvidia") else "no NVIDIA GPU support (no nvidia runtime or CDI)"
+        lines.append(f"container ok: {c.get('engine')} {c.get('version') or ''}; {gpu}")
+    else:
+        lines.append(f"container unavailable: {c.get('reason')}")
+    return lines
+
+
+def _runtimes_cmd(args) -> int:
+    import tempfile
+
+    from forgeyard.agent import state
+
+    state_dir = Path(args.state_dir) if args.state_dir else state.default_state_dir()
+    if state_dir.exists():
+        info = _make_supervisor(args, state_dir).runtime_info()
+    else:  # only looking: never create the real state directory for it
+        with tempfile.TemporaryDirectory(prefix="forgeyard-runtimes-") as tmp:
+            info = _make_supervisor(args, Path(tmp)).runtime_info()
+    if args.json:
+        json.dump(info, sys.stdout, indent=2, default=str)
+        sys.stdout.write("\n")
+    else:
+        print("\n".join(_describe_runtimes(info)))
+    return 0
+
+
 def _agent_cmd(args) -> int:
     from forgeyard.agent import state
     from forgeyard.agent.client import EXIT_JOIN_FAILED, EXIT_USAGE, Agent, JoinError, join, normalise_server
@@ -126,7 +183,15 @@ def _agent_cmd(args) -> int:
     elif server != saved.get("server"):
         log.info("Using --server %s (the credential was issued by %s).", server, saved.get("server"))
 
-    agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label))
+    try:
+        supervisor = None if args.no_workloads else _make_supervisor(args, state_dir)
+    except ValueError as e:
+        log.error("%s", e)
+        return EXIT_USAGE
+    if supervisor is not None:
+        for line in _describe_runtimes(supervisor.runtime_info()):
+            log.info("Runtime %s", line)
+    agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label), supervisor=supervisor)
 
     async def main() -> int:
         loop = asyncio.get_running_loop()
@@ -160,13 +225,42 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--simulate-inventory", metavar="FIXTURE",
                        help="report a fixture instead of real hardware (development only; needs "
                             "FORGEYARD_AGENT_SIMULATION=1)")
+    _workload_args(agent)
+    agent.add_argument("--no-workloads", action="store_true", help="only report hardware; run no workloads")
     agent.add_argument("-v", "--verbose", action="store_true")
     agent_sub = agent.add_subparsers(dest="agent_command")
     inv = agent_sub.add_parser("inventory", help="print what the agent detects, without joining")
     inv.add_argument("--json", action="store_true", help="machine-readable output")
     inv.add_argument("--raw", action="store_true", help="include what each tool returned (for bug reports)")
     inv.add_argument("--simulate-inventory", metavar="FIXTURE", help=argparse.SUPPRESS)
+    rts = agent_sub.add_parser("runtimes", help="print which runtimes the agent can use here, without joining")
+    rts.add_argument("--json", action="store_true", help="machine-readable output")
+    _workload_args(rts, sub=True)
     return parser
+
+
+def _workload_args(p: argparse.ArgumentParser, *, sub: bool = False) -> None:
+    """The agent's workload options. On a subcommand they default to SUPPRESS, so the same option
+    works before or after the subcommand name (argparse would otherwise reset it)."""
+
+    def d(value):
+        return argparse.SUPPRESS if sub else value
+
+    p.add_argument("--workload-user", default=d(None), metavar="USER",
+                   help="unprivileged user that process workloads run as when the agent is root "
+                        "(required then: without it, process workloads are refused)")
+    p.add_argument("--work-dir", default=d(None),
+                   help="where each process replica gets its own directory (default: next to the state directory)")
+    p.add_argument("--port-range", default=d("30000-32767"), metavar="LOW-HIGH",
+                   help="host ports for services (default 30000-32767)")
+    p.add_argument("--bind-address", default=d(None),
+                   help="address container ports are published on (default: this machine's address towards "
+                        "the server)")
+    p.add_argument("--container-engine", default=d("auto"),
+                   help="auto (docker, then podman), docker, podman, none, or a path")
+    p.add_argument("--limits", choices=("auto", "systemd", "rlimit"), default=d("auto"),
+                   help="process CPU/memory limits: a systemd scope (root on systemd hosts) or rlimits")
+    p.add_argument("--log-max-mb", type=int, default=d(10), help="output kept per replica, in MB (default 10)")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -179,6 +273,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "agent":
         if args.agent_command == "inventory":
             return _inventory_cmd(args)
+        if args.agent_command == "runtimes":
+            return _runtimes_cmd(args)
         return _agent_cmd(args)
     return _serve()
 

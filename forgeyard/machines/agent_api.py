@@ -26,17 +26,20 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import HeartbeatIn, HelloIn, InventoryMsgIn
+from forgeyard.machines.messages import HeartbeatIn, HelloIn, InventoryMsgIn, LogsIn, StatusIn
 from forgeyard.machines.protocol import (
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
     CLOSE_REVOKED,
+    FEATURE_WORKLOADS,
     JOIN_PATH,
     MAX_MESSAGE_BYTES,
     PROTOCOL_VERSION,
+    SERVER_FEATURES,
     STREAM_PATH,
 )
+from forgeyard.workloads import placement, state as wstate
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -154,6 +157,28 @@ def _inventory(db: DbSession, node_id: int, msg: InventoryMsgIn, ip: str) -> boo
     return True
 
 
+def _desired(db: DbSession, node_id: int, revision: int) -> Optional[dict]:
+    if _live_node(db, node_id) is None:
+        return None
+    return wstate.desired_message(db, node_id, revision)
+
+
+def _status(db: DbSession, node_id: int, msg: StatusIn) -> Optional[bool]:
+    """Apply a status message. None: the machine was revoked. True: its desired state changed."""
+    node = _live_node(db, node_id)
+    if node is None:
+        return None
+    changed = wstate.apply_status(db, node, msg)
+    db.commit()
+    if changed:  # a replica finished: its resources are free for what is waiting
+        placement.place_and_poke(db)
+    return changed
+
+
+def _place(db: DbSession) -> None:
+    placement.place_and_poke(db)
+
+
 def _went_away(db: DbSession, node_id: int) -> None:
     node = db.get(Node, node_id)
     if node is not None and node.status == "online":
@@ -209,7 +234,8 @@ async def stream(ws: WebSocket):
     except WebSocketDisconnect:
         return
 
-    conn = Connection(node_id)
+    features = set(hello.features) & set(SERVER_FEATURES)
+    conn = Connection(node_id, features=features)
     replaced = hub.attach(conn)
     if replaced is not None:
         replaced.close(CLOSE_REPLACED, "another agent connected with this credential")
@@ -221,29 +247,56 @@ async def stream(ws: WebSocket):
         settings = get_settings()
         await ws.send_json({"v": PROTOCOL_VERSION, "type": "welcome", **welcome, "server_version": __version__,
                             "heartbeat_interval": settings.agent_heartbeat_seconds,
-                            "offline_after": settings.agent_offline_seconds})
+                            "offline_after": settings.agent_offline_seconds,
+                            "features": sorted(SERVER_FEATURES)})
+        if FEATURE_WORKLOADS in features:
+            conn.dirty.set()  # the desired state goes out right after the welcome
+            await run_in_threadpool(_db_call, _place)  # this machine may take what is waiting
         await _serve(ws, conn, node_id, ip)
     except WebSocketDisconnect:
         pass
     finally:
+        conn.fail_pending()
         if hub.detach(conn):
             await run_in_threadpool(_db_call, _went_away, node_id)
 
 
 async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None:
+    workloads = FEATURE_WORKLOADS in conn.features
     kick = asyncio.create_task(conn.kick.wait())
+    recv = dirty = out = None
+    revision = 0
     try:
         while True:
-            recv = asyncio.create_task(ws.receive())
-            done, _ = await asyncio.wait({recv, kick}, return_when=asyncio.FIRST_COMPLETED)
+            if recv is None:
+                recv = asyncio.create_task(ws.receive())
+            if workloads and dirty is None:
+                dirty = asyncio.create_task(conn.dirty.wait())
+            if workloads and out is None:
+                out = asyncio.create_task(conn.outbox.get())
+            done, _ = await asyncio.wait({t for t in (recv, kick, dirty, out) if t is not None},
+                                         return_when=asyncio.FIRST_COMPLETED)
             if kick in done:
-                recv.cancel()
                 try:
                     await ws.close(code=conn.code or CLOSE_REVOKED, reason=conn.reason[:120])
                 except RuntimeError:
                     pass
                 return
-            message = recv.result()
+            if dirty in done:
+                dirty = None
+                conn.dirty.clear()
+                revision += 1
+                desired = await run_in_threadpool(_db_call, _desired, node_id, revision)
+                if desired is None:
+                    await _error_close(ws, CLOSE_REVOKED, "revoked", "This machine was revoked.")
+                    return
+                await ws.send_json(desired)
+            if out in done:
+                item, out = out.result(), None
+                await ws.send_json(item)
+            if recv not in done:
+                continue
+            message, recv = recv.result(), None
             if message["type"] == "websocket.disconnect":
                 return
             text = message.get("text")
@@ -256,6 +309,15 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     ok = await run_in_threadpool(_db_call, _heartbeat, node_id, _parse(text, HeartbeatIn), ip)
                 elif kind == "inventory":
                     ok = await run_in_threadpool(_db_call, _inventory, node_id, _parse(text, InventoryMsgIn), ip)
+                elif kind == "status" and workloads:
+                    changed = await run_in_threadpool(_db_call, _status, node_id, _parse(text, StatusIn))
+                    ok = changed is not None
+                    if changed:
+                        conn.dirty.set()
+                elif kind == "logs" and workloads:
+                    answer = _parse(text, LogsIn)
+                    conn.answer(answer.request_id, answer.model_dump())
+                    ok = True
                 else:
                     raise ValueError(f"unknown message type {kind!r}")
             except _ProtocolMismatch:
@@ -268,4 +330,6 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                 await _error_close(ws, CLOSE_REVOKED, "revoked", "This machine was revoked.")
                 return
     finally:
-        kick.cancel()
+        for t in (kick, recv, dirty, out):
+            if t is not None:
+                t.cancel()

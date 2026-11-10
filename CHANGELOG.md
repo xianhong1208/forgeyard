@@ -6,6 +6,52 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added — M2: generic workloads
+- Workloads: **services** (run until stopped, health-checked, restarted with backoff) and **tasks**
+  (run to the end; `retries` with doubling backoff; `max_duration` stops and fails a run), 1-16
+  fixed replicas, as a **container** (Docker or Podman CLI) or a **process**. A small explicit spec:
+  name, kind, runtime, env, resources (cpu, memory, gpus by count or by index, vendor), ports, health,
+  restart, max_duration, retries, replicas, machine.
+- Placement: the chosen machine, or the first online machine with the runtime, free allowed GPUs and
+  the declared CPU and memory. GPUs are exclusive. What does not fit waits as *pending* with the
+  reason and is placed when room appears (also by a background sweep).
+- Per-machine **GPU allowlist** (`PUT /api/machines/{id}/gpu-allowlist`, admins; Machines page →
+  Change GPU access). Cards outside it are never assigned and are marked *not for Forgeyard*; a card
+  in use cannot be taken off; audit event `machine.gpu_allowlist_changed` with before and after.
+- Isolation: workloads start from an empty environment (never the agent's); GPU visibility by UUID
+  (`CUDA_VISIBLE_DEVICES`/`NVIDIA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES` + `HIP_VISIBLE_DEVICES`)
+  for processes, `--gpus "device=<uuid>"` / CDI / `--device /dev/kfd` + the assigned render node for
+  containers; empty lists and `NVIDIA_VISIBLE_DEVICES=void` without GPUs. Containers run with
+  `--security-opt no-new-privileges`, never `--privileged`, ports published on one address.
+- A root agent runs process workloads only as `--workload-user` (refused without one). Processes get
+  their own process group, a systemd scope with CPU/memory limits on systemd hosts, rlimits otherwise.
+- Desired-state reconciliation: the server sends each agent the full list of its replicas (spec and
+  generation) on connect and on change; the agent converges, adopts what it started after a restart
+  (pid + start time + boot id; container labels), never starts anything twice, stops before it
+  starts, and reports per-replica status (pending, starting, running, healthy, unhealthy, backoff,
+  exited, failed, stopped).
+- Output: kept per replica on the agent (`--log-max-mb`, 10 MB), live tail on the workload page
+  (server asks the agent over the WebSocket), last 100 lines kept on the server when a replica ends.
+- Agent protocol v1 extended compatibly: `features` in hello/welcome, and `desired`, `status`,
+  `logs_request`, `logs`. M1 agents keep working without work; M2 agents on an M1 server only report
+  hardware.
+- Agent options `--workload-user`, `--work-dir`, `--port-range`, `--bind-address`,
+  `--container-engine`, `--limits`, `--log-max-mb`, `--no-workloads`; `forgeyard agent runtimes`.
+- Workloads page (list with replicas, machine, GPUs, addresses), New workload form (with the spec it
+  sends), and a workload page with replicas, events, live output, stop / start / delete.
+- API `/api/workloads` (list, create, get, stop, start, delete, replica logs). Admins and operators
+  run workloads; users see them without environment values or output. Audit events
+  `workload.created`, `workload.stopped`, `workload.started`, `workload.deleted`.
+- `scripts/gpu_probe.py`: which NVIDIA GPU a workload sees, through the CUDA driver only.
+- `docs/acceptance-m2.md`: the real-hardware checklist for a shared 8-GPU host restricted to one card.
+- Migration `0003_workloads`.
+
+### Changed — M2
+- The *Deployments* placeholder became **Workloads** (`/deployments` redirects); model deployments
+  come with M3.
+- The AMD collector records the KFD `unique_id` (as `rocr_uuid`) and `drm_render_minor` per card.
+- Revoking or removing a machine sends its replicas back to pending (placed elsewhere, or waiting).
+
 ### Added — M1: machines join
 - Agent in the same package: `python -m forgeyard agent` (also `python main.py agent`). It joins
   with a one-time token, keeps a WebSocket to the server and reconnects by itself (exponential

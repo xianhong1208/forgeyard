@@ -5,9 +5,10 @@ on one LAN or VPN, later rented cloud machines too. Agents report each machine's
 you run services, tasks and dev environments on them, and deploy models from recipes behind
 one OpenAI-compatible gateway.
 
-> **Status: milestones M0 and M1 (0.1.0, unreleased).** The server, database, web UI and sign-in
-> are in place, and machines join through the agent and report their hardware. Deployments stay
-> empty until workloads land (M2).
+> **Status: milestones M0, M1 and M2 (0.1.0, unreleased).** The server, database, web UI and
+> sign-in are in place; machines join through the agent and report their hardware; and you run
+> services and tasks on them, as containers or processes, with only the GPUs they were given.
+> Model deployments come with M3.
 
 [繁體中文說明](README.zh-TW.md)
 
@@ -88,10 +89,117 @@ agent dials out to the server, so the server never needs to reach the machine.
 
 Real-hardware checks for this milestone: [docs/acceptance-m1.md](docs/acceptance-m1.md).
 
+## Workloads
+
+A **workload** is something to run on your machines: a **service** (runs until stopped, is
+health-checked and restarted) or a **task** (runs to the end, with retries and a time limit).
+Each one has 1 to 16 **replicas**; each replica runs on one machine. Open **Workloads → New
+workload**, or `POST /api/workloads` with the spec:
+
+```json
+{"name": "web", "kind": "service",
+ "runtime": {"type": "container", "image": "python:3.13-slim", "args": ["python", "-m", "http.server", "8000"]},
+ "ports": [{"name": "http", "port": 8000}], "health": {"type": "http", "path": "/"},
+ "resources": {"cpu": 1, "memory": "512Mi", "gpus": {"count": 0}}, "machine_id": null}
+```
+
+| Field | What |
+|---|---|
+| `runtime` | `{"type": "container", "image", "command"?, "args"?}` (Docker or Podman; `command` replaces the entrypoint) or `{"type": "process", "command", "args"?, "workdir"?}` |
+| `env` | explicit variables only (see *Isolation*) |
+| `resources` | `cpu` (cores), `memory` (`4Gi`, `512Mi` or bytes), `gpus`: `{"count": n}` or `{"indices": [4]}` (on a chosen machine), optional `"vendor": "nvidia"/"amd"` |
+| `ports` | services: `[{"name", "port"}]`. The agent picks the **host port** from its range (30000-32767 by default) and the page shows the address. A process must listen on it: `$PORT`, or `${PORT}` / `${PORT_<NAME>}` in its arguments |
+| `health` | services: `{"type": "http" or "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay"}`. Shown as healthy / unhealthy; it does not restart anything |
+| `restart` | services: `always` (default), `on-failure`, `never`. Restarts back off 1, 2, 4… s, at most 60 s |
+| `max_duration`, `retries`, `retry_backoff` | tasks: a run longer than `max_duration` seconds is stopped and fails (no retry); a non-zero exit is retried `retries` times, `retry_backoff` seconds apart, doubling, at most 5 min |
+| `replicas`, `machine_id` | how many copies; a machine, or `null` for the first online machine with room |
+
+**Placement (M2):** the machine you chose, or the first online machine (by name) that has the
+runtime, enough free GPUs on its allowlist, and the CPU and memory the spec declares (counted
+against the replicas already there). GPUs are **exclusive**: one card, one replica. Something that
+does not fit waits as *pending* with the reason, and is placed as soon as room appears. The real
+scheduler (scoring, VRAM estimates, binpacking) is M3.
+
+**Who:** admins and operators create, stop, start and delete workloads and read their output.
+Everyone signed in sees the list, the status and the events, but not environment values or output
+(either can hold secrets). Creating, stopping, starting and deleting are in the audit log.
+
+**GPU allowlist per machine:** an admin chooses on the Machines page (**Change GPU access**) which
+cards Forgeyard may assign on each machine; by default all. A card outside the list is never
+assigned, whatever a spec asks; the page marks such cards *not for Forgeyard*. A card in use cannot
+be taken off the list (stop its workload first), and every change is audited with before and after.
+
+### Isolation
+
+- **Empty environment.** A process gets `PATH`, `HOME` (its own empty directory), `LANG`,
+  `USER`/`LOGNAME`, the declared `env`, its GPU and port variables and `FORGEYARD_REPLICA`,
+  `FORGEYARD_WORKLOAD`, `FORGEYARD_REPLICA_INDEX`. A container gets the declared `env`, its GPU
+  variables and identity; its image supplies the rest. Nothing of the agent's environment or the
+  host's credentials ever reaches a workload. GPU variables and `FORGEYARD_*`/`PORT*` cannot be
+  declared in a spec.
+- **GPUs, process runtime:** `CUDA_VISIBLE_DEVICES` and `NVIDIA_VISIBLE_DEVICES` hold the
+  assigned cards' **UUIDs** (CUDA numbers cards fastest-first, nvidia-smi by PCI bus, so an index
+  can name a different card; a UUID cannot), with `CUDA_DEVICE_ORDER=PCI_BUS_ID`. AMD:
+  `ROCR_VISIBLE_DEVICES` holds the ROCr UUIDs (`GPU-<KFD unique_id>`, the index when there is none)
+  and `HIP_VISIBLE_DEVICES` the renumbered `0..n-1`. Without GPUs every list is empty
+  (`NVIDIA_VISIBLE_DEVICES=void`), and on AMD the process also gets none of the device groups, so
+  the kernel keeps it off `/dev/kfd`. This is cooperative for NVIDIA (`/dev/nvidia*` are usually
+  world-readable); containers are enforced.
+- **GPUs, container runtime:** `--gpus "device=<uuid>"` (NVIDIA Container Toolkit) or CDI
+  `--device nvidia.com/gpu=<uuid>`; AMD: `--device /dev/kfd` plus only the assigned
+  `/dev/dri/renderD*`. `NVIDIA_VISIBLE_DEVICES` is always set (`void` without GPUs), because CUDA
+  images declare `all` and a host whose default Docker runtime is `nvidia` would otherwise expose
+  every card.
+- **Never root by default.** When the agent runs as root, process workloads run as
+  `--workload-user` (an unprivileged account, e.g. `nobody` or a dedicated user); without it,
+  process workloads are refused and the Machines page says why. An agent that is not root runs
+  processes as its own user. Containers run with the engine's defaults plus
+  `--security-opt no-new-privileges`, never `--privileged`.
+- **Limits.** Processes run in their own process group. On a systemd host with a root agent they get
+  a transient scope with `MemoryMax` and `CPUQuota`; otherwise only rlimits: no core dumps, and an
+  address-space cap for memory on workloads without GPUs (GPU runtimes reserve huge address
+  ranges). CPU is then not capped, only counted for placement. Containers get `--cpus` and
+  `--memory`.
+- **Ports.** Container ports are published on one address: the agent's own address towards the
+  server (`--bind-address` to change it).
+- Anyone who can create a workload can run code on the machines. That is why only admins and
+  operators can.
+
+### Desired state and the agent
+
+The server keeps, per machine, the full list of replicas that should run there (spec and
+generation) and sends it to the agent on connect and on every change (`desired`). The agent
+compares it with what actually runs, stops what is not wanted, starts what is missing, applies the
+restart, retry and time-limit rules and reports every replica's state (`status`). It never gets
+commands such as "start X", so a lost message, a reconnect or an agent restart just converges
+again.
+
+- **Adoption:** the agent remembers each replica in `<state dir>/replicas/` (pid, its kernel start
+  time and the boot id; container name). A restarted agent finds its processes (the same pids;
+  never a stranger that reused a pid) and its containers (labels `forgeyard.agent`,
+  `forgeyard.replica`, `forgeyard.generation`), takes them over and starts nothing twice. Until the
+  server's first list arrives it only watches. **Stopping the agent leaves workloads running**;
+  stop them from the UI.
+- **Output:** a process writes straight to `<state dir>/logs/<replica>/output.log`, kept to the last
+  `--log-max-mb` MB (10); containers use the engine's log driver with the same budget. The detail
+  page shows a live tail: the browser asks the server every 2 s and the server asks the agent over
+  its WebSocket. When a replica ends, its last 100 lines are kept on the server for the page.
+- **Protocol:** still version 1, extended compatibly. The agent lists `features: ["workloads"]` in
+  `hello`, the server answers with its own in `welcome`, and `desired`, `status`,
+  `logs_request` / `logs` only flow when both have it. An M1 agent keeps working (it is just
+  never given work); an M2 agent on an M1 server only reports hardware.
+- **Agent options:** `--workload-user`, `--work-dir` (one directory per process replica; default
+  next to the state directory, never inside it), `--port-range` (30000-32767),
+  `--bind-address`, `--container-engine auto|docker|podman|none|<path>`,
+  `--limits auto|systemd|rlimit`, `--log-max-mb`, `--no-workloads`. `python -m forgeyard agent
+  runtimes [--workload-user …]` prints what it can run here without joining.
+
+Real-hardware checks for workloads: [docs/acceptance-m2.md](docs/acceptance-m2.md).
+
 ## Accounts and sign-in
 
-- **Roles:** `admin` manages users and sees the audit log; `operator` will run machines and
-  deployments; `user` deploys their own work. The **owner** (the first account) is always an
+- **Roles:** `admin` manages users, machines and their GPU allowlists and sees the audit log;
+  `operator` runs workloads; `user` can look (and gets API keys in M4). The **owner** (the first account) is always an
   admin and cannot be demoted, disabled or deleted, so nobody can lock administration out.
 - **Passwords:** argon2id; at least 12 characters; common passwords (also with digits or
   symbols tacked on) and passwords containing the username are refused.
@@ -138,9 +246,12 @@ project.
 |---|---|
 | `forgeyard/app.py` | FastAPI app: guards, routes, the built UI |
 | `forgeyard/cli.py` | `python -m forgeyard [serve]` and `python -m forgeyard agent …` |
-| `forgeyard/api/` | `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines` |
+| `forgeyard/api/` | `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads` |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
+| `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
 | `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state file |
+| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, logs, health checks |
+| `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, secrets file |
 | `forgeyard/migrations/` | Alembic |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

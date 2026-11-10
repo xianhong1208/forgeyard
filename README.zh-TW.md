@@ -3,8 +3,9 @@
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器，之後也包括租用的雲端機器。
 每台機器上的 agent 回報硬體；你在上面跑 service、task 與開發環境，並用配方部署模型，統一走一個 OpenAI 相容的 gateway。
 
-> **狀態：里程碑 M0 與 M1（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成，機器可以透過 agent
-> 加入並回報硬體。Deployments 頁要等 workload（M2）才有內容。
+> **狀態：里程碑 M0、M1 與 M2（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
+> 加入並回報硬體；可以在機器上跑 service 與 task，以容器或程序執行，而且只拿得到分配給它的 GPU。
+> 模型部署在 M3。
 
 [English](README.md)
 
@@ -64,9 +65,91 @@ server 不需要能連到機器。
 
 這個里程碑的真機驗收步驟見 [docs/acceptance-m1.md](docs/acceptance-m1.md)（英文）。
 
+## Workload
+
+**workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
+可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。在
+**Workloads → New workload** 建立，或用 `POST /api/workloads` 送出 spec（欄位見英文 README 的表格）：
+
+```json
+{"name": "web", "kind": "service",
+ "runtime": {"type": "container", "image": "python:3.13-slim", "args": ["python", "-m", "http.server", "8000"]},
+ "ports": [{"name": "http", "port": 8000}], "health": {"type": "http", "path": "/"},
+ "resources": {"cpu": 1, "memory": "512Mi", "gpus": {"count": 0}}, "machine_id": null}
+```
+
+- **runtime：** `container`（Docker 或 Podman；`image`，可選 `command` 取代 entrypoint、`args`）或 `process`
+  （`command`、`args`、可選 `workdir`）。
+- **resources：** `cpu`（核心數）、`memory`（`4Gi`、`512Mi` 或位元組數）、`gpus`：`{"count": n}` 或
+  `{"indices": [4]}`（要先選機器），可加 `"vendor": "nvidia"/"amd"`。
+- **ports（service）：** agent 從自己的範圍（預設 30000-32767）挑 **host port**，頁面上會顯示位址。程序要聽在
+  這個 port：`$PORT`，或在參數裡寫 `${PORT}`／`${PORT_<NAME>}`。
+- **health（service）：** HTTP 或 TCP；只顯示 healthy／unhealthy，不會因此重啟。**restart：** `always`（預設）、
+  `on-failure`、`never`，重啟間隔 1、2、4… 秒，最多 60 秒。
+- **task：** 跑超過 `max_duration` 秒會被停止並判定失敗（不重試）；非 0 結束會重試 `retries` 次，間隔
+  `retry_backoff` 秒、每次加倍、最多 5 分鐘。
+
+**放置（M2）：** 你選的機器，或依名稱排序第一台有空間的線上機器：有對應的 runtime、allowlist 裡有足夠的空閒 GPU、
+spec 宣告的 CPU 與記憶體放得下（扣掉已在上面的 replica）。GPU 是**獨佔**的：一張卡只給一個 replica。放不下的
+replica 會停在 *pending* 並寫明原因，一有空間就自動放上去。真正的排程器（評分、VRAM 估算、binpack）在 M3。
+
+**權限：** admin 與 operator 可以建立、停止、啟動、刪除 workload，也能看輸出。登入的人都看得到清單、狀態與事件，
+但看不到環境變數的值與輸出（可能含機密）。建立、停止、啟動、刪除都記在稽核紀錄。
+
+**每台機器的 GPU allowlist：** admin 在 Machines 頁（**Change GPU access**）選這台機器上 Forgeyard 可以分配
+哪些卡，預設全部。不在清單上的卡，不管 spec 怎麼寫都不會被分配，頁面會標成 *not for Forgeyard*。使用中的卡不能
+從清單拿掉（先停掉那個 workload），每次修改都記在稽核紀錄，含修改前後。
+
+### 隔離
+
+- **空的環境變數。** 程序只拿到 `PATH`、`HOME`（自己的空目錄）、`LANG`、`USER`／`LOGNAME`、spec 宣告的
+  `env`、GPU 與 port 變數，以及 `FORGEYARD_REPLICA`／`FORGEYARD_WORKLOAD`／`FORGEYARD_REPLICA_INDEX`。容器只拿到
+  宣告的 `env`、GPU 變數與身分變數，其他由 image 提供。agent 自己的環境變數與主機的憑證絕不會傳給 workload。
+  GPU 變數、`FORGEYARD_*`、`PORT*` 不能在 spec 裡宣告。
+- **GPU（程序）：** `CUDA_VISIBLE_DEVICES` 與 `NVIDIA_VISIBLE_DEVICES` 放分配到的卡的 **UUID**（CUDA 預設依速度
+  排序、nvidia-smi 依 PCI bus 排序，用編號可能指到另一張卡，UUID 不會），並設 `CUDA_DEVICE_ORDER=PCI_BUS_ID`。
+  AMD：`ROCR_VISIBLE_DEVICES` 放 ROCr UUID（`GPU-<KFD unique_id>`，沒有時用編號），`HIP_VISIBLE_DEVICES` 放重新
+  編號的 `0..n-1`。沒有 GPU 時每個清單都是空的（`NVIDIA_VISIBLE_DEVICES=void`），AMD 上程序也不會拿到裝置的
+  群組，由核心擋住 `/dev/kfd`。NVIDIA 程序的隔離是「配合式」的（`/dev/nvidia*` 通常人人可讀）；容器才是強制的。
+- **GPU（容器）：** `--gpus "device=<uuid>"`（NVIDIA Container Toolkit）或 CDI `--device nvidia.com/gpu=<uuid>`；
+  AMD：`--device /dev/kfd` 加上分配到的那幾個 `/dev/dri/renderD*`。一定會設 `NVIDIA_VISIBLE_DEVICES`（沒 GPU 時
+  為 `void`），因為 CUDA image 預設寫 `all`，若主機 Docker 的預設 runtime 是 `nvidia`，否則會看到全部的卡。
+- **預設不用 root 跑。** agent 以 root 執行時，程序 workload 以 `--workload-user`（無特權帳號，例如 `nobody` 或
+  專用帳號）執行；沒設就拒絕執行程序 workload，Machines 頁會寫原因。agent 不是 root 時，程序以 agent 自己的身分
+  執行。容器用引擎預設值，加上 `--security-opt no-new-privileges`，絕不用 `--privileged`。
+- **資源限制。** 程序在自己的 process group。systemd 主機上、agent 為 root 時，放進有 `MemoryMax` 與 `CPUQuota`
+  的 transient scope；否則只有 rlimit：不產生 core dump，沒有 GPU 的 workload 用位址空間上限限制記憶體（GPU
+  runtime 會保留很大的位址空間）。這時 CPU 不會被限制，只在放置時計算。容器用 `--cpus` 與 `--memory`。
+- **Port。** 容器的 port 只綁在一個位址：agent 連到 server 時用的本機位址（可用 `--bind-address` 改）。
+- 能建立 workload 的人就能在機器上執行程式，所以只開放給 admin 與 operator。
+
+### 期望狀態與 agent
+
+server 為每台機器保存「應該在跑的 replica 完整清單」（spec 與 generation），在 agent 連上時與每次變動時送出
+（`desired`）。agent 比對實際在跑的東西：停掉不要的、啟動缺少的、套用重啟／重試／時間上限規則，並回報每個
+replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，所以掉訊息、重連或 agent 重啟後都只是再收斂一次。
+
+- **接管（adopt）：** agent 把每個 replica 記在 `<state dir>/replicas/`（pid、核心記錄的啟動時間與 boot id；
+  容器名稱）。重啟後的 agent 會找到自己的程序（同一個 pid；pid 被別人重用也不會認錯）與容器（label
+  `forgeyard.agent`、`forgeyard.replica`、`forgeyard.generation`），直接接管，不會重複啟動。收到 server 的第一份
+  清單之前只觀察、不動作。**停掉 agent 不會停掉 workload**；要停請從 UI 停。
+- **輸出：** 程序直接寫到 `<state dir>/logs/<replica>/output.log`，只保留最後 `--log-max-mb` MB（預設 10）；
+  容器用引擎的 log driver，額度相同。詳細頁會即時顯示：瀏覽器每 2 秒問 server，server 透過 WebSocket 問 agent。
+  replica 結束時，最後 100 行會存在 server 給頁面用。
+- **協定：** 仍是第 1 版，以相容方式擴充。agent 在 `hello` 列出 `features: ["workloads"]`，server 在 `welcome`
+  回覆自己的；雙方都有時才會傳 `desired`、`status`、`logs_request`／`logs`。M1 的 agent 照常運作（只是不會被
+  派工作）；M2 的 agent 連到 M1 的 server 只回報硬體。
+- **agent 選項：** `--workload-user`、`--work-dir`（每個程序 replica 一個目錄；預設在 state 目錄旁邊，不在裡面）、
+  `--port-range`（30000-32767）、`--bind-address`、`--container-engine auto|docker|podman|none|<路徑>`、
+  `--limits auto|systemd|rlimit`、`--log-max-mb`、`--no-workloads`。`python -m forgeyard agent runtimes
+  [--workload-user …]` 不加入 server，只印出這台機器能用哪些 runtime。
+
+workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)（英文）。
+
 ## 帳號與登入
 
-- **角色：** `admin` 管理使用者、看稽核紀錄；`operator` 之後負責機器與部署；`user` 部署自己的工作。
+- **角色：** `admin` 管理使用者、機器與其 GPU allowlist，並看稽核紀錄；`operator` 執行 workload；`user` 只能看
+  （M4 會拿到 API key）。
   **owner**（第一個帳號）永遠是 admin，不能被降級、停用或刪除，所以不會有人把管理權整個鎖死。
 - **密碼：** argon2id；至少 12 字元；常見密碼（含尾巴加數字或符號的變形）與包含使用者名稱的密碼會被拒絕。
 - **新使用者**由 admin 建立，admin 拿到一條**一次性連結**（72 小時）轉交對方，由本人自己設定密碼；
