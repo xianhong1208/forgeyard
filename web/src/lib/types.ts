@@ -221,8 +221,9 @@ export type EstimateResponse = { estimate: Estimate; placement: Placement; param
 
 export type Endpoint = {
   replica: number; machine: string | null; state: string; ready: boolean; url: string;
-  // M4: whether the engine requires its internal key, and what the gateway sent it since the server started.
-  protected?: boolean; served?: number; in_flight?: number;
+  // M4: whether the replica requires its internal key (guarded: on every path, by its agent's key
+  // guard), and what the gateway sent it since the server started.
+  protected?: boolean; guarded?: boolean; served?: number; in_flight?: number;
 };
 
 export type LiveCard = { replica: number; machine: string | null; key: string; index: number | null; vendor: string; model: string; total: number | null; free: number | null; used: number | null; reserved: number | null; updated_at: string };
@@ -247,6 +248,8 @@ export type KeyLimits = { default_rpm: number | null; default_tpm: number | null
 
 export type ApiKey = {
   id: string; name: string; prefix: string; models: string[] | null; rpm: number | null; tpm: number | null;
+  // The admin who set that limit on someone else's key: locked for its owner.
+  rpm_locked_by?: string | null; tpm_locked_by?: string | null;
   effective_rpm: number | null; effective_tpm: number | null; expires_at: string | null; created_at: string;
   last_used_at: string | null; revoked_at: string | null; revoked_by: string | null; status: "active" | "revoked" | "expired";
   user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };

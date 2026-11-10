@@ -161,14 +161,16 @@ function Gateway({ d }: { d: Deployment }) {
                 <span className={`chip chip-tone-${e.ready ? "ok" : "wait"}`}>{e.ready ? "ready" : e.state}</span>
                 <span className="mono small">#{e.replica}{e.machine ? ` on ${e.machine}` : ""}</span>
                 <span className="small">{num(e.served ?? 0)} requests{e.in_flight ? ` · ${e.in_flight} in flight` : ""}</span>
-                <span className={`chip ${e.protected ? "chip-tone-ok" : "chip-tone-wait"}`} title={e.protected
-                  ? "The engine requires the replica's internal key, which only the gateway has."
-                  : "The engine runs without a key: anyone who can reach its port can use it."}>{e.protected ? "internal key" : "no key"}</span>
+                <span className={`chip ${e.protected ? "chip-tone-ok" : "chip-tone-wait"}`} title={e.guarded
+                  ? "The agent's key guard holds this port: every path needs the replica's internal key, which only the gateway has. The engine itself listens on loopback only."
+                  : e.protected
+                    ? "The engine requires the replica's internal key on its /v1 routes; its other routes are open (the agent on that machine has no key guard yet)."
+                    : "The engine runs without a key: anyone who can reach its port can use it."}>{e.guarded ? "key guard" : e.protected ? "internal key" : "no key"}</span>
                 <span className="muted small mono gw-addr">{e.url}</span>
               </li>
             ))}
           </ul>
-          <p className="muted small">Requests sent since the server started. Calls straight to a replica's port without its internal key are refused (401).</p>
+          <p className="muted small">Requests sent since the server started. Calls straight to a replica's port without its internal key are refused (401) by the agent's key guard, on every path.</p>
         </>
       )}
     </section>

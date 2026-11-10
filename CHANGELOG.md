@@ -6,6 +6,38 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Key guard in front of every model replica.** vLLM 0.32's `VLLM_API_KEY` only covers `/v1`, `/v2`,
+  `/inference` and `/cohere`; `/invocations`, `/rerank`, `/pooling`, `/score`, `/classify` and
+  `/tokenize` answered anyone who could reach a replica's port. Now the engine listens on loopback
+  only (a process binds `127.0.0.1`, a container is published on `127.0.0.1:<internal port>`), and the
+  agent listens on the replica's published port with a small streaming reverse proxy that requires
+  `Authorization: Bearer <internal key>` on every path and method (401 `replica_key_required`
+  otherwise; constant-time comparison). SSE, chunked and multipart bodies stream both ways; a client
+  disconnect closes the engine's connection; hop-by-hop headers are dropped; an engine that is down
+  gets the connection closed unanswered, so the gateway fails over as before. Health checks go to the
+  engine's loopback port; nothing is open on the guard. The same mechanism for every recipe (the
+  engines' own key variables stay as defence in depth; a recipe without `api_key_env` is guarded too).
+  An adopted replica's guard opens again once the server has sent its key; while the agent is down the
+  replica is unreachable from outside. Replicas an older agent started are restarted behind a guard;
+  a process engine found listening beyond loopback is stopped and failed. Agent feature
+  `replica_guard`; with it the server gives every model replica a key (`env` null when the engine
+  reads none). The deployment page shows "key guard" per replica. `h11` is listed as a dependency (it
+  was installed already).
+- **Limits an admin sets on someone else's key are locked**: the owner can no longer change that
+  value (403 `limit_locked`), can still revoke the key and set the other limit; the API keys page shows
+  a lock with the admin's name, disables the field for the owner and offers admins *Unlock* (clearing
+  the value, back to the default). Locking and unlocking are audited (`api_key.changed` with `locked` /
+  `unlocked`). Migration `0006_key_locks`.
+- `scripts/accept_m4.py`: the vLLM paths (`/invocations`, `/rerank`, `/pooling`) on every replica
+  port are PASS checks expecting the guard's 401 (they were INFO lines), and a client's API key on a
+  replica port must get 401 too; model allowlists are checked for real (a key limited to one deployment
+  lists and reaches only that one, 403 `model_not_allowed` for the others; a key with no list made
+  before the deployments sees and reaches all of them).
+
+### Changed
+- Spreading a deployment's replicas over machines is documented as the default (unchanged).
+
 ## [1.0.0] — 2026-11-10
 
 The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared card) plus a CPU machine.

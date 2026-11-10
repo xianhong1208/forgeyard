@@ -375,6 +375,9 @@ class ApiKey(Base):
     # Requests and tokens per minute; NULL: the server's default (admins set defaults and caps).
     rpm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     tpm: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # The admin who set that limit on someone else's key (username); NULL: the owner may change it.
+    rpm_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    tpm_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

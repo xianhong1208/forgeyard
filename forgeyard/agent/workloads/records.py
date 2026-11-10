@@ -61,6 +61,9 @@ class Record:
     # M4: the environment variable that carries the engine's internal key. Only the name is kept
     # here; the key itself stays in the agent's memory (Supervisor.keys) and comes with `desired`.
     key_env: Optional[str] = None
+    # Behind the agent's key guard (guard.py): the server gave it an internal key. Its ports then
+    # carry an `internal` loopback port for the engine; the guard listens on `host_port`.
+    guarded: bool = False
 
     def public(self, *, with_tail: Optional[str] = None) -> dict:
         out = {"id": self.id, "generation": self.generation, "state": self.state, "reason": self.reason,

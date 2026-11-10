@@ -85,7 +85,10 @@ def test_fy_key_002_people_manage_their_own_keys_admins_all(owner):
     assert all("prefix" in d and "hash" not in d for _a, _t, d in created)
     changed = _audit("api_key.changed")
     assert ("owner", "renamed", {"key": uk["id"], "owner": "ursula",
-                                 "changes": {"rpm": {"before": 7, "after": 2}, "tpm": {"before": None, "after": 1000}}}) in changed
+                                 "changes": {"rpm": {"before": 7, "after": 2}, "tpm": {"before": None, "after": 1000},
+                                             "rpm_locked_by": {"before": None, "after": "owner"},
+                                             "tpm_locked_by": {"before": None, "after": "owner"}},
+                                 "locked": ["rpm", "tpm"]}) in changed
     assert [(a, t) for a, t, _d in _audit("api_key.revoked")] == [("owner", "olga-key")]
 
 
@@ -138,3 +141,57 @@ def test_fy_key_005_deleting_a_user_deletes_their_keys(owner):
     uid = next(x["id"] for x in owner.get("/api/users").json()["users"] if x["username"] == "temp")
     assert owner.delete(f"/api/users/{uid}").status_code == 200
     assert owner.get("/api/keys?all=true").json()["keys"] == []
+
+
+def test_fy_key_006_limits_an_admin_sets_are_locked_for_the_owner(owner):
+    """FY-KEY-006: an admin sets a limit on someone else's key: the owner can no longer change that value
+    (403 limit_locked, the value unchanged), may send it back unchanged, may still change the other
+    limit and revoke the key. The key says who locked it. An admin changes it further, and unlocks it
+    by clearing it (back to the default, the owner's again). All of it is in the audit log."""
+    add_user(owner, "ursula")
+    u = sign_in(owner, "ursula", PW)
+    k = new_key(u, "mine", rpm=10, tpm=1000)["api_key"]
+    assert (k["rpm_locked_by"], k["tpm_locked_by"]) == (None, None)
+    r = owner.patch(f"/api/keys/{k['id']}", json={"rpm": 3})
+    assert r.status_code == 200 and r.json()["api_key"]["rpm_locked_by"] == "owner"
+    assert r.json()["api_key"]["tpm_locked_by"] is None
+    listed = u.get("/api/keys").json()["keys"][0]
+    assert (listed["rpm"], listed["rpm_locked_by"]) == (3, "owner")
+    for value in (5, 2, None):
+        r = u.patch(f"/api/keys/{k['id']}", json={"rpm": value})
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "limit_locked"
+        assert "owner" in r.json()["detail"]["message"]
+    assert _row(k["id"]).rpm == 3
+    r = u.patch(f"/api/keys/{k['id']}", json={"rpm": 3, "tpm": 500, "name": "renamed"})  # rpm unchanged: fine
+    assert r.status_code == 200 and (r.json()["api_key"]["rpm"], r.json()["api_key"]["tpm"]) == (3, 500)
+    assert r.json()["api_key"]["tpm_locked_by"] is None
+    r = owner.patch(f"/api/keys/{k['id']}", json={"rpm": 4})
+    assert r.json()["api_key"]["rpm"] == 4 and r.json()["api_key"]["rpm_locked_by"] == "owner"
+    r = owner.patch(f"/api/keys/{k['id']}", json={"rpm": None})
+    assert (r.json()["api_key"]["rpm"], r.json()["api_key"]["rpm_locked_by"]) == (None, None)
+    assert u.patch(f"/api/keys/{k['id']}", json={"rpm": 6}).json()["api_key"]["rpm"] == 6  # unlocked
+    owner.patch(f"/api/keys/{k['id']}", json={"tpm": 50})
+    assert u.patch(f"/api/keys/{k['id']}", json={"tpm": 60}).status_code == 403
+    assert u.delete(f"/api/keys/{k['id']}").json()["api_key"]["status"] == "revoked"  # still theirs to revoke
+    changes = [d for _a, t, d in _audit("api_key.changed") if d["key"] == k["id"]]
+    assert changes[0]["locked"] == ["rpm"] and changes[0]["changes"]["rpm_locked_by"] == {"before": None, "after": "owner"}
+    unlock = next(d for d in changes if d.get("unlocked"))
+    assert unlock["unlocked"] == ["rpm"] and unlock["changes"]["rpm"] == {"before": 4, "after": None}
+    assert [d.get("locked") for d in changes].count(["tpm"]) == 1
+
+
+def test_fy_key_007_an_admins_own_keys_are_never_locked(owner):
+    """FY-KEY-007: on their own key an admin's limits are their own (no lock), and a locked key's caps
+    still do not apply to the admin's value (an admin may go past the cap)."""
+    mine = new_key(owner, "mine")["api_key"]
+    r = owner.patch(f"/api/keys/{mine['id']}", json={"rpm": 7, "tpm": 70})
+    assert (r.json()["api_key"]["rpm_locked_by"], r.json()["api_key"]["tpm_locked_by"]) == (None, None)
+    owner.put("/api/keys/limits", json={"max_rpm": 10})
+    add_user(owner, "ursula")
+    u = sign_in(owner, "ursula", PW)
+    k = new_key(u, "k")["api_key"]
+    r = owner.patch(f"/api/keys/{k['id']}", json={"rpm": 500})
+    assert r.json()["api_key"]["effective_rpm"] == 500 and r.json()["api_key"]["rpm_locked_by"] == "owner"
+    # the owner saves the form with the locked value unchanged and a new tpm: allowed, although 500 > cap
+    r = u.patch(f"/api/keys/{k['id']}", json={"rpm": 500, "tpm": 99})
+    assert r.status_code == 200 and r.json()["api_key"]["tpm"] == 99

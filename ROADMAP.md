@@ -23,7 +23,7 @@ Three pull requests, in this order:
    - Hugging Face search, showing an estimate and where each model would fit.
 2. **Security**
    - The agent guards every model replica, so a replica port cannot be used without the
-     replica's key (separate PR, in progress).
+     replica's key (PR `replica-guard`, together with the next item).
    - API key limits set by an admin are locked against the key's owner.
    - HTTPS out of the box from Forgeyard's own certificate authority:
      - the join command pins its fingerprint;

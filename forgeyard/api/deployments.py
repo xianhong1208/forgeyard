@@ -152,16 +152,19 @@ def estimate(body: DeploymentIn, _: Caller = Depends(require_operator), db: DbSe
 
 def _endpoints(w: Workload) -> list[dict]:
     """Each replica's own address, with what the gateway sent it since the server started. Whether
-    its engine requires the internal key (protected) is shown; the key never is."""
+    it requires the internal key (protected), and whether on every path (guarded: its agent's key
+    guard) or only on the engine's own /v1 routes, is shown; the key never is."""
     from forgeyard.gateway.balancer import balancer
-    from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
+    from forgeyard.machines.protocol import FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS
 
     by_ordinal = {r.ordinal: r for r in w.replicas}
     out = []
     for e in routes.endpoints(w):
         r = by_ordinal.get(e["replica"])
-        protected = bool(r and r.secret and r.node and FEATURE_REPLICA_KEYS in (r.node.features or []))
-        out.append({**e, "protected": protected, **(balancer.snapshot(r.uid) if r else {})})
+        features = (r.node.features or []) if r and r.node else []
+        protected = bool(r and r.secret and FEATURE_REPLICA_KEYS in features)
+        guarded = protected and FEATURE_REPLICA_GUARD in features
+        out.append({**e, "protected": protected, "guarded": guarded, **(balancer.snapshot(r.uid) if r else {})})
     return out
 
 

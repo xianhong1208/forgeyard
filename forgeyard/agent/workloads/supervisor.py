@@ -17,6 +17,12 @@ cancelled. Replicas that share a GPU are launched one at a time: the next starts
 before has loaded (passed its health check), so two engines never size themselves against the
 same free memory at once.
 
+Model replicas (M4) sit behind the agent's key guard (guard.py): the engine listens on loopback
+only, on a port only the agent knows, and the guard listens on the replica's published address and
+lets through only requests that carry the replica's internal key. The guard lives in the agent: it
+is opened when the key is known (it comes with `desired`, in memory only), so after an agent restart
+an adopted replica is unreachable from outside until the server has sent its key again.
+
 Everything is idempotent: running it again with the same desired list changes nothing, and an
 agent restart or a reconnect simply converges again. Until the first desired list arrives
 after a start, the agent keeps watching what it adopted but starts and stops nothing new.
@@ -35,8 +41,9 @@ from typing import Callable, Optional
 
 from pydantic import ValidationError
 
-from forgeyard.agent.workloads import health, ports as portlib
-from forgeyard.agent.workloads.process import find_leader
+from forgeyard.agent.workloads import health, plan, ports as portlib
+from forgeyard.agent.workloads.guard import Guard
+from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.machines.protocol import PROTOCOL_VERSION
 from forgeyard.workloads.spec import WorkloadSpec
@@ -85,9 +92,12 @@ class Supervisor:
         # memory only), cancel switches for downloads in flight, and the stops in flight.
         self.models = models
         self.tokens: dict[str, str] = {}
-        # M4: each model replica's internal key, {replica id: (variable, key)}, from `desired`. In
-        # memory only: never in a record, a log line or a status message.
-        self.keys: dict[str, tuple[str, str]] = {}
+        # M4: each model replica's internal key, {replica id: (variable or None, key)}, from
+        # `desired`. In memory only: never in a record, a log line or a status message. The guards in
+        # front of those replicas ({replica id: one per port}) and why one could not listen.
+        self.keys: dict[str, tuple[Optional[str], str]] = {}
+        self.guards: dict[str, list[Guard]] = {}
+        self.guard_errors: dict[str, str] = {}
         self.cancels: dict[str, threading.Event] = {}
         self.stopping: set[str] = set()
         self.cache_dirty = models is not None
@@ -123,9 +133,12 @@ class Supervisor:
             key = r.get("replica_key")
             if "replica_key" in r:
                 r = {k: v for k, v in r.items() if k != "replica_key"}
-                if isinstance(key, dict) and isinstance(key.get("env"), str) and key.get("value"):
-                    self.keys[r["id"]] = (key["env"], str(key["value"]))
-                    r["key_env"] = key["env"]
+                env = key.get("env") if isinstance(key, dict) else None
+                if isinstance(key, dict) and key.get("value") and (env is None or isinstance(env, str)):
+                    # env None: the engine takes no key of its own; the guard alone requires it.
+                    self.keys[r["id"]] = (env or None, str(key["value"]))
+                    r["key_env"] = env or None
+                    r["guarded"] = True
             desired[r["id"]] = r
         self.desired = desired
         self.full_due = True
@@ -179,10 +192,14 @@ class Supervisor:
                 pass
 
     async def close(self) -> None:
+        """The agent stops: operations end, and the guards close (their replicas are unreachable
+        from outside until an agent runs again: the safe direction)."""
         tasks = list(self.ops.values()) + list(self.probes.values())
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        for rid in list(self.guards):
+            await self._close_guard(rid)
 
     async def settle(self) -> None:
         """Wait for every operation in flight (tests)."""
@@ -252,6 +269,7 @@ class Supervisor:
                 self._maybe_probe(rec, now)
             await asyncio.to_thread(rt.trim, rec, self.log_max_bytes)
 
+        await self._sync_guards()
         if self.desired is None:
             self._start_due(now, restarts_only=True)  # keep adopted services alive; nothing new yet
             return
@@ -266,6 +284,16 @@ class Supervisor:
             if unwanted:
                 self.stopping.add(rec.id)
                 self._launch(rec.id, self._remove(rec))
+                continue
+            if want.get("guarded") and not rec.guarded:
+                rec.guarded = True
+                self._save(rec)
+            if (self._guarded(rec) and rec.id in self.keys and rec.state in LIVE and rec.ports
+                    and not plan.guarded(rec.ports)):
+                # Started by an agent without the guard: its engine listens on the published port
+                # itself. Restart it behind a guard (once its key is known, so it is not left down).
+                self.stopping.add(rec.id)
+                self._launch(rec.id, self._reguard(rec))
         if not self._orphans_swept:
             self._orphans_swept = True
             container = self.runtimes.get("container")
@@ -284,11 +312,14 @@ class Supervisor:
                          runtime=str(((want.get("spec") or {}).get("runtime") or {}).get("type")),
                          spec=want.get("spec") or {}, gpus=list(want.get("gpus") or []))
             rec.key_env = want.get("key_env")
+            rec.guarded = bool(want.get("guarded"))
             if rec.runtime not in self.runtimes:
                 rec.state, rec.final, rec.reason = "failed", True, f"this agent has no {rec.runtime} runtime"
             elif want.get("model") is not None or want.get("engine") is not None:
                 self._model_record(rec, want)
             owned = self._owned.pop(rid, None)
+            if owned and rec.guarded and not plan.guarded(owned["ports"]):
+                owned = dict(owned, generation=None)  # started without the guard: replaced, not adopted
             if owned and owned["generation"] == rec.generation and rec.runtime == "container":
                 rec.container, rec.ports, rec.state = owned["name"], owned["ports"], "running"
                 rec.started_at = now
@@ -392,9 +423,14 @@ class Supervisor:
         return out
 
     # ------------------------------------------------------------------ operations
+    @staticmethod
+    def _guarded(rec: Record) -> bool:
+        # key_env alone: a record written by an M4 agent, before the guard.
+        return rec.guarded or rec.key_env is not None
+
     async def _start(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
-        if rec.key_env and rec.id not in self.keys:
+        if self._guarded(rec) and rec.id not in self.keys:
             # Its internal key comes with the server's next `desired` (an agent restarted while the
             # server is away does not know it). Never start the engine without it: it would answer
             # anyone on its port.
@@ -418,17 +454,27 @@ class Supervisor:
             rec.attempt += 1
         elif rec.started_at is not None:
             rec.restarts += 1
-        if spec.ports and not rec.ports:
+        guard = self._guarded(rec)
+        if spec.ports and (not rec.ports or (guard and not plan.guarded(rec.ports))):
             # On the event loop, before any await: starts run concurrently, and a port must be
-            # reserved (in rec.ports) before the next start looks for a free one.
-            reserved = [p["host_port"] for r in self.records.values() for p in r.ports]
+            # reserved (in rec.ports) before the next start looks for a free one. A guarded replica
+            # takes two per port: the published one (the guard's) and an internal one (the engine's,
+            # on loopback; agent-local, never reported).
+            reserved = [n for r in self.records.values() for p in r.ports for n in (p["host_port"], p.get("internal")) if n]
+            fresh = not rec.ports
             try:
-                hosts = portlib.allocate(len(spec.ports), self.port_range, reserved, self.port_probe)
+                need = (len(spec.ports) if fresh else 0) + (len(spec.ports) if guard else 0)
+                got = portlib.allocate(need, self.port_range, reserved, self.port_probe)
             except RuntimeError as e:
                 await self._ended(rec, None, reason=str(e))
                 return
-            rec.ports = [{"name": p.name, "port": p.port, "host_port": h, "address": self.address}
-                         for p, h in zip(spec.ports, hosts)]
+            if fresh:
+                hosts, got = got[:len(spec.ports)], got[len(spec.ports):]
+                rec.ports = [{"name": p.name, "port": p.port, "host_port": h, "address": self.address}
+                             for p, h in zip(spec.ports, hosts)]
+            if guard:
+                for p, internal in zip(rec.ports, got):
+                    p["internal"] = internal
         rec.state = "starting"
         rec.reason = "pulling the image and starting the container" if rec.runtime == "container" else None
         rec.exit_code = None
@@ -460,9 +506,15 @@ class Supervisor:
             rec.started_at = self.clock()
             self._save(rec)
             self._notify(rec)
+        if guard and rec.ports:
+            # The guard first: if the published port cannot be held, the engine is not started.
+            problem = await self._open_guard(rec)
+            if problem:
+                await self._ended(rec, None, reason=problem)
+                return
         try:
-            key = self.keys.get(rec.id) if rec.key_env else None
-            if key is not None:
+            key = self.keys.get(rec.id) if guard else None
+            if key is not None and key[0]:
                 await asyncio.to_thread(rt.start, rec, self.address, {key[0]: key[1]})
             else:
                 await asyncio.to_thread(rt.start, rec, self.address)
@@ -525,6 +577,7 @@ class Supervisor:
                 rec.state, rec.final = ("failed" if failed else "exited"), True
                 rec.reason = what if failed else None
         if rec.final:
+            await self._close_guard(rec.id)
             text, _ = await asyncio.to_thread(rt.tail, rec, TAIL_LINES)
             self.tails[rec.id] = text[-TAIL_CHARS:]
             log.info("Replica %s of %s ended: %s.", rec.id[:12], rec.workload, rec.state + (f" ({rec.reason})" if rec.reason else ""))
@@ -558,6 +611,7 @@ class Supervisor:
 
     async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
+        await self._close_guard(rec.id)
         was_running = rec.state in LIVE
         if was_running or rec.state == "backoff":
             rec.stop_requested = True
@@ -597,26 +651,40 @@ class Supervisor:
         port = next((p for p in rec.ports if p["name"] == h.get("port")), rec.ports[0] if rec.ports else None)
         if port is None:
             return
-        if rec.key_env and rec.id not in self.keys:
+        if self._guarded(rec) and rec.id not in self.keys:
             return  # adopted after an agent restart; probed again once the server sent its key
         rec.last_probe_at = now
-        # Processes usually listen on every address (probe loopback); a model engine run as a process
-        # binds only the agent's address, like a container's published port.
-        if self.address in ("0.0.0.0", "::") or (rec.runtime == "process" and rec.model is None):
-            host = "127.0.0.1"
+        if port.get("internal"):
+            # Behind the guard: the engine itself, on loopback. The guard has nothing open, not even
+            # the health path; that it listens is known here without asking it.
+            host, number = plan.LOOPBACK, int(port["internal"])
+        elif self.address in ("0.0.0.0", "::") or (rec.runtime == "process" and rec.model is None):
+            # Processes usually listen on every address (probe loopback); a model engine run as a
+            # process binds only the agent's address, like a container's published port.
+            host, number = "127.0.0.1", int(port["host_port"])
         else:
-            host = self.address
-        self.probes[rec.id] = asyncio.create_task(self._probe(rec, h, host, int(port["host_port"])))
+            host, number = self.address, int(port["host_port"])
+        self.probes[rec.id] = asyncio.create_task(self._probe(rec, h, host, number))
 
     async def _probe(self, rec: Record, h: dict, host: str, port: int) -> None:
         args = (h.get("type", "http"), host, port, h.get("path") or "/", float(h.get("timeout") or 3))
-        key = self.keys.get(rec.id) if rec.key_env else None
+        key = self.keys.get(rec.id) if self._guarded(rec) else None
         if key is not None:  # speaches guards /health too; vLLM and llama.cpp ignore it there
             err = await asyncio.to_thread(self.prober, *args, headers={"Authorization": f"Bearer {key[1]}"})
         else:
             err = await asyncio.to_thread(self.prober, *args)
         if self.records.get(rec.id) is not rec or rec.state not in LIVE or rec.id in self.ops:
             return
+        if err is None and rec.runtime == "process" and plan.guarded(rec.ports):
+            open_on = await asyncio.to_thread(beyond_loopback, [int(p["internal"]) for p in rec.ports])
+            if open_on:
+                # The engine ignored ${BIND_ADDRESS} and listens beyond loopback: it could be used
+                # around the guard. Stopped, never served.
+                self.stopping.add(rec.id)
+                self._launch(rec.id, self._exposed(rec, open_on))
+                return
+        if err is None and self._guarded(rec) and rec.id in self.guard_errors:
+            err = self.guard_errors[rec.id]
         before = (rec.state, rec.reason)
         if err is None:
             rec.health_failures = 0
@@ -635,3 +703,98 @@ class Supervisor:
         if (rec.state, rec.reason) != before:
             self._save(rec)
             self._notify(rec)
+
+    # ------------------------------------------------------------------ the key guard
+    async def _open_guard(self, rec: Record) -> Optional[str]:
+        """Make sure a guard listens on each of the replica's published ports, with its current key.
+        None when they do, else why not (also kept in guard_errors, which fails its health)."""
+        key = self.keys.get(rec.id)
+        guards = self.guards.get(rec.id)
+        if guards is not None:
+            for g in guards:
+                if not g.has_key(key[1] if key else None):
+                    g.set_key(key[1] if key else None)
+            return None
+        opened: list[Guard] = []
+        for p in rec.ports:
+            if not p.get("internal"):
+                continue
+            g = Guard(listen=(p.get("address") or self.address, int(p["host_port"])),
+                      upstream=(plan.LOOPBACK, int(p["internal"])), key=key[1] if key else None,
+                      name=f"{rec.workload} #{rec.ordinal}")
+            try:
+                await g.start()
+            except OSError as e:
+                for o in opened:
+                    await o.close()
+                problem = (f"the agent cannot listen on {g.listen[0]}:{g.listen[1]} for the replica's key guard "
+                           f"({e.strerror or e})")
+                if self.guard_errors.get(rec.id) != problem:
+                    log.warning("Replica %s of %s: %s.", rec.id[:12], rec.workload, problem)
+                self.guard_errors[rec.id] = problem
+                return problem
+            opened.append(g)
+        self.guards[rec.id] = opened
+        if self.guard_errors.pop(rec.id, None) is not None or opened:
+            log.info("Key guard of replica %s of %s listens on %s.", rec.id[:12], rec.workload,
+                     ", ".join(f"{g.listen[0]}:{g.listen[1]}" for g in opened))
+        return None
+
+    async def _close_guard(self, rec_id: str) -> None:
+        self.guard_errors.pop(rec_id, None)
+        for g in self.guards.pop(rec_id, []):
+            await g.close()
+
+    async def _sync_guards(self) -> None:
+        """A guard for every guarded replica that has its key and is not over; none for the rest.
+        Adoption after an agent restart comes down to this: the engine kept running, and its guard is
+        opened again as soon as the server has sent the key."""
+        for rec in list(self.records.values()):
+            want = (self._guarded(rec) and rec.id in self.keys and not rec.final and plan.guarded(rec.ports)
+                    and rec.id not in self.stopping)
+            if want:
+                await self._open_guard(rec)
+            elif rec.id in self.guards:  # over, or being stopped and removed
+                await self._close_guard(rec.id)
+        for rid in [r for r in self.guards if r not in self.records]:
+            await self._close_guard(rid)
+
+    async def _reguard(self, rec: Record) -> None:
+        try:
+            rt = self.runtimes[rec.runtime]
+            log.info("Replica %s of %s was started without the key guard; restarting it behind one.",
+                     rec.id[:12], rec.workload)
+            rec.stop_requested = True
+            rec.reason = "restarting behind the agent's key guard"
+            self._save(rec)
+            self._notify(rec)
+            await asyncio.to_thread(rt.stop, rec, self.stop_grace)
+            await asyncio.to_thread(rt.cleanup, rec)
+            rec.stop_requested = rec.loading = False
+            rec.state, rec.next_start_at = "pending", None
+            rec.pid = None if rec.runtime == "process" else rec.pid
+            self._save(rec)
+            self._notify(rec)
+        finally:
+            self.stopping.discard(rec.id)
+
+    async def _exposed(self, rec: Record, where: list[str]) -> None:
+        try:
+            rt = self.runtimes[rec.runtime]
+            await self._close_guard(rec.id)
+            rec.stop_requested = True
+            self._save(rec)
+            await asyncio.to_thread(rt.stop, rec, self.stop_grace)
+            await asyncio.to_thread(rt.cleanup, rec)
+            rec.stop_requested = rec.loading = False
+            rec.state, rec.final, rec.finished_at = "failed", True, self.clock()
+            rec.pid = None
+            rec.reason = (f"the engine listens on {', '.join(where)}, not only on loopback, so it could be used "
+                          "around the key guard; it was stopped (its recipe must bind {host})")[:400]
+            log.warning("Replica %s of %s: %s.", rec.id[:12], rec.workload, rec.reason)
+            text, _ = await asyncio.to_thread(rt.tail, rec, TAIL_LINES)
+            self.tails[rec.id] = text[-TAIL_CHARS:]
+            self._save(rec)
+            self._notify(rec)
+        finally:
+            self.stopping.discard(rec.id)

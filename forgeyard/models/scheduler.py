@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, utcnow
-from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_WORKLOADS
+from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
 from forgeyard.models import render, sources
 from forgeyard.models.catalog import Context, context_for, deployment_of, model_block
 from forgeyard.models.estimate import EstimateError, gib
@@ -319,8 +319,10 @@ def place_replica(db: DbSession, r: Replica) -> Optional[int]:
     r.model = model_block(ctx.model)
     r.engine = render.engine_block(ctx, opt.variant)
     # A fresh internal key for every placement (M4): only the gateway, which adds it, can use the
-    # engine. None when the recipe's engine takes no key.
-    r.secret = secrets.token_urlsafe(32) if ctx.recipe.api_key_env else None
+    # engine. An agent with the key guard requires it on every path, whatever the engine; elsewhere
+    # only an engine that reads a key (the recipe's api_key_env) gets one.
+    guard = FEATURE_REPLICA_GUARD in (opt.node.features or [])
+    r.secret = secrets.token_urlsafe(32) if (ctx.recipe.api_key_env or guard) else None
     r.state = "pending"
     r.download = None
     r.reason = None if opt.node.status == "online" else f"waiting for {opt.node.name} to come online"

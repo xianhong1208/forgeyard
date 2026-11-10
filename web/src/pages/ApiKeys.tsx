@@ -1,6 +1,7 @@
-import { IconKey, IconPlus } from "@tabler/icons-react";
+import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
+import { useAuth } from "../auth";
 import { CopyBox, Field, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
@@ -20,6 +21,18 @@ const STATUS_TONE: Record<ApiKey["status"], string> = { active: "ok", revoked: "
 
 function capText(n: number | null): string {
   return n ? `at most ${num(n)}` : "no cap";
+}
+
+type LimitName = "rpm" | "tpm";
+const LIMIT_LABEL: Record<LimitName, string> = { rpm: "Requests", tpm: "Tokens" };
+
+// A limit an admin set on someone else's key: its owner cannot change it.
+function LockChip({ by }: { by: string }) {
+  return (
+    <span className="chip chip-lock" title={`Set by the admin ${by}; only an admin can change it.`}>
+      <IconLock size={12} stroke={2} aria-hidden="true" /> set by {by}
+    </span>
+  );
 }
 
 export function ApiKeysPage() {
@@ -126,16 +139,38 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
   k: ApiKey; everyone: boolean; isAdmin: boolean; limits: KeyLimits; editing: boolean; onEdit: () => void;
   onSaved: (text: string) => void; onError: (text: string) => void; onRevoke: () => void;
 }) {
+  const { user } = useAuth();
   const [rpm, setRpm] = useState(k.rpm ? String(k.rpm) : "");
   const [tpm, setTpm] = useState(k.tpm ? String(k.tpm) : "");
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
+  const own = user?.id === k.user.id;
+  const lockedBy: Record<LimitName, string | null> = { rpm: k.rpm_locked_by ?? null, tpm: k.tpm_locked_by ?? null };
+  // Only what changed is sent: an unchanged locked value is not "changed" by its owner saving the other one.
+  const patch = (values: Record<LimitName, string>) => Object.fromEntries((["rpm", "tpm"] as LimitName[])
+    .map((n) => [n, values[n] ? Number(values[n]) : null] as const)
+    .filter(([n, v]) => v !== k[n]));
+  const send = async (body: Record<string, number | null>, done: string) => {
     try {
-      await api(`/keys/${k.id}`, { method: "PATCH", body: { rpm: rpm ? Number(rpm) : null, tpm: tpm ? Number(tpm) : null } });
-      onSaved(`Limits of ${k.name} saved.`);
+      await api(`/keys/${k.id}`, { method: "PATCH", body });
+      onSaved(done);
     } catch (err) {
       onError(errorText(err));
     }
+  };
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    const body = patch({ rpm, tpm });
+    if (Object.keys(body).length === 0) {
+      onEdit();
+      return;
+    }
+    await send(body, `Limits of ${k.name} saved.`);
+  };
+  const lockHint = (n: LimitName, base: string) => {
+    const by = lockedBy[n];
+    if (by && !isAdmin) return <>Set by the admin <strong>{by}</strong>; only an admin can change it.</>;
+    if (by) return <>Locked for {k.user.username ?? "the owner"} (set by {by}). Clear it to unlock.</>;
+    if (isAdmin && !own) return `${base} Saving a value locks it for ${k.user.username ?? "the owner"}.`;
+    return base;
   };
   const active = k.status === "active";
   return (
@@ -148,8 +183,10 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
         {everyone && <td data-label="Owner" className="mono small">{k.user.username ?? "—"}</td>}
         <td data-label="Models" className="small">{keyModels(k)}</td>
         <td data-label="Limits" className="small">
-          <div><span className="muted">Requests</span> {k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"}</div>
-          <div><span className="muted">Tokens</span> {k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}</div>
+          <div><span className="muted">Requests</span> {k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"}
+            {lockedBy.rpm && <> <LockChip by={lockedBy.rpm} /></>}</div>
+          <div><span className="muted">Tokens</span> {k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}
+            {lockedBy.tpm && <> <LockChip by={lockedBy.tpm} /></>}</div>
           {active && (k.this_minute.requests > 0 || k.this_minute.tokens > 0) && (
             <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
           )}
@@ -172,13 +209,19 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
           <td colSpan={everyone ? 8 : 7}>
             <form className="limits-form" onSubmit={save} aria-label={`Limits of ${k.name}`}>
               <Field label="Requests per minute" name={`rpm-${k.id}`} type="number" min={1} value={rpm} onChange={(e) => setRpm(e.target.value)}
-                placeholder={limits.default_rpm ? `default ${limits.default_rpm}` : "server default"}
-                hint={isAdmin ? "Admins may set any value." : `Empty: the default; ${capText(limits.max_rpm)}.`} />
+                placeholder={limits.default_rpm ? `default ${limits.default_rpm}` : "server default"} disabled={!isAdmin && !!lockedBy.rpm}
+                hint={lockHint("rpm", isAdmin ? "Admins may set any value." : `Empty: the default; ${capText(limits.max_rpm)}.`)} />
               <Field label="Tokens per minute" name={`tpm-${k.id}`} type="number" min={1} value={tpm} onChange={(e) => setTpm(e.target.value)}
-                placeholder={limits.default_tpm ? `default ${limits.default_tpm}` : "server default"}
-                hint={isAdmin ? "Prompt and completion tokens together." : `Empty: the default; ${capText(limits.max_tpm)}.`} />
+                placeholder={limits.default_tpm ? `default ${limits.default_tpm}` : "server default"} disabled={!isAdmin && !!lockedBy.tpm}
+                hint={lockHint("tpm", isAdmin ? "Prompt and completion tokens together." : `Empty: the default; ${capText(limits.max_tpm)}.`)} />
               <div className="row-gap limits-actions">
-                <button type="submit" className="btn btn-primary btn-small">Save limits</button>
+                <button type="submit" className="btn btn-primary btn-small" disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm}>Save limits</button>
+                {isAdmin && (["rpm", "tpm"] as LimitName[]).filter((n) => lockedBy[n]).map((n) => (
+                  <button key={n} type="button" className="btn btn-quiet btn-small"
+                    onClick={() => void send({ [n]: null }, `${LIMIT_LABEL[n]} limit of ${k.name} unlocked; it is the default again.`)}>
+                    <IconLock size={14} aria-hidden="true" /> Unlock {LIMIT_LABEL[n].toLowerCase()}
+                  </button>
+                ))}
                 <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>Cancel</button>
               </div>
             </form>

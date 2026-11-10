@@ -239,7 +239,8 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   Forgeyard's reservations that are not in that number yet, minus `VRAM_HEADROOM_MIB` (512). Never
   the card's total. When nothing fits the deployment is refused and every machine says why and by
   how much (`wait: true` queues it instead). Replicas of one deployment go to **different machines**
-  when they can (before binpack), so the gateway can balance and fail over between them.
+  when they can (before binpack), so the gateway can balance and fail over between them. This
+  spreading is the default and always on; replicas share a machine only when no other machine fits.
 - **Sharing a GPU** (`share: vram`): several replicas on one card, each held to its own
   reservation; a shared card is never shared with an exclusive replica. vLLM's
   `--gpu-memory-utilization` is a fraction of the card's **total** memory and vLLM refuses to start
@@ -278,6 +279,12 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   request. Admins see and revoke everyone's keys, change any key's limits, and set the **defaults**
   (for keys without their own limit) and **caps** (the most people may give their own keys). Creating,
   changing and revoking keys are in the audit log.
+- **Limits an admin sets are locked.** When an admin sets the requests or tokens per minute of
+  someone else's key, its owner can no longer change that value (403 `limit_locked`); the key shows a
+  lock with the admin's name. The owner can still revoke the key and set a limit no admin set. An
+  admin changes a locked value at will and **unlocks** it by clearing it (back to the default, the
+  owner's to set again). Locking and unlocking are in the audit log (`api_key.changed`, `locked` /
+  `unlocked`). An admin's own keys are never locked.
 - **Only keys on `/v1`**: the console's cookie is never read there (a web page cannot use a signed-in
   browser against it), so the console's CSRF rule does not apply; the host check (421) does. No CORS.
 - **Routing:** the ready replicas of the model, fewest requests in flight first, ties in turn. If
@@ -302,15 +309,33 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage.
 - **Replicas cannot be used around the gateway.** Every model replica gets an **internal key**, new
-  with every placement. The agent passes it to the engine in the **environment** (vLLM
-  `VLLM_API_KEY`, llama.cpp `LLAMA_API_KEY`, speaches `API_KEY`; a recipe names its variable with
-  `api_key_env`), never on the command line, keeps it in memory only and sends it with health checks;
-  it is never shown in the UI, the API, a spec or a log. Only the gateway and *Try it* send it. A call
-  straight to a replica's port without it gets 401 (speaches: 403). **vLLM 0.32 checks the key only on
-  `/v1`, `/v2`, `/inference` and `/cohere`**: its `/invocations`, `/rerank`, `/score`, `/pooling` and
-  `/tokenize` stay open on the replica's port, so keep the replica port range (30000-32767) reachable
-  from the server only (firewall) on a shared network. Replicas started by an agent from before M4
-  have no key until they are placed again (stop and start the deployment after updating the agent).
+  with every placement. Only the gateway and *Try it* send it; it is never shown in the UI, the API,
+  a spec or a log. The agent keeps it in memory only and enforces it with its **key guard**:
+  - The **engine listens on loopback only**, on a port only the agent knows: a process binds
+    `127.0.0.1` (the recipe's `{host}`), a container is published on `127.0.0.1:<internal port>`.
+  - The agent itself listens on the replica's **published** address and port (the one the server and
+    the gateway know) and passes a request on only with `Authorization: Bearer <internal key>`, on
+    **every path and method** (key compared in constant time); everything else gets 401
+    `replica_key_required` and never reaches the engine. This closes what the engines leave open:
+    vLLM 0.32 checks its own key only on `/v1`, `/v2`, `/inference` and `/cohere`, so its
+    `/invocations`, `/rerank`, `/score`, `/pooling`, `/classify` and `/tokenize` would answer anyone.
+  - Bodies stream both ways as they come (SSE, chunked and multipart uploads, large answers); a client
+    that disconnects closes the engine's connection; hop-by-hop headers are dropped. If the engine is
+    down the guard closes the connection unanswered, so the gateway tries the next replica.
+  - The guard has nothing open, not even `/health`: the agent checks health on the engine's loopback
+    port. A process engine found listening beyond loopback (a recipe that ignores `{host}`) is
+    stopped and failed.
+  - The engines still get the key in their **environment** too (vLLM `VLLM_API_KEY`, llama.cpp
+    `LLAMA_API_KEY`, speaches `API_KEY`; a recipe names its variable with `api_key_env`), never on the
+    command line: defence in depth. A recipe without `api_key_env` is guarded the same way.
+  - The guard lives in the agent. **While the agent is down, its replicas are unreachable from
+    outside** (the engines keep running); a restarted agent adopts them and opens their guards again
+    as soon as the server has sent their keys. Anyone who can run code on the machine itself (Forgeyard
+    workloads there included) can reach the loopback port; there the engine's own key still guards
+    its `/v1` routes.
+  - Replicas started by an older agent are restarted behind a guard once the new agent has their key
+    (same published port); those from before M4 have no key until they are placed again (stop and
+    start the deployment). Plain workloads (not models) are not guarded.
 
 Real-hardware checks: [docs/acceptance-m4.md](docs/acceptance-m4.md) and `scripts/accept_m4.py`.
 

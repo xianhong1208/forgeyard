@@ -79,12 +79,27 @@ def gpu_env(gpus: list[dict], runtime: str) -> dict[str, str]:
     return env
 
 
+LOOPBACK = "127.0.0.1"
+
+
+def guarded(ports: list[dict]) -> bool:
+    """A replica behind the agent's key guard: its ports carry an `internal` loopback port, where
+    the engine listens, while the guard listens on `host_port` (see guard.py)."""
+    return any(p.get("internal") for p in ports)
+
+
+def listen_port(p: dict) -> int:
+    """Where the process itself must listen: the internal loopback port when guarded."""
+    return int(p.get("internal") or p["host_port"])
+
+
 def port_env(ports: list[dict], runtime: str) -> dict[str, str]:
-    """PORT (the first) and PORT_<NAME>: the host port for a process, which must listen on it.
-    A container keeps its own port; the engine maps the host port to it."""
+    """PORT (the first) and PORT_<NAME>: the host port for a process, which must listen on it (the
+    internal loopback port when the replica is guarded). A container keeps its own port; the engine
+    maps the host port to it."""
     env: dict[str, str] = {}
     for i, p in enumerate(ports):
-        value = str(p["host_port"] if runtime == "process" else p.get("port") or p["host_port"])
+        value = str(listen_port(p) if runtime == "process" else p.get("port") or p["host_port"])
         env[port_var(p["name"])] = value
         if i == 0:
             env["PORT"] = value
@@ -201,8 +216,9 @@ def container_run_argv(engine: str, *, name: str, image: str, command: Optional[
                        render_devices: list[str], render_gids: list[int], log_max_bytes: int,
                        mounts: Optional[list[tuple[str, str]]] = None) -> list[str]:
     """`docker run` / `podman run`. No --privileged, ever; no new privileges; only the assigned
-    cards; host ports bound to one address (the agent's own on the network to the server). The
-    only volume ever mounted is a model's cache entry, read-only (M3)."""
+    cards; host ports bound to one address (the agent's own on the network to the server), or, for
+    a guarded replica, to loopback on its internal port (the agent's guard holds the published one).
+    The only volume ever mounted is a model's cache entry, read-only (M3)."""
     argv = [engine, "run", "-d", "--name", name, "--security-opt", "no-new-privileges", "--restart", "no",
             "--env-file", env_file]
     for key, value in sorted(labels.items()):
@@ -213,7 +229,10 @@ def container_run_argv(engine: str, *, name: str, image: str, command: Optional[
     else:
         argv += ["--log-driver", "json-file", "--log-opt", f"max-size={size}", "--log-opt", "max-file=2"]
     for p in ports:
-        argv += ["-p", f"{bind}:{p['host_port']}:{p['port']}/tcp"]
+        if p.get("internal"):
+            argv += ["-p", f"{LOOPBACK}:{p['internal']}:{p['port']}/tcp"]
+        else:
+            argv += ["-p", f"{bind}:{p['host_port']}:{p['port']}/tcp"]
     for host, inside in mounts or []:
         argv += ["--mount", f"type=bind,source={host},target={inside},ro=true"]
     if cpu:
