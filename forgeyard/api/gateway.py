@@ -75,7 +75,8 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
     except GatewayError as e:
-        proxy.record(caller, parsed.model if parsed else "", route.deployment_id if route else None, e.status, started)
+        if parsed is not None:  # a body without a model is not counted under any model
+            proxy.record(caller, parsed.model, route.deployment_id if route else None, e.status, started)
         return e.response()
     try:
         return await proxy.forward(request, caller=caller, route=route, endpoint=endpoint, parsed=parsed, started=started)

@@ -6,6 +6,54 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added — M4: unified API (the MVP)
+- **Gateway** at `/v1` on the server's own port, OpenAI-compatible: `GET /v1/models` (and
+  `/v1/models/{model}`), `POST /v1/chat/completions`, `/v1/completions` (SSE streaming passed through
+  as it arrives), `/v1/embeddings`, `/v1/rerank`, `/v1/score`, `/v1/audio/transcriptions` and
+  `/translations` (multipart, the model field rewritten, the audio untouched). Only API keys open it,
+  never the console cookie; no CSRF rule there, the host check applies; no CORS. Errors in OpenAI's
+  shape: 401, 403 (model not allowed), 404 (unknown model), 400 (wrong endpoint), 429 with
+  `Retry-After`, 503 (no ready replica, with each replica's state), 502, 504.
+- **Routing**: least requests in flight per ready replica, ties in turn; a replica that cannot be
+  connected to is skipped before anything reaches the client and tried last until its agent reports
+  it ready again (at most 15 s); a client that disconnects closes the upstream request.
+  `GATEWAY_CONNECT_TIMEOUT` (5 s), `GATEWAY_READ_TIMEOUT` (600 s), `GATEWAY_MAX_BODY_MB` (32).
+- **API keys**: `fyk_` + 256 random bits, shown once (with curl and Python `openai` examples), stored
+  as SHA-256 with a 12-character prefix; optional expiry and model allowlist; rpm and tpm per key, with
+  admin-set defaults and caps (`GATEWAY_DEFAULT_RPM`/`_TPM`, `GATEWAY_MAX_RPM`/`_TPM` as initial
+  values); revoke, expiry and a disabled owner take effect on the next request. Everyone manages
+  their own keys; admins list and revoke all keys and change any key's limits. Audit events
+  `api_key.created`, `api_key.changed`, `api_key.revoked`, `api_key_limits.changed`.
+- **Limits**: sliding 60-second windows per key in the server's memory; tokens from the answers'
+  `usage` (for streamed chats the gateway sets `stream_options.include_usage` and strips that chunk
+  unless the client asked for it); `max_tokens` held while a request runs.
+- **Usage statistics** per UTC day, source (API key or console), key, user and model: requests,
+  errors, limit refusals, prompt and completion tokens, latency histogram (p50/p95); written every
+  5 s (`USAGE_FLUSH_SECONDS`). `GET /api/usage` (own; admins everyone's), per deployment on its page.
+- **Internal replica keys**: every model replica gets a random key per placement; the agent passes it
+  to the engine through the environment only (`api_key_env` in recipes: `VLLM_API_KEY` for vLLM,
+  `LLAMA_API_KEY` for llama.cpp, `API_KEY` for speaches), keeps it in memory only, and sends it with
+  health checks (speaches guards `/health`); the gateway and *Try it* send it upstream. Never in the
+  API, specs, events or logs. Agent feature `replica_keys` (protocol v1, compatible).
+- **Playground** in the console (`/api/playground/…`, session + CSRF): chat with streaming,
+  embeddings, rerank, speech to text; no API key is created; counted as "console".
+- Pages **API keys**, **Usage**, **Playground**; a deployment's page shows its `/v1` model name and
+  endpoint, its usage and each replica's requests and whether its engine requires the internal key.
+- `scripts/accept_m4.py` (makes its own venv with the official `openai` SDK when needed) and
+  `docs/acceptance-m4.md`.
+- Migration `0005_gateway`. `httpx` is a runtime dependency; `openai` a dev dependency (tests).
+
+### Changed — M4
+- The request guard is a pure ASGI middleware (streamed answers pass straight through).
+- Replicas of one deployment are spread over machines before binpacking.
+- *Try it* sends the replica's internal key.
+
+### Fixed — M4
+- A process replica whose wrapper died left its engine running and holding the port, so every restart
+  failed. Leftovers of the process group were only recognised by a marker in `/proc/<pid>/environ`,
+  which a root agent in a container without `CAP_SYS_PTRACE` cannot read for another user's
+  processes; the group itself is used then (unless its id was reused).
+
 ### Added — M3: model deployment
 - **Catalog** of models (admins): `hf://<org>/<name>` pinned to the commit a revision resolves to, a
   GGUF file from an admin-allowed host, or `local://` under admin-allowed directories. Models are

@@ -130,6 +130,15 @@ const usage = (over: Partial<UsageResponse> = {}): UsageResponse => {
 };
 
 describe("Usage", () => {
+  it("people who are not admins see only their own usage", async () => {
+    const fetch = server((url) => url.startsWith("/api/usage") ? { status: 200, body: usage({ is_admin: false }) } : undefined, USER);
+    mount("/usage");
+    expect(await screen.findByLabelText("Totals")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Everyone" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Person" })).toBeNull();
+    expect(fetch.mock.calls.every(([u]) => !String(u).includes("everyone"))).toBe(true);
+  });
+
   it("shows totals and rows, and changes the period, the grouping and whose usage", async () => {
     const fetch = server((url) => url.startsWith("/api/usage") ? { status: 200, body: usage() } : undefined);
     mount("/usage");

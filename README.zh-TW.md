@@ -3,9 +3,10 @@
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器，之後也包括租用的雲端機器。
 每台機器上的 agent 回報硬體；你在上面跑 service、task 與開發環境，並用配方部署模型，統一走一個 OpenAI 相容的 gateway。
 
-> **狀態：里程碑 M0 到 M3（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
+> **狀態：里程碑 M0 到 M4，MVP 完成（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
 > 加入並回報硬體；可以在機器上跑 service 與 task，以容器或程序執行，而且只拿得到分配給它的 GPU；
-> 也能從目錄挑模型、用引擎配方部署，依記憶體估算放到合適的機器上。統一的 `/v1` gateway 與 API key 在 M4。
+> 能從目錄挑模型、用引擎配方部署，依記憶體估算放到合適的機器上；所有部署都在同一個 OpenAI 相容的 `/v1` gateway 後面，
+> 有 API key、限流、用量統計與 playground。
 
 [English](README.md)
 
@@ -151,8 +152,8 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
 ## 模型
 
 **模型 → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
-會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由（M4 的 gateway 會用）；在那之前，
-每個 replica 用自己的 port 對外（頁面顯示網址，並有一個小小的 **Try it**）。
+會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
+（見「Gateway 與 API key」）。部署頁顯示這個名稱、用量、每個 replica，並有一個直接檢查單一 replica 的小小 **Try it**。
 
 - **目錄**（admin）：加入 `hf://<org>/<name>`（可指定 revision；GGUF repo 可指定檔案）、允許主機上的 GGUF 網址，或允許目錄下的
   `local://<dir>`。模型**不下載就先檢視**：固定到哪個 commit、檔案與大小、`config.json`、safetensors header（參數量）或 GGUF
@@ -176,7 +177,8 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
 - **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
   整張大卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
-  並列出每台機器的原因與差多少（`wait: true` 則改為排隊等候）。
+  並列出每台機器的原因與差多少（`wait: true` 則改為排隊等候）。同一個部署的多個 replica 會盡量放在**不同機器**上（優先於 binpack），
+  讓 gateway 能在它們之間分流與容錯。
 - **共用 GPU**（`share: vram`）：同一張卡上多個 replica，各自被限制在自己的保留量內；共用的卡不會再給獨佔的 replica。
   vLLM 的 `--gpu-memory-utilization` 是卡**總**記憶體的比例，而且**空閒**量不夠就拒絕啟動，所以在共用卡上固定 0.9 永遠起不來：
   Forgeyard 把它設成（保留量 − CUDA context）÷ 總量，無條件捨去。同一張卡上的 replica 一個一個啟動（前一個 healthy 才啟動下一個），
@@ -188,10 +190,49 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
 
 真機檢查：[docs/acceptance-m3.md](docs/acceptance-m3.md) 與 `scripts/accept_m3.py`。
 
+## Gateway 與 API key
+
+每個部署都在 **`http://<server>:7860/v1`** 對外，OpenAI 相容，和 console 同一個 port：`GET /v1/models`、
+`POST /v1/chat/completions` 與 `/v1/completions`（串流原樣轉送）、`/v1/embeddings`、`/v1/rerank` 與 `/v1/score`（vLLM 的格式）、
+`/v1/audio/transcriptions` 與 `/translations`（multipart）。`model` 填部署的 served name。任何 OpenAI client 都能用：
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://<server>:7860/v1", api_key="fyk_…")
+client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hi"}])
+```
+
+- **API key**（**API keys** 頁）：每個人自己建立；key 是 `fyk_` 加 43 個隨機字元，**只顯示一次**，同時給一段 curl 與 Python 範例；
+  server 只存 SHA-256 與 12 字元的前綴。可選：到期時間、可用的模型（不選就是所有部署，包括之後新增的）、每分鐘請求數與 token 數。
+  撤銷、到期或帳號停用後，下一個請求就失效。admin 可以看與撤銷所有人的 key、改任何 key 的限制，並設定**預設值**（key 沒設時套用）
+  與**上限**（一般人替自己的 key 設的最大值）。建立、修改、撤銷 key 都記在稽核紀錄。
+- **`/v1` 只認 API key**：完全不讀 console 的 cookie（網頁沒辦法借用已登入的瀏覽器打 gateway），所以 console 的 CSRF 規則不套用；
+  host 檢查（421）照樣套用。不送 CORS header。
+- **路由：** 該模型 ready 的 replica 中，經這台 server 進行中請求最少的優先，同分輪流。連線失敗（還沒回任何東西給 client 之前）
+  就換下一個，失敗的那個排到最後，直到它的 agent 回報它又 ready（最多 15 秒）。client 中途斷線會關掉往上游的連線，引擎就停止生成。
+  逾時：連線 5 秒；等回應 header 或串流的下一段 600 秒（`GATEWAY_CONNECT_TIMEOUT`、`GATEWAY_READ_TIMEOUT`）。
+- **錯誤**用 OpenAI 的格式 `{"error": {"message", "type", "param", "code"}}`：401 沒有／錯誤／過期／已撤銷的 key；403 這把 key
+  不能用這個模型；404 沒有這個模型；400 這個模型不走這個端點；429 超過限制，附 `Retry-After`；503 沒有 ready 的 replica，附每個
+  replica 的狀態；502 連不上 replica 或它拒絕內部 key；504 逾時。引擎自己的錯誤原樣轉回。
+- **限制**以 key 計，滑動視窗（最近 60 秒），計數在這台 server 的記憶體裡（多台 server 共用限制之後再做）：每分鐘請求數（被拒絕的
+  不算）與每分鐘 token 數（取自回應的 `usage`；串流 chat 由 gateway 向引擎要最後的 usage chunk，client 沒要的話再拿掉）；
+  請求進行中先保留它的 `max_tokens`，避免同時送出的請求一起超過限制。
+- **用量**（**Usage** 頁）：請求數、錯誤、被限流次數、prompt／completion token、延遲 p50／p95，可依日期、模型、key、人或來源
+  （API key 或 playground）分組。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。只統計，不計費。
+- **Playground**：在 console 裡用串流 chat，也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
+  （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。
+- **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。agent 透過**環境變數**交給引擎
+  （vLLM `VLLM_API_KEY`、llama.cpp `LLAMA_API_KEY`、speaches `API_KEY`；配方用 `api_key_env` 指定變數名），絕不放在命令列；
+  只存在記憶體，health check 也會帶上；UI、API、spec 與 log 裡都看不到。只有 gateway 與 *Try it* 會送出它。不帶它直接打 replica 的
+  port 會得到 401（speaches 是 403）。**vLLM 0.32 只在 `/v1`、`/v2`、`/inference`、`/cohere` 檢查 key**：它的 `/invocations`、
+  `/rerank`、`/score`、`/pooling`、`/tokenize` 在 replica 自己的 port 上仍然開著，所以在共用網路上請用防火牆讓 replica 的 port 範圍
+  （30000-32767）只對 server 開放。M4 之前的 agent 啟動的 replica 沒有 key，要重新放置才有（更新 agent 後把部署停止再啟動）。
+
+真機檢查：[docs/acceptance-m4.md](docs/acceptance-m4.md) 與 `scripts/accept_m4.py`。
+
 ## 帳號與登入
 
-- **角色：** `admin` 管理使用者、機器與其 GPU allowlist、模型目錄、配方與模型來源，並看稽核紀錄；`operator` 執行 workload 與部署模型；`user` 只能看（也能試用已部署的模型）
-  （M4 會拿到 API key）。
+- **角色：** `admin` 管理使用者、機器與其 GPU allowlist、模型目錄、配方與模型來源，並看稽核紀錄；`operator` 執行 workload 與部署模型；`user` 只能看，並透過 playground 與自己的 API key 使用已部署的模型、看自己的用量。
   **owner**（第一個帳號）永遠是 admin，不能被降級、停用或刪除，所以不會有人把管理權整個鎖死。
 - **密碼：** argon2id；至少 12 字元；常見密碼（含尾巴加數字或符號的變形）與包含使用者名稱的密碼會被拒絕。
 - **新使用者**由 admin 建立，admin 拿到一條**一次性連結**（72 小時）轉交對方，由本人自己設定密碼；

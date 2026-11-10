@@ -156,6 +156,7 @@ def test_fy_gw_006_streaming_passes_through_and_counts_usage(gw):
     evs = events(r.text)
     assert evs[-1] == "[DONE]" and [e["choices"][0]["delta"].get("content") for e in evs[:3]] == ["t0 ", "t1 ", "t2 "]
     assert not any(isinstance(e, dict) and "usage" in e for e in evs)
+    assert all(e["choices"] for e in evs[:-1])  # the usage-only chunk (empty choices) is gone too
     engine = gw.e1 if r.headers["x-forgeyard-replica"] == "chat#0" else gw.e2
     assert engine.posts()[-1]["body"]["stream_options"] == {"include_usage": True}
     r = chat(gw.api, stream=True, stream_options={"include_usage": True})
@@ -172,6 +173,8 @@ def test_fy_gw_007_only_api_keys_open_v1(gw, owner):
     assert err(chat(api_client(owner)))["code"] == "missing_api_key"
     assert chat(api_client(owner, "fyk_" + "x" * 43)).status_code == 401
     assert err(chat(api_client(owner, "sk-something")))["code"] == "invalid_api_key"
+    r = chat(api_client(owner, gw.key[:12] + "x" * (len(gw.key) - 12)))  # the right prefix is not enough
+    assert r.status_code == 401 and err(r)["code"] == "invalid_api_key"
     cookie_only = owner.post("/v1/chat/completions", json={"model": "chat", "messages": []})
     assert cookie_only.status_code == 401 and err(cookie_only)["type"] == "authentication_error"
     assert owner.get("/v1/models").status_code == 401
