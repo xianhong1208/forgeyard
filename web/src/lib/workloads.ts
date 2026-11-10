@@ -118,6 +118,11 @@ export function stateLabel(r: Replica): string {
 export function runtimeSummary(w: Workload): string {
   const rt = w.spec.runtime;
   if (rt.type === "container") return [rt.image, ...(rt.command ?? []), ...rt.args].join(" ");
+  if (rt.type === "model") {
+    const runs = w.replica_list.find((r) => r.runs)?.runs;
+    const what = runs ? (runs.image ?? (Array.isArray(runs.command) ? runs.command.join(" ") : runs.command)) : null;
+    return `model ${rt.model} with ${rt.recipe}${what ? ` · ${what}` : ""}`;
+  }
   return [rt.command, ...rt.args].join(" ");
 }
 

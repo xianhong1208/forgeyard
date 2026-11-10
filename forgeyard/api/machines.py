@@ -42,6 +42,7 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "ip": n.ip, "joined_at": n.joined_at, "connected_at": n.connected_at,
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [], "runtime_info": n.runtime_info or {},
+        "model_cache": n.model_cache or {},
         "accelerators": [accelerator_out(a, n, assigned) for a in n.accelerators],
     }
 

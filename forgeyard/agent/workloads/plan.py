@@ -17,7 +17,7 @@ from typing import Optional
 
 BASIC_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 WRAPPER_NAME = "forgeyard-replica"
-_PORT_REF = re.compile(r"\$\{(PORT(?:_[A-Z0-9_]+)?)\}")
+_PORT_REF = re.compile(r"\$\{(PORT(?:_[A-Z0-9_]+)?|MODEL_PATH|MODEL_FILE|MODEL_HUB|BIND_ADDRESS)\}")
 
 
 def port_var(name: str) -> str:
@@ -95,28 +95,57 @@ def identity_env(replica_id: str, workload: str, ordinal: int) -> dict[str, str]
     return {"FORGEYARD_REPLICA": replica_id, "FORGEYARD_WORKLOAD": workload, "FORGEYARD_REPLICA_INDEX": str(ordinal)}
 
 
+def _filled(spec_env: dict[str, str], values: Optional[dict[str, str]]) -> dict[str, str]:
+    """Model replicas (M3): ${PORT}, ${MODEL_PATH}… in the recipe's environment values too."""
+    if not values:
+        return dict(spec_env)
+    return {k: substitute([v], values)[0] for k, v in spec_env.items()}
+
+
 def process_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *, home: str, user: str,
-                replica_id: str, workload: str, ordinal: int) -> dict[str, str]:
+                replica_id: str, workload: str, ordinal: int, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
     env = {"PATH": BASIC_PATH, "HOME": home, "LANG": "C.UTF-8", "USER": user, "LOGNAME": user}
-    env.update(spec_env)                       # the spec cannot declare the reserved names below
+    ports_env = port_env(ports, "process")
+    env.update(_filled(spec_env, {**ports_env, **extra} if extra else None))  # reserved names cannot be declared
     env.update(gpu_env(gpus, "process"))
-    env.update(port_env(ports, "process"))
+    env.update(ports_env)
     env.update(identity_env(replica_id, workload, ordinal))
     return env
 
 
 def container_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *, replica_id: str,
-                  workload: str, ordinal: int) -> dict[str, str]:
-    env = dict(spec_env)
+                  workload: str, ordinal: int, extra: Optional[dict[str, str]] = None) -> dict[str, str]:
+    ports_env = port_env(ports, "container")
+    env = _filled(spec_env, {**ports_env, **extra} if extra else None)
     env.update(gpu_env(gpus, "container"))
-    env.update(port_env(ports, "container"))
+    env.update(ports_env)
     env.update(identity_env(replica_id, workload, ordinal))
     return env
 
 
-def substitute(args: list[str], env: dict[str, str]) -> list[str]:
-    """${PORT} and ${PORT_<NAME>} in arguments become the assigned ports; nothing else is expanded."""
-    return [_PORT_REF.sub(lambda m: env.get(m.group(1), m.group(0)), a) for a in args]
+def substitute(args: list[str], env: dict[str, str], extra: Optional[dict[str, str]] = None) -> list[str]:
+    """${PORT} and ${PORT_<NAME>} in arguments become the assigned ports, and for model replicas
+    ${MODEL_PATH}, ${MODEL_FILE}, ${MODEL_HUB} and ${BIND_ADDRESS} the model's paths and the bind
+    address; nothing else is expanded."""
+    values = {**env, **(extra or {})}
+    return [_PORT_REF.sub(lambda m: values.get(m.group(1), m.group(0)), a) for a in args]
+
+
+def model_values(paths: dict, *, container: bool, model: dict, bind: str) -> dict[str, str]:
+    """What ${MODEL_*} and ${BIND_ADDRESS} become: the read-only mount inside a container, the
+    cache directory for a process."""
+    from forgeyard.models import sources
+
+    if container:
+        c = sources.container_paths(model)
+        out = {"MODEL_PATH": c["path"], "MODEL_HUB": c["hub"], "BIND_ADDRESS": "0.0.0.0"}
+        if c["file"]:
+            out["MODEL_FILE"] = c["file"]
+        return out
+    out = {"MODEL_PATH": paths["path"], "MODEL_HUB": paths.get("hub") or paths["path"], "BIND_ADDRESS": bind}
+    if paths.get("file"):
+        out["MODEL_FILE"] = paths["file"]
+    return out
 
 
 def ulimits(memory: Optional[int], gpus: list[dict]) -> list[str]:
@@ -160,9 +189,11 @@ def container_name(workload: str, replica_id: str) -> str:
 def container_run_argv(engine: str, *, name: str, image: str, command: Optional[list[str]], args: list[str],
                        env_file: str, labels: dict[str, str], ports: list[dict], bind: str,
                        cpu: Optional[float], memory: Optional[int], gpus: list[dict], gpu_mode: Optional[str],
-                       render_devices: list[str], render_gids: list[int], log_max_bytes: int) -> list[str]:
+                       render_devices: list[str], render_gids: list[int], log_max_bytes: int,
+                       mounts: Optional[list[tuple[str, str]]] = None) -> list[str]:
     """`docker run` / `podman run`. No --privileged, ever; no new privileges; only the assigned
-    cards; host ports bound to one address (the agent's own on the network to the server)."""
+    cards; host ports bound to one address (the agent's own on the network to the server). The
+    only volume ever mounted is a model's cache entry, read-only (M3)."""
     argv = [engine, "run", "-d", "--name", name, "--security-opt", "no-new-privileges", "--restart", "no",
             "--env-file", env_file]
     for key, value in sorted(labels.items()):
@@ -174,6 +205,8 @@ def container_run_argv(engine: str, *, name: str, image: str, command: Optional[
         argv += ["--log-driver", "json-file", "--log-opt", f"max-size={size}", "--log-opt", "max-file=2"]
     for p in ports:
         argv += ["-p", f"{bind}:{p['host_port']}:{p['port']}/tcp"]
+    for host, inside in mounts or []:
+        argv += ["--mount", f"type=bind,source={host},target={inside},ro=true"]
     if cpu:
         argv += ["--cpus", f"{cpu:g}"]
     if memory:

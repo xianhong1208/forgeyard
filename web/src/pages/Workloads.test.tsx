@@ -87,12 +87,16 @@ describe("workloads", () => {
     expect(screen.getByRole("link", { name: "New workload" })).toBeTruthy();
   });
 
-  it("FY-WEB-040 users can look but not start; the old Deployments link lands here", async () => {
-    server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "", can_manage: false } } : undefined),
+  it("FY-WEB-040 users can look but not start; the old Deployments link lands on Models (M3)", async () => {
+    server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "", can_manage: false } }
+      : url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: false } } : undefined),
       { ...OWNER, role: "user", is_owner: false });
     mount("/deployments");
+    expect(await screen.findByText("No deployments yet")).toBeTruthy();
+    expect(screen.getByTestId("where").textContent).toBe("/models");
+    cleanup();
+    mount("/workloads");
     expect(await screen.findByText("No workloads yet")).toBeTruthy();
-    expect(screen.getByTestId("where").textContent).toBe("/workloads");
     expect(screen.queryByRole("link", { name: "New workload" })).toBeNull();
     expect(screen.getByRole("link", { name: "Workloads" })).toBeTruthy();
   });

@@ -6,6 +6,65 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added — M3: model deployment
+- **Catalog** of models (admins): `hf://<org>/<name>` pinned to the commit a revision resolves to, a
+  GGUF file from an admin-allowed host, or `local://` under admin-allowed directories. Models are
+  inspected without downloading the weights: file list and sizes, `config.json`, parameter counts
+  from the safetensors headers, the GGUF metadata and exact tensor sizes by HTTP range reads. Tokens
+  for gated repositories are used for the inspection only. Per-recipe engine arguments per model.
+- **Recipes** as YAML (built-in and admin-added): tasks, formats, protocol per task, parameters,
+  estimate method, health check with a start period, and variants per vendor / compute capability /
+  gfx target / driver, each a pinned image or a pinned, SHA-256-checked release for a process.
+  Built in: `vllm` (vLLM 0.32.0), `vllm-pooling` (embeddings and rerank on the same image),
+  `llama-cpp` (b11977: CUDA, ROCm and CPU images, and a CPU process variant) and `faster-whisper`
+  (speaches 0.8.3).
+- **Estimates** before deploying: weights from parameters x bytes (FP8 aware) or GGUF tensor sizes,
+  KV cache from layers x KV heads x head size x tokens, logits buffer, recipe overhead, CUDA context.
+  A declared `vram` overrides it.
+- **Scheduler** for model deployments: filter (variant for the hardware and driver, runtime,
+  allowlist, memory), score (binpack, then a machine with the model already cached). Memory is the
+  card's free memory as reported, minus reservations not yet visible there, minus a headroom
+  (`VRAM_HEADROOM_MIB`, 512). Refused with every machine's reason and shortfall when nothing fits.
+- **GPU sharing** (`share: vram`) enforced by reservation; vLLM's `--gpu-memory-utilization`
+  computed from the reservation and the card's total. Replicas on one card start one at a time.
+  Workloads can declare `gpus.vram` and `gpus.share` too; M2 workloads keep their behaviour.
+- **Deployments**: a service workload (runtime `model`, rendered per replica for its machine and
+  variant) plus a **gateway route** (served name, protocol, upstream model name) for M4;
+  `GET /api/routes`. Each replica is reachable on its own port meanwhile; **Try it** sends one small
+  request in the route's protocol (a bundled public-domain clip for speech).
+- **Agent model cache** (`--model-cache DIR`): Hugging Face cache layout keyed by source and
+  revision, shared by replicas, resumable downloads verified by SHA-256 or git blob id, progress
+  reported, cancelled when unwanted, read-only files, the model's directory mounted read-only into
+  containers (the only volume ever mounted); engines for process variants unpacked safely. Tokens
+  stay in the agent's memory. `--model-local-dir`, `--allow-private-model-hosts`.
+- **SSRF guard** for every model request on server and agent: https, every resolved address public
+  (no private, loopback, link-local/metadata, CGNAT, reserved), connections pinned to the checked
+  address, every redirect re-checked, credentials dropped when a redirect leaves the host.
+- Models pages: deployments (download progress, endpoints), catalog and recipes (add a model with an
+  inspection preview, custom recipes, model sources), deploy form with a live estimate and placement
+  preview, deployment page (estimated vs live memory, endpoint, try it, output, events).
+- API `/api/models` (+ `/inspect`), `/api/recipes`, `/api/model-sources`, `/api/deployments`
+  (+ `/estimate`, `/stop`, `/start`, `/try`), `/api/routes`. Audit events `model.added`,
+  `model.changed`, `model.removed`, `recipe.created`, `recipe.updated`, `recipe.deleted`,
+  `model_sources.changed`, `deployment.created`, `deployment.stopped`, `deployment.started`,
+  `deployment.deleted`.
+- Agent protocol v1 extended compatibly: feature `models`; desired replicas carry a rendered spec,
+  the model (with a token when needed) and an engine; status carries download progress and the model
+  cache. M2 agents get specs without the new fields.
+- `scripts/accept_m3.py` and `docs/acceptance-m3.md`: the real-hardware run.
+- Migration `0004_models`.
+
+### Changed — M3
+- The `/deployments` path now opens Models.
+- Health checks have `start_period`: failures before the first success do not count during it.
+- The agent's reconciler only holds new starts back while replicas are being stopped (a slow start,
+  such as an image pull or a download, no longer delays other replicas).
+- A container whose image is not on the machine yet still starts when the docker CLI's credential
+  helper (`credsStore` / `credHelpers`) fails under the agent. That failure stopped even public
+  images, such as the llama.cpp one on the first real run. The agent now pulls once more with a
+  copy of the CLI config that leaves out the helpers and keeps everything else, then starts the
+  container. Other start failures are reported as before.
+
 ### Added — M2: generic workloads
 - Workloads: **services** (run until stopped, health-checked, restarted with backoff) and **tasks**
   (run to the end; `retries` with doubling backoff; `max_duration` stops and fails a run), 1-16

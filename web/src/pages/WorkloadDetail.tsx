@@ -154,7 +154,7 @@ function ReplicaRow({ r, w }: { r: Replica; w: Workload }) {
   );
 }
 
-function Output({ w }: { w: Workload }) {
+export function Output({ w }: { w: Workload }) {
   const [ordinal, setOrdinal] = useState(0);
   const [follow, setFollow] = useState(true);
   const [logs, setLogs] = useState<LogsResponse | null>(null);
@@ -219,12 +219,15 @@ function Spec({ w }: { w: Workload }) {
   const s = w.spec;
   const rt = s.runtime;
   const gpus = s.resources.gpus;
-  const facts: [string, ReactNode][] = [
-    ["Runtime", rt.type],
-    rt.type === "container" ? ["Image", <code key="i">{rt.image}</code>] : ["Command", <code key="c">{rt.command}</code>],
-  ];
-  if (rt.type === "container" && rt.command) facts.push(["Entrypoint", <code key="e">{rt.command.join(" ")}</code>]);
-  if (rt.args.length) facts.push(["Arguments", <code key="a">{rt.args.join(" ")}</code>]);
+  const facts: [string, ReactNode][] = [["Runtime", rt.type]];
+  if (rt.type === "model") {
+    facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
+    if (w.deployment_id) facts.push(["Deployment", <Link key="d" to={`/models/deployments/${w.deployment_id}`}>open the deployment</Link>]);
+  } else {
+    facts.push(rt.type === "container" ? ["Image", <code key="i">{rt.image}</code>] : ["Command", <code key="c">{rt.command}</code>]);
+    if (rt.type === "container" && rt.command) facts.push(["Entrypoint", <code key="e">{rt.command.join(" ")}</code>]);
+    if (rt.args.length) facts.push(["Arguments", <code key="a">{rt.args.join(" ")}</code>]);
+  }
   if (rt.type === "process" && rt.workdir) facts.push(["Working directory", <code key="w">{rt.workdir}</code>]);
   facts.push(["Placement", s.machine_id ? `machine ${w.replica_list[0]?.machine?.name ?? `#${s.machine_id}`}` : "any online machine with room"]);
   facts.push(["GPUs", gpus.indices ? `cards ${gpus.indices.map((i) => `#${i}`).join(", ")}` : gpus.count ? `${gpus.count}${gpus.vendor ? ` ${gpus.vendor}` : ""} per replica` : "none"]);

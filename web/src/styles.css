@@ -348,7 +348,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .card-blocked { color: var(--muted); cursor: not-allowed; }
 .form-foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
 .spec-preview { min-width: 0; flex: 1; font-size: 13px; color: var(--muted); }
-.spec-preview summary { cursor: pointer; width: max-content; }
+.spec-preview summary { cursor: pointer; width: max-content; max-width: 100%; }
 .spec-preview pre { margin: 8px 0 0; padding: 10px 12px; max-height: 280px; overflow: auto; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); font-size: 11.5px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 
@@ -361,6 +361,82 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .allowlist-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 12px; margin-bottom: 8px; }
 .allowlist .row-gap { align-items: center; }
 .accel-off .accel-name, .accel-off .mem-text, .accel-off .accel-live { opacity: 0.55; }
+
+/* ---------------------------------------------------------------- models (M3) */
+.tabs { display: flex; gap: 2px; margin: -8px 0 18px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { padding: 9px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-2); font: inherit;
+  font-size: 14px; font-weight: 550; cursor: pointer; white-space: nowrap; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--heat); }
+.tabs button:focus-visible { outline: 2px solid var(--heat); outline-offset: -2px; }
+.linklike { border: 0; background: none; padding: 0 4px; color: var(--info); font: inherit; font-family: var(--mono); font-size: 12px;
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.examples { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 0 0 6px; color: var(--muted); }
+.catalog-table td { vertical-align: top; }
+.catalog-table td[data-label="Format"], .catalog-table td[data-label="Size"] { white-space: nowrap; }
+.catalog-table .mono.small { overflow-wrap: anywhere; }
+.inspect-facts { margin: 16px 0 4px; }
+.recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.recipe { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; background: var(--surface-2); min-width: 0; }
+.recipe header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.recipe header .chip + .chip { margin-left: 0; }
+.recipe h3 { margin: 0 4px 0 0; font-size: 14px; }
+.recipe p { margin: 6px 0; }
+.variants { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.variants li { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; }
+.variants .vendor { display: inline-flex; align-items: center; gap: 3px; justify-self: start; }
+.variant-what { overflow-wrap: anywhere; }
+.variants li > .muted { grid-column: 2; }
+
+.deploy-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 20px; align-items: start; }
+.estimate-side { position: sticky; top: 76px; min-width: 0; }
+.est-total { margin: 0 0 10px; font-size: 14px; }
+.est-total strong { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-right: 4px; }
+.stack-bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
+.seg { display: block; height: 100%; }
+.seg-0 { background: var(--steel-3); }
+.seg-1 { background: var(--heat); }
+.seg-2 { background: #8aa1b4; }
+.seg-3 { background: #c9d2db; }
+.seg-4 { background: #5d7a90; }
+.parts { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.parts li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; font-size: 13.5px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.part-detail { grid-column: 2 / -1; font-size: 12px; overflow-wrap: anywhere; }
+.placement { margin-top: 6px; }
+.placed { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.placed li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; overflow-wrap: anywhere; }
+.ok-ic { color: var(--ok); margin-top: 3px; }
+.nofit { display: flex; gap: 8px; align-items: center; padding: 8px 10px; margin-bottom: 8px; border-radius: var(--radius);
+  background: var(--bad-soft); border: 1px solid #f2c4c0; color: #8a1a12; font-size: 13.5px; font-weight: 550; }
+.verdicts { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 0; }
+.verdicts li { padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.verdicts li .chip { margin-left: 8px; height: 19px; }
+.verdicts li.nope .mono.strong { color: var(--ink-2); }
+.verdict-reason { margin-top: 2px; color: var(--ink-2); overflow-wrap: anywhere; }
+.notice .verdicts { margin-top: 6px; }
+.notice .verdicts li { border-top-color: #f2c4c0; }
+
+.bar-dl { width: 120px; display: inline-block; vertical-align: middle; }
+.bar-dl > span { background: var(--heat); }
+.dl { display: grid; gap: 4px; margin-top: 6px; }
+.dl .bar-dl { width: 100%; max-width: 260px; }
+.endpoint { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
+.endpoint .copybox { margin-bottom: 8px; }
+.live-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.live-cards li { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.try-out { margin-top: 12px; }
+.try-out p { margin: 0 0 6px; overflow-wrap: anywhere; }
+.try-answer { height: auto; max-height: 220px; min-height: 60px; }
+
+@media (max-width: 980px) {
+  .deploy-layout { grid-template-columns: minmax(0, 1fr); }
+  .estimate-side { position: static; }
+}
+@media (max-width: 760px) {
+  .recipes { grid-template-columns: minmax(0, 1fr); }
+  .endpoint { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .bar-dl { width: 90px; }
+}
 
 /* ---------------------------------------------------------------- empty shells */
 .empty { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 36px; align-items: center;

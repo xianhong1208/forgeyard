@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     agent_heartbeat_seconds: int = 10
     agent_offline_seconds: int = 30
 
+    # Models (M3).
+    # Where Hugging Face models are inspected and downloaded from (a mirror can be set here).
+    hf_endpoint: str = "https://huggingface.co"
+    # Allow model sources on private addresses (and plain http): only for a LAN mirror. Agents
+    # need their own --allow-private-model-hosts as well.
+    model_allow_private_hosts: bool = False
+    # Initial allowlists; admins change them on the Models page (stored in the database).
+    model_url_hosts: str = ""      # hosts allowed for https:// GGUF sources, comma-separated
+    model_local_dirs: str = ""     # directories allowed for local:// sources, comma-separated
+    # Per-process GPU memory a replica's CUDA context takes on top of its own (measured: ~0.4 GiB
+    # on an A100), and memory always left free on a card when placing.
+    gpu_context_mib: int = 400
+    vram_headroom_mib: int = 512
+
     @field_validator("registration")
     @classmethod
     def _registration(cls, v: str) -> str:

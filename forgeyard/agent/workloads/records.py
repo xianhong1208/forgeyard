@@ -49,6 +49,15 @@ class Record:
     health_failures: int = 0
     healthy_seen: bool = False
     last_probe_at: Optional[float] = None
+    # Model replicas (M3): what to fetch (never the token), the host paths once fetched, the
+    # engine program for a process variant, download progress, and whether it is still loading
+    # (a replica on a shared card starts only once the others there have loaded).
+    model: Optional[dict] = None
+    engine: Optional[dict] = None
+    paths: Optional[dict] = None
+    engine_path: Optional[str] = None
+    download: Optional[dict] = None
+    loading: bool = False
 
     def public(self, *, with_tail: Optional[str] = None) -> dict:
         out = {"id": self.id, "generation": self.generation, "state": self.state, "reason": self.reason,
@@ -56,6 +65,8 @@ class Record:
                "pid": self.pid, "container": self.container,
                "ports": [{k: p.get(k) for k in ("name", "port", "host_port", "address")} for p in self.ports],
                "started_at": self.started_at, "finished_at": self.finished_at}
+        if self.download is not None:
+            out["download"] = self.download
         if with_tail is not None:
             out["log_tail"] = with_tail
         return out

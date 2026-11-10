@@ -51,6 +51,7 @@ def parse_spec(body: Any) -> WorkloadSpec:
 
 def replica_out(r: Replica) -> dict:
     node = r.node
+    rt = ((r.spec or {}).get("runtime") or {})
     return {
         "ordinal": r.ordinal, "id": r.uid, "generation": r.generation,
         "machine": {"id": node.id, "name": node.name, "status": node.status, "connected": hub.connected(node.id)}
@@ -60,6 +61,8 @@ def replica_out(r: Replica) -> dict:
         "state": r.state, "reason": r.reason, "exit_code": r.exit_code, "attempt": r.attempt, "restarts": r.restarts,
         "final": r.final, "pid": r.pid, "container": r.container, "ports": r.ports or [],
         "started_at": r.started_at, "finished_at": r.finished_at, "updated_at": r.updated_at,
+        "vram": r.vram, "download": r.download, "ready_at": r.ready_at,
+        "runs": {"type": rt.get("type"), "image": rt.get("image"), "command": rt.get("command")} if rt else None,
     }
 
 
@@ -73,6 +76,13 @@ def workload_out(w: Workload, caller: Caller, *, detail: bool = False) -> dict:
         "updated_at": w.updated_at, "spec": spec, **wstate.summary(w),
         "replica_list": [replica_out(r) for r in w.replicas],
     }
+    if w.runtime == "model":
+        from sqlalchemy.orm import object_session
+
+        from forgeyard.db import Deployment
+
+        db = object_session(w)
+        out["deployment_id"] = db.scalar(select(Deployment.id).where(Deployment.workload_id == w.id)) if db else None
     return out
 
 
@@ -106,6 +116,8 @@ def list_workloads(caller: Caller = Depends(current), db: DbSession = Depends(ge
 @router.post("", status_code=201)
 def create_workload(body: Any = Body(...), caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
     spec = parse_spec(body)
+    if spec.runtime_type == "model":
+        raise fail(422, "invalid_spec", "runtime: model workloads are created as deployments (/api/deployments)")
     if db.scalar(select(Workload.id).where(Workload.name == spec.name)) is not None:
         raise fail(409, "name_taken", f"A workload named {spec.name} already exists.")
     if spec.machine_id is not None:

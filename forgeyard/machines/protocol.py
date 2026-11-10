@@ -11,7 +11,8 @@ agent -> server
   inventory  the full inventory again, sent when the hardware changed
 
   status     (M2) replica states: after every desired, and whenever one changes. `full` lists
-             every replica the agent knows
+             every replica the agent knows. (M3) a replica may carry `download` progress, and the
+             message `model_cache` (free space, the cached models) when that changed
   logs       (M2) answer to a logs_request: the last lines of a replica's output
 
 server -> agent
@@ -22,6 +23,11 @@ server -> agent
              idempotent, so a restart or reconnect just converges again
   logs_request (M2) the last N lines of one replica's output
   error      a refused message; the server closes the connection after it
+
+Models (M3) extend it the same way: an agent started with a model cache lists "models"; only
+then does the server place model deployments there, and its desired replicas carry a rendered
+`spec`, the `model` to fetch (with a token for gated repositories, never stored by the agent) and
+an `engine` for process variants.
 
 Workloads extend version 1 compatibly instead of bumping it. Each side lists its `features` (the
 agent in hello, the server in welcome), and `desired` / `status` / `logs` flow only when both list
@@ -60,7 +66,8 @@ MAX_MESSAGE_BYTES = 512 * 1024
 VENDORS = ("nvidia", "amd", "cpu")
 
 FEATURE_WORKLOADS = "workloads"
-SERVER_FEATURES = (FEATURE_WORKLOADS,)
+FEATURE_MODELS = "models"
+SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS)
 RUNTIMES = ("process", "container")
 
 # What the agent reports per replica. Server-only states: "stopping" (asked, not confirmed yet).

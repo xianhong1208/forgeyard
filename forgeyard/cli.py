@@ -101,8 +101,14 @@ def _make_supervisor(args, state_dir: Path):
         "container": ContainerRuntime(store, agent_id=state.agent_id(state_dir), engine=args.container_engine,
                                       log_max_bytes=log_max),
     }
+    models = None
+    if getattr(args, "model_cache", None):
+        from forgeyard.agent.models import ModelCache
+
+        models = ModelCache(Path(args.model_cache), allow_private=bool(args.allow_private_model_hosts),
+                            local_dirs=list(args.model_local_dir or []))
     return Supervisor(state_dir, runtimes, port_range=parse_range(args.port_range), log_max_bytes=log_max,
-                      bind_address=args.bind_address or None)
+                      bind_address=args.bind_address or None, models=models)
 
 
 def _describe_runtimes(info: dict) -> list[str]:
@@ -191,6 +197,14 @@ def _agent_cmd(args) -> int:
     if supervisor is not None:
         for line in _describe_runtimes(supervisor.runtime_info()):
             log.info("Runtime %s", line)
+        cache = supervisor.model_cache_info()
+        if cache is None:
+            log.info("Models: not served here (start with --model-cache DIR to serve models).")
+        elif cache.get("ok"):
+            log.info("Models: cache in %s, %.1f GiB free, %d cached.", args.model_cache,
+                     (cache.get("free_bytes") or 0) / 1024**3, len(cache.get("cached") or []))
+        else:
+            log.error("Models: %s", cache.get("reason"))
     agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label), supervisor=supervisor)
 
     async def main() -> int:
@@ -261,6 +275,13 @@ def _workload_args(p: argparse.ArgumentParser, *, sub: bool = False) -> None:
     p.add_argument("--limits", choices=("auto", "systemd", "rlimit"), default=d("auto"),
                    help="process CPU/memory limits: a systemd scope (root on systemd hosts) or rlimits")
     p.add_argument("--log-max-mb", type=int, default=d(10), help="output kept per replica, in MB (default 10)")
+    p.add_argument("--model-cache", default=d(None), metavar="DIR",
+                   help="serve models: where models and engines are downloaded and kept, shared by every replica "
+                        "on this machine (containers get their model mounted read-only from here)")
+    p.add_argument("--allow-private-model-hosts", action="store_true", default=d(False),
+                   help="allow model downloads from private addresses and plain http (a LAN mirror only)")
+    p.add_argument("--model-local-dir", action="append", default=d([]), metavar="DIR",
+                   help="a directory local:// models may come from on this machine; repeatable")
 
 
 def main(argv: Optional[list[str]] = None) -> int:

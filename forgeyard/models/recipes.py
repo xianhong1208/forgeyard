@@ -1,0 +1,368 @@
+"""Engine recipes: YAML that says how to run an inference engine for a kind of model, per
+hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's code.
+
+    name: vllm                       a-z, 0-9, '-'; unique
+    engine, version, title, description
+    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr
+    formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2
+    api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
+    upstream_model: served_name      what the engine expects in a request's `model` field:
+                                     served_name, or repo (the model's Hugging Face id)
+    share: exclusive | vram          default GPU sharing
+    port: 8000                       the port the engine listens on inside a container
+    health: {path, start_period, interval, timeout, failure_threshold}
+    estimate: {method, overhead, cpu_overhead, kv_sequences, vram}
+    params: {name: {type: int|choice|size, default, min, max, choices, label, help}}
+    args: [...]                      the engine's arguments, with {placeholders}
+    optional_args: [{if: {param: value}, args: [...]}]
+    env: {NAME: value}               with {placeholders}
+    variants:                        tried in order; the first that fits a machine is used
+      - name: cuda
+        when: {vendor: nvidia, compute_capability: ">=8.0", driver: ">=580"}
+        runtime: container
+        image: vllm/vllm-openai:v0.32.0
+        entrypoint: [vllm, serve]
+      - name: cpu-process
+        when: {vendor: cpu, arch: [x86_64]}
+        runtime: process
+        engine: {url, sha256, binary}  a pinned release the agent downloads (sha256-checked), or
+        command: /opt/x/bin/server     a program already installed on the machines
+
+Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} {context} {concurrency}
+{kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} and any declared param.
+Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
+mount inside a container, the cache directory for a process).
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Annotated, Literal, Optional, Union
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+
+from forgeyard.workloads.spec import ENV_KEY_RE, IMAGE_RE, RESERVED_ENV, RESERVED_ENV_PREFIXES, parse_bytes
+
+BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
+NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
+PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
+TASKS = ("chat", "embed", "rerank", "asr")
+FORMATS = ("safetensors", "gguf", "ctranslate2")
+APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio")
+ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed")
+BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
+                        "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo"}
+# Parameters every recipe has, handled by Forgeyard itself.
+COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
+MAX_RECIPE_BYTES = 64 * 1024
+
+
+class RecipeError(Exception):
+    pass
+
+
+class _M(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def _version_tuple(text: str) -> tuple:
+    parts = re.findall(r"\d+", str(text))
+    return tuple(int(p) for p in parts) if parts else ()
+
+
+_CMP_RE = re.compile(r"^\s*(>=|<=|==|>|<)?\s*([0-9][0-9.]*)\s*$")
+
+
+def version_ok(actual: Optional[str], constraint: Optional[str]) -> bool:
+    """`">=8.0"` against `"8.6"`; dotted numbers compared numerically. No actual value: no match."""
+    if not constraint:
+        return True
+    if actual is None or not _version_tuple(actual):
+        return False
+    m = _CMP_RE.match(constraint)
+    if not m:
+        return False
+    op, want = m.group(1) or ">=", _version_tuple(m.group(2))
+    have = _version_tuple(actual)
+    # Compare on the constraint's precision: "580" matches driver "580.95.05".
+    have = have[:len(want)] + (0,) * max(0, len(want) - len(have))
+    return {">=": have >= want, ">": have > want, "<=": have <= want, "<": have < want, "==": have == want}[op]
+
+
+class When(_M):
+    vendor: Literal["nvidia", "amd", "cpu"]
+    # AMD gfx targets ("gfx1100") or CPU machine architectures ("x86_64").
+    arch: Optional[list[Annotated[str, Field(max_length=32)]]] = None
+    compute_capability: Optional[str] = Field(default=None, max_length=16)  # NVIDIA, e.g. ">=8.0"
+    driver: Optional[str] = Field(default=None, max_length=16)              # e.g. ">=580"
+
+    @field_validator("compute_capability", "driver")
+    @classmethod
+    def _cmp(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not _CMP_RE.match(v):
+            raise ValueError("use a comparison such as >=8.0")
+        return v
+
+
+class Engine(_M):
+    """A prebuilt engine the agent downloads for a process variant: a tar.gz release, pinned by its
+    SHA-256, and the program inside it."""
+    url: str = Field(max_length=1024)
+    sha256: str
+    binary: str = Field(max_length=256)
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError("engine.url must be an https:// URL")
+        return v
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha(cls, v: str) -> str:
+        v = v.lower().removeprefix("sha256:")
+        if not re.fullmatch(r"[0-9a-f]{64}", v):
+            raise ValueError("engine.sha256 must be 64 hex characters")
+        return v
+
+    @field_validator("binary")
+    @classmethod
+    def _binary(cls, v: str) -> str:
+        if v.startswith("/") or ".." in v.split("/") or not re.fullmatch(r"[A-Za-z0-9._/+-]+", v):
+            raise ValueError("engine.binary is a relative path inside the archive")
+        return v
+
+
+class Variant(_M):
+    name: str = Field(max_length=40)
+    when: When
+    runtime: Literal["container", "process"]
+    image: Optional[str] = Field(default=None, max_length=255)
+    entrypoint: Optional[list[Annotated[str, Field(max_length=256)]]] = Field(default=None, max_length=8)
+    engine: Optional[Engine] = None
+    command: Optional[str] = Field(default=None, max_length=1024)  # process: an installed program
+    args: Optional[list[Annotated[str, Field(max_length=4096)]]] = Field(default=None, max_length=128)
+    env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
+
+    @model_validator(mode="after")
+    def _runtime(self) -> "Variant":
+        if self.runtime == "container":
+            if not self.image or not IMAGE_RE.match(self.image):
+                raise ValueError(f"variant {self.name}: a container variant needs an image")
+            if self.engine is not None or self.command:
+                raise ValueError(f"variant {self.name}: engine and command are for process variants")
+        else:
+            if (self.engine is None) == (not self.command):
+                raise ValueError(f"variant {self.name}: a process variant needs either an engine to download "
+                                 "or the absolute path of an installed command")
+            if self.command and (not self.command.startswith("/") or "\x00" in self.command):
+                raise ValueError(f"variant {self.name}: command must be an absolute path")
+            if self.image or self.entrypoint:
+                raise ValueError(f"variant {self.name}: image and entrypoint are for container variants")
+        return self
+
+    @property
+    def gpu(self) -> bool:
+        return self.when.vendor != "cpu"
+
+
+class Param(_M):
+    type: Literal["int", "choice", "size", "float"]
+    default: Union[int, float, str]
+    min: Optional[float] = None
+    max: Optional[float] = None
+    choices: Optional[list[str]] = None
+    label: Optional[str] = Field(default=None, max_length=80)
+    help: Optional[str] = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def _shape(self) -> "Param":
+        if self.type == "choice" and not self.choices:
+            raise ValueError("a choice parameter needs choices")
+        return self
+
+    def coerce(self, name: str, value):
+        if self.type in ("int", "float"):
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a number")
+            try:
+                n = int(value) if self.type == "int" else float(value)
+                if self.type == "int" and float(value) != n:
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ValueError(f"{name} must be {'a whole number' if self.type == 'int' else 'a number'}") from None
+            if self.min is not None and n < self.min:
+                raise ValueError(f"{name} must be at least {self.min:g}")
+            if self.max is not None and n > self.max:
+                raise ValueError(f"{name} must be at most {self.max:g}")
+            return n
+        if self.type == "size":
+            return parse_bytes(value)
+        value = str(value)
+        if value not in (self.choices or []):
+            raise ValueError(f"{name} must be one of {', '.join(self.choices or [])}")
+        return value
+
+
+class Health(_M):
+    path: str = "/health"
+    start_period: int = Field(default=900, ge=0, le=7200)
+    interval: int = Field(default=10, ge=1, le=300)
+    timeout: int = Field(default=5, ge=1, le=60)
+    failure_threshold: int = Field(default=3, ge=1, le=20)
+
+
+class Estimate(_M):
+    method: Literal[ESTIMATE_METHODS]  # type: ignore[valid-type]
+    # Engine overhead per GPU (activations, CUDA graphs, workspaces) and in RAM for CPU variants.
+    overhead: int = 0
+    cpu_overhead: int = 0
+    # KV cache for how many sequences: every concurrent one, or a single full-length one (pooling).
+    kv_sequences: Literal["concurrency", "one"] = "concurrency"
+    # Fixed method: the memory it takes.
+    vram: Optional[int] = None
+
+    @field_validator("overhead", "cpu_overhead", "vram", mode="before")
+    @classmethod
+    def _size(cls, v):
+        return None if v is None else (0 if v in (0, "0") else parse_bytes(v))
+
+
+class OptionalArgs(_M):
+    if_: dict[str, Union[str, int]] = Field(alias="if")
+    args: list[Annotated[str, Field(max_length=4096)]] = Field(max_length=32)
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class Recipe(_M):
+    name: str
+    title: str = Field(max_length=80)
+    description: str = Field(default="", max_length=600)
+    engine: str = Field(max_length=40)
+    version: str = Field(max_length=40)
+    tasks: list[Literal[TASKS]] = Field(min_length=1)  # type: ignore[valid-type]
+    formats: list[Literal[FORMATS]] = Field(min_length=1)  # type: ignore[valid-type]
+    api: dict[Literal[TASKS], Literal[APIS]]  # type: ignore[valid-type]
+    upstream_model: Literal["served_name", "repo"] = "served_name"
+    share: Literal["exclusive", "vram"] = "exclusive"
+    port: int = Field(default=8000, ge=1, le=65535)
+    health: Health = Field(default_factory=Health)
+    estimate: Estimate
+    params: dict[str, Param] = Field(default_factory=dict, max_length=24)
+    args: list[Annotated[str, Field(max_length=4096)]] = Field(default_factory=list, max_length=128)
+    optional_args: list[OptionalArgs] = Field(default_factory=list, max_length=16)
+    env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
+    variants: list[Variant] = Field(min_length=1, max_length=16)
+    builtin: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not NAME_RE.match(v):
+            raise ValueError("name: 1-40 characters, a-z, 0-9 and '-'")
+        return v
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "Recipe":
+        missing = [t for t in self.tasks if t not in self.api]
+        if missing:
+            raise ValueError(f"api: say which protocol serves {', '.join(missing)}")
+        names = [v.name for v in self.variants]
+        if len(set(names)) != len(names):
+            raise ValueError("variants: names must be unique")
+        for p in self.params:
+            if p in COMMON_PARAMS or not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", p):
+                raise ValueError(f"params: {p!r} is reserved or not a valid name")
+        known = BUILTIN_PLACEHOLDERS | set(self.params)
+        texts = list(self.args) + list(self.env.values())
+        for oa in self.optional_args:
+            texts += oa.args
+            for k in oa.if_:
+                if k not in self.params:
+                    raise ValueError(f"optional_args: {k!r} is not a parameter")
+        for v in self.variants:
+            texts += list(v.args or []) + list(v.env.values())
+        for text in texts:
+            for ph in PLACEHOLDER_RE.findall(text):
+                if ph not in known:
+                    raise ValueError(f"unknown placeholder {{{ph}}}")
+        envs = dict(self.env)
+        for v in self.variants:
+            envs.update(v.env)
+        for key in envs:
+            if not ENV_KEY_RE.match(key) or key in RESERVED_ENV or key.startswith(RESERVED_ENV_PREFIXES):
+                raise ValueError(f"env: {key} cannot be set by a recipe")
+        for name, p in self.params.items():
+            try:
+                p.coerce(name, p.default)
+            except ValueError as e:
+                raise ValueError(f"params.{name}: the default is not valid ({e})") from None
+        if self.estimate.method == "fixed" and not self.estimate.vram:
+            raise ValueError("estimate: the fixed method needs vram")
+        return self
+
+    def api_for(self, task: str) -> str:
+        return self.api[task]
+
+    def variant(self, name: str) -> Optional[Variant]:
+        return next((v for v in self.variants if v.name == name), None)
+
+
+def parse_recipe(text: str, *, builtin: bool = False) -> Recipe:
+    if len(text.encode("utf-8")) > MAX_RECIPE_BYTES:
+        raise RecipeError("a recipe is at most 64 KB")
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise RecipeError(f"not valid YAML: {str(e).splitlines()[0]}") from None
+    if not isinstance(data, dict):
+        raise RecipeError("a recipe is a YAML mapping")
+    data["builtin"] = builtin
+    try:
+        return Recipe.model_validate(data)
+    except ValidationError as e:
+        err = e.errors()[0]
+        loc = ".".join(str(p) for p in err.get("loc", ()))
+        raise RecipeError(f"{loc}: {str(err.get('msg', 'invalid')).removeprefix('Value error, ')}") from None
+
+
+_builtin_cache: Optional[dict[str, tuple[Recipe, str]]] = None
+
+
+def builtin_recipes() -> dict[str, tuple[Recipe, str]]:
+    """{name: (recipe, its YAML)} for the recipes shipped with Forgeyard."""
+    global _builtin_cache
+    if _builtin_cache is None:
+        out = {}
+        for path in sorted(BUILTIN_DIR.glob("*.yaml")):
+            text = path.read_text(encoding="utf-8")
+            recipe = parse_recipe(text, builtin=True)
+            out[recipe.name] = (recipe, text)
+        _builtin_cache = dict(sorted(out.items()))
+    return _builtin_cache
+
+
+# ------------------------------------------------------------------ matching hardware
+def variant_matches(variant: Variant, accel: dict) -> Optional[str]:
+    """Why this variant cannot run on this accelerator (a dict like the inventory's), or None."""
+    w = variant.when
+    if accel.get("vendor") != w.vendor:
+        return f"needs {w.vendor}"
+    arch = accel.get("arch")
+    if w.vendor == "nvidia":
+        if w.compute_capability and not version_ok(arch, w.compute_capability):
+            return f"compute capability {arch or '?'} is not {w.compute_capability}"
+    elif w.arch and arch not in w.arch:
+        return f"{arch or 'unknown architecture'} is not one of {', '.join(w.arch)}"
+    if w.driver and not version_ok(accel.get("driver"), w.driver):
+        return f"driver {accel.get('driver') or 'unknown'} is not {w.driver}"
+    return None
+
+
+def render_text(text: str, values: dict) -> str:
+    """Fill {placeholders}; anything else in braces (JSON, Jinja) is left alone."""
+    return PLACEHOLDER_RE.sub(lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), text)

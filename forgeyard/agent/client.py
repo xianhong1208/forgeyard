@@ -24,6 +24,7 @@ from forgeyard.machines.protocol import (
     CLOSE_REPLACED,
     CLOSE_REVOKED,
     FATAL_CLOSE_CODES,
+    FEATURE_MODELS,
     FEATURE_WORKLOADS,
     JOIN_PATH,
     PROTOCOL_VERSION,
@@ -136,6 +137,10 @@ class Agent:
             msg["features"] = [FEATURE_WORKLOADS]
             msg["runtimes"] = self.supervisor.available()
             msg["runtime_info"] = self.supervisor.runtime_info()
+            cache = self.supervisor.model_cache_info()
+            if cache is not None:
+                msg["features"].append(FEATURE_MODELS)
+                msg["model_cache"] = cache
         return msg
 
     @property

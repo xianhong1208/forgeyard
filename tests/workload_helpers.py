@@ -166,6 +166,11 @@ elif cmd == "run":
     if image.startswith("fail/"):
         print("Error: pull access denied for " + image, file=sys.stderr)
         sys.exit(125)
+    if image.startswith("credfail/") and image not in state.get("pulled", []):
+        # not local, and the configured credential helper is broken (as under the agent)
+        print(f"Unable to find image '{image}' locally", file=sys.stderr)
+        print("docker: error getting credentials - err: exit status 255, out: ``", file=sys.stderr)
+        sys.exit(125)
     env = {}
     for f in opts.get("--env-file", []):
         for line in Path(f).read_text().splitlines():
@@ -180,6 +185,17 @@ elif cmd == "run":
                "args": rest, "opts": opts, "env": env, "logs": [f"{name} line {n}" for n in range(1, 6)]}
     save()
     print(cid)
+elif cmd == "pull":
+    import os
+    conf = os.environ.get("DOCKER_CONFIG")
+    cfg = json.loads((Path(conf) / "config.json").read_text()) if conf else {"credsStore": "broken"}
+    if "credsStore" in cfg or "credHelpers" in cfg:
+        print("Error response from daemon: error getting credentials - err: exit status 255, out: ``",
+              file=sys.stderr)
+        sys.exit(1)
+    state.setdefault("pulled", []).append(args[-1])
+    save()
+    print("Status: Downloaded newer image for " + args[-1])
 elif cmd == "inspect":
     if args[1] == "--format":
         cid, c = find(args[3])

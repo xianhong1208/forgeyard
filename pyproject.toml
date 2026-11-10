@@ -13,6 +13,8 @@ dependencies = [
     "argon2-cffi>=25.1",
     # The agent's connection to the server (uvicorn[standard] also uses it on the server side).
     "websockets>=15",
+    # Engine recipes (M3). Already installed through uvicorn[standard]; listed because it is used.
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]

@@ -3,9 +3,9 @@
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器，之後也包括租用的雲端機器。
 每台機器上的 agent 回報硬體；你在上面跑 service、task 與開發環境，並用配方部署模型，統一走一個 OpenAI 相容的 gateway。
 
-> **狀態：里程碑 M0、M1 與 M2（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
-> 加入並回報硬體；可以在機器上跑 service 與 task，以容器或程序執行，而且只拿得到分配給它的 GPU。
-> 模型部署在 M3。
+> **狀態：里程碑 M0 到 M3（0.1.0，未發布）。** server、資料庫、Web UI 與登入已完成；機器透過 agent
+> 加入並回報硬體；可以在機器上跑 service 與 task，以容器或程序執行，而且只拿得到分配給它的 GPU；
+> 也能從目錄挑模型、用引擎配方部署，依記憶體估算放到合適的機器上。統一的 `/v1` gateway 與 API key 在 M4。
 
 [English](README.md)
 
@@ -91,7 +91,8 @@ server 不需要能連到機器。
 
 **放置（M2）：** 你選的機器，或依名稱排序第一台有空間的線上機器：有對應的 runtime、allowlist 裡有足夠的空閒 GPU、
 spec 宣告的 CPU 與記憶體放得下（扣掉已在上面的 replica）。GPU 是**獨佔**的：一張卡只給一個 replica。放不下的
-replica 會停在 *pending* 並寫明原因，一有空間就自動放上去。真正的排程器（評分、VRAM 估算、binpack）在 M3。
+replica 會停在 *pending* 並寫明原因，一有空間就自動放上去。workload 也可以宣告每張卡需要的記憶體（`gpus.vram`），
+並和同樣宣告的 workload 共用卡（`gpus.share: vram`）；模型部署用 M3 的排程器（見「模型」）。
 
 **權限：** admin 與 operator 可以建立、停止、啟動、刪除 workload，也能看輸出。登入的人都看得到清單、狀態與事件，
 但看不到環境變數的值與輸出（可能含機密）。建立、停止、啟動、刪除都記在稽核紀錄。
@@ -141,14 +142,55 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   派工作）；M2 的 agent 連到 M1 的 server 只回報硬體。
 - **agent 選項：** `--workload-user`、`--work-dir`（每個程序 replica 一個目錄；預設在 state 目錄旁邊，不在裡面）、
   `--port-range`（30000-32767）、`--bind-address`、`--container-engine auto|docker|podman|none|<路徑>`、
-  `--limits auto|systemd|rlimit`、`--log-max-mb`、`--no-workloads`。`python -m forgeyard agent runtimes
+  `--limits auto|systemd|rlimit`、`--log-max-mb`、`--no-workloads`；模型用 `--model-cache DIR`、
+  `--model-local-dir DIR`（可重複）與 `--allow-private-model-hosts`。`python -m forgeyard agent runtimes
   [--workload-user …]` 不加入 server，只印出這台機器能用哪些 runtime。
 
 workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)（英文）。
 
+## 模型
+
+**模型 → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
+會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由（M4 的 gateway 會用）；在那之前，
+每個 replica 用自己的 port 對外（頁面顯示網址，並有一個小小的 **Try it**）。
+
+- **目錄**（admin）：加入 `hf://<org>/<name>`（可指定 revision；GGUF repo 可指定檔案）、允許主機上的 GGUF 網址，或允許目錄下的
+  `local://<dir>`。模型**不下載就先檢視**：固定到哪個 commit、檔案與大小、`config.json`、safetensors header（參數量）或 GGUF
+  header（用 HTTP range 讀）。gated repo 的 token 只用在這次檢視，不保存。admin 可以替模型加上各配方的引擎參數
+  （Qwen3-Reranker 需要 vLLM 的 `--hf-overrides`）。
+- **配方**是 YAML（[forgeyard/recipes](forgeyard/recipes)）：task、格式、每個 task 的協定、參數、估算方法、health check，以及依硬體
+  （廠商、NVIDIA compute capability 或 AMD gfx target、driver 版本）分的 **variant**；每個 variant 是固定版本的容器映像，或給沒有
+  Docker 的 CPU 機器、由 agent 下載並以 SHA-256 檢查的固定版本執行檔。admin 可在模型頁加自訂配方。內建：
+
+  | 配方 | 服務 | 執行在 | 固定版本 |
+  |---|---|---|---|
+  | `vllm` | chat（safetensors） | NVIDIA、AMD | `vllm/vllm-openai:v0.32.0`（CUDA 13.0，driver ≥ 580）、`-cu129`（≥ 575）、`vllm/vllm-openai-rocm:v0.32.0` |
+  | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
+  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD、CPU（容器或程序） | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`，程序用 release `b11977` |
+  | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
+
+- **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
+  （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
+  GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
+  宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
+- **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
+  整張大卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
+  減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
+  並列出每台機器的原因與差多少（`wait: true` 則改為排隊等候）。
+- **共用 GPU**（`share: vram`）：同一張卡上多個 replica，各自被限制在自己的保留量內；共用的卡不會再給獨佔的 replica。
+  vLLM 的 `--gpu-memory-utilization` 是卡**總**記憶體的比例，而且**空閒**量不夠就拒絕啟動，所以在共用卡上固定 0.9 永遠起不來：
+  Forgeyard 把它設成（保留量 − CUDA context）÷ 總量，無條件捨去。同一張卡上的 replica 一個一個啟動（前一個 healthy 才啟動下一個），
+  避免兩個引擎同時依同一份空閒量決定自己的大小。
+- **模型快取**在每台機器上（`agent --model-cache DIR`）：以來源 + revision 為 key，目錄結構同 Hugging Face cache，該機器上所有 replica
+  共用；由 agent 下載（可續傳、每個檔案以 SHA-256 或 git blob id 驗證、頁面顯示進度），以**唯讀**方式掛進容器（只掛該模型的目錄）；
+  對程序也是唯讀檔案。下載和 server 走同一套防護：只接受 https 與公開位址、每次轉址都重新檢查（LAN mirror 用 `--allow-private-model-hosts`）。
+- **權限**：admin 管目錄、配方與模型來源；admin 與 operator 部署；所有登入的人都能看部署並試用。
+
+真機檢查：[docs/acceptance-m3.md](docs/acceptance-m3.md) 與 `scripts/accept_m3.py`。
+
 ## 帳號與登入
 
-- **角色：** `admin` 管理使用者、機器與其 GPU allowlist，並看稽核紀錄；`operator` 執行 workload；`user` 只能看
+- **角色：** `admin` 管理使用者、機器與其 GPU allowlist、模型目錄、配方與模型來源，並看稽核紀錄；`operator` 執行 workload 與部署模型；`user` 只能看（也能試用已部署的模型）
   （M4 會拿到 API key）。
   **owner**（第一個帳號）永遠是 admin，不能被降級、停用或刪除，所以不會有人把管理權整個鎖死。
 - **密碼：** argon2id；至少 12 字元；常見密碼（含尾巴加數字或符號的變形）與包含使用者名稱的密碼會被拒絕。
