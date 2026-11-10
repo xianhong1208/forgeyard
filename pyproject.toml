@@ -15,6 +15,8 @@ dependencies = [
     "websockets>=15",
     # Engine recipes (M3). Already installed through uvicorn[standard]; listed because it is used.
     "pyyaml>=6",
+    # The gateway's client to the replicas (M4): async, streaming. Was a dev dependency (tests).
+    "httpx>=0.28",
 ]
 
 [project.optional-dependencies]
@@ -26,8 +28,9 @@ nvidia = ["nvidia-ml-py>=12.535"]
 [dependency-groups]
 dev = [
     "pytest>=8.4",
-    "httpx>=0.28",
     "ruff>=0.12",
+    # The official OpenAI SDK, to test the gateway the way its users call it (M4).
+    "openai>=2.0",
 ]
 
 [tool.uv]

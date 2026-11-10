@@ -51,6 +51,12 @@ env:
   HF_HUB_CACHE: "{model_hub}"
   VLLM_NO_USAGE_STATS: "1"
   DO_NOT_TRACK: "1"
+# The replica's internal key (M4). vLLM 0.32.0 reads VLLM_API_KEY (vllm/envs.py) when --api-key is not
+# given (vllm/entrypoints/serve/middleware/register.py) and then requires `Authorization: Bearer` on
+# paths under /v1, /v2, /inference and /cohere (serve/middleware/authenticate.py: GUARDED_PREFIX).
+# /health stays open, so the health check needs no key. Other paths (/invocations, /tokenize,
+# /pooling, /score, /rerank without /v1) are not guarded by vLLM: see docs/acceptance-m4.md.
+api_key_env: VLLM_API_KEY
 variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=7.0", driver: ">=580"}

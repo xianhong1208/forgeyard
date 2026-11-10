@@ -30,6 +30,12 @@ export function setUnauthorizedHandler(handler: Handler | null) {
   unauthorized = handler;
 }
 
+// For requests made without api() (the playground streams with fetch itself): a 401 still means
+// "sign in again".
+export function notifyUnauthorized(reason?: string) {
+  unauthorized?.(reason);
+}
+
 export type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;

@@ -64,6 +64,23 @@ class Settings(BaseSettings):
     gpu_context_mib: int = 400
     vram_headroom_mib: int = 512
 
+    # Gateway (M4), /v1. Connecting to a replica that does not answer within this many seconds
+    # moves on to the next one; once connected, it may take this long to send its answer's
+    # headers or the next piece of a streamed answer (long generations, queued requests).
+    gateway_connect_timeout: float = 5.0
+    gateway_read_timeout: float = 600.0
+    # The largest request body accepted (an audio file for transcription is the big one).
+    gateway_max_body_mb: int = 32
+    # Initial limits for API keys, per minute; admins change them on the API keys page (stored in
+    # the database). default_*: what a key without its own limit gets; max_*: the most a user may
+    # give their own key. 0: no limit / no cap.
+    gateway_default_rpm: int = 0
+    gateway_default_tpm: int = 0
+    gateway_max_rpm: int = 0
+    gateway_max_tpm: int = 0
+    # How often gateway usage counted in memory is written to the database (seconds).
+    usage_flush_seconds: float = 5.0
+
     @field_validator("registration")
     @classmethod
     def _registration(cls, v: str) -> str:

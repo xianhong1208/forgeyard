@@ -42,6 +42,11 @@ env:
   WHISPER__COMPUTE_TYPE: "{compute_type}"
   LOG_LEVEL: info
   DO_NOT_TRACK: "1"
+# The replica's internal key (M4). speaches 0.8.3 reads API_KEY (src/speaches/config.py:
+# Config.api_key) and then requires `Authorization: Bearer` on every route, /health included
+# (main.py: FastAPI(dependencies=[ApiKeyDependency])), answering 403 without it. The agent's
+# health check therefore sends the key too.
+api_key_env: API_KEY
 variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=575"}

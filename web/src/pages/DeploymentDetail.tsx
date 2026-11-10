@@ -2,9 +2,10 @@ import { IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } fr
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { CopyBox, Notice, PageHeader } from "../components/ui";
+import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
+import { ms, num } from "../lib/gateway";
 import { bytes } from "../lib/machines";
 import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
 import type { Deployment, DeploymentResponse, LiveCard, TryResponse } from "../lib/types";
@@ -75,7 +76,7 @@ export function DeploymentDetailPage() {
             <span>{w.ready} of {w.replicas} ready</span>
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
           </div>
-          <Endpoints d={d} />
+          <Gateway d={d} />
           <section className="panel" aria-labelledby="replicas-title">
             <h2 id="replicas-title">Replicas</h2>
             <div className="table-wrap">
@@ -128,19 +129,48 @@ export function DeploymentDetailPage() {
   );
 }
 
-function Endpoints({ d }: { d: Deployment }) {
-  if (!d.endpoints.length) return null;
-  const path = d.route ? API_LABEL[d.route.api] ?? "" : "";
+function Gateway({ d }: { d: Deployment }) {
+  const base = `${window.location.origin}/v1`;
+  const path = d.route ? (API_LABEL[d.route.api] ?? "/v1").replace(/^\/v1/, "") : "";
+  const u = d.usage?.total;
   return (
-    <section className="panel" aria-labelledby="ep-title">
-      <h2 id="ep-title">Endpoint{d.endpoints.length > 1 ? "s" : ""}</h2>
-      <p className="muted small">Each replica answers on its own port until the gateway (M4) puts them behind one URL. Send <code>"model": "{d.route?.upstream_model ?? d.served_name}"</code>.</p>
-      {d.endpoints.map((e) => (
-        <div key={e.replica} className="endpoint">
-          <span className={`chip chip-tone-${e.ready ? "ok" : "wait"}`}>{e.ready ? "ready" : e.state}</span>
-          <CopyBox value={`${e.url.replace(/\/$/, "")}${path}`} label={`Endpoint of replica ${e.replica}`} />
-        </div>
-      ))}
+    <section className="panel gw-panel" aria-labelledby="gw-title">
+      <h2 id="gw-title">Through the gateway</h2>
+      <dl className="facts">
+        <dt>Model name</dt><dd><code className="gw-model">{d.served_name}</code></dd>
+        <dt>Endpoint</dt><dd className="mono small">{base}{path}</dd>
+      </dl>
+      <p className="muted small gw-how">
+        Programs call it with an <Link to="/keys">API key</Link> (any OpenAI client, <code>base_url</code> = <code>{base}</code>); you can also
+        try it in the <Link to="/playground">playground</Link>. Requests go to the ready replica with the fewest in flight.
+      </p>
+      {u && (
+        <dl className="fleet gw-usage" aria-label={`Last ${d.usage?.days ?? 7} days`}>
+          <div><dt>Requests, {d.usage?.days ?? 7} days</dt><dd>{num(u.requests)}</dd></div>
+          <div><dt>Errors</dt><dd>{num(u.errors)}</dd></div>
+          <div><dt>Tokens</dt><dd>{num(u.tokens)}</dd></div>
+          <div><dt>p50 / p95</dt><dd className="small-dd">{ms(u.latency_p50_ms)} / {ms(u.latency_p95_ms)}</dd></div>
+        </dl>
+      )}
+      {d.endpoints.length > 0 && (
+        <>
+          <h3 className="sub">Replicas behind it</h3>
+          <ul className="gw-replicas">
+            {d.endpoints.map((e) => (
+              <li key={e.replica}>
+                <span className={`chip chip-tone-${e.ready ? "ok" : "wait"}`}>{e.ready ? "ready" : e.state}</span>
+                <span className="mono small">#{e.replica}{e.machine ? ` on ${e.machine}` : ""}</span>
+                <span className="small">{num(e.served ?? 0)} requests{e.in_flight ? ` · ${e.in_flight} in flight` : ""}</span>
+                <span className={`chip ${e.protected ? "chip-tone-ok" : "chip-tone-wait"}`} title={e.protected
+                  ? "The engine requires the replica's internal key, which only the gateway has."
+                  : "The engine runs without a key: anyone who can reach its port can use it."}>{e.protected ? "internal key" : "no key"}</span>
+                <span className="muted small mono gw-addr">{e.url}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">Requests sent since the server started. Calls straight to a replica's port without its internal key are refused (401).</p>
+        </>
+      )}
     </section>
   );
 }
@@ -193,7 +223,7 @@ function TryIt({ d }: { d: Deployment }) {
   return (
     <section className="panel" aria-labelledby="try-title">
       <h2 id="try-title">Try it</h2>
-      <p className="muted small">One small request to a ready replica's own endpoint{api_ === "openai-audio" ? ": an 11-second public-domain clip (JFK, 1961) to transcribe" : ""}.</p>
+      <p className="muted small">One small request straight to a ready replica (with its internal key), to check that replica{api_ === "openai-audio" ? ": an 11-second public-domain clip (JFK, 1961) to transcribe" : ""}.</p>
       {api_ !== "openai-audio" && (
         <div className="field"><label htmlFor="try-input">{api_ === "rerank" ? "Query" : "Input"}</label>
           <input id="try-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder} maxLength={500} /></div>

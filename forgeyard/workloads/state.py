@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, utcnow
 from forgeyard.machines.messages import StatusIn
-from forgeyard.machines.protocol import FEATURE_MODELS, PROTOCOL_VERSION
+from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_REPLICA_KEYS, PROTOCOL_VERSION
 
 MAX_EVENTS = 300
 # Agent states in which the replica is (or may be) running something.
@@ -60,7 +60,8 @@ def compat_spec(spec: dict) -> dict:
     return spec
 
 
-def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = None) -> dict:
+def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = None,
+                    key_env: Optional[str] = None) -> dict:
     w = r.workload
     spec = r.spec or w.spec
     out = {"id": r.uid, "workload_id": w.id, "workload": w.name, "ordinal": r.ordinal, "generation": r.generation,
@@ -69,20 +70,33 @@ def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = N
         out["model"] = dict(r.model, token=token) if token else dict(r.model)
     if r.engine:
         out["engine"] = dict(r.engine)
+    if key_env and r.secret:
+        # The engine's internal key (M4): the agent passes it in the environment variable the
+        # recipe names, keeps it in memory only, and sends it with its health checks.
+        out["replica_key"] = {"env": key_env, "value": r.secret}
     return out
 
 
 def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
+    from forgeyard.models.catalog import get_recipe
+
     node = db.get(Node, node_id)
-    models = node is not None and FEATURE_MODELS in (node.features or [])
+    features = (node.features or []) if node is not None else []
+    models = FEATURE_MODELS in features
+    keys = FEATURE_REPLICA_KEYS in features
     reps = desired_replicas(db, node_id)
     tokens: dict[int, Optional[str]] = {}
+    key_envs: dict[int, Optional[str]] = {}
     ids = {r.workload_id for r in reps if r.model}
     if ids:
         for dep in db.scalars(select(Deployment).where(Deployment.workload_id.in_(ids))).all():
             tokens[dep.workload_id] = dep.hf_token
+            if keys:
+                recipe = get_recipe(db, dep.recipe)
+                key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None
     return {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
-            "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id)) for r in reps]}
+            "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id),
+                                         key_env=key_envs.get(r.workload_id)) for r in reps]}
 
 
 # ------------------------------------------------------------------ status from the agent
@@ -186,6 +200,7 @@ def reset_replica(r: Replica, generation: int) -> None:
     r.vram = None
     r.download = None
     r.ready_at = None
+    r.secret = None  # the next placement gets a new internal key
     r.updated_at = utcnow()
 
 

@@ -64,12 +64,25 @@ def is_ours(pid: Optional[int], start: Optional[int], boot: Optional[str]) -> bo
     return st is not None and st[0] != "Z" and st[2] == start
 
 
-def marked_members(rec_id: str, pgid: Optional[int]) -> list[int]:
-    """Processes of a replica whose group leader is gone: in its process group *and* carrying
-    its FORGEYARD_REPLICA marker, so a reused group id can never point at someone else."""
+def marked_members(rec_id: str, pgid: Optional[int], leader_start: Optional[int] = None,
+                   boot: Optional[str] = None) -> list[int]:
+    """Processes of a replica whose group leader is gone: in its process group *and* known to be
+    its own, so a reused group id can never point at someone else.
+
+    Its own: the process carries the replica's FORGEYARD_REPLICA marker in its environment. When
+    that cannot be read (a root agent in a container without CAP_SYS_PTRACE may not read another
+    user's /proc/<pid>/environ), the group itself is the proof, as long as its id was not reused:
+    Linux never hands out a pid that is still a living group's id, so while members of the group
+    remain, the id is still the one the replica's leader created. Only if a *different* process now
+    has the group's id as its pid (the old group died out and the number came back) is nothing
+    taken without the marker."""
     if not pgid:
         return []
+    if boot and boot != boot_id():
+        return []
     marker = f"FORGEYARD_REPLICA={rec_id}".encode()
+    leader = proc_stat(pgid)
+    reused = leader is not None and leader[0] != "Z" and leader_start is not None and leader[2] != leader_start
     out = []
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
@@ -78,10 +91,11 @@ def marked_members(rec_id: str, pgid: Optional[int]) -> list[int]:
         if st is None or st[1] != pgid or st[0] == "Z":
             continue
         try:
-            if marker in (entry / "environ").read_bytes().split(b"\0"):
-                out.append(int(entry.name))
+            marked = marker in (entry / "environ").read_bytes().split(b"\0")
         except OSError:
-            continue
+            marked = None  # unreadable: decide by the group
+        if marked or (marked is None and leader_start is not None and not reused):
+            out.append(int(entry.name))
     return out
 
 
@@ -190,7 +204,7 @@ class ProcessRuntime:
         return sorted(g for g in gids if g != 0)
 
     # ------------------------------------------------------------------ lifecycle
-    def start(self, rec: Record, address: str) -> None:
+    def start(self, rec: Record, address: str, secret: Optional[dict[str, str]] = None) -> None:
         if not self._info.get("ok"):
             raise StartError(self._info.get("reason") or "the process runtime is not available")
         spec = WorkloadSpec.model_validate(rec.spec)
@@ -203,7 +217,8 @@ class ProcessRuntime:
                 raise StartError("the model is not in the cache")
             extra = plan.model_values(rec.paths, container=False, model=rec.model, bind=address)
         env = plan.process_env(spec.env, rec.gpus, rec.ports, home=str(home), user=self.user,
-                               replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal, extra=extra)
+                               replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal, extra=extra,
+                               secret=secret)
         command = rec.engine_path or rt.command
         exe = command if "/" in command else shutil.which(command, path=env.get("PATH", plan.BASIC_PATH))
         if not exe or not os.path.isfile(exe):
@@ -278,7 +293,7 @@ class ProcessRuntime:
                 log.warning("Not allowed to signal replica %s (pgid %s).", rec.id, rec.pgid)
                 return False
         hit = False
-        for pid in marked_members(rec.id, rec.pgid):
+        for pid in marked_members(rec.id, rec.pgid, rec.proc_start, rec.boot_id):
             try:
                 os.kill(pid, sig)
                 hit = True
@@ -311,8 +326,9 @@ class ProcessRuntime:
                 pass
 
     def cleanup(self, rec: Record) -> None:
-        """After the main process ended: anything it left behind in its group goes too."""
-        for pid in marked_members(rec.id, rec.pgid):
+        """After the main process ended: anything it left behind in its group goes too (an engine
+        whose wrapper was killed would otherwise keep the port, and its successor could not start)."""
+        for pid in marked_members(rec.id, rec.pgid, rec.proc_start, rec.boot_id):
             try:
                 os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):

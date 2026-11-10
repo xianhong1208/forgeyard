@@ -29,6 +29,10 @@ then does the server place model deployments there, and its desired replicas car
 `spec`, the `model` to fetch (with a token for gated repositories, never stored by the agent) and
 an `engine` for process variants.
 
+The gateway (M4) adds "replica_keys": a desired model replica then carries `replica_key` ({env,
+value}), the internal key its engine must require. The agent keeps it in memory only, puts it in the
+engine's environment (never on a command line) and sends it with the replica's health checks.
+
 Workloads extend version 1 compatibly instead of bumping it. Each side lists its `features` (the
 agent in hello, the server in welcome), and `desired` / `status` / `logs` flow only when both list
 "workloads". An M1 agent (no features) keeps working with this server and is never sent work; an
@@ -67,7 +71,10 @@ VENDORS = ("nvidia", "amd", "cpu")
 
 FEATURE_WORKLOADS = "workloads"
 FEATURE_MODELS = "models"
-SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS)
+# M4: the agent gives model replicas their internal key (environment only, memory only) and sends it
+# with health checks. Only agents that list it are sent keys; replicas elsewhere run without one.
+FEATURE_REPLICA_KEYS = "replica_keys"
+SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS)
 RUNTIMES = ("process", "container")
 
 # What the agent reports per replica. Server-only states: "stopping" (asked, not confirmed yet).

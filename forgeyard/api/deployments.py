@@ -1,9 +1,9 @@
 """Model deployments: a catalog model + a recipe + parameters, expanded into a service workload
-(placed by the model scheduler) and a gateway route (used by the M4 gateway).
+(placed by the model scheduler) and a gateway route (served at /v1 by the gateway, M4).
 
 Admins and operators estimate, create, stop, start and delete deployments; everyone signed in
-sees them and can send a short test request ("try it") to a ready replica. Until the gateway
-(M4), each replica is reached on its own port.
+sees them and can send a short test request ("try it") to a ready replica, and use them through
+the gateway with an API key or the playground.
 """
 
 from __future__ import annotations
@@ -150,6 +150,21 @@ def estimate(body: DeploymentIn, _: Caller = Depends(require_operator), db: DbSe
             "recipe": recipe.name, "model": m.name}
 
 
+def _endpoints(w: Workload) -> list[dict]:
+    """Each replica's own address, with what the gateway sent it since the server started. Whether
+    its engine requires the internal key (protected) is shown; the key never is."""
+    from forgeyard.gateway.balancer import balancer
+    from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
+
+    by_ordinal = {r.ordinal: r for r in w.replicas}
+    out = []
+    for e in routes.endpoints(w):
+        r = by_ordinal.get(e["replica"])
+        protected = bool(r and r.secret and r.node and FEATURE_REPLICA_KEYS in (r.node.features or []))
+        out.append({**e, "protected": protected, **(balancer.snapshot(r.uid) if r else {})})
+    return out
+
+
 def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool = False) -> dict:
     w = d.workload
     route = db.scalar(select(GatewayRoute).where(GatewayRoute.deployment_id == d.id))
@@ -161,11 +176,14 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
         "route": {"served_name": route.served_name, "api": route.api, "upstream_model": route.upstream_model}
         if route else None,
-        "endpoints": routes.endpoints(w),
+        "endpoints": _endpoints(w),
         "workload": workload_out(w, caller),
     }
     if detail:
+        from forgeyard.api.keys import deployment_usage
+
         out["cards"] = live_cards(db, w)
+        out["usage"] = deployment_usage(db, d)
     return out
 
 
@@ -313,9 +331,11 @@ class TryIn(BaseModel):
     stream: bool = False
 
 
-def _post(url: str, body: bytes, content_type: str) -> tuple[int, dict | str]:
-    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": content_type,
-                                                                          "Accept": "application/json"})
+def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None) -> tuple[int, dict | str]:
+    headers = {"Content-Type": content_type, "Accept": "application/json"}
+    if secret:
+        headers["Authorization"] = f"Bearer {secret}"  # the replica's internal key (M4)
+    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=TRY_TIMEOUT) as resp:
             raw = resp.read(2 * 1024**2)
@@ -381,7 +401,8 @@ def summarise(api: str, answer) -> str:
 
 @router.post("/deployments/{dep_id}/try")
 def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
-    """One small request to a ready replica's own endpoint (the gateway comes with M4)."""
+    """One small request straight to a ready replica's own endpoint (with its internal key), to check
+    that replica; the playground and /v1 go through the gateway instead."""
     import time
 
     d = _get(db, dep_id)
@@ -390,8 +411,9 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     if route is None or target is None:
         raise fail(409, "not_ready", "No replica of this deployment is ready yet.")
     path, payload, ctype = try_request(route.api, route.upstream_model, body.input)
+    replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
     started = time.monotonic()
-    status, answer = _post(target["url"].rstrip("/") + path, payload, ctype)
+    status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)
     return {"status": status, "ok": 200 <= status < 300, "api": route.api, "endpoint": target["url"] + path.lstrip("/"),
             "request": json.loads(payload) if ctype == "application/json" else {"model": route.upstream_model,

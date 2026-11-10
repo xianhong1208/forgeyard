@@ -13,10 +13,12 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from forgeyard import __version__
-from forgeyard.api import audit_log, auth, deployments, machines, models, users, workloads
+from forgeyard.api import audit_log, auth, deployments, gateway, keys, machines, models, users, workloads
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import new_session
+from forgeyard.gateway import proxy as gateway_proxy
+from forgeyard.gateway.usage import recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_RESTART
@@ -42,13 +44,20 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     sweeper = asyncio.create_task(liveness.run_forever())
+    usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        sweeper.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sweeper
+        for task in (sweeper, usage_writer):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        await gateway_proxy.close_client()
+        try:
+            await asyncio.to_thread(usage_recorder.flush)  # what was counted since the last write
+        except Exception:
+            log.exception("Writing gateway usage on shutdown failed")
 
 
 def create_app() -> FastAPI:
@@ -75,6 +84,9 @@ def create_app() -> FastAPI:
     app.include_router(workloads.router)
     app.include_router(models.router)
     app.include_router(deployments.router)
+    app.include_router(keys.router)
+    app.include_router(gateway.console)
+    app.include_router(gateway.router)
     app.include_router(agent_api.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

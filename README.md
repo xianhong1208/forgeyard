@@ -5,11 +5,12 @@ on one LAN or VPN, later rented cloud machines too. Agents report each machine's
 you run services, tasks and dev environments on them, and deploy models from recipes behind
 one OpenAI-compatible gateway.
 
-> **Status: milestones M0 to M3 (0.1.0, unreleased).** The server, database, web UI and
+> **Status: milestones M0 to M4, the MVP (0.1.0, unreleased).** The server, database, web UI and
 > sign-in are in place; machines join through the agent and report their hardware; you run
-> services and tasks on them, as containers or processes, with only the GPUs they were given; and
-> you deploy models from a catalog with engine recipes, placed by memory estimate. The unified
-> `/v1` gateway and API keys come with M4.
+> services and tasks on them, as containers or processes, with only the GPUs they were given; you
+> deploy models from a catalog with engine recipes, placed by memory estimate; and every deployment
+> answers behind one OpenAI-compatible gateway at `/v1`, with API keys, limits, usage statistics and
+> a playground.
 
 [繁體中文說明](README.zh-TW.md)
 
@@ -204,8 +205,8 @@ Real-hardware checks for workloads: [docs/acceptance-m2.md](docs/acceptance-m2.m
 **Models → Deploy a model**: pick a model from the catalog and a recipe, set the parameters, and
 the page shows how much memory one replica needs and where it would go, before anything is created
 or downloaded. A deployment is one service workload (it also appears under Workloads) plus a
-gateway route, which the M4 gateway will use; until then every replica answers on its own port
-(the page shows the URL and has a small **Try it**).
+gateway route: programs reach it at `/v1` with its **model name** (see *Gateway and API keys*). Its
+page shows that name, its usage, each replica and a small **Try it** that checks one replica directly.
 
 - **Catalog** (admins): add `hf://<org>/<name>` (optionally a revision and, for GGUF repositories,
   the file), a GGUF URL from an allowed host, or `local://<dir>` under an allowed directory. The
@@ -237,7 +238,8 @@ gateway route, which the M4 gateway will use; until then every replica answers o
   what the agent reports **free** on the card (it may be shared with work outside Forgeyard), minus
   Forgeyard's reservations that are not in that number yet, minus `VRAM_HEADROOM_MIB` (512). Never
   the card's total. When nothing fits the deployment is refused and every machine says why and by
-  how much (`wait: true` queues it instead).
+  how much (`wait: true` queues it instead). Replicas of one deployment go to **different machines**
+  when they can (before binpack), so the gateway can balance and fail over between them.
 - **Sharing a GPU** (`share: vram`): several replicas on one card, each held to its own
   reservation; a shared card is never shared with an exclusive replica. vLLM's
   `--gpu-memory-utilization` is a fraction of the card's **total** memory and vLLM refuses to start
@@ -256,11 +258,67 @@ gateway route, which the M4 gateway will use; until then every replica answers o
 
 Real-hardware checks: [docs/acceptance-m3.md](docs/acceptance-m3.md) and `scripts/accept_m3.py`.
 
+## Gateway and API keys
+
+Every deployment answers at **`http://<server>:7860/v1`**, OpenAI-compatible, on the console's own
+port: `GET /v1/models`, `POST /v1/chat/completions` and `/v1/completions` (streaming passed through),
+`/v1/embeddings`, `/v1/rerank` and `/v1/score` (vLLM's shapes), `/v1/audio/transcriptions` and
+`/translations` (multipart). The `model` is the deployment's served name. Any OpenAI client works:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://<server>:7860/v1", api_key="fyk_…")
+client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hi"}])
+```
+
+- **API keys** (page **API keys**): everyone creates their own; a key is `fyk_` + 43 random
+  characters, **shown once** with a curl and a Python example; the server keeps its SHA-256 and a
+  12-character prefix. Optional: an expiry, the models it may use (else every deployment, also later
+  ones), requests and tokens per minute. Revoking, an expiry or a disabled account stop it on the next
+  request. Admins see and revoke everyone's keys, change any key's limits, and set the **defaults**
+  (for keys without their own limit) and **caps** (the most people may give their own keys). Creating,
+  changing and revoking keys are in the audit log.
+- **Only keys on `/v1`**: the console's cookie is never read there (a web page cannot use a signed-in
+  browser against it), so the console's CSRF rule does not apply; the host check (421) does. No CORS.
+- **Routing:** the ready replicas of the model, fewest requests in flight first, ties in turn. If
+  connecting to one fails before anything was sent back, the next is tried and the failed one goes
+  last until its agent reports it ready again (at most 15 s). A client that disconnects closes the
+  request upstream, so the engine stops. Timeouts: 5 s to connect, 600 s for the headers or the next
+  piece of a stream (`GATEWAY_CONNECT_TIMEOUT`, `GATEWAY_READ_TIMEOUT`).
+- **Errors** in OpenAI's shape `{"error": {"message", "type", "param", "code"}}`: 401 key missing,
+  wrong, expired or revoked; 403 model not allowed for the key; 404 unknown model; 400 wrong endpoint
+  for the model; 429 over a limit, with `Retry-After`; 503 no ready replica, with each replica's state;
+  502 replica unreachable or refusing its internal key; 504 no answer in time. An engine's own errors
+  are passed on as they are.
+- **Limits** per key, sliding windows over the last 60 s, counted in this server's memory (several
+  servers sharing limits come later): requests per minute (refused requests do not count) and tokens
+  per minute from the answers' `usage` (for a streamed chat the gateway asks the engine for its usage
+  chunk and removes it unless the client asked for it); while a request runs, its `max_tokens` is held
+  so parallel requests cannot all slip past.
+- **Usage** (page **Usage**): requests, errors, limit refusals, prompt and completion tokens, latency
+  p50/p95, per day, model, key, person or source (API key or playground). Everyone sees their own;
+  admins everyone's. A deployment's page shows its last 7 days. Counting only, no billing.
+- **Playground**: chat with streaming, embeddings, rerank and speech to text in the console, through
+  the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
+  no API key and counts as "console" in usage.
+- **Replicas cannot be used around the gateway.** Every model replica gets an **internal key**, new
+  with every placement. The agent passes it to the engine in the **environment** (vLLM
+  `VLLM_API_KEY`, llama.cpp `LLAMA_API_KEY`, speaches `API_KEY`; a recipe names its variable with
+  `api_key_env`), never on the command line, keeps it in memory only and sends it with health checks;
+  it is never shown in the UI, the API, a spec or a log. Only the gateway and *Try it* send it. A call
+  straight to a replica's port without it gets 401 (speaches: 403). **vLLM 0.32 checks the key only on
+  `/v1`, `/v2`, `/inference` and `/cohere`**: its `/invocations`, `/rerank`, `/score`, `/pooling` and
+  `/tokenize` stay open on the replica's port, so keep the replica port range (30000-32767) reachable
+  from the server only (firewall) on a shared network. Replicas started by an agent from before M4
+  have no key until they are placed again (stop and start the deployment after updating the agent).
+
+Real-hardware checks: [docs/acceptance-m4.md](docs/acceptance-m4.md) and `scripts/accept_m4.py`.
+
 ## Accounts and sign-in
 
 - **Roles:** `admin` manages users, machines and their GPU allowlists, the model catalog, recipes
   and sources, and sees the audit log; `operator` runs workloads and deploys models; `user` can
-  look and try deployed models (and gets API keys in M4). The **owner** (the first account) is always an
+  look, use deployed models through the playground and their own API keys, and see their own usage. The **owner** (the first account) is always an
   admin and cannot be demoted, disabled or deleted, so nobody can lock administration out.
 - **Passwords:** argon2id; at least 12 characters; common passwords (also with digits or
   symbols tacked on) and passwords containing the username are refused.
@@ -313,6 +371,9 @@ project.
 | `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF), estimates, recipes, the scheduler, routes |
 | `forgeyard/recipes/` | the built-in engine recipes (YAML) |
 | `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it, routes |
+| `forgeyard/gateway/` | the gateway: API keys, limits, the balancer, forwarding and streaming, usage |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground; API keys, key limits and usage |
+| `scripts/accept_m4.py` | the M4 acceptance run on real machines, with the official OpenAI SDK |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
 | `scripts/accept_m3.py` | the M3 acceptance run on a real machine, through the API |
 | `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state file |

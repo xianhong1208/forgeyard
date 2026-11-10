@@ -58,6 +58,9 @@ class Record:
     engine_path: Optional[str] = None
     download: Optional[dict] = None
     loading: bool = False
+    # M4: the environment variable that carries the engine's internal key. Only the name is kept
+    # here; the key itself stays in the agent's memory (Supervisor.keys) and comes with `desired`.
+    key_env: Optional[str] = None
 
     def public(self, *, with_tail: Optional[str] = None) -> dict:
         out = {"id": self.id, "generation": self.generation, "state": self.state, "reason": self.reason,

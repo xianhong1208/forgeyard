@@ -45,6 +45,10 @@ params:
 args: [-m, "{model_file}", --alias, "{served_name}", --host, "{host}", --port, "{port}",
        -c, "{kv_tokens}", -np, "{concurrency}", --kv-unified, -ngl, "{gpu_layers}", --fit, "off",
        -t, "{threads}", --no-webui]
+# The replica's internal key (M4). llama-server b11977 reads --api-key from LLAMA_API_KEY
+# (common/arg.cpp: .set_env("LLAMA_API_KEY")) and then answers 401 to every path except /health,
+# /v1/health and the web UI's files (tools/server/server-http.cpp: get_public_endpoints).
+api_key_env: LLAMA_API_KEY
 variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=570"}
