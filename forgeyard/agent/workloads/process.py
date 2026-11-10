@@ -197,12 +197,18 @@ class ProcessRuntime:
         rt = spec.runtime
         assert isinstance(rt, ProcessSpec)
         home, log_dir = self._prepare_dirs(rec)
+        extra = None
+        if rec.model is not None:
+            if not rec.paths:
+                raise StartError("the model is not in the cache")
+            extra = plan.model_values(rec.paths, container=False, model=rec.model, bind=address)
         env = plan.process_env(spec.env, rec.gpus, rec.ports, home=str(home), user=self.user,
-                               replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal)
-        exe = rt.command if "/" in rt.command else shutil.which(rt.command, path=env.get("PATH", plan.BASIC_PATH))
+                               replica_id=rec.id, workload=rec.workload, ordinal=rec.ordinal, extra=extra)
+        command = rec.engine_path or rt.command
+        exe = command if "/" in command else shutil.which(command, path=env.get("PATH", plan.BASIC_PATH))
         if not exe or not os.path.isfile(exe):
             raise StartError(f"command not found: {rt.command}")
-        args = plan.substitute(rt.args, env)
+        args = plan.substitute(rt.args, env, extra)
         exit_file = home / EXIT_FILE
         exit_file.unlink(missing_ok=True)
         cwd = rt.workdir or str(home)

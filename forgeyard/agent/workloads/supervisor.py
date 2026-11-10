@@ -11,6 +11,12 @@ whenever that list changes, the supervisor:
 4. applies the policies: task retries with backoff, max_duration, service restarts, health;
 5. reports every change in a `status` message (all replicas after each new desired list).
 
+Model replicas (M3) first get their model (and, for a process variant, their engine) into the
+machine's model cache, reporting download progress; a download nobody wants any more is
+cancelled. Replicas that share a GPU are launched one at a time: the next starts once the one
+before has loaded (passed its health check), so two engines never size themselves against the
+same free memory at once.
+
 Everything is idempotent: running it again with the same desired list changes nothing, and an
 agent restart or a reconnect simply converges again. Until the first desired list arrives
 after a start, the agent keeps watching what it adopted but starts and stops nothing new.
@@ -22,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -47,7 +54,7 @@ class Supervisor:
     def __init__(self, state_dir: Path, runtimes: dict, *, port_range: tuple[int, int] = (30000, 32767),
                  log_max_bytes: int = 10 * 1024**2, stop_grace: float = 10.0, tick: float = 1.0,
                  clock: Callable[[], float] = time.time, port_probe=portlib.bindable, prober=health.probe,
-                 bind_address: Optional[str] = None):
+                 bind_address: Optional[str] = None, models=None, gate_poll: float = 1.0):
         self.store = RecordStore(state_dir)
         self.records: dict[str, Record] = self.store.load_all()
         self.runtimes = runtimes
@@ -74,6 +81,14 @@ class Supervisor:
         self._owned: dict[str, dict] = {}
         self._orphans_swept = False
         self.started = 0  # replicas started by this agent process (tests and logs)
+        # M3: the model cache (None: this agent serves no models), tokens for gated models (in
+        # memory only), cancel switches for downloads in flight, and the stops in flight.
+        self.models = models
+        self.tokens: dict[str, str] = {}
+        self.cancels: dict[str, threading.Event] = {}
+        self.stopping: set[str] = set()
+        self.cache_dirty = models is not None
+        self.gate_poll = gate_poll
 
     # ------------------------------------------------------------------ what the agent tells the server
     def runtime_info(self) -> dict:
@@ -86,12 +101,24 @@ class Supervisor:
         if address and not self.bind_fixed:
             self.address = address
 
+    def model_cache_info(self) -> Optional[dict]:
+        return self.models.info() if self.models is not None else None
+
     def set_desired(self, msg: dict) -> None:
         revision = int(msg.get("revision") or 0)
         if revision and revision < self.revision:
             return  # an older list, overtaken
         self.revision = revision
-        self.desired = {r["id"]: r for r in msg.get("replicas") or [] if isinstance(r, dict) and r.get("id")}
+        desired = {}
+        for r in msg.get("replicas") or []:
+            if not isinstance(r, dict) or not r.get("id"):
+                continue
+            model = r.get("model")
+            if isinstance(model, dict) and model.get("token"):
+                self.tokens[r["id"]] = str(model["token"])  # kept in memory only, never in a record
+                r = {**r, "model": {k: v for k, v in model.items() if k != "token"}}
+            desired[r["id"]] = r
+        self.desired = desired
         self.full_due = True
         self._wake.set()
 
@@ -114,7 +141,11 @@ class Supervisor:
             return None
         self.changed.clear()
         self.removed = []
-        return {"v": PROTOCOL_VERSION, "type": "status", "full": full, "replicas": entries}
+        msg = {"v": PROTOCOL_VERSION, "type": "status", "full": full, "replicas": entries}
+        if self.cache_dirty and self.models is not None:
+            self.cache_dirty = False
+            msg["model_cache"] = self.models.info()
+        return msg
 
     async def logs(self, replica_id: str, lines: int) -> dict:
         rec = self.records.get(replica_id)
@@ -205,6 +236,7 @@ class Supervisor:
                 continue
             limit = rec.spec.get("max_duration")
             if rec.kind == "task" and limit and rec.started_at and now - rec.started_at >= limit:
+                self.stopping.add(rec.id)
                 self._launch(rec.id, self._deadline(rec))
                 continue
             if rec.kind == "service" and rec.spec.get("health"):
@@ -216,10 +248,14 @@ class Supervisor:
             return
 
         for rec in list(self.records.values()):
-            if rec.id in self.ops:
-                continue
             want = self.desired.get(rec.id)
-            if want is None or want.get("generation") != rec.generation:
+            unwanted = want is None or want.get("generation") != rec.generation
+            if rec.id in self.ops:
+                if unwanted and rec.id in self.cancels:
+                    self.cancels[rec.id].set()  # a download nobody wants any more
+                continue
+            if unwanted:
+                self.stopping.add(rec.id)
                 self._launch(rec.id, self._remove(rec))
         if not self._orphans_swept:
             self._orphans_swept = True
@@ -228,7 +264,7 @@ class Supervisor:
                 if rid not in self.records and rid not in self.desired and container is not None:
                     log.info("Removing container %s: nothing wants replica %s any more.", owned["name"], rid[:12])
                     await asyncio.to_thread(container.remove_name, owned["name"])
-        if self.ops:
+        if self.stopping:
             return  # stops first; starts on a later round, once every stop has finished
 
         for rid, want in self.desired.items():
@@ -240,6 +276,8 @@ class Supervisor:
                          spec=want.get("spec") or {}, gpus=list(want.get("gpus") or []))
             if rec.runtime not in self.runtimes:
                 rec.state, rec.final, rec.reason = "failed", True, f"this agent has no {rec.runtime} runtime"
+            elif want.get("model") is not None or want.get("engine") is not None:
+                self._model_record(rec, want)
             owned = self._owned.pop(rid, None)
             if owned and owned["generation"] == rec.generation and rec.runtime == "container":
                 rec.container, rec.ports, rec.state = owned["name"], owned["ports"], "running"
@@ -263,6 +301,85 @@ class Supervisor:
             if (rec.state == "pending" and not restarts_only) or (
                     rec.state == "backoff" and (rec.next_start_at or 0) <= now):
                 self._launch(rec.id, self._start(rec))
+
+    def _model_record(self, rec: Record, want: dict) -> None:
+        from forgeyard.agent.models import CacheError, validate_model
+        from forgeyard.models.sources import SourceError
+
+        if self.models is None:
+            rec.state, rec.final = "failed", True
+            rec.reason = "this agent has no model cache (start it with --model-cache DIR)"
+            return
+        try:
+            if want.get("model") is not None:
+                rec.model = validate_model(want["model"], self.models.local_dirs)
+            if want.get("engine") is not None:
+                rec.engine = dict(want["engine"])
+        except (CacheError, SourceError, ValueError, TypeError) as e:
+            rec.state, rec.final, rec.reason = "failed", True, f"refused the model: {e}"[:400]
+
+    def _progress(self, rec_id: str, phase: str, done: int, total: int, file: Optional[str]) -> None:
+        rec = self.records.get(rec_id)
+        if rec is None:
+            return
+        rec.download = {"phase": phase, "done": done, "total": total, **({"file": file} if file else {})}
+        what = "the model" if phase == "model" else "the engine"
+        if total:
+            rec.reason = f"downloading {what}: {done / 1024**3:.2f} of {total / 1024**3:.2f} GiB ({100 * done // total}%)"
+        else:
+            rec.reason = f"downloading {what}: {done / 1024**2:.0f} MiB"
+        self._notify(rec)
+
+    async def _prepare(self, rec: Record) -> bool:
+        """Model and engine into the cache. False when it cannot (the replica has ended) or was cancelled."""
+        from forgeyard.agent.models import CacheError, Cancelled
+        from forgeyard.models.sources import cache_key
+
+        loop = asyncio.get_running_loop()
+        cancel = self.cancels.setdefault(rec.id, threading.Event())
+
+        def progress(phase, done, total, file):
+            loop.call_soon_threadsafe(self._progress, rec.id, phase, done, total, file)
+
+        try:
+            if rec.engine is not None:
+                exe = await asyncio.to_thread(self.models.ensure_engine, rec.engine, progress=progress, cancel=cancel)
+                rec.engine_path = str(exe)
+            if rec.model is not None:
+                if not self.models.is_cached(rec.model) and self.models.busy(cache_key(rec.model)):
+                    rec.reason = "waiting for another replica's download of the same model"
+                    self._notify(rec)
+                rec.paths = await asyncio.to_thread(self.models.ensure_model, rec.model, token=self.tokens.get(rec.id),
+                                                    progress=progress, cancel=cancel)
+        except Cancelled:
+            rec.state, rec.reason, rec.download = "pending", None, None
+            return False
+        except CacheError as e:
+            rec.download = None
+            await self._ended(rec, None, reason=str(e)[:300])
+            return False
+        finally:
+            self.cancels.pop(rec.id, None)
+            self.cache_dirty = True
+        rec.download = None
+        return True
+
+    def _gate_blockers(self, rec: Record) -> list[Record]:
+        """Other replicas still loading on one of this replica's GPUs."""
+        keys = {g.get("key") for g in rec.gpus}
+        if not keys:
+            return []
+        now = self.clock()
+        out = []
+        for other in self.records.values():
+            if other is rec or not other.loading or other.state not in LIVE:
+                continue
+            period = int(((other.spec.get("health") or {}).get("start_period")) or 0)
+            if other.started_at and now - other.started_at > period + 60:
+                continue  # stuck loading: do not wait for it forever
+            if keys & {g.get("key") for g in other.gpus}:
+                out.append(other)
+        return out
 
     # ------------------------------------------------------------------ operations
     async def _start(self, rec: Record) -> None:
@@ -295,11 +412,33 @@ class Supervisor:
         rec.reason = "pulling the image and starting the container" if rec.runtime == "container" else None
         rec.exit_code = None
         rec.started_at, rec.finished_at, rec.next_start_at = now, None, None
-        rec.deadline_hit = rec.stop_requested = rec.healthy_seen = False
+        rec.deadline_hit = rec.stop_requested = rec.healthy_seen = rec.loading = False
         rec.health_failures, rec.last_probe_at, rec.pid = 0, None, None
         self.tails.pop(rec.id, None)
         self._save(rec)
         self._notify(rec)
+        if rec.model is not None or rec.engine is not None:
+            rec.reason = "preparing the model"
+            self._notify(rec)
+            if not await self._prepare(rec):
+                self._save(rec)
+                self._notify(rec)
+                return
+            waited = False
+            while self._gate_blockers(rec):
+                if rec.id not in self.records or (self.desired is not None and rec.id not in self.desired):
+                    return
+                if not waited:
+                    rec.reason = (f"waiting for {self._gate_blockers(rec)[0].workload} to finish loading on the "
+                                  "shared GPU")
+                    self._notify(rec)
+                    waited = True
+                await asyncio.sleep(self.gate_poll)
+            rec.loading = bool(rec.gpus) and bool(spec.health)
+            rec.reason = "pulling the image and starting the container" if rec.runtime == "container" else None
+            rec.started_at = self.clock()
+            self._save(rec)
+            self._notify(rec)
         try:
             await asyncio.to_thread(rt.start, rec, self.address)
         except Exception as e:  # StartError, and anything unexpected: shown, never fatal
@@ -322,6 +461,7 @@ class Supervisor:
                      unknown: bool = False) -> None:
         """The replica's main process or container ended: decide what happens next."""
         rt = self.runtimes[rec.runtime]
+        rec.loading = False
         await asyncio.to_thread(rt.cleanup, rec)
         now = self.clock()
         spec = rec.spec
@@ -367,6 +507,12 @@ class Supervisor:
         self._notify(rec)
 
     async def _deadline(self, rec: Record) -> None:
+        try:
+            await self._deadline_inner(rec)
+        finally:
+            self.stopping.discard(rec.id)
+
+    async def _deadline_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
         rec.deadline_hit = rec.stop_requested = True
         rec.reason = f"max_duration ({rec.spec.get('max_duration')} s) reached; stopping"
@@ -378,6 +524,13 @@ class Supervisor:
         await self._ended(rec, obs.exit_code if not obs.alive else None)
 
     async def _remove(self, rec: Record) -> None:
+        try:
+            await self._remove_inner(rec)
+        finally:
+            self.stopping.discard(rec.id)
+            self.tokens.pop(rec.id, None)
+
+    async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
         was_running = rec.state in LIVE
         if was_running or rec.state == "backoff":
@@ -419,7 +572,12 @@ class Supervisor:
         if port is None:
             return
         rec.last_probe_at = now
-        host = "127.0.0.1" if rec.runtime == "process" or self.address in ("0.0.0.0", "::") else self.address
+        # Processes usually listen on every address (probe loopback); a model engine run as a process
+        # binds only the agent's address, like a container's published port.
+        if self.address in ("0.0.0.0", "::") or (rec.runtime == "process" and rec.model is None):
+            host = "127.0.0.1"
+        else:
+            host = self.address
         self.probes[rec.id] = asyncio.create_task(self._probe(rec, h, host, int(port["host_port"])))
 
     async def _probe(self, rec: Record, h: dict, host: str, port: int) -> None:
@@ -431,11 +589,17 @@ class Supervisor:
         if err is None:
             rec.health_failures = 0
             rec.healthy_seen = True
+            rec.loading = False
             rec.state, rec.reason = "healthy", None
+        elif (not rec.healthy_seen and rec.started_at
+              and self.clock() - rec.started_at < int(h.get("start_period") or 0)):
+            # Still within the start period (a model loading): failures do not count yet.
+            rec.reason = "loading; waiting for the health check to pass"
         else:
             rec.health_failures += 1
             if rec.health_failures >= int(h.get("failure_threshold") or 3):
                 rec.state, rec.reason = "unhealthy", err[:300]
+                rec.loading = False
         if (rec.state, rec.reason) != before:
             self._save(rec)
             self._notify(rec)
