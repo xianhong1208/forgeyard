@@ -397,3 +397,22 @@ def test_fy_gw_016_try_it_sends_the_replicas_internal_key(gw):
     out = gw.owner.post(f"/api/deployments/{dep['id']}/try", json={}).json()
     assert out["ok"] and out["summary"].startswith("3 dimensions")
     assert gw.emb.posts("/v1/embeddings")[-1]["auth"] == "Bearer secret-e" and gw.emb.refused == 0
+
+
+def test_fy_gw_017_a_failed_replica_is_tried_last_until_it_is_ready_again():
+    """FY-GW-017: after a failed connection a replica goes last for a while, unless it has become
+    ready again since (restarted by its agent)."""
+    from forgeyard.gateway.balancer import Balancer, Target
+
+    t = {"mono": 100.0, "wall": 1000.0}
+    b = Balancer(clock=lambda: t["mono"], wall=lambda: t["wall"])
+    a0 = Target("u0", 0, "http://a", "a", None, True, ready_since=900.0)
+    a1 = Target("u1", 1, "http://b", "b", None, True, ready_since=900.0)
+    b.failed("u0")
+    assert [x.uid for x in b.order("m", [a0, a1])] == ["u1", "u0"]
+    assert [x.uid for x in b.order("m", [a0, a1])] == ["u1", "u0"]  # whatever the turn
+    restarted = Target("u0", 0, "http://a", "a", None, True, ready_since=1005.0)
+    orders = {tuple(x.uid for x in b.order("m", [restarted, a1])) for _ in range(2)}
+    assert orders == {("u0", "u1"), ("u1", "u0")}  # back in turn
+    t["mono"] += 16  # the penalty is over anyway
+    assert {tuple(x.uid for x in b.order("m", [a0, a1])) for _ in range(2)} == {("u0", "u1"), ("u1", "u0")}

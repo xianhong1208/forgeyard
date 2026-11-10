@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -449,3 +450,51 @@ def test_fy_rt_024_anonymous_config_without_a_config_file(tmp_path):
     conf = anonymous_config(str(tmp_path / "nothing-here"), tmp_path / "anon")
     assert json.loads((conf / "config.json").read_text()) == {}
     assert (conf / "config.json").stat().st_mode & 0o777 == 0o600 and conf.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.skipif(os.geteuid() != 0, reason="runs the process as the workload user, which needs a root agent")
+def test_fy_rt_025_what_a_killed_leader_leaves_behind_is_stopped_before_a_restart(tmp_path):
+    """FY-RT-025 (found in the M4 run): the wrapper of a replica is killed but its engine lives on,
+    holding the port. Before the restart the agent stops the leftovers of the group, also when it
+    cannot read their environment (a root agent in a container without CAP_SYS_PTRACE)."""
+    import signal
+    import time
+
+    from forgeyard.agent.workloads.process import marked_members, proc_stat
+
+    work = world_dir()
+    try:
+        rt = ProcessRuntime(RecordStore(tmp_path / "state"), work / "work", workload_user="nobody",
+                            systemd=lambda: False)
+
+        def members(pgid):
+            return [int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit()
+                    and (st := proc_stat(int(p.name))) and st[1] == pgid and st[0] != "Z"]
+
+        async def scenario():
+            sup = Supervisor(tmp_path / "state", {"process": rt}, tick=0.05)
+            spec = {"name": "eng", "kind": "service", "runtime": {"type": "process", "command": "sh",
+                                                                  "args": ["-c", "sleep 300 & exec sleep 301"]}}
+            sup.set_desired(desired(replica("r1", spec)))
+            await converge(sup, lambda s: s.records["r1"].pid and len(members(s.records["r1"].pgid)) == 3)
+            rec = sup.records["r1"]
+            first_pid, pgid, start = rec.pid, rec.pgid, rec.proc_start
+            left = [p for p in members(pgid) if p != first_pid]
+            assert marked_members("r1", pgid, start, rec.boot_id) == sorted(members(pgid))
+            assert marked_members("r1", pgid, start + 1, rec.boot_id) == [] or proc_stat(pgid) is None
+            os.kill(first_pid, signal.SIGKILL)  # the wrapper only: its children live on
+            await converge(sup, lambda s: s.records["r1"].pid not in (None, first_pid))
+            deadline = time.monotonic() + 5
+            while any(proc_stat(p) and proc_stat(p)[0] != "Z" for p in left) and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            gone = [p for p in left if not (proc_stat(p) and proc_stat(p)[0] != "Z")]
+            new_pgid = sup.records["r1"].pgid
+            sup.set_desired(desired())
+            await converge(sup, lambda s: "r1" not in s.records)
+            return left, gone, new_pgid, pgid
+
+        left, gone, new_pgid, old_pgid = asyncio.run(scenario())
+        assert len(left) == 2 and sorted(gone) == sorted(left)
+        assert new_pgid != old_pgid
+    finally:
+        shutil.rmtree(work, ignore_errors=True)

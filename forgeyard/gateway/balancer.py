@@ -4,6 +4,7 @@ time the replicas simply alternate.
 
 A replica the gateway could not connect to is tried last for a few seconds (`PENALTY`): the agent
 reports a dead engine within seconds, and until it does, requests should not keep knocking on it.
+The penalty ends early when the replica has become ready again since (it was restarted).
 """
 
 from __future__ import annotations
@@ -26,16 +27,18 @@ class Target:
     machine: Optional[str]
     secret: Optional[str]            # its internal key (never logged or returned)
     protected: bool                  # its agent gave the engine that key
+    ready_since: float = 0.0         # when it last became ready (epoch seconds)
 
 
 class Balancer:
-    def __init__(self, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, clock: Callable[[], float] = time.monotonic, wall: Callable[[], float] = time.time):
         self._clock = clock
+        self._wall = wall
         self._lock = threading.Lock()
         self.inflight: dict[str, int] = {}
         self.served: dict[str, int] = {}           # requests sent per replica since the server started
         self._turn: dict[str, int] = {}
-        self._failed: dict[str, float] = {}
+        self._failed: dict[str, tuple[float, float]] = {}   # uid -> (penalty until, wall time of the failure)
 
     def reset(self) -> None:
         with self._lock:
@@ -56,7 +59,8 @@ class Balancer:
 
             def key(item):
                 i, t = item
-                failed = self._failed.get(t.uid, 0.0) > now
+                until, at = self._failed.get(t.uid, (0.0, 0.0))
+                failed = until > now and at >= t.ready_since  # not if it became ready again after failing
                 return (failed, self.inflight.get(t.uid, 0), (i - turn) % n)
 
             return [t for _, t in sorted(enumerate(targets), key=key)]
@@ -76,7 +80,7 @@ class Balancer:
 
     def failed(self, uid: str) -> None:
         with self._lock:
-            self._failed[uid] = self._clock() + PENALTY
+            self._failed[uid] = (self._clock() + PENALTY, self._wall())
             self.served[uid] = max(0, self.served.get(uid, 0) - 1)  # it never got the request
 
     def snapshot(self, uid: str) -> dict:

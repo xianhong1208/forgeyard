@@ -31,7 +31,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from forgeyard.config import get_settings
-from forgeyard.db import GatewayRoute, Replica, Workload
+from forgeyard.db import GatewayRoute, Replica, Workload, as_utc
 from forgeyard.gateway import multipart
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
@@ -106,8 +106,10 @@ def load_route(db: DbSession, served_name: str) -> Optional[Route]:
         host = port["address"]
         host = f"[{host}]" if ":" in host else host
         protected = bool(r.secret) and r.node is not None and FEATURE_REPLICA_KEYS in (r.node.features or [])
+        since = as_utc(r.ready_at).timestamp() if r.ready_at else 0.0
         targets.append(Target(uid=r.uid, ordinal=r.ordinal, url=f"http://{host}:{port['host_port']}",
-                              machine=r.node.name if r.node else None, secret=r.secret, protected=protected))
+                              machine=r.node.name if r.node else None, secret=r.secret, protected=protected,
+                              ready_since=since))
     return Route(served_name=route.served_name, api=route.api, upstream_model=route.upstream_model,
                  deployment_id=route.deployment_id, targets=targets,
                  reason=None if targets else not_ready_reason(w))
