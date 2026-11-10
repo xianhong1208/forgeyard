@@ -1,7 +1,7 @@
 """Users: small per-person settings of the web UI (the Get started checklist hidden or not).
 
-Revision ID: 0006_preferences
-Revises: 0005_gateway
+Revision ID: 0007_preferences
+Revises: 0006_key_locks
 Create Date: 2026-11-10 21:00:00.000000
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = '0006_preferences'
-down_revision = '0005_gateway'
+revision = '0007_preferences'
+down_revision = '0006_key_locks'
 branch_labels = None
 depends_on = None
 

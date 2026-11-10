@@ -113,6 +113,52 @@ describe("API keys", () => {
     expect(screen.getByRole("heading", { name: "Limits for keys" })).toBeTruthy();
   });
 
+  it("an owner sees a limit an admin set as locked, cannot change it, and saves only the other one", async () => {
+    const patches: unknown[] = [];
+    const locked = key({ user: { id: 2, username: "ursula" }, rpm: 5, effective_rpm: 5, rpm_locked_by: "owner" });
+    server((url, init) => {
+      if (init?.method === "PATCH") {
+        patches.push(JSON.parse(String(init.body)));
+        return { status: 200, body: { api_key: locked } };
+      }
+      if (url.startsWith("/api/keys")) return { status: 200, body: keys({ is_admin: false, keys: [locked] }) };
+    }, USER);
+    mount("/keys");
+    const chip = await screen.findByText(/set by owner/);
+    expect(chip.getAttribute("title")).toBe("Set by the admin owner; only an admin can change it.");
+    fireEvent.click(screen.getByRole("button", { name: "Limits" }));
+    const rpm = screen.getByLabelText("Requests per minute") as HTMLInputElement;
+    expect(rpm.disabled).toBe(true);
+    expect(screen.getByText(/only an admin can change it\./, { selector: "p" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Tokens per minute"), { target: { value: "800" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
+    await waitFor(() => expect(patches).toEqual([{ tpm: 800 }]));
+  });
+
+  it("an admin sees whose limit is locked and unlocks it", async () => {
+    const patches: unknown[] = [];
+    const theirs = key({ id: "k9", name: "other", user: { id: 2, username: "ursula" }, tpm: 100, effective_tpm: 100, tpm_locked_by: "owner" });
+    server((url, init) => {
+      if (init?.method === "PATCH") {
+        patches.push(JSON.parse(String(init.body)));
+        return { status: 200, body: { api_key: { ...theirs, tpm: null, tpm_locked_by: null } } };
+      }
+      if (url === "/api/keys?all=true") return { status: 200, body: keys({ keys: [key(), theirs] }) };
+      if (url === "/api/keys") return { status: 200, body: keys() };
+    });
+    mount("/keys");
+    fireEvent.click(await screen.findByRole("button", { name: "Everyone's" }));
+    await screen.findByText(/set by owner/);
+    const row = screen.getByText("other").closest("tr") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Limits" }));
+    expect((screen.getByLabelText("Tokens per minute") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText(/Saving a value locks it for ursula/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Unlock tokens/ }));
+    await waitFor(() => expect(patches).toEqual([{ tpm: null }]));
+    expect(await screen.findByText(/unlocked; it is the default again/)).toBeTruthy();
+  });
+
   it("users see only their keys, no admin switch and no defaults panel", async () => {
     server((url) => url.startsWith("/api/keys") ? { status: 200, body: keys({ is_admin: false }) } : undefined, USER);
     mount("/keys");

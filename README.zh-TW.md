@@ -199,7 +199,7 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
   整張大卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
   並列出每台機器的原因與差多少（`wait: true` 則改為排隊等候）。同一個部署的多個 replica 會盡量放在**不同機器**上（優先於 binpack），
-  讓 gateway 能在它們之間分流與容錯。
+  讓 gateway 能在它們之間分流與容錯。這是預設行為，一直開著；只有在沒有別台機器放得下時，replica 才會放在同一台。
 - **共用 GPU**（`share: vram`）：同一張卡上多個 replica，各自被限制在自己的保留量內；共用的卡不會再給獨佔的 replica。
   vLLM 的 `--gpu-memory-utilization` 是卡**總**記憶體的比例，而且**空閒**量不夠就拒絕啟動，所以在共用卡上固定 0.9 永遠起不來：
   Forgeyard 把它設成（保留量 − CUDA context）÷ 總量，無條件捨去。同一張卡上的 replica 一個一個啟動（前一個 healthy 才啟動下一個），
@@ -227,6 +227,10 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   server 只存 SHA-256 與 12 字元的前綴。可選：到期時間、可用的模型（不選就是所有部署，包括之後新增的）、每分鐘請求數與 token 數。
   撤銷、到期或帳號停用後，下一個請求就失效。admin 可以看與撤銷所有人的 key、改任何 key 的限制，並設定**預設值**（key 沒設時套用）
   與**上限**（一般人替自己的 key 設的最大值）。建立、修改、撤銷 key 都記在稽核紀錄。
+- **admin 設的限制會鎖定。** admin 替別人的 key 設定每分鐘請求數或 token 數後，key 的主人就不能再改這個值（403 `limit_locked`）；
+  key 上會顯示鎖頭與設定它的 admin。主人仍然可以撤銷這把 key，也可以設定 admin 沒設的那個限制。admin 可以隨時修改鎖定的值，
+  清空它就是**解鎖**（回到預設值，主人又能自己設定）。鎖定與解鎖都記在稽核紀錄（`api_key.changed` 的 `locked`／`unlocked`）。
+  admin 自己的 key 不會被鎖。
 - **`/v1` 只認 API key**：完全不讀 console 的 cookie（網頁沒辦法借用已登入的瀏覽器打 gateway），所以 console 的 CSRF 規則不套用；
   host 檢查（421）照樣套用。不送 CORS header。
 - **路由：** 該模型 ready 的 replica 中，經這台 server 進行中請求最少的優先，同分輪流。連線失敗（還沒回任何東西給 client 之前）
@@ -242,12 +246,24 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   （API key 或 playground）分組。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。只統計，不計費。
 - **Playground**：在 console 裡用串流 chat，也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
   （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。
-- **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。agent 透過**環境變數**交給引擎
-  （vLLM `VLLM_API_KEY`、llama.cpp `LLAMA_API_KEY`、speaches `API_KEY`；配方用 `api_key_env` 指定變數名），絕不放在命令列；
-  只存在記憶體，health check 也會帶上；UI、API、spec 與 log 裡都看不到。只有 gateway 與 *Try it* 會送出它。不帶它直接打 replica 的
-  port 會得到 401（speaches 是 403）。**vLLM 0.32 只在 `/v1`、`/v2`、`/inference`、`/cohere` 檢查 key**：它的 `/invocations`、
-  `/rerank`、`/score`、`/pooling`、`/tokenize` 在 replica 自己的 port 上仍然開著，所以在共用網路上請用防火牆讓 replica 的 port 範圍
-  （30000-32767）只對 server 開放。M4 之前的 agent 啟動的 replica 沒有 key，要重新放置才有（更新 agent 後把部署停止再啟動）。
+- **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；
+  UI、API、spec 與 log 裡都看不到。agent 只把它存在記憶體，並用它的 **key guard** 把關：
+  - **引擎只聽 loopback**，用只有 agent 知道的 port：process 綁 `127.0.0.1`（配方的 `{host}`），容器發布在 `127.0.0.1:<內部 port>`。
+  - agent 自己聽 replica **對外公布**的位址與 port（server 與 gateway 知道的那個），只有帶 `Authorization: Bearer <內部 key>`
+    的請求才轉給引擎，**每個路徑、每個 method** 都一樣（以固定時間比對 key）；其他一律 401 `replica_key_required`，到不了引擎。
+    這補上引擎自己沒擋的地方：vLLM 0.32 只在 `/v1`、`/v2`、`/inference`、`/cohere` 檢查自己的 key，`/invocations`、`/rerank`、
+    `/score`、`/pooling`、`/classify`、`/tokenize` 原本誰都能用。
+  - 內容雙向串流、不暫存（SSE、chunked 與 multipart 上傳、大型回應）；client 斷線就關掉往引擎的連線；hop-by-hop header 會拿掉。
+    引擎沒起來時 guard 直接關掉連線不回應，gateway 就改試下一個 replica。
+  - guard 沒有任何開放的路徑，連 `/health` 也沒有：agent 直接到引擎的 loopback port 做 health check。process 引擎若被發現聽在
+    loopback 以外（配方沒用 `{host}`），會被停掉並標為失敗。
+  - 引擎仍然會從**環境變數**拿到 key（vLLM `VLLM_API_KEY`、llama.cpp `LLAMA_API_KEY`、speaches `API_KEY`；配方用 `api_key_env`
+    指定變數名），絕不放在命令列，多一層防護。沒有 `api_key_env` 的配方一樣有 guard。
+  - guard 在 agent 裡。**agent 停著的時候，它的 replica 從外面連不到**（引擎繼續跑）；agent 重啟後會接手它們，server 一送來 key
+    就重新打開 guard。能在那台機器上執行程式的人（包括跑在那裡的 Forgeyard workload）連得到 loopback port；在那裡，引擎自己的 key
+    仍然守著它的 `/v1` 路徑。
+  - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
+    （把部署停止再啟動）。一般 workload（不是模型）沒有 guard。
 
 真機檢查：[docs/acceptance-m4.md](docs/acceptance-m4.md) 與 `scripts/accept_m4.py`。
 

@@ -4,6 +4,10 @@ Everyone signed in creates and revokes their own keys. Admins see and revoke eve
 the limits of any key, and set the defaults and caps for keys. A key is shown once, when it is
 created; the server keeps only its SHA-256 and its prefix. Creating, changing and revoking keys, and
 changing the defaults, are in the audit log.
+
+A limit an admin sets on someone else's key is locked: its owner can no longer change that value
+(they can still revoke the key, and change the other limit if no admin set it). The key shows who set
+it. An admin unlocks a limit by clearing it (null: back to the server's default, the owner's again).
 """
 
 from __future__ import annotations
@@ -64,11 +68,14 @@ def key_status(k: ApiKey) -> str:
     return "active"
 
 
+LIMIT_NAMES = {"rpm": "requests-per-minute", "tpm": "tokens-per-minute"}
+
+
 def key_out(k: ApiKey, limits: dict) -> dict:
     requests, tokens = key_limiter.used(k.id)
     return {
         "id": k.public_id, "name": k.name, "prefix": k.prefix, "models": k.models,
-        "rpm": k.rpm, "tpm": k.tpm,
+        "rpm": k.rpm, "tpm": k.tpm, "rpm_locked_by": k.rpm_locked_by, "tpm_locked_by": k.tpm_locked_by,
         "effective_rpm": gkeys.effective(k.rpm, limits["default_rpm"], limits["max_rpm"]),
         "effective_tpm": gkeys.effective(k.tpm, limits["default_tpm"], limits["max_tpm"]),
         "expires_at": k.expires_at, "created_at": k.created_at, "last_used_at": k.last_used_at,
@@ -153,20 +160,37 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
     if k.revoked_at is not None:
         raise fail(409, "revoked", "This key was revoked.")
     limits = gkeys.get_limits(db)
-    before = {"name": k.name, "models": k.models, "rpm": k.rpm, "tpm": k.tpm}
-    rpm = body.rpm if "rpm" in fields else k.rpm
-    tpm = body.tpm if "tpm" in fields else k.tpm
-    _check_own(caller, k.user_id, limits, rpm if "rpm" in fields else None, tpm if "tpm" in fields else None)
+    admin = caller.user.role == "admin"
+    fields_ = ("name", "models", "rpm", "tpm", "rpm_locked_by", "tpm_locked_by")
+    before = {f: getattr(k, f) for f in fields_}
+    new = {name: getattr(body, name) for name in ("rpm", "tpm") if name in fields}
+    if not admin:
+        # Only values that change count: a form that sends a locked value back unchanged is fine.
+        new = {name: v for name, v in new.items() if v != getattr(k, name)}
+        for name in new:
+            by = getattr(k, f"{name}_locked_by")
+            if by:
+                raise fail(403, "limit_locked", f"An admin ({by}) set this key's {LIMIT_NAMES[name]} limit; only an "
+                                                "admin can change it. You can still revoke the key.")
+    _check_own(caller, k.user_id, limits, new.get("rpm"), new.get("tpm"))
     if "name" in fields and body.name:
         k.name = body.name.strip()
     if "models" in fields:
         k.models = _models(db, body.models)
-    k.rpm, k.tpm = rpm, tpm
-    after = {"name": k.name, "models": k.models, "rpm": k.rpm, "tpm": k.tpm}
+    for name, value in new.items():
+        setattr(k, name, value)
+        if admin:
+            # On someone else's key an admin's value is locked for its owner; clearing it unlocks.
+            # On their own key there is nobody to lock it against.
+            setattr(k, f"{name}_locked_by", caller.user.username if (not own and value is not None) else None)
+    after = {f: getattr(k, f) for f in fields_}
     changed = {f: {"before": before[f], "after": after[f]} for f in before if before[f] != after[f]}
     if changed:
+        locked = [n for n in ("rpm", "tpm") if after[f"{n}_locked_by"] and after[f"{n}_locked_by"] != before[f"{n}_locked_by"]]
+        unlocked = [n for n in ("rpm", "tpm") if before[f"{n}_locked_by"] and not after[f"{n}_locked_by"]]
         audit.record(db, "api_key.changed", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
-                     owner=k.user.username if k.user else None, changes=changed)
+                     owner=k.user.username if k.user else None, changes=changed, locked=locked or None,
+                     unlocked=unlocked or None)
     db.commit()
     db.refresh(k)
     return {"api_key": key_out(k, limits)}

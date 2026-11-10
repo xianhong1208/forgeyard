@@ -12,9 +12,13 @@ Through Forgeyard's API only (an admin session), it:
   3. shows the balancing between the two CPU replicas (one at a time: they take turns; ten at once:
      both machines work), an rpm limit of 3 answering the 4th call with 429 and Retry-After, and a
      revoked key getting 401 on the very next call;
-  4. calls every replica's own port without its internal key (must be refused), and records which
-     paths vLLM leaves open (see docs/acceptance-m4.md);
-  5. with --kill-local, kills the engine of the CPU replica that runs on THIS computer (the second
+  4. calls every replica's own port without its internal key (must be refused), also on the paths
+     vLLM itself leaves open (/invocations, /rerank, /pooling): the agent's key guard must answer 401
+     there too (see docs/acceptance-m4.md);
+  5. checks model allowlists: a key limited to one deployment lists and reaches only that one (403
+     model_not_allowed for the others); a key made before any of the deployments, with no list,
+     sees and reaches every one of them;
+  6. with --kill-local, kills the engine of the CPU replica that runs on THIS computer (the second
      machine's agent) and shows that every request is still answered (failover);
 
 then removes everything it created (deployments, catalog entries, keys) and prints a report (also
@@ -138,6 +142,36 @@ def children(pid: int) -> list[int]:
     return out
 
 
+def _call(client, model: str, no_think: dict):
+    """One small request to `model` with `client`: 200, or "<status> <code>" when refused."""
+    import openai
+
+    key = model.removeprefix("accept-")
+    try:
+        if key == "embed":
+            client.embeddings.create(model=model, input="x")
+        elif key == "asr":
+            with CLIP.open("rb") as fh:
+                client.audio.transcriptions.create(model=model, file=fh)
+        elif key == "rerank":  # not in the SDK
+            status, text = raw_post(str(client.base_url).rstrip("/") + "/rerank",
+                                    json.dumps({"model": model, "query": "q", "documents": ["a", "b"]}).encode(),
+                                    "application/json", {"Authorization": f"Bearer {client.api_key}"})
+            if status != 200:
+                try:
+                    return f"{status} {json.loads(text)['error']['code']}"
+                except (ValueError, KeyError, TypeError):
+                    return f"{status} {text[:60]}"
+        else:  # chat; also any other deployment, which a key outside its list is refused before the endpoint
+            client.chat.completions.create(model=model, max_tokens=2, extra_body=no_think,
+                                           messages=[{"role": "user", "content": "hi"}])
+        return 200
+    except openai.APIStatusError as e:
+        body = e.body if isinstance(e.body, dict) else {}
+        code = body.get("code") or (body.get("error") or {}).get("code") if body else None
+        return f"{e.status_code} {code or str(e.body)[:60]}"
+
+
 # ------------------------------------------------------------------ the run
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -171,6 +205,9 @@ def main() -> int:
         if "replica_keys" not in (x.get("features") or []):
             log(f"WARNING: {x['name']}'s agent does not give engines their internal key (an agent from before M4): "
                 "update and restart it, or direct calls to its replicas will not be refused")
+        elif "replica_guard" not in (x.get("features") or []):
+            log(f"WARNING: {x['name']}'s agent has no key guard (an M4 agent): vLLM's /invocations, /rerank and "
+                "/pooling stay open on its replica ports; update and restart it")
     card = the_card(m)
     log(f"{m['name']}: Forgeyard may use only GPU #{card['index']} ({card['model']}), "
         f"{card['vram_free'] / GIB:.2f} GiB free; second machine {m2['name']}")
@@ -185,6 +222,9 @@ def main() -> int:
         log(f"{tag}  {name}" + (f"  ({detail})" if detail else ""))
 
     try:
+        # A key with no model list, made before any deployment exists: it must cover them all.
+        k_all = c.ok("POST", "/api/keys", {"name": "accept-m4-all"})
+        keys.append(k_all["api_key"]["id"])
         for spec in wanted:
             if ensure_model(c, spec):
                 added.append(spec["model"])
@@ -213,10 +253,11 @@ def main() -> int:
             d = wait_all_ready(c, dep["id"], args.timeout)
             deps[key] = d
             report["deployments"][d["name"]] = {"ready_seconds": int(time.time() - t0),
-                                               "endpoints": [{k: e[k] for k in ("replica", "machine", "url", "protected")}
+                                               "endpoints": [{k: e.get(k) for k in ("replica", "machine", "url", "protected",
+                                                                                    "guarded")}
                                                              for e in d["endpoints"]]}
             log(f"{d['name']}: ready after {time.time() - t0:.0f} s; replicas protected: "
-                f"{[e.get('protected') for e in d['endpoints']]}")
+                f"{[e.get('protected') for e in d['endpoints']]}, guarded: {[e.get('guarded') for e in d['endpoints']]}")
 
         # ---- an API key and the official SDK
         k = c.ok("POST", "/api/keys", {"name": "accept-m4"})
@@ -294,6 +335,30 @@ def main() -> int:
             check("ten requests at once: both machines answer (least in flight)", len(counts) == 2,
                   f"{dict(counts)} in {time.time() - t0:.1f} s")
 
+        # ---- model allowlists
+        names_all = sorted(f"accept-{s['key']}" for s in wanted)
+        every = openai.OpenAI(base_url=gw, api_key=k_all["key"], max_retries=0, timeout=300)
+        listed = sorted(x.id for x in every.models.list())
+        check("a key with no list, made before the deployments, lists every one of them",
+              all(n in listed for n in names_all), ", ".join(listed))
+        allowed = "accept-cpu" if "cpu" in deps else names_all[0]
+        others = [n for n in listed if n != allowed]  # every other deployment on the server, also ones not made here
+        reach = {}
+        for name in names_all:
+            reach[name] = _call(every, name, no_think)
+        check("a key with no list reaches every deployment", all(v == 200 for v in reach.values()), json.dumps(reach))
+        k1 = c.ok("POST", "/api/keys", {"name": "accept-m4-one", "models": [allowed]})
+        keys.append(k1["api_key"]["id"])
+        one = openai.OpenAI(base_url=gw, api_key=k1["key"], max_retries=0, timeout=300)
+        listed = sorted(x.id for x in one.models.list())
+        check(f"a key limited to {allowed}: GET /v1/models lists only it", listed == [allowed], ", ".join(listed))
+        s1 = _call(one, allowed, no_think)
+        check(f"a key limited to {allowed}: calling it works", s1 == 200, str(s1))
+        if others:
+            refused = {n: _call(one, n, no_think) for n in others}
+            check(f"a key limited to {allowed}: every other deployment is 403 model_not_allowed",
+                  all(v == "403 model_not_allowed" for v in refused.values()), json.dumps(refused))
+
         # ---- limits and revoking
         k3 = c.ok("POST", "/api/keys", {"name": "accept-m4-rpm3", "rpm": 3})
         keys.append(k3["api_key"]["id"])
@@ -326,7 +391,8 @@ def main() -> int:
                 if key == "asr":
                     body, ctype = multipart({"model": d["route"]["upstream_model"]}, "file", CLIP)
                     s, text = raw_post(base + "/v1/audio/transcriptions", body, ctype)
-                    ok = s in (401, 403)  # speaches answers 403 to a missing or wrong key
+                    # The guard answers 401; without it speaches itself answers 403 to a missing key.
+                    ok = s == 401 if e.get("guarded") else s in (401, 403)
                 else:
                     path, payload = probes[key]
                     s, text = raw_post(base + path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
@@ -334,16 +400,20 @@ def main() -> int:
                     ok = s == 401
                 check(f"{d['name']} #{e['replica']} on {e['machine']}: direct call without the internal key is refused",
                       ok, f"{s} {text[:80]}")
-        for key, path, payload in (("chat", "/invocations", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
-                                   ("rerank", "/rerank", {"query": "q", "documents": ["a"]}),
-                                   ("embed", "/pooling", {"input": "x"})):
-            if key in deps:
-                base = deps[key]["endpoints"][0]["url"].rstrip("/")
-                s, text = raw_post(base + path, json.dumps({"model": deps[key]["route"]["upstream_model"], **payload}).encode(),
-                                   "application/json")
-                check(f"vLLM leaves {path} unguarded on {deps[key]['name']}'s own port", True,
-                      f"{s} {'(answered without a key: firewall replica ports, see docs)' if s == 200 else text[:60]}",
-                      info=True)
+        # The paths vLLM 0.32 itself leaves open: the agent's key guard must refuse them on every replica.
+        open_paths = (("/invocations", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
+                      ("/rerank", {"query": "q", "documents": ["a"]}), ("/pooling", {"input": "x"}))
+        for key, d in deps.items():
+            for e in d["endpoints"]:
+                base = e["url"].rstrip("/")
+                for path, payload in open_paths:
+                    s, text = raw_post(base + path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
+                                       "application/json")
+                    check(f"{d['name']} #{e['replica']} on {e['machine']}: {path} without the key is refused by the guard",
+                          s == 401 and "replica_key_required" in text, f"{s} {text[:80]}")
+                s, text = raw_post(base + "/invocations", b"{}", "application/json", {"Authorization": f"Bearer {k['key']}"})
+                check(f"{d['name']} #{e['replica']}: a client's API key does not open the replica's port", s == 401,
+                      f"{s} {text[:60]}")
 
         # ---- failover
         if args.kill_local and "cpu" in deps:

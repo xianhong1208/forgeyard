@@ -136,6 +136,7 @@ def test_fy_rk_004_a_real_process_gets_it_in_its_environment_only(tmp_path):
             on_disk = (tmp_path / "state" / "replicas" / "r1.json").read_text()
             sup.set_desired(desired())
             await converge(sup, lambda s: "r1" not in s.records)
+            await sup.close()
             return printed, cmdlines, report, on_disk
 
         printed, cmdlines, report, on_disk = asyncio.run(scenario())
@@ -171,6 +172,7 @@ def test_fy_rk_005_containers_get_it_through_the_env_file(tmp_path):
         sup = Supervisor(tmp_path / "state", {"container": rt}, tick=0.05, port_range=(32000, 32010))
         sup.set_desired(desired(keyed(replica("abcdef0123456789", container()), env="VLLM_API_KEY")))
         await converge(sup, lambda s: s.records["abcdef0123456789"].state == "running")
+        await sup.close()
 
     asyncio.run(scenario())
     [run] = fake.runs()
@@ -200,6 +202,7 @@ def test_fy_rk_006_health_checks_send_it_and_nothing_starts_without_it(tmp_path)
         sup = Supervisor(tmp_path / "state", {"container": rt}, tick=0.05, port_range=(32000, 32010), prober=prober)
         sup.set_desired(desired(keyed(replica("abcdef0123456789", spec), env="API_KEY")))
         await converge(sup, lambda s: s.records["abcdef0123456789"].state == "healthy")
+        await sup.close()
 
     asyncio.run(first())
     assert seen and seen[-1] == {"Authorization": f"Bearer {SECRET}"}
@@ -220,6 +223,7 @@ def test_fy_rk_006_health_checks_send_it_and_nothing_starts_without_it(tmp_path)
         sup.set_desired(desired(keyed(replica("abcdef0123456789", spec), env="API_KEY")))
         rec.next_start_at = 0
         await converge(sup, lambda s: s.records["abcdef0123456789"].state == "healthy")
+        await sup.close()
         return state
 
     runs_before = len(fake.runs())

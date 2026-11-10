@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, utcnow
 from forgeyard.machines.messages import StatusIn
-from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_REPLICA_KEYS, PROTOCOL_VERSION
+from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS, PROTOCOL_VERSION
 
 MAX_EVENTS = 300
 # Agent states in which the replica is (or may be) running something.
@@ -61,7 +61,7 @@ def compat_spec(spec: dict) -> dict:
 
 
 def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = None,
-                    key_env: Optional[str] = None) -> dict:
+                    key_env: Optional[str] = None, guard: bool = False) -> dict:
     w = r.workload
     spec = r.spec or w.spec
     out = {"id": r.uid, "workload_id": w.id, "workload": w.name, "ordinal": r.ordinal, "generation": r.generation,
@@ -70,9 +70,10 @@ def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = N
         out["model"] = dict(r.model, token=token) if token else dict(r.model)
     if r.engine:
         out["engine"] = dict(r.engine)
-    if key_env and r.secret:
+    if r.secret and (key_env or guard):
         # The engine's internal key (M4): the agent passes it in the environment variable the
-        # recipe names, keeps it in memory only, and sends it with its health checks.
+        # recipe names, keeps it in memory only, and sends it with its health checks. An agent with
+        # the key guard also requires it on the replica's port, on every path (env None: only there).
         out["replica_key"] = {"env": key_env, "value": r.secret}
     return out
 
@@ -84,6 +85,7 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
     features = (node.features or []) if node is not None else []
     models = FEATURE_MODELS in features
     keys = FEATURE_REPLICA_KEYS in features
+    guard = keys and FEATURE_REPLICA_GUARD in features
     reps = desired_replicas(db, node_id)
     tokens: dict[int, Optional[str]] = {}
     key_envs: dict[int, Optional[str]] = {}
@@ -96,7 +98,7 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
                 key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None
     return {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
             "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id),
-                                         key_env=key_envs.get(r.workload_id)) for r in reps]}
+                                         key_env=key_envs.get(r.workload_id), guard=guard) for r in reps]}
 
 
 # ------------------------------------------------------------------ status from the agent
