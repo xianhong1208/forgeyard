@@ -40,7 +40,23 @@ Three pull requests, in this order:
    - A user guide in English and Traditional Chinese: quick start, concepts, how-tos,
      troubleshooting.
 
-Whether to publish the source is decided after 1.1, with a full scan first.
+## Publishing the source: with 1.2
+
+Agreed on 2026-11-10. Forgeyard becomes public with 1.2. By then a newcomer can install it alone
+(the agent image, the one-line install, the guide), it is on HTTPS by default, and it does
+something the alternatives do not: one gateway, one set of keys and limits, for your own GPUs and
+cloud model APIs, local first. One pull request before the 1.2 release prepares it:
+
+1. **AMD ROCm accepted on real hardware.** The README claims AMD support, and it has only been
+   checked against recorded data so far.
+2. **A licence:** Apache-2.0.
+3. **A full scan** of every commit, issue and pull request for secrets and anything specific to
+   private infrastructure. Certificates and keys made at run time stay in the data directory and
+   are never committed.
+4. **Files for contributors:** `CONTRIBUTING.md`, `SECURITY.md` (how to report a vulnerability),
+   issue templates.
+5. **Repository settings:** public; secret scanning, push protection and Dependabot alerts on; a
+   ruleset protecting `main` and `dev`.
 
 ## Next: 1.2, cloud model APIs behind the same gateway
 
