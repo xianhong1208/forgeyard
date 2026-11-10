@@ -1,0 +1,90 @@
+# Roadmap
+
+Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10; each line names what
+users get, not how it is built. Versions are minor releases unless a change breaks something.
+
+## Shipped
+
+**1.0.0 (2026-11-10), the MVP.** Milestones M0 to M4: sign-in and roles; machines join through
+the agent; services and tasks as containers or processes with only the GPUs they were given;
+models deployed from a catalog with engine recipes and memory estimates; one OpenAI-compatible
+gateway at `/v1` with API keys, limits and usage. Each milestone was accepted on a real 8×A100
+host (Forgeyard limited to one shared card) plus a CPU machine. See [CHANGELOG.md](CHANGELOG.md).
+
+## Now: 1.1, easier to start and safe on the network
+
+Three pull requests, in this order:
+
+1. **Getting started** (in progress)
+   - A checklist on the home page: add a machine, choose its GPUs, add a model, deploy it,
+     create an API key, call `/v1`.
+   - Every empty page says what to do next.
+   - A list of recommended models: Qwen3, other open LLMs, Whisper, bge-m3 and bge-reranker.
+   - Hugging Face search, showing an estimate and where each model would fit.
+2. **Security**
+   - The agent guards every model replica, so a replica port cannot be used without the
+     replica's key (PR `replica-guard`, together with the next item).
+   - API key limits set by an admin are locked against the key's owner.
+   - HTTPS out of the box from Forgeyard's own certificate authority:
+     - the join command pins its fingerprint;
+     - each device trusts it once;
+     - your own certificate is optional;
+     - examples are given for running behind nginx or Caddy.
+   - Engine images are pinned by digest.
+   - Stored secrets are encrypted.
+3. **Install and guide**
+   - The agent reads a config file, `/etc/forgeyard/agent.toml`, instead of a long command line.
+   - A one-line install served by your server sets the agent up as a system service.
+   - An agent container image: one `docker run` per machine.
+   - A user guide in English and Traditional Chinese: quick start, concepts, how-tos,
+     troubleshooting.
+
+Whether to publish the source is decided after 1.1, with a full scan first.
+
+## Next: 1.2, cloud model APIs behind the same gateway
+
+- OpenAI, Anthropic, Google Gemini and any OpenAI-compatible endpoint can be added as providers.
+  The provider key is stored encrypted.
+- Their models are served at `/v1` next to local ones, with the same API keys, limits and usage.
+- **Local first:** a model can fall back to a cloud provider when no local replica is free.
+- Cost is tracked per provider, key and user.
+- LiteLLM, OpenRouter and Portkey are studied first, to choose the routing and fallback rules.
+
+## Then
+
+| Version | What you get |
+|---|---|
+| **1.3: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
+| **1.4: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
+| **1.5: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
+| **1.6: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments); scheduled backup and restore. |
+
+## Later, when there is a need
+
+- **On-demand cloud GPUs.** A machine is rented when local capacity runs out and released when
+  idle. The provider is chosen at that time.
+- **Relay through the agent.** Machines behind NAT can serve without inbound ports.
+- **Models larger than one machine.** vLLM with Ray across several machines.
+- **Prefix-aware routing.** Requests that share a long prompt go to the replica that already has
+  it cached.
+- **Several servers.** For availability, with limits and counters shared between them.
+
+## Small improvements, picked up along the way
+
+- Download a model's shards in parallel, and support a Hugging Face mirror (on the test host,
+  downloads ran at 3–4 MiB/s).
+- Per-process VRAM figures, instead of the change in whole-card usage.
+- A `modelscope://` model source.
+- Answer 404, as for an unknown model, when a key may not use a model, so a restricted key cannot
+  tell which other models exist.
+- Spread scoring for plain tasks (they still use first fit).
+- Tune each recipe's memory overhead from real runs (estimates were 7–39% above actual).
+
+## Verification still to do
+
+- **AMD ROCm on real hardware.** M1 to M4 have only been checked against recorded AMD data. On a
+  real machine, confirm:
+  - the `gfx` target and unified memory (for example a Strix Halo `gfx1151`);
+  - vLLM's ROCm image;
+  - `ROCR_VISIBLE_DEVICES`.
+- **The systemd scope for process limits.** It has not run on a host with systemd yet.

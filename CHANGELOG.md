@@ -6,7 +6,7 @@ version until 1.0.
 
 ## [Unreleased]
 
-### Added — after M4
+### Added
 - **Key guard in front of every model replica.** vLLM 0.32's `VLLM_API_KEY` only covers `/v1`, `/v2`,
   `/inference` and `/cohere`; `/invocations`, `/rerank`, `/pooling`, `/score`, `/classify` and
   `/tokenize` answered anyone who could reach a replica's port. Now the engine listens on loopback
@@ -35,8 +35,12 @@ version until 1.0.
   lists and reaches only that one, 403 `model_not_allowed` for the others; a key with no list made
   before the deployments sees and reaches all of them).
 
-### Changed — after M4
+### Changed
 - Spreading a deployment's replicas over machines is documented as the default (unchanged).
+
+## [1.0.0] — 2026-11-10
+
+The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared card) plus a CPU machine.
 
 ### Added — M4: unified API (the MVP)
 - **Gateway** at `/v1` on the server's own port, OpenAI-compatible: `GET /v1/models` (and
