@@ -43,10 +43,6 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
   };
 }
 
-export function limitText(n: number | null | undefined, unit: string): string {
-  return n ? `${num(n)} ${unit}/min` : "no limit";
-}
-
 export function num(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
   return n.toLocaleString("en-US");

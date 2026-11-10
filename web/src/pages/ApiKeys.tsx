@@ -4,7 +4,7 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 import { CopyBox, Field, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
-import { keyModels, limitText, num, snippets } from "../lib/gateway";
+import { keyModels, num, snippets } from "../lib/gateway";
 import type { ApiKey, KeyLimits, KeysResponse, NewKeyResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -148,8 +148,8 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
         {everyone && <td data-label="Owner" className="mono small">{k.user.username ?? "—"}</td>}
         <td data-label="Models" className="small">{keyModels(k)}</td>
         <td data-label="Limits" className="small">
-          <div>{limitText(k.effective_rpm, "requests")}</div>
-          <div>{limitText(k.effective_tpm, "tokens")}</div>
+          <div><span className="muted">Requests</span> {k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"}</div>
+          <div><span className="muted">Tokens</span> {k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}</div>
           {active && (k.this_minute.requests > 0 || k.this_minute.tokens > 0) && (
             <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
           )}
