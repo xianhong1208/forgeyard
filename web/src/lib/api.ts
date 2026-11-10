@@ -4,16 +4,18 @@
 // the browser to the sign-in page. 403, 429 and 5xx are errors to show where they happen —
 // a rate limit or a server hiccup must never sign anyone out.
 
-export type ErrorDetail = { code?: string; message?: string; reason?: string; retry_after?: string };
+export type ErrorDetail = { code?: string; message?: string; reason?: string; retry_after?: string; [extra: string]: unknown };
 
 export class ApiError extends Error {
   status: number;
   code: string;
   reason?: string;
   retryAfter?: number;
+  detail: ErrorDetail;
 
   constructor(status: number, detail: ErrorDetail, retryAfter?: number) {
     super(detail.message || `Request failed (${status})`);
+    this.detail = detail;
     this.status = status;
     this.code = detail.code || "error";
     this.reason = detail.reason;

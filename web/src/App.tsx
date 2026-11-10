@@ -8,7 +8,10 @@ import { loginPath } from "./lib/nav";
 import { AccountPage } from "./pages/Account";
 import { AuditPage } from "./pages/Audit";
 import { LoginPage } from "./pages/Login";
+import { DeploymentDetailPage } from "./pages/DeploymentDetail";
 import { MachinesPage } from "./pages/Machines";
+import { ModelDeployPage } from "./pages/ModelDeploy";
+import { ModelsPage } from "./pages/Models";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
 import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
@@ -51,8 +54,11 @@ export default function App() {
         <Route path="/workloads" element={<WorkloadsPage />} />
         <Route path="/workloads/new" element={<WorkloadNewPage />} />
         <Route path="/workloads/:id" element={<WorkloadDetailPage />} />
-        {/* M0/M1 called this placeholder "Deployments"; model deployments come with M3. */}
-        <Route path="/deployments" element={<Navigate to="/workloads" replace />} />
+        <Route path="/models" element={<ModelsPage />} />
+        <Route path="/models/deploy" element={<ModelDeployPage />} />
+        <Route path="/models/deployments/:id" element={<DeploymentDetailPage />} />
+        {/* M0-M2 sent "Deployments" to the workloads; model deployments live under Models since M3. */}
+        <Route path="/deployments" element={<Navigate to="/models" replace />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/users" element={<AdminOnly><UsersPage /></AdminOnly>} />
         <Route path="/audit" element={<AdminOnly><AuditPage /></AdminOnly>} />

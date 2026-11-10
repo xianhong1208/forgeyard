@@ -81,6 +81,7 @@ export type Machine = {
   gpu_allowlist?: string[] | null;
   features?: string[];
   runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
+  model_cache?: { ok?: boolean; free_bytes?: number | null; cached?: string[]; reason?: string | null };
   accelerators: Accelerator[];
 };
 
@@ -122,15 +123,21 @@ export type Replica = {
   started_at: string | null;
   finished_at: string | null;
   updated_at: string;
+  // Model deployments (M3).
+  vram?: number | null;
+  download?: { phase: "model" | "engine"; done: number; total: number; file?: string } | null;
+  ready_at?: string | null;
+  runs?: { type: string; image: string | null; command: string | string[] | null } | null;
 };
 
 export type ContainerRuntimeSpec = { type: "container"; image: string; command: string[] | null; args: string[] };
 export type ProcessRuntimeSpec = { type: "process"; command: string; args: string[]; workdir: string | null };
+export type ModelRuntimeSpec = { type: "model"; recipe: string; model: string };
 
 export type WorkloadSpec = {
   name: string;
   kind: WorkloadKind;
-  runtime: ContainerRuntimeSpec | ProcessRuntimeSpec;
+  runtime: ContainerRuntimeSpec | ProcessRuntimeSpec | ModelRuntimeSpec;
   env: Record<string, string>;
   resources: { cpu: number | null; memory: number | null; gpus: { count: number | null; indices: number[] | null; vendor: string | null } };
   ports: { name: string; port: number | null }[];
@@ -149,7 +156,7 @@ export type Workload = {
   id: number;
   name: string;
   kind: WorkloadKind;
-  runtime: "container" | "process";
+  runtime: "container" | "process" | "model";
   desired_state: "running" | "stopped";
   generation: number;
   created_by: string | null;
@@ -160,6 +167,7 @@ export type Workload = {
   ready: number;
   replicas: number;
   replica_list: Replica[];
+  deployment_id?: number | null;
 };
 
 export type WorkloadEvent = { at: string; kind: string; replica: number | null; message: string };
@@ -169,3 +177,62 @@ export type WorkloadsResponse = { workloads: Workload[]; server_time: string; ca
 export type WorkloadResponse = { workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
 
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
+
+// ---------------------------------------------------------------- models (M3)
+export type Task = "chat" | "embed" | "rerank" | "asr";
+
+export type RecipeParam = { type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string };
+
+export type RecipeVariant = { name: string; vendor: "nvidia" | "amd" | "cpu"; runtime: "container" | "process"; image: string | null; arch: string[] | null; compute_capability: string | null; driver: string | null; engine: string | null };
+
+export type Recipe = {
+  name: string; title: string; description: string; engine: string; version: string; tasks: Task[]; formats: string[];
+  api: Record<string, string>; share: "exclusive" | "vram"; builtin: boolean; estimate: string;
+  params: Record<string, RecipeParam>; devices: ("gpu" | "cpu")[]; variants: RecipeVariant[]; yaml?: string;
+};
+
+export type CatalogModel = {
+  id: number; name: string; title: string | null; source: string; kind: "hf" | "url" | "local"; ref: string | null;
+  revision: string | null; file: string | null; format: string; task: Task; task_label: string; size_bytes: number;
+  engine_args: Record<string, string[]>; recipes: string[]; deployments: number; created_by: string | null; created_at: string;
+  summary: { params?: number; layers?: number; kv_heads?: number; head_dim?: number; max_context?: number; dtype?: string; architecture?: string; weights_bytes?: number };
+  gguf_files: { path: string; size: number; parts: number }[];
+};
+
+export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };
+
+export type CatalogResponse = { models: CatalogModel[]; recipes: Recipe[]; can_manage: boolean; can_deploy: boolean; sources?: ModelSources };
+
+export type EstimatePart = { label: string; bytes: number; detail: string };
+
+export type Estimate = { method: string; device: "gpu" | "cpu"; gpus: number; per_gpu: number; ram: number; amount: number; parts: EstimatePart[]; notes: string[]; kv_tokens: number };
+
+export type MachineVerdict = {
+  machine_id: number; name: string; status: string; fits: boolean; reason: string; short_by: number | null;
+  cards: { index: number | null; available: number; total: number | null; shared_with: string[] }[];
+  variant?: string; runtime?: string; image?: string | null; gpus?: number[]; cached?: boolean; leftover?: number;
+};
+
+export type PlacedReplica = { replica: number; machine: string; machine_id: number; variant: string; runtime: string; image: string | null; gpus: number[]; cached: boolean; leftover: number; online: boolean; gpu_memory_utilization?: string };
+
+export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: MachineVerdict[]; summary?: string; failed_replica?: number };
+
+export type EstimateResponse = { estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string };
+
+export type Endpoint = { replica: number; machine: string | null; state: string; ready: boolean; url: string };
+
+export type LiveCard = { replica: number; machine: string | null; key: string; index: number | null; vendor: string; model: string; total: number | null; free: number | null; used: number | null; reserved: number | null; updated_at: string };
+
+export type Deployment = {
+  id: number; name: string; recipe: string; served_name: string; params: Record<string, unknown>;
+  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number };
+  estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
+  route: { served_name: string; api: string; upstream_model: string } | null;
+  endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
+};
+
+export type DeploymentsResponse = { deployments: Deployment[]; server_time: string; can_manage: boolean };
+
+export type DeploymentResponse = { deployment: Deployment; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
+
+export type TryResponse = { status: number; ok: boolean; api: string; endpoint: string; request: Record<string, unknown>; summary: string; answer: unknown; ms: number };
