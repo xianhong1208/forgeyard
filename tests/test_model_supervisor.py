@@ -4,6 +4,8 @@ at a time, cancel unwanted downloads, keep tokens off disk (FY-MSUP-*)."""
 
 import asyncio
 import hashlib
+import os
+import signal
 import io
 import json
 import tarfile
@@ -138,7 +140,10 @@ def test_fy_msup_001_process_engine_and_model_are_fetched_then_started(tmp_path,
         rec, seen = asyncio.run(scenario())
     finally:
         for p in list(rt.children.values()):
-            p.kill()
+            try:
+                os.killpg(p.pid, signal.SIGKILL)  # the wrapper and the engine it started
+            except ProcessLookupError:
+                pass
             p.wait(5)
     snap = tmp_path / "cache" / "hub" / "models--acme--tiny-gguf" / "snapshots" / GGUF_REV
     assert seen["model"] == str(snap / "tiny.gguf") and seen["head"] == "GGUF"
