@@ -1,0 +1,104 @@
+{
+ "id": "Qwen/Qwen3-Reranker-0.6B",
+ "sha": "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+ "pipeline_tag": "text-ranking",
+ "library_name": "transformers",
+ "tags": [
+  "transformers",
+  "safetensors",
+  "qwen3",
+  "text-generation",
+  "sentence-transformers",
+  "text-ranking",
+  "arxiv:2506.05176",
+  "base_model:Qwen/Qwen3-0.6B-Base",
+  "base_model:finetune:Qwen/Qwen3-0.6B-Base",
+  "license:apache-2.0",
+  "endpoints_compatible",
+  "region:us"
+ ],
+ "gated": false,
+ "private": false,
+ "siblings": [
+  {
+   "rfilename": ".gitattributes",
+   "blobId": "52373fe24473b1aa44333d318f578ae6bf04b49b",
+   "size": 1570
+  },
+  {
+   "rfilename": "1_LogitScore/config.json",
+   "blobId": "d2c77fa4fc4e2bdba0fbd2caa97f7272f7c9e967",
+   "size": 57
+  },
+  {
+   "rfilename": "README.md",
+   "blobId": "b8bfdef6c3cd9297bf8f5965c87edbee65a444aa",
+   "size": 14742
+  },
+  {
+   "rfilename": "chat_template.jinja",
+   "blobId": "63b97f268a9ddb9c6b34e6d7d8ef531d1fee9cf4",
+   "size": 741
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "39784456e9de7a06590f8a4a38760ac1fb38d65e",
+   "size": 727
+  },
+  {
+   "rfilename": "config_sentence_transformers.json",
+   "blobId": "c6f8a7e0240028086cbce6b5c018874cf48cbeb7",
+   "size": 325
+  },
+  {
+   "rfilename": "generation_config.json",
+   "blobId": "e4f1d3193e99a3e5d7047edf56e93a6e933fa31b",
+   "size": 214
+  },
+  {
+   "rfilename": "merges.txt",
+   "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+   "size": 1671853
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "c2009afdaf622dc596bec224a625daa46a2b4cc9",
+   "size": 1191588280,
+   "lfs": {
+    "sha256": "27cd75a405b9c1b46b59abfd88aaa209e6fed2a1972cde9b70e7659537c5e65b",
+    "size": 1191588280,
+    "pointerSize": 135
+   }
+  },
+  {
+   "rfilename": "modules.json",
+   "blobId": "008ceadb8aca5de2810344509a4ac73352f23428",
+   "size": 280
+  },
+  {
+   "rfilename": "sentence_bert_config.json",
+   "blobId": "813a773d3bf36aa61b1760d80070c9d72c87e270",
+   "size": 362
+  },
+  {
+   "rfilename": "tokenizer.json",
+   "blobId": "cd71f61a15a522601badb3dc960d800d9cb3766c",
+   "size": 11422654,
+   "lfs": {
+    "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    "size": 11422654,
+    "pointerSize": 133
+   }
+  },
+  {
+   "rfilename": "tokenizer_config.json",
+   "blobId": "7345216a0785dc7086e8c245b2a9d3896ce2b756",
+   "size": 9706
+  },
+  {
+   "rfilename": "vocab.json",
+   "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569",
+   "size": 2776833
+  }
+ ]
+}
