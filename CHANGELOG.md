@@ -34,9 +34,44 @@ version until 1.0.
   replica port must get 401 too; model allowlists are checked for real (a key limited to one deployment
   lists and reaches only that one, 403 `model_not_allowed` for the others; a key with no list made
   before the deployments sees and reaches all of them).
+- **Get started** checklist, the home page after sign-in until it is done or hidden, and always
+  under the account menu: six steps for admins and operators (add a machine, choose its GPUs, add a
+  model, deploy it, create an API key, call `/v1`), three for users (create a key, call `/v1`, see
+  usage). Each step's state comes from real state: a machine online; every machine with GPUs has an
+  allowlist or a saved "all of them" (read from the audit log); a catalog entry; a deployment with a
+  ready replica; an active key of the person's own; a request with one of their keys through the
+  gateway; for users, having opened Usage. Steps only admins can do say so to operators. A Python
+  and curl example for this server's `/v1` uses the ready deployment (chat first) and the key from
+  `FORGEYARD_API_KEY`. `GET/PUT /api/onboarding`, `POST /api/onboarding/seen`; hiding is stored per
+  person in the new `users.preferences` (migration `0007_preferences`).
+- **Recommended models** on Add a model, from `forgeyard/models/recommended.yaml` (27 entries in four
+  groups: Qwen3, other open chat models, speech to text, embeddings and rerank; Gemma 4 E2B, E4B,
+  12B, 26B-A4B and 31B need no token, and vLLM 0.32.0 has both of their architectures), checked at load
+  (catalog names, `hf://` sources, groups, a built-in recipe that serves the task and format, a GGUF
+  file for GGUF entries only, a CPU variant for CPU entries, engine arguments) and by
+  `scripts/check_recommended.py` against Hugging Face. Gated entries (Gemma 3, Llama) are marked as
+  needing a token and the licence. `GET /api/models/recommended` (admins).
+- **Hugging Face search** through the server: `GET /api/models/search?q=&task=&format=&limit=`
+  (admins), one request per Hugging Face pipeline tag of the task (embeddings: feature-extraction
+  and sentence-similarity; rerank: text-ranking and text-classification), over the guarded fetcher to
+  the configured `HF_ENDPOINT` only, 10 s timeout, results trimmed (no chat templates), merged and
+  sorted by downloads (for rerank, names containing "rerank" first), cached 5 minutes, 30 searches per minute per person; 503 `hub_unreachable`
+  when Hugging Face cannot be reached. A result on the recommended list is added the way the list
+  says.
+- **Inspecting a model suggests how to run it**: `POST /api/models/inspect` also returns the recipe
+  (the one asked for if it fits, else the first that serves the model), the device (GPU when an
+  online machine has an allowed GPU, else the CPU when the recipe has a CPU variant), the estimate
+  with the recipe's defaults, and the scheduler's verdict per machine, so the page shows "fits on …"
+  before the model is added. The deploy page takes `?recipe=` and `?device=` from "Deploy it".
 
 ### Changed
 - Spreading a deployment's replicas over machines is documented as the default (unchanged).
+- Every empty page says what it is for and offers the next action: Machines (Add a machine, with
+  how joining works), Workloads (New workload, or serve a model instead), Models (add a model first
+  when the catalog is empty, else deploy one), the catalog, the deploy page with an empty catalog,
+  API keys (Create a key), Usage (create a key, open the Playground) and the Playground (deploy a
+  model, or who to ask). The Models page no longer says replicas answer only on their own ports.
+- The Machines page's button reads "Add a machine", like the checklist.
 
 ## [1.0.0] — 2026-11-10
 

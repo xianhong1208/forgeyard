@@ -6,7 +6,7 @@ import { AuthFrame } from "../components/AuthFrame";
 import { Splash } from "../components/Splash";
 import { Field, Notice } from "../components/ui";
 import { api, ApiError, errorText } from "../lib/api";
-import { ENDED_TEXT, safeNext } from "../lib/nav";
+import { ENDED_TEXT, HOME, safeNext } from "../lib/nav";
 import type { User } from "../lib/types";
 
 export function LoginPage() {
@@ -41,7 +41,7 @@ export function LoginPage() {
   };
 
   return (
-    <AuthFrame title="Sign in" lead={next !== "/machines" ? <>You'll go back to <code>{next}</code> afterwards.</> : undefined}>
+    <AuthFrame title="Sign in" lead={next !== HOME ? <>You'll go back to <code>{next}</code> afterwards.</> : undefined}>
       {ended && ENDED_TEXT[ended] && <Notice>{ENDED_TEXT[ended]}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
       <form onSubmit={submit} className="stack">

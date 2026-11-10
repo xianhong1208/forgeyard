@@ -108,7 +108,21 @@ export function ApiKeysPage() {
           {data.keys.length === 0 ? (
             <div className="panel empty-keys">
               <IconKey size={22} aria-hidden="true" />
-              <p className="muted">No keys yet. Create one for each program or computer, so you can revoke one without the others.</p>
+              {everyone ? (
+                <p className="muted">Nobody has an API key yet.</p>
+              ) : (
+                <>
+                  <p className="muted">
+                    You have no API keys yet. A program needs one to call the models at the address above. Create one per
+                    program or computer, so you can revoke one without the others.
+                  </p>
+                  {!creating && (
+                    <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+                      <IconPlus size={16} aria-hidden="true" /> Create a key
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           ) : (
             <div className="table-wrap">

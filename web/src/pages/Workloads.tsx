@@ -53,10 +53,16 @@ export function WorkloadsPage() {
           <div className="empty-copy">
             <h2>No workloads yet</h2>
             <p>
-              {canManage
-                ? "Start a container or a process on a machine that has joined: New workload."
-                : "Admins and operators start workloads; they show up here with their status."}
+              A workload is a program you run on your machines: a container or a command, kept running as a service or run
+              once as a task. To serve a model, use Models instead: it sets up the engine for you.{" "}
+              {canManage ? "" : "Admins and operators start workloads; they show up here with their status."}
             </p>
+            {canManage && (
+              <p className="empty-actions">
+                <Link to="/workloads/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> New workload</Link>
+                <Link to="/models" className="btn btn-quiet">Serve a model</Link>
+              </p>
+            )}
             <ul className="kinds">
               {KINDS.map(({ icon: Icon, name, detail }) => (
                 <li key={name}>

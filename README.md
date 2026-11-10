@@ -36,6 +36,17 @@ Open `/setup`, paste the token and create the **owner**. The token is also kept 
 a fresh server, so it is safe to start Forgeyard on a shared network before you have set it up.
 To skip the page, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` before the first start.
 
+After signing in, Forgeyard opens on **Get started**: the steps from a fresh install to a first
+API call, in order, each with why it matters and a button to the page that does it. Admins and
+operators get six: add a machine → choose which GPUs Forgeyard may use → add a model → deploy it →
+create an API key → call `/v1` (with a copyable Python and curl example for this server). People
+with the `user` role get three: create a key → call `/v1` → see their usage. Every step ticks
+itself off from what is really there (a machine online, a GPU choice saved, a model in the catalog,
+a deployment ready, an active key of yours, a request with it through the gateway), so the list
+also tells you what is still missing. Hide it with **Hide this list** (saved for your account);
+it stays under **Get started** in the account menu, and Forgeyard opens on Machines once it is
+hidden or every step is done. Every empty page says what it is for and what to do next.
+
 Settings come from the environment or a `.env` file; see [.env.example](.env.example).
 `HOST=0.0.0.0` opens it to the LAN. PostgreSQL instead of SQLite:
 `uv sync --extra postgres` and `DATABASE_URL=postgresql+psycopg://…`.
@@ -208,6 +219,30 @@ or downloaded. A deployment is one service workload (it also appears under Workl
 gateway route: programs reach it at `/v1` with its **model name** (see *Gateway and API keys*). Its
 page shows that name, its usage, each replica and a small **Try it** that checks one replica directly.
 
+- **Adding a model** (admins), three ways on **Models → Catalog and recipes → Add a model**:
+  - **Recommended**: a curated list ([forgeyard/models/recommended.yaml](forgeyard/models/recommended.yaml),
+    easy to edit) of models known to work with the built-in recipes, grouped: Qwen3 (chat 0.6B to
+    32B, two GGUF builds for the CPU, Embedding and Reranker 0.6B / 4B), other open chat models
+    (gpt-oss-20b, Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B, Gemma 3 4B / 12B / 27B, Llama 3.2 3B and
+    3.1 8B), speech to text (Whisper small and
+    large-v3 turbo for faster-whisper) and BGE-M3 with its reranker. Each says its task, the
+    recipe it is meant for, about how much it downloads and how much memory one copy needs. Gemma 3
+    and Llama are **gated**: they need a Hugging Face token whose account accepted the licence
+    (Gemma 4 is not).
+    BGE-M3 is added at `refs/pr/130`, Hugging Face's own safetensors conversion (its main branch
+    has PyTorch weights only). `python scripts/check_recommended.py` checks every entry against
+    Hugging Face with Forgeyard's own inspector and estimator.
+  - **Search Hugging Face**: the server asks `<HF_ENDPOINT>/api/models` (the browser never talks to
+    Hugging Face), with filters for the task and the format (safetensors, GGUF, CTranslate2), most
+    downloaded first (a rerank search also covers text classification, where many rerankers are
+    filed, and lists names containing "rerank" first), and shows downloads, likes, last update, gated,
+    and the size when Hugging Face reports it. Answers are cached for 5 minutes; 30 searches per minute per admin. Without internet
+    the page says so and the recommended list (and adding by source) still work.
+  - **Enter a source**, as below.
+
+  Choosing a model inspects it (next point) and shows the recipe it would run with, what one copy
+  reserves with that recipe's defaults (GPU or CPU, switchable when the recipe has both), and the
+  machines it **fits on right now**, or why it fits nowhere, before anything is added.
 - **Catalog** (admins): add `hf://<org>/<name>` (optionally a revision and, for GGUF repositories,
   the file), a GGUF URL from an allowed host, or `local://<dir>` under an allowed directory. The
   model is **inspected without downloading it**: the commit it pins to, the files and their size,

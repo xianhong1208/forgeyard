@@ -2,6 +2,7 @@ import { IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 
+import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
 import { API_KIND, answerError, ms, readEvents } from "../lib/gateway";
@@ -32,6 +33,8 @@ async function failure(res: Response): Promise<string> {
 
 export function PlaygroundPage() {
   const { data, error } = useApi<{ routes: RouteInfo[] }>("/routes");
+  const { user } = useAuth();
+  const canDeploy = user?.role === "admin" || user?.role === "operator";
   const routes = data?.routes ?? [];
   const [picked, setModel] = useState<string>("");
   // Until someone picks one: a ready chat model, else anything ready, else the first.
@@ -45,7 +48,14 @@ export function PlaygroundPage() {
         lead="Try a deployed model through the gateway, as yourself: the same routing and limits of the replicas as an API key, without creating one. Requests count as “console” in Usage." />
       {error && <Notice tone="error">{error}</Notice>}
       {data && routes.length === 0 && (
-        <Notice>Nothing is deployed yet. <Link to="/models">Models</Link> lists the catalog; admins and operators deploy from there.</Notice>
+        <section className="panel play-empty">
+          <h2>Nothing to try yet</h2>
+          <p className="muted">
+            The Playground sends messages to a deployed model, as you, without an API key. No model is deployed yet.{" "}
+            {canDeploy ? "Deploy one from the catalog; it shows up here once it is ready." : "Admins and operators deploy models; ask one to deploy the model you need."}
+          </p>
+          {canDeploy && <Link to="/models/deploy" className="btn btn-primary">Deploy a model</Link>}
+        </section>
       )}
       {routes.length > 0 && (
         <div className="play-bar">

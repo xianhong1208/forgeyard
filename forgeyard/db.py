@@ -52,6 +52,9 @@ class User(Base):
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Small per-person settings of the web UI ({"onboarding_hidden": true, …}): see
+    # forgeyard/api/onboarding.py for the keys that are accepted.
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict)
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 

@@ -185,12 +185,13 @@ describe("models", () => {
       return undefined;
     });
     mount("/models?tab=catalog");
-    fireEvent.click(await screen.findByRole("button", { name: "Add a model to the catalog" }));
-    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "hf://Qwen/Qwen3-4B" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Inspect" })));
+    // An empty catalog opens Add a model by itself; a source can still be typed in.
+    fireEvent.click(await screen.findByRole("button", { name: "Enter a source" }));
+    fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Qwen/Qwen3-4B" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Look it up" })));
     expect(await screen.findByText("4.02 B")).toBeTruthy();
-    expect(screen.getByText("36 layers, 8 KV heads, 40960 tokens, bfloat16")).toBeTruthy();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("qwen3-4b");
+    expect(screen.getByText("36 layers, 8 KV heads, up to 40,960 tokens, bfloat16")).toBeTruthy();
+    expect((screen.getByLabelText("Name in the catalog") as HTMLInputElement).value).toBe("qwen3-4b");
     expect((screen.getByLabelText("Task") as HTMLSelectElement).value).toBe("chat");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add to the catalog" })));
     const post = fetch.mock.calls.find(([u, i]) => u === "/api/models" && i?.method === "POST");
