@@ -25,15 +25,17 @@ export type Checklist = {
   complete: boolean;
   hidden: boolean;
   gateway_url: string;
+  // Where the CA for /v1 clients is (null: nothing to trust).
+  trust_url?: string | null;
   example: { model: string; api: string; ready: boolean } | null;
 };
 
 export const KEY_ENV = "FORGEYARD_API_KEY";
 
 // The example call with the key read from an environment variable, so it can be copied as is.
-export function exampleCall(gatewayUrl: string, model: string, api: string): { curl: string; python: string } {
+export function exampleCall(gatewayUrl: string, model: string, api: string, trustUrl?: string | null): { curl: string; python: string } {
   const marker = "@@KEY@@";
-  const s = snippets(gatewayUrl, marker, model, api);
+  const s = snippets(gatewayUrl, marker, model, api, trustUrl);
   const python = s.python
     .replace(`"Bearer ${marker}"`, `"Bearer " + os.environ["${KEY_ENV}"]`)
     .replace(`"${marker}"`, `os.environ["${KEY_ENV}"]`);

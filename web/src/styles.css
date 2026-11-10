@@ -757,3 +757,27 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 @media (prefers-reduced-motion: reduce) { .onb-track li.next { animation: none; } }
 .gguf-pick { max-width: 520px; margin-top: 12px; }
 .review:first-of-type { margin-top: 4px; }
+
+/* ---------------------------------------------------------------- HTTPS and trust */
+.topbar-spacer { flex: 1; }
+.topbar-link { display: flex; align-items: center; color: var(--steel-ink); font-size: 14px; font-weight: 550; text-decoration: none; }
+.topbar-link:hover { color: #fff; }
+.trust .panel h2 { display: flex; align-items: center; gap: 8px; }
+.trust-why p { margin: 0 0 10px; max-width: 75ch; color: var(--ink-2); }
+.trust-why p:last-child { margin-bottom: 0; }
+.trust-check { margin: 14px 0; max-width: 75ch; }
+.fingerprint { font-size: 11.5px; word-break: break-all; }
+.trust-platforms { display: grid; gap: 8px; }
+.trust-platforms details { border: 1px solid var(--line); border-radius: var(--radius); padding: 0 14px; }
+.trust-platforms details[open] { border-color: #f3d39b; box-shadow: inset 4px 0 0 var(--heat); padding-bottom: 6px; }
+.trust-platforms summary { cursor: pointer; padding: 11px 0; font-weight: 600; }
+.trust-platforms .steps { margin-top: 2px; }
+.trust-platforms p { margin: 8px 0; color: var(--ink-2); }
+.trust-admin-lead { margin: 14px 0 10px; color: var(--ink-2); max-width: 75ch; }
+.trust-hint { margin: 10px 0 0; }
+.trust-upgrade { margin: 4px 0 12px; }
+.trust-upgrade summary { cursor: pointer; width: max-content; max-width: 100%; color: var(--info); }
+.trust-upgrade p { margin: 8px 0; }
+.trust-offline { margin: -4px 0 16px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.plain-http { margin-bottom: 20px; }
+.auth-trust { margin-top: 10px; }

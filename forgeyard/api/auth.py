@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import audit
 from forgeyard.api import links
+from forgeyard.api.tls import tls_state
 from forgeyard.api.deps import (
     Caller,
     cookie_secure,
@@ -97,6 +98,8 @@ def state(request: Request, db: DbSession = Depends(get_db)):
         "user": user_out(user) if user else None,
         # Why this browser's session ended, so the sign-in page can say so.
         "ended": ended,
+        # HTTPS or not: admins get a warning while the server speaks plain HTTP.
+        "tls": tls_state(request),
     }
 
 

@@ -15,23 +15,24 @@ host (Forgeyard limited to one shared card) plus a CPU machine. See [CHANGELOG.m
 
 Three pull requests, in this order:
 
-1. **Getting started** (in progress)
+1. ✅ **Getting started** (PR #9)
    - A checklist on the home page: add a machine, choose its GPUs, add a model, deploy it,
      create an API key, call `/v1`.
    - Every empty page says what to do next.
    - A list of recommended models: Qwen3, other open LLMs, Whisper, bge-m3 and bge-reranker.
    - Hugging Face search, showing an estimate and where each model would fit.
-2. **Security**
-   - The agent guards every model replica, so a replica port cannot be used without the
-     replica's key (PR `replica-guard`, together with the next item).
-   - API key limits set by an admin are locked against the key's owner.
-   - HTTPS out of the box from Forgeyard's own certificate authority:
-     - the join command pins its fingerprint;
-     - each device trusts it once;
-     - your own certificate is optional;
-     - examples are given for running behind nginx or Caddy.
-   - Engine images are pinned by digest.
-   - Stored secrets are encrypted.
+2. ✅ **Security** (PR #8 `replica-guard`, then PR `security`)
+   - ✅ The agent guards every model replica, so a replica port cannot be used without the
+     replica's key.
+   - ✅ API key limits set by an admin are locked against the key's owner.
+   - ✅ HTTPS out of the box from Forgeyard's own certificate authority:
+     - ✅ the join command pins its fingerprint, and `agent trust` upgrades agents that joined
+       over plain HTTP without a new join token;
+     - ✅ each device trusts it once, from the *Trust this server* page;
+     - ✅ your own certificate is optional;
+     - ✅ examples are given for running behind nginx or Caddy.
+   - ✅ Engine images are pinned by digest.
+   - ✅ Stored secrets are encrypted.
 3. **Install and guide**
    - The agent reads a config file, `/etc/forgeyard/agent.toml`, instead of a long command line.
    - A one-line install served by your server sets the agent up as a system service.

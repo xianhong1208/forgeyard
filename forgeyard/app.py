@@ -13,16 +13,29 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from forgeyard import __version__
-from forgeyard.api import audit_log, auth, deployments, gateway, keys, machines, models, onboarding, users, workloads
+from forgeyard.api import (
+    audit_log,
+    auth,
+    deployments,
+    gateway,
+    keys,
+    machines,
+    models,
+    onboarding,
+    tls as tls_api,
+    users,
+    workloads,
+)
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
-from forgeyard.db import new_session
+from forgeyard.db import get_engine, new_session
 from forgeyard.gateway import proxy as gateway_proxy
 from forgeyard.gateway.usage import recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_RESTART
 from forgeyard.migrate import upgrade
+from forgeyard.security import crypto, tls
 from forgeyard.security.middleware import GuardMiddleware, WebSocketHostGuard
 
 STATIC = Path(__file__).with_name("static")
@@ -31,13 +44,28 @@ log = logging.getLogger("forgeyard")
 
 def _base_url() -> str:
     s = get_settings()
-    return s.public_url.rstrip("/") or f"http://{'localhost' if s.host in ('0.0.0.0', '::') else s.host}:{s.port}"
+    scheme = "https" if s.tls_on else "http"
+    return s.public_url.rstrip("/") or f"{scheme}://{'localhost' if s.host in ('0.0.0.0', '::') else s.host}:{s.port}"
+
+
+def check_secret_key() -> None:
+    with get_engine().connect() as conn:
+        crypto.check_database(conn)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    check_secret_key()  # before migrations: never make a new key for a database that names one
     upgrade()
+    check_secret_key()
     bootstrap(_base_url())
+    settings = get_settings()
+    if settings.public_url_upgraded:
+        log.warning("PUBLIC_URL says http:// but this server speaks HTTPS: using %s. Change PUBLIC_URL to it.",
+                    settings.public_url)
+    if not settings.tls_on:
+        log.warning("TLS=off: Forgeyard speaks plain HTTP. Only run it like this behind a proxy that terminates "
+                    "TLS (docs/https-and-trust.md); admins see a warning while requests arrive over plain HTTP.")
     db = new_session()
     try:
         liveness.mark_all_offline(db)  # no agent is connected to a server that just started
@@ -45,11 +73,12 @@ async def lifespan(_app: FastAPI):
         db.close()
     sweeper = asyncio.create_task(liveness.run_forever())
     usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
+    renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        for task in (sweeper, usage_writer):
+        for task in (sweeper, usage_writer, renewer):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -86,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(deployments.router)
     app.include_router(keys.router)
     app.include_router(onboarding.router)
+    app.include_router(tls_api.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
     app.include_router(agent_api.router)

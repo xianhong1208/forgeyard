@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard.api.deps import Caller, can_run_workloads, current
 from forgeyard.api.keys import gateway_url, key_status
+from forgeyard.api.tls import trust_page
 from forgeyard.db import ApiKey, AuditEvent, CatalogModel, Deployment, Node, UsageDaily, User, get_db
 from forgeyard.models import routes
 from forgeyard.workloads import placement, state as wstate
@@ -187,7 +188,8 @@ def checklist(db: DbSession, user: User, request: Request) -> dict:
     done = sum(1 for s in steps if s["done"])
     prefs = user.preferences or {}
     return {"kind": kind, "steps": steps, "done": done, "total": len(steps), "complete": done == len(steps),
-            "hidden": bool(prefs.get(HIDDEN)), "gateway_url": gateway_url(request), "example": ex}
+            "hidden": bool(prefs.get(HIDDEN)), "gateway_url": gateway_url(request),
+            "trust_url": trust_page(request), "example": ex}
 
 
 @router.get("")

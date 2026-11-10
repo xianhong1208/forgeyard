@@ -1,5 +1,7 @@
 """Recipes: loading, validation and choosing a variant per machine (FY-REC-*)."""
 
+import re
+
 import pytest
 
 from forgeyard.models import recipes
@@ -44,10 +46,11 @@ def test_fy_rec_001_builtins_load_and_are_pinned():
         assert r.builtin
         for v in r.variants:
             if v.image:
-                assert ":" in v.image and not v.image.endswith(":latest"), v.image
+                tag = v.image.split("@")[0]
+                assert ":" in tag.split("/")[-1] and not tag.endswith(":latest"), v.image
             if v.engine:
                 assert len(v.engine.sha256) == 64
-    assert rs["vllm"][0].variant("cuda").image == "vllm/vllm-openai:v0.32.0"
+    assert rs["vllm"][0].variant("cuda").image.startswith("vllm/vllm-openai:v0.32.0@sha256:")
     assert rs["vllm-pooling"][0].share == "vram" and rs["faster-whisper"][0].upstream_model == "repo"
 
 
@@ -136,3 +139,23 @@ def test_fy_rec_007_params_are_checked():
             r.params["context"].coerce("context", value)
     with pytest.raises(ValueError, match="one of"):
         r.params["quantization"].coerce("quantization", "int3")
+
+
+DIGEST_RE = re.compile(r"^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")
+
+
+def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
+    """FY-REC-008: every container variant names its image as repo:tag@sha256:<digest> (the tag for
+    people, the digest for what runs), so a tag moved on the registry cannot change what an agent
+    runs. Bump with scripts/pin_images.py --write."""
+    images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
+              if v.runtime == "container"]
+    assert len(images) == 12
+    unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
+    assert unpinned == []
+    # One tag, one digest: the same tag in two recipes (vllm and vllm-pooling) is the same image.
+    by_tag: dict[str, set[str]] = {}
+    for _, _, image in images:
+        tag, digest = image.split("@")
+        by_tag.setdefault(tag, set()).add(digest)
+    assert all(len(d) == 1 for d in by_tag.values()), by_tag

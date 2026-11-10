@@ -2,7 +2,7 @@ import { IconArrowRight, IconCheck } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, Navigate } from "react-router";
 
-import { CopyBox, Notice, PageHeader } from "../components/ui";
+import { CopyBox, Notice, PageHeader, TrustHint } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { API_KIND } from "../lib/gateway";
 import { MACHINES } from "../lib/nav";
@@ -127,7 +127,7 @@ function StepRow({ s, n, current }: { s: Step; n: number; current: boolean }) {
 function ExampleCall({ c }: { c: Checklist }) {
   const [tab, setTab] = useState<"python" | "curl">("python");
   const model = c.example?.model ?? "MODEL_NAME";
-  const call = exampleCall(c.gateway_url, model, c.example?.api ?? "openai-chat");
+  const call = exampleCall(c.gateway_url, model, c.example?.api ?? "openai-chat", c.trust_url);
   return (
     <section className="panel onb-example" aria-labelledby="example-title">
       <h2 id="example-title">Call /v1</h2>
@@ -136,6 +136,7 @@ function ExampleCall({ c }: { c: Checklist }) {
         in <code>{KEY_ENV}</code> and a deployment's name as the <code>model</code>.
       </p>
       <CopyBox value={c.gateway_url} label="Gateway address" />
+      {c.trust_url && <TrustHint url={c.trust_url} />}
       <p className="muted small">
         {c.example
           ? <>The example uses <code>{c.example.model}</code> ({API_KIND[c.example.api] ?? c.example.api}){c.example.ready ? "." : ", which is not ready yet."}</>

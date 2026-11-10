@@ -5,7 +5,7 @@ import { Link, useSearchParams } from "react-router";
 import { Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
-import { exact, when } from "../lib/format";
+import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, params } from "../lib/models";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe } from "../lib/types";
@@ -208,7 +208,7 @@ function RecipeCard({ r }: { r: Recipe }) {
         {r.variants.map((v) => (
           <li key={v.name}>
             <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
-            <span className="mono small variant-what">{v.runtime === "container" ? v.image : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
+            <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
             <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
           </li>
         ))}

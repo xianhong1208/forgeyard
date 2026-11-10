@@ -498,3 +498,17 @@ def test_fy_rt_025_what_a_killed_leader_leaves_behind_is_stopped_before_a_restar
         assert new_pgid != old_pgid
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
+    """FY-RT-026: the agent hands the image reference it was sent, digest included, to the engine:
+    `docker run repo:tag@sha256:…` (and the anonymous pull, when needed, pulls the same reference),
+    so what runs is exactly the pinned image even if the tag moved on the registry."""
+    fake = FakeDocker(tmp_path / "bin")
+    rt = _ctr(tmp_path, fake)
+    pinned = "credfail/vllm-openai:v0.32.0@sha256:" + "ab" * 32
+    rec = _start_one(tmp_path, rt, container(image=pinned))
+    assert rec.state == "running"
+    runs = fake.runs()
+    assert runs and all(pinned in r for r in runs)
+    assert [c for c in fake.calls() if c and c[0] == "pull"] == [["pull", pinned]]

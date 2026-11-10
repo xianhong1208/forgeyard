@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from forgeyard.db import Accelerator, Node, Replica, new_session, utcnow
-from forgeyard.models import scheduler
+from forgeyard.models import recipes, scheduler
 from forgeyard.models.scheduler import Option
 from tests.model_helpers import FIX, GGUF_REV, QWEN4B_REV, RERANK_REV, WHISPER_REV, add_catalog
 from tests.workload_helpers import PROCESS_OK, make_node, task
@@ -97,7 +97,9 @@ def test_fy_sch_001_four_gpu_models_share_card_4(fleet):
         assert r["machine"]["name"] == "a100" and [g["index"] for g in r["gpus"]] == [4]
     row = replica_row("chat")
     args = row.spec["runtime"]["args"]
-    assert row.spec["runtime"]["image"] == "vllm/vllm-openai:v0.32.0" and row.spec["runtime"]["command"] == ["vllm", "serve"]
+    image = row.spec["runtime"]["image"]
+    assert image == recipes.builtin_recipes()["vllm"][0].variant("cuda").image  # the agent is sent the digest
+    assert image.startswith("vllm/vllm-openai:v0.32.0@sha256:") and row.spec["runtime"]["command"] == ["vllm", "serve"]
     assert args[args.index("--gpu-memory-utilization") + 1] == "0.174"
     assert args[0] == "${MODEL_PATH}" and args[args.index("--served-model-name") + 1] == "chat"
     assert row.vram == 15443688448 and row.spec["resources"]["gpus"]["share"] == "vram"
@@ -266,7 +268,7 @@ def test_fy_sch_008_cpu_gguf_container_or_process(owner):
         db.close()
     deploy(owner, "small2", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})
     row2 = replica_row("small2")
-    assert row2.spec["runtime"]["image"] == "ghcr.io/ggml-org/llama.cpp:server-b11977" and row2.engine is None
+    assert row2.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-b11977@sha256:") and row2.engine is None
     many = owner.post("/api/deployments/estimate", json={"name": "t", "model": "qwen3-1.7b-gguf", "recipe": "llama-cpp",
                                                          "params": {"gpus": 0, "threads": 24}}).json()["placement"]
     assert many["fits"] is False and "needs 24 CPU threads, 16 free of 32" in many["machines"][0]["reason"]

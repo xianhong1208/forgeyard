@@ -1,7 +1,11 @@
 """Command line: `python -m forgeyard [serve]` runs the server, `python -m forgeyard agent ...` the agent.
 
-    python -m forgeyard agent --server http://forge.lan:7860 --join-token fyj_...   # first start: join
+    python -m forgeyard agent --server https://forge.lan:7860 --join-token fyj_... \
+        --ca-fingerprint sha256:...                                                # first start: join
     python -m forgeyard agent                                                      # later starts
+    python -m forgeyard agent trust --server https://forge.lan:7860 --ca-fingerprint sha256:...
+                                                   # an agent that joined over http: switch to https
+    python -m forgeyard secrets reset --yes        # the secret key is lost: start over (see docs)
     python -m forgeyard agent inventory [--json] [--raw]                           # what it detects
     python -m forgeyard agent runtimes [--workload-user nobody]                     # what it can run
 """
@@ -24,10 +28,28 @@ def _serve() -> int:
     import uvicorn
 
     from forgeyard.app import create_app
-    from forgeyard.config import get_settings
+    from forgeyard.security import tls
 
-    settings = get_settings()
-    uvicorn.run(create_app(), host=settings.host, port=settings.port, proxy_headers=False)
+    log = logging.getLogger("forgeyard")
+    from forgeyard.app import check_secret_key
+    from forgeyard.security.crypto import SecretKeyError
+
+    try:
+        check_secret_key()
+    except SecretKeyError as e:
+        log.error("%s", e)
+        return 2
+    try:
+        config = tls.uvicorn_config(create_app())
+    except tls.TlsError as e:
+        log.error("HTTPS: %s", e)
+        return 2
+    material = tls.live.material
+    if material is not None and material.mode != "off":
+        anchor = tls.trust_anchor_pem()
+        log.info("HTTPS with %s.%s", "Forgeyard's own CA" if material.mode == "forgeyard-ca" else material.cert_file,
+                 f" CA fingerprint {tls.fingerprint(anchor)}" if anchor else "")
+    uvicorn.Server(config).run()
     return 0
 
 
@@ -164,6 +186,8 @@ def _agent_cmd(args) -> int:
         log.error("%s", e)
         return EXIT_USAGE
 
+    from forgeyard.agent import trust
+
     if args.join_token:
         if saved and not args.rejoin:
             log.error("This machine already joined %s as %r (state in %s). Start without --join-token, "
@@ -174,20 +198,38 @@ def _agent_cmd(args) -> int:
             log.error("--server is required to join.")
             return EXIT_USAGE
         try:
-            joined = join(server, args.join_token, name=args.name)
+            ca_pem = trust.resolve(server, fingerprint=args.ca_fingerprint, ca_file=args.ca_file)
+            joined = join(server, args.join_token, name=args.name,
+                          ssl_context=trust.context(ca_pem) if server.startswith("https://") else None)
+        except trust.TrustError as e:
+            log.error("%s", e)
+            return EXIT_JOIN_FAILED
         except JoinError as e:
             log.error("%s", e)
             return EXIT_JOIN_FAILED
         saved = {"server": server, "node_id": joined["node_id"], "name": joined["name"],
-                 "credential": joined["credential"]}
+                 "credential": joined["credential"], "ca_fingerprint": trust.fingerprint_of(ca_pem) if ca_pem else None}
+        trust.save_ca(state_dir, ca_pem)
         path = state.save(state_dir, saved)
-        log.info("Joined %s as %r; credential saved to %s (mode 0600).", server, joined["name"], path)
+        log.info("Joined %s as %r; credential saved to %s (mode 0600).%s", server, joined["name"], path,
+                 f" Trusting only the CA {saved['ca_fingerprint']}." if ca_pem else "")
     elif not saved:
         log.error("This machine has not joined yet. Create a join token on the Machines page and run:\n"
                   "    python -m forgeyard agent --server <url> --join-token <token>")
         return EXIT_USAGE
+    elif args.ca_fingerprint or args.ca_file:
+        log.error("This machine already joined. To change which server or CA it trusts, run:\n"
+                  "    python -m forgeyard agent trust --server <https url> --ca-fingerprint <fingerprint>")
+        return EXIT_USAGE
     elif server != saved.get("server"):
         log.info("Using --server %s (the credential was issued by %s).", server, saved.get("server"))
+    ca_pem = trust.load_ca(state_dir)
+    if server.startswith("https://"):
+        log.info("Verifying %s with %s.", server,
+                 f"the pinned CA {trust.fingerprint_of(ca_pem)}" if ca_pem else "the system trust store")
+    else:
+        log.warning("Talking to %s over plain HTTP: the credential and workload secrets cross the network "
+                    "unencrypted. Use https:// unless the server runs with TLS=off on a trusted network.", server)
 
     try:
         supervisor = None if args.no_workloads else _make_supervisor(args, state_dir)
@@ -205,7 +247,8 @@ def _agent_cmd(args) -> int:
                      (cache.get("free_bytes") or 0) / 1024**3, len(cache.get("cached") or []))
         else:
             log.error("Models: %s", cache.get("reason"))
-    agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label), supervisor=supervisor)
+    agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label), supervisor=supervisor,
+                  ca_pem=ca_pem)
 
     async def main() -> int:
         loop = asyncio.get_running_loop()
@@ -222,6 +265,64 @@ def _agent_cmd(args) -> int:
     return asyncio.run(main())
 
 
+def _trust_cmd(args) -> int:
+    """Switch a joined agent to another address or CA (http -> https), keeping its credential."""
+    from forgeyard.agent import state, trust
+    from forgeyard.agent.client import EXIT_JOIN_FAILED, EXIT_USAGE, normalise_server
+
+    log = logging.getLogger("forgeyard.agent")
+    state_dir = Path(args.state_dir) if getattr(args, "state_dir", None) else state.default_state_dir()
+    try:
+        saved = state.load(state_dir)
+    except (ValueError, OSError) as e:
+        log.error("Cannot read the agent state in %s: %s", state_dir, e)
+        return EXIT_USAGE
+    if not saved:
+        log.error("This machine has not joined yet (no credential in %s): use the join command instead.", state_dir)
+        return EXIT_USAGE
+    if not getattr(args, "server", None):
+        log.error("--server is required, e.g. --server https://forge.lan:7860")
+        return EXIT_USAGE
+    try:
+        server = normalise_server(args.server)
+        ca_pem = trust.resolve(server, fingerprint=getattr(args, "ca_fingerprint", None),
+                               ca_file=getattr(args, "ca_file", None))
+    except (ValueError, trust.TrustError) as e:
+        log.error("%s", e)
+        return EXIT_JOIN_FAILED
+    if server.startswith("http://"):
+        log.warning("%s is plain HTTP: nothing is verified. Only for a server started with TLS=off.", server)
+    before = saved.get("server")
+    saved = {**saved, "server": server, "ca_fingerprint": trust.fingerprint_of(ca_pem) if ca_pem else None}
+    trust.save_ca(state_dir, ca_pem)
+    state.save(state_dir, saved)
+    log.info("This machine (%r) now talks to %s%s; it was %s. Its credential is unchanged: restart the agent.",
+             saved.get("name"), server, f", trusting only the CA {saved['ca_fingerprint']}" if ca_pem
+             else (" with the system trust store" if server.startswith("https://") else ""), before)
+    return 0
+
+
+def _secrets_cmd(args) -> int:
+    from forgeyard.security import secrets_reset
+
+    log = logging.getLogger("forgeyard")
+    if args.secrets_command != "reset":
+        log.error("Usage: python -m forgeyard secrets reset --yes")
+        return 2
+    if not args.yes:
+        log.error("This throws away every stored secret that cannot be read without the lost key: Hugging Face "
+                  "tokens (enter them again), model replicas' keys (they restart with new ones) and workload "
+                  "environment values (emptied). Stop the server first, then run it again with --yes.")
+        return 2
+    try:
+        report = secrets_reset.reset()
+    except secrets_reset.NothingToReset as e:
+        log.error("%s", e)
+        return 2
+    log.info("New secret key %s in %s. %s", report["kid"], report["key_file"], report["summary"])
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="forgeyard", description="Forgeyard server and agent.")
     parser.add_argument("--version", action="version", version=f"forgeyard {__version__}")
@@ -229,13 +330,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("serve", help="run the server (the default)")
 
     agent = sub.add_parser("agent", help="run the agent on a machine that should join a server")
-    agent.add_argument("--server", help="the server's address, e.g. http://192.168.1.20:7860")
+    agent.add_argument("--server", help="the server's address, e.g. https://192.168.1.20:7860")
     agent.add_argument("--join-token", help="one-time token from the Machines page (first start only)")
     agent.add_argument("--state-dir", help="where the machine credential is kept "
                                            "(default /var/lib/forgeyard-agent as root, else ~/.local/state/forgeyard-agent)")
     agent.add_argument("--name", help="machine name shown on the server (default: the host name)")
     agent.add_argument("--label", action="append", default=[], metavar="KEY=VALUE", help="a label; repeatable")
     agent.add_argument("--rejoin", action="store_true", help="join again even though a credential is saved")
+    _trust_args(agent)
     agent.add_argument("--simulate-inventory", metavar="FIXTURE",
                        help="report a fixture instead of real hardware (development only; needs "
                             "FORGEYARD_AGENT_SIMULATION=1)")
@@ -250,7 +352,26 @@ def build_parser() -> argparse.ArgumentParser:
     rts = agent_sub.add_parser("runtimes", help="print which runtimes the agent can use here, without joining")
     rts.add_argument("--json", action="store_true", help="machine-readable output")
     _workload_args(rts, sub=True)
+    tr = agent_sub.add_parser("trust", help="switch a joined machine to the server's https:// address and pin its "
+                                            "CA, keeping the credential (agents that joined over http)")
+    tr.add_argument("--server", default=argparse.SUPPRESS, help="the server's https:// address")
+    tr.add_argument("--state-dir", default=argparse.SUPPRESS, help="the agent's state directory")
+    _trust_args(tr, sub=True)
+
+    sec = sub.add_parser("secrets", help="manage the key that encrypts stored secrets")
+    sec_sub = sec.add_subparsers(dest="secrets_command")
+    reset = sec_sub.add_parser("reset", help="the key is lost: make a new one and drop what it encrypted")
+    reset.add_argument("--yes", action="store_true", help="really do it")
     return parser
+
+
+def _trust_args(p: argparse.ArgumentParser, *, sub: bool = False) -> None:
+    d = argparse.SUPPRESS if sub else None
+    p.add_argument("--ca-fingerprint", "--fingerprint", dest="ca_fingerprint", default=d, metavar="SHA256",
+                   help="pin the server's CA by its fingerprint (in the join command on the Machines page): only "
+                        "certificates signed by that CA are accepted")
+    p.add_argument("--ca-file", default=d, metavar="PEM",
+                   help="pin this CA certificate instead (your own CA, or a TLS proxy's)")
 
 
 def _workload_args(p: argparse.ArgumentParser, *, sub: bool = False) -> None:
@@ -296,7 +417,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             return _inventory_cmd(args)
         if args.agent_command == "runtimes":
             return _runtimes_cmd(args)
+        if args.agent_command == "trust":
+            return _trust_cmd(args)
         return _agent_cmd(args)
+    if args.command == "secrets":
+        return _secrets_cmd(args)
     return _serve()
 
 

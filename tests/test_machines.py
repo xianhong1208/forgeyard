@@ -182,11 +182,11 @@ def test_fy_mch_015_revoke_and_remove(owner):
 
 def test_fy_mch_016_command_uses_public_url(owner, monkeypatch):
     """FY-MCH-016"""
-    monkeypatch.setenv("PUBLIC_URL", "http://192.168.1.20:7860/")
+    monkeypatch.setenv("PUBLIC_URL", "https://192.168.1.20:7860/")
     get_settings.cache_clear()
     t = new_token(owner)
-    assert t["server_url"] == "http://192.168.1.20:7860"
-    assert "--server http://192.168.1.20:7860 --join-token fyj_" in t["command"]
+    assert t["server_url"] == "https://192.168.1.20:7860"
+    assert "--server https://192.168.1.20:7860 --join-token fyj_" in t["command"]
 
 
 def test_fy_mch_017_two_redeems_racing_admit_one_machine(owner):

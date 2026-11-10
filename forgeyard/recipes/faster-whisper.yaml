@@ -51,15 +51,15 @@ variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=575"}
     runtime: container
-    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda@sha256:9abc6968a883e77ead9286c38a6ccf3139dcad518b783deeebb7be2ced50e972
     env: {WHISPER__INFERENCE_DEVICE: cuda}
   - name: cuda-12.4
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=550"}
     runtime: container
-    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda-12.4.1
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda-12.4.1@sha256:6a64b1dfe7fe650c72ff01027048858d51c5851993d0f76ba6046f4ca94545c7
     env: {WHISPER__INFERENCE_DEVICE: cuda}
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
-    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8
     env: {WHISPER__INFERENCE_DEVICE: cpu}

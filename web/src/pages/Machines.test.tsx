@@ -143,4 +143,29 @@ describe("machines page", () => {
     expect(fetch.mock.calls.some(([u, i]) => u === "/api/machines/1/revoke" && i?.method === "POST")).toBe(true);
     expect(await screen.findByText("Revoked a100-box; its agent was disconnected.")).toBeTruthy();
   });
+
+  it("FY-WEB-119 over https the join command pins the CA, and offline agents get the trust command", async () => {
+    const fp = "sha256:" + "cd".repeat(32);
+    const trustCmd = `uv run --no-sync python -m forgeyard agent trust --server https://forge.lan:7860 --ca-fingerprint ${fp}`;
+    const created = { id: "t2", created_at: "2026-11-09T10:00:00Z", expires_at: "2026-11-09T10:15:00Z", created_by: "owner",
+      token: "fyj_secret", server_url: "https://forge.lan:7860", valid_minutes: 15, ca_fingerprint: fp, trust_command: trustCmd,
+      command: `uv run --no-sync python -m forgeyard agent --server https://forge.lan:7860 --join-token fyj_secret --ca-fingerprint ${fp}` };
+    server((url, init) => {
+      if (url === "/api/machines") return machines();
+      if (url === "/api/tls") return { status: 200, body: { mode: "forgeyard-ca", https: true, admin: { trust_command: trustCmd, server_certificate: null } } };
+      if (url === "/api/machines/join-tokens" && init?.method === "POST") return { status: 201, body: created };
+      if (url === "/api/machines/join-tokens") return { status: 200, body: { tokens: [] } };
+      return undefined;
+    });
+    mount();
+    await screen.findByRole("article", { name: "Machine a100-box" });
+    // The fixture has an offline machine: the one-time trust command is offered.
+    expect((await screen.findByText("Machines offline since this server switched to HTTPS?")).tagName).toBe("SUMMARY");
+    expect(screen.getByLabelText("Trust command").textContent).toBe(trustCmd);
+    fireEvent.click(screen.getByRole("button", { name: "Add a machine" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
+    expect((await screen.findByLabelText("Join command")).textContent).toBe(created.command);
+    expect(screen.getByText(/trusts only the certificate authority with the fingerprint/)).toBeTruthy();
+    expect(screen.queryByText(/only works on this computer/)).toBeNull();
+  });
 });

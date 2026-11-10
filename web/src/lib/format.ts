@@ -44,3 +44,11 @@ export function device(ua: string | null | undefined): string {
             : "";
   return os ? `${browser} on ${os}` : browser;
 }
+
+// An engine image as people read it: "vllm/vllm-openai:v0.32.0" for "vllm/vllm-openai:v0.32.0@sha256:…".
+// The agent runs the digest; the tag says which release that is.
+export function imageTag(image: string | null | undefined): string {
+  if (!image) return "";
+  const at = image.indexOf("@sha256:");
+  return at > 0 && image.slice(0, at).split("/").pop()!.includes(":") ? image.slice(0, at) : image;
+}

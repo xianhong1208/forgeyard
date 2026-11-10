@@ -17,8 +17,13 @@
 ```bash
 cd web && npm ci && npm run build && cd ..   # UI 建置到 forgeyard/static
 uv sync
-uv run python main.py                        # http://127.0.0.1:7860，啟動時自動跑 migration
+uv run python main.py                        # https://127.0.0.1:7860，啟動時自動跑 migration
 ```
+
+Forgeyard **第一次啟動就用 HTTPS**：它自己建一個小型憑證機構（CA），替這台機器的每個位址簽一張憑證，到期前自己更新。
+在每台裝置上信任這個 CA 一次之前，瀏覽器都會警告：先略過警告一次，在登入頁點 **Trust this server**，比對指紋，安裝 CA。
+agent 透過加入指令裡的指紋釘選這個 CA。也可以用自己的憑證（`TLS_CERT_FILE`、`TLS_KEY_FILE`）或放在 reverse proxy 後面（`TLS=off`）。
+完整說明與 nginx、Caddy 範例：[docs/https-and-trust.md](docs/https-and-trust.md)。
 
 第一次啟動時沒有任何帳號，log 會印出**一次性設定碼**（setup token）。打開 `/setup`，貼上設定碼並建立
 **owner**。設定碼在完成設定前也存在 `data/secrets.json`（權限 0600），完成後即刪除；沒有它就無法搶先佔用
@@ -34,6 +39,14 @@ admin 與 operator 有六步：加入機器 → 選 Forgeyard 可以用哪些 GP
 設定來自環境變數或 `.env`，見 [.env.example](.env.example)。`HOST=0.0.0.0` 對 LAN 開放。改用 PostgreSQL：
 `uv sync --extra postgres` 並設定 `DATABASE_URL=postgresql+psycopg://…`。
 
+**要備份**：資料庫、`data/secret.key`（加密儲存的機密：Hugging Face token、replica 內部金鑰、workload 環境變數的值；
+和資料庫備份分開放），以及 `data/tls/`（每台裝置與 agent 信任的 CA）。見
+[docs/https-and-trust.md](docs/https-and-trust.md#what-to-back-up)。
+
+**從 1.0 升級：** 執行 `uv sync`（1.1 新增 `cryptography`），重新啟動 server，再到每台用一般 HTTP 加入的機器上執行一次
+`agent trust` 指令；機器的憑證不變。步驟見
+[docs/https-and-trust.md](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。
+
 ## 機器
 
 每台機器跑 **Forgeyard agent**（同一個 repo，`python -m forgeyard agent`）。由 agent 主動連到 server，
@@ -44,10 +57,12 @@ server 不需要能連到機器。
 2. 在那台機器的 Forgeyard 目錄裡（先 `uv sync`，NVIDIA 機器加 `--extra nvidia`）執行：
 
    ```bash
-   uv run --no-sync python -m forgeyard agent --server http://<server>:7860 --join-token fyj_…
+   uv run --no-sync python -m forgeyard agent --server https://<server>:7860 --join-token fyj_… \
+       --ca-fingerprint sha256:…
    ```
 
-   agent 用 token 換到**這台機器專屬的憑證**，存在 state 目錄（root 時是 `/var/lib/forgeyard-agent`，
+   agent 先下載 server 的 CA，指紋不符就拒絕；之後 `https://` 與 `wss://` 都**只信任這個 CA**（不用系統的清單），
+   所以中間人會被拒絕。接著 agent 用 token 換到**這台機器專屬的憑證**，存在 state 目錄（root 時是 `/var/lib/forgeyard-agent`，
    否則 `~/.local/state/forgeyard-agent`；可用 `--state-dir` 指定），權限 0600；server 只存它的 SHA-256。
    之後啟動不需要 token：`python -m forgeyard agent`。
 3. agent 以 `Authorization: Bearer <憑證>` 開 WebSocket 到 `/agent/v1/stream`，先送完整 inventory，之後每 10 秒
@@ -63,8 +78,10 @@ server 不需要能連到機器。
   或 agent 卡住、TCP 連線看起來還在時也抓得到。agent 會自己重連，指數退避加隨機抖動，最長 15 秒。
 - **撤銷與移除**（admin）：憑證立即失效，開著的連線也立刻被關掉（agent 會結束）。登入的人都能看 Machines 頁，
   只有 admin 能新增、撤銷、移除機器。建立 token、加入、被拒絕的加入、撤銷與移除都記在稽核紀錄。
-- **傳輸：** Forgeyard 假設在 LAN 或 VPN 上，所以用一般的 `ws://` 即可；要 `wss://` 就把 server 放在 TLS
-  reverse proxy 或 Tailscale 後面，並用 `https://` 網址。Host 檢查對 agent 也適用：agent 若用名稱而不是 IP
+- **傳輸：** `wss://`，用釘選的 CA（存在 state 目錄的 `server-ca.pem`）驗證。用一般 HTTP 加入的 agent（1.0）
+  執行一次 `python -m forgeyard agent trust --server https://<server>:7860 --ca-fingerprint sha256:…` 即可切換，
+  機器憑證不變；在那之前它會一直離線，log 會說明該怎麼做。`--ca-file` 改為釘選你自己的 CA 檔（公司 CA、TLS proxy）。
+  Host 檢查對 agent 也適用：agent 若用名稱而不是 IP
   連 server，該名稱要列在 `ALLOWED_HOSTS`（或設為 `PUBLIC_URL`）。agent 端點永遠不接受瀏覽器的 session cookie，
   且拒絕任何帶 `Origin` 標頭的請求。
 - **模擬 inventory**（只供開發與測試）：`--simulate-inventory nvidia-a100x8 | nvidia-rtx4090x2 | amd-gfx1151-apu |
@@ -182,7 +199,11 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
   （Qwen3-Reranker 需要 vLLM 的 `--hf-overrides`）。
 - **配方**是 YAML（[forgeyard/recipes](forgeyard/recipes)）：task、格式、每個 task 的協定、參數、估算方法、health check，以及依硬體
   （廠商、NVIDIA compute capability 或 AMD gfx target、driver 版本）分的 **variant**；每個 variant 是固定版本的容器映像，或給沒有
-  Docker 的 CPU 機器、由 agent 下載並以 SHA-256 檢查的固定版本執行檔。admin 可在模型頁加自訂配方。內建：
+  Docker 的 CPU 機器、由 agent 下載並以 SHA-256 檢查的固定版本執行檔。內建的映像以 **digest 釘選**，寫成
+  `repo:tag@sha256:…`：agent 拉取並執行的是 digest，registry 上的 tag 被改掉也改變不了實際執行的東西；介面顯示 tag。
+  要升級引擎：改 tag，執行 `uv run --no-sync python scripts/pin_images.py --write`（從 Docker Hub 或 GHCR 取得多架構 digest，
+  並檢查每個 variant 宣稱的平台都在），再檢查 diff；不加 `--write` 則檢查每個 digest 是否仍對應它的 tag。內建映像少了 digest
+  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。內建：
 
   | 配方 | 服務 | 執行在 | 固定版本 |
   |---|---|---|---|
@@ -213,15 +234,23 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](docs/acceptance-m2.md)
 
 ## Gateway 與 API key
 
-每個部署都在 **`http://<server>:7860/v1`** 對外，OpenAI 相容，和 console 同一個 port：`GET /v1/models`、
+每個部署都在 **`https://<server>:7860/v1`** 對外，OpenAI 相容，和 console 同一個 port：`GET /v1/models`、
 `POST /v1/chat/completions` 與 `/v1/completions`（串流原樣轉送）、`/v1/embeddings`、`/v1/rerank` 與 `/v1/score`（vLLM 的格式）、
 `/v1/audio/transcriptions` 與 `/translations`（multipart）。`model` 填部署的 served name。任何 OpenAI client 都能用：
 
 ```python
+import ssl
+
+import httpx
 from openai import OpenAI
-client = OpenAI(base_url="http://<server>:7860/v1", api_key="fyk_…")
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")   # server 的 CA，從 "Trust this server" 下載
+client = OpenAI(base_url="https://<server>:7860/v1", api_key="fyk_…", http_client=httpx.Client(verify=ca))
 client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hi"}])
 ```
+
+用你自己的公開受信任憑證時，省略 `ca` 與 `http_client`。`curl --cacert forgeyard-ca.pem …` 與 `SSL_CERT_FILE=forgeyard-ca.pem`
+也可以。server 用自己的 CA 時，API keys 頁上的範例會自動加上這幾行。
 
 - **API key**（**API keys** 頁）：每個人自己建立；key 是 `fyk_` 加 43 個隨機字元，**只顯示一次**，同時給一段 curl 與 Python 範例；
   server 只存 SHA-256 與 12 字元的前綴。可選：到期時間、可用的模型（不選就是所有部署，包括之後新增的）、每分鐘請求數與 token 數。
@@ -275,7 +304,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 - **新使用者**由 admin 建立，admin 拿到一條**一次性連結**（72 小時）轉交對方，由本人自己設定密碼；
   重設密碼也是同樣的連結（24 小時）。token 放在網址的 `#` 後面，不會進到伺服器 log 或 `Referer`。
 - **自行註冊**預設關閉。`REGISTRATION=approval` 時可以申請帳號，會先處於 *pending*，等 admin 核准。
-- **Session 存在伺服器端。** Cookie（`HttpOnly`、`SameSite=Strict`，https 時加 `Secure`）只放隨機 token，
+- **Session 存在伺服器端。** Cookie（`HttpOnly`、`SameSite=Strict`，HTTPS 時加 `Secure`）只放隨機 token，
   資料庫只存它的 SHA-256。登出、改密碼、停用帳號或 admin 強制登出後，下一個請求就失效——複製走的
   cookie 也不能用。閒置 2 小時、最長 7 天就結束，都在伺服器端檢查。*My account* 可以看到並登出每個 session。
 - **限流：** 同一帳號失敗 5 次後，每次重試都要等待（2 秒起倍增，最多 5 分鐘）；同一 IP 15 分鐘內失敗 30 次也要等。
@@ -283,6 +312,10 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 - **請求防護：** Host 不是自己的名稱回 **421**（防 DNS rebinding）；對 `/api` 的寫入必須帶 `X-Forgeyard: 1`，
   瀏覽器有送 `Origin`／`Referer` 時必須同源。
 - **稽核紀錄：** 登入、登入失敗與所有帳號變更，含操作者、對象與來源 IP。
+- **靜態加密的機密：** Hugging Face token、replica 內部金鑰與 workload 環境變數的值以 AES-256-GCM 加密儲存，金鑰不在資料庫裡
+  （`data/secret.key`，權限 0600；或 `SECRET_KEY_FILE`／`FORGEYARD_SECRET_KEY`）。金鑰不見或不對時 server 拒絕啟動，
+  而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 要重新輸入，
+  replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。
 
 ## 開發
@@ -294,7 +327,7 @@ uv run --no-sync ruff check .
 TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db uv run --no-sync python -m pytest -q
                                                # 同一套測試跑在 PostgreSQL 上——會清空該資料庫
 cd web
-npm run dev                                   # UI 在 :5173，API 轉到 :7860
+npm run dev                                   # UI 在 :5173，API 轉到 https://127.0.0.1:7860
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 

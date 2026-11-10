@@ -51,6 +51,11 @@ export function LoginPage() {
           value={password} onChange={(e) => setPassword(e.target.value)} />
         <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
       </form>
+      {state.tls?.mode === "forgeyard-ca" && (
+        <p className="auth-foot auth-trust">
+          Did your browser warn about this site's certificate? <Link to="/trust">Trust this server</Link> once on this device.
+        </p>
+      )}
       <p className="auth-foot">
         {state.registration === "approval" ? (
           <>No account? <Link to="/register">Request one</Link>; an admin approves it.</>

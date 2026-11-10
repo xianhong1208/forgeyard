@@ -19,6 +19,7 @@ import { PlaygroundPage } from "./pages/Playground";
 import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
 import { SetupPage } from "./pages/Setup";
+import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
 import { UsersPage } from "./pages/Users";
 import { WorkloadDetailPage } from "./pages/WorkloadDetail";
@@ -46,6 +47,8 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/set-password" element={<SetPasswordPage />} />
+      {/* Public: a device gets the CA before anyone signs in on it. */}
+      <Route path="/trust" element={<TrustPage />} />
       <Route
         element={
           <RequireAuth>

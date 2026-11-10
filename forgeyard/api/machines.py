@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
+from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, JoinToken, Node, get_db, utcnow
 from forgeyard.machines import store
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED
+from forgeyard.security import tls
 from forgeyard.workloads import placement, state as wstate
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
@@ -77,11 +79,14 @@ def create_join_token(request: Request, caller: Caller = Depends(require_admin),
     audit.record(db, "machine.join_token_created", actor=caller.user, ip=caller.ip, token=row.public_id)
     db.commit()
     server = public_base(request)
+    anchor = tls.trust_anchor_pem()
     return {
         **token_out(row),
         "token": token,
         "server_url": server,
-        "command": f"uv run --no-sync python -m forgeyard agent --server {server} --join-token {token}",
+        # The join command pins the CA by its fingerprint: the agent trusts that CA only.
+        **agent_commands(server, token),
+        "ca_fingerprint": tls.fingerprint(anchor) if anchor and server.startswith("https://") else None,
         "valid_minutes": int(store.JOIN_TOKEN_TTL.total_seconds() // 60),
     }
 
