@@ -70,7 +70,7 @@ Where it stands (PR `publish-prep`):
   acceptance records of the test machines are kept out of the published repository.
 - ✅ 1 in part, on a real Strix Halo (Radeon 8060S, gfx1151, ROCm 7.0.2):
   - the inventory, through the `amdsmi` library;
-  - joining over an SSH tunnel, and the GPU allowlist;
+  - joining from another network, and the GPU allowlist;
   - a model deployed and called through `/v1` with llama.cpp's Vulkan build as a custom recipe, on
     a machine with no internet access.
 

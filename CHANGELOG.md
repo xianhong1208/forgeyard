@@ -83,7 +83,7 @@ part B1: cost tracking and prices; part B2: budgets).
   `GATEWAY_CLOUD_MAX`, `EGRESS_*` and `PROVIDER_*`.
 - **Machines → Add a machine → Docker is a form** that writes the complete `docker run`: the model
   directory on that machine (both sides of the `-v` and `FORGEYARD_MODEL_CACHE`), an optional machine
-  name (`FORGEYARD_NAME`), the server address as that machine reaches it (an SSH tunnel, a VPN, another
+  name (`FORGEYARD_NAME`), the server address as that machine reaches it (a VPN, a forwarded port, another
   LAN address; a warning when its host is not in the server's certificate, with `TLS_EXTRA_NAMES`), and
   under *Advanced* a port range (`FORGEYARD_PORT_RANGE`). The command follows the form as you type, a
   value the agent would reject shows its error instead of a broken command, and the values are

@@ -87,24 +87,24 @@ It prints:
 forgeyard-ca.der: OK
 
 ==> Checking this machine
-Linux x86_64, server https://192.168.1.20:7860, agent 1.1.0.
+Linux x86_64, server https://192.168.1.20:7860, agent 1.2.0.
 
 ==> Checking the server's certificate authority
 The CA matches sha256:3f9a….
 
-==> Downloading the agent 1.1.0
-forgeyard-1.1.0-py3-none-any.whl (335662 bytes, SHA-256 checked).
+==> Downloading the agent 1.2.0
+forgeyard-1.2.0-py3-none-any.whl (335662 bytes, SHA-256 checked).
 NVIDIA driver found: installing NVML support too.
 
 ==> Installing it in /opt/forgeyard/venv
 Installed with uv (uv 0.9.24).
-forgeyard 1.1.0, as /usr/local/bin/forgeyard (try: forgeyard agent config).
+forgeyard 1.2.0, as /usr/local/bin/forgeyard (try: forgeyard agent config).
 
 ==> Account for process workloads
 Created the system account 'forgeyard-run' (no password, no shell, no home).
 
 ==> Settings (/etc/forgeyard/agent.toml)
-# Forgeyard agent settings, written by `forgeyard agent init` (1.1.0).
+# Forgeyard agent settings, written by `forgeyard agent init` (1.2.0).
 …
 # GPUs: 2 x NVIDIA GeForce RTX 4090 (driver 580.95.05). Choose which ones Forgeyard may use on the Machines page.
 …
@@ -265,7 +265,9 @@ Hello, how are you?
 
 Any program that speaks the OpenAI API works the same way: point it at
 `https://192.168.1.20:7860/v1`, give it the key, and make it trust `forgeyard-ca.pem` (for many
-programs, `SSL_CERT_FILE=forgeyard-ca.pem` is enough).
+programs, `SSL_CERT_FILE=forgeyard-ca.pem` is enough; see
+[A program does not trust the certificate](troubleshooting.md#a-program-does-not-trust-the-certificate)
+for what that variable replaces, and for Node.js).
 
 ## What next
 
