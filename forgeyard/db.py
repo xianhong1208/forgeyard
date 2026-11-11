@@ -432,8 +432,8 @@ class Provider(Base):
 
 
 class ProviderModel(Base):
-    """One model of a provider that routes may use. Prices are for cost tracking and budgets (later):
-    micro-USD per million tokens, NULL while unknown."""
+    """One model of a provider that routes may use. Prices are for cost tracking (forgeyard/gateway/
+    pricing.py) and budgets: micro-USD per million tokens, NULL while unknown."""
 
     __tablename__ = "provider_models"
 
@@ -450,8 +450,10 @@ class ProviderModel(Base):
     price_output: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     price_cache_read: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     price_cache_write: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    price_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # manual | openrouter | upstream
+    price_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # manual | openrouter
     price_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The OpenRouter model id whose prices this model takes, once an admin confirmed the match.
+    price_ref: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     provider: Mapped[Provider] = relationship(back_populates="models")
@@ -521,6 +523,14 @@ class UsageDaily(Base):
     reasoning_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     # Requests that moved on from the first tier (local busy, unavailable or refusing).
     spilled: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # What the requests cost (forgeyard/gateway/pricing.py), micro-USD: 0 for local targets; the
+    # requests whose cost is unknown are counted in `unpriced` and not in cost_micros. Of the priced
+    # ones, `cost_reported` took the upstream's own figure and `cost_estimated` assumed what was not
+    # reported (cached tokens, a cache price).
+    cost_micros: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    unpriced: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cost_reported: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cost_estimated: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     latency_ms_sum: Mapped[int] = mapped_column(BigInteger, default=0)
     # Request counts per latency bucket (forgeyard/gateway/usage.py: BUCKETS_MS), for p50 / p95.
     latency_buckets: Mapped[list] = mapped_column(JSON, default=list)

@@ -53,7 +53,7 @@ from starlette.responses import Response
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc
-from forgeyard.gateway import egress, multipart, quirks
+from forgeyard.gateway import egress, multipart, pricing, quirks
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -121,6 +121,7 @@ class CloudTarget:
     headers: dict = field(default_factory=dict)
     drop_params: list = field(default_factory=list)
     api_key: Optional[str] = field(default=None, repr=False)   # never logged or returned
+    prices: pricing.Prices = field(default_factory=pricing.Prices)
 
     @property
     def key(self) -> str:
@@ -211,7 +212,7 @@ def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
                        base_url=p.base_url, upstream_model=pm.upstream_model, external=p.external,
                        allow_http=p.allow_http, enabled=p.enabled, weight=max(1, t.weight or 1),
                        timeout_s=p.timeout_s, headers=dict(p.headers or {}), drop_params=list(pm.drop_params or []),
-                       api_key=p.api_key)
+                       api_key=p.api_key, prices=pricing.Prices.of(pm))
 
 
 def _route_query():
@@ -649,8 +650,10 @@ class Job:
         self.settled = False
         self.spilled: Optional[str] = None
         self.target = "local"                   # who the usage is counted for
+        self.sent_to: Optional[CloudTarget] = None  # the provider it was last sent to
         self.deployment_id = route.deployment_id
         self.settings = get_settings()
+        self.cost: Optional[pricing.Cost] = None  # once finished (budgets settle with it)
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -660,8 +663,13 @@ class Job:
         u = quirks.read_usage(usage)
         if self.admission is not None:
             key_limiter.settle(self.admission, u.prompt + u.completion)
+        c = self.sent_to
+        self.cost = pricing.cost_of(u, c.prices if c else None, cloud=c is not None and c.external,
+                                    served=status < 400 or status == CLIENT_CLOSED,
+                                    reports_cached=quirks.get(c.kind).reports_cached if c else True)
         record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt, u.completion,
-               target=self.target, cached=u.cached, reasoning=u.reasoning, spilled=self.spilled is not None)
+               target=self.target, cached=u.cached, reasoning=u.reasoning, spilled=self.spilled is not None,
+               cost=self.cost)
 
     def headers(self, target: str) -> dict:
         out = {"X-Forgeyard-Target": target}
@@ -764,7 +772,7 @@ class Job:
                 return Failed("busy", GatewayError(503, "local_busy", f"Every replica of {route.served_name!r} is busy."))
             remaining.remove(pick)
             g = group_of[pick.uid]
-            self.target, self.deployment_id = "local", g.deployment_id
+            self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
             if g.upstream_model not in body_for:
                 body_for[g.upstream_model] = upstream_body(parsed, self.endpoint, g.upstream_model)
             body, strip = body_for[g.upstream_model]
@@ -852,7 +860,7 @@ class Job:
 
     async def send_cloud(self, c: CloudTarget, again: bool = False) -> Union[Response, Failed]:
         parsed, endpoint = self.parsed, self.endpoint
-        self.target, self.deployment_id = c.key, None
+        self.target, self.deployment_id, self.sent_to = c.key, None, c
         kind = quirks.get(c.kind)
         obj = dict(parsed.obj or {})
         obj["model"] = c.upstream_model
@@ -1004,9 +1012,10 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
 
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,
            prompt: int = 0, completion: int = 0, limited: bool = False, *, target: str = "local", cached: int = 0,
-           reasoning: int = 0, spilled: bool = False) -> None:
+           reasoning: int = 0, spilled: bool = False, cost: Optional[pricing.Cost] = None) -> None:
+    cost = cost or pricing.Cost(0, pricing.NONE)
     recorder.record(source=caller.source, key_id=caller.key_id, user_id=caller.user_id, username=caller.username,
                     model=model, deployment_id=deployment_id, status=status,
                     latency_ms=(time.monotonic() - started) * 1000, prompt_tokens=prompt,
                     completion_tokens=completion, limited=limited, target=target, cached_tokens=cached,
-                    reasoning_tokens=reasoning, spilled=spilled)
+                    reasoning_tokens=reasoning, spilled=spilled, cost_picos=cost.picos, cost_method=cost.method)
