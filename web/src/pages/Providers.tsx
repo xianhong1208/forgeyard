@@ -297,7 +297,7 @@ export function ProviderDetailPage() {
           <div className="wl-status"><WhereChip p={p} /><span className="mono small">{p.key_hint ? `key ${p.key_hint}` : "no key"}</span></div>
           {p.budget && <ProviderBudget p={p} budget={p.budget} admin={admin} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
           <Models p={p} admin={admin} kinds={data.kinds} onChanged={reload} />
-          {admin && <Settings p={p} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
+          {admin && <Settings p={p} defaultTimeout={data?.egress?.read_timeout_s} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
         </>
       )}
     </>
@@ -335,7 +335,7 @@ function ProviderBudget({ p, budget, admin, onSaved }: { p: Provider; budget: Bu
       {admin && (
         <form onSubmit={(e) => void save(e)} className="row-gap" style={{ marginTop: 12, alignItems: "flex-end" }}>
           <Field label="Monthly budget (USD)" name="pb-budget" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)}
-            placeholder="no budget" error={error} />
+            placeholder="no budget" error={error} hint="$0 blocks every cloud request to it; leave it empty for no budget." />
           <button type="submit" className="btn">Save budget</button>
         </form>
       )}
@@ -343,7 +343,7 @@ function ProviderBudget({ p, budget, admin, onSaved }: { p: Provider; budget: Bu
   );
 }
 
-function Settings({ p, onSaved }: { p: Provider; onSaved: (text: string) => void }) {
+function Settings({ p, defaultTimeout, onSaved }: { p: Provider; defaultTimeout?: number; onSaved: (text: string) => void }) {
   const [baseUrl, setBaseUrl] = useState(p.base_url);
   const [key, setKey] = useState("");
   const [external, setExternal] = useState(p.external);
@@ -379,7 +379,8 @@ function Settings({ p, onSaved }: { p: Provider; onSaved: (text: string) => void
             <textarea id="ps-headers" className="mono" rows={2} value={headers} onChange={(e) => setHeaders(e.target.value)} />
           </div>
           <Field label="Answer timeout (seconds)" name="ps-timeout" type="number" min={1} max={3600} value={timeout}
-            onChange={(e) => setTimeoutS(e.target.value)} placeholder="server default" />
+            onChange={(e) => setTimeoutS(e.target.value)} placeholder={defaultTimeout ? `default ${defaultTimeout} s` : "server default"}
+            hint="Empty: PROVIDER_READ_TIMEOUT, the server's default." />
         </div>
         <label className="check provider-check">
           <input type="checkbox" checked={external} onChange={(e) => setExternal(e.target.checked)} />

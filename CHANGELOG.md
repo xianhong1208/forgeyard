@@ -39,6 +39,9 @@ version until 1.0.
 - The agent's `limits = auto` asks systemd for a throwaway scope (`systemd-run --scope true`) instead
   of looking for its files, so an agent in a container that sees the host's systemd uses rlimits
   instead of failing every process workload with *Failed to connect to bus*.
+- Labels: budget fields say that $0 blocks all cloud spend and empty means no budget; a provider's
+  *Answer timeout* shows the server's default; a route's *Wait for a free local slot* says it is in
+  milliseconds; the GPU choice on **Machines** is called *GPU access*, like everywhere else.
 
 ### Fixed
 

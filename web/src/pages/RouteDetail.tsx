@@ -212,7 +212,7 @@ function RouteEditor({ r, admin, opts, reload }: { r: RouteInfo | null; admin: b
             </label>
             <div className="grid-2">
               <Field label="Wait for a free local slot (ms)" name="rt-wait" type="number" min={0} max={10000} value={waitMs} disabled={!admin}
-                onChange={(e) => setWaitMs(e.target.value)} hint="0: spill at once when every local replica is at its concurrency. At most 10,000." />
+                onChange={(e) => setWaitMs(e.target.value)} hint="In milliseconds. 0: spill at once when every local replica is at its concurrency. At most 10,000 (10 s)." />
             </div>
             <p className="muted small">
               A request always moves on when the tier has no ready replica, cannot be connected to, or answers 429 or 503. It never moves on for

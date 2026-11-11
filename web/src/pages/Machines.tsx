@@ -431,7 +431,7 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
       </p>
       {editing && (
         <fieldset className="allowlist">
-          <legend>GPUs Forgeyard may assign on {m.name}</legend>
+          <legend>GPU access on {m.name}: the GPUs Forgeyard may assign</legend>
           <div className="allowlist-cards">
             {cards.map((a) => (
               <label key={a.key} className="card-pick">
