@@ -1,4 +1,6 @@
-# The Forgeyard agent as a container image: one `docker run` per machine.
+# The Forgeyard agent as a container image: one `docker run` per machine. Releases publish it for
+# linux/amd64 and linux/arm64 (forgeyard/install/images.py, .github/workflows/publish-images.yml);
+# to build it yourself:
 #
 #   docker build -f Dockerfile.agent -t forgeyard-agent:<version> .
 #
@@ -28,17 +30,28 @@ RUN python -m venv /opt/forgeyard/venv \
 FROM docker:28.5-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS dockercli
 
 FROM base
+ARG TARGETARCH
 # libdrm2 and libdrm-amdgpu1: the host's ROCm (mounted at /opt/rocm) brings libamd_smi.so, which
 # links only libc/libstdc++ but dlopen()s "libdrm.so.2" and, for the card's marketing name,
 # "libdrm_amdgpu.so" (the unversioned name, normally in libdrm-dev; ROCm 7.0 amd_smi_drm.cc and
-# amd_smi_utils.cc). Without them amdsmi reads memory but no ASIC information.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tini libdrm2 libdrm-amdgpu1 \
- && rm -rf /var/lib/apt/lists/* \
- && amdgpu="$(find /usr/lib -name 'libdrm_amdgpu.so.1' | head -n 1)" \
- && ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so" \
- && ldconfig \
- && useradd --system --uid 990 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin forgeyard-run
+# amd_smi_utils.cc). Without them amdsmi reads memory but no ASIC information. ROCm is x86_64 only,
+# so the arm64 image leaves them out; NVML (nvidia-ml-py, above) is in both.
+# Package versions are not pinned: the base image is (by digest), and Debian's security updates
+# should land on the next build.
+# hadolint ignore=DL3008
+RUN set -eu; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends tini; \
+    if [ "$arch" = "amd64" ]; then \
+      apt-get install -y --no-install-recommends libdrm2 libdrm-amdgpu1; \
+      amdgpu="$(find /usr/lib -name 'libdrm_amdgpu.so.1' -print -quit)"; \
+      test -n "$amdgpu"; \
+      ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so"; \
+      ldconfig; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*; \
+    useradd --system --uid 990 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin forgeyard-run
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=venv /opt/forgeyard/venv /opt/forgeyard/venv
 # There is no systemd in a container: process workloads are limited with rlimits. /opt/rocm/bin is
@@ -53,5 +66,13 @@ VOLUME /var/lib/forgeyard-agent
 # tini reaps the processes the agent starts and passes on SIGTERM (the agent stops cleanly; container
 # workloads keep running on the host's Docker and are adopted on the next start).
 ENTRYPOINT ["tini", "--", "forgeyard", "agent"]
+# Last, so a new revision does not invalidate the layers above.
+ARG VERSION=dev
+ARG REVISION=unknown
 LABEL org.opencontainers.image.title="Forgeyard agent" \
-      org.opencontainers.image.description="Joins a Forgeyard server and runs its work on this machine."
+      org.opencontainers.image.description="Joins a Forgeyard server and runs its work on this machine." \
+      org.opencontainers.image.source="https://github.com/xianhong1208/forgeyard" \
+      org.opencontainers.image.url="https://github.com/xianhong1208/forgeyard" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"

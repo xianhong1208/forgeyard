@@ -1,5 +1,16 @@
-# Only forgeyard/ goes into the agent image (Dockerfile.agent); keep the build context small.
+# Only what the images use goes into the build context: Dockerfile.agent copies forgeyard/;
+# Dockerfile.server also needs the web UI's sources, the lock file and the user guide.
 *
 !forgeyard
+!web
+!docs/guide
+!pyproject.toml
+!uv.lock
+!main.py
+!LICENSE
+# Built inside the server image (and never part of the agent's): a local build would be stale.
 forgeyard/static
+web/node_modules
+web/dist
+**/*.tsbuildinfo
 **/__pycache__/

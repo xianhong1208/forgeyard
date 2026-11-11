@@ -1,0 +1,86 @@
+# The Forgeyard server as a container image.
+#
+#   docker build -f Dockerfile.server -t forgeyard:<version> .
+#
+#   docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
+#     -v forgeyard-data:/data -e PUBLIC_URL=https://<this host's name or LAN address>:7860 \
+#     forgeyard:<version>
+#   docker logs forgeyard     # the one-time setup token, on first start
+#
+# Everything the server keeps is in the /data volume: the SQLite database, secret.key (the key to
+# the stored secrets) and tls/ (Forgeyard's own certificate authority). Back the volume up; losing
+# secret.key or tls/ca.key means re-entering secrets or having every agent and browser trust a new
+# CA. More: docs/guide/how-to.md, "Run the server in Docker".
+#
+# Base images are pinned by digest (multi-platform indexes: linux/amd64 and linux/arm64), like the
+# agent image's and the engine images in forgeyard/recipes.
+
+# ------------------------------------------------------------------ the web UI
+# Built on the build machine's own platform: the result is plain JS and CSS, the same for every
+# target, so a multi-platform build runs npm once and natively, not under emulation.
+FROM --platform=$BUILDPLATFORM node:24-trixie-slim@sha256:0820eaa85e07d0490446dd01d14707e17e6108a36988cf374899cd057eb3812d AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web ./
+# vite writes to ../forgeyard/static (web/vite.config.ts), i.e. /src/forgeyard/static.
+RUN npm run build
+
+FROM python:3.13-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS base
+
+# ------------------------------------------------------------------ the Python environment
+# Exactly what uv.lock says, without the dev group, with PostgreSQL support (DATABASE_URL).
+FROM base AS venv
+RUN pip install --no-cache-dir --disable-pip-version-check uv==0.9.24
+ENV UV_PROJECT_ENVIRONMENT=/opt/forgeyard/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
+WORKDIR /src
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --extra postgres --no-install-project
+
+# ------------------------------------------------------------------ the image
+FROM base
+# The server runs as this account, never as root. Its data directory is the volume; a new named
+# volume takes this ownership from the image (a bind-mounted directory needs it too: uid 10001).
+RUN useradd --system --uid 10001 --user-group --home-dir /data --no-create-home --shell /usr/sbin/nologin forgeyard \
+ && mkdir -p /data \
+ && chown forgeyard:forgeyard /data \
+ && chmod 0700 /data
+COPY --from=venv /opt/forgeyard/venv /opt/forgeyard/venv
+WORKDIR /app
+COPY main.py LICENSE ./
+COPY forgeyard ./forgeyard
+# The user guide, served at /guide (forgeyard/guide.py reads it next to the package).
+COPY docs/guide ./docs/guide
+COPY --from=web /src/forgeyard/static ./forgeyard/static
+# HOST 0.0.0.0: inside a container the server must listen on every address for -p to reach it.
+# PUBLIC_URL: set it to the address people and agents use (the host's name or LAN address); its host
+# goes into the server certificate and into every command the Machines page shows.
+ENV PATH=/opt/forgeyard/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DATA_DIR=/data \
+    HOST=0.0.0.0 \
+    PORT=7860
+USER forgeyard
+VOLUME /data
+EXPOSE 7860
+# GET /api/health over the container's own loopback; why it does not verify the certificate is in
+# forgeyard/install/healthcheck.py. Docker 25 and newer probe every 2 s while it starts.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --start-interval=2s --retries=3 \
+    CMD ["python", "-m", "forgeyard.install.healthcheck"]
+# Migrations run on boot; the setup token is printed in the log on first start (`docker logs`).
+CMD ["python", "main.py"]
+# Last, so a new revision does not invalidate the layers above.
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="Forgeyard" \
+      org.opencontainers.image.description="One control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API." \
+      org.opencontainers.image.source="https://github.com/xianhong1208/forgeyard" \
+      org.opencontainers.image.url="https://github.com/xianhong1208/forgeyard" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"

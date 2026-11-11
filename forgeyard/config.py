@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from forgeyard.install.images import reference_error
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -71,6 +73,11 @@ class Settings(BaseSettings):
     # agent_offline_seconds is shown offline (a server-side check, so a silent network drop counts).
     agent_heartbeat_seconds: int = 10
     agent_offline_seconds: int = 30
+    # The agent image the Machines page puts in its `docker run` (forgeyard/install/images.py). Empty:
+    # the published one, docker.io/<namespace>/forgeyard-agent, or a local build while none is
+    # published. Without :TAG or @sha256:DIGEST the tag is this server's version. A mirror or a
+    # private registry goes here, e.g. registry.example.org/forgeyard/forgeyard-agent.
+    agent_image: str = ""
 
     # Models (M3).
     # Where Hugging Face models are inspected and downloaded from (a mirror can be set here).
@@ -143,6 +150,15 @@ class Settings(BaseSettings):
     @property
     def egress_allowed_host_list(self) -> list[str]:
         return [h.strip().lower() for h in self.egress_allowed_hosts.split(",") if h.strip()]
+
+    @field_validator("agent_image")
+    @classmethod
+    def _agent_image(cls, v: str) -> str:
+        v = v.strip()
+        problem = reference_error(v) if v else None
+        if problem:
+            raise ValueError(problem)
+        return v
 
     @field_validator("registration")
     @classmethod
