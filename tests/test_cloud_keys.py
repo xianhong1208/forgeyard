@@ -312,3 +312,19 @@ def test_fy_ck_013_lowering_the_cap_applies_at_once_to_peoples_own_keys(world):
     assert "cloud-m" in listed(k["on"])                           # an admin's own key stays
     assert o.put("/api/keys/cloud", json={"default": "off", "max": "on"}).status_code == 200
     assert "cloud-m" in listed(mine)
+
+
+def test_fy_ck_014_a_partial_change_of_the_cloud_defaults_keeps_the_other_value(owner):
+    """FY-CK-014: PUT /api/keys/cloud with one field changes that field only; the other keeps its
+    saved value (it used to fall back to off). Both fields together still work, and a partial body
+    that would put the default above the maximum is refused."""
+    assert owner.put("/api/keys/cloud", json={"default": "fallback", "max": "on"}).json()["cloud"] == \
+        {"default": "fallback", "max": "on"}
+    r = owner.put("/api/keys/cloud", json={"max": "fallback"})
+    assert r.status_code == 200 and r.json()["cloud"] == {"default": "fallback", "max": "fallback"}
+    r = owner.put("/api/keys/cloud", json={"default": "off"})
+    assert r.status_code == 200 and r.json()["cloud"] == {"default": "off", "max": "fallback"}
+    r = owner.put("/api/keys/cloud", json={"default": "on"})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "default_over_max"
+    assert owner.get("/api/keys").json()["cloud"] == {"default": "off", "max": "fallback"}
+    assert owner.put("/api/keys/cloud", json={}).json()["cloud"] == {"default": "off", "max": "fallback"}

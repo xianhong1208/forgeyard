@@ -34,9 +34,19 @@ def _serve() -> int:
     from forgeyard.security import tls
 
     log = logging.getLogger("forgeyard")
+    from pydantic import ValidationError
+
     from forgeyard.app import check_secret_key
+    from forgeyard.config import get_settings
     from forgeyard.security.crypto import SecretKeyError
 
+    try:
+        get_settings()
+    except ValidationError as e:
+        for err in e.errors():
+            where = ".".join(str(x) for x in err.get("loc") or ()).upper()
+            log.error("Setting %s: %s", where or "?", err.get("msg", "").removeprefix("Value error, "))
+        return 2
     try:
         check_secret_key()
     except SecretKeyError as e:

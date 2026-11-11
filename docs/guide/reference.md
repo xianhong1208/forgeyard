@@ -5,15 +5,41 @@ Every setting of the server and the agent, the command line, and where things ar
 ## Server settings
 
 The server reads its settings from environment variables, or from a `.env` file in the folder it
-starts in (`.env.example` lists them with comments). Restart the server after a change.
+starts in (`.env.example` lists them with comments, the common ones first). Restart the server
+after a change.
+
+The server checks its settings when it starts:
+
+- **A value it cannot use stops the start** with the setting's name and the values it takes:
+  `TLS`, `REGISTRATION`, `COOKIE_SECURE`, `GATEWAY_CLOUD_DEFAULT`, `GATEWAY_CLOUD_MAX`, a number
+  that is not a number, and only one of `TLS_CERT_FILE` and `TLS_KEY_FILE`.
+- **Anything surprising is logged as a warning** and shown to admins under
+  [Setup health](#setup-health-checks): a name that is not a setting ("did you mean"), a setting
+  that another one makes useless, and risky combinations.
+
+### Common settings
+
+Most installations set only some of these. Everything after this table is advanced: the defaults
+are fine for almost everyone.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HOST` | `127.0.0.1` | Where to listen. `0.0.0.0` opens it to the network, which a machine other than this one needs to join |
+| `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
+| `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate. Empty: the address each browser opened Forgeyard with, which other machines cannot use when that was `127.0.0.1` |
+| `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token. A relative path is relative to the folder the server starts in |
+| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
+| `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key: both or neither (one alone stops the start). Checked every 12 hours and reloaded when they changed. Ignored with `TLS=off` |
+| `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it. Ignored without your own certificate |
+| `REGISTRATION` | `off` | `approval`: people can ask for an account, which waits for an admin |
+| `HF_ENDPOINT` | `https://huggingface.co` | Where Hugging Face models are inspected and downloaded from (a mirror can go here) |
+| `EGRESS_PROXY` | — | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
 
 ### Network and addresses
 
 | Variable | Default | What it does |
 |---|---|---|
-| `HOST` | `127.0.0.1` | Where to listen. `0.0.0.0` opens it to the network |
-| `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
-| `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate |
 | `ALLOWED_HOSTS` | — | More host names to answer to, comma-separated. `localhost` and IP addresses always work; any other name gets 421 |
 | `TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed, comma-separated IPs |
 
@@ -21,31 +47,27 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key (both or neither); checked every 12 hours and reloaded when they changed |
-| `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it |
-| `TLS_EXTRA_NAMES` | — | More names or IP addresses for Forgeyard's own server certificate, comma-separated |
+| `TLS_EXTRA_NAMES` | — | More names or IP addresses for Forgeyard's own server certificate, comma-separated. Ignored with your own certificate |
+
+`TLS`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `TLS_CA_FILE` are under [Common settings](#common-settings).
 
 ### Data and secrets
 
 | Variable | Default | What it does |
 |---|---|---|
-| `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token |
-| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
 | `SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets. Back it up apart from the database |
-| `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file |
+| `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file. Set one of the two: with both, this one is used and the file is ignored |
 
 ### Accounts and sign-in
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Create the owner on the first start, instead of the setup page |
-| `FORGEYARD_SETUP_TOKEN` | — | Use this setup token instead of a random one |
-| `REGISTRATION` | `off` | `approval`: people can ask for an account, which waits for an admin |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Create the owner on the first start, instead of the setup page. Read only then: remove them afterwards |
+| `FORGEYARD_SETUP_TOKEN` | — | Use this setup token instead of a random one (no use once setup is done) |
 | `SESSION_IDLE_MINUTES` | `120` | Signed out after this long without a request |
 | `SESSION_MAX_DAYS` | `7` | Signed out after this long in any case |
-| `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS; `true` or `false` to force |
-| `RATE_LIMIT_PER_MINUTE` | `600` | API requests per minute per address (0: no limit) |
+| `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS; `true` or `false` to force. Any other value stops the start |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Requests per minute per address to the web UI's API, `/api` (0: no limit). The gateway, `/v1`, has per-key limits instead |
 | `LOGIN_FREE_FAILURES` | `5` | Failed sign-ins per account before each further try waits (2 s, doubling, at most 5 min) |
 | `LOGIN_IP_FAILURES` | `30` | Failed sign-ins per address within 15 minutes before that address waits |
 
@@ -54,16 +76,15 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | Variable | Default | What it does |
 |---|---|---|
 | `AGENT_HEARTBEAT_SECONDS` | `10` | How often agents send a heartbeat |
-| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline |
+| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Keep it at least 2.5 heartbeats long, or machines flap |
 
 ### Models
 
 | Variable | Default | What it does |
 |---|---|---|
-| `HF_ENDPOINT` | `https://huggingface.co` | Where Hugging Face models are inspected and downloaded from (a mirror can go here) |
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
-| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated (admins change it on **Models**) |
-| `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated (admins change it on **Models**) |
+| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins |
+| `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
 | `VRAM_HEADROOM_MIB` | `512` | Memory always left free on a card when placing replicas |
 
@@ -84,7 +105,6 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 |---|---|---|
 | `GATEWAY_CLOUD_DEFAULT` | `off` | The cloud setting a new API key gets: `off`, `fallback` or `on`. Admins change it on **API keys** (stored in the database); existing keys keep theirs |
 | `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key, also applied to existing keys on every request. Admins may give any key anything |
-| `EGRESS_PROXY` | empty | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
 | `EGRESS_ALLOWED_HOSTS` | empty | Only these provider hosts, comma-separated (`*.example.org` for subdomains). Empty: any |
 | `EGRESS_CA_FILE` | empty | A CA file to trust for providers on top of the system's (a company proxy that inspects TLS) |
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | Let providers outside your network use private or loopback addresses and plain http. For testing with a stand-in only; link-local and metadata addresses stay refused |
@@ -94,6 +114,28 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | `PROVIDER_RETRY_AFTER_CAP` | `2` | When no other target is left, a `Retry-After` up to this many seconds is waited for once |
 | `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Where **Refresh prices from OpenRouter** reads prices (only when an admin asks; no key is sent). Change it only to test against a stand-in |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | Budgets reserve a cloud request's estimated cost before it is sent. A request without `max_tokens` is estimated with an answer of this many tokens |
+
+`EGRESS_PROXY` is under [Common settings](#common-settings). `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`,
+`GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX` are only first values too: once an admin saves
+**API keys → Limits for keys** or **Cloud for keys**, the database wins, and Setup health says so
+when the environment still holds another value.
+
+### Units, zero and empty
+
+| Kind | How it is written |
+|---|---|
+| Durations | Seconds, unless the name says `MINUTES` or `DAYS`. A route's *Wait for a free local slot* is in milliseconds |
+| Sizes | `_MIB` is mebibytes. `GATEWAY_MAX_BODY_MB` and the agent's `log_max_mb` are mebibytes too, despite the name. Sizes typed in forms take `8Gi` (GiB); `8G` and `8GB` are decimal (10⁹ bytes) |
+| Money | US dollars in the web UI; micro-dollars (`_micros`) in the API; prices per million tokens |
+| Rates | Per minute; `LOGIN_IP_FAILURES` counts within 15 minutes |
+
+| Setting | `0` means | Empty means |
+|---|---|---|
+| `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, **Limits for keys** | No limit | No limit |
+| A key's own requests or tokens per minute | Refused (at least 1) | The server's default |
+| A budget (key, person, provider) | **$0: every cloud request it applies to is blocked** | No budget |
+| `RATE_LIMIT_PER_MINUTE` | Off | — |
+| A route's *Wait for a free local slot* | Spill at once | — |
 
 The headers and error codes of `/v1` are listed under [The gateway (/v1)](#the-gateway-v1).
 
@@ -294,6 +336,57 @@ A workload's replica starts with an empty environment. It gets only what its spe
 A spec that sets a GPU variable (also `HIP_VISIBLE_DEVICES` and `GPU_DEVICE_ORDINAL`), `PORT`, or
 any name that starts with `FORGEYARD_` or `PORT_` is refused. In a process's arguments and in
 environment values, `${PORT}` and `${PORT_<NAME>}` become the port.
+
+## Setup health checks
+
+Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
+warnings) and as a banner on the page concerned. Users and operators see none of them. Every check
+runs when the page asks, from the settings, the database and the agents' last reports. *Errors*
+stay until fixed; an admin may snooze a *warning* or a *note* (`info` in the API) for 30 days, for themselves only. How
+to use it: [Check the setup health](how-to.md#check-the-setup-health).
+
+| Id | Severity | When |
+|---|---|---|
+| `setting-unknown` | warning | A name in `.env`, or one in the environment that starts like a setting (`GATEWAY_`, `PROVIDER_`, `EGRESS_`…) or is very close to one, is not a setting. It says which setting you probably meant |
+| `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
+| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `SECRET_KEY_FILE` are set |
+| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS` or `PROVIDER_ALLOW_PRIVATE_HOSTS` is on |
+| `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
+| `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
+| `setup-token-left` | note | `FORGEYARD_SETUP_TOKEN` is still set after setup |
+| `env-seed-ignored` | note | A first-value setting (`MODEL_URL_HOSTS`, `MODEL_LOCAL_DIRS`, `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, `GATEWAY_CLOUD_*`) differs from what an admin saved, which wins |
+| `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **I have a backup of key id …** ticks it off; it comes back when the key changes |
+| `host-loopback` | error | `HOST` is a loopback address, but a machine joined from another address (and no proxy is in front) |
+| `public-url-unset` | note | `PUBLIC_URL` is empty on a server other machines can reach. A warning when you opened the page as `127.0.0.1` or `localhost` |
+| `certificate-name-missing` | error | Your own certificate does not name `PUBLIC_URL`'s host |
+| `certificate-expiring` | warning | Your own certificate expires within 30 days, or Forgeyard's CA within 90. An error within 14 days |
+| `registrations-pending` | note | People are waiting for approval |
+| `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
+| `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
+| `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
+| `process-workloads-off` | note | An online agent refuses process workloads; the finding gives its reason |
+| `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
+| `machine-simulated` | warning | A machine reports simulated hardware |
+| `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
+| `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
+| `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
+| `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
+| `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
+| `cloud-model-unpriced` | error | A route's cloud model has no input or output price while any budget exists: its requests answer 402 `budget_unpriced` |
+| `cloud-model-cost-unknown` | note | The same without budgets: its cost is unknown |
+| `provider-no-key` | error | An enabled provider whose kind needs an API key has none |
+| `provider-blocked-by-egress` | error | A provider's host is not in `EGRESS_ALLOWED_HOSTS` |
+| `provider-inside-public-address` | warning | A provider marked as inside your network resolves only to public addresses |
+| `cloud-default-open` | note | New keys get more than **Never**, or people may set their own keys to **Allowed**. A warning when a key also has no budget |
+| `cloud-unreachable` | note | Routes have cloud targets, but no key may use the cloud |
+| `route-cloud-before-local` | warning | A route's cloud tier comes before its first local tier |
+| `route-cloud-never-used` | note | A **Local only** route has cloud targets, or a spill rule has no tier after the local one |
+| `route-no-target` | error | No target of a route can answer: every one is disabled, or its provider is |
+| `route-local-stopped` | warning | A route with local and cloud tiers whose local deployments are all stopped |
+| `budget-zero` | note | A budget is $0, which blocks every cloud request it applies to |
+| `prices-stale` | note | Prices from OpenRouter of a model a route uses are over 60 days old |
+| `keys-idle-never-expire` | note | Keys that never expire were not used for 90 days |
 
 ## Command line
 

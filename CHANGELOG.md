@@ -7,6 +7,29 @@ version until 1.0.
 ## [Unreleased]
 
 ### Added
+
+- **Setup health** for admins: Forgeyard checks its own setup for settings and combinations that
+  are broken, risky or useless, from the settings, the database and the agents' reports, and says
+  what to do with a link to the fix. About 40 checks, among them: a key that may spend on cloud
+  providers with no budget, a route's cloud model without a price under a budget (402
+  `budget_unpriced`), a cloud tier before the local one, a provider marked inside your network with
+  a public address, a shared machine whose GPU access nobody chose, an agent older than the server,
+  `HOST` on loopback while machines joined from elsewhere, a certificate that expires or does not
+  name `PUBLIC_URL`, and keys that never expire and sat unused for 90 days. Shown under
+  **Get started → Setup health**, as a count in the top bar and as a banner on the page concerned.
+  Warnings and notes can be snoozed for 30 days per admin; errors cannot. `GET /api/advisor`.
+- A reminder to **back up `data/secret.key`**, until an admin ticks *I have a backup of key id …*;
+  it comes back when the key changes.
+- The server warns at start about a name in `.env` or the environment that is not a setting ("did
+  you mean …?"), settings that another one makes useless (`TLS_CA_FILE` without your own
+  certificate, any `TLS_*` with `TLS=off`, `SECRET_KEY_FILE` next to `FORGEYARD_SECRET_KEY`), an
+  offline time under 2.5 heartbeats, the private-address switches, `ADMIN_PASSWORD` or the setup
+  token left after setup, and first-value settings (`MODEL_URL_HOSTS`, `GATEWAY_MAX_RPM`,
+  `GATEWAY_CLOUD_MAX`…) that the database overrides.
+- `.env.example` lists every setting, the common ones first and the advanced ones commented out at
+  their defaults; a test keeps it, the code and the reference in step. The reference has a
+  *Common settings* table, units, and what 0 and empty mean.
+- `CONTRIBUTING.md`: rules for new settings.
 - **`scripts/accept_all.py`, the full regression run** on real machines: one command checks every feature
   shipped so far, so each pull request and release can show the old ones still work. Seven groups, run in
   order and chosen with `--only` / `--skip`: `server` (HTTPS with the CA, security headers, 421, CSRF,
@@ -23,6 +46,25 @@ version until 1.0.
   table per group, totals and the time, `--out` JSON. Everything it makes is named `accept-<run>-…` and
   removed at the end, also after a failure or Ctrl-C; a provider budget it changes is put back. Guide:
   *How-to → Check a server end to end*.
+
+### Changed
+
+- `COOKIE_SECURE` takes `auto`, `true` or `false` (also `yes`/`no`/`1`/`0`); anything else stops the
+  start, instead of acting as `auto`. A setting the server cannot use is reported by name, without
+  a traceback.
+- The agent's `limits = auto` asks systemd for a throwaway scope (`systemd-run --scope true`) instead
+  of looking for its files, so an agent in a container that sees the host's systemd uses rlimits
+  instead of failing every process workload with *Failed to connect to bus*.
+- Labels: budget fields say that $0 blocks all cloud spend and empty means no budget; a provider's
+  *Answer timeout* shows the server's default; a route's *Wait for a free local slot* says it is in
+  milliseconds; the GPU choice on **Machines** is called *GPU access*, like everywhere else.
+
+### Fixed
+
+- `PUT /api/keys/cloud` with only one of `default` and `max` reset the other one to `off`; a field
+  left out now keeps its saved value. `PUT /api/keys/limits` does the same (`null` still clears one).
+- The guide said the Docker form's server address defaults to `PUBLIC_URL`; with `PUBLIC_URL` empty
+  it is the address you opened the page with.
 
 ## [1.2.0] — 2026-11-11
 
