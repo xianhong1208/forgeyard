@@ -149,6 +149,8 @@ class KeyCaller:
     rpm: Optional[int] = None
     tpm: Optional[int] = None
     cloud: str = "off"                # off | fallback | on
+    budget_micros: Optional[int] = None       # the key's monthly cloud budget (None: none)
+    user_budget_micros: Optional[int] = None  # its person's
 
 
 def bearer(header: Optional[str]) -> Optional[str]:
@@ -188,4 +190,5 @@ def authenticate(db: DbSession, authorization: Optional[str], *, now: Optional[d
     return KeyCaller(source="api", user_id=user.id, username=user.username, key_id=key.id, key_name=key.name,
                      models=list(key.models) if key.models is not None else None,
                      rpm=effective(key.rpm, limits["default_rpm"], limits["max_rpm"]),
-                     tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]), cloud=cloud_level(key.cloud))
+                     tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]), cloud=cloud_level(key.cloud),
+                     budget_micros=key.budget_micros, user_budget_micros=user.budget_micros)

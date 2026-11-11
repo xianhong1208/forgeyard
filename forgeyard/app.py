@@ -16,6 +16,7 @@ from forgeyard import __version__
 from forgeyard.api import (
     audit_log,
     auth,
+    budgets,
     deployments,
     gateway,
     guide,
@@ -34,7 +35,7 @@ from forgeyard.api import (
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import get_engine, new_session
-from forgeyard.gateway import egress as gateway_egress, proxy as gateway_proxy
+from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy
 from forgeyard.gateway.usage import recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
@@ -79,11 +80,12 @@ async def lifespan(_app: FastAPI):
     sweeper = asyncio.create_task(liveness.run_forever())
     usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
+    alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(get_settings().usage_flush_seconds))
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        for task in (sweeper, usage_writer, renewer):
+        for task in (sweeper, usage_writer, renewer, alerts):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -93,6 +95,10 @@ async def lifespan(_app: FastAPI):
             await asyncio.to_thread(usage_recorder.flush)  # what was counted since the last write
         except Exception:
             log.exception("Writing gateway usage on shutdown failed")
+        try:
+            await asyncio.to_thread(gateway_budgets.ledger.write_alerts)
+        except Exception:
+            log.exception("Writing budget alerts on shutdown failed")
 
 
 def create_app() -> FastAPI:
@@ -120,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(models.router)
     app.include_router(deployments.router)
     app.include_router(keys.router)
+    app.include_router(budgets.router)
     app.include_router(providers.router)
     app.include_router(prices.router)
     app.include_router(routing.router)

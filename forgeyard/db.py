@@ -56,6 +56,10 @@ class User(Base):
     # Small per-person settings of the web UI ({"onboarding_hidden": true, …}): see
     # forgeyard/api/onboarding.py for the keys that are accepted.
     preferences: Mapped[dict] = mapped_column(JSON, default=dict)
+    # What this person's requests may cost at cloud providers per UTC calendar month, in micro-USD,
+    # over all their keys and the playground (1.2; forgeyard/gateway/budgets.py). NULL: no budget.
+    # Only admins set it.
+    budget_micros: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -423,6 +427,9 @@ class Provider(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Seconds to wait for an answer (headers, or the next piece of a stream); NULL: the server's.
     timeout_s: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # What requests to this provider may cost per UTC calendar month, micro-USD (forgeyard/gateway/
+    # budgets.py); NULL: no budget. Admins only.
+    budget_micros: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -486,6 +493,10 @@ class ApiKey(Base):
     # fallback: only when a route spills from local; on: cloud-only models too.
     cloud: Mapped[str] = mapped_column(String(8), default="off", server_default="off")
     cloud_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # What this key's requests may cost at cloud providers per UTC calendar month, micro-USD
+    # (forgeyard/gateway/budgets.py); NULL: no budget. Its owner may set it unless an admin did.
+    budget_micros: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    budget_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -540,6 +551,24 @@ class UsageDaily(Base):
         Index("ix_usage_daily_user_day", "user_id", "day"),
         Index("ix_usage_daily_deployment_day", "deployment_id", "day"),
     )
+
+
+class BudgetAlert(Base):
+    """A budget passed 80% or 100% in a month (forgeyard/gateway/budgets.py). One row per scope,
+    month and threshold, so each alert is written to the audit log once."""
+
+    __tablename__ = "budget_alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(16))                        # key | person | provider
+    scope_id: Mapped[int] = mapped_column(Integer)
+    month: Mapped[str] = mapped_column(String(7))                         # YYYY-MM, UTC
+    threshold: Mapped[int] = mapped_column(Integer)                       # 80 | 100
+    spent_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    budget_micros: Mapped[int] = mapped_column(BigInteger, default=0)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (Index("ix_budget_alerts_once", "scope", "scope_id", "month", "threshold", unique=True),)
 
 
 class ServerSetting(Base):

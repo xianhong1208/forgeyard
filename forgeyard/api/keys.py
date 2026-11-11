@@ -12,6 +12,10 @@ it. An admin unlocks a limit by clearing it (null: back to the server's default,
 The same goes for a key's `cloud` setting (1.2): off (the default, and every key from before 1.2),
 fallback or on. A user may give their own key at most the server's cap; an admin's value on someone
 else's key is locked; null unlocks it and sets the server's default again.
+
+And for a key's monthly cloud budget (`budget_micros`, micro-USD; forgeyard/gateway/budgets.py): its
+owner may set or remove it; an admin's value on someone else's key is locked; null removes it (no
+budget) and unlocks it.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
 from forgeyard.api.tls import trust_page
 from forgeyard.db import ApiKey, Deployment, GatewayRoute, as_utc, get_db, utcnow
 from forgeyard.models import routes as mroutes
-from forgeyard.gateway import keys as gkeys, usage as gusage
+from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
 
 router = APIRouter(prefix="/api", tags=["keys"])
@@ -37,6 +41,7 @@ router = APIRouter(prefix="/api", tags=["keys"])
 MAX_MODELS = 64
 MAX_LIMIT = 100_000_000
 Cloud = Literal["off", "fallback", "on"]
+MAX_BUDGET = 10**15        # micro-USD: a billion dollars
 
 
 class KeyIn(BaseModel):
@@ -48,6 +53,8 @@ class KeyIn(BaseModel):
     expires_in_days: Optional[int] = Field(default=None, ge=1, le=3650)
     # None: the server's default for new keys.
     cloud: Optional[Cloud] = None
+    # Monthly cloud budget in micro-USD; None: no budget.
+    budget_micros: Optional[int] = Field(default=None, ge=0, le=MAX_BUDGET)
 
 
 class KeyPatchIn(BaseModel):
@@ -56,6 +63,7 @@ class KeyPatchIn(BaseModel):
     rpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
     tpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
     cloud: Optional[Cloud] = None
+    budget_micros: Optional[int] = Field(default=None, ge=0, le=MAX_BUDGET)
 
 
 class CloudIn(BaseModel):
@@ -83,11 +91,22 @@ def key_status(k: ApiKey) -> str:
     return "active"
 
 
-LIMIT_NAMES = {"rpm": "requests-per-minute", "tpm": "tokens-per-minute", "cloud": "cloud"}
+LIMIT_NAMES = {"rpm": "requests-per-minute", "tpm": "tokens-per-minute", "cloud": "cloud",
+               "budget_micros": "monthly budget"}
+# A value an admin may lock on someone else's key -> the column that says who locked it.
+LOCKS = {"rpm": "rpm_locked_by", "tpm": "tpm_locked_by", "cloud": "cloud_locked_by", "budget_micros": "budget_locked_by"}
 
 
-def key_out(k: ApiKey, limits: dict) -> dict:
+def budget_out(budget: Optional[int], spent: int, reserved: int) -> dict:
+    """A budget with this month's spend: `used` (0..1+) and `level` ok | warning (80%) | exhausted."""
+    used = (spent / budget if budget else (1.0 if spent or budget == 0 else 0.0)) if budget is not None else None
+    level = None if used is None else "exhausted" if used >= 1 else "warning" if used >= 0.8 else "ok"
+    return {"budget_micros": budget, "spent_micros": spent, "reserved_micros": reserved, "used": used, "level": level}
+
+
+def key_out(k: ApiKey, limits: dict, spend: Optional[gbudgets.Spend] = None) -> dict:
     requests, tokens = key_limiter.used(k.id)
+    spend = spend or gbudgets.ledger.snapshot()
     return {
         "id": k.public_id, "name": k.name, "prefix": k.prefix, "models": k.models,
         "rpm": k.rpm, "tpm": k.tpm, "rpm_locked_by": k.rpm_locked_by, "tpm_locked_by": k.tpm_locked_by,
@@ -98,6 +117,8 @@ def key_out(k: ApiKey, limits: dict) -> dict:
         "revoked_at": k.revoked_at, "revoked_by": k.revoked_by, "status": key_status(k),
         "user": {"id": k.user_id, "username": k.user.username if k.user else None},
         "this_minute": {"requests": requests, "tokens": tokens},
+        "budget_locked_by": k.budget_locked_by,
+        "budget": budget_out(k.budget_micros, spend.spent.get(("key", k.id), 0), spend.held.get(("key", k.id), 0)),
     }
 
 
@@ -145,7 +166,12 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
         q = q.where(ApiKey.user_id == caller.user.id)
     limits = gkeys.get_limits(db)
     rows = db.scalars(mroutes.query().order_by(GatewayRoute.served_name)).all()
-    return {"keys": [key_out(k, limits) for k in db.scalars(q).all()], "limits": limits, "is_admin": admin,
+    spend = gbudgets.ledger.snapshot()
+    me = caller.user
+    return {"keys": [key_out(k, limits, spend) for k in db.scalars(q).all()], "limits": limits, "is_admin": admin,
+            "month": spend.month, "resets_at": gbudgets.resets_at(spend.month),
+            "person_budget": budget_out(me.budget_micros, spend.spent.get(("person", me.id), 0),
+                                        spend.held.get(("person", me.id), 0)),
             "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
             "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows]}
 
@@ -159,12 +185,13 @@ def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current),
     cloud = body.cloud or cloud_settings["default"]
     raw, prefix, digest = gkeys.new_key()
     k = ApiKey(user_id=caller.user.id, name=body.name.strip(), prefix=prefix, hash=digest, models=models,
-               rpm=body.rpm, tpm=body.tpm, cloud=cloud,
+               rpm=body.rpm, tpm=body.tpm, cloud=cloud, budget_micros=body.budget_micros,
                expires_at=utcnow() + timedelta(days=body.expires_in_days) if body.expires_in_days else None)
     db.add(k)
     db.flush()
     audit.record(db, "api_key.created", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
-                 prefix=prefix, models=models, rpm=body.rpm, tpm=body.tpm, cloud=cloud, expires_at=k.expires_at.isoformat()
+                 prefix=prefix, models=models, rpm=body.rpm, tpm=body.tpm, cloud=cloud,
+                 budget_micros=body.budget_micros, expires_at=k.expires_at.isoformat()
                  if k.expires_at else None)
     db.commit()
     db.refresh(k)
@@ -178,25 +205,26 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
     k = _get(db, key_id, caller)
     own = k.user_id == caller.user.id
     fields = body.model_fields_set
-    if not own and fields - {"rpm", "tpm", "cloud"}:
-        raise fail(403, "forbidden", "On someone else's key an admin changes only the limits and the cloud setting.")
+    if not own and fields - set(LOCKS):
+        raise fail(403, "forbidden", "On someone else's key an admin changes only the limits, the cloud setting and "
+                                     "the budget.")
     if k.revoked_at is not None:
         raise fail(409, "revoked", "This key was revoked.")
     limits = gkeys.get_limits(db)
     admin = caller.user.role == "admin"
-    fields_ = ("name", "models", "rpm", "tpm", "cloud", "rpm_locked_by", "tpm_locked_by", "cloud_locked_by")
+    fields_ = ("name", "models", *LOCKS, *LOCKS.values())
     before = {f: getattr(k, f) for f in fields_}
     cloud_settings = gkeys.get_cloud(db)
-    new = {name: getattr(body, name) for name in ("rpm", "tpm", "cloud") if name in fields}
+    new = {name: getattr(body, name) for name in LOCKS if name in fields}
     if "cloud" in new and new["cloud"] is None and not admin:
         new["cloud"] = cloud_settings["default"]  # "the default", for a user
     if not admin:
         # Only values that change count: a form that sends a locked value back unchanged is fine.
         new = {name: v for name, v in new.items() if v != getattr(k, name)}
         for name in new:
-            by = getattr(k, f"{name}_locked_by")
+            by = getattr(k, LOCKS[name])
             if by:
-                what = "cloud setting" if name == "cloud" else f"{LIMIT_NAMES[name]} limit"
+                what = {"cloud": "cloud setting", "budget_micros": "monthly budget"}.get(name, f"{LIMIT_NAMES[name]} limit")
                 raise fail(403, "limit_locked", f"An admin ({by}) set this key's {what}; only an admin can change "
                                                 "it. You can still revoke the key.")
     _check_own(caller, k.user_id, limits, new.get("rpm"), new.get("tpm"), new.get("cloud"), cloud_settings["max"])
@@ -210,13 +238,12 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
         if admin:
             # On someone else's key an admin's value is locked for its owner; clearing it unlocks.
             # On their own key there is nobody to lock it against.
-            setattr(k, f"{name}_locked_by", caller.user.username if (not own and value is not None) else None)
+            setattr(k, LOCKS[name], caller.user.username if (not own and value is not None) else None)
     after = {f: getattr(k, f) for f in fields_}
     changed = {f: {"before": before[f], "after": after[f]} for f in before if before[f] != after[f]}
     if changed:
-        names = ("rpm", "tpm", "cloud")
-        locked = [n for n in names if after[f"{n}_locked_by"] and after[f"{n}_locked_by"] != before[f"{n}_locked_by"]]
-        unlocked = [n for n in names if before[f"{n}_locked_by"] and not after[f"{n}_locked_by"]]
+        locked = [n for n, col in LOCKS.items() if after[col] and after[col] != before[col]]
+        unlocked = [n for n, col in LOCKS.items() if before[col] and not after[col]]
         audit.record(db, "api_key.changed", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
                      owner=k.user.username if k.user else None, changes=changed, locked=locked or None,
                      unlocked=unlocked or None)

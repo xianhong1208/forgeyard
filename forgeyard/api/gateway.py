@@ -44,7 +44,7 @@ def _console_caller(token: Optional[str]) -> tuple[Optional[KeyCaller], Optional
         if row is None:
             return None, reason
         return KeyCaller(source="console", user_id=row.user.id, username=row.user.username,
-                         cloud=keys.console_cloud(db, row.user)), None
+                         cloud=keys.console_cloud(db, row.user), user_budget_micros=row.user.budget_micros), None
     finally:
         db.close()
 
