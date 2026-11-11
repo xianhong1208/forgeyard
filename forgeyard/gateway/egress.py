@@ -101,7 +101,8 @@ def check_url(base_url: str, *, external: bool, allow_http: bool) -> Destination
     return Destination(scheme, host, port, parts.path.rstrip("/"))
 
 
-def address_problem(addr: str, *, private_ok: bool) -> Optional[str]:
+def address_problem(addr: str, *, private_ok: bool,
+                    private_why: str = "the provider is marked as outside your network") -> Optional[str]:
     try:
         ip = ipaddress.ip_address(addr.split("%", 1)[0])
     except ValueError:
@@ -114,31 +115,36 @@ def address_problem(addr: str, *, private_ok: bool) -> Optional[str]:
         return f"{ip} is not a usable address"
     local = ip.is_loopback or ip.is_private or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT)
     if local and not private_ok:
-        return f"{ip} is a private or loopback address, but the provider is marked as outside your network"
+        return f"{ip} is a private or loopback address, but {private_why}"
     if not local and not ip.is_global:
         return f"{ip} is not a public address"
     return None
 
 
-async def checked_address(dest: Destination, *, external: bool, allow_http: bool) -> str:
-    """Resolve the host (cached briefly) and check every address it has; the one to connect to."""
-    s = get_settings()
-    key = (dest.host, dest.port)
+async def resolve(host: str, port: int) -> list[str]:
+    """The host's addresses (an IP address is its own), cached for RESOLVE_TTL seconds."""
+    key = (host, port)
     now = time.monotonic()
     hit = _cache.get(key)
     if hit and hit[0] > now:
-        addresses = hit[1]
-    else:
-        try:
-            ipaddress.ip_address(dest.host)
-            addresses = [dest.host]
-        except ValueError:
-            addresses = await resolver(dest.host, dest.port)
-        if not addresses:
-            raise EgressError(f"cannot resolve {dest.host}")
-        _cache[key] = (now + RESOLVE_TTL, addresses)
-        if len(_cache) > 1000:
-            _cache.clear()
+        return hit[1]
+    try:
+        ipaddress.ip_address(host)
+        addresses = [host]
+    except ValueError:
+        addresses = await resolver(host, port)
+    if not addresses:
+        raise EgressError(f"cannot resolve {host}")
+    _cache[key] = (now + RESOLVE_TTL, addresses)
+    if len(_cache) > 1000:
+        _cache.clear()
+    return addresses
+
+
+async def checked_address(dest: Destination, *, external: bool, allow_http: bool) -> str:
+    """Resolve the host (cached briefly) and check every address it has; the one to connect to."""
+    s = get_settings()
+    addresses = await resolve(dest.host, dest.port)
     private_ok = (not external) or s.provider_allow_private_hosts
     for addr in addresses:
         problem = address_problem(addr, private_ok=private_ok)
