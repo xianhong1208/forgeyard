@@ -116,7 +116,8 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
 
 1. ✅ **Multimodal chat** (#4): images in chat on vLLM and llama.cpp (projector files), video
    opt-in, the usage units for all of 1.3.
-2. llama.cpp bump to a current build, with a built-in Vulkan variant.
+2. *In review:* llama.cpp bump to a current build (b12242), with a built-in Vulkan variant for AMD
+   APUs and the cards the ROCm image lacks.
 3. Text-to-speech (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp on AMD, speaches
    for small English voices on CPU and CUDA. Voice cloning stays off.
 4. Image generation (`/v1/images/generations`).
@@ -206,10 +207,15 @@ version and the details are not decided yet.
 - Answer 404, as for an unknown model, when a key may not use a model, so a restricted key cannot
   tell which other models exist.
 - Spread scoring for plain tasks (they still use first fit).
-- A built-in llama.cpp **Vulkan** recipe for AMD (and other) GPUs: on a Strix Halo it is a 0.3 GB
-  image that ran where the 7.2 GB ROCm image is untested.
+- Choose a recipe variant per deployment (today the first variant that matches a card wins; a
+  custom recipe with only the wanted variant is the way around it).
+- Vulkan on Intel and other GPUs: the agent's inventory reports NVIDIA and AMD cards only, so the
+  `vulkan` variant of `llama-cpp` is for AMD.
 - **Import an image** from a file, for machines that cannot reach a registry (seen on a machine
-  whose DNS blocked ghcr.io and Hugging Face).
+  whose DNS blocked ghcr.io and Hugging Face). `docker load` on Docker's classic image store keeps an
+  image's tag but not its registry digest, so a recipe image pinned as `tag@sha256:…` is not found
+  there and Docker tries to pull it; the agent could check a loaded tag against the pinned image's
+  config digest instead.
 - Tune each recipe's memory overhead from real runs (estimates were 7–39% above actual).
 
 ## Verification still to do
@@ -218,7 +224,9 @@ version and the details are not decided yet.
   inventory through the `amdsmi` library, unified memory and the 96 GiB
   pool, joining, the GPU allowlist, and a llama.cpp Vulkan deployment served through `/v1`. Still to
   confirm:
-  - the ROCm images of the `vllm` and `llama-cpp` recipes (gfx1151 support in them is unknown);
+  - the built-in `vulkan` variant of `llama-cpp` (b12242) on the Strix Halo;
+  - the ROCm images of the `vllm` and `llama-cpp` recipes (both list gfx1151 among their targets;
+    `llama-cpp` sends APUs to Vulkan);
   - a discrete card;
   - `ROCR_VISIBLE_DEVICES` for a process workload.
 - **The systemd scope for process limits.** It has not run on a host with systemd yet.

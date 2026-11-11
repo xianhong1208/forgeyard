@@ -49,12 +49,51 @@ Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A pr
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
+`llama-cpp` picks one of two images for each card:
+
+| Card | `llama-cpp` runs | Why |
+|---|---|---|
+| Instinct (`gfx908`, `gfx90a`, `gfx942`, MI300A included) and the discrete Radeon cards its ROCm image is built for (`gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1200`, `gfx1201`) | **ROCm** (variant `rocm`, a 7.7 GB image) | Instinct cards have no Vulkan |
+| Every other AMD GPU: APUs with unified memory (Strix Halo `gfx1151`, Strix Point `gfx1150`, Phoenix `gfx1103`, …) and discrete cards the ROCm image lacks (`gfx1031`, `gfx1032`, …) | **Vulkan** (variant `vulkan`, a 0.3 GB image with Mesa's RADV driver) | No ROCm needed in the image; the path used on a real Strix Halo |
+
+A Vulkan container gets only its card's render node (`/dev/dri/renderD*`) and the group that owns
+it, not `/dev/kfd`. Its memory is checked against the same pool as for ROCm: for an APU, the larger
+of the carve-out and GTT. The deployment's events say which variant it got (`… (vulkan; reserves
+…)`).
+
+A deployment cannot choose the variant itself. To run a card with the other one, add a custom
+recipe (**Models**, *Recipes*, **Add a custom recipe**): a copy of `llama-cpp` under another name, with only the variant you
+want under `variants`.
+
+**From a custom `llama-cpp-vulkan` recipe.** Before 1.3, Vulkan needed a custom recipe; the built-in
+one replaces it. A deployment keeps the recipe it was made with, so deploy the model again with
+`llama-cpp`, then delete the old deployment and, once nothing uses it, the custom recipe.
+
+**A machine that cannot reach `ghcr.io`** gets the image as a file. On a machine that can, pull it
+by its tag and check that it is the pinned one (the `DIGEST` of that tag must be the recipe's,
+`sha256:28a56d03…`):
+
+```bash
+sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242
+sudo docker images --digests ghcr.io/ggml-org/llama.cpp
+sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama-vulkan.tar.gz
+```
+
+Copy the file over and load it there with `gunzip -c llama-vulkan.tar.gz | sudo docker load`. The
+recipe names the image as `tag@sha256:digest`, and Docker looks it up by the digest. With Docker's
+classic image store (`docker info` shows a storage driver such as `overlay2`), a loaded image keeps
+its tag but not the digest it was pulled by (`docker images --digests` shows `<none>`): `docker run`
+does not find it, tries to pull it from `ghcr.io`, and the replica fails with that error. With the
+containerd image store (`driver-type: io.containerd.snapshotter.v1` in `docker info`), check
+`docker images --digests` after loading. Where the digest is missing, use a custom recipe whose
+image is the loaded tag without the digest; Docker then finds it locally and does not pull.
+
 > AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2: the
 > inventory (through the `amdsmi` library, `amd-smi` and `rocm-smi`), joining, the GPU allowlist,
-> and a model served through `/v1` with llama.cpp's Vulkan build as a custom recipe. Not checked on
-> real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes (whether they support
-> gfx1151 is unknown), and discrete AMD cards (recorded data only). Report anything that looks wrong
-> with the output of `forgeyard agent inventory --json --raw`.
+> and a model served through `/v1` with llama.cpp's Vulkan build as a custom recipe (build b11977).
+> Not checked on real hardware yet: the built-in Vulkan variant (b12242), the ROCm images of the
+> `vllm` and `llama-cpp` recipes, and discrete AMD cards (recorded data only). Report anything that
+> looks wrong with the output of `forgeyard agent inventory --json --raw`.
 
 ## Add a CPU-only machine
 
@@ -329,9 +368,11 @@ visible; a container gets only its cards, never `--privileged`. See
 
 **Video:** set *Videos per request* to 1 or more under **Advanced** and send a `video_url` part.
 On vLLM this makes the engine reserve memory for a long video when it starts, which leaves less for
-the KV cache: lower the context if it does not start.
+the KV cache: lower the context if it does not start. On llama.cpp, give the deployment a context of
+8,192 or more: Qwen3-VL reads a video at its own 2 frames a second (*Video frames per second* applies
+to other models), and a 6-second clip took 5,345 tokens.
 
-**A custom llama.cpp recipe** (a Vulkan build, for example) reads images once it passes the
+**A custom llama.cpp recipe** (another build, for example) reads images once it passes the
 projector and says what it takes:
 
 ```yaml
