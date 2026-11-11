@@ -21,7 +21,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `TLS` | `on` | `on`：以 Forgeyard 自己的 CA（建立在 `data/tls/`）或你的憑證提供 HTTPS。`off`：純 HTTP，只能用在處理 HTTPS 的代理後面 |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰（兩個都設或都不設）；檔案變更時會重新載入 |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰（兩個都設或都不設）；每 12 小時檢查一次，有變更就重新載入 |
 | `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**Trust this server** 也會提供它 |
 | `TLS_EXTRA_NAMES` | — | 要加進 Forgeyard 自己的伺服器憑證的其他名稱或 IP 位址，以逗號分隔 |
 
@@ -94,7 +94,7 @@
 | `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | **Refresh prices from OpenRouter** 讀取價格的位置（只在管理員要求時讀取，不送出金鑰）。只有在用替身伺服器測試時才需要修改 |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | 預算會在雲端請求送出前先預留它的估計費用。沒有 `max_tokens` 的請求，以這個 token 數估計它的回應 |
 
-請求標頭 `X-Forgeyard-Local-Only: 1`：這個請求絕不使用雲端目標。回應標頭：`X-Forgeyard-Target`（`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`）；請求離開第一層時有 `X-Forgeyard-Spilled`（`unavailable`、`busy`、`refused` 或 `too_long`）；本機回答則和以前一樣有 `X-Forgeyard-Replica`。
+`/v1` 的標頭和錯誤碼列在[閘道（/v1）](#the-gateway-v1)。
 
 ## agent 設定
 
@@ -146,29 +146,150 @@ cache = "/srv/forgeyard-models"
 local_dirs = ["/data/models"]
 ```
 
+### agent 讀取的其他變數
+
+這些不是 `agent.toml` 裡的設定：
+
+| 變數 | 用途 |
+|---|---|
+| `FORGEYARD_AGENT_CONFIG` | 設定檔，取代 `/etc/forgeyard/agent.toml`（等同 `--config PATH`） |
+| `FORGEYARD_JOIN_TOKEN` | 一次性的加入權杖（等同 `--join-token`） |
+| `DOCKER_HOST`、`DOCKER_CONFIG`、`CONTAINER_HOST`、`XDG_RUNTIME_DIR` | 傳給 `docker` 或 `podman` 指令，讓非預設的引擎 socket 或設定可以運作。agent 環境裡的其他東西都不會傳給引擎 |
+| `ROCM_PATH`、`ROCM_HOME` | ROCm 不在 `/opt/rocm` 時的安裝位置（AMD 卡） |
+| `FORGEYARD_AGENT_SIMULATION` | 設為 `1` 才允許 `--simulate-inventory FIXTURE`：agent 回報錄好的硬體資料，而不是自己的硬體。僅供開發和測試；伺服器會把這種機器標示為模擬 |
+
+## 閘道（/v1）
+
+程式以 API 金鑰呼叫 `https://<server>:7860/v1` 上的模型：`Authorization: Bearer fyk_…`。閘道不接受 cookie，也不送 CORS 標頭，所以網頁無法借用已登入的瀏覽器來呼叫它。
+
+### 端點
+
+| 端點 | 提供什麼 | 雲端供應商 |
+|---|---|---|
+| `GET /v1/models` | 這把金鑰可以使用的模型。以下模型不會列出：對這把金鑰不存在的模型（只有雲端，而金鑰的雲端設定不是 **Allowed**）、不在金鑰模型清單內的模型，以及部署全部停止的模型（除非還有這把金鑰可用的供應商能提供它） | — |
+| `GET /v1/models/{model}` | 單一模型，格式相同。模型不存在、對這把金鑰隱藏或已停止時回 404 `model_not_found`；不在金鑰模型清單內時回 403 `model_not_allowed` | — |
+| `POST /v1/chat/completions` | 對話模型（vLLM、llama.cpp、供應商的對話模型）。`stream: true` 會以 server-sent events 串流 | 是 |
+| `POST /v1/completions` | 同樣的模型，使用單純的 `prompt` | 是 |
+| `POST /v1/embeddings` | 嵌入模型 | 是 |
+| `POST /v1/rerank` | 重排序模型（vLLM 的 rerank API） | 否 |
+| `POST /v1/score` | 重排序模型（vLLM 的 score API） | 否 |
+| `POST /v1/audio/transcriptions` | 語音轉文字（faster-whisper），以 `multipart/form-data` 送出，含 `model` 欄位 | 否 |
+| `POST /v1/audio/translations` | 語音轉成英文文字，格式同上 | 否 |
+
+`/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
+
+閘道如何處理一個請求：
+
+- 從請求內容讀取 `model`，把請求送到這個模型的路由。模型在另一個端點提供時（例如把嵌入模型送到 `/v1/chat/completions`），回 400 `wrong_endpoint`。
+- 把 `model` 換成副本或供應商預期的名稱，加上副本的內部金鑰或供應商的金鑰，你的其他東西一概不轉送：不轉送你的 API 金鑰，也不轉送你的其他標頭。
+- `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。
+- 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
+- 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB）。
+- 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
+
+### 標頭
+
+| 標頭 | 方向 | 值 |
+|---|---|---|
+| `Authorization` | 請求 | `Bearer fyk_…`：你的 API 金鑰 |
+| `X-Forgeyard-Local-Only` | 請求 | `1`（或 `true`、`yes`、`on`）：這個請求不使用任何雲端供應商。它絕不會放寬金鑰的權限 |
+| `X-Forgeyard-Target` | 回應 | 由誰回答：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。絕不包含金鑰 |
+| `X-Forgeyard-Replica` | 回應 | 本機回答時：`<model>#<replica>` |
+| `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
+| `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
+| `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`，以及供應商有提供時的 429 `provider_rate_limited` |
+
+### 錯誤
+
+錯誤採用 OpenAI 的格式，每個 OpenAI 用戶端函式庫都讀得懂：
+
+```json
+{"error": {"message": "This API key was revoked.", "type": "authentication_error", "param": null, "code": "revoked_api_key"}}
+```
+
+`type` 依狀態碼而定（`invalid_request_error`、`authentication_error`、`insufficient_quota`、`permission_error`、`rate_limit_error`、`upstream_error`、`service_unavailable`）。請依 `code` 處理錯誤：
+
+| 狀態碼 | `code` | 意思 | 怎麼做 |
+|---|---|---|---|
+| 400 | `invalid_json` | 請求內容不是 JSON | 送 JSON |
+| 400 | `invalid_request` | 沒有 `model`、請求內容不是物件，或音訊不是以 `multipart/form-data` 送出 | 修正請求 |
+| 400 | `wrong_endpoint` | 這個模型在另一個端點提供；訊息會寫出是哪一個 | 改用那個端點 |
+| 400 | `context_length_exceeded` | 只出現在開啟 **Spill a prompt that is too long** 的路由：提示放不進本機的上下文，而且沒有其他目標能接手 | 縮短提示或降低 `max_tokens` |
+| 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
+| 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
+| 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
+| 401 | `revoked_api_key` | 金鑰已被撤銷 | 建立新金鑰 |
+| 401 | `expired_api_key` | 金鑰已過期 | 建立新金鑰 |
+| 401 | `account_disabled` | 金鑰的擁有者已停用或正在等待核准 | 詢問管理員 |
+| 402 | `budget_exhausted` | 每月預算讓請求無法送往任何能提供服務的供應商，本機也無法接手。`budget` 物件會說明是哪個預算、何時重置 | 等到月底、提高預算，或改用本機模型。不要重試 |
+| 402 | `budget_unpriced` | 有預算適用，但供應商的模型沒有價格，所以無法預留它的費用 | 由管理員設定它的價格 |
+| 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
+| 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **Allowed**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
+| 404 | `unknown_endpoint` | 閘道沒有這個路徑 | 使用上面列出的端點 |
+| 413 | `request_too_large` | 請求內容大於 `GATEWAY_MAX_BODY_MB` | 送少一點，或調高設定 |
+| 421 | `host_not_allowed` | 伺服器不回應網址裡的主機名稱 | 使用它的位址，或把名稱加進 `ALLOWED_HOSTS` |
+| 429 | `rate_limit_exceeded` | 超過金鑰每分鐘的請求數或 token 數 | 等待 `Retry-After` 秒 |
+| 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
+| 502 | `upstream_unreachable` | 連不上任何副本 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
+| 502 | `upstream_error` | 回應傳送到一半時，和副本或供應商的連線斷了 | 重試 |
+| 502 | `replica_refused_key` | 副本拒絕了閘道的內部金鑰 | 停止再啟動部署 |
+| 502 | `provider_auth_failed` | 供應商拒絕了 Forgeyard 給它的金鑰。絕不會以 401 轉給你，免得你懷疑自己的金鑰 | 由管理員修正供應商的金鑰 |
+| 502 | `provider_blocked` | 外連規則在送出前就拒絕了供應商的位址 | 由管理員檢查供應商的 base URL 和 `EGRESS_*` |
+| 502 | `provider_redirect` | 供應商回應了重新導向，而重新導向一律不跟隨 | 由管理員檢查供應商的 base URL |
+| 502 | `provider_unreachable` | 連不上供應商 | 稍後重試 |
+| 502 | `provider_error` | 供應商回應 5xx，或送往它的請求失敗 | 稍後重試 |
+| 503 | `no_ready_replica` | 模型存在，但沒有就緒的副本：下載中、啟動中、已停止，或它的機器離線。訊息會列出每個副本的狀態 | 等待，或啟動部署 |
+| 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它 | 重試 |
+| 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
+| 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
+| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段） | 降低 `max_tokens`，或調高設定 |
+| 504 | `provider_timeout` | 供應商沒有及時回應（`PROVIDER_READ_TIMEOUT`，或供應商自己的逾時設定） | 稍後重試 |
+
+另外兩種情況：
+
+- **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
+- **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
+
+## 工作負載的環境變數
+
+工作負載的副本從空的環境開始，只拿到它的規格宣告的變數，再加上：
+
+| 變數 | 值 |
+|---|---|
+| `FORGEYARD_WORKLOAD` | 工作負載的名稱 |
+| `FORGEYARD_REPLICA` | 副本的 id |
+| `FORGEYARD_REPLICA_INDEX` | 副本的編號，從 0 開始 |
+| `PORT`、`PORT_<NAME>` | 每個宣告的連接埠：行程拿到它必須監聽的主機連接埠；容器拿到它自己的連接埠（引擎會把主機連接埠對應過去）。`PORT` 是第一個 |
+| `CUDA_VISIBLE_DEVICES`、`NVIDIA_VISIBLE_DEVICES`、`CUDA_DEVICE_ORDER` | NVIDIA：只有它自己的卡的 UUID。沒有 GPU 的副本看不到任何卡 |
+| `ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES` | AMD：只有它自己的卡 |
+| `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及工作負載帳號 |
+
+規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。
+
 ## 命令列
 
 ### 伺服器
 
 | 指令 | 用途 |
 |---|---|
-| `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`）。資料庫的變更會在啟動時執行 |
-| `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器） |
+| `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`，或單獨的 `python -m forgeyard`）。資料庫的變更會在啟動時執行 |
+| `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器）。沒有 `--yes` 時只說明會捨棄什麼 |
 | `python -m forgeyard --version` | 顯示版本 |
 
 ### agent
 
-用單行安裝裝好後，agent 的指令是 `forgeyard`（在 `/usr/local/bin`）；從原始碼目錄執行則是 `uv run --no-sync python -m forgeyard`。
+用單行安裝裝好後，agent 的指令是 `forgeyard`（在 `/usr/local/bin`）；從原始碼目錄執行則是 `uv run --no-sync python -m forgeyard`。每個指令都接受 [agent 設定](#agent-settings)的旗標，放在指令名稱之前或之後都可以，`-v`（`--verbose`）則顯示除錯輸出。`--fingerprint` 是 `--ca-fingerprint` 的另一個名稱。在 agent 的 Docker 映像檔裡，指令本身已經是 `forgeyard agent`，所以只要加上後面的部分（`… forgeyard-agent:<version> inventory`）。
 
 | 指令 | 用途 |
 |---|---|
-| `forgeyard agent` | 執行 agent（服務執行的是 `forgeyard agent --config /etc/forgeyard/agent.toml`）。如果有加入權杖但還沒有憑據，會先加入 |
+| `forgeyard agent` | 執行 agent（服務執行的是 `forgeyard agent --config /etc/forgeyard/agent.toml`）。如果有加入權杖但還沒有憑據，會先加入；`--rejoin` 會以新機器的身分重新加入 |
 | `forgeyard agent init [--print] [--force]` | 根據偵測到的內容（GPU、Docker 或 Podman、systemd、工作負載帳號）寫出 `/etc/forgeyard/agent.toml`，並印出內容。`--print` 只印出不寫入。在這裡給的旗標（`--server`、`--ca-fingerprint`、`--model-cache`…）會寫進檔案 |
 | `forgeyard agent join --join-token fyj_…` | 用檔案裡的設定加入，儲存憑據後結束。已經加入過：不做任何事；`--rejoin` 會以新機器的身分重新加入 |
 | `forgeyard agent config [--get KEY]` | 列出所有生效中的設定和它們的來源；`--get models.cache` 只印出一個值 |
 | `forgeyard agent trust --server https://… [--ca-fingerprint …]` | 把已加入的機器切換到另一個位址或 CA，並保留它的憑據 |
 | `forgeyard agent inventory [--json] [--raw]` | agent 偵測到的內容（GPU、CPU、記憶體），不需要加入 |
-| `forgeyard agent runtimes` | 這台機器能執行什麼（行程、容器、容器內的 NVIDIA），不需要加入 |
+| `forgeyard agent runtimes [--json]` | 這台機器能執行什麼（行程、容器、容器內的 NVIDIA），不需要加入 |
+| `forgeyard --version` | agent 的版本 |
 
 ### 安裝腳本
 
@@ -176,8 +297,8 @@ local_dirs = ["/data/models"]
 
 | 選項 | 用途 |
 |---|---|
-| `--join fyj_…` | 加入權杖（第一次安裝） |
-| `--ca-fingerprint sha256:…` | 伺服器 CA 的指紋：在下載任何東西之前檢查，之後由 agent 釘選 |
+| `--join fyj_…` | 加入權杖（第一次安裝）。也可以寫成 `--join-token` |
+| `--ca-fingerprint sha256:…` | 伺服器 CA 的指紋：在下載任何東西之前檢查，之後由 agent 釘選。也可以寫成 `--fingerprint` |
 | `--ca-file PEM` | 改為釘選這個 CA 檔案 |
 | `--server URL` | 伺服器的位址（預設：提供這個腳本的伺服器） |
 | `--name NAME`, `--label KEY=VALUE` | 機器的名稱和標籤（第一次安裝） |
@@ -186,6 +307,7 @@ local_dirs = ["/data/models"]
 | `--no-start` | 安裝並加入，但不啟動服務 |
 | `--rejoin` | 以新機器的身分重新加入 |
 | `--uninstall [--purge]` | 移除服務和程式；`--purge` 會連設定和憑據一起刪除 |
+| `-h`、`--help` | 列出選項 |
 
 再執行一次時，它會把 agent 升級到伺服器的版本，並保留設定和憑據。它需要 x86_64 或 aarch64 的 Linux、root 權限、`curl`，以及能連上 PyPI 以下載 agent 的少數幾個相依套件。它會優先使用已安裝的 `uv`，否則使用系統上已有的 Python 3.13 或更新版本，再不然就把 `uv` 安裝到 `/opt/forgeyard/bin`，它會自備 Python。沒有 systemd 的話，它會安裝好所有東西，並印出啟動 agent 的方法。
 

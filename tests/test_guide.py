@@ -151,3 +151,70 @@ def test_fy_guide_008_examples_use_documentation_addresses_only():
     for f in sorted(guide.ROOT.rglob("*.md")):
         found = bad.findall(f.read_text())
         assert not found, (f, found)
+
+
+def _gateway_codes() -> set[str]:
+    """Every `code` the gateway can answer with: GatewayError(status, "code", …) and the few errors
+    written out by hand (the host check, a stream that breaks off)."""
+    codes = set()
+    for f in (ROOT / "forgeyard").rglob("*.py"):
+        text = f.read_text()
+        codes |= set(re.findall(r'GatewayError\(\s*\w+,\s*"([a-z_]+)"', text))
+        codes |= set(re.findall(r'"code":\s*"([a-z_]+)"', text)) if f.parent.name in ("gateway", "security") else set()
+    return codes
+
+
+def test_fy_guide_009_the_reference_lists_every_gateway_endpoint_header_and_error_code():
+    """FY-GUIDE-009: a client author finds every /v1 endpoint, every X-Forgeyard-* header and every
+    error `code` the gateway can send in the reference, in both languages."""
+    from forgeyard.gateway import budgets, proxy
+
+    codes = _gateway_codes() | {"budget_exhausted", "budget_unpriced"}
+    assert {"model_not_found", "no_ready_replica", "local_busy", "cloud_only_model", "host_not_allowed",
+            "upstream_stream_broken"} <= codes
+    headers = {budgets.HEADER, "X-Forgeyard-Target", "X-Forgeyard-Spilled", "X-Forgeyard-Replica", "X-Forgeyard-Local-Only"}
+    for f in (ROOT / "forgeyard").rglob("*.py"):
+        headers |= {h for h in re.findall(r"X-Forgeyard-[A-Za-z-]+", f.read_text(), re.I) if not h.endswith("-")}
+    headers = {h.lower() for h in headers}
+    for lang in ("en", "zh-TW"):
+        text = (guide.directory(lang) / "reference.md").read_text()
+        for code in codes:
+            assert f"`{code}`" in text, (lang, code)
+        for endpoint in proxy.ENDPOINTS:
+            assert f"`POST /v1/{endpoint}`" in text, (lang, endpoint)
+        assert "`GET /v1/models`" in text and "`GET /v1/models/{model}`" in text
+        lower = text.lower()
+        for h in headers:
+            assert f"`{h}`" in lower, (lang, h)
+
+
+def test_fy_guide_010_the_reference_lists_every_command_and_install_option():
+    """FY-GUIDE-010: every subcommand of `forgeyard`, every option of the agent's commands and every
+    option of install.sh is in the reference, in both languages."""
+    import argparse
+
+    from forgeyard import cli
+
+    words, flags = set(), set()
+
+    def walk(p: argparse.ArgumentParser) -> None:
+        for a in p._actions:
+            if isinstance(a, argparse._SubParsersAction):
+                for name, sub in a.choices.items():
+                    words.add(name)
+                    walk(sub)
+            elif a.help != argparse.SUPPRESS:
+                flags.update(o for o in a.option_strings if o.startswith("--") and o != "--help")
+
+    walk(cli.build_parser())
+    script = (ROOT / "forgeyard" / "install" / "install.sh").read_text()
+    install = set(re.findall(r"^\s+(--[a-z-]+)(?:\|(--[a-z-]+))?\)", script, re.M))
+    install_flags = {o for pair in install for o in pair if o and o != "--help"}
+    assert {"serve", "agent", "secrets", "reset", "inventory", "runtimes", "init", "join", "config", "trust"} <= words
+    for lang in ("en", "zh-TW"):
+        text = (guide.directory(lang) / "reference.md").read_text()
+        for w in words - {"agent", "secrets", "reset", "serve"}:
+            assert f"forgeyard agent {w}" in text, (lang, w)
+        assert "forgeyard serve" in text and "forgeyard secrets reset" in text
+        for f in flags | install_flags:
+            assert re.search(rf"(?<![\w-]){re.escape(f)}(?![\w-])", text), (lang, f)
