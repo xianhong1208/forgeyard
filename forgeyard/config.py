@@ -57,7 +57,8 @@ class Settings(BaseSettings):
 
     session_idle_minutes: int = 120
     session_max_days: int = 7
-    # "auto": Secure cookies when the request came over https.
+    # "auto": Secure cookies when the request came over https; "true" / "false" to force. Anything else
+    # stops the start (it used to act as "auto" without a word).
     cookie_secure: str = "auto"
 
     # Requests per minute per client IP across the API. 0 turns it off.
@@ -174,6 +175,15 @@ class Settings(BaseSettings):
     @property
     def public_url_upgraded(self) -> bool:
         return self._public_url_upgraded
+
+    @field_validator("cookie_secure")
+    @classmethod
+    def _cookie_secure(cls, v: str) -> str:
+        v = v.strip().lower()
+        v = {"1": "true", "yes": "true", "on": "true", "0": "false", "no": "false", "off": "false"}.get(v, v)
+        if v not in ("auto", "true", "false"):
+            raise ValueError("COOKIE_SECURE must be 'auto', 'true' or 'false'")
+        return v
 
     @field_validator("tls")
     @classmethod

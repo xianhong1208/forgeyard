@@ -47,6 +47,9 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 It speaks HTTPS from its own certificate authority, prints a one-time setup token for `/setup`,
 and keeps everything in `data/` (back up the database, `data/secret.key` and `data/tls/`).
+Admins see what needs attention in the setup under **Get started → Setup health**: misspelled
+settings, keys that may spend on the cloud without a budget, shared GPUs nobody chose, outdated
+agents and more, each with a link to the fix.
 
 A machine: **Machines → Add a machine** gives a one-line install that checks the server's CA
 against its fingerprint, then installs the agent of the server's own version as a systemd service:
@@ -138,6 +141,7 @@ project.
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
+| `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](docs/guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |

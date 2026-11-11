@@ -973,3 +973,54 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .chip-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .chip-row .chip { display: inline-flex; align-items: center; gap: 3px; }
 .nowrap { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- setup health (the advisor) */
+.health-badge { display: flex; align-items: center; align-self: center; gap: 6px; height: 34px; padding: 0 10px; margin-left: auto;
+  border-radius: var(--radius); border: 1px solid; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.health-badge + .usermenu { margin-left: 0; }
+.health-warning { background: var(--heat-soft); border-color: var(--heat); color: var(--heat-ink); }
+.health-error { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+.health-badge:hover { filter: brightness(0.97); }
+.health-badge:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+.health-count { font-family: var(--mono); font-size: 12px; }
+.chip-sev-error { background: var(--bad-soft); border-color: #f2c4c0; color: var(--bad); }
+.chip-sev-warning { background: var(--heat-soft); border-color: #f3d39b; color: var(--heat-ink); }
+.chip-sev-info { background: var(--info-soft); border-color: #c7d9eb; color: var(--info); }
+.health .muted.small { margin: 6px 0 14px; max-width: 80ch; }
+.health-summary { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.health-summary-error { color: var(--bad); }
+.health-summary-warning { color: var(--heat-ink); }
+.health-ok { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ok); font-weight: 600; }
+.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.finding, .advisor-banner li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
+.finding { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.finding-error { border-color: #f2c4c0; box-shadow: inset 3px 0 0 var(--bad); }
+.finding-warning { border-color: #f3d39b; box-shadow: inset 3px 0 0 var(--heat); }
+.finding-icon { display: flex; padding-top: 2px; }
+.finding-error .finding-icon, .advisor-banner .finding-icon { color: inherit; }
+.finding-body { min-width: 0; }
+.finding-title { margin: 0; overflow-wrap: anywhere; }
+.finding-title .chip { vertical-align: 1px; margin-right: 4px; }
+.finding-detail { margin: 4px 0 8px; color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.finding-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.health-snoozed { margin-top: 14px; display: grid; gap: 10px; justify-items: start; }
+.health-snoozed .findings { width: 100%; }
+.advisor-banner { margin-bottom: 18px; padding: 12px 14px; border: 1px solid; border-radius: var(--radius); font-size: 14px; }
+.advisor-banner ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.advisor-banner .finding-detail { color: inherit; opacity: 0.9; }
+.advisor-error { background: var(--bad-soft); border-color: #f2c4c0; color: #8a1a12; }
+.advisor-warning { background: var(--heat-soft); border-color: #f3d39b; color: #5f3700; }
+.advisor-info { background: var(--info-soft); border-color: #c7d9eb; color: #1e3f5e; }
+.advisor-more { margin: 10px 0 0; }
+/* Admins have ten links plus the badge: keep each link on one line. */
+.mainnav a { white-space: nowrap; }
+@media (min-width: 761px) and (max-width: 1260px) {
+  .topbar-inner { gap: 18px; }
+  .mainnav { gap: 0; }
+  .mainnav a, .navbutton { padding: 0 9px; }
+}
+@media (max-width: 760px) {
+  .health-badge { order: 2; margin-left: auto; }
+  .finding, .advisor-banner li { grid-template-columns: minmax(0, 1fr); }
+  .finding-icon { display: none; }
+}

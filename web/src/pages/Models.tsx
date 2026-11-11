@@ -2,6 +2,7 @@ import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, Ico
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
@@ -41,6 +42,7 @@ export function ModelsPage() {
           <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
       />
+      <AdvisorBanner pages={["models"]} />
       <HelpLinks>
         <HelpLink page="quick-start" anchor="5-add-a-recommended-model">How do I deploy my first model?</HelpLink>
         <HelpLink page="concepts" anchor="models-recipes-and-estimates">Models, recipes and estimates</HelpLink>

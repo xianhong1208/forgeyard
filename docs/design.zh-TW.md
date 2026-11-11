@@ -414,3 +414,26 @@ Kong 與 GPUStack 之後決定。
   而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 與供應商金鑰要重新輸入，
   replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。
+
+## 設定與設定顧問（1.3）
+
+- **啟動時驗證。** server 無法使用的值會讓它停止啟動，並指出設定名稱與可以填的值（`TLS`、`REGISTRATION`、`COOKIE_SECURE`、
+  雲端等級、數字，以及 `TLS_CERT_FILE`／`TLS_KEY_FILE` 只設其中一個）。其他出乎意料的情況一律是警告，絕不拒絕：
+  `forgeyard/settings_check.py` 找出 `.env` 或環境裡不是設定的名稱（和 agent 一樣附上「你是不是指」）、被另一個設定變得沒有作用的設定
+  （`TLS=off` 時的 `TLS_*`、沒有自己的憑證時的 `TLS_CA_FILE`、兩個機密金鑰設定都有設）、有風險的值（離線時間少於 2.5 次心跳、
+  允許私有位址的開關、HTTPS 下的 `COOKIE_SECURE=false`）、設定完成後還留著的設定用值，以及被資料庫覆蓋的環境變數初始值。
+  server 啟動時把每一項寫進 log（`Settings: …`）。
+- **設定顧問**（`forgeyard/advisor.py`、`GET /api/advisor`，只限 admin）在頁面要求時，對設定、資料庫與各 agent 最後一次的回報
+  執行一串小檢查；它自己不儲存任何東西。一項檢查結果是 `{id, severity, title, detail, fix_url, fix_label, scope, pages}`：
+  `scope` 指出對象（`machine:3`、`key:12`、`route:4`），`pages` 指出 UI 在哪些頁面以橫幅顯示它。*error* 是現在就壞了或不安全，
+  *warning* 是可能會花錢、外洩或壞掉，*info* 是沒有作用或出乎意料。拋出例外的檢查會被記錄並略過，所以一個 bug 絕不會蓋掉其他結果。
+  檢查清單在指南的參考資料（*Setup health checks*）；有測試確保它完整。
+- **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、API keys、
+  Providers、Models、路由、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
+- **延後提醒**是每位 admin、每項結果（`id@scope`）各自的，為期 30 天，存在使用者的 `preferences` JSON（`advisor_snoozed`），
+  所以不需要 migration。error 不能延後。延後的結果如果仍然成立，30 天後會再出現。
+- **機密金鑰備份**（決策 D5）：在 admin 勾選 *I have a backup of key id X* 之前一直是警告。勾選是一筆 `server_settings`
+  （`secret_key_backup`：金鑰 id、誰、何時），和目前的金鑰 id 比對，所以換了新金鑰提醒就會回來。過時的 id 會被拒絕（409），
+  金鑰本身絕不離開 server。
+- **新設定的規則**寫在 `CONTRIBUTING.md`：預設值要能用、要有文件（有測試比對 `Settings`、`.env.example` 與參考資料）、
+  除非必要都算進階設定，而且設錯有風險時要加一項顧問檢查。

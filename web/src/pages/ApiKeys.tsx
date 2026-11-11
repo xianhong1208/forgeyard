@@ -1,6 +1,7 @@
 import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { useAuth } from "../auth";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -82,6 +83,7 @@ export function ApiKeysPage() {
           </button>
         }
       />
+      <AdvisorBanner pages={["keys"]} />
       <HelpLinks>
         <HelpLink page="quick-start" anchor="8-call-it">How do I call /v1 with curl or the OpenAI SDK?</HelpLink>
         <HelpLink page="concepts" anchor="api-keys-limits-and-usage">Keys, limits and usage</HelpLink>
@@ -287,7 +289,7 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
                 hint={budgetLock && !isAdmin ? <>Set by the admin <strong>{budgetLock}</strong>; only an admin can change it.</>
                   : budgetLock ? `Locked for ${k.user.username ?? "the owner"} (set by ${budgetLock}). Clear it to unlock.`
                     : isAdmin && !own ? `Cloud spend per calendar month (UTC). Saving it locks it for ${k.user.username ?? "the owner"}.`
-                      : "Cloud spend per calendar month (UTC). When it is used up, this key stays local. Empty: no budget."} />
+                      : "Cloud spend per calendar month (UTC). When it is used up, this key stays local. $0 blocks all cloud spend; leave it empty for no budget."} />
               <div className="row-gap limits-actions">
                 <button type="submit" className="btn btn-primary btn-small" disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock && !!budgetLock}>Save limits</button>
                 {isAdmin && budgetLock && (
@@ -416,7 +418,7 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
         {cloud !== "off" && (
           <div className="grid-2">
             <Field label="Monthly budget (USD)" name="key-budget" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)}
-              placeholder="no budget" hint="What this key may spend at cloud providers per calendar month (UTC). When it is used up, the key stays local." />
+              placeholder="no budget" hint="What this key may spend at cloud providers per calendar month (UTC). When it is used up, the key stays local. $0 blocks all cloud spend; leave it empty for no budget." />
           </div>
         )}
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}

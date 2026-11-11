@@ -639,3 +639,36 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   hashed, not encrypted.
 - The UI goes to the sign-in page only on **401**, never on 403, 429 or a server error, and comes
   back to the page you were on afterwards.
+
+## Settings and the setup advisor (1.3)
+
+- **Validation at start.** A value the server cannot use stops it with the setting's name and the
+  values it takes (`TLS`, `REGISTRATION`, `COOKIE_SECURE`, the cloud levels, numbers, and only one
+  of `TLS_CERT_FILE` / `TLS_KEY_FILE`). Everything else that is surprising is a warning, never a
+  refusal: `forgeyard/settings_check.py` finds names in `.env` or the environment that are not
+  settings (with "did you mean", like the agent), settings another one makes useless (`TLS_*` with
+  `TLS=off`, `TLS_CA_FILE` without an own certificate, both secret-key settings), risky values (an
+  offline time under 2.5 heartbeats, the private-address switches, `COOKIE_SECURE=false` over
+  HTTPS), setup values left after setup, and env seeds the database overrides. The server logs
+  each one at start (`Settings: …`).
+- **The advisor** (`forgeyard/advisor.py`, `GET /api/advisor`, admins only) runs a list of small
+  checks over the settings, the database and the agents' last reports when the page asks; it stores
+  nothing of its own. A finding is `{id, severity, title, detail, fix_url, fix_label, scope, pages}`:
+  `scope` names the object (`machine:3`, `key:12`, `route:4`), `pages` where the UI shows it as a
+  banner. *error* is broken or unsafe now, *warning* likely to cost money, leak or break, *info*
+  useless or surprising. A check that raises is logged and skipped, so one bug never hides the
+  rest. The list of checks is in the guide's reference (*Setup health checks*); a test keeps it
+  complete.
+- **Where it shows** (decision D8): **Get started → Setup health** lists everything, the top bar
+  shows the number of errors and warnings, and each page (Machines, API keys, Providers, Models, a
+  route, a deployment, Users) shows its own as a banner. Plain users and operators see none of it.
+- **Snoozing** is per admin and per finding (`id@scope`), for 30 days, in the user's `preferences`
+  JSON (`advisor_snoozed`), so no migration. Errors cannot be snoozed. A snoozed finding that still
+  applies comes back after 30 days.
+- **Secret-key backup** (decision D5): a warning until an admin ticks *I have a backup of key id X*.
+  The tick is one `server_settings` row (`secret_key_backup`: the key id, who and when), compared
+  with the current key id, so a new key brings the reminder back. A stale id is refused (409), and
+  the key itself never leaves the server.
+- **Rules for new settings** are in `CONTRIBUTING.md`: a default that works, documented (a test
+  compares `Settings` with `.env.example` and the reference), advanced unless essential, and an
+  advisor check when getting it wrong is risky.

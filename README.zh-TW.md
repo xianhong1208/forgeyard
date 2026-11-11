@@ -40,6 +40,8 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 它一啟動就用自己的憑證授權單位提供 HTTPS，印出 `/setup` 用的一次性設定權杖，所有資料都放在 `data/`
 （要備份資料庫、`data/secret.key` 與 `data/tls/`）。
+管理員可以在 **Get started → Setup health** 看到設定中需要注意的地方：拼錯的設定、沒有預算卻能使用雲端的金鑰、
+沒人選過的共用 GPU、過舊的 agent 等等，每一項都附有前往修正之處的連結。
 
 加入機器：**Machines → Add a machine** 會給你一行安裝指令。它先用指紋核對伺服器的 CA，再把與伺服器同版本的
 agent 裝成 systemd 服務：
@@ -127,6 +129,7 @@ docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | agent 的容器映像檔與它的 CI 冒煙測試 |
+| `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](docs/guide/zh-TW/how-to.md#check-a-server-end-to-end)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
