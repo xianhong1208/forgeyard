@@ -3,7 +3,7 @@
 One control plane for the GPUs (and CPUs) you own: NVIDIA, AMD ROCm and CPU-only machines on one
 LAN or VPN. An agent on each machine reports its hardware; you run services and tasks on them, and
 deploy models from recipes behind one OpenAI-compatible gateway at `/v1`, with API keys, limits
-and usage statistics. Cloud model APIs can sit behind the same gateway, local first, with cost
+and usage statistics. Vision models read images in chat, fetched by the gateway, never by the engine. Cloud model APIs can sit behind the same gateway, local first, with cost
 tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
@@ -13,8 +13,10 @@ tracking and monthly budgets.
 > an agent container image and this guide. 1.2 puts cloud providers behind the same gateway, local
 > first: a model spills to OpenAI, Anthropic, Gemini, Azure or OpenRouter when its replicas are busy
 > or down, only for keys allowed to send data out; each cloud request's cost is counted in US dollars,
-> and monthly budgets per key, person and provider are reserved before a request is sent. See
-> [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
+> and monthly budgets per key, person and provider are reserved before a request is sent. 1.3 (in
+> progress) adds more kinds of models; first, images in chat on vLLM and llama.cpp (Qwen3-VL and
+> similar), with the catalog showing each model's licence. See [CHANGELOG.md](CHANGELOG.md) and
+> [ROADMAP.md](ROADMAP.md).
 
 ## The guide
 
@@ -121,10 +123,11 @@ project.
 | `forgeyard/gateway/egress.py` | the HTTP client for providers: TLS, no redirects, the address checks, `EGRESS_*` |
 | `forgeyard/gateway/pricing.py` | a request's cost from its usage and prices; OpenRouter's list and price matching |
 | `forgeyard/gateway/budgets.py` | the budget ledger: reserve, settle, release, the 80% and 100% alerts, 402 |
+| `forgeyard/gateway/media.py` | images, audio and video in chat: parts rebuilt, media URLs fetched under the egress rules |
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
-| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF), estimates, recipes, the scheduler, routes, the recommended list |
+| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list |
 | `forgeyard/recipes/` | the built-in engine recipes (YAML), images pinned by digest |
 | `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, HTTPS and the CA, secrets at rest, `secrets reset` |
 | `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`) |
@@ -135,7 +138,7 @@ project.
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
-| `scripts/accept_m3.py`, `accept_m4.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
+| `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

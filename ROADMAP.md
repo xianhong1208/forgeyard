@@ -109,11 +109,40 @@ Two pull requests (the second in two parts):
 Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
 and thinking.
 
+## In progress: 1.3, more kinds of models
+
+Planned as one pull request per kind, each complete (recipe, estimate, gateway, usage, Playground,
+docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
+
+1. **Multimodal chat** (`multimodal-chat`): images in chat on vLLM and llama.cpp (projector files),
+   video opt-in, the usage units for all of 1.3. *In review.*
+2. llama.cpp bump to a current build, with a built-in Vulkan variant.
+3. Text-to-speech (`/v1/audio/speech`).
+4. Image generation (`/v1/images/generations`).
+5. Generic passthrough (`/x/<name>/…`).
+6. Video generation (async `/v1/videos`), the first to move to 1.4 if time is short.
+
+The owner's decisions for 1.3 (2026-11-11):
+
+- **Media URLs:** the gateway fetches `http(s)` media URLs itself through the 1.2 egress rules and
+  sends data: URIs; engines never fetch (vLLM's hardening flags on). `file://` and other schemes are
+  refused; private addresses only with `MEDIA_ALLOW_PRIVATE_HOSTS`. Caps per item, items per request
+  and in total (the deployment's body limit).
+- **PDF and other `file` parts:** no conversion by the gateway. Only recipes that say they take files
+  get them; otherwise a clear 400.
+- **Body limit per deployment** (`max_body_mb`), with a default that works.
+- **Video in chat** is off by default, a per-deployment parameter; so is the number of images.
+- **Usage columns** for all of 1.3 in one migration, one per unit, default 0.
+- **No cloud for the new content types in 1.3:** requests with media are served locally only.
+- **Licences in the catalog**, and the recommended list holds only licences that allow commercial use.
+- **Settings:** every new setting or parameter has a default that works untouched, sits in
+  *Advanced* unless a normal user must decide it, and is derived from the model when it can be.
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.3: more kinds of models** | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images, documents and video on vLLM (Qwen3-VL, Gemma and similar); **text-to-speech** through speaches (`/v1/audio/speech`); **image and video generation** (a diffusers-family recipe, `/v1/images/generations`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage. That covers detection, segmentation, depth, 3D, tabular and other tasks without a recipe each. |
+| **1.3: more kinds of models** (in progress, above) | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images, documents and video on vLLM (Qwen3-VL, Gemma and similar); **text-to-speech** through speaches (`/v1/audio/speech`); **image and video generation** (a diffusers-family recipe, `/v1/images/generations`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage. That covers detection, segmentation, depth, 3D, tabular and other tasks without a recipe each. |
 | **1.4: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
 | **1.5: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.6: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |

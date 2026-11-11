@@ -186,6 +186,37 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 
 隔離方式簡述：行程以無特權的工作負載帳號執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[工作負載](concepts.md#workloads)。
 
+## 把圖片送給模型
+
+1. **加入能讀圖片的模型。** 在 **Models → Add a model → Recommended** 的 **Vision** 群組裡，有給 vLLM 用的 Qwen3-VL 2B、4B 和 8B，以及給 llama.cpp（CPU 或 AMD APU）用、附 projector 檔的 Qwen3-VL GGUF。只要目錄項目標示 *Images* 的模型都可以：目錄會從模型的 `config.json` 讀出來。GGUF 儲存庫還要選它的 **Projector** 檔（有 F16 就預設選它；選 *None* 就只能處理文字）。
+2. 照平常的方式**部署**。*Images per request*（4）、*Videos per request*（0，關閉）和 *Largest request*（64 MiB）都在 **Advanced** 底下，預設值就能用。估算會把視覺編碼器（vLLM）或 projector（llama.cpp）列成獨立的一項。
+3. **呼叫它**，圖片用 `data:` URI 或 `https://` 網址：
+
+   ```python
+   import base64
+
+   with open("photo.jpg", "rb") as f:
+       photo = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+   client.chat.completions.create(model="qwen3-vl-8b", messages=[{"role": "user", "content": [
+       {"type": "text", "text": "What is in this picture?"},
+       {"type": "image_url", "image_url": {"url": photo}},
+   ]}])
+   ```
+
+   `https://` 網址由閘道下載（只連公開位址，每張圖片最多 `MEDIA_FETCH_MAX_MB`），再以資料形式轉送。區網內的圖片伺服器需要在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true`。
+4. **在 Playground 試用：** 訊息框旁的圖片按鈕可以附上圖片。
+
+**影片：** 在 **Advanced** 把 *Videos per request* 設成 1 以上，再送 `video_url` 區塊。在 vLLM 上，這會讓引擎啟動時為一段長影片預留記憶體，KV cache 能用的就變少：啟動不了的話就調低上下文長度。
+
+**自訂的 llama.cpp 配方**（例如 Vulkan 版本）只要傳入 projector 並宣告它接受什麼，就能讀圖片：
+
+```yaml
+optional_args:
+  - if_model: mmproj
+    args: [--mmproj, "{mmproj_file}"]
+media: {inputs: [image, audio, video], files: false}
+```
+
 ## 加入雲端供應商
 
 管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。

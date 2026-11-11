@@ -1,14 +1,15 @@
 # Forgeyard
 
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器。每台機器上的 agent
-回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
+回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
 
 [English](README.md)
 
 > **狀態：1.2.0。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的機器上驗收過）。1.1 加入首次使用清單與推薦模型、開箱即用的
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
-> 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.md](ROADMAP.md)。
+> 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3（進行中）加入更多種類的模型；第一步是 vLLM 與 llama.cpp 上的
+> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.md](ROADMAP.md)。
 
 ## 使用指南
 
@@ -111,10 +112,11 @@ docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image
 | `forgeyard/gateway/egress.py` | 供應商用的 HTTP client：TLS、不跟隨重新導向、位址檢查、`EGRESS_*` |
 | `forgeyard/gateway/pricing.py` | 依用量與價格計算請求的費用；OpenRouter 的清單與價格對應 |
 | `forgeyard/gateway/budgets.py` | 預算帳本：預留、結算、釋放、80% 與 100% 警示、402 |
+| `forgeyard/gateway/media.py` | 對話中的圖片、音訊與影片：重建內容區塊、依 egress 規則下載媒體網址 |
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
-| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF）、估算、recipe、排程器、路由、推薦清單 |
+| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單 |
 | `forgeyard/recipes/` | 內建的引擎 recipe（YAML），映像檔以 digest 固定 |
 | `forgeyard/security/` | 密碼、工作階段、速率限制、host／CSRF middleware、HTTPS 與 CA、靜態加密的機密、`secrets reset` |
 | `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`） |
@@ -125,7 +127,7 @@ docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | agent 的容器映像檔與它的 CI 冒煙測試 |
-| `scripts/accept_m3.py`, `accept_m4.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
+| `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

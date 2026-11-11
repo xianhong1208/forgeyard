@@ -78,7 +78,8 @@ machines. Model deployments are workloads too; most people only deploy models.
   NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on GPU or CPU) and
   `faster-whisper` (speech to text).
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
-  concurrency you choose, the engine's own overhead and the CUDA context. The deploy page shows it,
+  concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
+  reads images, its vision encoder. The deploy page shows it,
   part by part, and where it fits, before anything is downloaded.
 - The **model cache** on each machine (`/srv/forgeyard-models` by default) keeps the downloaded
   files, checked against their checksums, shared by every replica there. Containers get their model
@@ -105,8 +106,25 @@ next one if a replica does not answer. Replicas cannot be used around it: each h
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
 The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
-streaming), embeddings, rerank and speech to text. Its requests count as `console` in Usage, and its
+streaming, and images for models that read them), embeddings, rerank and speech to text. Its requests count as `console` in Usage, and its
 cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
+
+## Images, audio and video in chat
+
+Models that read images (Qwen3-VL, Gemma 3 and 4, and similar) take them in
+`/v1/chat/completions` as OpenAI's content parts. What a model takes is read when it is added to
+the catalog: from its `config.json`, or, for a GGUF model, from its **projector file**
+(`mmproj-*.gguf`), which llama.cpp needs to see images. The catalog shows it next to the licence.
+
+- Send an image as a `data:` URI, or as an `https://` URL: the **gateway downloads it** and passes
+  the data on. Engines never download anything themselves, and the gateway only fetches public
+  addresses, so a request cannot make your servers reach into your own network.
+- Each deployment takes at most a few images per request (4 by default), video only when it is
+  turned on (it is off by default: it costs memory at startup), and requests up to a size (64 MB by
+  default). These are in the deploy form's **Advanced** section; the defaults work.
+- Requests with images, audio or video stay on your own deployments; they never go to a cloud
+  provider.
+- Usage counts the media items; image tokens are inside the prompt tokens.
 
 ## API keys, limits and usage
 
