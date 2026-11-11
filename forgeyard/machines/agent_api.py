@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, WebSocket
@@ -265,7 +266,11 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
     workloads = FEATURE_WORKLOADS in conn.features
     kick = asyncio.create_task(conn.kick.wait())
     recv = dirty = out = None
-    revision = 0
+    # Revisions order the desired lists on one connection. They start from the clock, not from 0, so
+    # a new connection (after a network drop or a server restart) always counts above the old one:
+    # agents up to 1.2.0 keep the highest revision they saw across connections and drop any lower
+    # list without a word, so they took no new work until the count caught up.
+    revision = time.time_ns() // 1_000_000
     try:
         while True:
             if recv is None:

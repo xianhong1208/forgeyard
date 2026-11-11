@@ -376,3 +376,64 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
                     if proc.poll() is None:
                         os.killpg(proc.pid, signal.SIGKILL)
                         proc.wait(5)
+
+
+@pytest.mark.parametrize("server_clock_back", [False, True])
+def test_fy_agt_031_after_a_server_restart_the_same_agent_takes_new_work(monkeypatch, tmp_path, server_clock_back):
+    """FY-AGT-031: over real HTTP and WebSocket: a task runs, the server restarts, the agent reconnects by
+    itself, and a new task placed afterwards runs on it, with no agent restart. Up to 1.2.0 the agent
+    kept the highest revision across connections and silently dropped the restarted server's lists.
+    With the server's clock set back (so its revisions start lower than before) the agent still takes
+    the new connection's lists: it starts a new order on every connection."""
+    from forgeyard.agent.workloads.process import ProcessRuntime
+    from forgeyard.agent.workloads.records import RecordStore
+    from forgeyard.agent.workloads.supervisor import Supervisor
+    from forgeyard.machines import agent_api
+
+    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    get_settings.cache_clear()
+    port = _free_port()
+    server = f"http://127.0.0.1:{port}"
+    state_dir = tmp_path / "agent"
+    rt = ProcessRuntime(RecordStore(state_dir), tmp_path / "work", euid=lambda: 4242)
+    sup = Supervisor(state_dir, {"process": rt}, tick=0.1)
+
+    def api(method, path, body=None):
+        return _http(port, method, path, body, cookie)[0]
+
+    def task(name):
+        return api("POST", "/api/workloads", {"name": name, "kind": "task",
+                                              "runtime": {"type": "process", "command": "sh", "args": ["-c", "echo ok"]}})["workload"]
+
+    def status(wid):
+        try:
+            return api("GET", f"/api/workloads/{wid}")["workload"]["status"]
+        except OSError:
+            return None
+
+    with LiveServer(port):
+        _, cookie = _http(port, "POST", "/api/auth/setup",
+                          {"setup_token": SETUP_TOKEN, "username": OWNER[0], "password": OWNER[1]})
+        joined = join(server, api("POST", "/api/machines/join-tokens", {})["token"], name="cpu")
+
+    async def scenario():
+        agent = Agent(server, joined["credential"], SimulatedInventory("nvidia-rtx4090x2", environ={SIMULATION_ENV: "1"}),
+                      backoff=Backoff(base=0.05, cap=0.2), supervisor=sup)
+        run = asyncio.create_task(agent.run())
+        with LiveServer(port):
+            first = await asyncio.to_thread(task, "first")
+            assert await _wait(lambda: status(first["id"]) == "succeeded")
+            before = sup.revision
+        assert await _wait(lambda: agent.sessions >= 1)
+        if server_clock_back:  # the restarted server counts from far below the old revisions
+            real = time.time_ns
+            monkeypatch.setattr(agent_api.time, "time_ns", lambda: real() - 10**15)
+        with LiveServer(port):  # restarted: the agent reconnects on its own
+            assert await _wait(lambda: agent.sessions >= 2)
+            second = await asyncio.to_thread(task, "second")
+            assert await _wait(lambda: status(second["id"]) == "succeeded")
+            assert (sup.revision < before) == server_clock_back
+            agent.stop()
+            await asyncio.wait_for(run, 10)
+
+    asyncio.run(scenario())

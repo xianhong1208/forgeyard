@@ -174,6 +174,22 @@ line says why it was not chosen:
 lower the context length or concurrency, choose a quantised or smaller model, or deploy it to wait
 until room appears (the API's `"wait": true`).
 
+## A replica stays pending
+
+**You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
+is online, and the replica stays **pending** with no reason: nothing is downloaded or started.
+
+**Why:** the machine's agent is not acting on its work list. Agents up to 1.2.0 kept the number of the
+last work list they received across connections, and a server restarted since then numbered its
+lists from 1 again: the agent took them all for old ones and dropped them without a word. A server
+from 1.3.0 numbers them so that this cannot happen, also for those older agents; an agent from
+1.3.0 starts a new count on every connection and logs any list it drops.
+
+**Do:** run the server's own version on the agent ([upgrades](how-to.md#upgrade-the-server-and-the-agents)); until then,
+restarting the agent (`sudo systemctl restart forgeyard-agent`, or `docker restart forgeyard-agent`)
+makes it take its work at once. **Setup health** flags agents older than the server, and replicas
+that waited for a machine for more than 15 minutes.
+
 ## Errors from /v1: 401, 403, 429, 503
 
 The gateway answers errors in the OpenAI format, `{"error": {"message", "type", "param", "code"}}`.

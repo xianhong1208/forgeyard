@@ -135,6 +135,12 @@ through the gateway, and the usage units for all of 1.3.
   NVML stays on both. It now carries OCI labels (source, licence, version, revision).
 
 ### Fixed
+- **After a server restart, connected agents took no new work** until they were restarted: replicas
+  placed on them stayed *pending* with no reason. The server numbered each connection's work lists
+  from 1, and the agent kept the highest number across connections, silently dropping anything lower.
+  The server now numbers them from the clock, so they keep growing (this also fixes agents up to
+  1.2.0 without upgrading them), and the agent starts a new count on every connection and logs a list
+  it drops (FY-WST-008, FY-SUP-015, FY-AGT-031). Found on real machines after updating the server.
 
 - `PUT /api/keys/cloud` with only one of `default` and `max` reset the other one to `off`; a field
   left out now keeps its saved value. `PUT /api/keys/limits` does the same (`null` still clears one).
