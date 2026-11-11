@@ -49,7 +49,8 @@ docker run --rm --entrypoint python "$IMAGE" -c 'import ctypes; ctypes.CDLL("lib
 ok "libdrm.so.2 and libdrm_amdgpu.so load (for amdsmi on AMD hosts)"
 # The AMD command gives the host's video and render groups by number: a name is looked up in the
 # image's /etc/group, which has no "render" group.
-docker run --rm --group-add 4242 --entrypoint id "$IMAGE" | grep -q "4242" || fail "--group-add with a numeric gid"
+docker run --rm --group-add 4242 --entrypoint id "$IMAGE" > "$WORK/id.txt" || fail "--group-add with a numeric gid"
+grep -q "4242" "$WORK/id.txt" || fail "--group-add with a numeric gid: $(cat "$WORK/id.txt")"
 ok "--group-add with a numeric gid (the AMD command)"
 
 # ------------------------------------------------------------------ 2. inventory and init
@@ -63,7 +64,8 @@ PY
 ok "inventory --json (simulated 8 x A100)"
 # The entrypoint already is `forgeyard agent`; a redundant `agent` before the subcommand works too.
 docker run --rm -e FORGEYARD_AGENT_SIMULATION=1 "$IMAGE" agent inventory --simulate-inventory amd-gfx1151-apu \
-    | grep -q "arch=gfx1151 .* rocm=" || fail "IMAGE agent inventory"
+    > "$WORK/inv.txt" 2>/dev/null || fail "IMAGE agent inventory"
+grep -q "arch=gfx1151 .* rocm=" "$WORK/inv.txt" || fail "IMAGE agent inventory: $(cat "$WORK/inv.txt")"
 ok "IMAGE agent inventory (a redundant 'agent')"
 docker run --rm -e FORGEYARD_AGENT_SIMULATION=1 "$IMAGE" init --print --simulate-inventory nvidia-a100x8 \
     --server https://192.168.1.20:7860 --ca-fingerprint "sha256:$(printf 'ab%.0s' $(seq 32))" > "$WORK/agent.toml"
@@ -123,7 +125,9 @@ wait_online() {
 run_agent
 first="$(wait_online)" || fail "the agent container did not come online"
 ok "joined over wss:// with the pinned CA, online as machine $first"
-docker logs "$NAME" 2>&1 | grep -q "Runtime container ok: docker" || { docker logs "$NAME" >&2; fail "container runtime through the socket"; }
+# Logs go to a file first: with pipefail, `docker logs | grep -q` fails when grep stops reading early.
+docker logs "$NAME" > "$WORK/agent.log" 2>&1
+grep -q "Runtime container ok: docker" "$WORK/agent.log" || { cat "$WORK/agent.log" >&2; fail "container runtime through the socket"; }
 ok "container runtime: the host's Docker through the socket"
 
 docker rm -f "$NAME" >/dev/null
@@ -131,7 +135,8 @@ sleep 2
 run_agent   # the same command again (what --restart always does): the token is not used twice
 second="$(wait_online)" || fail "the agent did not come back after a restart"
 [ "$first" = "$second" ] || fail "a restart joined again as machine $second (was $first)"
-docker logs "$NAME" 2>&1 | grep -q "join token is not used" || fail "restart: expected the 'already joined' notice"
+docker logs "$NAME" > "$WORK/agent.log" 2>&1
+grep -q "join token is not used" "$WORK/agent.log" || { cat "$WORK/agent.log" >&2; fail "restart: expected the 'already joined' notice"; }
 count="$(api "https://127.0.0.1:$PORT/api/machines" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["machines"]))')"
 [ "$count" = 1 ] || fail "$count machines after a restart, expected 1"
 ok "recreated with the same command: same machine ($second), credential kept in the volume"
