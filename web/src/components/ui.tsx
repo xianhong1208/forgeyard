@@ -61,6 +61,29 @@ export function CopyBox({ value, label }: { value: string; label: string }) {
   );
 }
 
+// A command over several lines (a long one-liner broken with backslashes), copied as it is shown.
+export function CopyBlock({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="copyblock">
+      <pre aria-label={label}>{value}</pre>
+      <button type="button" className="btn btn-quiet btn-small" onClick={copy}>
+        {copied ? <IconCheck size={16} aria-hidden="true" /> : <IconCopy size={16} aria-hidden="true" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
 export function RoleChip({ role }: { role: string }) {
   return <span className={`chip chip-role-${role}`}>{role}</span>;
 }

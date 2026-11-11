@@ -1,0 +1,5 @@
+# Only forgeyard/ goes into the agent image (Dockerfile.agent); keep the build context small.
+*
+!forgeyard
+forgeyard/static
+**/__pycache__/

@@ -2,6 +2,7 @@ import { IconBrain, IconCpu, IconMicrophone, IconPlus, IconSortDescending, IconV
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
+import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
@@ -38,6 +39,11 @@ export function ModelsPage() {
           <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
       />
+      <HelpLinks>
+        <HelpLink page="quick-start" anchor="5-add-a-recommended-model">How do I deploy my first model?</HelpLink>
+        <HelpLink page="concepts" anchor="models-recipes-and-estimates">Models, recipes and estimates</HelpLink>
+        <HelpLink page="troubleshooting" anchor="a-deployment-does-not-fit">A deployment does not fit</HelpLink>
+      </HelpLinks>
       <div className="tabs" role="tablist" aria-label="Models">
         <button type="button" role="tab" aria-selected={tab === "deployments"} className={tab === "deployments" ? "on" : ""}
           onClick={() => setSearch({})}>Deployments{deps.data ? ` (${deps.data.deployments.length})` : ""}</button>

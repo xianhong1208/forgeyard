@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import stat
 import sys
 import time
@@ -15,6 +14,7 @@ from typing import Optional
 from forgeyard.db import new_session
 from forgeyard.machines import store
 from forgeyard.machines.messages import InventoryIn
+from tests.leaks import cleanup as cleanup_world, world_dir  # noqa: F401 (the tests import them from here)
 from tests.machines_helpers import SIM
 
 PROCESS_OK = {"process": {"ok": True, "user": "nobody", "uid": 65534, "limits": "rlimit"},
@@ -267,12 +267,3 @@ class FakeDocker:
 
     def info(self, data: dict) -> None:
         (self.root / "info.json").write_text(json.dumps(data))
-
-
-def world_dir(base: str = "/tmp") -> Path:
-    """A directory an unprivileged workload user can enter (the pytest tmp dir is 0700)."""
-    import tempfile
-
-    d = Path(tempfile.mkdtemp(prefix="fy-test-", dir=base))
-    os.chmod(d, 0o755)
-    return d

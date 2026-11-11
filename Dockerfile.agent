@@ -1,0 +1,50 @@
+# The Forgeyard agent as a container image: one `docker run` per machine.
+#
+#   docker build -f Dockerfile.agent -t forgeyard-agent:<version> .
+#
+# How to run it (NVIDIA, AMD, CPU only), and why it needs the host network, the Docker socket and
+# the model cache at the same path inside and outside: docs/guide/how-to.md, "Run the agent in
+# Docker". The agent runs as root in the container: it talks to the host's Docker through its
+# socket (which is root-equivalent anyway) and starts process workloads as the unprivileged
+# account forgeyard-run. Workloads never run as root.
+#
+# Base images are pinned by digest, like the engine images in forgeyard/recipes.
+
+FROM python:3.13-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS base
+
+# The agent's wheel, built the way the server builds the one it serves (forgeyard/install/wheel.py).
+FROM base AS wheel
+WORKDIR /src
+COPY forgeyard ./forgeyard
+RUN python -m forgeyard.install.wheel /dist
+
+FROM base AS venv
+COPY --from=wheel /dist /dist
+RUN python -m venv /opt/forgeyard/venv \
+ && /opt/forgeyard/venv/bin/pip install --no-cache-dir --disable-pip-version-check "$(ls /dist/forgeyard-*.whl)[nvidia]"
+
+# The docker CLI only (no daemon): the agent drives the host's Docker through its socket. 28.x
+# still talks to daemons as old as API 1.24; 29 needs 1.44 (Docker 25) or newer.
+FROM docker:28.5-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS dockercli
+
+FROM base
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tini \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 990 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin forgeyard-run
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=venv /opt/forgeyard/venv /opt/forgeyard/venv
+# There is no systemd in a container: process workloads are limited with rlimits. /opt/rocm/bin is
+# on PATH for AMD hosts that mount their ROCm read-only (amd-smi, rocm-smi).
+ENV PATH=/opt/forgeyard/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/rocm/bin \
+    PYTHONUNBUFFERED=1 \
+    FORGEYARD_LIMITS=rlimit \
+    FORGEYARD_WORKLOAD_USER=forgeyard-run \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# The machine's credential and the pinned CA: keep this volume, or the machine has to join again.
+VOLUME /var/lib/forgeyard-agent
+# tini reaps the processes the agent starts and passes on SIGTERM (the agent stops cleanly; container
+# workloads keep running on the host's Docker and are adopted on the next start).
+ENTRYPOINT ["tini", "--", "forgeyard", "agent"]
+LABEL org.opencontainers.image.title="Forgeyard agent" \
+      org.opencontainers.image.description="Joins a Forgeyard server and runs its work on this machine."

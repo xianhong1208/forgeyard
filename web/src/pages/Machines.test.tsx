@@ -82,12 +82,16 @@ describe("machines page", () => {
     });
     mount();
     expect(await screen.findByText("No machines yet")).toBeTruthy();
-    expect(screen.getByText(/install Forgeyard on it, then run the one-time join command/)).toBeTruthy();
+    expect(screen.getByText(/one line installs the agent as a service/)).toBeTruthy();
     const [, inEmpty] = screen.getAllByRole("button", { name: "Add a machine" });
     fireEvent.click(inEmpty); // the empty page's own button opens the same form
     expect(screen.getAllByRole("button", { name: "Add a machine" })).toHaveLength(1);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
-    expect((await screen.findByLabelText("Join command")).textContent).toBe(created.command);
+    // Plain HTTP: no install script (HTTPS only), so the manual way is open, with the flags command too.
+    expect((await screen.findByRole("tab", { name: "Manual (config file)" })).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByLabelText("Join command with flags").textContent).toBe(created.command);
+    fireEvent.click(screen.getByRole("tab", { name: /One-line install/ }));
+    expect(screen.getByText(/served only over HTTPS/)).toBeTruthy();
     expect(screen.getByText(/only works on this computer/)).toBeTruthy();
     expect(screen.getByText(/Waiting for the machine to join/)).toBeTruthy();
     const post = fetch.mock.calls.find(([u, i]) => u === "/api/machines/join-tokens" && i?.method === "POST");
@@ -149,7 +153,13 @@ describe("machines page", () => {
     const trustCmd = `uv run --no-sync python -m forgeyard agent trust --server https://forge.lan:7860 --ca-fingerprint ${fp}`;
     const created = { id: "t2", created_at: "2026-11-09T10:00:00Z", expires_at: "2026-11-09T10:15:00Z", created_by: "owner",
       token: "fyj_secret", server_url: "https://forge.lan:7860", valid_minutes: 15, ca_fingerprint: fp, trust_command: trustCmd,
-      command: `uv run --no-sync python -m forgeyard agent --server https://forge.lan:7860 --join-token fyj_secret --ca-fingerprint ${fp}` };
+      command: `uv run --no-sync python -m forgeyard agent --server https://forge.lan:7860 --join-token fyj_secret --ca-fingerprint ${fp}`,
+      install_command: `curl -fsSk https://forge.lan:7860/api/tls/ca.pem -o forgeyard-ca.pem && \\\n  sudo sh -s -- --join fyj_secret --ca-fingerprint ${fp}`,
+      docker_build_command: "docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .",
+      docker_commands: { nvidia: "docker run … --gpus all … forgeyard-agent:1.1.0", amd: "docker run … --device /dev/kfd … forgeyard-agent:1.1.0", cpu: "docker run … forgeyard-agent:1.1.0" },
+      config_file: `server = "https://forge.lan:7860"\nca_fingerprint = "${fp}"\n`,
+      manual_commands: ["uv run --no-sync python -m forgeyard agent join --join-token fyj_secret", "uv run --no-sync python -m forgeyard agent"],
+      version: "1.1.0" };
     server((url, init) => {
       if (url === "/api/machines") return machines();
       if (url === "/api/tls") return { status: 200, body: { mode: "forgeyard-ca", https: true, admin: { trust_command: trustCmd, server_certificate: null } } };
@@ -164,8 +174,24 @@ describe("machines page", () => {
     expect(screen.getByLabelText("Trust command").textContent).toBe(trustCmd);
     fireEvent.click(screen.getByRole("button", { name: "Add a machine" }));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
-    expect((await screen.findByLabelText("Join command")).textContent).toBe(created.command);
+    // Three ways; the one-line install first, and every one pins the fingerprint.
+    expect((await screen.findByRole("tab", { name: /One-line install/ })).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByLabelText("Install command").textContent).toBe(created.install_command);
     expect(screen.getByText(/trusts only the certificate authority with the fingerprint/)).toBeTruthy();
     expect(screen.queryByText(/only works on this computer/)).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Docker" }));
+    expect(screen.getByLabelText("Build command").textContent).toBe(created.docker_build_command);
+    expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.nvidia);
+    fireEvent.click(screen.getByRole("button", { name: "AMD" }));
+    expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.amd);
+    fireEvent.click(screen.getByRole("button", { name: "CPU only" }));
+    expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.cpu);
+    fireEvent.click(screen.getByRole("tab", { name: "Manual (config file)" }));
+    expect(screen.getByLabelText("Config file").textContent).toBe(created.config_file);
+    expect(screen.getByLabelText("Join command").textContent).toBe(created.manual_commands[0]);
+    expect(screen.getByLabelText("Start command").textContent).toBe(created.manual_commands[1]);
+    expect(screen.getByLabelText("Join command with flags").textContent).toBe(created.command);
+    // "How do I…?" links go to the guide.
+    expect(screen.getByRole("link", { name: "How do I add a machine?" }).getAttribute("href")).toMatch(/^\/guide\/(en|zh-TW)\/quick-start#3-add-a-machine$/);
   });
 });

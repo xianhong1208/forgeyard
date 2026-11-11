@@ -21,6 +21,8 @@ dependencies = [
     # Already installed through httpx (httpcore) and uvicorn; listed because it is used.
     "h11>=0.16",
     "cryptography>=46",
+    # The user guide at /guide: its Markdown rendered on the server (no raw HTML, works offline).
+    "markdown-it-py>=4",
 ]
 
 [project.optional-dependencies]

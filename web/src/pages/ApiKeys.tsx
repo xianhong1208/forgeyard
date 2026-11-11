@@ -2,6 +2,7 @@ import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import { useAuth } from "../auth";
+import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Field, Notice, PageHeader, TrustHint } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
@@ -72,6 +73,11 @@ export function ApiKeysPage() {
           </button>
         }
       />
+      <HelpLinks>
+        <HelpLink page="quick-start" anchor="8-call-it">How do I call /v1 with curl or the OpenAI SDK?</HelpLink>
+        <HelpLink page="concepts" anchor="api-keys-limits-and-usage">Keys, limits and usage</HelpLink>
+        <HelpLink page="troubleshooting" anchor="errors-from-v1-401-403-429-503">Errors from /v1</HelpLink>
+      </HelpLinks>
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 

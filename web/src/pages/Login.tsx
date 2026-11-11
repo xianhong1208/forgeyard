@@ -51,6 +51,9 @@ export function LoginPage() {
           value={password} onChange={(e) => setPassword(e.target.value)} />
         <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
       </form>
+      <p className="auth-foot">
+        New here? The <Link to="/guide">guide</Link> explains how to set Forgeyard up, step by step.
+      </p>
       {state.tls?.mode === "forgeyard-ca" && (
         <p className="auth-foot auth-trust">
           Did your browser warn about this site's certificate? <Link to="/trust">Trust this server</Link> once on this device.

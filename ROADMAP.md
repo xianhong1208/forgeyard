@@ -11,7 +11,7 @@ models deployed from a catalog with engine recipes and memory estimates; one Ope
 gateway at `/v1` with API keys, limits and usage. Each milestone was accepted on a real 8×A100
 host (Forgeyard limited to one shared card) plus a CPU machine. See [CHANGELOG.md](CHANGELOG.md).
 
-## Now: 1.1, easier to start and safe on the network
+## Done: 1.1, easier to start and safe on the network
 
 Three pull requests, in this order:
 
@@ -33,12 +33,17 @@ Three pull requests, in this order:
      - ✅ examples are given for running behind nginx or Caddy.
    - ✅ Engine images are pinned by digest.
    - ✅ Stored secrets are encrypted.
-3. **Install and guide**
-   - The agent reads a config file, `/etc/forgeyard/agent.toml`, instead of a long command line.
-   - A one-line install served by your server sets the agent up as a system service.
-   - An agent container image: one `docker run` per machine.
-   - A user guide in English and Traditional Chinese: quick start, concepts, how-tos,
-     troubleshooting.
+3. ✅ **Install and guide** (PR `install-guide`)
+   - ✅ The agent reads a config file, `/etc/forgeyard/agent.toml`, instead of a long command line;
+     `forgeyard agent init` writes one from what it finds.
+   - ✅ A one-line install served by your server sets the agent up as a system service (and upgrades
+     or removes it).
+   - ✅ An agent container image: one `docker run` per machine (built locally until the source is
+     published with 1.2).
+   - ✅ A user guide in English and Traditional Chinese: quick start, concepts, how-tos,
+     troubleshooting, reference; also served in the app at `/guide`, linked from the pages.
+
+1.1 is complete.
 
 ## Publishing the source: with 1.2
 
@@ -105,3 +110,7 @@ cloud model APIs, local first. One pull request before the 1.2 release prepares 
   - vLLM's ROCm image;
   - `ROCR_VISIBLE_DEVICES`.
 - **The systemd scope for process limits.** It has not run on a host with systemd yet.
+- **The one-line install on a systemd host, and the agent image on real GPUs.** Both ran in a
+  container without systemd or Docker (the install with a stand-in `systemctl`, the image in CI on a
+  runner without GPUs). On a real host, confirm the service (`KillMode=process`: workloads survive
+  `systemctl restart forgeyard-agent`), `--gpus all` in the image, and AMD with ROCm mounted.

@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 from pathlib import Path
 
 import pytest
@@ -20,7 +19,7 @@ from forgeyard.db import Replica, Workload, new_session
 from forgeyard.models.recipes import RecipeError, builtin_recipes, parse_recipe
 from forgeyard.workloads import state as wstate
 from tests.test_scheduler import MODELS, deploy, seed_catalog
-from tests.workload_helpers import FakeDocker, container, converge, desired, replica, world_dir
+from tests.workload_helpers import FakeDocker, container, converge, desired, replica, cleanup_world, world_dir
 from tests.workload_helpers import make_node, service
 
 SECRET = "k3y-0123456789abcdefghijklmnopqrstuvwxyzABCDEF"
@@ -145,7 +144,7 @@ def test_fy_rk_004_a_real_process_gets_it_in_its_environment_only(tmp_path):
         assert SECRET not in report and SECRET not in on_disk
         assert json.loads(on_disk)["key_env"] == "LLAMA_API_KEY"
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        cleanup_world(work)
 
 
 def _group(pgid):

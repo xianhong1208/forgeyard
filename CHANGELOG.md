@@ -101,7 +101,53 @@ version until 1.0.
   `scripts/pin_images.py` checks the digests against the registries, and `--write` re-resolves
   them when an engine is bumped.
 
+- **Agent config file**: `/etc/forgeyard/agent.toml` (or `--config PATH`, `FORGEYARD_AGENT_CONFIG`) holds
+  every agent setting: server, CA pin, name, labels, state directory, and under `[workloads]` the
+  workload account, work directory, port range, bind address, container engine, limits and log size,
+  under `[models]` the cache, local directories and private hosts. Each setting also has a
+  `FORGEYARD_*` variable; a flag wins over the environment, the environment over the file (labels
+  merge key by key). A wrong file is refused with every problem named (unknown settings with the
+  closest name, wrong types, bad values, relative paths, two pins). `forgeyard agent init` writes a
+  commented file from what it detects (GPUs, Docker or Podman and NVIDIA support, systemd, running in
+  a container, a workload account) and prints it; `agent config [--get KEY]` shows the settings in
+  effect and where each came from; `agent join` joins with the file's settings and exits.
+- **One-line install served by the server**: `GET /install.sh` (HTTPS only, public like the CA). The
+  command on the Machines page first downloads the CA, checks its SHA-256 against the fingerprint
+  with `sed`, `base64` and `sha256sum -c` (no openssl), and only then fetches the script over a
+  connection verified against that CA. The script (POSIX sh, shellcheck-clean) checks the system,
+  downloads the agent **from the server** (`GET /install/forgeyard-<version>-py3-none-any.whl`, built
+  from the running code, so the agent always matches the server; its SHA-256 is in the script),
+  installs it in `/opt/forgeyard/venv` with uv, else a Python 3.13 already there, else after
+  installing uv, links `/usr/local/bin/forgeyard`, creates the `forgeyard-run` account, writes
+  `agent.toml` with `agent init`, joins, and installs the `forgeyard-agent` systemd service
+  (`KillMode=process` so workloads survive agent restarts, `Restart=always`, no restart after a refused
+  credential). Without systemd it says how to run the agent. Run again it upgrades and keeps the
+  settings and the credential; `--uninstall [--purge]` removes it.
+- **Agent container image**: `Dockerfile.agent` (multi-stage, base images pinned by digest, the same
+  wheel, nvidia-ml-py, the docker CLI, tini, the `forgeyard-run` account, rlimits). Configured by a
+  mounted `agent.toml` or `FORGEYARD_*` variables; joins on the first start with
+  `FORGEYARD_JOIN_TOKEN` and keeps the credential in a volume. CI builds it and runs
+  `scripts/agent_image_smoke.sh`: its contents, inventory and init in simulation, a real join to a
+  server on the runner, and a re-created container that stays the same machine.
+- **Add a machine** offers three ways, each with the token and the pinned fingerprint: one-line
+  install (recommended), Docker (NVIDIA, AMD or CPU only, with the build command) and manual (a config
+  file and the commands).
+- **User guide** in English and Traditional Chinese (`docs/guide`, `docs/guide/zh-TW`, the same
+  structure): quick start, concepts, how-to, troubleshooting from real incidents, and a reference of
+  every server and agent setting. Served in the app at `/guide/<lang>/<page>` (public, rendered on the
+  server without raw HTML or images, works offline) with a language switch and copy buttons; "How do
+  I…?" links on Machines, Models, API keys, Get started and Trust this server, and a Guide entry in
+  the account menu and on the sign-in page. `GET /api/guide`, `/api/guide/{lang}/{page}`. New
+  dependency: `markdown-it-py`.
+
 ### Changed
+- **A joined agent started again with its join settings just starts**: a join token is ignored (and
+  the log says so) when the machine already joined the same server, so a container's
+  `--restart always` or a re-run install never fails; server and CA values from the file or the
+  environment that differ from what the machine joined are reported and ignored (`agent trust`
+  changes them); a different pin given as a flag is still refused.
+- The README is short and points to the guide; the details it held moved to `docs/design.md`
+  (and `docs/design.zh-TW.md`).
 - **HTTPS is the default.** Plain HTTP only with `TLS=off`, meant for running behind a proxy that
   terminates TLS (nginx and Caddy examples in the docs); while pages still arrive over plain HTTP,
   every admin sees a warning at the top of each page, and the startup log warns too. Session cookies
@@ -121,6 +167,13 @@ version until 1.0.
   API keys (Create a key), Usage (create a key, open the Playground) and the Playground (deploy a
   model, or who to ask). The Models page no longer says replicas answer only on their own ports.
 - The Machines page's button reads "Add a machine", like the checklist.
+
+### Fixed
+- Tests no longer leave process workloads running: FY-RG-008/009 and the other tests that start
+  real processes as the workload user only removed their directory when a scenario failed half-way,
+  so on a busy host two stand-in engines (one on 0.0.0.0) kept running as `nobody`. They now kill
+  what still runs from their directory, and two fixtures catch any test that leaves a process
+  behind (killed, and reported as that test's error) plus leftovers of earlier runs.
 
 ## [1.0.0] — 2026-11-10
 

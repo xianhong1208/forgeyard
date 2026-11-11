@@ -82,7 +82,7 @@ def nvidia_cdi_present(dirs=CDI_DIRS) -> bool:
 def detect(engine: str = "auto", run: Runner = _run, which=shutil.which, cdi=nvidia_cdi_present) -> dict:
     """Which engine works here, and whether it can pass NVIDIA GPUs into containers."""
     if engine == "none":
-        return {"ok": False, "reason": "disabled with --container-engine none"}
+        return {"ok": False, "reason": "disabled (container engine: none)"}
     candidates = ENGINES if engine == "auto" else (engine,)
     tried = []
     for name in candidates:

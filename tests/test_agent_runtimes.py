@@ -4,7 +4,6 @@ fake docker CLI (FY-RT-*)."""
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -15,7 +14,7 @@ from forgeyard.agent.workloads.container import ContainerRuntime, anonymous_conf
 from forgeyard.agent.workloads.process import ProcessRuntime
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
-from tests.workload_helpers import FakeDocker, container, converge, desired, gpus_of, replica, task, world_dir
+from tests.workload_helpers import FakeDocker, container, converge, desired, gpus_of, replica, task, cleanup_world, world_dir
 
 A100 = gpus_of("nvidia-a100x8")
 APU = gpus_of("amd-gfx1151-apu")
@@ -148,7 +147,7 @@ def test_fy_rt_008_as_root_processes_run_as_the_workload_user(tmp_path):
         assert oct(os.stat(work / "work" / "r1").st_mode & 0o777) == "0o700"
         assert os.stat(work / "work" / "r1").st_uid == 65534
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        cleanup_world(work)
 
 
 def test_fy_rt_009_memory_cap_without_gpus_only():
@@ -497,7 +496,7 @@ def test_fy_rt_025_what_a_killed_leader_leaves_behind_is_stopped_before_a_restar
         assert len(left) == 2 and sorted(gone) == sorted(left)
         assert new_pgid != old_pgid
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        cleanup_world(work)
 
 
 def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):

@@ -18,6 +18,8 @@ from forgeyard.api import (
     auth,
     deployments,
     gateway,
+    guide,
+    install,
     keys,
     machines,
     models,
@@ -119,6 +121,8 @@ def create_app() -> FastAPI:
     app.include_router(gateway.console)
     app.include_router(gateway.router)
     app.include_router(agent_api.router)
+    app.include_router(install.router)
+    app.include_router(guide.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     def api_not_found(rest: str):

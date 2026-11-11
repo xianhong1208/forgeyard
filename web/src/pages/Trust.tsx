@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import { useAuth } from "../auth";
 import { Mark } from "../components/Mark";
+import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact } from "../lib/format";
@@ -109,6 +110,11 @@ export function TrustPage() {
       </header>
       <main className="content trust">
         <PageHeader index="HTTPS" title="Trust this server" lead="Do this once on each device you use Forgeyard from. Agents and programs have their own step, at the end." />
+        <HelpLinks>
+          <HelpLink page="troubleshooting" anchor="the-browser-warns-about-the-certificate">Why the browser warns, and what to check</HelpLink>
+          <HelpLink page="how-to" anchor="use-your-own-certificate-or-a-reverse-proxy">Use your own certificate or a reverse proxy</HelpLink>
+          <HelpLink page="how-to" anchor="back-up-and-restore">Back up the CA</HelpLink>
+        </HelpLinks>
         {error && <Notice tone="error">{error}</Notice>}
         {info && info.mode === "off" && <PlainHttp admin={user?.role === "admin"} https={info.https} />}
         {info && info.mode === "own" && !ca && (

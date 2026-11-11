@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import close_all_sessions
 from fastapi.testclient import TestClient
 
+from forgeyard.agent import config as agent_config
 from forgeyard.config import get_settings
 from forgeyard.db import reset_engine
 from forgeyard.gateway.balancer import balancer
@@ -14,6 +15,7 @@ from forgeyard.gateway.usage import recorder
 from forgeyard.models.hub import hub
 from forgeyard.security import crypto, tls
 from forgeyard.security.ratelimit import limiter
+from tests import leaks
 
 OWNER = ("owner", "harbour-lantern-71")
 SETUP_TOKEN = "test-setup-token-0123456789"
@@ -31,6 +33,36 @@ def _wipe(url: str) -> None:
     engine.dispose()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def no_processes_left_behind():
+    """Safety net for the whole run: before it, leftovers of runs that are gone are killed and
+    removed (with a warning); after it, anything still running from this run's directories is
+    killed and the run fails, naming it."""
+    stale = leaks.stale_dirs()
+    if stale:
+        found = [p for d in stale for p in leaks.cleanup(d)]
+        if found:
+            import warnings
+
+            warnings.warn(f"Killed processes left by an earlier test run: {leaks.describe(found)}", stacklevel=1)
+    yield
+    found = [p for d in leaks.made for p in leaks.cleanup(d)]
+    if found:
+        pytest.fail(f"Processes were still running after the tests (killed): {leaks.describe(found)}", pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def no_process_left_by_the_test(tmp_path):
+    """Every test: nothing it started may outlive it (process workloads run in their own session,
+    so a test that fails half-way would leave them running). Killed and reported as an error of
+    that test."""
+    made_before = len(leaks.made)
+    yield
+    found = leaks.check([tmp_path, *leaks.made[made_before:]])
+    if found:
+        pytest.fail(f"The test left processes running (killed now): {leaks.describe(found)}", pytrace=False)
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Each test gets its own data dir (SQLite + secrets file) and fresh settings."""
@@ -40,6 +72,12 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", SETUP_TOKEN)
+    # The agent's settings: never this machine's /etc/forgeyard/agent.toml or FORGEYARD_* variables.
+    for setting in agent_config.SETTINGS:
+        monkeypatch.delenv(setting.env, raising=False)
+    monkeypatch.delenv(agent_config.CONFIG_ENV, raising=False)
+    monkeypatch.delenv(agent_config.JOIN_TOKEN_ENV, raising=False)
+    monkeypatch.setattr(agent_config, "DEFAULT_PATH", tmp_path / "etc" / "forgeyard" / "agent.toml")
     if PG_URL:
         _wipe(PG_URL)
         monkeypatch.setenv("DATABASE_URL", PG_URL)

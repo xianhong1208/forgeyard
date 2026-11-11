@@ -11,6 +11,7 @@ import { AuditPage } from "./pages/Audit";
 import { LoginPage } from "./pages/Login";
 import { DeploymentDetailPage } from "./pages/DeploymentDetail";
 import { GetStartedPage, HomePage } from "./pages/GetStarted";
+import { GuidePage, GuideRedirect } from "./pages/Guide";
 import { MachinesPage } from "./pages/Machines";
 import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
@@ -49,6 +50,10 @@ export default function App() {
       <Route path="/set-password" element={<SetPasswordPage />} />
       {/* Public: a device gets the CA before anyone signs in on it. */}
       <Route path="/trust" element={<TrustPage />} />
+      {/* Public too: the guide explains how to install the server and add machines. */}
+      <Route path="/guide" element={<GuideRedirect />} />
+      <Route path="/guide/:lang" element={<GuideRedirect />} />
+      <Route path="/guide/:lang/:slug" element={<GuidePage />} />
       <Route
         element={
           <RequireAuth>

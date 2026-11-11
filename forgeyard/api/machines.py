@@ -15,6 +15,7 @@ from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
 from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, JoinToken, Node, get_db, utcnow
+from forgeyard.install import commands as install_commands
 from forgeyard.machines import store
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED
@@ -80,13 +81,15 @@ def create_join_token(request: Request, caller: Caller = Depends(require_admin),
     db.commit()
     server = public_base(request)
     anchor = tls.trust_anchor_pem()
+    fingerprint = tls.fingerprint(anchor) if anchor and server.startswith("https://") else None
     return {
         **token_out(row),
         "token": token,
         "server_url": server,
-        # The join command pins the CA by its fingerprint: the agent trusts that CA only.
+        # Every way to add the machine pins the CA by its fingerprint: the agent trusts that CA only.
         **agent_commands(server, token),
-        "ca_fingerprint": tls.fingerprint(anchor) if anchor and server.startswith("https://") else None,
+        **install_commands.all_commands(server, token, fingerprint),
+        "ca_fingerprint": fingerprint,
         "valid_minutes": int(store.JOIN_TOKEN_TTL.total_seconds() // 60),
     }
 

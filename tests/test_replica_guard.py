@@ -7,7 +7,6 @@ import asyncio
 import hashlib
 import json
 import os
-import shutil
 import socket
 import threading
 import time
@@ -24,7 +23,7 @@ from forgeyard.agent.workloads.records import RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
 from tests.gateway_helpers import free_port
 from tests.guard_helpers import KEY, GuardThread, OpenEngine
-from tests.workload_helpers import FakeDocker, container, converge, desired, replica, world_dir
+from tests.workload_helpers import FakeDocker, container, converge, desired, replica, cleanup_world, world_dir
 
 OPEN_PATHS = ["/invocations", "/rerank", "/pooling", "/score", "/classify", "/tokenize", "/v1/chat/completions",
               "/v1/models", "/health", "/metrics", "/", "/docs"]
@@ -339,7 +338,7 @@ def test_fy_rg_008_a_process_replica_behind_its_guard_and_after_an_agent_restart
         closed, pid2, codes, started = asyncio.run(second())
         assert closed and pid2 == pid and codes == (401, 200) and started == 0
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        cleanup_world(work)
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="runs the process as the workload user, which needs a root agent")
@@ -367,7 +366,7 @@ def test_fy_rg_009_an_engine_listening_beyond_loopback_is_stopped(tmp_path):
         assert state == "failed" and "not only on loopback" in reason and "{host}" in reason
         assert listening == [] and guards == {}
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        cleanup_world(work)
 
 
 def test_fy_rg_010_containers_publish_on_loopback_and_old_replicas_are_put_behind_a_guard(tmp_path):
@@ -706,4 +705,4 @@ def test_fy_rg_019_a_guarded_model_process_gets_loopback_and_the_internal_port(t
             out[name] = rt.tail(rec, 10)[0].strip()
         assert out == {"guarded": "bind=127.0.0.1 port=31001", "plain": "bind=10.9.8.7 port=31000"}
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        cleanup_world(work)

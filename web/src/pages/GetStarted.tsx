@@ -2,6 +2,7 @@ import { IconArrowRight, IconCheck } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, Navigate } from "react-router";
 
+import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Notice, PageHeader, TrustHint } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { API_KIND } from "../lib/gateway";
@@ -67,6 +68,11 @@ function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void })
         lead={setup
           ? "Six steps from a fresh install to your first API call. Each step ticks itself off as soon as it is really done."
           : "Three steps to call the models on this server from your own programs. Each step ticks itself off when it is done."} />
+      <HelpLinks>
+        <HelpLink page="quick-start">The quick start, every step with its commands</HelpLink>
+        <HelpLink page="concepts">How Forgeyard fits together</HelpLink>
+        <HelpLink page="troubleshooting">Troubleshooting</HelpLink>
+      </HelpLinks>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
       <section className="onb-progress" aria-label="Progress">
