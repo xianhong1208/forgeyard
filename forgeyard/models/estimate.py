@@ -137,7 +137,8 @@ def _vision(meta: dict, recipe: Recipe, params: dict, fmt: str) -> list[Part]:
             "profiling of the largest image and its encoder cache (recipe)"
         parts.append(Part("Vision encoder", recipe.estimate.vision_overhead, what))
     if video and recipe.estimate.video_overhead:
-        parts.append(Part("Video", recipe.estimate.video_overhead, "profiling of the largest video (recipe)"))
+        what = "buffers for a video's frames (recipe)" if fmt == "gguf" else "profiling of the largest video (recipe)"
+        parts.append(Part("Video", recipe.estimate.video_overhead, what))
     return parts
 
 

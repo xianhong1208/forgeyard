@@ -146,6 +146,10 @@ through the gateway, and the usage units for all of 1.3.
   models without a rate of their own. The 6-second sample clip on Qwen3-VL 2B takes 5,345 prompt
   tokens instead of 3,565, more than a 4,096-token context: give video deployments 8,192 or more
   (`scripts/accept_mm.py` does for GGUF video runs).
+- **The llama.cpp estimate counts video**: 512 MiB more once *Videos per request* is 1 or more (the
+  recipe's `video_overhead`, shown as *Video*). Measured on the CPU with Qwen3-VL 2B at a context of
+  8,192: peak RSS 3.83 GiB without video and 4.24 GiB with the 6-second clip (4.15 on b11977), against
+  an estimate of 3.95 GiB that did not count it.
 - `COOKIE_SECURE` takes `auto`, `true` or `false` (also `yes`/`no`/`1`/`0`); anything else stops the
   start, instead of acting as `auto`. A setting the server cannot use is reported by name, without
   a traceback.
