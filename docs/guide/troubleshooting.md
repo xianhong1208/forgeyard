@@ -97,7 +97,7 @@ helpers. That is enough for every built-in engine image, since they are all publ
 the speed.
 
 **Why:** the agent downloads models from Hugging Face directly, at whatever speed the machine's
-network reaches it. On one test machine that was 3–4 MiB/s, so a 16 GB model took over an hour.
+network reaches it. At 4 MiB/s, a 16 GB model takes over an hour.
 
 **Do:**
 
@@ -138,8 +138,8 @@ line says why it was not chosen:
 | Line | Means |
 |---|---|
 | `no allowed GPU that vllm supports` | no card on the GPU allowlist, or no recipe variant for that card and driver |
-| `needs 14.38 GiB per GPU; available: #4 12.07 GiB, … (2.31 GiB short)` | the best card misses that much free memory |
-| `needs 1 GPU it can have; in use: #4 (qwen)` | the cards are taken by replicas that do not share |
+| `needs 14.38 GiB per GPU; available: #0 12.07 GiB, … (2.31 GiB short)` | the best card misses that much free memory |
+| `needs 1 GPU it can have; in use: #1 (qwen)` | the cards are taken by replicas that do not share |
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | a CPU model, and not enough free RAM |
 | `no container runtime (…)` | the recipe needs Docker or Podman, which the machine does not have |
 | `its agent does not serve models` | the agent has no model cache (`[models] cache` in its settings) |
@@ -160,6 +160,34 @@ The `code` says what happened.
 key is missing (send `Authorization: Bearer fyk_…`), wrong, expired or revoked, or its owner's
 account is disabled. Check the key on **API keys**; create a new one if needed.
 
+### 402
+
+**You see:** `402` with `budget_exhausted` or `budget_unpriced`, and the header
+`X-Forgeyard-Budget-Exhausted: key` (or `person`, or `provider:<name>`).
+
+**Why:** the request could only be served by a cloud provider, and a monthly budget kept it from
+every provider that could serve it:
+
+- `budget_exhausted`: the budget of the key, of its owner or of the provider is used up, or this
+  request's reserved cost would go past it. The `budget` object in the error gives the budget, what
+  was spent and reserved, the most this request could cost, and `resets_at` (the first of next month,
+  00:00 UTC).
+- `budget_unpriced`: a budget applies, but the provider's model has no price, so its cost cannot be
+  reserved.
+
+Local replicas are never limited by a budget: when one could serve the request, it does.
+
+**Do:**
+
+- `budget_exhausted`: wait for `resets_at`, or have the budget raised (a key's on **API keys** →
+  **Limits**, a person's on **Usage** → **Cost** → **Budgets this month**, a provider's on its page).
+  Starting a local deployment of the model also helps. A request with a lower `max_tokens` reserves
+  less, so it may still fit. OpenAI's SDKs do not retry 402, and retrying does not help.
+- `budget_unpriced`: an admin sets the model's prices on its provider's page (**Prices**, or
+  **Refresh prices from OpenRouter**).
+
+More in [Budgets](cloud-providers.md#budgets).
+
 ### 403
 
 `model_not_allowed`: the key is limited to some models, and this is not one of them. The key's
@@ -175,11 +203,13 @@ locked; ask an admin to change them.
 
 `no_ready_replica`: the model exists, but none of its replicas is ready: still downloading or
 starting, stopped, or its machine is offline. The message lists each replica's state. Look at the
-deployment's page.
+deployment's page; see also [A model is listed but answers 503](#a-model-is-listed-but-answers-503).
 
-Others: `404 model_not_found` (no deployment with that model name: see `/v1/models`), `502` (a
-replica could not be reached or refused its internal key: usually its agent restarted; it recovers
-within seconds), `504` (no answer within `GATEWAY_READ_TIMEOUT`, 600 s by default).
+Others: `404 model_not_found` (no model by that name for this key: see `/v1/models` and
+[A model is missing from /v1/models](#a-model-is-missing-from-v1models)), `502` (a replica could not be
+reached or refused its internal key: usually its agent restarted; it recovers within seconds),
+`504` (no answer within `GATEWAY_READ_TIMEOUT`, 600 s by default). Every code is listed in the
+[reference](reference.md#errors).
 
 ### Errors from cloud providers
 
@@ -196,9 +226,122 @@ provider answered.
   base URL.
 - `429 provider_rate_limited`: every target of the cloud tier was rate limited; wait for
   `Retry-After`.
+- `402 budget_exhausted`, `402 budget_unpriced`: a monthly budget; see [402](#402).
 - Any other 4xx keeps the provider's status, code and message, prefixed with the provider's name.
 
 More in [Cloud providers](cloud-providers.md#troubleshooting).
+
+## A program does not trust the certificate
+
+**You see:** a program that calls `/v1` fails with `certificate verify failed`,
+`self-signed certificate in certificate chain`, `unable to get local issuer certificate`, or
+`SELF_SIGNED_CERT_IN_CHAIN`. The same address works in a browser that trusts the CA.
+
+**Why:** the server's certificate comes from Forgeyard's own CA, and each program decides on its
+own which authorities it trusts. Installing the CA in the browser or the system does not reach a
+program that brings its own list: Python's `requests` and the OpenAI SDK (through `httpx`) use the
+`certifi` package's list, not the system's, and Node.js has its own list built in.
+
+**Do:** get `forgeyard-ca.pem` from **Trust this server**, check its fingerprint, then give it to
+the program in one of these ways:
+
+| Program | How |
+|---|---|
+| curl | `curl --cacert forgeyard-ca.pem …`, or install the CA in the system (below) |
+| Python, OpenAI SDK, `httpx` | in code: `httpx.Client(verify=ssl.create_default_context(cafile="forgeyard-ca.pem"))`, as in the [quick start](quick-start.md#python-with-the-openai-sdk); or `SSL_CERT_FILE` |
+| Python, `requests` | `REQUESTS_CA_BUNDLE` |
+| Node.js | `NODE_EXTRA_CA_CERTS=forgeyard-ca.pem`: added to Node's own list, which stays |
+| Anything else | its own setting for a CA file, if it has one |
+
+`SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` **replace** the program's list. Pointing them at
+`forgeyard-ca.pem` alone is fine for a program that only talks to Forgeyard, but it then fails on
+every other HTTPS site (a cloud API, a package index). For such a program, install the CA in the
+system and point the variables at the system's list, which then holds both:
+
+```bash
+sudo cp forgeyard-ca.pem /usr/local/share/ca-certificates/forgeyard-ca.crt
+sudo update-ca-certificates
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+```
+
+That is Debian and Ubuntu; **Trust this server** shows the steps for other systems. Restart the
+program after you set the variables. A program that cannot be given a CA at all needs a certificate
+it already trusts: [use your own certificate or a reverse proxy](how-to.md#use-your-own-certificate-or-a-reverse-proxy).
+
+## A model is missing from /v1/models
+
+**You see:** a model you expect is not in `GET /v1/models`, and calling it answers
+`404 model_not_found`.
+
+**Why:** `/v1/models` lists only the models **this key** may use right now. A model is left out
+when:
+
+- **its deployment is stopped**, and no provider the key may use serves it. A starting deployment
+  stays in the list; a stopped one leaves it until it is started again;
+- the key is limited to **other models** (then a call answers `403 model_not_allowed`);
+- only a **cloud provider** serves it, and the key's cloud setting is not **Allowed**: for that key the
+  model does not exist;
+- the deployment or the route was **deleted**, or its name is not what you think: the name programs
+  use is the deployment's name (or the route's), shown as *Model name* on its page.
+
+**Do:** open **Models** and check the model's state; **Start** a stopped deployment. On **API keys**,
+check the key's models and its *Cloud providers* setting.
+
+## A model is listed but answers 503
+
+**You see:** the model is in `/v1/models`, but calling it answers `503 no_ready_replica`.
+
+**Why:** the deployment is meant to run, but no replica is ready yet: the model is still
+downloading, the engine is still starting, a replica failed and is restarting, or its machine is
+offline. The message gives each replica's state, for example
+`replica 0 on gpu-01: downloading`. A stopped deployment answers the same way
+(`The deployment is stopped.`), if you call it anyway.
+
+**Do:** open the deployment's page. Wait while it downloads or starts (the page shows the progress).
+If a replica keeps failing, its output on that page says why; a machine that is offline is in
+[An agent shows offline](#an-agent-shows-offline). To have such requests go to a cloud provider
+meanwhile, add a cloud tier to the model's route ([Cloud providers](cloud-providers.md#route-a-model-to-the-cloud)).
+
+## A request does not spill to the cloud
+
+**You see:** a model's route has a cloud tier, but requests still fail (503, 429) or wait while the
+local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
+
+**Why**, in the order to check:
+
+1. **The key's cloud setting is Never.** It is **Never** for every key unless someone changed it,
+   including every key made before 1.2. Such a key never reaches a cloud provider; it gets the local
+   error instead.
+2. The route has **Local only**, or the request sends `X-Forgeyard-Local-Only: 1` (the Playground's
+   *Local only (never the cloud)* sends it).
+3. The endpoint does not go to providers: only chat, completions and embeddings do; rerank, score
+   and speech to text stay local.
+4. The reason is not one that spills. A request moves on only before its answer starts, when the
+   local tier is unavailable, busy, or answers 429 or 503; a prompt too long for the local context
+   only with **Spill a prompt that is too long**. A 400, a timeout after the request was sent, or a
+   stream that had started never spill.
+5. A **budget** is used up: the answer carries `X-Forgeyard-Budget-Exhausted`.
+6. The provider, or its target in the route, is **disabled**.
+
+**Do:** on **API keys**, open the key's **Limits** and set *Cloud providers* to **Only to spill**
+(or **Allowed**, for cloud-only models too), then **Save limits**. People can choose at most what an
+admin allows under **Cloud for keys**. In the Playground, admins may use the cloud and everyone else
+gets that most. Details: [When a request spills](cloud-providers.md#when-a-request-spills).
+
+## Cost shows requests without a price
+
+**You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above
+leaves them out.
+
+**Why:** a cloud request is priced from its provider model's prices when it finishes. It has no price
+when the provider did not report the cost itself and the model had no input or output price then, or when the provider answered but reported no
+tokens (for example a stream the client closed before the usage arrived). Its cost is unknown, not 0.
+Local replicas and providers inside your network always cost 0 and are never without a price.
+
+**Do:** an admin opens the provider's page and sets the model's **Prices**, or uses **Refresh prices
+from OpenRouter**. Prices apply to requests from then on: requests already counted stay without a
+price. Under a budget, a model without a price is refused (`402 budget_unpriced`) until it has one.
 
 ## Agent in a container without systemd
 
