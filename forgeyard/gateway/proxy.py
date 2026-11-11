@@ -100,6 +100,7 @@ class LocalGroup:
     reason: Optional[str] = None          # why none is ready
     concurrency: Optional[int] = None     # requests one replica takes at once (its `concurrency`)
     context: Optional[int] = None         # tokens per request (its `context`)
+    running: bool = True                  # False once someone stopped the deployment
 
 
 @dataclass
@@ -203,7 +204,8 @@ def local_group(t: RouteTarget, d: Deployment) -> LocalGroup:
     params = d.params or {}
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
-                      concurrency=_int(params.get("concurrency")), context=_int(params.get("context")))
+                      concurrency=_int(params.get("concurrency")), context=_int(params.get("context")),
+                      running=w.desired_state == "running")
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -254,15 +256,10 @@ def load_route(db: DbSession, served_name: str) -> Optional[Route]:
     return build_route(row) if row is not None else None
 
 
-def model_names(db: DbSession) -> list[tuple[str, str, int, bool, bool]]:
-    """(served name, protocol, created, has a target inside your network, has a cloud target) of
-    every route."""
-    out = []
-    for row in db.scalars(_route_query().order_by(GatewayRoute.served_name)).all():
-        r = build_route(row)
-        out.append((r.served_name, r.api, int(row.created_at.timestamp()) if row.created_at else 0,
-                    r.has_local, r.has_cloud))
-    return out
+def model_names(db: DbSession) -> list[tuple[Route, int]]:
+    """Every route, with the time it was created."""
+    return [(build_route(row), int(row.created_at.timestamp()) if row.created_at else 0)
+            for row in db.scalars(_route_query().order_by(GatewayRoute.served_name)).all()]
 
 
 def endpoint_for(api: str) -> str:
@@ -273,6 +270,21 @@ def endpoint_for(api: str) -> str:
 def visible(cloud: str, has_local: bool) -> bool:
     """May a caller with this cloud setting see a route at all? A cloud-only model exists only for `on`."""
     return has_local or cloud == "on"
+
+
+def serving(route: Route, cloud: str) -> bool:
+    """Can this route answer a caller with this cloud setting, now or once its replicas are ready?
+
+    Not when every deployment in it was stopped and nothing else in it is open to the caller: such a
+    model is left out of /v1/models, so clients do not offer it. A deployment that is starting or
+    restarting still counts. Calling a stopped model still answers 503 with the reason.
+    """
+    for tier in route.tiers:
+        if any(g.running for g in tier.locals) or any(not c.external for c in tier.clouds):
+            return True
+        if tier.clouds and not route.local_only and cloud in ("fallback", "on"):
+            return True
+    return False
 
 
 def check_access(caller: KeyCaller, route: Optional[Route], model: str, endpoint: str) -> Route:

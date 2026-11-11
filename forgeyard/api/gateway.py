@@ -57,7 +57,7 @@ def _route(name: str) -> Optional[proxy.Route]:
         db.close()
 
 
-def _models() -> list[tuple[str, str, int, bool, bool]]:
+def _models() -> list[tuple[proxy.Route, int]]:
     db = new_session()
     try:
         return proxy.model_names(db)
@@ -135,14 +135,15 @@ def _model_out(name: str, created: int) -> dict:
 @router.get("/models")
 async def list_models(request: Request):
     """The models this key may use (every route, or the key's allowlist; cloud-only models only with
-    the key's cloud setting on)."""
+    the key's cloud setting on; not a model whose deployments were all stopped)."""
     try:
         caller = await run_in_threadpool(_authenticate, request.headers.get("authorization"))
     except GatewayError as e:
         return e.response()
     rows = await run_in_threadpool(_models)
-    data = [_model_out(n, c) for n, _a, c, local, _cloud in rows
-            if proxy.visible(caller.cloud, local) and (caller.models is None or n in caller.models)]
+    data = [_model_out(r.served_name, c) for r, c in rows
+            if proxy.visible(caller.cloud, r.has_local) and proxy.serving(r, caller.cloud)
+            and (caller.models is None or r.served_name in caller.models)]
     return {"object": "list", "data": data}
 
 
@@ -152,13 +153,17 @@ async def get_model(model: str, request: Request):
         caller = await run_in_threadpool(_authenticate, request.headers.get("authorization"))
     except GatewayError as e:
         return e.response()
-    rows = {n: c for n, _a, c, local, _cloud in await run_in_threadpool(_models) if proxy.visible(caller.cloud, local)}
+    rows = {r.served_name: (r, c) for r, c in await run_in_threadpool(_models) if proxy.visible(caller.cloud, r.has_local)}
     if model not in rows:
         return GatewayError(404, "model_not_found", f"The model {model!r} does not exist.", param="model").response()
     if caller.models is not None and model not in caller.models:
         return GatewayError(403, "model_not_allowed", f"This API key may not use the model {model!r}.",
                             param="model").response()
-    return _model_out(model, rows[model])
+    route, created = rows[model]
+    if not proxy.serving(route, caller.cloud):
+        return GatewayError(404, "model_not_found", f"The model {model!r} is stopped. Start its deployment to use it.",
+                            param="model").response()
+    return _model_out(model, created)
 
 
 @router.api_route("/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)

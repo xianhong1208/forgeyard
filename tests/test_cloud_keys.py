@@ -43,7 +43,7 @@ def world(owner, monkeypatch):
                                             "targets": [{"kind": "provider", "provider_model_id": ref}]})
         assert r.status_code == 201, r.text
     keys = {level: api_client(owner, cloud_key(owner, f"k-{level}", level)) for level in ("off", "fallback", "on")}
-    ns = SimpleNamespace(owner=owner, node=node, cloud=cloud, own=own, pm=pm, keys=keys, e1=e1, e2=e2)
+    ns = SimpleNamespace(owner=owner, node=node, cloud=cloud, own=own, pm=pm, opm=opm, keys=keys, e1=e1, e2=e2)
     yield ns
     for x in (e1, e2, cloud, own):
         x.close()
@@ -213,3 +213,22 @@ def test_fy_ck_008_fallback_uses_the_cloud_only_after_a_local_tier(world):
     assert world.cloud.posts() == []
     r = chat(world.keys["on"], "mixed-m")
     assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "provider:cloudy/gpt-mini"
+
+
+def test_fy_ck_009_a_stopped_deployment_with_a_cloud_tier_stays_listed_for_cloud_keys(world):
+    """FY-CK-009: with its deployment stopped, the mixed model leaves /v1/models for `off` keys (and
+    for everyone once the route is local-only), but stays listed, and spills, for keys that may use
+    the cloud. A provider inside your network keeps a route listed whatever the key."""
+    o = world.owner
+    assert o.post(f"/api/deployments/{deployment_id(o, 'mixed-m')}/stop").status_code == 200
+    k = world.keys
+    assert listed(k["off"]) == ["local-m", "own-m"]
+    assert k["off"].get("/v1/models/mixed-m").status_code == 404
+    assert listed(k["fallback"]) == ["local-m", "mixed-m", "own-m"]
+    r = chat(k["fallback"], "mixed-m")
+    assert r.status_code == 200 and r.headers["x-forgeyard-spilled"] == "unavailable"
+    set_tiers(o, "mixed-m", [[("local", deployment_id(o, "mixed-m"))], [("provider", world.pm)]], local_only=True)
+    assert "mixed-m" not in listed(k["on"])
+    set_tiers(o, "local-m", [[("local", deployment_id(o, "local-m"))], [("provider", world.opm)]])
+    assert o.post(f"/api/deployments/{deployment_id(o, 'local-m')}/stop").status_code == 200
+    assert "local-m" in listed(k["off"])
