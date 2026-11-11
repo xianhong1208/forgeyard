@@ -199,6 +199,33 @@ describe("Usage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Person" }));
     await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === "/api/usage?days=30&group=user&everyone=true")).toBe(true));
   });
+
+  it("has a Cost tab: cost per group, local and cloud, and the requests without a price", async () => {
+    const base = { errors: 0, limited: 0, prompt_tokens: 100, completion_tokens: 50, tokens: 150, latency_avg_ms: 1, latency_p50_ms: 1, latency_p95_ms: 1 };
+    const cloud = { ...base, id: "p:3", name: "openai", requests: 4, cost_micros: 1_850, unpriced: 2, cost_estimated: 1, cloud: true };
+    const local = { ...base, id: "local", name: "Local replicas", requests: 12, cost_micros: 0, unpriced: 0, cloud: false };
+    const total = { ...base, id: "total", name: "Total", requests: 16, cost_micros: 1_850, unpriced: 2, cost_estimated: 1,
+      split: { local: { ...local, id: "local", name: "Local" }, cloud: { ...cloud, id: "cloud", name: "Cloud" } } };
+    const fetch = server((url) => url.startsWith("/api/usage") ? { status: 200, body: usage({ group_by: url.includes("group=provider") ? "provider" : "day", total, rows: [cloud, local] }) } : undefined);
+    mount("/usage");
+    await screen.findByLabelText("Totals");
+    fireEvent.click(screen.getByRole("tab", { name: "Cost" }));
+    await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === "/api/usage?days=7&group=day")).toBe(true));
+    const totals = await screen.findByLabelText("Cost totals");
+    expect(within(totals).getAllByText("$0.00185").length).toBe(2);       // the total and the cloud part
+    expect(within(totals).getByText("$0.00")).toBeTruthy();               // local
+    expect(within(totals).getByText("75%")).toBeTruthy();                 // served locally
+    expect(screen.getByText(/2 cloud requests have no price/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Set prices/ }).getAttribute("href")).toBe("/providers");
+    expect(screen.getByText(/1 request was estimated/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Provider" }));
+    await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === "/api/usage?days=7&group=provider")).toBe(true));
+    const row = (await screen.findAllByText("openai"))[0].closest("tr") as HTMLElement;
+    expect(within(row).getByText("cloud")).toBeTruthy();
+    expect(within(row).getByText("100%")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Requests" }));
+    expect(await screen.findByLabelText("Totals")).toBeTruthy();
+  });
 });
 
 const LOCAL = { local_only: false, spill_on_long_prompt: false, wait_ms: 0, kind: "local", has_local: true, has_cloud: false, targets: [], usable: true };

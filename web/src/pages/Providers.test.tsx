@@ -121,3 +121,87 @@ describe("Route editor", () => {
     expect((screen.getByLabelText(/Local only/) as HTMLInputElement).disabled).toBe(true);
   });
 });
+
+describe("Prices", () => {
+  const priced: Provider = { ...PROVIDER, models: [
+    { ...PROVIDER.models[0], price_input: 150_000, price_output: 600_000, price_cache_read: 75_000, price_source: "openrouter",
+      price_ref: "openai/gpt-4o-mini", price_checked_at: "2026-11-10T00:00:00Z" },
+    { ...PROVIDER.models[0], id: 9, upstream_model: "gpt-4o", routes: [] },
+  ] };
+
+  it("shows each model's prices and their source, and saves prices typed in dollars as micro-dollars", async () => {
+    const patched: Record<string, unknown>[] = [];
+    server((url, init) => {
+      if (url === "/api/provider-models/9" && init?.method === "PATCH") {
+        patched.push(JSON.parse(String(init.body)));
+        return { status: 200, body: { model: priced.models[1] } };
+      }
+      if (url === "/api/providers/3") return { status: 200, body: { provider: priced, kinds: KINDS, egress: EGRESS, is_admin: true } };
+    });
+    mount("/providers/3");
+    const row = (await screen.findByText("gpt-4o-mini")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("$0.15")).toBeTruthy();
+    expect(within(row).getByText("$0.60")).toBeTruthy();
+    expect(within(row).getByText(/from OpenRouter \(openai\/gpt-4o-mini\)/)).toBeTruthy();
+    const other = screen.getByText("gpt-4o").closest("tr") as HTMLElement;
+    expect(within(other).getByText("no price")).toBeTruthy();
+    fireEvent.click(within(other).getByRole("button", { name: "Prices" }));
+    fireEvent.change(screen.getByLabelText("Input ($)"), { target: { value: "2.5" } });
+    fireEvent.change(screen.getByLabelText("Output ($)"), { target: { value: "$10" } });
+    fireEvent.change(screen.getByLabelText("Cached input ($)"), { target: { value: "1.25x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save prices" }));
+    expect(await screen.findByText(/Cached input: a number of US dollars/)).toBeTruthy();
+    expect(patched).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Cached input ($)"), { target: { value: "1.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save prices" }));
+    await waitFor(() => expect(patched).toEqual([{ price_input: 2_500_000, price_output: 10_000_000, price_cache_read: 1_250_000, price_cache_write: null }]));
+    expect(await screen.findByText("Prices of gpt-4o saved.")).toBeTruthy();
+  });
+
+  it("refreshes from OpenRouter: a diff to review, and only the ticked rows are applied", async () => {
+    const previews: Record<string, unknown>[] = [];
+    const applied: Record<string, unknown>[] = [];
+    const before = { price_input: null, price_output: null, price_cache_read: null, price_cache_write: null };
+    const rows = [
+      { model_id: 8, provider_id: 3, provider: "openai", kind: "openai", upstream_model: "gpt-4o-mini", api: "openai-chat", ref: "openai/gpt-4o-mini",
+        match: "confirmed", manual: false, source: "openrouter", checked_at: null, before: { ...before, price_input: 150_000, price_output: 600_000 },
+        after: { ...before, price_input: 200_000, price_output: 600_000 }, changed: true },
+      { model_id: 9, provider_id: 3, provider: "openai", kind: "openai", upstream_model: "gpt-4o", api: "openai-chat", ref: "openai/gpt-4o",
+        match: "suggested", manual: false, source: null, checked_at: null, before, after: { ...before, price_input: 2_500_000, price_output: 10_000_000 }, changed: true },
+      { model_id: 10, provider_id: 3, provider: "openai", kind: "openai", upstream_model: "my-ft", api: "openai-chat", ref: null,
+        match: "none", manual: false, source: null, checked_at: null, before, after: null, changed: false },
+    ];
+    server((url, init) => {
+      if (url === "/api/prices/openrouter/preview") {
+        previews.push(JSON.parse(String(init?.body)));
+        return { status: 200, body: { checked_at: "2026-11-11T00:00:00Z", listed: 470, matched: 2, changed: 2, rows } };
+      }
+      if (url === "/api/prices/openrouter/apply") {
+        applied.push(JSON.parse(String(init?.body)));
+        return { status: 200, body: { applied: [8], skipped: [] } };
+      }
+      if (url === "/api/providers/3") return { status: 200, body: { provider: priced, kinds: KINDS, egress: EGRESS, is_admin: true } };
+    });
+    mount("/providers/3");
+    fireEvent.click(await screen.findByRole("button", { name: /Refresh prices from OpenRouter/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Refresh prices from OpenRouter" });
+    await within(dialog).findByText(/470 models listed/);
+    expect(previews[0]).toEqual({ provider_id: 3, refs: {} });
+    const first = within(dialog).getByText("gpt-4o-mini").closest("tr") as HTMLElement;
+    expect(within(first).getByText("$0.15")).toBeTruthy();
+    expect(within(first).getByText("$0.20")).toBeTruthy();
+    expect((within(first).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    const suggested = within(dialog).getByText("gpt-4o").closest("tr") as HTMLElement;
+    expect(within(suggested).getByText("suggested")).toBeTruthy();
+    expect((within(suggested).getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    const none = within(dialog).getByText("my-ft").closest("tr") as HTMLElement;
+    expect((within(none).getByRole("checkbox") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(within(none).getByLabelText("OpenRouter id for my-ft"), { target: { value: "openai/gpt-4.1" } });
+    fireEvent.click(within(none).getByRole("button", { name: "Compare" }));
+    await waitFor(() => expect(previews[1]).toEqual({ provider_id: 3, refs: { 10: "openai/gpt-4.1" } }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply 1 ticked" }));
+    await waitFor(() => expect(applied).toEqual([{ items: [{ model_id: 8, ref: "openai/gpt-4o-mini", price_input: 200_000, price_output: 600_000,
+      price_cache_read: null, price_cache_write: null, overwrite_manual: false }] }]));
+    expect(await screen.findByText(/applied to 1 model\./)).toBeTruthy();
+  });
+});

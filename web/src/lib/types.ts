@@ -302,10 +302,15 @@ export type UsageRow = {
   id: string; name: string; requests: number; errors: number; limited: number; prompt_tokens: number; completion_tokens: number;
   tokens: number; latency_avg_ms: number | null; latency_p50_ms: number | null; latency_p95_ms: number | null;
   cached_tokens?: number; reasoning_tokens?: number; spilled?: number;
+  // Cost (1.2): micro-USD; unpriced requests are not in cost_micros.
+  cost_micros?: number; unpriced?: number; cost_reported?: number; cost_estimated?: number;
+  cloud?: boolean;   // grouped by target or provider: outside your network
 };
 
+export type UsageTotal = UsageRow & { split?: { local: UsageRow; cloud: UsageRow } };
+
 export type UsageResponse = {
-  from: string; to: string; days: number; group_by: string; total: UsageRow; rows: UsageRow[]; everyone: boolean; is_admin: boolean;
+  from: string; to: string; days: number; group_by: string; total: UsageTotal; rows: UsageRow[]; everyone: boolean; is_admin: boolean;
 };
 
 // ---------------------------------------------------------------- routes and providers (1.2)
@@ -340,8 +345,22 @@ export type ProviderKind = {
 export type ProviderModel = {
   id: number; provider_id: number; upstream_model: string; api: string; display_name: string | null; context_length: number | null;
   drop_params: string[]; price_input: number | null; price_output: number | null; price_cache_read: number | null; price_cache_write: number | null;
-  price_source: string | null; cooldown_s: number; in_flight: number; sent: number; created_at: string; routes: string[];
+  price_source: string | null; price_checked_at?: string | null; price_ref?: string | null; cooldown_s: number; in_flight: number; sent: number;
+  created_at: string; routes: string[];
 };
+
+export type PriceFields = { price_input: number | null; price_output: number | null; price_cache_read: number | null; price_cache_write: number | null };
+
+export type PriceMatch = "exact" | "confirmed" | "suggested" | "not_listed" | "none";
+
+export type PriceRow = {
+  model_id: number; provider_id: number; provider: string; kind: string; upstream_model: string; api: string; ref: string | null;
+  match: PriceMatch; manual: boolean; source: string | null; checked_at: string | null; before: PriceFields; after: PriceFields | null; changed: boolean;
+};
+
+export type PricePreview = { checked_at: string; listed: number; rows: PriceRow[]; matched: number; changed: number };
+
+export type PriceApplied = { applied: number[]; skipped: { model_id: number; reason: string }[] };
 
 export type Provider = {
   id: number; name: string; kind: string; kind_label: string; base_url: string; has_key: boolean; key_hint: string | null;

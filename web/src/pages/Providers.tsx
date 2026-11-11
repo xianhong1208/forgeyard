@@ -1,12 +1,14 @@
-import { IconArrowLeft, IconCloud, IconCopy, IconDownload, IconPlugConnected, IconPlus, IconTrash } from "@tabler/icons-react";
-import { useState, type FormEvent } from "react";
+import { IconArrowLeft, IconCloud, IconCopy, IconCurrencyDollar, IconDownload, IconPlugConnected, IconPlus, IconTrash } from "@tabler/icons-react";
+import { Fragment, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { HelpLink, HelpLinks } from "../components/HelpLink";
+import { PriceRefresh } from "../components/PriceRefresh";
 import { Field, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
-import { when } from "../lib/format";
+import { exact, when } from "../lib/format";
 import { num } from "../lib/gateway";
+import { PRICE_FIELDS, PRICE_LABEL, parsePrice, perMillion, priceText, SOURCE_LABEL } from "../lib/prices";
 import type { Egress, Provider, ProviderKind, ProviderModel, ProviderResponse, ProvidersResponse, TestResult, UpstreamModel } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -60,7 +62,9 @@ export function ProvidersPage() {
   const [adding, setAdding] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
   const [testing, setTesting] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const admin = data?.is_admin ?? false;
+  const priced = (data?.providers ?? []).some((p) => p.external && p.models.length > 0);
 
   const test = async (p: Provider) => {
     setTesting(p.id);
@@ -80,17 +84,27 @@ export function ProvidersPage() {
       <PageHeader index="07 · Providers" title="Cloud providers"
         lead="Model APIs outside Forgeyard: OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible server. A route can send requests there when local replicas are busy or down, or serve a cloud model under a name of its own."
         actions={admin && (
-          <button type="button" className="btn btn-primary" aria-expanded={adding} onClick={() => setAdding((v) => !v)}>
-            <IconPlus size={16} aria-hidden="true" /> Add a provider
-          </button>
+          <>
+            {priced && (
+              <button type="button" className="btn" aria-expanded={refreshing} onClick={() => setRefreshing((v) => !v)}>
+                <IconCurrencyDollar size={16} aria-hidden="true" /> Refresh prices from OpenRouter
+              </button>
+            )}
+            <button type="button" className="btn btn-primary" aria-expanded={adding} onClick={() => setAdding((v) => !v)}>
+              <IconPlus size={16} aria-hidden="true" /> Add a provider
+            </button>
+          </>
         )} />
       <HelpLinks>
         <HelpLink page="cloud-providers" anchor="add-a-provider">How do I add OpenAI, Anthropic, Gemini or Azure?</HelpLink>
         <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request go to the cloud?</HelpLink>
         <HelpLink page="cloud-providers" anchor="what-each-providers-endpoint-cannot-do">What each provider's endpoint cannot do</HelpLink>
+        <HelpLink page="cloud-providers" anchor="cost-and-prices">How cost is counted</HelpLink>
       </HelpLinks>
       {error && <Notice tone="error">{error}</Notice>}
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      {refreshing && <PriceRefresh onClose={() => setRefreshing(false)}
+        onApplied={(text) => { setRefreshing(false); setMsg({ tone: "ok", text }); reload(); }} />}
       {adding && data && <AddProvider kinds={data.kinds} onCancel={() => setAdding(false)}
         onAdded={(p) => { setAdding(false); setMsg({ tone: "ok", text: `${p.name} added. Test it, then add its models.` }); reload(); }} />}
       {data && data.providers.length === 0 && !adding && (
@@ -115,7 +129,9 @@ export function ProvidersPage() {
                   <td data-label="Where"><WhereChip p={p} /></td>
                   <td data-label="Models" className="small">
                     {p.models.length ? p.models.map((m) => (
-                      <div key={m.id}><span className="mono">{m.upstream_model}</span>{m.cooldown_s > 0 && <> <span className="chip chip-tone-bad" title="It failed recently and is tried last">cooling {Math.ceil(m.cooldown_s)} s</span></>}</div>
+                      <div key={m.id}><span className="mono">{m.upstream_model}</span>
+                        {p.external && <span className="muted"> · {m.price_input === null && m.price_output === null ? "no price" : `${perMillion(m.price_input)} / ${perMillion(m.price_output)}`}</span>}
+                        {m.cooldown_s > 0 && <> <span className="chip chip-tone-bad" title="It failed recently and is tried last">cooling {Math.ceil(m.cooldown_s)} s</span></>}</div>
                     )) : <span className="muted">none yet</span>}
                   </td>
                   {admin && (
@@ -347,6 +363,9 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   const add = async (models: { upstream_model: string; api: string; context_length?: number | null }[]) => {
     setError(null);
@@ -371,22 +390,44 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
 
   return (
     <section className="panel" aria-labelledby="models-title">
-      <div className="panel-head"><h2 id="models-title">Models</h2><span className="muted small">what routes may send to {p.name}</span></div>
+      <div className="panel-head">
+        <h2 id="models-title">Models</h2>
+        {admin && p.external && p.models.length > 0 ? (
+          <button type="button" className="btn btn-small" aria-expanded={refreshing} onClick={() => setRefreshing((v) => !v)}>
+            <IconCurrencyDollar size={14} aria-hidden="true" /> Refresh prices from OpenRouter
+          </button>
+        ) : <span className="muted small">what routes may send to {p.name}</span>}
+      </div>
+      {!p.external && p.models.length > 0 && <p className="muted small">Inside your network: requests here cost nothing, so its models have no prices.</p>}
+      {note && <Notice tone="ok">{note}</Notice>}
+      {refreshing && <PriceRefresh providerId={p.id} onClose={() => setRefreshing(false)}
+        onApplied={(text) => { setRefreshing(false); setNote(text); onChanged(); }} />}
       {p.models.length === 0 ? <p className="muted small">No models yet. {admin ? "Add them by name, or import the provider's list." : ""}</p> : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Model</th><th>Serves</th><th>Context</th><th>Used by</th><th>Since the server started</th>{admin && <th><span className="sr-only">Actions</span></th>}</tr></thead>
+            <thead><tr><th>Model</th><th>Serves</th>{p.external && <th>Price per 1M tokens</th>}<th>Context</th><th>Used by</th><th>Since the server started</th>{admin && <th><span className="sr-only">Actions</span></th>}</tr></thead>
             <tbody>
               {p.models.map((m) => (
-                <tr key={m.id}>
-                  <td data-label="Model"><span className="mono">{m.upstream_model}</span>{m.display_name && <div className="muted small">{m.display_name}</div>}</td>
+                <Fragment key={m.id}>
+                <tr>
+                  <td data-label="Model"><div><span className="mono">{m.upstream_model}</span>{m.display_name && <div className="muted small">{m.display_name}</div>}</div></td>
                   <td data-label="Serves" className="small">{API_NAME[m.api] ?? m.api}</td>
+                  {p.external && <td data-label="Price per 1M" className="small"><Prices m={m} /></td>}
                   <td data-label="Context" className="small">{m.context_length ? num(m.context_length) : "—"}</td>
                   <td data-label="Used by" className="small">{m.routes.length ? m.routes.map((r) => <code key={r} className="egress-host">{r}</code>) : <span className="muted">no route</span>}</td>
                   <td data-label="Since start" className="small">{num(m.sent)} sent{m.in_flight ? ` · ${m.in_flight} in flight` : ""}{m.cooldown_s > 0 ? ` · cooling down ${Math.ceil(m.cooldown_s)} s` : ""}</td>
-                  {admin && <td className="cell-actions"><button type="button" className="btn btn-quiet btn-small" disabled={m.routes.length > 0}
+                  {admin && <td className="cell-actions">
+                    {p.external && <button type="button" className="btn btn-quiet btn-small" aria-expanded={editing === m.id}
+                      onClick={() => setEditing(editing === m.id ? null : m.id)}>Prices</button>}
+                    <button type="button" className="btn btn-quiet btn-small" disabled={m.routes.length > 0}
                     title={m.routes.length ? "Remove it from its routes first" : undefined} onClick={() => void remove(m)}>Remove</button></td>}
                 </tr>
+                {editing === m.id && (
+                  <tr className="price-edit-row"><td colSpan={7}>
+                    <PriceEditor m={m} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); setNote(`Prices of ${m.upstream_model} saved.`); onChanged(); }} />
+                  </td></tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -444,5 +485,54 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
       )}
       {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
     </section>
+  );
+}
+
+function Prices({ m }: { m: ProviderModel }) {
+  if (PRICE_FIELDS.every((f) => m[f] === null)) return <span className="chip chip-tone-wait" title="Requests to it are counted as unpriced until it has prices">no price</span>;
+  return (
+    <div className="price-cell">
+      <div><span className="muted">in</span> <span className="mono">{perMillion(m.price_input)}</span> · <span className="muted">out</span> <span className="mono">{perMillion(m.price_output)}</span></div>
+      {(m.price_cache_read !== null || m.price_cache_write !== null) && (
+        <div><span className="muted">cached</span> <span className="mono">{perMillion(m.price_cache_read)}</span>{m.price_cache_write !== null && <> · <span className="muted">write</span> <span className="mono">{perMillion(m.price_cache_write)}</span></>}</div>
+      )}
+      {m.price_source && (
+        <div className="muted" title={m.price_checked_at ? exact(m.price_checked_at) : undefined}>
+          {SOURCE_LABEL[m.price_source] ?? m.price_source}{m.price_ref && m.price_source === "openrouter" ? ` (${m.price_ref})` : ""}{m.price_checked_at ? `, ${when(m.price_checked_at)}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriceEditor({ m, onCancel, onSaved }: { m: ProviderModel; onCancel: () => void; onSaved: () => void }) {
+  const [text, setText] = useState<Record<string, string>>(() => Object.fromEntries(PRICE_FIELDS.map((f) => [f, priceText(m[f])])));
+  const [error, setError] = useState<string | null>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const body: Record<string, number | null> = {};
+    for (const f of PRICE_FIELDS) {
+      const v = parsePrice(text[f]);
+      if (v === "bad") { setError(`${PRICE_LABEL[f]}: a number of US dollars per million tokens, like 2.50.`); return; }
+      body[f] = v;
+    }
+    try {
+      await api(`/provider-models/${m.id}`, { method: "PATCH", body });
+      onSaved();
+    } catch (err) { setError(errorText(err)); }
+  };
+  return (
+    <form className="price-edit" onSubmit={(e) => void save(e)} aria-label={`Prices of ${m.upstream_model}`}>
+      <p className="muted small">US dollars per million tokens, as on the provider's pricing page. Leave a field empty when it does not apply; without an input or output price, requests are counted as unpriced. Cached input and cache writes fall back to the input price.</p>
+      <div className="grid-4">
+        {PRICE_FIELDS.map((f) => (
+          <Field key={f} label={`${PRICE_LABEL[f]} ($)`} name={`${f}-${m.id}`} inputMode="decimal" value={text[f]}
+            onChange={(e) => setText((x) => ({ ...x, [f]: e.target.value }))} placeholder="unknown" />
+        ))}
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+      <div className="row-gap"><button type="submit" className="btn">Save prices</button><button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button></div>
+    </form>
   );
 }
