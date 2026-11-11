@@ -307,7 +307,6 @@ def test_fy_mm_005_video_when_enabled(mm):
         make_ready("vlv", [(mm.gpu, e.port, e.secret)])
         r = ask(mm.api, "vlv", {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,AAAA"}})
         assert r.status_code == 200, r.text
-        dep = next(d for d in mm.owner.get("/api/deployments").json()["deployments"] if d["name"] == "vlv")
         args = replica_spec("vlv")["runtime"]["args"]
         assert args[args.index("--limit-mm-per-prompt") + 1] == '{"image":4,"audio":4,"video":1}'
     finally:

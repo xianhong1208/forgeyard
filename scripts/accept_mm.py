@@ -159,6 +159,9 @@ def main() -> int:
     ap.add_argument("--device", choices=("cpu", "gpu"), help="for GGUF models (default: gpu when the machine has one)")
     ap.add_argument("--gpu", type=int, help="the GPU index (default: the machine's only allowed GPU)")
     ap.add_argument("--threads", type=int, default=8, help="CPU threads for a GGUF model on the CPU")
+    ap.add_argument("--context", type=int, help="the context length instead of the model's default here (a smaller "
+                                                "one fits a shared card)")
+    ap.add_argument("--concurrency", type=int, help="concurrent requests instead of the model's default here")
     ap.add_argument("--image-url", default=DEFAULT_IMAGE_URL, help="a public image the gateway fetches")
     ap.add_argument("--audio", action="store_true", help="also send audio (models that take it: gemma-4-12b-it)")
     ap.add_argument("--video-url", help="also send this public video (the deployment gets videos 1)")
@@ -209,6 +212,10 @@ def main() -> int:
                 params["threads"] = args.threads
             if args.video_url:
                 params["videos"] = 1
+            if args.context:
+                params["context"] = args.context
+            if args.concurrency:
+                params["concurrency"] = args.concurrency
             dep_name = f"{PREFIX}{name}"[:48]
             body = {"name": dep_name, "model": name, "recipe": recipe, "params": params, "served_name": dep_name,
                     "replicas": 1, "machine_id": m["id"]}
