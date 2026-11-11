@@ -197,8 +197,9 @@ On the newest Claude models, a `temperature` below 1 together with `top_p`, or a
 - **Gemini 3 thought signatures** (`extra_content.google.thought_signature` on each tool call) must
   be sent back on the next turn. Forgeyard passes them through untouched. A conversation whose
   earlier turns were answered by a local model has none, and Gemini may refuse it with 400.
-- Thinking cannot be turned off on some models. Whether thinking tokens count in
-  `completion_tokens` has not been checked yet.
+- Thinking cannot be turned off on some models. Thinking tokens are left out of
+  `completion_tokens` and counted only in `total_tokens`; Forgeyard adds them back (see
+  [Cost and prices](#cost-and-prices)).
 
 ### Azure OpenAI
 

@@ -133,7 +133,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 - 這個端點還在 **beta**，不認得的參數會被默默忽略。
 - 不支援檔案上傳或下載。context 快取只能透過 `extra_body.google.cached_content` 使用。
 - **Gemini 3 thought signature**（每個工具呼叫上的 `extra_content.google.thought_signature`）必須在下一輪送回。Forgeyard 會原封不動地傳遞。如果對話較早的回合是由本機模型回答，就不會有 signature，Gemini 可能以 400 拒絕。
-- 有些模型無法關閉 thinking。thinking token 是否計入 `completion_tokens`，目前還沒確認。
+- 有些模型無法關閉 thinking。thinking token 不計入 `completion_tokens`，只算在 `total_tokens`；Forgeyard 會把它補回來（請見[費用與價格](#cost-and-prices)）。
 
 ### Azure OpenAI
 
