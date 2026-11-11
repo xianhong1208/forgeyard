@@ -23,6 +23,13 @@ class RecommendedError(ValueError):
     pass
 
 
+# Licences the built-in list may hold (1.3): permissive ones, OpenRAIL-style ones, and model licences
+# whose terms allow commercial use (Gemma's terms; Meta's Llama 3.1 / 3.2 community licences, which
+# allow it below 700 million monthly users and with attribution). Hugging Face's ids.
+ALLOWED_LICENSES = {"apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause", "openrail", "openrail++", "creativeml-openrail-m",
+                    "bigscience-openrail-m", "gemma", "llama3.1", "llama3.2"}
+
+
 class Group(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^[a-z0-9-]{1,32}$")
@@ -37,6 +44,7 @@ class Entry(BaseModel):
     source: str
     revision: Optional[str] = None
     file: Optional[str] = None
+    mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
     task: Literal["chat", "embed", "rerank", "asr"]
     format: Literal["safetensors", "gguf", "ctranslate2"]
@@ -45,6 +53,8 @@ class Entry(BaseModel):
     download_gib: float = Field(gt=0, le=10_000)
     memory_gib: float = Field(gt=0, le=10_000)
     gated: bool = False
+    license: str = Field(min_length=1, max_length=64)
+    inputs: list[Literal["image", "audio", "video"]] = Field(default_factory=list)  # besides text
     engine_args: dict[str, list[str]] = Field(default_factory=dict)
     note: str = Field(min_length=1, max_length=200)
 
@@ -94,6 +104,17 @@ def check(data: dict) -> Recommended:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
+        if e.license not in ALLOWED_LICENSES:
+            raise RecommendedError(f"{where}: the licence {e.license!r} is not one the recommended list may hold")
+        if e.mmproj is not None:
+            if e.format != "gguf":
+                raise RecommendedError(f"{where}: only a GGUF entry names a projector (mmproj) file")
+            try:
+                sources.safe_relpath(e.mmproj)
+            except sources.SourceError as err:
+                raise RecommendedError(f"{where}: {err}") from None
+            if not sources.is_mmproj(e.mmproj):
+                raise RecommendedError(f"{where}: {e.mmproj} is not an mmproj-*.gguf file")
         recipe = builtin.get(e.recipe)
         if recipe is None:
             raise RecommendedError(f"{where}: no built-in recipe {e.recipe!r}")

@@ -87,10 +87,20 @@
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | 連線到副本的秒數上限，超過就改試下一個 |
 | `GATEWAY_READ_TIMEOUT` | `600` | 副本回傳回應標頭或串流下一段內容的秒數上限 |
-| `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的） |
+| `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的）。部署的配方有 *Largest request* 參數（`max_body_mb`，vLLM 與 llama.cpp 預設 64）時，改以該值為上限 |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API keys** 修改 |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
 | `USAGE_FLUSH_SECONDS` | `5` | 把記憶體中統計的用量寫入資料庫的頻率 |
+
+### 對話中的媒體
+
+| 變數 | 預設值 | 用途 |
+|---|---|---|
+| `MEDIA_FETCH_MAX_MB` | `20` | 閘道為一個媒體網址（對話請求裡的 `https://` 圖片）最多下載多少，超過就拒絕（413 `media_too_large`） |
+| `MEDIA_ALLOW_PRIVATE_HOSTS` | `false` | 允許媒體網址指向私有或 loopback 位址（區網內的圖片伺服器）。link-local 與 metadata 位址仍然拒絕 |
+
+媒體網址也遵守下方的 `EGRESS_PROXY`、`EGRESS_ALLOWED_HOSTS` 與 `EGRESS_CA_FILE`。請見
+[對話中的圖片、音訊與影片](#images-audio-and-video-in-chat)。
 
 ### 雲端供應商
 
@@ -217,8 +227,36 @@ local_dirs = ["/data/models"]
 - 把 `model` 換成副本或供應商預期的名稱，加上副本的內部金鑰或供應商的金鑰，你的其他東西一概不轉送：不轉送你的 API 金鑰，也不轉送你的其他標頭。
 - `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
-- 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB）。
+- 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
 - 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
+
+### 對話中的圖片、音訊與影片
+
+`POST /v1/chat/completions` 接受 OpenAI 的內容區塊（content parts）。閘道接受什麼、轉送給引擎什麼：
+
+| 區塊 | 接受的寫法 | 送給引擎的形式 |
+|---|---|---|
+| 文字 | `text`、`input_text`、`refusal` | 不變 |
+| 圖片 | `image_url`（`{"url": …, "detail"}` 或單純字串）、`input_image` | 帶 `data:` URI 的 `image_url` |
+| 音訊 | `input_audio`（`{"data": <base64>, "format"}`，或 `data:audio/…` URI）、`audio_url` | 帶 base64 `data` 的 `input_audio` |
+| 影片 | `video_url`、`input_video` | 帶 `data:` URI 的 `video_url` |
+| 檔案（PDF） | `file`，`file_data` 為 `data:` URI | 不變，只送給能接受檔案的配方（內建配方都不能） |
+
+- 媒體網址可以是 `data:` URI（base64，且類型與區塊相符）或 `http(s)` 網址。**閘道會自己下載網址**，再以 `data:` URI 送給引擎：引擎從不自己抓任何東西。下載遵守 egress 規則：只連公開位址（開啟 `MEDIA_ALLOW_PRIVATE_HOSTS` 才允許私有位址；link-local 與 metadata 位址一律拒絕）、最多 3 次轉址且每次都重新檢查、每個項目最多 `MEDIA_FETCH_MAX_MB`、每個項目 20 秒，回應的類型也必須與區塊相符（圖片區塊要 `image/…`）。`file://` 與其他所有 scheme 回 400 `media_url_refused`。
+- 請求只會送到能處理其內容的部署：模型接受這種媒體（從模型的 `config.json` 判斷，GGUF 則看它的 projector 檔），配方也接受，而且數量在部署的 *Images per request*（圖片與音訊片段，預設 4）與 *Videos per request*（預設 0：影片預設關閉）之內。否則回 400 `media_not_supported` 或 `too_many_media_items`。
+- **1.3 中，帶媒體的請求絕不送往雲端供應商**（也不送往你網路內的供應商）。只由供應商提供的路由回 400 `media_local_only`；混合路由則不會溢出。
+- 用量會計算媒體項目數（`GET /api/usage` 的 `media_items`）。圖片的 token 依引擎回報，包含在 `prompt_tokens` 中。
+
+部署參數，位於部署表單的 **Advanced**（配方 `vllm` 與 `llama-cpp`）：
+
+| 參數 | 預設值 | 用途 |
+|---|---|---|
+| `images`（*Images per request*） | `4` | 一個請求最多可帶的圖片與音訊片段數；0 表示關閉。以 `--limit-mm-per-prompt` 傳給 vLLM |
+| `videos`（*Videos per request*） | `0` | 設為 1 以上才接受影片。在 vLLM 上，啟動時會為一段長影片預留記憶體 |
+| `max_body_mb`（*Largest request*） | `64` | 閘道送給這個部署的最大請求，單位 MiB（超過回 413） |
+| `image_tokens`（*Largest image*，僅 `llama-cpp`） | `1024` | 每張圖片最多縮成這麼多 token（`--image-max-tokens`；Qwen3-VL 約 1024 × 1024 像素）。不設的話，一張 5 MB 的照片約 4,000 token：8 個 CPU 執行緒要 125 秒，幾乎占滿 4,096 token 的上下文 |
+
+沒有這些參數的配方：4 張圖片或音訊片段、不接受影片、上限為 `GATEWAY_MAX_BODY_MB`。
 
 ### 標頭
 
@@ -248,6 +286,14 @@ local_dirs = ["/data/models"]
 | 400 | `invalid_request` | 沒有 `model`、請求內容不是物件，或音訊不是以 `multipart/form-data` 送出 | 修正請求 |
 | 400 | `wrong_endpoint` | 這個模型在另一個端點提供；訊息會寫出是哪一個 | 改用那個端點 |
 | 400 | `context_length_exceeded` | 只出現在開啟 **Spill a prompt that is too long** 的路由：提示放不進本機的上下文，而且沒有其他目標能接手 | 縮短提示或降低 `max_tokens` |
+| 400 | `invalid_content_part` | 內容區塊不是帶 `type` 的物件、閘道不接受的類型（`*_embeds`、未知類型），或媒體區塊沒有網址 | 使用[對話中的圖片、音訊與影片](#images-audio-and-video-in-chat)列出的區塊 |
+| 400 | `invalid_media_data` | `data:` URI 不是 base64，或類型與區塊不符（圖片區塊帶 `data:text/plain`），或 `file` 區塊沒有 `data:` URI | 送出 `data:<type>;base64,…` |
+| 400 | `media_url_refused` | 媒體網址的 scheme 不是 http(s) 或 `data:`（例如 `file://`）、帶有帳密，或主機解析到私有、loopback、link-local 或 metadata 位址（轉址後也一樣）；`input_audio.data` 裡放網址 | 送公開網址或 `data:` URI |
+| 400 | `media_fetch_failed` | 閘道無法下載媒體網址：沒有回應、狀態碼不是 200、超過 3 次轉址、超過 20 秒，或類型與區塊不符 | 檢查網址，或改以 `data:` URI 送出檔案 |
+| 400 | `media_not_supported` | 模型不接受這種媒體（把圖片送給純文字模型、*Videos per request* 為 0 時送影片）；訊息會說它接受什麼 | 改用能處理的模型，或在部署上開啟影片 |
+| 400 | `too_many_media_items` | 圖片（或音訊片段、影片）多於部署的 *Images per request* 或 *Videos per request* | 少送一些，或調高參數 |
+| 400 | `file_input_not_supported` | 把 `file` 區塊（PDF）送給配方不接受檔案的模型；閘道不會轉換檔案 | 改送頁面圖片或文字 |
+| 400 | `media_local_only` | 把帶媒體的請求送給只由供應商提供的模型 | 改用本機模型 |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
@@ -259,7 +305,8 @@ local_dirs = ["/data/models"]
 | 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
 | 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **Allowed**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
 | 404 | `unknown_endpoint` | 閘道沒有這個路徑 | 使用上面列出的端點 |
-| 413 | `request_too_large` | 請求內容大於 `GATEWAY_MAX_BODY_MB` | 送少一點，或調高設定 |
+| 413 | `request_too_large` | 請求內容（媒體網址下載並內嵌後）大於模型的 *Largest request* 或 `GATEWAY_MAX_BODY_MB` | 送少一點或縮小圖片，或調高參數或設定 |
+| 413 | `media_too_large` | 媒體網址的檔案大於 `MEDIA_FETCH_MAX_MB` | 送小一點的檔案，或調高設定 |
 | 421 | `host_not_allowed` | 伺服器不回應網址裡的主機名稱 | 使用它的位址，或把名稱加進 `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | 超過金鑰每分鐘的請求數或 token 數 | 等待 `Retry-After` 秒 |
 | 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
@@ -309,7 +356,7 @@ local_dirs = ["/data/models"]
 | `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
 | `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `SECRET_KEY_FILE` 都有設定 |
 | `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 × `AGENT_HEARTBEAT_SECONDS` |
-| `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS` 或 `PROVIDER_ALLOW_PRIVATE_HOSTS` 已開啟 |
+| `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS`、`PROVIDER_ALLOW_PRIVATE_HOSTS` 或 `MEDIA_ALLOW_PRIVATE_HOSTS` 已開啟 |
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
 | `setup-token-left` | 提示 | 設定完成後，`FORGEYARD_SETUP_TOKEN` 還設定著 |

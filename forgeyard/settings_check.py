@@ -162,6 +162,12 @@ def static_problems(s: Settings, environ: Optional[Mapping[str, str]] = None,
                            "PROVIDER_ALLOW_PRIVATE_HOSTS=true lets providers marked as outside your network reach "
                            "private and loopback addresses over plain http. It is meant for testing with a stand-in.",
                            fix_url=f"{REFERENCE}#cloud-providers", scope="setting:PROVIDER_ALLOW_PRIVATE_HOSTS"))
+    if s.media_allow_private_hosts:
+        out.append(Problem("private-hosts-allowed", "warning", "Media URLs in chat may use private addresses",
+                           "MEDIA_ALLOW_PRIVATE_HOSTS=true lets the gateway fetch images and other media from addresses "
+                           "on your network, for anyone with an API key. It is meant for an image server on your LAN; "
+                           "turn it off otherwise.", fix_url=f"{REFERENCE}#gateway",
+                           scope="setting:MEDIA_ALLOW_PRIVATE_HOSTS"))
     if s.cookie_secure == "false" and s.tls_on:
         out.append(Problem("cookie-not-secure", "warning", "Session cookies are sent without Secure",
                            "COOKIE_SECURE=false while the server speaks HTTPS: a browser would also send the session "

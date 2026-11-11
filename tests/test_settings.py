@@ -139,6 +139,7 @@ def test_fy_cfg_006_risky_combinations():
     assert "heartbeat-flapping" in ids(agent_heartbeat_seconds=10, agent_offline_seconds=24)
     assert "heartbeat-flapping" not in ids(agent_heartbeat_seconds=10, agent_offline_seconds=25)
     assert len(ids(model_allow_private_hosts=True, provider_allow_private_hosts=True)["private-hosts-allowed"]) == 2
+    assert len(ids(media_allow_private_hosts=True)["private-hosts-allowed"]) == 1
     assert "cookie-not-secure" in ids(cookie_secure="false")
     assert "cookie-not-secure" not in ids(cookie_secure="false", tls="off")
     assert "cookie-not-secure" not in ids(cookie_secure="true")

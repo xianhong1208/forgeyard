@@ -400,6 +400,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .seg-2 { background: #8aa1b4; }
 .seg-3 { background: #c9d2db; }
 .seg-4 { background: #5d7a90; }
+.seg-5 { background: #b3802f; }
+.seg-6 { background: #2f5d78; }
 .parts { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .parts li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; font-size: 13.5px; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -507,6 +509,14 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .cursor { display: inline-block; width: 8px; height: 15px; margin-left: 2px; vertical-align: -2px; background: var(--heat); animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.chat-form-media { grid-template-columns: auto minmax(0, 1fr) auto; }
+.msg-images { display: flex; flex-wrap: wrap; gap: 6px; }
+.msg-user .msg-images { justify-content: flex-end; }
+.msg-images img { max-width: min(220px, 100%); max-height: 180px; border-radius: var(--radius); border: 1px solid var(--line); object-fit: contain; background: var(--surface); }
+.attached { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; align-items: center; }
+.attached-item { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: 100%; min-width: 0; }
+.attached-item img { width: 40px; height: 40px; object-fit: cover; border-radius: calc(var(--radius) - 2px); flex: none; }
+.attached-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 18ch; }
 .chat-form textarea, .play textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius);
   background: var(--surface); color: var(--ink); font: inherit; resize: vertical; }
 .chat-form textarea:focus-visible, .play textarea:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
@@ -545,6 +555,9 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   .gw-addr { margin-left: 0; }
   .usage-controls .segmented { width: 100%; }
   .chat-form { grid-template-columns: minmax(0, 1fr); }
+  /* With the image button: the message on its own row, then the image button beside Send. */
+  .chat-form-media { grid-template-columns: auto minmax(0, 1fr); }
+  .chat-form-media textarea { grid-column: 1 / -1; order: -1; }
   .play-bar .field { min-width: 0; }
   .transcript { max-height: 60vh; padding: 10px; }
   .msg { max-width: 100%; }
@@ -954,6 +967,12 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .budget-item input { width: 120px; }
 .budget-group + .budget-group { margin-top: 16px; }
 .budget-group h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+/* 1.3: catalog cells with several lines stay one block in the stacked phone layout. */
+.cell-stack { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chip-row .chip { display: inline-flex; align-items: center; gap: 3px; }
+.nowrap { white-space: nowrap; }
 
 /* ---------------------------------------------------------------- setup health (the advisor) */
 .health-badge { display: flex; align-items: center; align-self: center; gap: 6px; height: 34px; padding: 0 10px; margin-left: auto;

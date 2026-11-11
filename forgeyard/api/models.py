@@ -23,7 +23,8 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, utcnow
-from forgeyard.models import catalog, hub as hf_hub, inspect as inspector, recipes, recommended as rec, scheduler, sources
+from forgeyard.models import (catalog, hub as hf_hub, inspect as inspector, modalities, recipes, recommended as rec,
+                              scheduler, sources)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
@@ -82,13 +83,25 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "revision": m.revision, "file": m.file, "format": m.format, "task": m.task,
             "task_label": TASK_LABEL.get(m.task, m.task), "size_bytes": m.size_bytes, "engine_args": m.engine_args or {},
             "summary": model_summary(m), "recipes": compatible(m, all_recipes), "deployments": deployments,
-            "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at}
+            "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
+            **media_out(m.meta or {}, m.format)}
+
+
+def media_out(meta: dict, fmt: str) -> dict:
+    """Licence, gated, the media it takes (None: unknown, a catalog entry from before 1.3) and its
+    projector file, for the catalog and the inspection preview."""
+    mm = meta.get("mmproj") if isinstance(meta.get("mmproj"), dict) else None
+    return {"license": meta.get("license"), "gated": bool(meta.get("gated")),
+            "modalities": modalities.of_model(meta, fmt),
+            "mmproj": {"path": mm.get("path"), "size": mm.get("size")} if mm else None,
+            "mmproj_files": meta.get("mmproj_files") or []}
 
 
 def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
     out = {"name": r.name, "title": r.title, "description": r.description, "engine": r.engine, "version": r.version,
            "tasks": r.tasks, "formats": r.formats, "api": r.api, "share": r.share, "builtin": r.builtin,
            "estimate": r.estimate.method,
+           "media": r.media.model_dump() if r.media is not None else None,
            "params": {k: p.model_dump(exclude_none=True) for k, p in r.params.items()},
            "devices": sorted({"gpu" if v.gpu else "cpu" for v in r.variants}),
            "variants": [{"name": v.name, "vendor": v.when.vendor, "runtime": v.runtime, "image": v.image,
@@ -121,6 +134,9 @@ class InspectIn(BaseModel):
     source: str = Field(max_length=1024)
     revision: Optional[str] = Field(default=None, max_length=128)
     file: Optional[str] = Field(default=None, max_length=512)
+    # GGUF vision models: the projector file (mmproj-*.gguf) to use with it. Not given: the
+    # repository's F16 one (else BF16, Q8_0, the first) when it has any; "none": none.
+    mmproj: Optional[str] = Field(default=None, max_length=512)
     # Gated repositories: used for these requests only, never stored with the catalog entry.
     token: Optional[str] = Field(default=None, max_length=512)
     format: Optional[str] = Field(default=None, max_length=16)       # local models
@@ -144,7 +160,7 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
         return inspector.inspect_source(src, ref=body.revision, file=body.file, endpoint=s["hf_endpoint"],
                                         policy=catalog.hf_policy(), url_policy=catalog.url_policy(db),
                                         local_dirs=s["local_dirs"], token=(body.token or "").strip() or None,
-                                        fmt=body.format, size_bytes=body.size_bytes)
+                                        fmt=body.format, size_bytes=body.size_bytes, mmproj=body.mmproj)
     except (inspector.InspectError, sources.SourceError) as e:
         raise fail(422, "cannot_inspect", str(e)) from None
 
@@ -218,6 +234,7 @@ def inspect_model(body: InspectPreviewIn, _: Caller = Depends(require_admin), db
     fits = [n for n, (r, _) in all_r.items() if fmt in r.formats and (task is None or task in r.tasks)]
     preview = {k: v for k, v in meta.items() if k not in ("files",)}
     preview["file_count"] = len(meta.get("files") or [])
+    preview.update(media_out(meta, fmt))
     return {"meta": preview, "recipes": fits,
             "suggestion": suggest(db, meta, task, body.recipe, body.device if body.device in ("gpu", "cpu") else None)}
 

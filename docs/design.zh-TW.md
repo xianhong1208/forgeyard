@@ -137,7 +137,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
     large-v3 turbo），以及 BGE-M3 與它的 reranker。每一項標示 task、建議的配方、大約下載量與一份需要多少記憶體。Gemma 3 與 Llama 是
-    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
+    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。**Vision** 群組（1.3）有給 vLLM 的 Qwen3-VL 2B / 4B / 8B，以及給 llama.cpp、附 projector 檔的 Qwen3-VL 2B / 8B GGUF。每一項都寫明**授權**，清單只收允許商業使用的授權（forgeyard/models/recommended.py 的 `ALLOWED_LICENSES`）：寬鬆授權（Apache-2.0、MIT、BSD）、OpenRAIL 類，以及條款允許商業使用的模型授權。Gemma 的條款（允許商業使用、有會延伸到使用者的禁止用途政策，Google 也保留限制違規使用的權利）與 Meta 的 Llama 3.1 / 3.2 社群授權（月活躍使用者 7 億以下可商用，須標示）留在清單上，標為 gated 並顯示授權；禁止商業使用的授權（CC-BY-NC、僅限研究）不能加入。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
     safetensors 版本（main 分支只有 PyTorch 權重）。`python scripts/check_recommended.py` 會用 Forgeyard 自己的檢視與估算逐項對 Hugging Face 檢查。
   - **Search Hugging Face（搜尋）**：由 server 呼叫 `<HF_ENDPOINT>/api/models`（瀏覽器不會直接連 Hugging Face），可依 task 與格式
     （safetensors、GGUF、CTranslate2）篩選，依下載數排序（搜尋 rerank 時也會查 text classification，因為很多 reranker 被歸在那一類，並把名稱含 "rerank" 的排在前面），顯示下載數、按讚數、最後更新、是否 gated，以及 Hugging Face 有提供時的大小。
@@ -150,13 +150,14 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   `local://<dir>`。模型**不下載就先檢視**：固定到哪個 commit、檔案與大小、`config.json`、safetensors header（參數量）或 GGUF
   header（用 HTTP range 讀）。gated repo 的 token 只用在這次檢視，不保存。admin 可以替模型加上各配方的引擎參數
   （Qwen3-Reranker 需要 vLLM 的 `--hf-overrides`）。
+  檢視（1.3）也會讀出**授權**（card 的 `license`，"other" 時用 `license_name`，否則看 `license:` tag）、是否 **gated**，以及**文字以外能接受什麼**：有 `vision_config` 或圖片 token 是圖片，有 `audio_config` 是音訊，有影片 token 或 `video_preprocessor_config.json` 是影片（Omni 模型看 `thinker_config`）。GGUF repo 的 **projector 檔**（`mmproj-*.gguf`）不算模型選項：加入模型時一併選一個（預設 F16，其次 BF16、Q8_0、第一個；或不選），讀它的 `clip.has_vision_encoder` / `clip.has_audio_encoder`（在 llama.cpp 裡視覺代表圖片與影片），並和模型一起下載。1.3 之前加入的目錄項目沒有這些資訊：safetensors 視為未知（媒體照樣轉送，由引擎回應），GGUF 視為只有文字。
 - **配方**是 YAML（[forgeyard/recipes](../forgeyard/recipes)）：task、格式、每個 task 的協定、參數、估算方法、health check，以及依硬體
   （廠商、NVIDIA compute capability 或 AMD gfx target、driver 版本）分的 **variant**；每個 variant 是固定版本的容器映像，或給沒有
   Docker 的 CPU 機器、由 agent 下載並以 SHA-256 檢查的固定版本執行檔。內建的映像以 **digest 釘選**，寫成
   `repo:tag@sha256:…`：agent 拉取並執行的是 digest，registry 上的 tag 被改掉也改變不了實際執行的東西；介面顯示 tag。
   要升級引擎：改 tag，執行 `uv run --no-sync python scripts/pin_images.py --write`（從 Docker Hub 或 GHCR 取得多架構 digest，
   並檢查每個 variant 宣稱的平台都在），再檢查 diff；不加 `--write` 則檢查每個 digest 是否仍對應它的 tag。內建映像少了 digest
-  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。內建：
+  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，以及估算的 `vision_overhead` / `video_overhead`。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
 
   | 配方 | 服務 | 執行在 | 固定版本 |
   |---|---|---|---|
@@ -169,6 +170,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
   GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
+  能讀圖片的模型（1.3）會加上配方的**視覺項**：vLLM 加 `vision_overhead`（1.5 GiB：vLLM 啟動時會用最大的圖片跑一次視覺編碼器並保留 encoder cache，之後才決定 KV cache 大小；視覺權重已含在模型權重裡），開啟影片時再加 `video_overhead`（1 GiB）；llama.cpp 加 projector 檔本身（整個載入，預設放到 GPU）與它的 buffer 用的 `vision_overhead`（在 CPU 上量測）。開啟圖片時，估算會註明圖片也會占用上下文 token。
 - **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
   讓整張空著的卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
@@ -237,7 +239,17 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   可依日期、模型、key、人、來源（API key 或 playground）或本機與雲端分組；**Cost** 分頁再依日期、key、人、模型或供應商顯示費用
   （見〈費用〉）。在記憶體裡計數，每 `USAGE_FLUSH_SECONDS`（5 秒）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
   一列。client 中途離開（499）不算錯誤。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。
-- **Playground**：在 console 裡用串流 chat，也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
+- **對話中的圖片、音訊與影片（1.3，** forgeyard/gateway/media.py**）。** vLLM 0.32 與 llama-server b11977 會自己下載媒體區塊裡的任何 http(s) 網址，沒有私有位址過濾（vLLM 還會跟隨轉址），而且是從你的網路內部連出去。所以：
+  - gateway 走過 `messages[].content[]`，把每個媒體區塊**重建**成同一種形式（`image_url` 與 `video_url` 帶 `data:` URI，`input_audio` 帶 base64），只保留檢查過的欄位；接受 `input_image`、`input_video` 與 `audio_url` 並轉換。文字區塊不變；其他類型與 `*_embeds` 一律拒絕（`invalid_content_part`）；
+  - `http(s)` 網址**由 gateway 下載**，用 egress client（forgeyard/gateway/egress.py：`EGRESS_PROXY`、`EGRESS_CA_FILE`、`EGRESS_ALLOWED_HOSTS`）：名稱解析出的每個位址都要檢查，除非 `MEDIA_ALLOW_PRIVATE_HOSTS` 否則只接受公開位址，link-local 與 metadata 位址一律拒絕；連線直接連到檢查過的位址；轉址由 gateway 自己跟隨（最多 3 次），每次重新檢查；每個項目 `MEDIA_FETCH_MAX_MB`、20 秒；內容類型必須與區塊相符（以 `application/octet-stream` 回傳的圖片用 magic number 辨識）。資料取代網址。`file://` 與其他所有 scheme：`media_url_refused`；
+  - 引擎本身也加固：`vllm` 與 `vllm-pooling` 帶 `--allowed-media-domains forgeyard.invalid`（清單為空時 vLLM 什麼主機都抓；一個什麼都比對不到的清單就全部拒絕）與 `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`，且不設 `--allowed-local-media-path`；llama-server 沒有這種開關，只能經由 key guard、以 gateway 送來的資料存取；
+  - 路由會縮小（`fit_route`）到能處理請求內容的部署：模型的媒體（來自目錄項目）、配方的 `media.inputs`、部署的 `images`（圖片與音訊片段，4）與 `videos`（0：影片關閉）數量，`files` 只送給配方有宣告的（內建的都沒有：gateway 從不轉換檔案）。否則在下載或送出任何東西之前就回 `media_not_supported`、`too_many_media_items` 或 `file_input_not_supported`；
+  - 1.3 中**媒體絕不送往供應商**（雲端與你網路內的都不送）：這些目標會被排除；只由供應商提供的路由回 `media_local_only`；
+  - 溢出規則把每個媒體項目算成 1,600 token，而不是它的 base64 大小；
+  - 用量會計算媒體項目（`media_items`）；圖片的 token 依引擎回報包含在 `prompt_tokens` 裡（vLLM 帶 `--enable-prompt-tokens-details`）。
+- **每個部署的請求大小上限（1.3）。** 部署的 `max_body_mb`（vLLM 與 llama.cpp 為 64 MiB）就是它的上限；沒有這個參數的配方沿用 `GATEWAY_MAX_BODY_MB`。gateway 先讀到所有部署中最大的上限為止（最多每 5 秒從資料庫讀一次），知道模型之後再套用該路由自己的上限，媒體內嵌後再檢查一次（413 `request_too_large`）。
+- **用量單位（1.3，migration 0012）。** `usage_daily` 為新模型類型的每種單位各加一欄：`media_items`、`characters`、`images`、`kilopixels`、`media_ms`、`bytes_in`、`bytes_out`、`busy_ms`；預設 0，所以舊的資料列意義不變。多模態對話會填 `media_items`；其餘由 1.3 後續的類型填入。
+- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
   （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。它的雲端設定對 admin 是 `on`，對其他人是
   server 允許的上限；個人的預算適用，沒有 key 的預算。
 - **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；
@@ -375,7 +387,7 @@ Kong 與 GPUStack 之後決定。
   - `GET /api/budgets`（admin：`?everyone=true`）回傳月份、`resets_at`，以及每個 key、個人與供應商的預算、已花費、已預留、使用比例
     與等級（`ok`、80% 起 `warning`、100% 起 `exhausted`；預算為 0 時是 exhausted）。API keys 頁、**Usage → Cost**（*Budgets this
     month*）與供應商的頁面會顯示它們。
-- **1.2 不做：**Anthropic 或 Gemini 的原生翻譯與 `/v1/messages` 直通；Responses API、batch、檔案、圖片；雲端的 rerank、score、
+- **1.2 不做：**Anthropic 或 Gemini 的原生翻譯與 `/v1/messages` 直通；Responses API、batch、檔案、圖片（1.3 中帶媒體的請求也只留在本機）；雲端的 rerank、score、
   語音；串流中途切換；雲端之間依成本、延遲或語意的路由；黏著路由；Entra ID、Vertex 或 Bedrock 認證。
 
 ## 帳號與登入

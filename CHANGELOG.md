@@ -6,6 +6,9 @@ version until 1.0.
 
 ## [Unreleased]
 
+1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
+through the gateway, and the usage units for all of 1.3.
+
 ### Added
 
 - **Setup health** for admins: Forgeyard checks its own setup for settings and combinations that
@@ -46,6 +49,52 @@ version until 1.0.
   table per group, totals and the time, `--out` JSON. Everything it makes is named `accept-<run>-…` and
   removed at the end, also after a failure or Ctrl-C; a provider budget it changes is put back. Guide:
   *How-to → Check a server end to end*.
+- **Images, audio and video in chat** at `/v1/chat/completions` (and the Playground): `image_url`,
+  `input_image`, `input_audio`, `audio_url`, `video_url` and `input_video` parts. The gateway rebuilds
+  every media part in one shape (`image_url` and `video_url` with a `data:` URI, `input_audio` with
+  base64) and keeps only the fields it checked; other part types and `*_embeds` answer 400
+  `invalid_content_part`.
+- **The gateway fetches media URLs itself**, through the egress rules: public addresses only
+  (`MEDIA_ALLOW_PRIVATE_HOSTS` for a LAN image server; link-local and metadata addresses never), every
+  redirect checked again (at most 3), `MEDIA_FETCH_MAX_MB` (20) per item, 20 seconds per item, the
+  answer's type must match the part. `file://` and other schemes answer 400 `media_url_refused`.
+- A request goes only to a deployment that takes what it carries: what the **model** takes (read
+  from its `config.json`, or a GGUF model's projector), what the **recipe** takes (its new `media`
+  block), and the deployment's **Images per request** (4) and **Videos per request** (0: video is off
+  until enabled), in the deployment form's collapsed **Advanced** section. New codes:
+  `media_not_supported`, `too_many_media_items`, `file_input_not_supported`, `invalid_media_data`,
+  `media_fetch_failed`, `media_too_large` (413), `media_local_only`.
+- **Body limit per deployment:** *Largest request* (`max_body_mb`, 64 MiB for vLLM and llama.cpp); the
+  gateway reads up to the largest any deployment takes, then applies the model's own (413
+  `request_too_large`). Recipes without the parameter keep `GATEWAY_MAX_BODY_MB`.
+- **vLLM**: `--limit-mm-per-prompt` from those parameters; `--enable-prompt-tokens-details`.
+- **llama.cpp**: GGUF catalog entries can carry a **projector file** (`mmproj-*.gguf`, F16 by
+  default, or chosen, or none), downloaded with the model and passed as `--mmproj` (recipes:
+  `optional_args` with `if_model: mmproj` and the `{mmproj_file}` placeholder). Images are scaled to
+  at most *Largest image* (`image_tokens`, 1,024 tokens, Advanced; `--image-max-tokens`): without it a
+  5 MB photo became 4,076 tokens and took 125 s on 8 CPU threads; with it 1,034 tokens and 21 s, the
+  same answer.
+- Measured on the CPU (Qwen3-VL 2B Q4_K_M with its F16 projector, llama.cpp b11977, 8 threads, context
+  4,096 × 2): estimate 3.95 GiB; RSS 3.37 GiB idle, peak 3.86 GiB after a 1,024-token image. A 256 ×
+  256 image takes 66 tokens and 1.1 s; llama-server's `prompt_tokens` include the image tokens.
+- **The catalog shows each model's licence, whether it is gated, and what it takes besides text**,
+  read from Hugging Face when it is added. The recommended list holds only allowed licences
+  (permissive, OpenRAIL-style, or terms that allow commercial use: Gemma's terms and Meta's Llama 3.1 /
+  3.2 licences stay) and adds a **Vision** group: Qwen3-VL 2B, 4B and 8B (vLLM), Qwen3-VL 2B GGUF
+  (CPU) and 8B GGUF (llama.cpp on a GPU or an AMD APU), with their projectors.
+- **The estimate counts the vision encoder:** a recipe's `vision_overhead` (vLLM profiles the
+  encoder at startup before sizing the KV cache: 1.5 GiB to start with, to be calibrated on an A100)
+  and `video_overhead` (1 GiB, when video is on); for GGUF the projector file itself plus llama.cpp's
+  buffers.
+- **Usage units for the whole of 1.3** (migration 0012): `media_items`, `characters`, `images`,
+  `kilopixels`, `media_ms`, `bytes_in`, `bytes_out` and `busy_ms` per usage row, 0 on rows from
+  before, in `GET /api/usage`. This release fills `media_items`; **Usage** shows a Media column once
+  there are any.
+- **Playground:** attach images in the chat tab (sent as `data:` URIs) and see them in the transcript.
+- Recipe parameters can be **advanced** (the deploy form's collapsed Advanced section), and a
+  deployment made before a recipe gained a parameter renders its default.
+- `scripts/accept_mm.py`: the real-hardware acceptance of this part, through the API and the official
+  SDK, with idempotent cleanup.
 
 ### Changed
 
@@ -65,6 +114,19 @@ version until 1.0.
   left out now keeps its saved value. `PUT /api/keys/limits` does the same (`null` still clears one).
 - The guide said the Docker form's server address defaults to `PUBLIC_URL`; with `PUBLIC_URL` empty
   it is the address you opened the page with.
+
+### Security
+
+- **Engines never fetch a URL from a request.** vLLM 0.32 and llama-server b11977 download any http(s)
+  media URL themselves, with no private-address filter (vLLM also follows redirects). Besides the
+  gateway doing the fetching, the `vllm` and `vllm-pooling` recipes pass `--allowed-media-domains
+  forgeyard.invalid` (a list that matches nothing turns engine fetches off) and
+  `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`. llama-server has no such switch; only the gateway reaches it
+  (the agent's key guard), and the gateway sends it only `data:` URIs and base64.
+- **Media never go to a provider:** requests with images, audio, video or files are served by local
+  deployments only; a route served only by providers answers 400 `media_local_only`, and on a mixed
+  route they do not spill.
+
 
 ## [1.2.0] — 2026-11-11
 

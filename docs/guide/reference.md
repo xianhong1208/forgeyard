@@ -94,10 +94,20 @@ are fine for almost everyone.
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | Seconds to connect to a replica before trying the next one |
 | `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for its answer's headers or the next piece of a stream |
-| `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one) |
+| `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
 | `USAGE_FLUSH_SECONDS` | `5` | How often usage counted in memory is written to the database |
+
+### Media in chat
+
+| Variable | Default | What it does |
+|---|---|---|
+| `MEDIA_FETCH_MAX_MB` | `20` | The most the gateway downloads for one media URL (an `https://` image in a chat request) before it refuses it (413 `media_too_large`) |
+| `MEDIA_ALLOW_PRIVATE_HOSTS` | `false` | Let media URLs point at private or loopback addresses (an image server on your LAN). Link-local and metadata addresses stay refused |
+
+Media URLs also follow `EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS` and `EGRESS_CA_FILE` below. See
+[Images, audio and video in chat](#images-audio-and-video-in-chat).
 
 ### Cloud providers
 
@@ -244,9 +254,51 @@ What the gateway does with a request:
   request arrives, and sets the most a request may cost under a budget.
 - A streamed chat or completion gets a final usage chunk (`stream_options.include_usage`) so that
   tokens are counted. If you did not ask for it, the gateway removes it again.
-- The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB).
+- The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB), or the model's own *Largest request*
+  (`max_body_mb`, 64 MB by default for vLLM and llama.cpp deployments).
 - If you close the connection, the gateway closes its request upstream at once, so the engine stops
   generating.
+
+### Images, audio and video in chat
+
+`POST /v1/chat/completions` takes OpenAI's content parts. What the gateway accepts and what it sends
+on:
+
+| Part | Accepted as | Sent to the engine as |
+|---|---|---|
+| Text | `text`, `input_text`, `refusal` | unchanged |
+| Image | `image_url` (`{"url": …, "detail"}` or a bare string), `input_image` | `image_url` with a `data:` URI |
+| Audio | `input_audio` (`{"data": <base64>, "format"}`, or a `data:audio/…` URI), `audio_url` | `input_audio` with base64 `data` |
+| Video | `video_url`, `input_video` | `video_url` with a `data:` URI |
+| File (PDF) | `file` with `file_data` as a `data:` URI | unchanged, only to a recipe that takes files (no built-in one does) |
+
+- A media URL may be a `data:` URI (base64, of the part's kind) or an `http(s)` URL. **The gateway
+  fetches URLs itself** and sends the engine a `data:` URI: engines never fetch anything. It follows
+  the egress rules: public addresses only (private ones with `MEDIA_ALLOW_PRIVATE_HOSTS`; link-local
+  and metadata addresses never), at most 3 redirects, each checked again, `MEDIA_FETCH_MAX_MB` per
+  item, 20 seconds per item, and the answer must be of the part's kind (`image/…` for an image).
+  `file://` and every other scheme answer 400 `media_url_refused`.
+- The request goes only to a deployment that takes what it carries: its model takes that medium
+  (read from the model's `config.json`, or its projector file for GGUF), its recipe does, and it is
+  within the deployment's *Images per request* (images and audio clips, 4 by default) and *Videos
+  per request* (0 by default: video is off until enabled). Otherwise 400 `media_not_supported` or
+  `too_many_media_items`.
+- **Requests with media never go to a cloud provider** (nor to a provider inside your network), in
+  1.3. A route served only by providers answers 400 `media_local_only`; on a mixed route they never
+  spill.
+- Usage counts the media items (`media_items` in `GET /api/usage`). Image tokens are in
+  `prompt_tokens` as the engine reports them.
+
+The deployment parameters, under **Advanced** in the deploy form (recipes `vllm` and `llama-cpp`):
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `images` (*Images per request*) | `4` | The most images, and audio clips, one request may carry; 0 turns them off. Passed to vLLM in `--limit-mm-per-prompt` |
+| `videos` (*Videos per request*) | `0` | Video is off until this is 1 or more. On vLLM it reserves memory for a long video at startup |
+| `max_body_mb` (*Largest request*) | `64` | The largest request the gateway sends this deployment, in MiB (413 above) |
+| `image_tokens` (*Largest image*, `llama-cpp` only) | `1024` | Each image is scaled down to at most this many tokens (`--image-max-tokens`; about 1024 × 1024 pixels on Qwen3-VL). Without it a 5 MB photo became about 4,000 tokens: 125 s on 8 CPU threads, nearly a whole 4,096-token context |
+
+A recipe without these parameters gets 4 images or audio clips, no video and `GATEWAY_MAX_BODY_MB`.
 
 ### Headers
 
@@ -278,6 +330,14 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `invalid_request` | No `model`, a body that is not an object, or audio not sent as `multipart/form-data` | Fix the request |
 | 400 | `wrong_endpoint` | The model is served at another endpoint; the message names it | Use that endpoint |
 | 400 | `context_length_exceeded` | Only on a route with **Spill a prompt that is too long**: the prompt does not fit the local context, and nothing else could take it | Shorten the prompt or lower `max_tokens` |
+| 400 | `invalid_content_part` | A content part that is not an object with a `type`, a type the gateway does not take (`*_embeds`, unknown ones), or a media part without its URL | Use the parts listed under [Images, audio and video in chat](#images-audio-and-video-in-chat) |
+| 400 | `invalid_media_data` | A `data:` URI that is not base64, or not of the part's kind (an image part with `data:text/plain`), or a `file` part without a `data:` URI | Send `data:<type>;base64,…` |
+| 400 | `media_url_refused` | A media URL with another scheme than http(s) or `data:` (`file://`…), credentials, or a host that resolves to a private, loopback, link-local or metadata address, also after a redirect; a URL in `input_audio.data` | Send a public URL or a `data:` URI |
+| 400 | `media_fetch_failed` | The gateway could not fetch a media URL: no answer, a status other than 200, more than 3 redirects, more than 20 seconds, or not of the part's kind | Check the URL, or send the file as a `data:` URI |
+| 400 | `media_not_supported` | The model does not take that medium (images to a text model, video while *Videos per request* is 0); the message says what it takes | Use a model that takes it, or enable video on the deployment |
+| 400 | `too_many_media_items` | More images (or audio clips, or videos) than the deployment's *Images per request* or *Videos per request* | Send fewer, or raise the parameter |
+| 400 | `file_input_not_supported` | A `file` part (PDF) to a model whose recipe does not take files; the gateway does not convert files | Send the pages as images, or the text |
+| 400 | `media_local_only` | A request with media to a model served only by providers | Use a local model |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
@@ -289,7 +349,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
 | 404 | `model_not_found` | No such model for this key: it does not exist, or it is cloud-only and the key's cloud setting is not **Allowed**. From `GET /v1/models/{model}`, also a stopped model | Check `GET /v1/models` |
 | 404 | `unknown_endpoint` | The gateway has no such path | Use an endpoint above |
-| 413 | `request_too_large` | The body is larger than `GATEWAY_MAX_BODY_MB` | Send less, or raise the setting |
+| 413 | `request_too_large` | The body (with media URLs fetched and inlined) is larger than the model's *Largest request* or `GATEWAY_MAX_BODY_MB` | Send less or smaller images, or raise the parameter or the setting |
+| 413 | `media_too_large` | A media URL's file is larger than `MEDIA_FETCH_MAX_MB` | Send a smaller file, or raise the setting |
 | 421 | `host_not_allowed` | The server does not answer to the host name in the URL | Use its address, or add the name to `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | Over the key's requests or tokens per minute | Wait `Retry-After` seconds |
 | 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
@@ -351,7 +412,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
 | `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `SECRET_KEY_FILE` are set |
 | `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 × `AGENT_HEARTBEAT_SECONDS` |
-| `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS` or `PROVIDER_ALLOW_PRIVATE_HOSTS` is on |
+| `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS`, `PROVIDER_ALLOW_PRIVATE_HOSTS` or `MEDIA_ALLOW_PRIVATE_HOSTS` is on |
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
 | `setup-token-left` | note | `FORGEYARD_SETUP_TOKEN` is still set after setup |

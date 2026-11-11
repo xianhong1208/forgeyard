@@ -36,6 +36,10 @@ cloud provider.
    local tier, may still serve it) and the answer says so in `X-Forgeyard-Budget-Exhausted`; when
    nothing else can serve it, 402 `budget_exhausted` (or `budget_unpriced`). The reservation is
    settled with the real cost when the request finishes, and released when it fails.
+10. Images, audio and video in chat (1.3, forgeyard/gateway/media.py): their parts are rebuilt, media
+   URLs fetched by the gateway and inlined, and the route narrowed to the deployments that take
+   what the request carries (`fit_route`). Such requests never go to a provider. Every deployment
+   may also take larger bodies than GATEWAY_MAX_BODY_MB (its `max_body_mb`).
 """
 
 from __future__ import annotations
@@ -48,7 +52,7 @@ import logging
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional, Union
 
 import httpx
@@ -59,14 +63,15 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from forgeyard.config import get_settings
-from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc
-from forgeyard.gateway import budgets, egress, multipart, pricing, quirks
+from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
+from forgeyard.gateway import budgets, egress, media as gmedia, multipart, pricing, quirks
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
 from forgeyard.gateway.usage import recorder
 from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
+from forgeyard.models import modalities
 
 log = logging.getLogger("forgeyard.gateway")
 
@@ -108,6 +113,7 @@ class LocalGroup:
     concurrency: Optional[int] = None     # requests one replica takes at once (its `concurrency`)
     context: Optional[int] = None         # tokens per request (its `context`)
     running: bool = True                  # False once someone stopped the deployment
+    accepts: Optional[modalities.Accepts] = None   # media and body size it takes (1.3)
 
 
 @dataclass
@@ -193,7 +199,7 @@ def _int(value) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
-def local_group(t: RouteTarget, d: Deployment) -> LocalGroup:
+def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -> LocalGroup:
     w = d.workload
     replicas = []
     for r in w.replicas:
@@ -210,10 +216,14 @@ def local_group(t: RouteTarget, d: Deployment) -> LocalGroup:
                                machine=r.node.name if r.node else None, secret=r.secret, protected=protected,
                                ready_since=since))
     params = d.params or {}
+    found = (recipes or {}).get(d.recipe)
+    model = d.model
+    accepts = modalities.accepts(found[0], model.meta or {}, model.format, params) \
+        if found is not None and model is not None else None
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
                       concurrency=_int(params.get("concurrency")), context=_int(params.get("context")),
-                      running=w.desired_state == "running")
+                      running=w.desired_state == "running", accepts=accepts)
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -229,10 +239,11 @@ def _route_query():
     return (select(GatewayRoute).options(
         selectinload(GatewayRoute.targets).selectinload(RouteTarget.deployment).selectinload(Deployment.workload)
         .selectinload(Workload.replicas).selectinload(Replica.node),
+        selectinload(GatewayRoute.targets).selectinload(RouteTarget.deployment).selectinload(Deployment.model),
         selectinload(GatewayRoute.targets).selectinload(RouteTarget.provider_model).selectinload(ProviderModel.provider)))
 
 
-def build_route(row: GatewayRoute) -> Route:
+def build_route(row: GatewayRoute, recipes: Optional[dict] = None) -> Route:
     route = Route(served_name=row.served_name, api=row.api, id=row.id, deployment_id=row.deployment_id,
                   local_only=bool(row.local_only), spill_on_long_prompt=bool(row.spill_on_long_prompt),
                   wait_ms=max(0, min(int(row.wait_ms or 0), MAX_WAIT_MS)))
@@ -250,7 +261,7 @@ def build_route(row: GatewayRoute) -> Route:
             continue
         tier = tiers.setdefault(t.tier, Tier(t.tier))
         if t.kind == "local" and t.deployment is not None:
-            tier.locals.append(local_group(t, t.deployment))
+            tier.locals.append(local_group(t, t.deployment, recipes))
         elif t.kind == "provider" and t.provider_model is not None and row.api in CLOUD_APIS:
             ct = cloud_target(t, t.provider_model)
             if ct.enabled:
@@ -260,8 +271,10 @@ def build_route(row: GatewayRoute) -> Route:
 
 
 def load_route(db: DbSession, served_name: str) -> Optional[Route]:
+    from forgeyard.models.catalog import all_recipes
+
     row = db.scalar(_route_query().where(GatewayRoute.served_name == served_name))
-    return build_route(row) if row is not None else None
+    return build_route(row, all_recipes(db)) if row is not None else None
 
 
 def model_names(db: DbSession) -> list[tuple[Route, int]]:
@@ -307,6 +320,84 @@ def check_access(caller: KeyCaller, route: Optional[Route], model: str, endpoint
     return route
 
 
+# ------------------------------------------------------------------ media and body size (1.3)
+MEDIA_ENDPOINTS = ("chat/completions", "embeddings")   # bodies that can carry `messages` with media parts
+KIND_WORDS = {"image": "images", "audio": "audio clips", "video": "videos"}
+
+
+def scan_media(parsed: "Parsed", endpoint: str) -> Optional[gmedia.Media]:
+    """Rebuild the request's media parts (400 for anything not accepted); None for text only."""
+    if endpoint not in MEDIA_ENDPOINTS or parsed.obj is None:
+        return None
+    parsed.media = gmedia.scan(parsed.obj)
+    return parsed.media
+
+
+def body_size(parsed: "Parsed") -> int:
+    """The body's size once media URLs were inlined."""
+    if parsed.obj is None:
+        return parsed.size
+    return len(json.dumps(parsed.obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _takes(g: LocalGroup, m: Optional[gmedia.Media], size: int) -> bool:
+    a = g.accepts
+    if a is None:  # its recipe is gone: the global limit, no media checks
+        return size <= get_settings().gateway_max_body_mb * 1024**2
+    if size > a.max_body:
+        return False
+    if m is None:
+        return True
+    if m.files and not a.files:
+        return False
+    return all(n <= a.limit(kind) for kind, n in m.counts.items() if n)
+
+
+def fit_route(route: Route, parsed: "Parsed", size: int) -> Route:
+    """The route with only the targets that can take this request: deployments whose recipe and
+    model take its media (and as many) and whose `max_body_mb` its size fits; providers only for
+    requests without media, within GATEWAY_MAX_BODY_MB. Raises the most telling error when none can."""
+    if not route.tiers:
+        return route
+    m = parsed.media
+    limit = get_settings().gateway_max_body_mb * 1024**2
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if _takes(g, m, size)]
+        clouds = [] if m is not None else [c for c in tier.clouds if size <= limit]
+        if locals_ or clouds:
+            tiers.append(Tier(tier.index, locals_, clouds))
+    if tiers:
+        return replace(route, tiers=tiers)
+    name = route.served_name
+    groups = [g for tier in route.tiers for g in tier.locals]
+    if m is not None and not groups:
+        raise GatewayError(400, "media_local_only", f"{name!r} is served by providers only, and requests with images, "
+                                                    "audio, video or files are served by local deployments only.",
+                           param="messages")
+    if m is not None:
+        known = [g.accepts for g in groups if g.accepts is not None]
+        if m.files and not any(a.files for a in known):
+            raise GatewayError(400, "file_input_not_supported", f"{name!r} does not take files (file parts). Send the "
+                                                                "pages as images, or the text itself.", param="messages")
+        for kind in gmedia.KINDS:
+            n = m.counts[kind]
+            if not n:
+                continue
+            most = max((a.limit(kind) for a in known), default=0)
+            if most == 0:
+                takes = sorted({k for a in known for k in a.kinds}, key=gmedia.KINDS.index)
+                what = ", ".join(KIND_WORDS[k] for k in takes) if takes else "text only"
+                raise GatewayError(400, "media_not_supported", f"{name!r} does not take {KIND_WORDS[kind]} (it takes "
+                                                               f"{what}).", param="messages")
+            if n > most:
+                raise GatewayError(400, "too_many_media_items", f"{name!r} takes at most {most} {KIND_WORDS[kind]} per "
+                                                                f"request; this one has {n}.", param="messages")
+    most = max([g.accepts.max_body if g.accepts else limit for g in groups] + ([limit] if m is None else []))
+    raise GatewayError(413, "request_too_large", f"The request is {size / 1024**2:.1f} MiB; {name!r} takes at most "
+                                                 f"{most // 1024**2} MiB.")
+
+
 def wants_local_only(request: Request) -> bool:
     return (request.headers.get(LOCAL_ONLY_HEADER) or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -334,6 +425,9 @@ def prompt_estimate(parsed: "Parsed") -> int:
     obj = parsed.obj or {}
     text = obj.get("messages") if "messages" in obj else obj.get("prompt", obj.get("input", ""))
     size = len(json.dumps(text, ensure_ascii=False).encode("utf-8")) if text is not None else 0
+    m = parsed.media
+    if m is not None:  # an image is so many tokens, not the size of its base64 text
+        return max(0, size - m.data_bytes) // BYTES_PER_TOKEN + m.items * gmedia.TOKENS_PER_ITEM + (parsed.max_tokens or 0)
     return size // BYTES_PER_TOKEN + (parsed.max_tokens or 0)
 
 
@@ -346,10 +440,41 @@ class Parsed:
     obj: Optional[dict] = None                     # a JSON body
     parts: Optional[list] = None                   # a multipart body
     boundary: Optional[bytes] = None
+    media: Optional[gmedia.Media] = None           # images, audio, video, files (1.3)
+    size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 
-async def read_body(request: Request) -> bytes:
+# The largest body any deployment takes (its `max_body_mb`), read every few seconds.
+CEILING_TTL = 5.0
+_ceiling: dict = {"until": 0.0, "bytes": 0}
+
+
+def forget_ceiling() -> None:
+    _ceiling["until"] = 0.0
+
+
+def body_ceiling() -> int:
+    """The most the gateway reads of any request: GATEWAY_MAX_BODY_MB, or a deployment's larger
+    `max_body_mb`. Which limit applies is known only once the body says its model (fit_route)."""
+    now = time.monotonic()
     limit = get_settings().gateway_max_body_mb * 1024**2
+    if now < _ceiling["until"]:
+        return max(limit, _ceiling["bytes"])
+    db = new_session()
+    try:
+        most = 0
+        for params in db.scalars(select(Deployment.params)).all():
+            mb = (params or {}).get("max_body_mb")
+            if isinstance(mb, int) and not isinstance(mb, bool) and mb > 0:
+                most = max(most, mb * 1024**2)
+    finally:
+        db.close()
+    _ceiling.update(until=now + CEILING_TTL, bytes=most)
+    return max(limit, most)
+
+
+async def read_body(request: Request, limit: Optional[int] = None) -> bytes:
+    limit = limit or get_settings().gateway_max_body_mb * 1024**2
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > limit:
         raise GatewayError(413, "request_too_large", f"The request is larger than {limit // 1024**2} MiB.")
@@ -374,7 +499,7 @@ def parse_body(body: bytes, content_type: str, kind: str) -> Parsed:
         if not model:
             raise GatewayError(400, "invalid_request", "The form needs a 'model' field.", param="model")
         stream = (multipart.field(parts, "stream") or "").lower() in ("true", "1")
-        return Parsed(model=model, stream=stream, parts=parts, boundary=boundary)
+        return Parsed(model=model, stream=stream, parts=parts, boundary=boundary, size=len(body))
     try:
         obj = json.loads(body or b"null")
     except (ValueError, UnicodeDecodeError):
@@ -386,7 +511,7 @@ def parse_body(body: bytes, content_type: str, kind: str) -> Parsed:
         raise GatewayError(400, "invalid_request", "The request needs a 'model'.", param="model")
     max_tokens = obj.get("max_completion_tokens", obj.get("max_tokens"))
     max_tokens = max_tokens if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0 else None
-    return Parsed(model=model.strip(), stream=obj.get("stream") is True, max_tokens=max_tokens, obj=obj)
+    return Parsed(model=model.strip(), stream=obj.get("stream") is True, max_tokens=max_tokens, obj=obj, size=len(body))
 
 
 def upstream_body(parsed: Parsed, endpoint: str, upstream_model: str) -> tuple[bytes, bool]:
@@ -701,7 +826,7 @@ class Job:
         def count() -> None:
             record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt,
                    u.completion, target=self.target, cached=u.cached, reasoning=u.reasoning,
-                   spilled=self.spilled is not None, cost=self.cost)
+                   spilled=self.spilled is not None, cost=self.cost, units=self.units())
 
         hold, self.hold = self.hold, None
         if c is None or not c.external:
@@ -712,6 +837,11 @@ class Job:
         picos = self.cost.picos if self.cost.picos is not None else (hold.picos if hold and served else 0)
         budgets.ledger.settle(hold, key_id=self.caller.key_id if self.caller.source == "api" else 0,
                               user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count)
+
+    def units(self) -> Optional[dict]:
+        """The request's 1.3 usage units: the media items it carried."""
+        m = self.parsed.media
+        return {"media_items": m.items} if m is not None and m.items else None
 
     def release(self) -> None:
         hold, self.hold = self.hold, None
@@ -1114,10 +1244,12 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
 
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,
            prompt: int = 0, completion: int = 0, limited: bool = False, *, target: str = "local", cached: int = 0,
-           reasoning: int = 0, spilled: bool = False, cost: Optional[pricing.Cost] = None) -> None:
+           reasoning: int = 0, spilled: bool = False, cost: Optional[pricing.Cost] = None,
+           units: Optional[dict] = None) -> None:
     cost = cost or pricing.Cost(0, pricing.NONE)
     recorder.record(source=caller.source, key_id=caller.key_id, user_id=caller.user_id, username=caller.username,
                     model=model, deployment_id=deployment_id, status=status,
                     latency_ms=(time.monotonic() - started) * 1000, prompt_tokens=prompt,
                     completion_tokens=completion, limited=limited, target=target, cached_tokens=cached,
-                    reasoning_tokens=reasoning, spilled=spilled, cost_picos=cost.picos, cost_method=cost.method)
+                    reasoning_tokens=reasoning, spilled=spilled, cost_picos=cost.picos, cost_method=cost.method,
+                    units=units)

@@ -212,7 +212,14 @@ export type LogsResponse = { source: "live" | "stored"; text: string; truncated:
 // ---------------------------------------------------------------- models (M3)
 export type Task = "chat" | "embed" | "rerank" | "asr";
 
-export type RecipeParam = { type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string };
+export type RecipeParam = {
+  type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
+  // Shown in the deploy form's collapsed Advanced section: its default works untouched (1.3).
+  advanced?: boolean;
+};
+
+// What a model takes in chat besides text (1.3).
+export type Medium = "image" | "audio" | "video";
 
 export type RecipeVariant = { name: string; vendor: "nvidia" | "amd" | "cpu"; runtime: "container" | "process"; image: string | null; arch: string[] | null; compute_capability: string | null; driver: string | null; engine: string | null };
 
@@ -220,6 +227,7 @@ export type Recipe = {
   name: string; title: string; description: string; engine: string; version: string; tasks: Task[]; formats: string[];
   api: Record<string, string>; share: "exclusive" | "vram"; builtin: boolean; estimate: string;
   params: Record<string, RecipeParam>; devices: ("gpu" | "cpu")[]; variants: RecipeVariant[]; yaml?: string;
+  media?: { inputs: Medium[]; files: boolean } | null;
 };
 
 export type CatalogModel = {
@@ -228,6 +236,10 @@ export type CatalogModel = {
   engine_args: Record<string, string[]>; recipes: string[]; deployments: number; created_by: string | null; created_at: string;
   summary: { params?: number; layers?: number; kv_heads?: number; head_dim?: number; max_context?: number; dtype?: string; architecture?: string; weights_bytes?: number };
   gguf_files: { path: string; size: number; parts: number }[];
+  // 1.3: the licence Hugging Face shows, gated, the media it takes (null: unknown, added before 1.3)
+  // and a GGUF vision model's projector file.
+  license?: string | null; gated?: boolean; modalities?: Medium[] | null;
+  mmproj?: { path: string; size: number } | null; mmproj_files?: { path: string; size: number }[];
 };
 
 export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };
@@ -310,6 +322,10 @@ export type UsageRow = {
   cached_tokens?: number; reasoning_tokens?: number; spilled?: number;
   // Cost (1.2): micro-USD; unpriced requests are not in cost_micros.
   cost_micros?: number; unpriced?: number; cost_reported?: number; cost_estimated?: number;
+  // 1.3 units: media items sent in chat (images, audio clips, videos); the others are filled by
+  // later model kinds.
+  media_items?: number; characters?: number; images?: number; kilopixels?: number; media_ms?: number;
+  bytes_in?: number; bytes_out?: number; busy_ms?: number;
   cloud?: boolean;   // grouped by target or provider: outside your network
 };
 

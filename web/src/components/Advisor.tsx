@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Link, useLocation } from "react-router";
 
 import { api, errorText } from "../lib/api";
-import { SEVERITY_LABEL, backupKid, fixHref, forPage, summary, worst, type AdvisorReport, type Finding, type Severity } from "../lib/advisor";
+import { SEVERITY_LABEL, asReport, backupKid, fixHref, forPage, summary, worst, type AdvisorReport, type Finding, type Severity } from "../lib/advisor";
 
 // The setup advisor for admins: one report, fetched by the shell and shared by the nav badge, the
 // Get started panel and the page banners. Plain users never ask for it (the API refuses them).
@@ -34,10 +34,10 @@ export function AdvisorProvider({ enabled, children }: { enabled: boolean; child
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
-    api<AdvisorReport>("/advisor").then(
+    api<unknown>("/advisor").then(
       (r) => {
         if (!alive) return;
-        setReport(r);
+        setReport(asReport(r));
         setError(null);
       },
       (e) => {
@@ -58,10 +58,10 @@ export function AdvisorProvider({ enabled, children }: { enabled: boolean; child
   }, [enabled, reload]);
 
   const snooze = useCallback(async (key: string, on: boolean) => {
-    setReport(await api<AdvisorReport>("/advisor/snooze", { method: "POST", body: { key, snooze: on } }));
+    setReport(asReport(await api<unknown>("/advisor/snooze", { method: "POST", body: { key, snooze: on } })));
   }, []);
   const confirmBackup = useCallback(async (kid: string) => {
-    setReport(await api<AdvisorReport>("/advisor/secret-key-backup", { method: "POST", body: { kid } }));
+    setReport(asReport(await api<unknown>("/advisor/secret-key-backup", { method: "POST", body: { kid } })));
   }, []);
 
   const value = useMemo(

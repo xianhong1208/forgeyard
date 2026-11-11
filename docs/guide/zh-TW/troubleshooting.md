@@ -225,6 +225,23 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **做法：** 到 **API keys**，打開金鑰的 **Limits**，把 *Cloud providers* 設為 **Only to spill**（或 **Allowed**，連只有雲端的模型也能用），再按 **Save limits**。一般人最多只能選到管理員在 **Cloud for keys** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
 
+## 圖片被拒絕
+
+**你看到：** 帶圖片（或音訊、影片）的對話請求回應 400 或 413；`code` 說明原因。請求的任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `media_not_supported` | 模型不接受這種媒體：純文字模型、加入時沒有 projector 檔的 GGUF 模型，或部署的 *Videos per request* 為 0 時送影片 | 改用視覺模型；重新加入 GGUF 模型並附上 projector；在 **Advanced** 開啟影片 |
+| `too_many_media_items` | 圖片多於部署的 *Images per request*（4） | 少送一些，或調高它 |
+| `media_url_refused` | 網址是 `file://` 或其他 scheme、帶有帳密，或主機是（或轉址到）私有、loopback、link-local 或 metadata 位址 | 改送公開的 `https://` 網址或 `data:` URI。區網內的圖片伺服器，請在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true` |
+| `media_fetch_failed` | 閘道下載不到：對方回應的狀態碼不是 200、超過 20 秒、轉址超過 3 次，或傳回的不是圖片 | 自己打開網址看看；有些網站拒絕程式下載。改以 `data:` URI 送出檔案 |
+| `media_too_large`（413） | 檔案大於 `MEDIA_FETCH_MAX_MB`（20） | 送小一點的圖片，或調高設定 |
+| `request_too_large`（413） | 圖片以 base64 內嵌後（比檔案大三分之一），請求超過部署的 *Largest request*（64 MiB） | 送小一點的圖片，或在 **Advanced** 調高 |
+| `file_input_not_supported` | `file` 區塊（PDF）：內建引擎都不接受檔案，閘道也不會轉換 | 改送頁面圖片或文字 |
+| `media_local_only` | 模型只由雲端供應商提供；媒體只留在你自己的部署上 | 改用本機的視覺模型 |
+
+vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一段長影片預留記憶體，剩給 KV cache 的就不夠了。調低上下文長度，或再把影片關掉。
+
 ## 費用顯示有請求沒有價格
 
 **你會看到：** **Usage** → **Cost** 把一些請求算在 *Without a price* 底下，並說明上面的費用沒有包含它們。
