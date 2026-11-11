@@ -23,7 +23,7 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import GatewayRoute, Provider, ProviderModel, RouteTarget, get_db, utcnow
-from forgeyard.gateway import egress, quirks
+from forgeyard.gateway import budgets as gbudgets, egress, quirks
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.pricing import PRICE_FIELDS
 
@@ -131,6 +131,12 @@ def provider_out(db: DbSession, p: Provider, *, admin: bool = True) -> dict:
            "external": p.external, "allow_http": p.allow_http, "enabled": p.enabled, "timeout_s": p.timeout_s,
            "created_by": p.created_by, "created_at": p.created_at, "updated_at": p.updated_at,
            "models": [{**model_out(m), "routes": uses.get(m.id, [])} for m in p.models]}
+    if p.external:
+        from forgeyard.api.keys import budget_out
+
+        spend = gbudgets.ledger.snapshot()
+        out["budget"] = budget_out(p.budget_micros, spend.spent.get(("provider", p.id), 0),
+                                   spend.held.get(("provider", p.id), 0))
     if admin:
         out["headers"] = dict(p.headers or {})
     return out
@@ -298,7 +304,7 @@ def clone_provider(provider_id: int, body: CloneIn, caller: Caller = Depends(req
     _taken(db, name)
     p = Provider(name=name, kind=src.kind, base_url=src.base_url, api_key=None, key_last4=None,
                  headers=dict(src.headers or {}), external=src.external, allow_http=src.allow_http, enabled=False,
-                 timeout_s=src.timeout_s, created_by=caller.user.username)
+                 timeout_s=src.timeout_s, budget_micros=src.budget_micros, created_by=caller.user.username)
     for m in src.models:
         p.models.append(ProviderModel(upstream_model=m.upstream_model, api=m.api, display_name=m.display_name,
                                       context_length=m.context_length, drop_params=list(m.drop_params or []),

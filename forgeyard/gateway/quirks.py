@@ -159,7 +159,8 @@ def read_usage(usage) -> Usage:
     only), OpenRouter's (cost, cache writes) and Anthropic's native input/output names.
 
     Cached and cache-write tokens are always a part of `prompt`, reasoning tokens a part of
-    `completion`, as in OpenAI's shape. Anthropic's native `input_tokens` leaves the cache out, so
+    `completion`, as in OpenAI's shape; tokens that only `total_tokens` counts (Gemini's thinking)
+    are added to `completion` as reasoning. Anthropic's native `input_tokens` leaves the cache out, so
     there the prompt is input + cache reads + cache writes."""
     if not isinstance(usage, dict):
         return Usage()
@@ -179,6 +180,13 @@ def read_usage(usage) -> Usage:
             prompt = _num(usage.get("total_tokens"))
     cached = cached or _num(usage.get("cache_read_input_tokens"))
     reasoning = _num(cd.get("reasoning_tokens")) if isinstance(cd, dict) else 0
+    total = _num(usage.get("total_tokens"))
+    if "completion_tokens" in usage and total > prompt + completion:
+        # Gemini's OpenAI-compatible endpoint leaves its thinking tokens out of completion_tokens and
+        # reports no reasoning_tokens; they show only in total_tokens, and Google bills them as output.
+        hidden = total - prompt - completion
+        completion += hidden
+        reasoning += hidden
     cost = usage.get("cost")
     cost = float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0 else None
     if prompt:

@@ -30,6 +30,12 @@ cloud provider.
 7. If the client goes away, the upstream request is closed at once, so the engine stops generating.
 8. The answer names who served it: `X-Forgeyard-Target: local:<deployment>#<replica>` or
    `provider:<provider>/<model>`, never a key; `X-Forgeyard-Spilled` says why it left tier 0.
+9. Budgets (forgeyard/gateway/budgets.py): before a request goes to a provider outside your network,
+   its estimated cost is reserved against the key's, the person's and the provider's monthly budget.
+   A budget that cannot cover it skips that provider (the next target or tier, or waiting for a busy
+   local tier, may still serve it) and the answer says so in `X-Forgeyard-Budget-Exhausted`; when
+   nothing else can serve it, 402 `budget_exhausted` (or `budget_unpriced`). The reservation is
+   settled with the real cost when the request finishes, and released when it fails.
 """
 
 from __future__ import annotations
@@ -48,12 +54,13 @@ from typing import Callable, Optional, Union
 import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc
-from forgeyard.gateway import egress, multipart, pricing, quirks
+from forgeyard.gateway import budgets, egress, multipart, pricing, quirks
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -123,6 +130,7 @@ class CloudTarget:
     drop_params: list = field(default_factory=list)
     api_key: Optional[str] = field(default=None, repr=False)   # never logged or returned
     prices: pricing.Prices = field(default_factory=pricing.Prices)
+    budget_micros: Optional[int] = None   # the provider's monthly budget (None: none)
 
     @property
     def key(self) -> str:
@@ -214,7 +222,7 @@ def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
                        base_url=p.base_url, upstream_model=pm.upstream_model, external=p.external,
                        allow_http=p.allow_http, enabled=p.enabled, weight=max(1, t.weight or 1),
                        timeout_s=p.timeout_s, headers=dict(p.headers or {}), drop_params=list(pm.drop_params or []),
-                       api_key=p.api_key, prices=pricing.Prices.of(pm))
+                       api_key=p.api_key, prices=pricing.Prices.of(pm), budget_micros=p.budget_micros)
 
 
 def _route_query():
@@ -577,7 +585,7 @@ class StreamResponse(Response):
 class Failed:
     """A tier (or part of one) did not answer; the request may move on."""
 
-    reason: str                                # unavailable | busy | refused | too_long
+    reason: str                                # unavailable | busy | refused | too_long | budget
     error: Optional[GatewayError] = None
     answer: Optional[Response] = None          # an upstream answer to pass on if nothing else serves
     retry_after: Optional[float] = None
@@ -666,6 +674,8 @@ class Job:
         self.deployment_id = route.deployment_id
         self.settings = get_settings()
         self.cost: Optional[pricing.Cost] = None  # once finished (budgets settle with it)
+        self.hold: Optional[budgets.Hold] = None  # money reserved at the provider it was sent to
+        self.budget_blocked: list[str] = []       # budgets that kept it from a provider
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -676,17 +686,60 @@ class Job:
         if self.admission is not None:
             key_limiter.settle(self.admission, u.prompt + u.completion)
         c = self.sent_to
+        served = status < 400 or status == CLIENT_CLOSED
         self.cost = pricing.cost_of(u, c.prices if c else None, cloud=c is not None and c.external,
-                                    served=status < 400 or status == CLIENT_CLOSED,
-                                    reports_cached=quirks.get(c.kind).reports_cached if c else True)
-        record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt, u.completion,
-               target=self.target, cached=u.cached, reasoning=u.reasoning, spilled=self.spilled is not None,
-               cost=self.cost)
+                                    served=served, reports_cached=quirks.get(c.kind).reports_cached if c else True)
+
+        def count() -> None:
+            record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt,
+                   u.completion, target=self.target, cached=u.cached, reasoning=u.reasoning,
+                   spilled=self.spilled is not None, cost=self.cost)
+
+        hold, self.hold = self.hold, None
+        if c is None or not c.external:
+            budgets.ledger.release(hold)
+            count()
+            return
+        # A cost that is unknown although the provider answered counts at its reservation.
+        picos = self.cost.picos if self.cost.picos is not None else (hold.picos if hold and served else 0)
+        budgets.ledger.settle(hold, key_id=self.caller.key_id if self.caller.source == "api" else 0,
+                              user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count)
+
+    def release(self) -> None:
+        hold, self.hold = self.hold, None
+        budgets.ledger.release(hold)
+
+    def reserve(self, c: CloudTarget) -> Optional[Failed]:
+        """Reserve the request's estimated cost against the budgets that apply at `c`, or why not."""
+        self.release()
+        if not c.external:
+            return None
+        limits = budgets.limits_for(self.caller, c.provider_id, c.provider, c.budget_micros)
+        if not limits:
+            return None
+        need = budgets.estimate(self.parsed.obj, self.parsed.max_tokens, self.endpoint, c.prices,
+                                self.settings.budget_default_max_tokens)
+        try:
+            verdict = budgets.ledger.reserve(limits, need, model=f"{c.provider}/{c.upstream_model}")
+        except Exception:
+            log.exception("The budgets could not be read; %s is not used for this request.", c.provider)
+            return Failed("unavailable", GatewayError(503, "budget_unavailable", "This month's spend could not be read, "
+                                                                                 "so no cloud request is sent under a "
+                                                                                 "budget. Try again shortly."))
+        if isinstance(verdict, budgets.Blocked):
+            if verdict.limit.token not in self.budget_blocked:
+                self.budget_blocked.append(verdict.limit.token)
+            log.info("A %s budget (%s) kept a request from %s.", verdict.limit.scope, verdict.limit.name, c.provider)
+            return Failed("budget", verdict.error())
+        self.hold = verdict
+        return None
 
     def headers(self, target: str) -> dict:
         out = {"X-Forgeyard-Target": target}
         if self.spilled:
             out["X-Forgeyard-Spilled"] = self.spilled
+        if self.budget_blocked:
+            out[budgets.HEADER] = ",".join(self.budget_blocked)
         return out
 
     def gone(self) -> Response:
@@ -868,9 +921,19 @@ class Job:
             if isinstance(result, Response):
                 return result
             failures.append((c, result))
-        return failures[-1][1]
+        # A provider's own failure says more than a budget that kept the request from another one.
+        return next((f for _, f in reversed(failures) if f.reason != "budget"), failures[-1][1])
 
     async def send_cloud(self, c: CloudTarget, again: bool = False) -> Union[Response, Failed]:
+        blocked = self.reserve(c)
+        if blocked is not None:
+            return blocked
+        result = await self._send_cloud(c, again)
+        if isinstance(result, Failed):
+            self.release()
+        return result
+
+    async def _send_cloud(self, c: CloudTarget, again: bool = False) -> Union[Response, Failed]:
         parsed, endpoint = self.parsed, self.endpoint
         self.target, self.deployment_id, self.sent_to = c.key, None, c
         kind = quirks.get(c.kind)
@@ -1016,9 +1079,21 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
                                                             "and this request may not leave your network.")
             raise GatewayError(503, "no_target", f"{route.served_name!r} has no target that can take this request "
                                                  "(every target is disabled, or none serves this endpoint).")
+        clouds = [c for t in tiers for c in t.clouds if c.external]
+        if clouds and (caller.budget_micros is not None or caller.user_budget_micros is not None
+                       or any(c.budget_micros is not None for c in clouds)):
+            try:
+                await run_in_threadpool(budgets.ledger.ensure)  # this month's spend, off the event loop
+            except Exception:
+                log.exception("Reading this month's spend for budgets failed")
         return await job.run(tiers)
     except GatewayError as e:
+        if job.budget_blocked and budgets.HEADER not in e.headers:
+            e.headers[budgets.HEADER] = ",".join(job.budget_blocked)
         job.finish(e.status, None)
+        raise
+    except BaseException:
+        job.release()
         raise
 
 

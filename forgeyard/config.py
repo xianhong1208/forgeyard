@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import PrivateAttr, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     # OpenRouter's public model list, read (without a key, through the egress rules) only when an
     # admin asks to refresh prices from it. Changed only to point tests at a stand-in.
     openrouter_models_url: str = "https://openrouter.ai/api/v1/models"
+    # Budgets: a cloud request is reserved at its estimated cost before it is sent. Without
+    # `max_tokens` in the request, its answer is estimated at this many tokens.
+    budget_default_max_tokens: int = Field(default=4096, ge=1, le=10_000_000)
 
     @field_validator("gateway_cloud_default", "gateway_cloud_max")
     @classmethod

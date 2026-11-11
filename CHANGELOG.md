@@ -7,7 +7,7 @@ version until 1.0.
 ## [Unreleased]
 
 Cloud model APIs behind the same gateway, local first (1.2, part A: providers and tiered routing;
-part B1: cost tracking and prices; budgets come next).
+part B1: cost tracking and prices; part B2: budgets).
 
 ### Added
 - **Cloud providers** (admins, page **Providers**): OpenAI, Anthropic, Google Gemini, Azure OpenAI (v1
@@ -60,6 +60,21 @@ part B1: cost tracking and prices; budgets come next).
   they type), shows old → new, and applies only the rows the admin ticks, only if OpenRouter still
   lists those prices; prices entered by hand are kept unless ticked. No background sync, no bundled
   price list. `POST /api/prices/openrouter/preview` and `/apply`; setting `OPENROUTER_MODELS_URL`.
+- **Monthly budgets** (USD, UTC calendar month; part B2) per API key, person and provider, for requests
+  to providers outside your network. Before a request is sent to one, its estimated cost (prompt size at
+  about 3 bytes a token plus `max_tokens`, or `BUDGET_DEFAULT_MAX_TOKENS` without it, at the model's
+  prices) is reserved against every budget that applies, in an in-memory ledger under a lock (seeded
+  once a month from the usage rows), so concurrent requests cannot overspend; it is settled with the
+  real cost when the request finishes and released when it fails. A budget that cannot cover a request
+  makes the route local-only for that scope: a busy local tier is waited for, another provider in the
+  tier serves, and `X-Forgeyard-Budget-Exhausted` (`key`, `person`, `provider:<name>`) says so; when
+  nothing else can serve, **402** `budget_exhausted` (type `insufficient_quota`) names the budget, its
+  spend and when it resets. Under a budget, a model without a price is blocked (402 `budget_unpriced`).
+  Alerts at 80% and 100%: one audit event (`budget.warning`, `budget.exhausted`) per budget, month and
+  threshold. Key owners set their key's budget unless an admin locked it; admins set people's (**Usage
+  → Cost**) and providers' (the provider's page). Meters and warnings on **API keys**, **Usage → Cost**
+  and the provider pages. `GET /api/budgets`, `PUT /api/budgets/people/{id}`,
+  `PUT /api/budgets/providers/{id}`; `budget_micros` on `/api/keys`.
 - Guide page **Cloud providers** (en, zh-TW): each provider, what each endpoint cannot do, the spill
   rules, the key setting, egress, troubleshooting. Settings `GATEWAY_CLOUD_DEFAULT`,
   `GATEWAY_CLOUD_MAX`, `EGRESS_*` and `PROVIDER_*`.
@@ -78,6 +93,9 @@ part B1: cost tracking and prices; budgets come next).
 - `GET /api/routes` returns each route's targets, tiers and flags, and whether the signed-in person may
   use it; route management moved to `/api/routes/*` and `/api/route-options`.
 - `python -m forgeyard secrets reset` also drops provider keys it cannot read.
+- Migration `0011_budgets`: `api_keys.budget_micros` and `budget_locked_by`, `users.budget_micros`,
+  `providers.budget_micros` (NULL, no budget, on every existing row) and the table `budget_alerts`.
+  Gateway errors may carry extra headers and fields (402 is typed `insufficient_quota`).
 - Migration `0010_cost`: `usage_daily` gets `cost_micros`, `unpriced`, `cost_reported` and
   `cost_estimated` (0 on existing rows), `provider_models` gets `price_ref` (the confirmed OpenRouter
   id). Clearing every price of a model clears its price source.
@@ -87,6 +105,9 @@ part B1: cost tracking and prices; budgets come next).
   as root or in the `docker` group), and the AMD command puts each `--group-add` on its own line.
 
 ### Fixed
+- Gemini's thinking tokens are counted and priced. Its OpenAI-compatible endpoint shows them only in
+  `total_tokens`, so the gateway counted a `gemini-2.5-flash` answer at less than half of what Google
+  bills (found by a real request); the difference now counts as reasoning, priced as output.
 - `/v1/models` no longer lists a model whose deployment was stopped, so clients stop offering a model
   that can only answer 503. It stays listed while its replicas are starting or restarting, and for keys
   that may use the cloud when its route has a cloud tier to spill to (or a provider inside your

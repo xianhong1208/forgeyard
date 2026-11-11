@@ -13,7 +13,8 @@ and usage statistics.
 > providers behind the same gateway, local first: a model spills to OpenAI, Anthropic, Gemini, Azure
 > or OpenRouter when its replicas are busy or down, and only for keys allowed to send data out, with
 > the cost of each cloud request counted in US dollars (prices entered by hand or refreshed from
-> OpenRouter after review). See
+> OpenRouter after review) and monthly budgets per key, person and provider, reserved before a
+> request is sent: a used-up budget keeps requests local. See
 > [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
 
 ## The guide

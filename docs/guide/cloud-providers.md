@@ -92,7 +92,8 @@ keys whose cloud setting is **Allowed** see such a route.
 
 Every answer says who served it, in the header `X-Forgeyard-Target`: `local:<deployment>#<replica>`
 or `provider:<provider>/<model>`. When a request moved past the first tier, `X-Forgeyard-Spilled`
-says why: `unavailable`, `busy`, `refused` or `too_long`. The `model` in the answer's body is what
+says why: `unavailable`, `busy`, `refused`, `too_long`, or `budget` (a [budget](#budgets) kept it
+from the cloud tier before). The `model` in the answer's body is what
 the upstream wrote. The Playground shows the target under each answer.
 
 ## When a request spills
@@ -255,8 +256,9 @@ price later does not change what was already counted.
     caching anyway, so the estimate is normally right.)
   - A model with cached tokens or cache writes but no cached or cache-write price is priced at the
     input price for those tokens.
-- **Gemini**: whether its compatibility endpoint counts thinking tokens in `completion_tokens` has not
-  been verified. If its costs look low for a thinking model, compare them with your Google bill.
+- **Gemini**: its compatibility endpoint leaves thinking tokens out of `completion_tokens` and shows them
+  only in `total_tokens` (checked on `gemini-2.5-flash`). Forgeyard counts the difference as reasoning
+  tokens, priced as output, as Google bills them.
 
 ### Prices
 
@@ -284,7 +286,88 @@ by hand* or *from OpenRouter*) and when. Admins set them:
 > discount, a model OpenRouter serves through another provider). **Spot-check** a few against the
 > provider's own pricing page before relying on them.
 
-Budgets per key, per person and per provider build on these numbers and come next.
+## Budgets
+
+A **budget** is what cloud requests may cost in a **calendar month (UTC)**, in US dollars. Budgets
+apply only to providers outside your network: local replicas and providers inside your network
+cost nothing and are never limited. Without a budget, nothing changes.
+
+| Budget on | Who sets it | When it is used up |
+|---|---|---|
+| **An API key** | its owner, on **API keys** (**Limits**, *Monthly budget*); an admin on any key, which locks it for the owner | that key's requests no longer spill or go to the cloud |
+| **A person** | admins, on **Usage → Cost** (*Budgets this month*) | none of that person's keys, nor their Playground, can |
+| **A provider** | admins, on the provider's page | that provider is skipped; other providers in the tier, or local replicas, still serve |
+
+### Reserved before sending
+
+Before a request is sent to a cloud provider, Forgeyard **reserves its estimated cost** against
+every budget that applies (the key's, the person's and the provider's):
+
+```
+prompt size (about 3 bytes a token, on the high side) × input price
+  + (max_tokens, or 4096 without it, × n) × output price
+```
+
+If any of those budgets cannot cover it (spent + reserved by requests in flight + this request >
+budget), the request is **not sent to that provider**. When it finishes, the reservation is replaced
+by the request's real cost; when it fails or is refused, the reservation is released. Several
+requests at once cannot overspend a budget together: the reservations are counted in this server, under
+a lock. A request can still cost more than its reservation (a provider that ignores `max_tokens`, or a
+long answer to a request without it), so set `max_tokens` in your programs, or lower
+`BUDGET_DEFAULT_MAX_TOKENS`, if a budget must be held to the cent.
+
+### When a budget is used up
+
+The route becomes **local-only for that scope**; nothing fails if something else can serve:
+
+- the request would have spilled because local was **busy**: it waits for a local replica instead;
+- another provider in the cloud tier has room: that provider serves it;
+- the answer carries `X-Forgeyard-Budget-Exhausted`, naming the budget that kept the request from a
+  provider: `key`, `person` or `provider:<name>`.
+
+Only when **nothing else can serve** the request (the local replicas are down, or the model is
+cloud-only) does it fail, with **402**:
+
+```json
+{"error": {"message": "The monthly budget of this API key (laptop) is used up: $4.98 spent of $5.00, and this request may cost up to $0.04. It resets on 2026-12-01 00:00 UTC. Models served locally still work.",
+           "type": "insufficient_quota", "param": null, "code": "budget_exhausted",
+           "budget": {"scope": "key", "name": "laptop", "budget_micros": 5000000, "spent_micros": 4980000,
+                      "reserved_micros": 0, "request_micros": 41330, "month": "2026-11",
+                      "resets_at": "2026-12-01T00:00:00Z"}}}
+```
+
+402 (*Payment Required*) is what OpenRouter answers when credits run out. Unlike 429, OpenAI's SDKs
+do not retry it: retrying cannot help before the month ends or an admin raises the budget.
+
+### Models without a price
+
+A model with no input or output price cannot be reserved. **Under any budget**, a request that would
+go to it is blocked (402 `budget_unpriced`, "an admin needs to set its prices"). Without a budget it
+is used as before, and counted as *without a price*.
+
+### Alerts at 80% and 100%
+
+When a budget's spend this month passes **80%**, and again at **100%**, Forgeyard writes one event to
+the **Audit** log (`budget.warning`, `budget.exhausted`), once per budget and month, also across
+restarts. It is checked as requests finish and are reserved, so a budget lowered below the month's
+spend alerts on its next request. A request refused by a budget whose spend and reservations together are already past 80%
+counts as reaching 100% (a single oversized request refused below that does not alert). The pages
+show it too:
+
+- **API keys**: a meter per key (spent of budget, and what is reserved by requests in flight), your
+  own budget, and a warning past 80%;
+- **Usage → Cost**: *Budgets this month*, with every budget that applies to you (admins: everyone's,
+  and the providers');
+- a provider's page: its budget, and the Providers list flags one past 80%.
+
+There is no e-mail: check the audit log or the pages.
+
+### How spend is counted
+
+The month's spend is the sum of the cost of its requests (see above), read from the usage counts when
+the server starts or a new month begins, and added to as requests finish. A cloud request that was
+answered but reported no tokens counts at its reservation until the server restarts. `GET
+/api/budgets` returns this month's spend per key, person and provider; admins add `?everyone=true`.
 
 ## Egress: what leaves your server
 
@@ -332,6 +415,14 @@ Check, in this order: the key's cloud setting (**Never** never spills); the rout
 the request's `X-Forgeyard-Local-Only`; and the reason. A 400, a timeout after sending, or an answer
 that had started do not spill. "Busy" counts only requests through this server against the
 deployment's *Concurrent requests*.
+
+### 402 budget_exhausted or budget_unpriced
+
+A monthly budget kept the request from every provider that could serve it, and no local replica
+could. The message and the `budget` object name the budget (`key`, `person` or `provider`), what was
+spent and when it resets. Raise the budget (on **API keys**, **Usage → Cost** or the provider's page),
+wait for the month to end, or start a local replica. `budget_unpriced`: the model has no price; an admin
+sets it on the provider's page.
 
 ### Requests go to the cloud more often than expected
 

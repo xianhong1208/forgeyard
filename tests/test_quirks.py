@@ -107,3 +107,24 @@ def test_fy_qk_005_provider_errors_and_retry_after():
     assert retry_after(httpx.Headers({"retry-after-ms": "1500", "retry-after": "9"})) == 1.5
     assert 0 <= retry_after(httpx.Headers({"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"})) <= 0.0
     assert retry_after(httpx.Headers({})) is None and retry_after(httpx.Headers({"retry-after": "soon"})) is None
+
+
+def test_fy_qk_006_gemini_thinking_tokens_count_as_output():
+    """FY-QK-006: Gemini's OpenAI-compatible endpoint reports its thinking only in total_tokens (seen
+    for real on gemini-2.5-flash: 12 + 16 with a total of 53); the difference is reasoning, part of the
+    completion and priced as output. When the total adds up, or there is no completion field
+    (embeddings), nothing changes."""
+    u = quirks.read_usage({"prompt_tokens": 12, "completion_tokens": 16, "total_tokens": 53})
+    assert (u.prompt, u.completion, u.reasoning) == (12, 41, 25)
+    u = quirks.read_usage({"prompt_tokens": 12, "completion_tokens": 0, "total_tokens": 40})
+    assert (u.completion, u.reasoning) == (28, 28)          # cut off while still thinking
+    u = quirks.read_usage({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150,
+                           "completion_tokens_details": {"reasoning_tokens": 20}})
+    assert (u.completion, u.reasoning) == (50, 20)
+    u = quirks.read_usage({"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 120})
+    assert (u.completion, u.reasoning) == (50, 0)
+    assert quirks.read_usage({"prompt_tokens": 4, "total_tokens": 9}).completion == 0
+    from forgeyard.gateway.pricing import Prices, cost_of
+    c = cost_of(quirks.read_usage({"prompt_tokens": 12, "completion_tokens": 16, "total_tokens": 53}),
+                Prices(input=300_000, output=2_500_000), cloud=True, served=True)
+    assert c.micros == 106                                   # 12 x 0.30 + 41 x 2.50 micro-USD

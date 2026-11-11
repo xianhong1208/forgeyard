@@ -358,7 +358,7 @@ def test_fy_rt_014_provider_errors_are_mapped(mixed):
 def test_fy_rt_015_busy_and_the_cloud_failing_waits_for_local_after_all(mixed):
     """FY-RT-015: local is busy and the cloud tier cannot take the request either: it waits for the
     local replica instead of failing."""
-    mixed.engine.hold = 0.5
+    mixed.engine.hold = 1.0          # long enough for a slow CI runner to see local busy
     mixed.cloud.status = 500
     t, _ = background(lambda: chat(mixed.api))
     in_flight_soon()

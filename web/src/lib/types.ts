@@ -1,3 +1,5 @@
+import type { Budget } from "./budgets";
+
 export type Role = "admin" | "operator" | "user";
 
 export type User = {
@@ -289,11 +291,15 @@ export type ApiKey = {
   effective_rpm: number | null; effective_tpm: number | null; expires_at: string | null; created_at: string;
   last_used_at: string | null; revoked_at: string | null; revoked_by: string | null; status: "active" | "revoked" | "expired";
   user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };
+  // Monthly cloud budget (1.2) and this month's spend; budget_locked_by: an admin set it on someone else's key.
+  budget?: Budget; budget_locked_by?: string | null;
 };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
   models: { name: string; api: string; kind?: RouteKind }[];
+  // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
+  month?: string; resets_at?: string; person_budget?: Budget;
 };
 
 export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string; trust_url?: string | null };
@@ -366,6 +372,7 @@ export type Provider = {
   id: number; name: string; kind: string; kind_label: string; base_url: string; has_key: boolean; key_hint: string | null;
   external: boolean; allow_http: boolean; enabled: boolean; timeout_s: number | null; created_by: string | null; created_at: string;
   updated_at: string; models: ProviderModel[]; headers?: Record<string, string>;
+  budget?: Budget;   // outside your network only
 };
 
 export type Egress = { proxy: boolean; allowed_hosts: string[]; ca_file: boolean; private_hosts: boolean; cooldown_s: number; read_timeout_s: number };

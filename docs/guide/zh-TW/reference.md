@@ -92,6 +92,7 @@
 | `PROVIDER_COOLDOWN_SECONDS` | `30` | 回應 429 或 5xx、或連不上的供應商目標，在這段時間內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
 | `PROVIDER_RETRY_AFTER_CAP` | `2` | 沒有其他目標可試時，不超過這個秒數的 `Retry-After` 會等一次再試 |
 | `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | **Refresh prices from OpenRouter** 讀取價格的位置（只在管理員要求時讀取，不送出金鑰）。只有在用替身伺服器測試時才需要修改 |
+| `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | 預算會在雲端請求送出前先預留它的估計費用。沒有 `max_tokens` 的請求，以這個 token 數估計它的回應 |
 
 請求標頭 `X-Forgeyard-Local-Only: 1`：這個請求絕不使用雲端目標。回應標頭：`X-Forgeyard-Target`（`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`）；請求離開第一層時有 `X-Forgeyard-Spilled`（`unavailable`、`busy`、`refused` 或 `too_long`）；本機回答則和以前一樣有 `X-Forgeyard-Replica`。
 

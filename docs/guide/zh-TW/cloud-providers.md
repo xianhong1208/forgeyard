@@ -56,7 +56,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 要用自己的名稱提供雲端模型，請到 **Models** 的 **Routes and cloud**，選 **New route**。填入用戶端會以 `model` 送出的名稱，再加入供應商的模型。只有雲端設定為 **Allowed** 的金鑰看得到這種路由。
 
-每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused` 或 `too_long`。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
+每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
 
 ## 請求何時溢出
 
@@ -173,7 +173,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 - **估算值**也會計數，並在表格下方說明：
   - **Anthropic** 的 OpenAI 相容端點不填 `cached_tokens`，所以無法得知快取了多少 token；這些請求會當作沒有快取來計價。（那個端點本來就不做提示快取，所以這個估算通常是對的。）
   - 模型有快取讀取或快取寫入的 token，卻沒有對應的價格時，這些 token 以輸入價格計算。
-- **Gemini**：它的相容端點是否把思考 token 算進 `completion_tokens` 還沒有驗證過。如果思考模型的費用看起來偏低，請和 Google 的帳單比對。
+- **Gemini**：它的相容端點不會把思考 token 算進 `completion_tokens`，只反映在 `total_tokens`（在 `gemini-2.5-flash` 上確認過）。Forgeyard 會把差額當成推理 token，以輸出價格計算，和 Google 的計費方式一致。
 
 ### 價格
 
@@ -188,7 +188,66 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 
 > OpenRouter 的價格通常就是供應商的定價，但不一定（不同地區、折扣，或 OpenRouter 經由另一個供應商提供的模型）。在依賴這些數字之前，請挑幾個和供應商自己的定價頁面**抽查**比對。
 
-依金鑰、依人、依供應商設定的預算會建立在這些數字之上，接下來就會推出。
+## 預算
+
+**預算**是雲端請求在一個**日曆月（UTC）**內可以花的錢，以美元計。預算只適用於你網路外的供應商：本機副本和你網路內的供應商不花錢，也永遠不受預算限制。沒有設定預算時，一切照舊。
+
+| 預算設在 | 誰可以設定 | 用完時 |
+|---|---|---|
+| **一把 API 金鑰** | 擁有者，在 **API keys**（**Limits**，*Monthly budget*）；管理員可以設定任何金鑰，設在別人的金鑰上會對擁有者鎖定 | 這把金鑰的請求不再溢出、也不再送到雲端 |
+| **一個人** | 管理員，在 **Usage → Cost**（*Budgets this month*） | 這個人的所有金鑰和他的 Playground 都不行 |
+| **一個供應商** | 管理員，在供應商的頁面 | 略過這個供應商；同一層的其他供應商或本機副本仍然可以服務 |
+
+### 送出前先預留
+
+請求送到雲端供應商之前，Forgeyard 會把它的**估計費用預留**在每一個適用的預算上（金鑰的、人的、供應商的）：
+
+```
+prompt size (about 3 bytes a token, on the high side) × input price
+  + (max_tokens, or 4096 without it, × n) × output price
+```
+
+也就是：提示的大小（大約 3 bytes 一個 token，偏高估）乘以輸入價格，加上 `max_tokens`（沒有時用 4096）乘以 `n` 再乘以輸出價格。
+
+只要其中一個預算付不起（已花費 + 進行中請求的預留 + 這個請求 > 預算），請求就**不會送到那個供應商**。請求結束時，預留會換成它實際的費用；請求失敗或被拒絕時，預留會釋放。同時進來的多個請求不會一起超支：預留是在這台伺服器裡、在鎖之下計算的。請求的實際費用仍可能超過預留（供應商不理會 `max_tokens`，或沒有設定 `max_tokens` 的請求回答很長），所以如果預算必須精確到分，請在程式裡設定 `max_tokens`，或調低 `BUDGET_DEFAULT_MAX_TOKENS`。
+
+### 預算用完時
+
+路由對**這個範圍變成只用本機**；只要還有別的目標能服務，就不會失敗：
+
+- 請求原本因為本機**忙碌**而要溢出：改成等待本機副本；
+- 雲端那一層還有別的供應商有額度：由那個供應商服務；
+- 回應會帶 `X-Forgeyard-Budget-Exhausted`，說明是哪個預算讓請求沒有送到某個供應商：`key`、`person` 或 `provider:<名稱>`。
+
+只有在**沒有任何目標能服務**時（本機副本都停擺，或模型只有雲端），請求才會失敗，回應 **402**：
+
+```json
+{"error": {"message": "The monthly budget of this API key (laptop) is used up: $4.98 spent of $5.00, and this request may cost up to $0.04. It resets on 2026-12-01 00:00 UTC. Models served locally still work.",
+           "type": "insufficient_quota", "param": null, "code": "budget_exhausted",
+           "budget": {"scope": "key", "name": "laptop", "budget_micros": 5000000, "spent_micros": 4980000,
+                      "reserved_micros": 0, "request_micros": 41330, "month": "2026-11",
+                      "resets_at": "2026-12-01T00:00:00Z"}}}
+```
+
+402（*Payment Required*）也是 OpenRouter 額度用完時的回應。和 429 不同，OpenAI 的 SDK 不會自動重試它：在月底或管理員調高預算之前，重試也沒有用。
+
+### 沒有價格的模型
+
+沒有輸入或輸出價格的模型無法預留。**只要有任何預算適用**，要送到它的請求就會被擋下（402 `budget_unpriced`，訊息會請管理員設定價格）。沒有預算時則照舊使用，並計入 *Without a price*。
+
+### 80% 與 100% 的警示
+
+預算本月的花費超過 **80%**、以及到達 **100%** 時，Forgeyard 會在 **Audit** 稽核紀錄寫一筆事件（`budget.warning`、`budget.exhausted`），每個預算每個月各一次，重新啟動後也不會重複。檢查發生在請求結束和預留時，所以把預算調低到本月花費以下，會在下一個請求時發出警示。預算的花費加上預留已經超過 80% 時有請求被它擋下，也算到達 100%（低於這個比例時，單一過大的請求被擋下不會發出警示）。頁面上也看得到：
+
+- **API keys**：每把金鑰一個量表（已花費 / 預算，以及進行中請求預留的金額）、你自己的預算，以及超過 80% 的警告；
+- **Usage → Cost**：*Budgets this month*，列出適用於你的每個預算（管理員：所有人的，以及供應商的）；
+- 供應商頁面：它的預算；Providers 清單會標示超過 80% 的供應商。
+
+沒有電子郵件通知：請查看稽核紀錄或這些頁面。
+
+### 花費怎麼算
+
+一個月的花費是這個月請求費用的總和（見上文），在伺服器啟動或新的月份開始時從用量統計讀取，之後隨著請求完成累加。有回答但沒有回報任何 token 的雲端請求，在伺服器重新啟動前以它的預留金額計算。`GET /api/budgets` 會回傳本月每把金鑰、每個人和每個供應商的花費；管理員加上 `?everyone=true`。
 
 ## 對外連線：哪些東西會離開你的伺服器
 
@@ -220,6 +279,10 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 ### 請求沒有溢出
 
 依序檢查：金鑰的雲端設定（**Never** 永遠不會溢出）；路由的 **Local only**；請求的 `X-Forgeyard-Local-Only`；以及原因。400、送出後逾時、或回答已經開始，都不會溢出。「忙碌」只計算經由這台伺服器、相對於部署 *Concurrent requests* 的請求數。
+
+### 402 budget_exhausted 或 budget_unpriced
+
+每月預算讓請求無法送到任何能服務它的供應商，而且也沒有本機副本能服務。訊息和 `budget` 物件會說明是哪個預算（`key`、`person` 或 `provider`）、花了多少，以及何時重設。可以調高預算（在 **API keys**、**Usage → Cost** 或供應商頁面）、等到月底，或啟動一個本機副本。`budget_unpriced`：模型沒有價格，請管理員在供應商頁面設定。
 
 ### 請求送到雲端的次數比預期多
 
