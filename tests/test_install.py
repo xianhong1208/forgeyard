@@ -158,6 +158,10 @@ def test_fy_inst_005_the_machines_page_gets_three_ways_that_pin_the_ca(owner):
                      "-e FORGEYARD_SERVER=https://localhost", f"forgeyard-agent:{__version__}"):
             assert part in cmd, (kind, part)
         assert (extra in cmd) if extra else ("--gpus" not in cmd and "/dev/kfd" not in cmd)
+    # Group names are looked up in the image, which has no "render": the host's numeric ids instead.
+    amd = j["docker_commands"]["amd"]
+    assert ('--group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)"'
+            in amd) and "--group-add video" not in amd and "--group-add render" not in amd
     import tomllib
 
     cfg = tomllib.loads(j["config_file"])
@@ -428,3 +432,15 @@ def test_fy_img_001_the_dockerfile_builds_the_same_wheel_and_pins_its_bases():
     assert ignore[ignore.index("*") + 1] == "!forgeyard" and "forgeyard/static" in ignore
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "docker build -f Dockerfile.agent" in ci and "scripts/agent_image_smoke.sh" in ci and "shellcheck" in ci
+
+
+def test_fy_img_002_the_image_has_what_the_hosts_libamd_smi_loads():
+    """FY-IMG-002: libamd_smi.so from the mounted ROCm dlopen()s libdrm.so.2 and the unversioned
+    libdrm_amdgpu.so; without them amdsmi read no ASIC information on the real Strix Halo. The smoke
+    test loads both inside the image."""
+    text = (ROOT / "Dockerfile.agent").read_text()
+    install = re.search(r"apt-get install -y --no-install-recommends ([^\\\n]+)", text).group(1).split()
+    assert {"libdrm2", "libdrm-amdgpu1"} <= set(install)
+    assert 'ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so"' in text and "ldconfig" in text
+    smoke = (ROOT / "scripts" / "agent_image_smoke.sh").read_text()
+    assert 'ctypes.CDLL("libdrm.so.2"); ctypes.CDLL("libdrm_amdgpu.so")' in smoke

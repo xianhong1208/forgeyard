@@ -17,18 +17,24 @@
    sudo forgeyard agent inventory
    ```
 
-   它會每張卡印出一行，附上卡的 `gfx` 目標（例如 `gfx1100`；Strix Halo APU 則是 `gfx1151`，並標示為 *unified-memory*），接著每個收集器各印一行。
+   它會每張卡印出一行，附上卡的 `gfx` 目標（例如 `gfx1100`；Strix Halo APU 則是 `gfx1151`，並標示為 *unified-memory*）和 ROCm 版本，接著每個收集器各印一行。以 BIOS 切出 96 GiB 的 Strix Halo 為例：
 
-agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它，否則用 `amd-smi` 指令，再不行就用 `rocm-smi`。如果 inventory 顯示 `amdsmi Python library not importable`，但 `amd-smi` 可以正常使用，那就什麼都不缺。如果也想用這個函式庫：
+   ```text
+   amd     0  AMD Radeon 8060S  arch=gfx1151  32.6 GiB free of 96.0 GiB  rocm=7.0.2 unified-memory
+   ```
 
-```bash
-sudo uv pip install --python /opt/forgeyard/venv/bin/python /opt/rocm/share/amd_smi
-sudo systemctl restart forgeyard-agent
-```
+agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 agent 自己的 Python，找不到就用 ROCm 附在 `/opt/rocm/share/amd_smi` 的那一份），否則用 `amd-smi` 指令，再不行就用 `rocm-smi`。如果 inventory 顯示 `amdsmi … not importable` 或 `failed to load`，但 `amd-smi` 可以正常使用，那就什麼都不缺：同樣的數值會從指令讀到。
+
+每張卡顯示的內容：
+
+- **名稱：**卡的市售名稱。APU 的名稱常常只是「AMD Radeon Graphics」，這時改用 CPU 型號裡寫的 GPU（「… w/ Radeon 8060S」）。
+- **ROCm 版本**（這裡是 `rocm=`，Machines 頁面上寫「ROCm」），放在 NVIDIA 卡顯示驅動程式版本的位置。核心驅動程式的版本保留在卡的詳細資料裡。
+- **記憶體：**APU 取 VRAM 切割區（在 BIOS 設定）和 GTT 兩者中較大的那個，和 `amd-smi monitor` 顯示的一樣。
+- **識別鍵（key）：**卡有序號時用它的 UUID，否則用 PCI 位址（APU 沒有序號，所以每台機器上的 UUID 都一樣）。用 Forgeyard 1.1.0 或更舊版本加入的機器，識別鍵改變後 GPU 允許清單仍會保留。
 
 在 AMD 上，模型可以用 `vllm` recipe 的 ROCm 映像檔執行，也可以用 `llama-cpp`。行程類工作負載只會在 `ROCR_VISIBLE_DEVICES` 裡拿到自己的卡，而且只有在分配到 GPU 時，才會加入擁有 `/dev/kfd` 和對應 `/dev/dri/renderD*` 的群組。
 
-> AMD 的支援已經用從 AMD 機器錄下來的資料驗證過，但還沒在實際的 AMD 機器上檢查。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --raw` 的輸出回報。
+> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上透過 `amd-smi` 和 `rocm-smi` 檢查過；獨立 AMD 顯示卡目前只用錄下來的資料驗證過。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
 
 ## 加入純 CPU 機器
 
@@ -86,7 +92,8 @@ INFO forgeyard.agent: Connected to https://192.168.1.20:7860 as 'gpu-01' (9 acce
 
 ```bash
 docker run -d --name forgeyard-agent --restart always --network host \
-  --device /dev/kfd --device /dev/dri --group-add video --group-add render \
+  --device /dev/kfd --device /dev/dri \
+  --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
@@ -98,7 +105,16 @@ docker run -d --name forgeyard-agent --restart always --network host \
   forgeyard-agent:1.1.0
 ```
 
-主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。
+主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
+
+加入之前想先確認 agent 看到什麼，可以用同樣的裝置執行它的 `inventory` 指令（映像檔的指令本身就是 `forgeyard agent`，所以只要加上 `inventory`）：
+
+```bash
+docker run --rm --device /dev/kfd --device /dev/dri \
+  --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
+  -v /opt/rocm:/opt/rocm:ro \
+  forgeyard-agent:1.1.0 inventory
+```
 
 ### 純 CPU
 

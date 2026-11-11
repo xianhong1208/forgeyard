@@ -60,6 +60,10 @@ def install_command(server: str, token: str, fingerprint: Optional[str]) -> Opti
             f"  sudo sh -s -- --join {token} --ca-fingerprint {fingerprint}")
 
 
+AMD_GROUPS = ('--group-add "$(getent group video | cut -d: -f3)" '
+              '--group-add "$(getent group render | cut -d: -f3)"')
+
+
 def docker_build_command() -> str:
     return f"docker build -f Dockerfile.agent -t {IMAGE}:{__version__} ."
 
@@ -73,7 +77,10 @@ def docker_command(server: str, token: str, fingerprint: Optional[str], kind: st
     if kind == "nvidia":
         lines.append("--gpus all")
     elif kind == "amd":
-        lines.append("--device /dev/kfd --device /dev/dri --group-add video --group-add render")
+        # Numeric ids: Docker looks group names up in the image's /etc/group, which has no
+        # "render" ("Unable to find group render"). getent asks the host.
+        lines.append("--device /dev/kfd --device /dev/dri")
+        lines.append(AMD_GROUPS)
         lines.append("-v /opt/rocm:/opt/rocm:ro")
     lines += ["-v /var/run/docker.sock:/var/run/docker.sock",
               "-v forgeyard-agent:/var/lib/forgeyard-agent",

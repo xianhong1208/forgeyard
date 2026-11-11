@@ -6,6 +6,52 @@ version until 1.0.
 
 ## [Unreleased]
 
+First run on a real AMD machine (Ryzen AI MAX+ 395 / Radeon 8060S, gfx1151, ROCm 7.0.2, amd-smi
+26.0.2, agent image 1.1.0); its tool output is now a test fixture (`tests/fixtures/strix-halo-gfx1151-amdsmi26`).
+
+### Fixed
+- **amd-smi 26 crashed the AMD collector** (`'str' object has no attribute 'get'`), so the agent fell
+  back to `rocm-smi`. amd-smi prints `"N/A"` where a value or a whole section (`"usage": "N/A"`) is
+  not supported; every section is now read defensively, in both the `{"gpu_data": [...]}` and the
+  bare-list shapes. What could not be read is listed in the card's `detail.missing` instead.
+- **The card's name was `N/A`.** A specific market or board name is used first; an APU whose
+  names are generic ("AMD Radeon Graphics") takes the GPU from the CPU's brand string
+  ("AMD RYZEN AI MAX+ 395 w/ Radeon 8060S" → "AMD Radeon 8060S"). A discrete card never does.
+- **The key was `amd:0x0`.** amdsmi's UUID is the device id plus the card's serial number, and an
+  APU has no serial, so `00ff1586-0000-1000-8000-000000000000` and rocm-smi's `0x0` are the same on
+  every Strix Halo. A card is now keyed by its UUID only when it has a serial, else by its PCI address,
+  and the key is the same whichever tool read it (a rocm-smi reading rebuilds amdsmi's UUID). The keys
+  an older agent used go along in `detail.aliases`; the server then moves the card's row, its GPU
+  allowlist entry and the claims of replicas running on it to the new key (audited as
+  `machine.gpu_keys_changed`). It does so only for a key that disappeared, of the same vendor,
+  claimed by exactly one card; anything ambiguous fails closed as before.
+- **The driver showed the kernel version** (`7.0.0-38-generic`; amd-smi's is a whole `uname -v`).
+  AMD cards report the ROCm version (from `<rocm>/.info/version`, else amdsmi, else
+  `amd-smi version`); the Machines page and `forgeyard agent inventory` label it "ROCm" /
+  `rocm=`. The kernel driver's string is kept in `detail.amdgpu_driver`.
+- **The `amdsmi` library was never used in the agent image**, although the mounted ROCm ships it in
+  `/opt/rocm/share/amd_smi`. When `import amdsmi` fails, the agent loads that copy (as `amd-smi`
+  itself does) with `ROCM_PATH` pointing at that ROCm; any failure (missing or mismatched
+  `libamd_smi.so`, a Python it does not support) is a reason and the CLI is used. What the library
+  prints, from Python or from its C++ code on file descriptor 1, goes to stderr (`inventory --json`
+  stays valid JSON).
+- **The agent image lacked libdrm**, which `libamd_smi.so` loads at run time (`libdrm.so.2`, and the
+  unversioned `libdrm_amdgpu.so` for the marketing name): amdsmi from the mounted ROCm then read the
+  memory but no ASIC information ("Fail to open libdrm.so.2"). The image installs `libdrm2` and
+  `libdrm-amdgpu1` with that link; the smoke test loads both.
+- **A partial answer no longer wins.** That half-working amdsmi was taken as the answer: no name, no
+  `gfx` target, no unified-memory flag. Now, while a card lacks its PCI address, gfx target, memory
+  size or a name, the next sources fill the gaps field by field (amd-smi, rocm-smi, then the KFD
+  topology, which alone gives the address and gfx target of a single GPU); the collector's source
+  names every one that contributed (`via amdsmi+kfd`), what stays unknown is said, and the live
+  metrics keep the merged keys.
+- **The AMD `docker run` failed with `Unable to find group render`**: Docker looks group names up in
+  the image. The Machines page, the guide and the image smoke test use the host's numeric ids,
+  `--group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)"`.
+- **`docker run … forgeyard-agent:<version> agent inventory` failed**: the image's command already is
+  `forgeyard agent`. The guide shows `… forgeyard-agent:<version> inventory`, and a redundant leading
+  `agent` is now accepted.
+
 ## [1.1.0] — 2026-11-11
 
 Easier to start and safe on the network: a first-run checklist and recommended models, an agent key guard in front of every model replica, HTTPS from Forgeyard's own CA, secrets encrypted at rest, a one-line agent install, an agent container image and a user guide in English and Traditional Chinese. Accepted on the real 8×A100 host (one shared card) plus a CPU machine.

@@ -10,8 +10,8 @@ from forgeyard.models.recipes import RecipeError, parse_recipe, render_text, var
 A100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
 RTX4090_OLD = {"vendor": "nvidia", "arch": "8.9", "driver": "550.54.14"}
 GTX = {"vendor": "nvidia", "arch": "6.1", "driver": "580.1"}
-GFX1151 = {"vendor": "amd", "arch": "gfx1151", "driver": "6.14.0"}
-GFX1030 = {"vendor": "amd", "arch": "gfx1030", "driver": "6.14.0"}
+GFX1151 = {"vendor": "amd", "arch": "gfx1151", "driver": "7.0.2"}
+GFX1030 = {"vendor": "amd", "arch": "gfx1030", "driver": "7.0.2"}
 CPU_X86 = {"vendor": "cpu", "arch": "x86_64", "driver": None}
 CPU_ARM = {"vendor": "cpu", "arch": "aarch64", "driver": None}
 

@@ -66,6 +66,9 @@ describe("machines page", () => {
     const strix = await screen.findByRole("article", { name: "Machine strix" });
     expect(within(strix).getByText("gfx1151")).toBeTruthy();
     expect(within(strix).getByText("unified memory")).toBeTruthy();
+    // An AMD card's driver is the ROCm version, and says so; NVIDIA keeps "driver".
+    expect(within(strix).getByText("ROCm 7.0.2")).toBeTruthy();
+    expect(within(await screen.findByRole("article", { name: "Machine a100-box" })).getAllByText("driver 580.178.04")).toHaveLength(8);
     expect(within(strix).getByText("offline")).toBeTruthy();
     expect(within(strix).getByText("Offline · last heartbeat 41 s ago")).toBeTruthy();
   });
@@ -184,6 +187,7 @@ describe("machines page", () => {
     expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.nvidia);
     fireEvent.click(screen.getByRole("button", { name: "AMD" }));
     expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.amd);
+    expect(screen.getByText(/given by their number on the host: the image has no render group/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "CPU only" }));
     expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.cpu);
     fireEvent.click(screen.getByRole("tab", { name: "Manual (config file)" }));

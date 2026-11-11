@@ -104,9 +104,10 @@ cloud model APIs, local first. One pull request before the 1.2 release prepares 
 
 ## Verification still to do
 
-- **AMD ROCm on real hardware.** M1 to M4 have only been checked against recorded AMD data. On a
-  real machine, confirm:
-  - the `gfx` target and unified memory (for example a Strix Halo `gfx1151`);
+- **AMD ROCm on real hardware.** The inventory has run on a real Strix Halo (gfx1151, ROCm 7.0.2;
+  see docs/acceptance-m1.md): the `gfx` target, unified memory and the 96 GiB pool are right. Still to
+  confirm there:
+  - the `amdsmi` library loaded from the mounted ROCm, and a discrete card;
   - vLLM's ROCm image;
   - `ROCR_VISIBLE_DEVICES`.
 - **The systemd scope for process limits.** It has not run on a host with systemd yet.

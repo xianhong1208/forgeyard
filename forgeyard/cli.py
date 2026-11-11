@@ -111,8 +111,9 @@ def _inventory_cmd(args) -> int:
     for a in data["accelerators"]:
         mem = f"{_human_size(a.get('vram_free'))} free of {_human_size(a.get('vram_total'))}"
         flags = " unified-memory" if a.get("unified_memory") else ""
+        driver = "rocm" if a["vendor"] == "amd" else "driver"  # AMD cards report the ROCm version
         print(f"{a['vendor']:<6} {a.get('index', 0):>2}  {a['model']}  arch={a.get('arch') or '?'}  {mem}"
-              f"  driver={a.get('driver') or '-'}{flags}")
+              f"  {driver}={a.get('driver') or '-'}{flags}")
     for name, status in data["collectors"].items():
         state = "ok" if status.get("ok") else "nothing"
         why = f" ({status['reason']})" if status.get("reason") else ""
@@ -566,6 +567,11 @@ def _agent_args(p: argparse.ArgumentParser, *, sub: bool = False) -> None:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:2] == ["agent", "agent"]:
+        # The agent image's entrypoint is already `forgeyard agent`, so `docker run … IMAGE agent
+        # inventory` arrives here as `agent agent inventory`. Accept it rather than fail.
+        del argv[0]
     args = build_parser().parse_args(argv)
     verbose = getattr(args, "verbose", False)
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,

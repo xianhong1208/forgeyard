@@ -296,7 +296,7 @@
      "vram_free": 111669149696,
      "vram_used": 6442450944,
      "unified_memory": true,
-     "driver": "6.14.0",
+     "driver": "7.0.2",
      "utilization": 3,
      "temperature": 47,
      "detail": {
