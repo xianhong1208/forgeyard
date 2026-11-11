@@ -200,7 +200,7 @@ export function paramApplies(name: string, model: CatalogModel | undefined): boo
   if (m === null || m === undefined) return true;
   if (name === "images") return m.includes("image") || m.includes("audio");
   if (name === "image_tokens") return m.includes("image");
-  if (name === "videos") return m.includes("video");
+  if (name === "videos" || name === "video_fps") return m.includes("video");
   return true;
 }
 

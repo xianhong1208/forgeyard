@@ -27,7 +27,8 @@ first, so it can be run again.
         --user <admin> --machine <machine> --only qwen3-vl-8b,gemma-4-12b-it --audio --out accept-mm.json
 
 Models it knows (--only): qwen3-vl-8b, qwen3-vl-2b (vLLM), gemma-4-12b-it (vLLM, images and audio),
-qwen3-vl-8b-gguf, qwen3-vl-2b-gguf (llama.cpp with projector). GGUF models run with --recipe (default
+qwen3-vl-8b-gguf, qwen3-vl-2b-gguf (llama.cpp with projector), qwen2.5-omni-3b-gguf (llama.cpp, images and
+audio). Every medium is covered by: an image model with --video-url sample, and an audio model with --audio. GGUF models run with --recipe (default
 llama-cpp; a custom recipe, such as a Vulkan one, must have `optional_args: [{if_model: mmproj, args:
 [--mmproj, "{mmproj_file}"]}]` and `media: {inputs: [image, audio, video]}`) on --device (cpu or gpu).
 
@@ -70,8 +71,15 @@ MODELS = {
     "qwen3-vl-2b-gguf": {"source": "hf://Qwen/Qwen3-VL-2B-Instruct-GGUF", "file": "Qwen3VL-2B-Instruct-Q4_K_M.gguf",
                          "mmproj": "mmproj-Qwen3VL-2B-Instruct-F16.gguf", "recipe": "llama-cpp",
                          "params": {"context": 4096, "concurrency": 1}},
+    # Audio on llama.cpp: a projector with an audio encoder (and vision). Its licence (qwen-research) allows
+    # testing, not commercial use, so it is not on the recommended list.
+    "qwen2.5-omni-3b-gguf": {"source": "hf://ggml-org/Qwen2.5-Omni-3B-GGUF", "file": "Qwen2.5-Omni-3B-Q4_K_M.gguf",
+                             "mmproj": "mmproj-Qwen2.5-Omni-3B-Q8_0.gguf", "recipe": "llama-cpp",
+                             "params": {"context": 8192, "concurrency": 1}},
 }
 DEFAULT_IMAGE_URL = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg"
+# A 6.5 MB tennis clip (under MEDIA_FETCH_MAX_MB) for --video-url.
+SAMPLE_VIDEO_URL = "https://huggingface.co/datasets/hf-internal-testing/fixtures_videos/resolve/main/tennis.mp4"
 PRIVATE_REDIRECT = "https://postman-echo.com/redirect-to?url={target}"
 
 
@@ -164,13 +172,16 @@ def main() -> int:
     ap.add_argument("--concurrency", type=int, help="concurrent requests instead of the model's default here")
     ap.add_argument("--image-url", default=DEFAULT_IMAGE_URL, help="a public image the gateway fetches")
     ap.add_argument("--audio", action="store_true", help="also send audio (models that take it: gemma-4-12b-it)")
-    ap.add_argument("--video-url", help="also send this public video (the deployment gets videos 1)")
+    ap.add_argument("--video-url", help="also send this public video (the deployment gets videos 1); "
+                    f"'sample' for {SAMPLE_VIDEO_URL}")
     ap.add_argument("--timeout", type=float, default=3600, help="seconds per deployment to become ready")
     ap.add_argument("--venv", default=str(Path.home() / ".cache" / "forgeyard-accept-m4"),
                     help="where to install the openai SDK if it is missing")
     ap.add_argument("--keep", action="store_true", help="leave the deployments running afterwards")
     ap.add_argument("--out", help="also write the report as JSON here")
     args = ap.parse_args()
+    if args.video_url == "sample":
+        args.video_url = SAMPLE_VIDEO_URL
     unknown = [n for n in args.only.split(",") if n not in MODELS]
     if unknown:
         raise Fail(f"unknown model(s) {unknown}; known: {', '.join(MODELS)}")
@@ -216,7 +227,7 @@ def main() -> int:
                 params["context"] = args.context
             if args.concurrency:
                 params["concurrency"] = args.concurrency
-            dep_name = f"{PREFIX}{name}"[:48]
+            dep_name = f"{PREFIX}{name}".replace(".", "-")[:48]   # deployment names take no dots
             body = {"name": dep_name, "model": name, "recipe": recipe, "params": params, "served_name": dep_name,
                     "replicas": 1, "machine_id": m["id"]}
             est = c.ok("POST", "/api/deployments/estimate", body)
