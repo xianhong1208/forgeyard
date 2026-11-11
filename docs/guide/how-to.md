@@ -206,6 +206,15 @@ A machine that already joined keeps its identity if the container gets its state
 Process workloads the old agent started outside the container are not taken over: stop them from
 the UI first.
 
+## Add a cloud provider
+
+Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
+OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test connection**. Add the
+models you want, then put one in a route: open a deployment, choose **Routing and cloud spill**, add
+a tier with the cloud model, and save. Give the keys that may use it a cloud setting other than
+**Never** on **API keys**. [Cloud providers](cloud-providers.md#add-a-provider) has the steps for
+each provider, and what each one's endpoint cannot do.
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, find the machine, choose **Change GPU access**.

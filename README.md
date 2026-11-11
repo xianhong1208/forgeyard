@@ -9,8 +9,10 @@ and usage statistics.
 
 > **Status: 1.1.1.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on a real 8×A100 host and a CPU
 > machine). 1.1 adds a first-run checklist and recommended models, HTTPS out of the box, a
-> one-line agent install, an agent container image and this guide. See [CHANGELOG.md](CHANGELOG.md)
-> and [ROADMAP.md](ROADMAP.md).
+> one-line agent install, an agent container image and this guide. Coming in 1.2 (on `dev`): cloud
+> providers behind the same gateway, local first: a model spills to OpenAI, Anthropic, Gemini, Azure
+> or OpenRouter when its replicas are busy or down, and only for keys allowed to send data out. See
+> [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
 
 ## The guide
 
@@ -22,6 +24,7 @@ Everything you need to set it up and use it is in the **[guide](docs/guide/READM
 | [Quick start](docs/guide/quick-start.md) | from nothing to your first `/v1` call in about ten minutes |
 | [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, workloads, models, deployments and the gateway, keys, roles |
 | [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
+| [Cloud providers](docs/guide/cloud-providers.md) | OpenAI, Anthropic, Gemini, Azure, OpenRouter or your own server behind `/v1`; when a request spills; which keys may use the cloud |
 | [Troubleshooting](docs/guide/troubleshooting.md) | problems seen on real machines, with their fix |
 | [Reference](docs/guide/reference.md) | every server and agent setting, the command line, files and ports |
 

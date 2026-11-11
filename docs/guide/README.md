@@ -14,6 +14,7 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
 | Set Forgeyard up for the first time | [Quick start](quick-start.md): about 10 minutes, plus the model download |
 | Understand machines, deployments, keys and roles | [Concepts](concepts.md) |
 | Add an AMD or CPU-only machine, run the agent in Docker, upgrade, back up | [How-to](how-to.md) |
+| Add OpenAI, Anthropic, Gemini or Azure, and let a model spill to the cloud | [Cloud providers](cloud-providers.md) |
 | Fix something that does not work | [Troubleshooting](troubleshooting.md) |
 | Look up a setting or a command | [Reference](reference.md) |
 
@@ -29,7 +30,10 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
    and restore, move a model cache, rotate keys, revoke a machine, uninstall the agent.
 4. [Troubleshooting](troubleshooting.md): problems seen on real machines, with their symptom, cause
    and fix.
-5. [Reference](reference.md): every server setting, every agent setting, the command line, files
+5. [Cloud providers](cloud-providers.md): add OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter
+   or a server of your own; route a model to the cloud; when a request spills; which keys may use the
+   cloud; what each provider's endpoint cannot do; what leaves your server.
+6. [Reference](reference.md): every server setting, every agent setting, the command line, files
    and ports.
 
 ## Conventions

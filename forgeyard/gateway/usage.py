@@ -1,5 +1,7 @@
 """Usage statistics: requests, errors, limit refusals, prompt and completion tokens and latency, per
-UTC day, source (an API key, or the console's playground), key, user and model.
+UTC day, source (an API key, or the console's playground), key, user, model and target (1.2: "local",
+or "pm:<id>" for a provider's model, so cloud traffic can be priced; plus cached and reasoning tokens
+and the requests that spilled from the first tier).
 
 Requests are counted in memory and written to `usage_daily` every few seconds (and when the
 server stops, and before the Usage page reads), so a busy gateway does not write the database
@@ -7,7 +9,8 @@ once per request. Latency is kept as a histogram per row (`BUCKETS_MS`), so p50 
 for any selection of rows; they are interpolated within a bucket.
 
 Tokens come from the engine's own `usage` (prompt_tokens, completion_tokens; embeddings and rerank
-report only input tokens). Only counting, never billing.
+report only input tokens; providers' usage is read by forgeyard/gateway/quirks.py). Only counting,
+never billing.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from typing import Callable, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from forgeyard.db import ApiKey, UsageDaily, new_session
+from forgeyard.db import ApiKey, Provider, ProviderModel, UsageDaily, new_session
 
 log = logging.getLogger("forgeyard")
 
@@ -62,6 +65,9 @@ class _Count:
     limited: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    spilled: int = 0
     latency_ms_sum: int = 0
     buckets: list[int] = field(default_factory=lambda: [0] * (len(BUCKETS_MS) + 1))
 
@@ -83,8 +89,10 @@ class Recorder:
 
     def record(self, *, source: str, key_id: int, user_id: int, username: str, model: str,
                deployment_id: Optional[int], status: int, latency_ms: float, prompt_tokens: int = 0,
-               completion_tokens: int = 0, limited: bool = False) -> None:
-        slot = (day_of(self.clock()), source, int(key_id or 0), int(user_id or 0), username or "", (model or "")[:128])
+               completion_tokens: int = 0, limited: bool = False, target: str = "local", cached_tokens: int = 0,
+               reasoning_tokens: int = 0, spilled: bool = False) -> None:
+        slot = (day_of(self.clock()), source, int(key_id or 0), int(user_id or 0), username or "", (model or "")[:128],
+                (target or "local")[:32])
         with self._lock:
             c = self._pending.get(slot)
             if c is None:
@@ -96,6 +104,9 @@ class Recorder:
             c.limited += 1 if limited else 0
             c.prompt_tokens += max(0, int(prompt_tokens or 0))
             c.completion_tokens += max(0, int(completion_tokens or 0))
+            c.cached_tokens += max(0, int(cached_tokens or 0))
+            c.reasoning_tokens += max(0, int(reasoning_tokens or 0))
+            c.spilled += 1 if spilled else 0
             c.latency_ms_sum += int(latency_ms)
             c.buckets[bucket_of(latency_ms)] += 1
 
@@ -109,15 +120,15 @@ class Recorder:
             own = db is None
             db = db or new_session()
             try:
-                for (day, source, key_id, user_id, username, model), c in pending.items():
+                for (day, source, key_id, user_id, username, model, target), c in pending.items():
                     row = db.scalar(select(UsageDaily).where(
                         UsageDaily.day == day, UsageDaily.source == source, UsageDaily.key_id == key_id,
-                        UsageDaily.user_id == user_id, UsageDaily.model == model))
+                        UsageDaily.user_id == user_id, UsageDaily.model == model, UsageDaily.target == target))
                     if row is None:
                         row = UsageDaily(day=day, source=source, key_id=key_id, user_id=user_id, username=username,
-                                         model=model, requests=0, errors=0, limited=0, prompt_tokens=0,
-                                         completion_tokens=0, latency_ms_sum=0,
-                                         latency_buckets=[0] * (len(BUCKETS_MS) + 1))
+                                         model=model, target=target, requests=0, errors=0, limited=0, prompt_tokens=0,
+                                         completion_tokens=0, cached_tokens=0, reasoning_tokens=0, spilled=0,
+                                         latency_ms_sum=0, latency_buckets=[0] * (len(BUCKETS_MS) + 1))
                         db.add(row)
                     if c.deployment_id is not None:
                         row.deployment_id = c.deployment_id
@@ -127,6 +138,9 @@ class Recorder:
                     row.limited += c.limited
                     row.prompt_tokens += c.prompt_tokens
                     row.completion_tokens += c.completion_tokens
+                    row.cached_tokens = (row.cached_tokens or 0) + c.cached_tokens
+                    row.reasoning_tokens = (row.reasoning_tokens or 0) + c.reasoning_tokens
+                    row.spilled = (row.spilled or 0) + c.spilled
                     row.latency_ms_sum += c.latency_ms_sum
                     merged = list(row.latency_buckets or [])
                     merged += [0] * (len(c.buckets) - len(merged))
@@ -143,6 +157,9 @@ class Recorder:
                         mine.limited += c.limited
                         mine.prompt_tokens += c.prompt_tokens
                         mine.completion_tokens += c.completion_tokens
+                        mine.cached_tokens += c.cached_tokens
+                        mine.reasoning_tokens += c.reasoning_tokens
+                        mine.spilled += c.spilled
                         mine.latency_ms_sum += c.latency_ms_sum
                         mine.buckets = [a + b for a, b in zip(mine.buckets, c.buckets)]
                         mine.deployment_id = mine.deployment_id or c.deployment_id
@@ -165,7 +182,7 @@ recorder = Recorder()
 
 
 # ------------------------------------------------------------------ reading
-GROUPS = ("day", "model", "key", "user", "source")
+GROUPS = ("day", "model", "key", "user", "source", "target")
 
 
 def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, deployment_id: Optional[int] = None,
@@ -180,6 +197,7 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
         q = q.where(UsageDaily.deployment_id == deployment_id)
     rows = db.scalars(q).all()
     keys = {k.id: k for k in db.scalars(select(ApiKey).where(ApiKey.id.in_({r.key_id for r in rows if r.key_id}))).all()}
+    targets = target_names(db, {r.target for r in rows}) if group_by == "target" else {}
 
     def label(r: UsageDaily) -> tuple[str, str]:
         if group_by == "day":
@@ -193,6 +211,9 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
             return str(r.user_id), r.username or f"user #{r.user_id}"
         if group_by == "source":
             return r.source, "API keys" if r.source == "api" else "Console playground"
+        if group_by == "target":
+            t = r.target or "local"
+            return t, targets.get(t, t)
         return r.model, r.model
 
     groups: dict[str, dict] = {}
@@ -213,7 +234,8 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
 
 def _empty(gid: str, name: str) -> dict:
     return {"id": gid, "name": name, "requests": 0, "errors": 0, "limited": 0, "prompt_tokens": 0,
-            "completion_tokens": 0, "latency_ms_sum": 0, "buckets": [0] * (len(BUCKETS_MS) + 1)}
+            "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "spilled": 0, "latency_ms_sum": 0,
+            "buckets": [0] * (len(BUCKETS_MS) + 1)}
 
 
 def _add(g: dict, r: UsageDaily) -> None:
@@ -222,6 +244,9 @@ def _add(g: dict, r: UsageDaily) -> None:
     g["limited"] += r.limited
     g["prompt_tokens"] += r.prompt_tokens
     g["completion_tokens"] += r.completion_tokens
+    g["cached_tokens"] += r.cached_tokens or 0
+    g["reasoning_tokens"] += r.reasoning_tokens or 0
+    g["spilled"] += r.spilled or 0
     g["latency_ms_sum"] += r.latency_ms_sum
     b = list(r.latency_buckets or [])
     b += [0] * (len(g["buckets"]) - len(b))
@@ -236,3 +261,15 @@ def _finish(g: dict) -> dict:
     g["latency_p50_ms"] = percentile(buckets, 0.50)
     g["latency_p95_ms"] = percentile(buckets, 0.95)
     return g
+
+
+def target_names(db: DbSession, targets: set) -> dict[str, str]:
+    """"local" -> "Local replicas"; "pm:<id>" -> "<provider>/<model>" (or "deleted provider model #id")."""
+    ids = {int(t[3:]) for t in targets if isinstance(t, str) and t.startswith("pm:") and t[3:].isdigit()}
+    rows = db.execute(select(ProviderModel.id, ProviderModel.upstream_model, Provider.name)
+                      .join(Provider, Provider.id == ProviderModel.provider_id).where(ProviderModel.id.in_(ids))).all() \
+        if ids else []
+    out = {"local": "Local replicas"}
+    out.update({f"pm:{i}": f"{p}/{m}" for i, m, p in rows})
+    out.update({f"pm:{i}": f"deleted provider model #{i}" for i in ids if f"pm:{i}" not in out})
+    return out

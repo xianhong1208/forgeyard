@@ -6,6 +6,7 @@ import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
+import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, spillRules, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
 import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
 import type { Deployment, DeploymentResponse, LiveCard, TryResponse } from "../lib/types";
@@ -139,6 +140,19 @@ function Gateway({ d }: { d: Deployment }) {
       <dl className="facts">
         <dt>Model name</dt><dd><code className="gw-model">{d.served_name}</code></dd>
         <dt>Endpoint</dt><dd className="mono small">{base}{path}</dd>
+        {d.routing && (
+          <>
+            <dt>Routing</dt>
+            <dd>
+              <span className={`chip chip-tone-${ROUTE_KIND_TONE[d.routing.kind]}`}>{ROUTE_KIND_LABEL[d.routing.kind]}</span>{" "}
+              {tiers(d.routing).map((tier, i) => (
+                <span key={i} className="small">{i === 0 ? "" : " → then "}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
+              ))}
+              <div className="muted small">{spillRules(d.routing)} <Link to={`/models/routes/${d.routing.id}`}>Routing and cloud spill</Link></div>
+              {d.also_in && d.also_in.length > 0 && <div className="muted small">Also a target of: {d.also_in.map((n) => <code key={n}>{n}</code>)}</div>}
+            </dd>
+          </>
+        )}
       </dl>
       <p className="muted small gw-how">
         Programs call it with an <Link to="/keys">API key</Link> (any OpenAI client, <code>base_url</code> = <code>{base}</code>); you can also

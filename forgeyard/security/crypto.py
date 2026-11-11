@@ -1,7 +1,7 @@
 """Secrets at rest: AES-256-GCM with a server key that is never in the database.
 
-Encrypted in the database: Hugging Face tokens on deployments, model replicas' internal keys, and
-the values of workload environment variables. Passwords, sessions, API keys and join tokens are not
+Encrypted in the database: Hugging Face tokens on deployments, model replicas' internal keys, the
+values of workload environment variables, and cloud providers' API keys (1.2). Passwords, sessions, API keys and join tokens are not
 encrypted but hashed (they are only ever compared, never read back).
 
     stored value   fy1:<key id>:<base64url(nonce || ciphertext || tag)>
@@ -233,9 +233,9 @@ def recorded_kid(connection) -> Optional[str]:
 def missing_key_message(kid: str) -> str:
     return (f"The secret key is missing: {key_path()} does not exist and {KEY_ENV} is not set, but the database "
             f"holds secrets encrypted with key {kid} (Hugging Face tokens, replica keys, workload environment "
-            f"values). Restore the key file from your backup and start again. If it is lost for good, run "
-            f"`python -m forgeyard secrets reset --yes` (see docs/https-and-trust.md): Hugging Face tokens must "
-            f"then be entered again, model replicas restart with new keys, and lost workload environment values "
+            f"values, provider keys). Restore the key file from your backup and start again. If it is lost for good, run "
+            f"`python -m forgeyard secrets reset --yes` (see docs/https-and-trust.md): Hugging Face tokens and "
+            f"provider keys must then be entered again, model replicas restart with new keys, and lost workload environment values "
             f"are emptied.")
 
 

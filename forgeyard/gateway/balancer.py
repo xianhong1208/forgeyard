@@ -5,6 +5,10 @@ time the replicas simply alternate.
 A replica the gateway could not connect to is tried last for a few seconds (`PENALTY`): the agent
 reports a dead engine within seconds, and until it does, requests should not keep knocking on it.
 The penalty ends early when the replica has become ready again since (it was restarted).
+
+Provider targets (1.2) are counted the same way, keyed "pm:<provider model id>", and one that
+failed (429, 5xx, no connection) cools down for longer (PROVIDER_COOLDOWN_SECONDS, or the
+provider's Retry-After when that is longer, up to five minutes).
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ class Balancer:
         self.served: dict[str, int] = {}           # requests sent per replica since the server started
         self._turn: dict[str, int] = {}
         self._failed: dict[str, tuple[float, float]] = {}   # uid -> (penalty until, wall time of the failure)
+        self._cool: dict[str, float] = {}                    # provider target -> cooled down until
 
     def reset(self) -> None:
         with self._lock:
@@ -46,6 +51,7 @@ class Balancer:
             self.served.clear()
             self._turn.clear()
             self._failed.clear()
+            self._cool.clear()
 
     def order(self, route: str, targets: list[Target]) -> list[Target]:
         """Every target, best first: not recently failed, fewest in flight, then in turn."""
@@ -70,6 +76,17 @@ class Balancer:
             self.inflight[uid] = self.inflight.get(uid, 0) + 1
             self.served[uid] = self.served.get(uid, 0) + 1
 
+    def try_acquire(self, uid: str, cap: Optional[int]) -> bool:
+        """Take a slot only while the replica has fewer than `cap` requests in flight (its deployment's
+        concurrency): the check and the count happen together, so two requests cannot both take the
+        last slot. No cap: always."""
+        with self._lock:
+            if cap and self.inflight.get(uid, 0) >= cap:
+                return False
+            self.inflight[uid] = self.inflight.get(uid, 0) + 1
+            self.served[uid] = self.served.get(uid, 0) + 1
+            return True
+
     def release(self, uid: str) -> None:
         with self._lock:
             left = self.inflight.get(uid, 0) - 1
@@ -82,6 +99,14 @@ class Balancer:
         with self._lock:
             self._failed[uid] = (self._clock() + PENALTY, self._wall())
             self.served[uid] = max(0, self.served.get(uid, 0) - 1)  # it never got the request
+
+    def cool_down(self, key: str, seconds: float) -> None:
+        with self._lock:
+            self._cool[key] = max(self._cool.get(key, 0.0), self._clock() + max(0.0, seconds))
+
+    def cooldown_left(self, key: str) -> float:
+        with self._lock:
+            return max(0.0, self._cool.get(key, 0.0) - self._clock())
 
     def snapshot(self, uid: str) -> dict:
         with self._lock:

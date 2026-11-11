@@ -15,6 +15,7 @@ const GROUPS: { id: string; label: string; admin?: boolean }[] = [
   { id: "user", label: "Person", admin: true },
   { id: "day", label: "Day" },
   { id: "source", label: "Source" },
+  { id: "target", label: "Local or cloud" },
 ];
 
 export function UsagePage() {
@@ -92,9 +93,9 @@ export function UsagePage() {
                       <div className={data.group_by === "model" || data.group_by === "day" ? "mono" : ""}>{r.name}</div>
                       <span className="bar usage-bar" aria-hidden="true"><span style={{ width: `${Math.round((r.requests / max) * 100)}%` }} /></span>
                     </td>
-                    <td data-label="Requests" className="num">{num(r.requests)}</td>
+                    <td data-label="Requests" className="num">{num(r.requests)}{r.spilled ? <span className="muted small"> · {num(r.spilled)} spilled</span> : null}</td>
                     <td data-label="Errors" className="num">{num(r.errors)}{r.limited > 0 && <span className="muted small"> · {num(r.limited)} limited</span>}</td>
-                    <td data-label="Tokens in" className="num">{num(r.prompt_tokens)}</td>
+                    <td data-label="Tokens in" className="num">{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</td>
                     <td data-label="Tokens out" className="num">{num(r.completion_tokens)}</td>
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>

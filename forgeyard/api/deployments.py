@@ -24,7 +24,8 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_operator
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
-from forgeyard.db import Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, Workload, get_db, utcnow
+from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
+                          utcnow)
 from forgeyard.machines.hub import hub
 from forgeyard.models import catalog, routes, scheduler
 from forgeyard.models.catalog import Context
@@ -170,20 +171,28 @@ def _endpoints(w: Workload) -> list[dict]:
 
 def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool = False) -> dict:
     w = d.workload
-    route = db.scalar(select(GatewayRoute).where(GatewayRoute.deployment_id == d.id))
+    route = routes.own_route(db, d.id)
+    own = next((t for t in route.targets if t.kind == "local" and t.deployment_id == d.id), None) if route else None
     out = {
         "id": d.id, "name": d.name, "recipe": d.recipe, "served_name": d.served_name, "params": d.params,
         "model": {"id": d.model.id, "name": d.model.name, "source": d.model.source, "task": d.model.task,
                   "format": d.model.format, "revision": d.model.revision, "file": d.model.file,
                   "size_bytes": d.model.size_bytes},
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
-        "route": {"served_name": route.served_name, "api": route.api, "upstream_model": route.upstream_model}
+        "route": {"served_name": route.served_name, "api": route.api,
+                  "upstream_model": own.upstream_model if own else d.served_name}
         if route else None,
         "endpoints": _endpoints(w),
         "workload": workload_out(w, caller),
     }
     if detail:
         from forgeyard.api.keys import deployment_usage
+
+        out["routing"] = routes.route_out(route) if route else None
+        # Other routes this deployment is a target of (an admin added it to them).
+        out["also_in"] = [r.served_name for r in db.scalars(
+            select(GatewayRoute).join(RouteTarget, RouteTarget.route_id == GatewayRoute.id)
+            .where(RouteTarget.deployment_id == d.id, GatewayRoute.id != (route.id if route else 0))).all()]
 
         out["cards"] = live_cards(db, w)
         out["usage"] = deployment_usage(db, d)
@@ -225,7 +234,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
         raise fail(409, "name_taken", f"A workload or deployment named {name} already exists.")
     served = _served_name(body)
     if db.scalar(select(GatewayRoute.id).where(GatewayRoute.served_name == served)) is not None:
-        raise fail(409, "served_name_taken", f"Another deployment already serves the model name {served}.")
+        raise fail(409, "served_name_taken", f"Another deployment or route already serves the model name {served}.")
     ctx, recipe, m = build_context(db, body)
 
     class _Dep:
@@ -256,8 +265,11 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
     db.add(d)
     db.flush()
     upstream = (m.meta or {}).get("repo") or served if recipe.upstream_model == "repo" else served
-    db.add(GatewayRoute(served_name=served, api=recipe.api_for(m.task), upstream_model=upstream,
-                        deployment_id=d.id, workload_id=w.id))
+    route = GatewayRoute(served_name=served, api=recipe.api_for(m.task), deployment_id=d.id,
+                         created_by=caller.user.username)
+    route.targets.append(RouteTarget(tier=0, kind="local", deployment_id=d.id, upstream_model=upstream, weight=1,
+                                     enabled=True))
+    db.add(route)
     what = f"{ctx.estimate.amount / 1024**3:.2f} GiB {'per GPU' if ctx.device == 'gpu' else 'of RAM'}"
     wstate.event(db, w, "created", f"Deployment of {m.name} with {recipe.name} by {caller.user.username}; "
                                    f"estimated {what}.")
@@ -409,23 +421,18 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     import time
 
     d = _get(db, dep_id)
-    route = db.scalar(select(GatewayRoute).where(GatewayRoute.deployment_id == d.id))
+    route = routes.own_route(db, d.id)
+    own = next((t for t in route.targets if t.kind == "local" and t.deployment_id == d.id), None) if route else None
+    upstream = own.upstream_model if own and own.upstream_model else d.served_name
     target = next(iter(routes.endpoints(d.workload, ready_only=True)), None)
     if route is None or target is None:
         raise fail(409, "not_ready", "No replica of this deployment is ready yet.")
-    path, payload, ctype = try_request(route.api, route.upstream_model, body.input)
+    path, payload, ctype = try_request(route.api, upstream, body.input)
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)
     return {"status": status, "ok": 200 <= status < 300, "api": route.api, "endpoint": target["url"] + path.lstrip("/"),
-            "request": json.loads(payload) if ctype == "application/json" else {"model": route.upstream_model,
-                                                                                 "file": CLIP.name},
+            "request": json.loads(payload) if ctype == "application/json" else {"model": upstream, "file": CLIP.name},
             "summary": summarise(route.api, answer) if 200 <= status < 300 else str(answer)[:500],
             "answer": answer if isinstance(answer, dict) else None, "ms": ms}
-
-
-@router.get("/routes")
-def list_routes(_: Caller = Depends(current), db: DbSession = Depends(get_db)):
-    """The gateway routes (M4 reads these): model name, protocol, and the ready replicas."""
-    return {"routes": routes.all_routes(db)}

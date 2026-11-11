@@ -349,6 +349,66 @@ page contain these lines whenever the server uses its own CA.
 
 Real-hardware checks: [docs/acceptance-m4.md](acceptance-m4.md) and `scripts/accept_m4.py`.
 
+## Cloud providers and tiered routes (1.2)
+
+The gateway can also send requests to model APIs outside Forgeyard, local first. Decided on
+2026-11-11 after a study of LiteLLM, OpenRouter, Portkey, Envoy's AI gateway, Kong and GPUStack.
+
+- **OpenAI-compatible upstreams only.** Forgeyard speaks the OpenAI shape to each provider's own
+  compatibility endpoint (OpenAI, Anthropic `…/v1/`, Gemini `…/v1beta/openai/`, Azure OpenAI's v1 API,
+  OpenRouter, any OpenAI-compatible server) and passes answers back unchanged. A small **quirks
+  table** per kind (`forgeyard/gateway/quirks.py`) covers what differs: how the key is sent (Bearer,
+  Azure's `api-key`, Anthropic's `x-api-key` and version), engine-only parameters dropped
+  (`chat_template_kwargs`, `top_k`, `guided_*`, llama.cpp samplers…), `max_tokens` renamed for OpenAI
+  and Azure, Gemini's `models/` prefix, and how `usage` is read back (cached and reasoning tokens;
+  Anthropic's are always empty). No native translators: what each endpoint loses is documented
+  (docs/guide/cloud-providers.md) instead of hidden. **No LiteLLM**, as a library or a sidecar: it
+  was compromised on PyPI twice in 2026 (1.82.7/1.82.8 in March through a compromised CI tool; 1.107.0
+  and its Docker images in October, which read a proxy's credential tables), and its key and budget
+  system would duplicate Forgeyard's.
+- **Routes and targets.** A route is a served name with targets in tiers (`route_targets`): local
+  deployments and provider models (`providers`, `provider_models`), each with a weight and an on/off
+  switch. A deployment creates its own route (tier 0: itself) and deletes it with itself; admins add
+  tiers or create routes of their own (cloud only, or several deployments behind one name). Migration
+  0009 turned every existing route into one tier-0 target with the same upstream model name, so they
+  behave exactly as before.
+- **Spill rules, only before the first byte.** The next tier is used when this one is *unavailable*
+  (no ready replica, every connection failed), *busy* (every ready replica has as many requests in
+  flight through this server as its deployment's `concurrency`; the slot is taken atomically, so two
+  requests cannot both get the last one; `wait_ms` waits for one first) or *refusing* (429 or 503).
+  *Too long* (estimated prompt plus `max_tokens` over the deployment's `context`) only when the route
+  opts in. Never on another 4xx, a timeout once the request was sent, a replica refusing the internal
+  key, a client that went away, or mid-stream. If local was busy and every later tier failed, the
+  request waits for a local slot after all.
+- **The cloud tier** tries its targets by weight (a weighted shuffle); one that answers 429 or 5xx or
+  cannot be reached cools down for 30 s (or its Retry-After, up to 5 min) and is tried last. A
+  Retry-After up to 2 s is waited for once when nothing else is left. Provider errors keep their status
+  and message (anything that looks like a key removed); a provider refusing its key is 502
+  `provider_auth_failed`, never a 401 the client would blame on its own key.
+- **Who may send data out.** Each API key has `cloud` = `off` (every key from before 1.2, and the
+  default) / `fallback` (only as a spill target) / `on` (cloud-only models too). A cloud-only model is
+  404 and unlisted for `off` and `fallback` keys. Admins set the default and the most a user may give
+  their own key; an admin's value on someone else's key is locked, like limits. A provider marked as
+  inside your network (a vLLM on your VPN) is not cloud. A route marked `local_only` and a request with
+  `X-Forgeyard-Local-Only: 1` never use cloud targets. Answers carry `X-Forgeyard-Target` and, after a
+  spill, `X-Forgeyard-Spilled`.
+- **Egress.** A separate HTTP client for providers: TLS verified (plus `EGRESS_CA_FILE`), redirects
+  never followed, never a proxy from the environment (`EGRESS_PROXY` instead), `EGRESS_ALLOWED_HOSTS`.
+  https only; cloud providers must resolve to public addresses; private addresses for providers inside
+  your network, plain http only when an admin allows it for one; link-local and metadata addresses
+  always refused. The name is resolved and checked before every request, and the connection goes to
+  the checked address (TLS still verifies the name).
+- **Provider keys** are `EncryptedText("providers.api_key")`: write-only (the API shows the last four
+  characters), never logged, audited or returned, never copied by **Clone** (the copy starts without a
+  key, disabled), and dropped by `secrets reset`.
+- **Usage** rows now carry the target (`local` or `pm:<provider model id>`), cached and reasoning
+  tokens, and how many requests spilled, so cost can be priced per provider model. Provider models
+  already have nullable price columns (micro-USD per million tokens). Cost, budgets and a price refresh
+  from OpenRouter come next.
+- **Not in 1.2:** native Anthropic or Gemini translators and a `/v1/messages` passthrough; the
+  Responses API, batch, files, images; cloud rerank, score or audio; fallback mid-stream; cost-,
+  latency- or semantic routing between clouds; sticky routing; Entra ID, Vertex or Bedrock auth.
+
 ## Accounts and sign-in
 
 - **Roles:** `admin` manages users, machines and their GPU allowlists, the model catalog, recipes

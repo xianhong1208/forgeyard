@@ -6,7 +6,8 @@ secret.key.lost-<time>), then for every stored secret the new key cannot read:
 - Hugging Face tokens are dropped: enter them again on each deployment of a gated model;
 - model replicas lose their internal key and are placed again, so they restart with a new one;
 - workload environment values are emptied (the names stay), and the workload's events say which:
-  delete the workload and create it again with the values.
+  delete the workload and create it again with the values;
+- provider keys (1.2) are dropped: enter them again on the Providers page.
 
 Nothing else changes: accounts, sessions, API keys and machines are hashed, not encrypted.
 """
@@ -24,6 +25,8 @@ from forgeyard.security import crypto
 from forgeyard.workloads import state as wstate
 
 deployments = sa.table("deployments", sa.column("id", sa.Integer), sa.column("hf_token", sa.Text))
+providers = sa.table("providers", sa.column("id", sa.Integer), sa.column("api_key", sa.Text),
+                     sa.column("key_last4", sa.String))
 replicas = sa.table("replicas", sa.column("id", sa.Integer), sa.column("secret", sa.Text),
                     sa.column("workload_id", sa.Integer))
 workloads = sa.table("workloads", sa.column("id", sa.Integer), sa.column("spec", sa.JSON))
@@ -62,13 +65,18 @@ def reset() -> dict:
     crypto.reset()
     box = crypto.box()  # a new key file (or FORGEYARD_SECRET_KEY, if that is set)
     upgrade()
-    counts = {"hf_tokens": 0, "replicas": 0, "env_values": 0}
+    counts = {"hf_tokens": 0, "replicas": 0, "env_values": 0, "provider_keys": 0}
     with get_engine().begin() as conn:
         for row in conn.execute(sa.select(deployments.c.id, deployments.c.hf_token)
                                 .where(deployments.c.hf_token.is_not(None))).all():
             if not _readable(box, row.hf_token, "deployments.hf_token"):
                 conn.execute(deployments.update().where(deployments.c.id == row.id).values(hf_token=None))
                 counts["hf_tokens"] += 1
+        for row in conn.execute(sa.select(providers.c.id, providers.c.api_key)
+                                .where(providers.c.api_key.is_not(None))).all():
+            if not _readable(box, row.api_key, "providers.api_key"):
+                conn.execute(providers.update().where(providers.c.id == row.id).values(api_key=None, key_last4=None))
+                counts["provider_keys"] += 1
         lost_keys: set[int] = set()
         for row in conn.execute(sa.select(replicas.c.id, replicas.c.secret, replicas.c.workload_id)
                                 .where(replicas.c.secret.is_not(None))).all():
@@ -113,6 +121,7 @@ def reset() -> dict:
     finally:
         db.close()
     summary = (f"Dropped {counts['hf_tokens']} Hugging Face token(s), placed {counts['replicas']} model replica(s) "
-               f"again and emptied {counts['env_values']} workload environment value(s).")
+               f"again, emptied {counts['env_values']} workload environment value(s) and dropped "
+               f"{counts['provider_keys']} provider key(s).")
     where = crypto.KEY_ENV if crypto.key_from_env() else str(path)
     return {"kid": box.kid, "key_file": where, **counts, "summary": summary}

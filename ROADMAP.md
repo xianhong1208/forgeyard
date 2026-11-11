@@ -48,9 +48,8 @@ Three pull requests, in this order:
 ## Publishing the source: with 1.2
 
 Agreed on 2026-11-10. Forgeyard becomes public with 1.2. By then a newcomer can install it alone
-(the agent image, the one-line install, the guide), it is on HTTPS by default, and it does
-something the alternatives do not: one gateway, one set of keys and limits, for your own GPUs and
-cloud model APIs, local first. One pull request before the 1.2 release prepares it:
+(the agent image, the one-line install, the guide), it is on HTTPS by default, and it offers
+something the alternatives do not (see below). One pull request before the 1.2 release prepares it:
 
 1. **AMD ROCm accepted on real hardware.** The README claims AMD support, and it has only been
    checked against recorded data so far.
@@ -65,12 +64,32 @@ cloud model APIs, local first. One pull request before the 1.2 release prepares 
 
 ## Next: 1.2, cloud model APIs behind the same gateway
 
-- OpenAI, Anthropic, Google Gemini and any OpenAI-compatible endpoint can be added as providers.
-  The provider key is stored encrypted.
-- Their models are served at `/v1` next to local ones, with the same API keys, limits and usage.
-- **Local first:** a model can fall back to a cloud provider when no local replica is free.
-- Cost is tracked per provider, key and user.
-- LiteLLM, OpenRouter and Portkey are studied first, to choose the routing and fallback rules.
+Researched on 2026-11-11 (LiteLLM, OpenRouter, Portkey, Envoy's AI gateway, Kong, GPUStack). "One
+gateway for your GPUs and cloud APIs" alone is no longer new: **GPUStack 2.1 to 2.3 already has
+cloud providers, weighted routes and fallback on status codes.** What Forgeyard 1.2 does that they
+do not:
+
+- **Spill when local is busy, not only when it is down.** A request goes to the cloud when every
+  local replica is at its concurrency (or unavailable, or answers 429/503), only before the first
+  byte, and waits for local again if the cloud cannot take it either.
+- **Cost in US dollars, and budgets** per key, person and provider, reserved before a request is
+  sent; an exhausted budget makes a route local-only. GPUStack meters tokens, not money.
+- **Keys that cannot send data out unless allowed.** Every key is "never" by default (including
+  every key from before 1.2), "only to spill" or "allowed"; cloud-only models do not exist for keys
+  that may not use them; a route or a single request can be kept local.
+
+Two pull requests:
+
+1. **Providers and tiered routing** (PR A, `providers`, in review): OpenAI-compatible endpoints only (OpenAI,
+   Anthropic, Gemini, Azure OpenAI, OpenRouter, any compatible server) with a quirks table, no LiteLLM;
+   tiered routes; the spill rules; the per-key cloud setting; egress rules; usage per target.
+2. **Cost and budgets** (PR B): prices per provider model (entered by hand, or refreshed from
+   OpenRouter's catalogue with a diff to accept), the cost of each request stored in micro-dollars,
+   monthly budgets (UTC calendar month) per key, person and provider with reservation, alerts at 80%
+   and 100%.
+
+Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
+and thinking.
 
 ## Then
 

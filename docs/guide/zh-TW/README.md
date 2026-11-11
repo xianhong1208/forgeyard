@@ -11,6 +11,7 @@ Forgeyard 在你自己的 GPU（和 CPU）上執行工作與模型，並把模�
 | 第一次架設 Forgeyard | [快速入門](quick-start.md)：大約 10 分鐘，另加下載模型的時間 |
 | 了解機器、部署、金鑰和角色 | [概念](concepts.md) |
 | 加入 AMD 或純 CPU 的機器、用 Docker 跑 agent（代理程式）、升級、備份 | [操作指南](how-to.md) |
+| 加入 OpenAI、Anthropic、Gemini 或 Azure，讓模型溢出到雲端 | [雲端供應商](cloud-providers.md) |
 | 排除無法運作的問題 | [疑難排解](troubleshooting.md) |
 | 查某個設定或指令 | [參考資料](reference.md) |
 
@@ -20,7 +21,8 @@ Forgeyard 在你自己的 GPU（和 CPU）上執行工作與模型，並把模�
 2. [概念](concepts.md)：機器與 agent、GPU 存取權、工作負載、模型、recipe（配方）與估算、部署與閘道、API 金鑰與限制與用量、角色。
 3. [操作指南](how-to.md)：加入 AMD 機器或純 CPU 機器、用 Docker 跑 agent、在共用機器上限制 GPU、使用自己的憑證或反向代理、升級、備份與還原、搬移模型快取、輪替金鑰、撤銷機器、解除安裝 agent。
 4. [疑難排解](troubleshooting.md)：在實際機器上遇過的問題，附上症狀、原因和解法。
-5. [參考資料](reference.md)：伺服器的每個設定、agent 的每個設定、命令列、檔案和連接埠。
+5. [雲端供應商](cloud-providers.md)：加入 OpenAI、Anthropic、Gemini、Azure OpenAI、OpenRouter 或你自己的伺服器；把模型導向雲端；請求何時溢出；哪些金鑰可以使用雲端；各供應商端點做不到的事；哪些東西會離開你的伺服器。
+6. [參考資料](reference.md)：伺服器的每個設定、agent 的每個設定、命令列、檔案和連接埠。
 
 ## 慣例
 

@@ -1,0 +1,266 @@
+# Cloud providers
+
+Forgeyard can send requests to model APIs outside it: OpenAI, Anthropic, Google Gemini, Azure
+OpenAI, OpenRouter, or any OpenAI-compatible server, such as a vLLM on another network. Your
+programs keep one address, one set of API keys, one set of limits and one usage page, and the
+local models come first. [繁體中文版](zh-TW/cloud-providers.md)
+
+## How it works
+
+- A **provider** is one account at one of those APIs: its base URL and its API key. The key is
+  stored encrypted and is never shown again. Admins add providers on **Providers**.
+- A provider's **models** are the names you may send it, such as `gpt-4o-mini` or, for Azure, your
+  deployment's name.
+- A **route** is a model name at `/v1`. It has **targets** in **tiers**. Every deployment has its
+  route, with the deployment as its only target. An admin can add a second tier to it, such as a
+  cloud model to use when the local replicas are busy or down. An admin can also make a route that
+  has only a cloud model.
+- Forgeyard talks to every provider through that provider's **own OpenAI-compatible endpoint**.
+  It has no translators to the providers' native APIs, and it does not use LiteLLM. What each
+  endpoint cannot do is listed [below](#what-each-providers-endpoint-cannot-do).
+- Each API key has a **cloud** setting, and it is **Never** unless someone changes it. See
+  [who may use the cloud](#who-may-use-the-cloud).
+
+Only chat, completions and embeddings go to providers. Rerank, score and speech to text stay local.
+
+## Add a provider
+
+On **Providers**, choose **Add a provider**, pick the kind and paste the key. Then:
+
+1. **Test connection** asks the base URL for `/models` with the key. It shows how many models the
+   provider listed, or why it refused.
+2. Open the provider and add its models: by name, or with **Import from /models** (not for Azure,
+   whose list does not show your deployments).
+3. Put a model in a route (see [route a model to the cloud](#route-a-model-to-the-cloud)).
+
+**Outside your network** is ticked for every kind except *OpenAI-compatible server*. Keep it ticked
+for a third party. Untick it for a server of your own: a provider inside your network does not
+count as cloud, so every key may use it.
+
+### OpenAI
+
+Kind *OpenAI*, an API key from platform.openai.com. The base URL is preset
+(`https://api.openai.com/v1`). Chat, completions and embeddings work. `max_tokens` is sent as
+`max_completion_tokens`, because newer OpenAI models refuse the old name.
+
+### Anthropic
+
+Kind *Anthropic*, an API key from console.anthropic.com. The base URL is preset
+(`https://api.anthropic.com/v1`, the compatibility endpoint). If your key belongs to an
+organisation and not a workspace, add the extra header `anthropic-workspace-id: <id>`. Anthropic
+has no embeddings. Read [what it cannot do](#anthropic-1) before you rely on it.
+
+### Google Gemini
+
+Kind *Google Gemini*, an API key from aistudio.google.com. The base URL is preset
+(`https://generativelanguage.googleapis.com/v1beta/openai`). Gemini lists its models as
+`models/gemini-…`; the import removes `models/`, which is what requests use. Chat and embeddings
+(`gemini-embedding-001`) work.
+
+### Azure OpenAI
+
+Kind *Azure OpenAI*, the key of your Azure OpenAI resource, and your own base URL:
+`https://<resource>.openai.azure.com/openai/v1` (the v1 API, without `api-version`). The model names
+are your **deployment names** in Azure: add them by hand.
+
+### OpenRouter
+
+Kind *OpenRouter*, an API key from openrouter.ai. The base URL is preset
+(`https://openrouter.ai/api/v1`). Model names look like `openai/gpt-4o-mini` or
+`anthropic/claude-sonnet-4.5`; import them. OpenRouter routes between its own providers, and
+reports the cost of each request.
+
+### A server of your own (vLLM elsewhere)
+
+Kind *OpenAI-compatible server* and its base URL, such as `https://llm.example.org/v1`, plus a key
+if it wants one. *Outside your network* is unticked by default: it is your server, so keys need no
+cloud permission to use it. Over a VPN with a private address, you may tick **Allow plain HTTP**.
+Forgeyard drops nothing from requests to it.
+
+## Route a model to the cloud
+
+To let a deployment spill to the cloud when it is busy or down:
+
+1. Open the deployment and choose **Routing and cloud spill**. You can also go to **Models**, then
+   **Routes and cloud**.
+2. **Add a tier**, and add the provider's model to it.
+3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save routing**.
+
+To serve a cloud model under a name of its own, choose **Models**, then **Routes and cloud**, then
+**New route**. Give it the name clients will send as `model`, and add the provider's model. Only
+keys whose cloud setting is **Allowed** see such a route.
+
+Every answer says who served it, in the header `X-Forgeyard-Target`: `local:<deployment>#<replica>`
+or `provider:<provider>/<model>`. When a request moved past the first tier, `X-Forgeyard-Spilled`
+says why: `unavailable`, `busy`, `refused` or `too_long`. The `model` in the answer's body is what
+the upstream wrote. The Playground shows the target under each answer.
+
+## When a request spills
+
+A request moves to the next tier **only before anything was sent back to the client**, and only
+when the tier is:
+
+- **unavailable**: no replica is ready, or none could be connected to;
+- **busy**: every ready replica already has as many requests in flight through this server as its
+  deployment's *Concurrent requests* setting. With **Wait for a free local slot**, it waits up to
+  that many milliseconds first (at most 10,000; 0 by default);
+- **refusing**: the engine answered 429 or 503;
+- **too small**, only when the route has **Spill a prompt that is too long**: the prompt's size
+  (about 3 bytes a token, on the high side) plus `max_tokens` is more than the deployment's context.
+
+It **never** moves on when:
+
+- the engine answers another error, such as 400 for a bad request (it would fail anywhere, and
+  cost money upstream);
+- the request was sent and no answer came in time (504): trying again would double the work;
+- the replica refused the gateway's internal key (502);
+- the client went away;
+- the answer has started streaming.
+
+If the local tier was busy and the cloud cannot take the request either, the request waits for a
+local replica after all.
+
+Within a cloud tier, a target that answers 429 or 5xx, or cannot be reached, is skipped and tried
+last for 30 seconds (`PROVIDER_COOLDOWN_SECONDS`). Several targets in one tier share the requests by
+their weight. When nothing else is left and the provider asked to wait up to 2 seconds
+(`Retry-After`, `PROVIDER_RETRY_AFTER_CAP`), the request waits once and tries again.
+
+A request can forbid the cloud for itself with the header `X-Forgeyard-Local-Only: 1`. It never
+widens what the key allows:
+
+```bash
+curl https://192.168.1.20:7860/v1/chat/completions \
+  -H "Authorization: Bearer fyk_…" -H "X-Forgeyard-Local-Only: 1" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3-8b", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+A route with **Local only** never leaves your network, whatever the keys allow. Use it as a switch
+for sensitive models.
+
+## Who may use the cloud
+
+Each API key has a **cloud** setting:
+
+| Setting | Mixed routes (local, then cloud) | Cloud-only routes |
+|---|---|---|
+| **Never** (`off`) | local only: the request gets the local error instead of spilling | do not exist: 404 and not in `/v1/models` |
+| **Only to spill** (`fallback`) | spill as described above | do not exist |
+| **Allowed** (`on`) | spill as described above | listed and usable |
+
+- Every key made before 1.2 is **Never**. A new key gets the server's default, which is **Never**
+  unless an admin changes it.
+- People may give their own keys at most **the most people may give their own keys**, which is
+  **Never** unless an admin raises it. Both are under **API keys**, then **Cloud for keys**.
+- An admin can set any key's cloud setting. On someone else's key the value is then **locked** for
+  its owner, as limits are. **Unlock cloud** gives it back the default.
+- A provider inside your network (not ticked *Outside your network*) is not cloud: every key may use
+  it.
+- In the **Playground**, admins may use the cloud; everyone else gets the most they may give a key.
+
+## What each provider's endpoint cannot do
+
+Forgeyard sends requests in the OpenAI shape to each provider's OpenAI-compatible endpoint, and
+passes the answer back unchanged. These are the limits of those endpoints, as their providers
+document them (November 2026).
+
+### OpenAI
+
+Nothing on Chat Completions and embeddings. Newer features arrive first, or only, in the Responses
+API, which Forgeyard does not serve.
+
+### Anthropic
+
+Anthropic says its OpenAI compatibility is not meant as a long-term or production-ready solution
+for most uses. Through it you lose:
+
+- **prompt caching**, so long prompts cost more than through Anthropic's own API;
+- **thinking**: it is never returned, and `thinking: {type: adaptive}` is refused;
+- **PDF, file and audio input** (400);
+- **`n` above 1** (refused), `strict` on tools (ignored), `reasoning_effort` (ignored);
+- the **usage breakdown**: `prompt_tokens_details` and `completion_tokens_details` are always
+  empty, so Usage shows no cached or reasoning tokens;
+- `response_format` other than `json_schema` with `strict: true` (Forgeyard drops a plain
+  `{"type": "text"}`, which is the default anyway);
+- **embeddings**: Anthropic has none.
+
+On the newest Claude models, a `temperature` below 1 together with `top_p`, or a forced
+`tool_choice`, may also be refused. System and developer messages are joined into one. A native
+`/v1/messages` passthrough, which keeps caching and thinking, may come later.
+
+### Google Gemini
+
+- The endpoint is in **beta**, and parameters it does not know are ignored silently.
+- No file upload or download. Context caching works only through
+  `extra_body.google.cached_content`.
+- **Gemini 3 thought signatures** (`extra_content.google.thought_signature` on each tool call) must
+  be sent back on the next turn. Forgeyard passes them through untouched. A conversation whose
+  earlier turns were answered by a local model has none, and Gemini may refuse it with 400.
+- Thinking cannot be turned off on some models. Whether thinking tokens count in
+  `completion_tokens` has not been checked yet.
+
+### Azure OpenAI
+
+- The model name is your **deployment name**, not the model's.
+- Microsoft recommends the Responses API. Only part of Azure's features were in the first release
+  of the v1 API, and its content-filter errors are Azure's own.
+
+### OpenRouter and other servers
+
+Only what is specific to one provider behind them. OpenRouter accepts `top_k`, `min_p` and
+`repetition_penalty` and passes them on; for the other cloud kinds Forgeyard drops those and other
+engine-only parameters (vLLM's `chat_template_kwargs`, `guided_*`, llama.cpp's sampler settings)
+when a request leaves for them.
+
+## Egress: what leaves your server
+
+- Requests to providers use their own HTTP client: TLS is verified, **redirects are never followed**
+  (a key is never sent on to wherever a redirect points), and a proxy from the environment is never
+  used.
+- `EGRESS_PROXY` sends them through a proxy of yours instead. `EGRESS_ALLOWED_HOSTS` limits them to
+  some hosts. `EGRESS_CA_FILE` trusts a company CA as well.
+- **https** only. A cloud provider must resolve to public addresses. Private addresses are for
+  providers inside your network, and plain http only for those with **Allow plain HTTP**.
+- **Link-local and cloud metadata addresses** (169.254.169.254, fd00:ec2::254) are always refused.
+  The address is checked before every request, and the connection goes to the address that was
+  checked.
+- Provider keys are never logged, never in the audit log, never in an answer, and never copied when
+  a provider is cloned (the copy starts without a key, disabled).
+- Prompts and answers are never logged.
+
+## Troubleshooting
+
+### Test connection says the key was refused
+
+HTTP 401 or 403 from the provider. Check the key on the provider's site. For Anthropic, an
+organisation-level key needs the `anthropic-workspace-id` header. For Azure, the key belongs to the
+resource in the base URL.
+
+### 502 provider_auth_failed
+
+The provider refused Forgeyard's key for it. Forgeyard never passes this on as 401, which would
+make the client blame its own key. An admin fixes the provider's key.
+
+### 502 provider_blocked
+
+The egress rules refused the request before it was sent. The base URL is http, is not in
+`EGRESS_ALLOWED_HOSTS`, or resolves to a private, link-local or metadata address. The message says
+which.
+
+### A model is not found, but it is in the list on Models
+
+It is a cloud-only route, and the key's cloud setting is not **Allowed**. Such models are "not
+found" for such keys, exactly like a name that does not exist.
+
+### A request did not spill
+
+Check, in this order: the key's cloud setting (**Never** never spills); the route's **Local only**;
+the request's `X-Forgeyard-Local-Only`; and the reason. A 400, a timeout after sending, or an answer
+that had started do not spill. "Busy" counts only requests through this server against the
+deployment's *Concurrent requests*.
+
+### Requests go to the cloud more often than expected
+
+Every replica was at its *Concurrent requests*. Raise it (if the engine and memory allow), add
+replicas, or set **Wait for a free local slot** to a few hundred milliseconds. `X-Forgeyard-Spilled`
+and Usage (**Local or cloud**) show how often and why.

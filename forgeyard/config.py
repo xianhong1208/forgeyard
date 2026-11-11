@@ -103,6 +103,41 @@ class Settings(BaseSettings):
     # How often gateway usage counted in memory is written to the database (seconds).
     usage_flush_seconds: float = 5.0
 
+    # Cloud providers (1.2). Initial values of a key's `cloud` setting; admins change them on the API
+    # keys page (stored in the database). default: what a new key gets; max: the most a user may give
+    # their own key (off < fallback < on). Keys made before 1.2 are "off".
+    gateway_cloud_default: str = "off"
+    gateway_cloud_max: str = "off"
+    # Requests to providers go through this proxy (http://host:port) when set; never through a
+    # proxy from the environment.
+    egress_proxy: str = ""
+    # Only these provider hosts, comma-separated (`*.example.org` for subdomains). Empty: any host.
+    egress_allowed_hosts: str = ""
+    # A CA file to trust for providers on top of the system's (a company proxy that inspects TLS).
+    egress_ca_file: str = ""
+    # Providers on private or loopback addresses, and plain http, also when marked as outside your
+    # network: for testing against a stand-in only. Link-local and metadata addresses stay refused.
+    provider_allow_private_hosts: bool = False
+    provider_connect_timeout: float = 10.0
+    # Waiting for a provider's answer headers or the next piece of a stream (a provider can lower it).
+    provider_read_timeout: float = 300.0
+    # A provider target that failed (429, 5xx, no connection) is tried last for this long.
+    provider_cooldown_seconds: float = 30.0
+    # A provider's Retry-After up to this many seconds is waited for once, when no other target is left.
+    provider_retry_after_cap: float = 2.0
+
+    @field_validator("gateway_cloud_default", "gateway_cloud_max")
+    @classmethod
+    def _cloud(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("off", "fallback", "on"):
+            raise ValueError("GATEWAY_CLOUD_DEFAULT and GATEWAY_CLOUD_MAX: off, fallback or on")
+        return v
+
+    @property
+    def egress_allowed_host_list(self) -> list[str]:
+        return [h.strip().lower() for h in self.egress_allowed_hosts.split(",") if h.strip()]
+
     @field_validator("registration")
     @classmethod
     def _registration(cls, v: str) -> str:

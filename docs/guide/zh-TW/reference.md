@@ -77,6 +77,23 @@
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
 | `USAGE_FLUSH_SECONDS` | `5` | 把記憶體中統計的用量寫入資料庫的頻率 |
 
+### 雲端供應商
+
+| 變數 | 預設值 | 用途 |
+|---|---|---|
+| `GATEWAY_CLOUD_DEFAULT` | `off` | 新 API 金鑰拿到的雲端設定：`off`、`fallback` 或 `on`。管理員可以在 **API keys** 修改（存在資料庫裡）；既有的金鑰維持原本的設定 |
+| `GATEWAY_CLOUD_MAX` | `off` | 任何人能為自己的金鑰設定的最大值。管理員可以為任何金鑰設定任何值 |
+| `EGRESS_PROXY` | 空白 | 送往供應商的請求改經由這個 proxy（`http://host:port`）。絕不使用環境變數裡的 proxy |
+| `EGRESS_ALLOWED_HOSTS` | 空白 | 只允許這些供應商主機，以逗號分隔（`*.example.org` 代表子網域）。空白：不限 |
+| `EGRESS_CA_FILE` | 空白 | 除了系統的 CA 之外，供應商連線額外信任的 CA 檔（例如會檢查 TLS 的公司 proxy） |
+| `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | 讓標示為在你網路外的供應商也能使用私有或 loopback 位址和純 http。只用於以替身伺服器測試；link-local 和 metadata 位址仍然一律拒絕 |
+| `PROVIDER_CONNECT_TIMEOUT` | `10` | 連線到供應商的秒數上限，超過就改試下一個目標 |
+| `PROVIDER_READ_TIMEOUT` | `300` | 供應商回傳回應標頭或串流下一段內容的秒數上限（每個供應商可以另外設定） |
+| `PROVIDER_COOLDOWN_SECONDS` | `30` | 回應 429 或 5xx、或連不上的供應商目標，在這段時間內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
+| `PROVIDER_RETRY_AFTER_CAP` | `2` | 沒有其他目標可試時，不超過這個秒數的 `Retry-After` 會等一次再試 |
+
+請求標頭 `X-Forgeyard-Local-Only: 1`：這個請求絕不使用雲端目標。回應標頭：`X-Forgeyard-Target`（`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`）；請求離開第一層時有 `X-Forgeyard-Spilled`（`unavailable`、`busy`、`refused` 或 `too_long`）；本機回答則和以前一樣有 `X-Forgeyard-Replica`。
+
 ## agent 設定
 
 如果 `/etc/forgeyard/agent.toml` 存在，agent 會先讀取它（可用 `--config PATH` 或 `FORGEYARD_AGENT_CONFIG` 指定其他檔案），接著讀取 `FORGEYARD_*` 環境變數，最後是旗標。**旗標優先於環境變數，環境變數優先於檔案，檔案優先於預設值。** labels 會依照相同順序逐個 key 合併。

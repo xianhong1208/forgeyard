@@ -6,8 +6,9 @@
 [English](README.md)
 
 > **狀態：1.1.1。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的 8×A100 主機與一台 CPU 機器上驗收過）。1.1 加入首次使用清單與
-> 推薦模型、開箱即用的 HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。見 [CHANGELOG.md](CHANGELOG.md)
-> 與 [ROADMAP.md](ROADMAP.md)。
+> 推薦模型、開箱即用的 HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 即將推出（已在 `dev`）：雲端供應商走同一個閘道、
+> 本機優先：模型的副本忙碌或停擺時，可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰。
+> 見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.md](ROADMAP.md)。
 
 ## 使用指南
 
@@ -19,6 +20,7 @@ Forgeyard 自己也在 `/guide` 提供：
 | [快速入門](docs/guide/zh-TW/quick-start.md) | 從零開始，大約十分鐘完成第一次 `/v1` 呼叫 |
 | [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、工作負載、模型、部署與閘道、金鑰、角色 |
 | [操作指南](docs/guide/zh-TW/how-to.md) | AMD 與純 CPU 機器、用 Docker 跑 agent、共用 GPU、自己的憑證、升級、備份 |
+| [雲端供應商](docs/guide/zh-TW/cloud-providers.md) | 把 OpenAI、Anthropic、Gemini、Azure、OpenRouter 或你自己的伺服器放到 `/v1` 後面；請求何時溢出；哪些金鑰可以使用雲端 |
 | [疑難排解](docs/guide/zh-TW/troubleshooting.md) | 在真實機器上遇過的問題與解法 |
 | [參考資料](docs/guide/zh-TW/reference.md) | 伺服器與 agent 的所有設定、指令、檔案與連接埠 |
 

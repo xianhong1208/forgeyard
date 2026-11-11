@@ -130,7 +130,7 @@ def test_fy_key_004_model_allowlists_name_real_deployments(owner):
     assert owner.post("/api/keys", json={"name": "x", "models": []}).json()["detail"]["code"] == "no_models"
     assert owner.patch(f"/api/keys/{k['id']}", json={"models": None}).json()["api_key"]["models"] is None
     listing = owner.get("/api/keys").json()
-    assert listing["models"] == [{"name": "embed", "api": "openai-embeddings"}]
+    assert listing["models"] == [{"name": "embed", "api": "openai-embeddings", "kind": "local"}]
 
 
 def test_fy_key_005_deleting_a_user_deletes_their_keys(owner):

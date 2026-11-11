@@ -43,7 +43,8 @@ def _console_caller(token: Optional[str]) -> tuple[Optional[KeyCaller], Optional
         row, reason = sessions.resolve(db, token)
         if row is None:
             return None, reason
-        return KeyCaller(source="console", user_id=row.user.id, username=row.user.username), None
+        return KeyCaller(source="console", user_id=row.user.id, username=row.user.username,
+                         cloud=keys.console_cloud(db, row.user)), None
     finally:
         db.close()
 
@@ -56,7 +57,7 @@ def _route(name: str) -> Optional[proxy.Route]:
         db.close()
 
 
-def _models() -> list[tuple[str, str, int]]:
+def _models() -> list[tuple[str, str, int, bool, bool]]:
     db = new_session()
     try:
         return proxy.model_names(db)
@@ -133,13 +134,15 @@ def _model_out(name: str, created: int) -> dict:
 
 @router.get("/models")
 async def list_models(request: Request):
-    """The models this key may use (every deployment, or the key's allowlist)."""
+    """The models this key may use (every route, or the key's allowlist; cloud-only models only with
+    the key's cloud setting on)."""
     try:
         caller = await run_in_threadpool(_authenticate, request.headers.get("authorization"))
     except GatewayError as e:
         return e.response()
     rows = await run_in_threadpool(_models)
-    data = [_model_out(n, c) for n, _a, c in rows if caller.models is None or n in caller.models]
+    data = [_model_out(n, c) for n, _a, c, local, _cloud in rows
+            if proxy.visible(caller.cloud, local) and (caller.models is None or n in caller.models)]
     return {"object": "list", "data": data}
 
 
@@ -149,7 +152,7 @@ async def get_model(model: str, request: Request):
         caller = await run_in_threadpool(_authenticate, request.headers.get("authorization"))
     except GatewayError as e:
         return e.response()
-    rows = {n: c for n, _a, c in await run_in_threadpool(_models)}
+    rows = {n: c for n, _a, c, local, _cloud in await run_in_threadpool(_models) if proxy.visible(caller.cloud, local)}
     if model not in rows:
         return GatewayError(404, "model_not_found", f"The model {model!r} does not exist.", param="model").response()
     if caller.models is not None and model not in caller.models:

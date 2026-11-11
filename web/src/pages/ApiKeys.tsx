@@ -7,7 +7,8 @@ import { CopyBox, Field, Notice, PageHeader, TrustHint } from "../components/ui"
 import { api, errorText } from "../lib/api";
 import { exact, when } from "../lib/format";
 import { keyModels, num, snippets } from "../lib/gateway";
-import type { ApiKey, KeyLimits, KeysResponse, NewKeyResponse } from "../lib/types";
+import { CLOUD_HELP, CLOUD_LABEL, CLOUD_LEVELS, cloudAbove } from "../lib/routing";
+import type { ApiKey, CloudLevel, CloudSettings, KeyLimits, KeysResponse, NewKeyResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 const EXPIRY = [
@@ -26,6 +27,12 @@ function capText(n: number | null): string {
 
 type LimitName = "rpm" | "tpm";
 const LIMIT_LABEL: Record<LimitName, string> = { rpm: "Requests", tpm: "Tokens" };
+const CLOUD_TONE: Record<CloudLevel, string> = { off: "off", fallback: "run", on: "wait" };
+const NO_CLOUD: CloudSettings = { default: "off", max: "off" };
+
+function CloudChip({ level }: { level: CloudLevel }) {
+  return <span className={`chip chip-tone-${CLOUD_TONE[level]}`} title={CLOUD_HELP[level]}>{CLOUD_LABEL[level]}</span>;
+}
 
 // A limit an admin set on someone else's key: its owner cannot change it.
 function LockChip({ by }: { by: string }) {
@@ -91,8 +98,8 @@ export function ApiKeysPage() {
           <h2 id="base-title">Gateway address</h2>
           <CopyBox value={data.gateway_url} label="Gateway base URL" />
           <p className="muted small">
-            Use it as the <code>base_url</code> of any OpenAI client, with <code>Authorization: Bearer &lt;key&gt;</code>. The <code>model</code> is a
-            deployment's model name{data.models.length ? ":" : " (none deployed yet)."}
+            Use it as the <code>base_url</code> of any OpenAI client, with <code>Authorization: Bearer &lt;key&gt;</code>. The <code>model</code> is one of
+            its model names{data.models.length ? ":" : " (none yet: deploy a model first)."}
           </p>
           {data.models.length > 0 && (
             <p className="model-names">{data.models.map((m) => <code key={m.name}>{m.name}</code>)}</p>
@@ -135,11 +142,11 @@ export function ApiKeysPage() {
             <div className="table-wrap">
               <table className="table keys-table">
                 <thead>
-                  <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+                  <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
                 </thead>
                 <tbody>
                   {data.keys.map((k) => (
-                    <KeyRow key={k.id} k={k} everyone={everyone} isAdmin={data.is_admin} limits={data.limits}
+                    <KeyRow key={k.id} k={k} everyone={everyone} isAdmin={data.is_admin} limits={data.limits} cloud={data.cloud ?? NO_CLOUD}
                       editing={editing === k.id} onEdit={() => setEditing(editing === k.id ? null : k.id)}
                       onSaved={(text) => { setEditing(null); setMessage({ tone: "ok", text }); reload(); }}
                       onError={(text) => setMessage({ tone: "error", text })} onRevoke={() => void revoke(k)} />
@@ -152,24 +159,32 @@ export function ApiKeysPage() {
       )}
 
       {data?.is_admin && <LimitsPanel limits={data.limits} onSaved={() => { setMessage({ tone: "ok", text: "Limits for keys saved." }); reload(); }} />}
+      {data?.is_admin && <CloudPanel cloud={data.cloud ?? NO_CLOUD} onSaved={() => { setMessage({ tone: "ok", text: "Cloud setting for keys saved." }); reload(); }} />}
     </>
   );
 }
 
-function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onError, onRevoke }: {
-  k: ApiKey; everyone: boolean; isAdmin: boolean; limits: KeyLimits; editing: boolean; onEdit: () => void;
+function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved, onError, onRevoke }: {
+  k: ApiKey; everyone: boolean; isAdmin: boolean; limits: KeyLimits; cloud: CloudSettings; editing: boolean; onEdit: () => void;
   onSaved: (text: string) => void; onError: (text: string) => void; onRevoke: () => void;
 }) {
   const { user } = useAuth();
   const [rpm, setRpm] = useState(k.rpm ? String(k.rpm) : "");
   const [tpm, setTpm] = useState(k.tpm ? String(k.tpm) : "");
+  const level: CloudLevel = k.cloud ?? "off";
+  const [cloudLevel, setCloudLevel] = useState<CloudLevel>(level);
   const own = user?.id === k.user.id;
   const lockedBy: Record<LimitName, string | null> = { rpm: k.rpm_locked_by ?? null, tpm: k.tpm_locked_by ?? null };
+  const cloudLock = k.cloud_locked_by ?? null;
   // Only what changed is sent: an unchanged locked value is not "changed" by its owner saving the other one.
-  const patch = (values: Record<LimitName, string>) => Object.fromEntries((["rpm", "tpm"] as LimitName[])
-    .map((n) => [n, values[n] ? Number(values[n]) : null] as const)
-    .filter(([n, v]) => v !== k[n]));
-  const send = async (body: Record<string, number | null>, done: string) => {
+  const patch = (values: Record<LimitName, string>) => {
+    const out: Record<string, number | string | null> = Object.fromEntries((["rpm", "tpm"] as LimitName[])
+      .map((n) => [n, values[n] ? Number(values[n]) : null] as const)
+      .filter(([n, v]) => v !== k[n]));
+    if (cloudLevel !== level) out.cloud = cloudLevel;
+    return out;
+  };
+  const send = async (body: Record<string, number | string | null>, done: string) => {
     try {
       await api(`/keys/${k.id}`, { method: "PATCH", body });
       onSaved(done);
@@ -184,7 +199,7 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
       onEdit();
       return;
     }
-    await send(body, `Limits of ${k.name} saved.`);
+    await send(body, `Limits and cloud setting of ${k.name} saved.`);
   };
   const lockHint = (n: LimitName, base: string) => {
     const by = lockedBy[n];
@@ -212,6 +227,7 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
             <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
           )}
         </td>
+        <td data-label="Cloud" className="small"><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}</td>
         <td data-label="Last used" className="small" title={exact(k.last_used_at)}>{k.last_used_at ? when(k.last_used_at) : "never"}</td>
         <td data-label="Expires" className="small" title={exact(k.expires_at)}>{k.expires_at ? when(k.expires_at) : "never"}</td>
         <td data-label="Status">
@@ -227,7 +243,7 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
       </tr>
       {editing && (
         <tr className="row-edit">
-          <td colSpan={everyone ? 8 : 7}>
+          <td colSpan={everyone ? 9 : 8}>
             <form className="limits-form" onSubmit={save} aria-label={`Limits of ${k.name}`}>
               <Field label="Requests per minute" name={`rpm-${k.id}`} type="number" min={1} value={rpm} onChange={(e) => setRpm(e.target.value)}
                 placeholder={limits.default_rpm ? `default ${limits.default_rpm}` : "server default"} disabled={!isAdmin && !!lockedBy.rpm}
@@ -235,8 +251,23 @@ function KeyRow({ k, everyone, isAdmin, limits, editing, onEdit, onSaved, onErro
               <Field label="Tokens per minute" name={`tpm-${k.id}`} type="number" min={1} value={tpm} onChange={(e) => setTpm(e.target.value)}
                 placeholder={limits.default_tpm ? `default ${limits.default_tpm}` : "server default"} disabled={!isAdmin && !!lockedBy.tpm}
                 hint={lockHint("tpm", isAdmin ? "Prompt and completion tokens together." : `Empty: the default; ${capText(limits.max_tpm)}.`)} />
+              <div className="field">
+                <label htmlFor={`cloud-${k.id}`}>Cloud providers</label>
+                <select id={`cloud-${k.id}`} value={cloudLevel} disabled={!isAdmin && !!cloudLock} onChange={(e) => setCloudLevel(e.target.value as CloudLevel)}>
+                  {CLOUD_LEVELS.map((c) => <option key={c} value={c} disabled={!isAdmin && cloudAbove(c, cloud.max) && c !== level}>{CLOUD_LABEL[c]}</option>)}
+                </select>
+                <p className="field-hint">{cloudLock && !isAdmin ? <>Set by the admin <strong>{cloudLock}</strong>; only an admin can change it.</>
+                  : cloudLock ? `Locked for ${k.user.username ?? "the owner"} (set by ${cloudLock}).`
+                    : isAdmin && !own ? `${CLOUD_HELP[cloudLevel]} Saving it locks it for ${k.user.username ?? "the owner"}.` : CLOUD_HELP[cloudLevel]}</p>
+              </div>
               <div className="row-gap limits-actions">
-                <button type="submit" className="btn btn-primary btn-small" disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm}>Save limits</button>
+                <button type="submit" className="btn btn-primary btn-small" disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock}>Save limits</button>
+                {isAdmin && cloudLock && (
+                  <button type="button" className="btn btn-quiet btn-small"
+                    onClick={() => void send({ cloud: null }, `Cloud setting of ${k.name} unlocked; it is the default again.`)}>
+                    <IconLock size={14} aria-hidden="true" /> Unlock cloud
+                  </button>
+                )}
                 {isAdmin && (["rpm", "tpm"] as LimitName[]).filter((n) => lockedBy[n]).map((n) => (
                   <button key={n} type="button" className="btn btn-quiet btn-small"
                     onClick={() => void send({ [n]: null }, `${LIMIT_LABEL[n]} limit of ${k.name} unlocked; it is the default again.`)}>
@@ -260,6 +291,8 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
   const [rpm, setRpm] = useState("");
   const [tpm, setTpm] = useState("");
   const [expiry, setExpiry] = useState("");
+  const cloudSettings = data.cloud ?? NO_CLOUD;
+  const [cloud, setCloud] = useState<CloudLevel>(cloudSettings.default);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { limits, is_admin: admin } = data;
@@ -273,7 +306,7 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
         method: "POST",
         body: {
           name: name.trim(), models: all ? null : picked, rpm: rpm ? Number(rpm) : null, tpm: tpm ? Number(tpm) : null,
-          expires_in_days: expiry ? Number(expiry) : null,
+          expires_in_days: expiry ? Number(expiry) : null, cloud,
         },
       }));
     } catch (err) {
@@ -326,6 +359,20 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
             placeholder={limits.default_tpm ? `default ${limits.default_tpm}` : "no limit"}
             hint={admin ? "Prompt and completion tokens together." : `Empty: the default; ${capText(limits.max_tpm)}.`} />
         </div>
+        <fieldset className="allowlist key-cloud">
+          <legend>Cloud providers</legend>
+          <div className="cloud-picks" role="radiogroup" aria-label="May this key use cloud providers?">
+            {CLOUD_LEVELS.map((c) => {
+              const over = !admin && cloudAbove(c, cloudSettings.max);
+              return (
+                <label key={c} className={`card-pick${over ? " row-off" : ""}`} title={over ? "An admin has not allowed this for your own keys" : undefined}>
+                  <input type="radio" name="key-cloud" checked={cloud === c} disabled={over} onChange={() => setCloud(c)} />
+                  <span className="strong">{CLOUD_LABEL[c]}</span> <span className="muted small">{CLOUD_HELP[c]}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
         <div className="row-gap" style={{ marginTop: 16 }}>
           <button type="submit" className="btn btn-primary" disabled={busy || !name.trim() || (!all && picked.length === 0)}>
@@ -371,6 +418,49 @@ function CopyText({ value }: { value: string }) {
     <button type="button" className="btn" onClick={() => {
       void navigator.clipboard?.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1600); }, () => undefined);
     }}>{done ? "Copied" : "Copy example"}</button>
+  );
+}
+
+function CloudPanel({ cloud, onSaved }: { cloud: CloudSettings; onSaved: () => void }) {
+  const [f, setF] = useState<CloudSettings>(cloud);
+  const [error, setError] = useState<string | null>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api("/keys/cloud", { method: "PUT", body: f });
+      onSaved();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+  return (
+    <section className="panel" aria-labelledby="cloud-title">
+      <h2 id="cloud-title">Cloud for keys</h2>
+      <p className="muted small">
+        Whether requests with a key may reach cloud providers. Keys made before 1.2 are “Never”, and changing the default here changes no existing
+        key. People may set their own keys up to the most allowed; admins may set any key, which locks it for its owner. In the playground, admins
+        may use the cloud and others get the most allowed.
+      </p>
+      <form onSubmit={save}>
+        <div className="grid-2">
+          <div className="field">
+            <label htmlFor="cloud-default">New keys get</label>
+            <select id="cloud-default" value={f.default} onChange={(e) => setF({ ...f, default: e.target.value as CloudLevel })}>
+              {CLOUD_LEVELS.map((c) => <option key={c} value={c}>{CLOUD_LABEL[c]}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="cloud-max">The most people may give their own keys</label>
+            <select id="cloud-max" value={f.max} onChange={(e) => setF({ ...f, max: e.target.value as CloudLevel })}>
+              {CLOUD_LEVELS.map((c) => <option key={c} value={c}>{CLOUD_LABEL[c]}</option>)}
+            </select>
+          </div>
+        </div>
+        {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
+        <button type="submit" className="btn" style={{ marginTop: 14 }}>Save cloud setting</button>
+      </form>
+    </section>
   );
 }
 

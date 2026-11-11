@@ -37,6 +37,7 @@ export function Layout() {
     { to: "/usage", label: "Usage" },
     ...(user?.role === "admin"
       ? [
+          { to: "/providers", label: "Providers" },
           { to: "/users", label: "Users" },
           { to: "/audit", label: "Audit log" },
         ]

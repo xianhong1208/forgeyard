@@ -161,6 +161,10 @@ docker run -d --name forgeyard-agent --restart always --network host \
 
 舊 agent 在容器外啟動的行程類工作負載不會被接手：請先從 UI 停止它們。
 
+## 加入雲端供應商
+
+管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+
 ## 在共用機器上限制 GPU
 
 1. 開啟 **Machines**，找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。

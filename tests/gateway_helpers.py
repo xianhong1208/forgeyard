@@ -35,6 +35,7 @@ class FakeEngine:
         self.hold = hold            # before a non-streamed answer
         self.usage = usage or USAGE
         self.status: Optional[int] = None   # answer every request with this status instead
+        self.cut_after: Optional[int] = None  # a stream breaks off after this many chunks (1.2)
         self.seen: list[dict] = []
         self.refused = 0
         self.disconnects = 0
@@ -99,10 +100,17 @@ class FakeEngine:
             def _stream(self, body):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
+                if engine.cut_after is not None:
+                    # Promise more than is sent, then hang up: the client sees a broken answer.
+                    self.send_header("Content-Length", "1000000")
                 self.end_headers()
                 usage_asked = (body.get("stream_options") or {}).get("include_usage") is True
                 try:
                     for i in range(engine.chunks):
+                        if engine.cut_after is not None and i == engine.cut_after:
+                            self.wfile.flush()
+                            self.close_connection = True
+                            return
                         chunk = {"id": "c1", "object": "chat.completion.chunk", "model": body.get("model"),
                                  "choices": [{"index": 0, "delta": {"content": f"t{i} "}, "finish_reason": None}]}
                         self.wfile.write(b"data: " + json.dumps(chunk).encode() + b"\n\n")
