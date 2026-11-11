@@ -1,6 +1,6 @@
 [project]
 name = "forgeyard"
-version = "1.1.1"
+version = "1.2.0"
 description = "Forgeyard: one control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API."
 readme = "README.md"
 license = "Apache-2.0"

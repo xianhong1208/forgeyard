@@ -6,8 +6,11 @@ version until 1.0.
 
 ## [Unreleased]
 
-Cloud model APIs behind the same gateway, local first (1.2, part A: providers and tiered routing;
-part B1: cost tracking and prices; part B2: budgets).
+## [1.2.0] — 2026-11-11
+
+Cloud model APIs behind the same gateway, local first: providers and tiered routes with spill rules,
+a per-key cloud setting, cost in US dollars with prices, and monthly budgets. Also the first public
+release: Apache-2.0, contributor and security files, and a documentation pass over the whole guide.
 
 ### Added
 - **Open source under the Apache License 2.0** (`LICENSE`; also in the agent's wheel and the package
