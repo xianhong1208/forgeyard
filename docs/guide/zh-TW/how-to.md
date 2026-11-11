@@ -361,6 +361,42 @@ sudo systemctl enable --now forgeyard
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
 
+## 從頭到尾檢查一台伺服器
+
+升級之後，或要開始使用新版本之前，`scripts/accept_all.py` 會在你自己的伺服器和機器上檢查每一項功能：只要一個指令，每項檢查印出一行 PASS、FAIL 或 SKIP（SKIP 會說明原因），最後再印出總結。它用管理員帳號透過 API 操作，用官方 OpenAI SDK 呼叫 `/v1`，並用瀏覽器檢查網頁主控台。
+
+在 Forgeyard 的 checkout 裡執行它，所在的電腦要連得到伺服器（金鑰守門員的檢查還需要連得到機器上模型副本的連接埠），並準備好從 **Trust this server** 下載的伺服器 CA：
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --gpu-machine gpu-01 --cpu-machine cpu-01 --second-cpu-machine cpu-02 \
+  --cloud-provider openai --out accept-all.json --shots accept-shots --install-playwright
+```
+
+每台機器和雲端供應商都可以不給：少了哪一個，需要它的檢查就會跳過，並說明原因。各組檢查依執行順序如下：
+
+| 組別 | 檢查什麼 |
+|---|---|
+| `server` | 用 CA 驗證的 HTTPS、安全性標頭、陌生的主機名稱（421）、CSRF 規則、用一次性帳號測試登入失敗後的等待、`/guide`、`/trust`、`/install.sh` |
+| `machines` | 每台機器都在線上、硬體正確；GPU 允許清單確實生效；加入指令會釘選 CA |
+| `workloads` | 行程類服務、任務（成功、重試、`max_duration`）、機器有 Docker 或 Podman 時的容器任務；在 GPU 機器上，工作負載只看得到分配給它的卡 |
+| `models` | 部署小模型並等它們就緒：每台 CPU 機器上的 Qwen3-1.7B GGUF；GPU 機器上的對話、embedding、rerank 和語音模型（估算放不下的會跳過）；部署頁面上的估算；**Try it** |
+| `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；Playground；用量 |
+| `cloud` | 給了 `--cloud-provider` 才會執行：外溢到雲端、設為 **Never** 的金鑰、只用本地、雲端上限、費用，以及預算和它的警示 |
+| `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
+
+用 `--only gateway,cloud` 或 `--skip console` 選擇要跑的組別；即使沒選 `models`，`gateway` 和 `cloud` 也會部署它們需要的模型。全部沒有失敗時結束代碼是 0，有檢查失敗時是 1，無法開始執行時是 2。
+
+執行前要知道的事：
+
+- **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、工作負載、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣。這次執行留下的用量紀錄和稽核事件會保留。
+- **只有一個請求會送到雲端供應商**，內容是固定的一小段提示，費用不到一美分。供應商的每月預算會被改動幾秒鐘再改回原值；其他預算檢查只用這次執行自己的金鑰和使用者。
+- **一次性使用者會有五次登入失敗**：伺服器允許每個位址在 15 分鐘內失敗 30 次，所以連續執行很多次時，中間要等一下。
+- **時間：**機器上已經有模型時大約 15 到 20 分鐘（沒有 GPU 機器時約 3 分鐘）；需要下載的話另外加上下載時間。
+- 加上 `--kill-local` 還會檢查容錯移轉：它會強制結束在執行這支腳本的電腦（兩台 CPU 機器之一）上那個 CPU 副本的引擎。
+- 主控台的檢查需要 Playwright for Python 和 Chrome（`--chrome`，預設 `/opt/google/chrome/chrome`）；`--install-playwright` 會把 Playwright 和 OpenAI SDK 一起裝進腳本自己的虛擬環境（`--venv`）。沒有的話，console 這組會跳過。
+
 ## 備份與還原
 
 **伺服器上要備份的東西**，除非你搬過位置，否則都在它的 `data/` 資料夾裡：
