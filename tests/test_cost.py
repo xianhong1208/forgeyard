@@ -306,10 +306,17 @@ def test_fy_cst_009_refresh_matches_previews_and_applies_only_what_is_confirmed(
     picks by hand is "confirmed"."""
     cat, cloud = catalog
     gpt, other, claude, llama, oa = _ids(owner, cloud)
+    inside = add_provider(owner, cloud, name="inside", kind="openai_compatible", external=False, allow_http=True,
+                          models=(("openai/gpt-mini", "openai-chat"),))
+    mine = model_id(inside, "openai/gpt-mini")
     r = owner.post("/api/prices/openrouter/preview", json={})
     assert r.status_code == 200, r.text
     out = r.json()
     rows = {x["model_id"]: x for x in out["rows"]}
+    assert mine not in rows                                            # inside your network: never priced
+    r = owner.post("/api/prices/openrouter/apply", json={"items": [{"model_id": mine, "ref": "openai/gpt-mini",
+                                                                    **rows[gpt]["after"]}]}).json()
+    assert r["skipped"] == [{"model_id": mine, "reason": "not_found"}] and _db_prices(mine) == (None,) * 6
     assert out["listed"] == 3 and out["matched"] == 3 and out["changed"] == 3
     assert cat.seen and not {"authorization", "x-api-key"} & {k.lower() for k in cat.seen[-1]["headers"]}
     assert (rows[llama]["match"], rows[llama]["ref"]) == ("exact", "meta/llama-x")
