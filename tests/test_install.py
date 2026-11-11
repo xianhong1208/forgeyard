@@ -158,6 +158,10 @@ def test_fy_inst_005_the_machines_page_gets_three_ways_that_pin_the_ca(owner):
                      "-e FORGEYARD_SERVER=https://localhost", f"forgeyard-agent:{__version__}"):
             assert part in cmd, (kind, part)
         assert (extra in cmd) if extra else ("--gpus" not in cmd and "/dev/kfd" not in cmd)
+    # Group names are looked up in the image, which has no "render": the host's numeric ids instead.
+    amd = j["docker_commands"]["amd"]
+    assert ('--group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)"'
+            in amd) and "--group-add video" not in amd and "--group-add render" not in amd
     import tomllib
 
     cfg = tomllib.loads(j["config_file"])

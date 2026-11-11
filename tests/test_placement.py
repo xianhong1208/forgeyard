@@ -1,9 +1,15 @@
 """Placement and the per-machine GPU allowlist (FY-PLACE-*, FY-ALLOW-*)."""
 
+import json
+from pathlib import Path
+
 import pytest
 from sqlalchemy import select
 
-from forgeyard.db import AuditEvent, Node, Replica, get_db
+from forgeyard.agent.inventory.amd import ROCM_SMI, AmdCollector
+from forgeyard.db import Accelerator, AuditEvent, Node, Replica, get_db, new_session
+from forgeyard.machines import store
+from forgeyard.machines.messages import InventoryIn
 from tests.conftest import add_user, sign_in
 from tests.workload_helpers import PROCESS_OK, make_node, task
 
@@ -178,3 +184,119 @@ def test_fy_allow_004_only_admins_change_it(owner, role):
     assert r.status_code == 403
     db = next(get_db())
     assert db.get(Node, nid).gpu_allowlist is None
+
+
+# ------------------------------------------------------------------ a card's key changes (AMD, 1.1.0 -> later)
+REAL = Path(__file__).with_name("fixtures") / "strix-halo-gfx1151-amdsmi26"
+NEW_KEY = "amd:0000:c6:00.0"
+
+
+def _strix_as_110_saw_it(name="strix") -> int:
+    """The real Strix Halo as the 1.1.0 agent reported it: key "amd:0x0" (rocm-smi's Unique ID)."""
+    data = json.loads((REAL / "agent-1.1.0-inventory.json").read_text())
+    db = new_session()
+    try:
+        _, node = store.create_node(db, name=name, hostname=name, agent_version="1.1.0", protocol=1, ip="10.0.0.9")
+        store.apply_inventory(db, node, InventoryIn.model_validate({"accelerators": data["accelerators"],
+                                                                    "collectors": data["collectors"]}))
+        node.status, node.features, node.runtime_info = "online", ["workloads"], PROCESS_OK
+        node.runtimes = ["process", "container"]
+        db.commit()
+        return node.id
+    finally:
+        db.close()
+
+
+def _strix_now(tmp_path) -> list[dict]:
+    """What this agent reports on the same machine (its rocm-smi reading), plus the old CPU row."""
+    from tests.fakes import fake_runner, make_kfd
+
+    kfd = make_kfd(tmp_path / "nodes", json.loads((REAL / "kfd.json").read_text())["nodes"])
+    run = fake_runner({" ".join(ROCM_SMI): (0, (REAL / "rocm-smi.json").read_text(), "")})
+    r = AmdCollector(run=run, which=lambda n: "/x" if n == "rocm-smi" else None, kfd_root=kfd, rocm_root=[],
+                     cpuinfo=REAL / "cpuinfo.txt", importer=_no_amdsmi).inventory()
+    old = json.loads((REAL / "agent-1.1.0-inventory.json").read_text())["accelerators"]
+    return r.accelerators + [a for a in old if a["vendor"] == "cpu"]
+
+
+def _no_amdsmi(name):
+    raise ImportError(f"No module named {name!r}")
+
+
+def _report(nid, accelerators):
+    db = new_session()
+    try:
+        node = db.get(Node, nid)
+        store.apply_inventory(db, node, InventoryIn.model_validate({"accelerators": accelerators}))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_fy_allow_005_a_card_keeps_its_allowlist_entry_and_claims_under_a_new_key(owner, tmp_path):
+    """FY-ALLOW-005: the 1.1.0 agent keyed the real Strix Halo "amd:0x0"; this one keys it by its PCI
+    address and names the old key in detail.aliases. The row, the allowlist entry and the running
+    replica's claim follow; it is audited once."""
+    nid = _strix_as_110_saw_it()
+    assert owner.put(f"/api/machines/{nid}/gpu-allowlist", json={"keys": ["amd:0x0"]}).status_code == 200
+    busy = create(owner, task("busy", machine_id=nid, resources={"gpus": {"count": 1}}))["workload"]
+    assert [g["key"] for g in reps(owner, busy["id"])[0]["gpus"]] == ["amd:0x0"]
+    db = next(get_db())
+    row_id = db.scalar(select(Accelerator.id).where(Accelerator.node_id == nid, Accelerator.key == "amd:0x0"))
+
+    new = _strix_now(tmp_path)
+    assert new[0]["key"] == NEW_KEY and "amd:0x0" in new[0]["detail"]["aliases"]
+    _report(nid, new)
+    m = owner.get("/api/machines").json()["machines"][0]
+    (gpu,) = [a for a in m["accelerators"] if a["vendor"] == "amd"]
+    assert (gpu["key"], gpu["model"], gpu["driver"]) == (NEW_KEY, "AMD Radeon 8060S", None)
+    assert m["gpu_allowlist"] == [NEW_KEY] and gpu["allowed"] and gpu["assigned_to"] == "busy"
+    assert [g["key"] for g in reps(owner, busy["id"])[0]["gpus"]] == [NEW_KEY]
+    db.expire_all()
+    assert db.scalar(select(Accelerator.id).where(Accelerator.node_id == nid, Accelerator.key == NEW_KEY)) == row_id
+    ev = db.scalars(select(AuditEvent).where(AuditEvent.action == "machine.gpu_keys_changed")).one()
+    assert ev.target == "strix" and ev.detail["keys"] == {"amd:0x0": NEW_KEY}
+    # the card is still taken: a second GPU task waits
+    second = create(owner, task("second", machine_id=nid, resources={"gpus": {"count": 1}}))["workload"]
+    assert second["replica_list"][0]["machine"] is None
+    _report(nid, new)  # the next report changes nothing
+    assert len(db.scalars(select(AuditEvent).where(AuditEvent.action == "machine.gpu_keys_changed")).all()) == 1
+
+
+def test_fy_allow_006_anything_ambiguous_fails_closed(owner, tmp_path):
+    """FY-ALLOW-006: no alias (a swapped card), an alias two cards claim, an alias that is still
+    reported, or one of another vendor: the old key is not carried over, so the allowlist entry
+    no longer matches a card and the card is not used."""
+    new = _strix_now(tmp_path)
+    gpu, cpu = new[0], new[1]
+
+    def fresh(name):
+        nid = _strix_as_110_saw_it(name)
+        db = next(get_db())
+        db.get(Node, nid).gpu_allowlist = ["amd:0x0"]
+        db.commit()
+        return nid
+
+    def state(nid):
+        db = next(get_db())
+        db.expire_all()
+        node = db.get(Node, nid)
+        return node.gpu_allowlist, sorted(a.key for a in node.accelerators if a.vendor == "amd")
+
+    swapped = dict(gpu, detail={k: v for k, v in gpu["detail"].items() if k != "aliases"})
+    nid = fresh("swapped")
+    _report(nid, [swapped, cpu])
+    assert state(nid) == (["amd:0x0"], [NEW_KEY])
+    twin = dict(gpu, key="amd:0000:c7:00.0", index=1)
+    nid = fresh("twins")
+    _report(nid, [gpu, twin, cpu])
+    assert state(nid) == (["amd:0x0"], [NEW_KEY, "amd:0000:c7:00.0"])
+    nid = fresh("still-there")
+    old = json.loads((REAL / "agent-1.1.0-inventory.json").read_text())["accelerators"][0]
+    _report(nid, [old, dict(gpu, index=1), cpu])
+    assert state(nid) == (["amd:0x0"], [NEW_KEY, "amd:0x0"])
+    nid = fresh("vendor")
+    _report(nid, [dict(gpu, vendor="nvidia", key="nvidia:GPU-x"), cpu])
+    assert state(nid) == (["amd:0x0"], [])
+    db = next(get_db())
+    assert db.scalars(select(AuditEvent).where(AuditEvent.action == "machine.gpu_keys_changed")).all() == []

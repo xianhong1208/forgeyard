@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test of the agent image (CI, after `docker build -f Dockerfile.agent -t IMAGE .`):
-#   1. what is inside: the CLI, the docker CLI, the workload account, the version;
-#   2. inventory and init in simulation (no GPU on the runner);
+#   1. what is inside: the CLI, the docker CLI, the workload account, the version, numeric groups;
+#   2. inventory (also as `IMAGE agent inventory`) and init in simulation (no GPU on the runner);
 #   3. a real join: a Forgeyard server on this host, the image started the way the guide says
 #      (host network, FORGEYARD_* variables, a state volume), the machine online; then a restart
 #      of the container with the same command line keeps the machine (no second join).
@@ -41,6 +41,10 @@ docker run --rm --entrypoint id "$IMAGE" forgeyard-run | grep -q "uid=990" || fa
 ok "forgeyard-run account"
 docker run --rm --entrypoint python "$IMAGE" -c "import pynvml" || fail "nvidia-ml-py"
 ok "nvidia-ml-py importable"
+# The AMD command gives the host's video and render groups by number: a name is looked up in the
+# image's /etc/group, which has no "render" group.
+docker run --rm --group-add 4242 --entrypoint id "$IMAGE" | grep -q "4242" || fail "--group-add with a numeric gid"
+ok "--group-add with a numeric gid (the AMD command)"
 
 # ------------------------------------------------------------------ 2. inventory and init
 docker run --rm -e FORGEYARD_AGENT_SIMULATION=1 "$IMAGE" inventory --json --simulate-inventory nvidia-a100x8 \
@@ -51,6 +55,10 @@ d = json.load(open(sys.argv[1]))
 assert d["simulated"] is True and sum(a["vendor"] == "nvidia" for a in d["accelerators"]) == 8, d
 PY
 ok "inventory --json (simulated 8 x A100)"
+# The entrypoint already is `forgeyard agent`; a redundant `agent` before the subcommand works too.
+docker run --rm -e FORGEYARD_AGENT_SIMULATION=1 "$IMAGE" agent inventory --simulate-inventory amd-gfx1151-apu \
+    | grep -q "arch=gfx1151 .* rocm=" || fail "IMAGE agent inventory"
+ok "IMAGE agent inventory (a redundant 'agent')"
 docker run --rm -e FORGEYARD_AGENT_SIMULATION=1 "$IMAGE" init --print --simulate-inventory nvidia-a100x8 \
     --server https://192.168.1.20:7860 --ca-fingerprint "sha256:$(printf 'ab%.0s' $(seq 32))" > "$WORK/agent.toml"
 grep -q '^limits = "rlimit"' "$WORK/agent.toml" || fail "init: limits"

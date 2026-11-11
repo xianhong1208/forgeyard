@@ -1,11 +1,16 @@
 """Inventory collectors on recorded and representative tool output (FY-COL-*)."""
 
 import json
+import os
+import sys
+from pathlib import Path
 
 import pytest
 
 from forgeyard.agent.inventory import Inventory
-from forgeyard.agent.inventory.amd import ROCM_SMI, AmdCollector, decode_gfx, parse_amd_smi, parse_rocm_smi, read_kfd
+from forgeyard.agent.inventory.amd import (ROCM_SMI, AmdCollector, amdsmi_uuid, decode_gfx, import_amdsmi, parse_amd_smi,
+                                           parse_rocm_smi, parse_version, pick_model, read_kfd, read_rocm_version,
+                                           rocm_roots, unique_uuid, uuid_serial)
 from forgeyard.agent.inventory.base import Result
 from forgeyard.agent.inventory.cpu import CpuCollector, parse_cpuinfo, parse_meminfo
 from forgeyard.agent.inventory.nvidia import NvidiaCollector
@@ -16,7 +21,8 @@ A100_FREE = [4023779328, 7219380224, 6169165824, 9480110080, 48294330368, 153210
 
 
 def no_tools(which=None):
-    return dict(run=fake_runner({}), which=which or (lambda name: None), kfd_root="/nonexistent")
+    return dict(run=fake_runner({}), which=which or (lambda name: None), kfd_root="/nonexistent", rocm_root=[],
+                cpuinfo="/nonexistent")
 
 
 # ------------------------------------------------------------------ NVIDIA
@@ -94,11 +100,14 @@ def test_fy_col_005_nvml_metrics_and_read_only_calls():
 # ------------------------------------------------------------------ AMD: amdsmi library
 def test_fy_col_010_amdsmi_strix_halo_gfx1151_is_unified():
     """FY-COL-010: gfx1151 APU: arch from target_graphics_version, unified memory, pool = the larger (GTT)."""
-    lib = FakeAmdsmi(load("amdsmi_gfx1151_apu.json"))
+    data = load("amdsmi_gfx1151_apu.json")
+    data["rocm_version"] = "6.4.1"
+    lib = FakeAmdsmi(data)
     r = AmdCollector(amdsmi=lib, **no_tools()).inventory()
     assert r.ok and r.source == "amdsmi"
     (gpu,) = r.accelerators
-    assert (gpu["model"], gpu["arch"], gpu["unified_memory"], gpu["driver"]) == ("AMD Radeon 8060S", "gfx1151", True, "6.14.0")
+    assert (gpu["model"], gpu["arch"], gpu["unified_memory"], gpu["driver"]) == ("AMD Radeon 8060S", "gfx1151", True, "6.4.1")
+    assert gpu["detail"]["amdgpu_driver"] == "6.14.0"  # the kernel driver's version, not ROCm's
     assert gpu["vram_total"] == 110 * GiB and gpu["vram_used"] == 6 * GiB and gpu["vram_free"] == 104 * GiB
     assert gpu["detail"]["vram_carveout"] == 512 * MiB and gpu["detail"]["pool"] == "gtt"
     assert gpu["detail"]["unified_by"] == "gfx1151 is an APU target"
@@ -172,6 +181,11 @@ def _amd_smi(static, metric, listing=None):
 
 
 class _NoLib(AmdCollector):
+    def __init__(self, **kw):
+        kw.setdefault("rocm_root", [])
+        kw.setdefault("cpuinfo", "/nonexistent")
+        super().__init__(**kw)
+
     def _load_lib(self):
         return None, "amdsmi Python library not importable (No module named 'amdsmi')"
 
@@ -207,7 +221,8 @@ def test_fy_col_022_rocm_smi_fallback():
     assert r.ok and r.source == "rocm-smi"
     a, b = r.accelerators
     assert a["model"] == b["model"] == "Navi 31 [Radeon RX 7900 XT/7900 XTX]"
-    assert (a["arch"], a["driver"], a["utilization"], a["temperature"]) == ("gfx1100", "6.10.5", 88, 61)
+    assert (a["arch"], a["driver"], a["utilization"], a["temperature"]) == ("gfx1100", None, 88, 61)
+    assert a["detail"]["amdgpu_driver"] == "6.10.5" and "driver" in a["detail"]["missing"]
     assert a["vram_free"] == 25753026560 - 18 * GiB and b["uuid"] is None and b["key"] == "amd:0000:83:00.0"
     assert "amd-smi not on PATH" in r.reason
 
@@ -247,6 +262,274 @@ def test_fy_col_026_parsers_ignore_junk():
     """FY-COL-026"""
     assert parse_amd_smi(None, None, None, {}) == [] and parse_amd_smi({"gpu_data": "x"}, [], [], {}) == []
     assert parse_rocm_smi("nope", {}) == [] and parse_rocm_smi({"system": {}}, {}) == []
+
+
+# ------------------------------------------------------------------ AMD: a real Strix Halo (2026-11-11)
+# Ryzen AI MAX+ 395 / Radeon 8060S (gfx1151), ROCm 7.0.2, amd-smi 26.0.2, 96 GiB BIOS carve-out, GTT
+# 15.5 GiB. The JSON is what the tools printed there; kfd.json and cpuinfo.txt are rebuilt from the
+# agent's own --raw reading of the same machine. The amd-smi and rocm-smi readings were taken a
+# few minutes apart, so their used/free numbers differ.
+REAL = "strix-halo-gfx1151-amdsmi26"
+REAL_UUID = "00ff1586-0000-1000-8000-000000000000"
+REAL_KEY = "amd:0000:c6:00.0"
+
+
+def _real(name):
+    return (FIXTURES / REAL / name).read_text()
+
+
+def _real_machine(tmp_path, version="7.0.2-56"):
+    """KFD tree, a ROCm whose .info/version says `version` (None: no file), and the CPU's cpuinfo."""
+    kfd = make_kfd(tmp_path / "nodes", load(f"{REAL}/kfd.json")["nodes"])
+    rocm = tmp_path / "rocm"
+    (rocm / ".info").mkdir(parents=True)
+    if version:
+        (rocm / ".info" / "version").write_text(version + "\n")
+    return dict(kfd_root=kfd, rocm_root=[rocm], cpuinfo=FIXTURES / REAL / "cpuinfo.txt")
+
+
+def _real_amd_smi():
+    return fake_runner({"amd-smi static --asic --bus --vram --driver --board --json": (0, _real("amd-smi-static.json"), ""),
+                        "amd-smi metric --mem-usage --usage --temperature --json": (0, _real("amd-smi-metric-sel.json"), ""),
+                        "amd-smi list --json": (0, _real("amd-smi-list.json"), "")})
+
+
+def _assert_real_card(gpu, source):
+    assert (gpu["vendor"], gpu["index"], gpu["arch"], gpu["unified_memory"]) == ("amd", 0, "gfx1151", True)
+    assert gpu["model"] == "AMD Radeon 8060S"  # market name "AMD Radeon Graphics" + the CPU's "w/ Radeon 8060S"
+    assert gpu["driver"] == "7.0.2"  # ROCm, not the kernel's 7.0.0-38
+    assert gpu["key"] == REAL_KEY and gpu["uuid"] is None  # no serial: the UUID is the same on every Strix Halo
+    d = gpu["detail"]
+    assert d["shared_uuid"] == REAL_UUID and {"amd:0x0", f"amd:{REAL_UUID}"} <= set(d["aliases"])
+    assert REAL_KEY not in d["aliases"]
+    assert gpu["vram_total"] == 96 * GiB == 103079215104  # the carve-out, bigger than GTT
+    assert (d["pool"], d["vram_carveout"], d["unified_by"]) == ("vram", 96 * GiB, "gfx1151 is an APU target")
+    assert (d["source"], d["pci_bus_id"], d["render_minor"]) == (source, "0000:c6:00.0", 128)
+    assert "rocr_uuid" not in d  # KFD unique_id is 0 there
+
+
+def test_fy_col_050_real_strix_halo_through_amd_smi_26(tmp_path):
+    """FY-COL-050: amd-smi 26 as printed on the real machine: "N/A" sections ("usage": "N/A"),
+    {"gpu_data": [...]} for static/metric but a bare list for `list`, sizes in MB = MiB."""
+    run = _real_amd_smi()
+    r = _NoLib(run=run, which=lambda n: "/opt/rocm/bin/" + n, **_real_machine(tmp_path)).inventory()
+    assert r.ok and r.source == "amd-smi", r.reason
+    (gpu,) = r.accelerators
+    _assert_real_card(gpu, "amd-smi")
+    assert gpu["vram_used"] == 64957 * MiB and gpu["vram_free"] == 33347 * MiB
+    assert gpu["detail"]["gtt_total"] == 15862 * MiB and gpu["detail"]["gtt_used"] == 764 * MiB
+    assert (gpu["temperature"], gpu["utilization"]) == (31, None)
+    assert gpu["detail"]["missing"] == ["utilization"]
+    assert gpu["detail"]["amdgpu_driver"].startswith("Linuxversion7.0.0-38-generic")
+    assert "amd-smi version --json" not in run.seen  # ROCm's version file was enough
+
+
+def test_fy_col_051_real_strix_halo_full_metric_and_the_cli_version(tmp_path):
+    """FY-COL-051: the plain `amd-smi metric --json` (every section, mostly "N/A"); no version file,
+    so the ROCm version comes from `amd-smi version --json`."""
+    version = json.dumps([{"tool": "AMDSMI Tool", "version": "26.0.2+unknown", "amdsmi_library_version": "26.0.2",
+                           "rocm_version": "7.0.2", "amdgpu_version": "N/A"}])
+    seen_run = fake_runner({"amd-smi static --asic --bus --vram --driver --board --json": (0, _real("amd-smi-static.json"), ""),
+                            "amd-smi metric --json": (0, _real("amd-smi-metric.json"), ""),
+                            "amd-smi list --json": (0, _real("amd-smi-list.json"), ""),
+                            "amd-smi version --json": (0, version, "")})
+    r = _NoLib(run=seen_run, which=lambda n: "/opt/rocm/bin/" + n, **_real_machine(tmp_path, version=None)).inventory()
+    (gpu,) = r.accelerators
+    _assert_real_card(gpu, "amd-smi")
+    assert gpu["vram_free"] == 33347 * MiB and gpu["temperature"] == 31
+    assert "amd-smi metric --mem-usage --usage --temperature --json" in seen_run.seen  # tried first, then the plain one
+
+
+def test_fy_col_052_real_strix_halo_through_rocm_smi(tmp_path):
+    """FY-COL-052: rocm-smi as printed there ("Card Series": "N/A", "Unique ID": "0x0", the kernel as
+    "Driver version"): the same key as amd-smi, and the 1.1.0 key "amd:0x0" as an alias."""
+    raw = _real("rocm-smi.json")
+    run = fake_runner({" ".join(ROCM_SMI): (0, raw, "")})
+    r = _NoLib(run=run, which=lambda n: "/opt/rocm/bin/rocm-smi" if n == "rocm-smi" else None,
+               **_real_machine(tmp_path)).inventory()
+    assert r.ok and r.source == "rocm-smi"
+    (gpu,) = r.accelerators
+    _assert_real_card(gpu, "rocm-smi")
+    assert gpu["vram_used"] == 63433625600 and gpu["vram_free"] == 39645589504
+    assert (gpu["utilization"], gpu["temperature"]) == (4, 41) and gpu["detail"]["amdgpu_driver"] == "7.0.0-38-generic"
+    assert "missing" not in gpu["detail"]
+    old = load(f"{REAL}/agent-1.1.0-inventory.json")["accelerators"][0]
+    assert (old["key"], old["model"], old["driver"]) == ("amd:0x0", "N/A", "7.0.0-38-generic")  # what 1.1.0 said
+    assert old["key"] in gpu["detail"]["aliases"]
+
+
+def test_fy_col_053_real_strix_halo_the_chain_as_it_ran_there(tmp_path):
+    """FY-COL-053: no amdsmi in the agent's Python, amd-smi and rocm-smi both there (the 1.1.0 image
+    crashed in amd-smi with "'str' object has no attribute 'get'" and fell back to rocm-smi)."""
+    run_all = fake_runner({
+        "amd-smi static --asic --bus --vram --driver --board --json": (0, _real("amd-smi-static.json"), ""),
+        "amd-smi metric --mem-usage --usage --temperature --json": (0, _real("amd-smi-metric-sel.json"), ""),
+        "amd-smi list --json": (0, _real("amd-smi-list.json"), ""),
+        " ".join(ROCM_SMI): (0, _real("rocm-smi.json"), "")})
+    c = AmdCollector(run=run_all, which=lambda n: "/opt/rocm/bin/" + n, **_real_machine(tmp_path))
+    r = c.inventory(raw=True)
+    assert r.ok and r.source == "amd-smi" and r.reason.startswith("used amd-smi (amdsmi Python library not importable")
+    assert "has no attribute" not in r.reason and not any("rocm-smi" in s for s in r.raw["skipped"])
+    assert r.raw["rocm_version"] == "7.0.2" and r.raw["cpu_model"] == "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S"
+    (m,) = c.metrics()
+    assert m["key"] == REAL_KEY and m["vram_free"] == 33347 * MiB
+
+
+def _na_everywhere(value):
+    if isinstance(value, dict):
+        return {k: _na_everywhere(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_na_everywhere(v) for v in value]
+    return "N/A"
+
+
+def test_fy_col_054_n_a_anywhere_never_crashes(tmp_path):
+    """FY-COL-054: every value "N/A", every section "N/A", every GPU entry "N/A": no exception, and
+    what could not be read is listed in detail.missing."""
+    static, metric, listing = (json.loads(_real(n)) for n in ("amd-smi-static.json", "amd-smi-metric.json",
+                                                               "amd-smi-list.json"))
+    gpu_static, gpu_metric = static["gpu_data"][0], metric["gpu_data"][0]
+    # every leaf
+    (card,) = parse_amd_smi(_na_everywhere(static) | {"gpu_data": [dict(_na_everywhere(gpu_static), gpu=0)]},
+                            _na_everywhere(metric), _na_everywhere(listing), {})
+    assert card["key"] == "amd:0" and card["model"] == "AMD GPU"
+    assert card["detail"]["missing"] == ["model", "arch", "vram_total", "vram_used", "driver", "utilization",
+                                         "temperature"]
+    # each section of static and metric on its own, then the whole entry
+    for section in [k for k in gpu_static if k != "gpu"]:
+        (c,) = parse_amd_smi({"gpu_data": [{**gpu_static, section: "N/A"}]}, metric, listing, {})
+        assert c["vendor"] == "amd", section
+    for section in [k for k in gpu_metric if k != "gpu"]:
+        parse_amd_smi(static, {"gpu_data": [{**gpu_metric, section: "N/A"}]}, listing, {})
+    assert parse_amd_smi({"gpu_data": ["N/A"]}, "N/A", "N/A", {}) == []
+    assert parse_amd_smi(static, {"gpu_data": "N/A"}, "N/A", {})[0]["vram_total"] == 96 * GiB  # from vram.size
+    # rocm-smi: every value N/A, the system section N/A
+    rocm = json.loads(_real("rocm-smi.json"))
+    (c,) = parse_rocm_smi({"card0": _na_everywhere(rocm["card0"]), "system": "N/A"}, {})
+    assert c["key"] == "amd:0" and c["model"] == "AMD GPU"
+    assert parse_rocm_smi({"card0": "N/A"}, {})[0]["key"] == "amd:0"
+    # and through the collector, with the tools printing it
+    run = fake_runner({"amd-smi static --asic --bus --vram --driver --board --json":
+                       (0, json.dumps({"gpu_data": [dict(_na_everywhere(gpu_static), gpu=0)]}), ""),
+                       "amd-smi metric --mem-usage --usage --temperature --json": (0, json.dumps(_na_everywhere(metric)), ""),
+                       "amd-smi list --json": (0, '"N/A"', "")})
+    r = _NoLib(run=run, which=lambda n: "/x/" + n, **_real_machine(tmp_path)).inventory()
+    assert r.ok and r.accelerators[0]["driver"] == "7.0.2"
+
+
+def test_fy_col_055_amd_uuids_and_keys():
+    """FY-COL-055: amdsmi's UUID is device id + serial (amdsmi_uuid_gen); without a serial it is not unique."""
+    assert amdsmi_uuid(0, 0x1586) == REAL_UUID == json.loads(_real("amd-smi-list.json"))[0]["uuid"]
+    serial = 0x1122334455667788
+    u = amdsmi_uuid(serial, 0x744C)
+    assert u == "11ff744c-0000-1000-8022-334455667788" and uuid_serial(u) == serial and unique_uuid(u)
+    assert uuid_serial(REAL_UUID) == 0 and not unique_uuid(REAL_UUID)
+    assert uuid_serial("00ff1586-0000-1000-80c5-000000000000") == 0xC5 << 48  # the representative fixture's
+    for shared in (None, "", "0x0", "0", "00000000-0000-0000-0000-000000000000"):
+        assert not unique_uuid(shared), shared
+    assert unique_uuid("0x9e3c1a2b") and uuid_serial("GPU-1234") is None
+
+
+@pytest.mark.parametrize("names, unified, cpu, model", [
+    (["AMD Radeon Graphics", "N/A"], True, "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S", "AMD Radeon 8060S"),
+    (["N/A", "0x1586"], True, "AMD Ryzen 7 8845HS w/ Radeon 780M Graphics", "AMD Radeon 780M"),
+    (["AMD Radeon(TM) Graphics"], True, "AMD Ryzen 5 2400G with Radeon Vega 11 Graphics", "AMD Radeon Vega 11"),
+    (["AMD Radeon 8060S"], True, "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S", "AMD Radeon 8060S"),
+    (["AMD Radeon Graphics", "Strix Halo [Radeon 8060S]"], True, None, "Strix Halo [Radeon 8060S]"),
+    (["AMD Radeon Graphics"], True, "AMD EPYC 9654 96-Core Processor", "AMD Radeon Graphics"),
+    (["AMD Radeon Graphics"], False, "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S", "AMD Radeon Graphics"),
+    (["Radeon RX 7900 XTX"], False, None, "Radeon RX 7900 XTX"),
+    (["N/A", None, "0x744c"], False, None, None),
+])
+def test_fy_col_056_model_name_rule(names, unified, cpu, model):
+    """FY-COL-056: a specific name first; an APU with only a generic one takes the GPU from the CPU's
+    brand string; a discrete card never does."""
+    assert pick_model(names, unified, cpu) == model
+
+
+def test_fy_col_057_rocm_version_sources(tmp_path):
+    """FY-COL-057: ROCm's .info/version, then amdsmi_get_rocm_version, then `amd-smi version`."""
+    assert parse_version("7.0.2-56\n") == "7.0.2" and parse_version("ROCm 6.4") == "6.4" and parse_version("N/A") is None
+    machine = _real_machine(tmp_path)
+    assert read_rocm_version(machine["rocm_root"]) == "7.0.2" and read_rocm_version([tmp_path / "none"]) is None
+    data = load("amdsmi_gfx1151_apu.json")
+    data["rocm_version"] = "6.4.1"
+    lib_first = AmdCollector(amdsmi=FakeAmdsmi(data), **{**no_tools(), **machine}).inventory()
+    assert lib_first.accelerators[0]["driver"] == "7.0.2"  # the file wins
+    lib_only = AmdCollector(amdsmi=FakeAmdsmi(data), **no_tools()).inventory()
+    assert lib_only.accelerators[0]["driver"] == "6.4.1"
+    del data["rocm_version"]
+    nothing = AmdCollector(amdsmi=FakeAmdsmi(data), **no_tools()).inventory().accelerators[0]
+    assert nothing["driver"] is None and nothing["detail"]["missing"] == ["driver"]
+    assert rocm_roots({"ROCM_PATH": "/x/rocm"}) == [Path("/x/rocm"), Path("/opt/rocm")]
+    assert rocm_roots({}) == [Path("/opt/rocm")]
+
+
+FAKE_AMDSMI = """
+import os
+print("amdsmi_wrapper chatter on stdout")
+SEEN_ROCM_PATH = os.environ.get("ROCM_PATH")
+from tests.fakes import FakeAmdsmi, load
+_lib = FakeAmdsmi(load("amdsmi_gfx1151_apu.json"))
+AmdSmiMemoryType, AmdSmiTemperatureType = _lib.AmdSmiMemoryType, _lib.AmdSmiTemperatureType
+AmdSmiTemperatureMetric = _lib.AmdSmiTemperatureMetric
+for _name in [n for n in dir(FakeAmdsmi) if n.startswith("amdsmi_")]:
+    globals()[_name] = getattr(_lib, _name)
+"""
+
+BROKEN_AMDSMI = """
+from . import amdsmi_exception  # loads; the next line does not (as amdsmi_wrapper without its library)
+print("Unable to find libamd_smi.so library try installing amd-smi-lib from your package manager")
+raise KeyError("libamd_smi.so")
+"""
+
+
+@pytest.fixture
+def clean_import(monkeypatch):
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.delenv("ROCM_PATH", raising=False)
+    yield
+    for name in [m for m in sys.modules if m == "amdsmi" or m.startswith("amdsmi.")]:
+        del sys.modules[name]
+
+
+def _rocm_with_amdsmi(root, source):
+    pkg = root / "share" / "amd_smi" / "amdsmi"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text(source)
+    (pkg / "amdsmi_exception.py").write_text("class AmdSmiException(Exception):\n    pass\n")
+    (root / "lib").mkdir()
+    return root
+
+
+def test_fy_col_058_amdsmi_from_rocms_own_copy(tmp_path, clean_import, capsys):
+    """FY-COL-058: not importable from the agent's Python, so ROCm's share/amd_smi is tried, with
+    ROCM_PATH pointing at that ROCm while it loads; nothing it prints reaches stdout."""
+    rocm = _rocm_with_amdsmi(tmp_path / "rocm", FAKE_AMDSMI)
+    c = AmdCollector(run=fake_runner({}), which=lambda n: None, kfd_root="/nonexistent", rocm_root=[tmp_path / "none", rocm],
+                     cpuinfo="/nonexistent")
+    r = c.inventory()
+    assert r.ok and r.source == "amdsmi" and r.reason == f"amdsmi from {rocm / 'share' / 'amd_smi'}"
+    assert r.accelerators[0]["arch"] == "gfx1151"
+    assert sys.modules["amdsmi"].SEEN_ROCM_PATH == str(rocm) and "ROCM_PATH" not in os.environ
+    assert capsys.readouterr().out == ""
+    c.close()
+
+
+def test_fy_col_059_a_broken_amdsmi_copy_fails_soft(tmp_path, clean_import, capsys):
+    """FY-COL-059: the real wrapper prints and then fails with KeyError when libamd_smi.so is not
+    found (or with SyntaxError/OSError on a mismatch): a reason, the next tool, and no trace left."""
+    rocm = _rocm_with_amdsmi(tmp_path / "rocm", BROKEN_AMDSMI)
+    lib, where, problem = import_amdsmi([rocm])
+    assert lib is None and where is None
+    assert problem.startswith("amdsmi Python library not importable")
+    assert f"amdsmi from {rocm / 'share' / 'amd_smi'} failed to load: 'libamd_smi.so' (Unable to find libamd_smi.so" in problem
+    assert str(rocm / "share" / "amd_smi") not in sys.path
+    assert not [m for m in sys.modules if m.split(".")[0] == "amdsmi"]  # no half-loaded submodule either
+    assert "ROCM_PATH" not in os.environ and capsys.readouterr().out == ""
+    r = AmdCollector(run=fake_runner({}), which=lambda n: None, kfd_root="/nonexistent", rocm_root=[rocm],
+                     cpuinfo="/nonexistent").inventory()
+    assert not r.ok and "failed to load" in r.reason and r.reason.endswith("rocm-smi not on PATH")
 
 
 # ------------------------------------------------------------------ CPU

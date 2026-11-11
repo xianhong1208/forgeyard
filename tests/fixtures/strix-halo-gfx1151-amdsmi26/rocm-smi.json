@@ -1,0 +1,24 @@
+{
+    "card0": {
+        "Unique ID": "0x0",
+        "Temperature (Sensor edge) (C)": "41.0",
+        "GPU use (%)": "4",
+        "PCI Bus": "0000:C6:00.0",
+        "VRAM Total Memory (B)": "103079215104",
+        "VRAM Total Used Memory (B)": "63433625600",
+        "GTT Total Memory (B)": "16632823808",
+        "GTT Total Used Memory (B)": "666247168",
+        "Card Series": "N/A",
+        "Card Model": "0x1586",
+        "Card Vendor": "0x1002",
+        "Card SKU": "STRXLGEN",
+        "Subsystem ID": "-0x7fe3",
+        "Device Rev": "0xc1",
+        "Node ID": "1",
+        "GUID": "51834",
+        "GFX Version": "gfx1151"
+    },
+    "system": {
+        "Driver version": "7.0.0-38-generic"
+    }
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -10,9 +11,12 @@ from typing import Optional
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session as DbSession
 
-from forgeyard.db import Accelerator, JoinToken, Node, as_utc, utcnow
+from forgeyard import audit
+from forgeyard.db import Accelerator, JoinToken, Node, Replica, as_utc, utcnow
 from forgeyard.machines.messages import HelloIn, InventoryIn, MetricIn
 from forgeyard.security.sessions import token_hash
+
+log = logging.getLogger("forgeyard.machines")
 
 JOIN_TOKEN_TTL = timedelta(minutes=15)
 JOIN_TOKEN_PREFIX = "fyj_"
@@ -100,9 +104,49 @@ def revoke(db: DbSession, node: Node, by: str) -> None:
 
 
 # ------------------------------------------------------------------ inventory
+def carry_over_keys(db: DbSession, node: Node, inventory: InventoryIn, existing: dict[str, Accelerator]) -> dict:
+    """A card the agent now reports under a new key keeps its row, its allowlist entry and its
+    replicas' claims, when the agent names the old key in detail.aliases (an AMD card that an
+    agent up to 1.1.0 keyed by a UUID shared by every card of its model, now keyed by its PCI
+    address). Only a key that disappears from this inventory, of the same vendor, claimed by
+    exactly one card is carried over; anything ambiguous is left alone, so the allowlist fails
+    closed as for a swapped card. Returns {old key: new key}."""
+    reported = {item.key for item in inventory.accelerators}
+    claims: dict[str, list] = {}
+    for item in inventory.accelerators:
+        aliases = (item.detail or {}).get("aliases")
+        if item.key in existing or not isinstance(aliases, list):
+            continue
+        for alias in aliases[:16]:
+            row = existing.get(alias) if isinstance(alias, str) else None
+            if row is not None and alias not in reported and row.vendor == item.vendor:
+                claims.setdefault(alias, []).append(item.key)
+    renamed: dict[str, str] = {}
+    for old, new in claims.items():
+        if len(set(new)) == 1 and new[0] not in renamed.values():
+            renamed[old] = new[0]
+    if not renamed:
+        return renamed
+    for old, new in renamed.items():
+        row = existing.pop(old)
+        row.key = new
+        existing[new] = row
+    if node.gpu_allowlist is not None:
+        node.gpu_allowlist = list(dict.fromkeys(renamed.get(k, k) for k in node.gpu_allowlist))
+    for r in db.scalars(select(Replica).where(Replica.node_id == node.id, Replica.final.is_(False))).all():
+        if any(g.get("key") in renamed for g in r.gpus or []):
+            r.gpus = [dict(g, key=renamed.get(g.get("key"), g.get("key"))) for g in r.gpus]
+    audit.record(db, "machine.gpu_keys_changed", actor_name="agent", target=node.name, machine_id=node.id,
+                 keys=renamed)
+    log.info("%s reports %d card(s) under a new key; kept their allowlist entries: %s", node.name, len(renamed),
+             ", ".join(f"{o} -> {n}" for o, n in renamed.items()))
+    return renamed
+
+
 def apply_inventory(db: DbSession, node: Node, inventory: InventoryIn) -> None:
     now = utcnow()
     existing = {a.key: a for a in node.accelerators}
+    carry_over_keys(db, node, inventory, existing)
     seen: set[str] = set()
     for position, item in enumerate(inventory.accelerators):
         if item.key in seen:

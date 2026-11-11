@@ -1,0 +1,18 @@
+{
+  "_comment": "KFD node 1 of the same machine, rebuilt from the agent's raw kfd reading (only the properties the agent reads).",
+  "nodes": [
+    {
+      "cpu_cores_count": 16,
+      "simd_count": 0
+    },
+    {
+      "cpu_cores_count": 0,
+      "simd_count": 80,
+      "gfx_target_version": 110501,
+      "location_id": 50688,
+      "domain": 0,
+      "unique_id": 0,
+      "drm_render_minor": 128
+    }
+  ]
+}

@@ -1,23 +1,29 @@
 {
-  "_comment": "Simulated inventory for development and tests (forgeyard agent --simulate-inventory). Not a real machine; GPU values are modelled on recorded tool output in tests/fixtures.",
+  "_comment": "Simulated inventory for development and tests (forgeyard agent --simulate-inventory). Not a real machine; GPU values are modelled on recorded tool output in tests/fixtures. The key is the PCI address: an APU has no serial number, so its UUID is not unique (as on a real Strix Halo, 2026-11-11).",
   "accelerators": [
     {
-      "key": "amd:00ff1586-0000-1000-80c5-000000000000",
+      "key": "amd:0000:c5:00.0",
       "vendor": "amd",
       "index": 0,
       "model": "AMD Radeon 8060S",
       "arch": "gfx1151",
-      "uuid": "00ff1586-0000-1000-80c5-000000000000",
+      "uuid": null,
       "vram_total": 118111600640,
       "vram_free": 111669149696,
       "vram_used": 6442450944,
       "unified_memory": true,
-      "driver": "6.14.0",
+      "driver": "7.0.2",
       "utilization": 3,
       "temperature": 47,
       "detail": {
         "pci_bus_id": "0000:c5:00.0",
         "source": "amdsmi",
+        "shared_uuid": "00ff1586-0000-1000-8000-000000000000",
+        "aliases": [
+          "amd:00ff1586-0000-1000-8000-000000000000",
+          "amd:0x0"
+        ],
+        "amdgpu_driver": "6.14.0",
         "gtt_total": 118111600640,
         "gtt_used": 6442450944,
         "vram_carveout": 536870912,

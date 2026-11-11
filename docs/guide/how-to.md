@@ -21,24 +21,37 @@ agent was installed with the one-line install (service `forgeyard-agent`, settin
    ```
 
    It prints one line per card, with its `gfx` target (for example `gfx1100`, or `gfx1151` for a
-   Strix Halo APU, marked *unified-memory*), then one line per collector.
+   Strix Halo APU, marked *unified-memory*) and the ROCm version, then one line per collector.
+   On a Strix Halo with a 96 GiB carve-out:
 
-The agent reads AMD cards through the `amdsmi` library when it can import it, else the `amd-smi`
-command, else `rocm-smi`. If the inventory says `amdsmi Python library not importable` but
-`amd-smi` works, nothing is missing. To use the library as well:
+   ```text
+   amd     0  AMD Radeon 8060S  arch=gfx1151  32.6 GiB free of 96.0 GiB  rocm=7.0.2 unified-memory
+   ```
 
-```bash
-sudo uv pip install --python /opt/forgeyard/venv/bin/python /opt/rocm/share/amd_smi
-sudo systemctl restart forgeyard-agent
-```
+The agent reads AMD cards through the `amdsmi` library when it can import it (from its own Python,
+or else from the copy ROCm ships in `/opt/rocm/share/amd_smi`), else the `amd-smi` command, else
+`rocm-smi`. If the inventory says `amdsmi … not importable` or `failed to load` but `amd-smi`
+works, nothing is missing: the same values come from the command.
+
+What it shows for each card:
+
+- **Name:** the card's market name. An APU's is often just "AMD Radeon Graphics"; then the GPU
+  named in the CPU's model ("… w/ Radeon 8060S") is used.
+- **ROCm version** (`rocm=` here, "ROCm" on the Machines page) where NVIDIA cards show their
+  driver. The kernel driver's version is kept in the card's details.
+- **Memory:** for an APU, the larger of the VRAM carve-out (set in the BIOS) and GTT, which is
+  what `amd-smi monitor` shows too.
+- **Key:** the card's UUID when it has a serial number, else its PCI address (APUs have no
+  serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
+  1.1.0 or older keeps its GPU allowlist when the key changes.
 
 Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process workload gets
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
-> AMD support has been checked against data recorded from AMD machines; the check on a real AMD
-> machine is still to come. Report anything that looks wrong with the output of
-> `forgeyard agent inventory --raw`.
+> AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2,
+> through `amd-smi` and `rocm-smi`; discrete AMD cards only against recorded data so far. Report
+> anything that looks wrong with the output of `forgeyard agent inventory --json --raw`.
 
 ## Add a CPU-only machine
 
@@ -102,7 +115,8 @@ INFO forgeyard.agent: Connected to https://192.168.1.20:7860 as 'gpu-01' (9 acce
 
 ```bash
 docker run -d --name forgeyard-agent --restart always --network host \
-  --device /dev/kfd --device /dev/dri --group-add video --group-add render \
+  --device /dev/kfd --device /dev/dri \
+  --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
@@ -114,8 +128,20 @@ docker run -d --name forgeyard-agent --restart always --network host \
   forgeyard-agent:1.1.0
 ```
 
-The host's ROCm is mounted read-only so the agent can use `amd-smi` and `rocm-smi` to read the
-cards.
+The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
+read the cards. The groups are given by their **number** on the host: Docker looks a group *name*
+up in the image, which has no `render` group (`Unable to find group render`). On an older system
+without a `render` group (`getent group render` prints nothing), leave that `--group-add` out.
+
+To check what the agent sees before it joins, run its `inventory` command with the same devices
+(the image's command already is `forgeyard agent`, so add only `inventory`):
+
+```bash
+docker run --rm --device /dev/kfd --device /dev/dri \
+  --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
+  -v /opt/rocm:/opt/rocm:ro \
+  forgeyard-agent:1.1.0 inventory
+```
 
 ### CPU only
 

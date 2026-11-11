@@ -113,6 +113,20 @@ def test_fy_agt_007_inventory_json_prints_what_it_detects(monkeypatch, capsys):
     assert "[cpu] ok" in capsys.readouterr().out
 
 
+def test_fy_agt_011_a_redundant_agent_and_the_amd_line(monkeypatch, capsys):
+    """FY-AGT-011: `docker run … IMAGE agent inventory` reaches the CLI as `agent agent inventory`
+    (the image's entrypoint is `forgeyard agent`) and works; an AMD card's line names the ROCm version."""
+    monkeypatch.setenv(SIMULATION_ENV, "1")
+    assert cli_main(["agent", "agent", "inventory", "--simulate-inventory", "amd-gfx1151-apu"]) == 0
+    out = capsys.readouterr().out
+    assert "amd     0  AMD Radeon 8060S  arch=gfx1151  104.0 GiB free of 110.0 GiB  rocm=7.0.2 unified-memory" in out
+    assert "driver=" in out  # the CPU row keeps "driver"
+    assert cli_main(["agent", "agent", "inventory", "--json", "--simulate-inventory", "amd-gfx1151-apu"]) == 0
+    assert json.loads(capsys.readouterr().out)["simulated"] is True
+    with pytest.raises(SystemExit):  # only one leading "agent" is dropped
+        cli_main(["agent", "agent", "agent", "inventory"])
+
+
 def test_fy_agt_008_urls():
     """FY-AGT-008"""
     assert normalise_server("192.168.1.20:7860/") == "http://192.168.1.20:7860"

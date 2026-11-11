@@ -146,6 +146,11 @@ class FakeAmdsmi:
     def amdsmi_get_gpu_activity(self, h):
         return dict(self._h(h)["activity"])
 
+    def amdsmi_get_rocm_version(self):
+        if "rocm_version" not in self._data:
+            raise RuntimeError("librocm-core.so not found")
+        return True, self._data["rocm_version"]
+
     def amdsmi_get_temp_metric(self, h, sensor, metric):
         value = self._h(h)["temperature"].get(self._TEMP[sensor])
         if value is None:

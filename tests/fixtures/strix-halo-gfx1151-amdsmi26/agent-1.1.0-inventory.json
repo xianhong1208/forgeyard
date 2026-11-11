@@ -1,0 +1,139 @@
+{
+  "agent_version": "1.1.0",
+  "simulated": false,
+  "accelerators": [
+    {
+      "key": "amd:0x0",
+      "vendor": "amd",
+      "index": 0,
+      "model": "N/A",
+      "arch": "gfx1151",
+      "uuid": "0x0",
+      "vram_total": 103079215104,
+      "vram_free": 39645589504,
+      "vram_used": 63433625600,
+      "unified_memory": true,
+      "driver": "7.0.0-38-generic",
+      "utilization": 4,
+      "temperature": 41,
+      "detail": {
+        "pci_bus_id": "0000:c6:00.0",
+        "source": "rocm-smi",
+        "render_minor": 128,
+        "gtt_total": 16632823808,
+        "gtt_used": 666247168,
+        "vram_carveout": 103079215104,
+        "unified_by": "gfx1151 is an APU target",
+        "pool": "vram"
+      }
+    },
+    {
+      "key": "cpu:0",
+      "vendor": "cpu",
+      "index": 0,
+      "model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+      "arch": "x86_64",
+      "vram_total": 33265651712,
+      "vram_free": 20458110976,
+      "vram_used": 12807540736,
+      "unified_memory": false,
+      "driver": null,
+      "utilization": null,
+      "temperature": null,
+      "detail": {
+        "cores": 16,
+        "threads": 32,
+        "sockets": 1,
+        "isa": [
+          "avx",
+          "avx2",
+          "fma",
+          "f16c",
+          "avx512f",
+          "avx512_bf16",
+          "avx512_vnni",
+          "avx_vnni"
+        ]
+      }
+    }
+  ],
+  "collectors": {
+    "nvidia": {
+      "ok": false,
+      "count": 0,
+      "source": "nvml",
+      "reason": "NVML did not start (no NVIDIA driver?): NVML Shared Library Not Found"
+    },
+    "amd": {
+      "ok": true,
+      "count": 1,
+      "source": "rocm-smi",
+      "reason": "used rocm-smi (amdsmi Python library not importable (No module named 'amdsmi'); amd-smi: 'str' object has no attribute 'get')"
+    },
+    "cpu": {
+      "ok": true,
+      "count": 1,
+      "source": "/proc"
+    }
+  },
+  "raw": {
+    "amd": {
+      "rocm-smi": {
+        "card0": {
+          "Unique ID": "0x0",
+          "Temperature (Sensor edge) (C)": "41.0",
+          "GPU use (%)": "4",
+          "PCI Bus": "0000:C6:00.0",
+          "VRAM Total Memory (B)": "103079215104",
+          "VRAM Total Used Memory (B)": "63433625600",
+          "GTT Total Memory (B)": "16632823808",
+          "GTT Total Used Memory (B)": "666247168",
+          "Card Series": "N/A",
+          "Card Model": "0x1586",
+          "Card Vendor": "0x1002",
+          "Card SKU": "STRXLGEN",
+          "Subsystem ID": "-0x7fe3",
+          "Device Rev": "0xc1",
+          "Node ID": "1",
+          "GUID": "51834",
+          "GFX Version": "gfx1151"
+        },
+        "system": {
+          "Driver version": "7.0.0-38-generic"
+        }
+      },
+      "kfd": {
+        "0000:c6:00.0": {
+          "node": "1",
+          "gfx": "gfx1151",
+          "cpu_cores": 0,
+          "simd": 80,
+          "unique_id": 0,
+          "render_minor": 128
+        }
+      },
+      "skipped": [
+        "amdsmi Python library not importable (No module named 'amdsmi')",
+        "amd-smi: 'str' object has no attribute 'get'"
+      ]
+    },
+    "cpu": {
+      "cpuinfo": {
+        "model": "AMD RYZEN AI MAX+ 395 w/ Radeon 8060S",
+        "threads": 32,
+        "cores": 16,
+        "sockets": 1,
+        "isa": [
+          "avx",
+          "avx2",
+          "fma",
+          "f16c",
+          "avx512f",
+          "avx512_bf16",
+          "avx512_vnni",
+          "avx_vnni"
+        ]
+      }
+    }
+  }
+}

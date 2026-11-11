@@ -483,7 +483,7 @@ function AcceleratorRow({ a, restricted }: { a: Accelerator; restricted: boolean
             <span className="chip chip-off" title="Not on this machine's allowlist: Forgeyard never assigns it.">not for Forgeyard</span>
           )}
           {!cpu && a.assigned_to && <span className="chip chip-tone-run">in use: {a.assigned_to}</span>}
-          {a.driver && <span className="muted">driver {a.driver}</span>}
+          {a.driver && <span className="muted">{a.vendor === "amd" ? "ROCm" : "driver"} {a.driver}</span>}
         </span>
       </span>
       <span className="accel-mem">
