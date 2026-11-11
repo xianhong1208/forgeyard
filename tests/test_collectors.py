@@ -8,8 +8,9 @@ from pathlib import Path
 import pytest
 
 from forgeyard.agent.inventory import Inventory
-from forgeyard.agent.inventory.amd import (ROCM_SMI, AmdCollector, amdsmi_uuid, decode_gfx, import_amdsmi, parse_amd_smi,
-                                           parse_rocm_smi, parse_version, pick_model, read_kfd, read_rocm_version,
+from forgeyard.agent.inventory.amd import (ROCM_SMI, AmdCollector, amdsmi_uuid, decode_gfx, fill_from_kfd, gaps,
+                                           import_amdsmi, pair_up, parse_amd_smi, parse_rocm_smi, parse_version,
+                                           pick_model, read_cpu_model, read_kfd, read_rocm_version, reading,
                                            rocm_roots, unique_uuid, uuid_serial)
 from forgeyard.agent.inventory.base import Result
 from forgeyard.agent.inventory.cpu import CpuCollector, parse_cpuinfo, parse_meminfo
@@ -530,6 +531,164 @@ def test_fy_col_059_a_broken_amdsmi_copy_fails_soft(tmp_path, clean_import, caps
     r = AmdCollector(run=fake_runner({}), which=lambda n: None, kfd_root="/nonexistent", rocm_root=[rocm],
                      cpuinfo="/nonexistent").inventory()
     assert not r.ok and "failed to load" in r.reason and r.reason.endswith("rocm-smi not on PATH")
+
+
+# ------------------------------------------------------------------ AMD: partial answers are merged
+class NoLibdrmAmdsmi(FakeAmdsmi):
+    """amdsmi as it ran in the 1.1.0-based image on the real Strix Halo: libamd_smi loads and reads
+    memory, but everything that goes through libdrm fails, and the C++ code says so on its own."""
+
+    def __init__(self):
+        super().__init__({"rocm_version": "7.0.2", "handles": [{
+            "memory": {"VRAM": [96 * GiB, 64957 * MiB], "VIS_VRAM": [96 * GiB, 64957 * MiB], "GTT": [15862 * MiB, 764 * MiB]},
+            "activity": {"gfx_activity": "N/A"}, "temperature": {"EDGE": 31}}]})
+
+    def amdsmi_init(self, *flags):
+        os.write(1, b"Fail to open libdrm.so.2: libdrm.so.2: cannot open shared object file\n")  # C++ on fd 1
+        print("amdsmi python chatter")
+
+    def amdsmi_shut_down(self):
+        os.write(1, b"shutting down\n")
+
+    def _fails(self, *a):
+        os.write(1, b"Fail to open libdrm.so.2\n")
+        raise RuntimeError("AMDSMI_STATUS_DRM_ERROR")
+
+    amdsmi_get_gpu_asic_info = amdsmi_get_gpu_board_info = amdsmi_get_gpu_driver_info = _fails
+    amdsmi_get_gpu_device_uuid = amdsmi_get_gpu_device_bdf = _fails
+
+
+def test_fy_col_060_a_partial_amdsmi_answer_is_completed_from_kfd(tmp_path, capfd):
+    """FY-COL-060: amdsmi without libdrm gives memory only. KFD (one GPU node) gives the address and
+    gfx1151, which sets unified memory; the CPU names the GPU; ROCm's version file the driver. The
+    library's own output never reaches stdout."""
+    c = AmdCollector(amdsmi=NoLibdrmAmdsmi(), run=fake_runner({}), which=lambda n: None, **_real_machine(tmp_path))
+    r = c.inventory()
+    assert r.ok and r.source == "amdsmi+kfd", (r.source, r.reason)
+    (gpu,) = r.accelerators
+    assert (gpu["arch"], gpu["unified_memory"], gpu["model"], gpu["driver"]) == ("gfx1151", True, "AMD Radeon 8060S", "7.0.2")
+    assert gpu["key"] == REAL_KEY and gpu["detail"]["source"] == "amdsmi+kfd"
+    assert gpu["vram_total"] == 96 * GiB and gpu["vram_free"] == 33347 * MiB and gpu["temperature"] == 31
+    assert gpu["detail"]["render_minor"] == 128 and gpu["detail"]["pool"] == "vram"
+    (m,) = c.metrics()
+    assert m["key"] == REAL_KEY and m["vram_free"] == 33347 * MiB  # live values keyed like the inventory
+    c.close()
+    out, err = capfd.readouterr()
+    assert out == "" and "Fail to open libdrm.so.2" in err and "amdsmi python chatter" in err
+    assert "shutting down" in err
+
+
+def test_fy_col_061_the_next_tools_fill_what_amdsmi_could_not(tmp_path):
+    """FY-COL-061: with rocm-smi there, it gives the address, target and IDs; amdsmi's memory and
+    temperature stay (it came first). No single KFD guess is needed then."""
+    run = fake_runner({" ".join(ROCM_SMI): (0, _real("rocm-smi.json"), "")})
+    c = AmdCollector(amdsmi=NoLibdrmAmdsmi(), run=run, which=lambda n: "/x" if n == "rocm-smi" else None,
+                     **_real_machine(tmp_path))
+    r = c.inventory(raw=True)
+    assert r.source == "amdsmi+rocm-smi" and r.raw["used"] == ["amdsmi", "rocm-smi"]
+    (gpu,) = r.accelerators
+    assert (gpu["arch"], gpu["unified_memory"], gpu["model"], gpu["driver"]) == ("gfx1151", True, "AMD Radeon 8060S", "7.0.2")
+    assert gpu["key"] == REAL_KEY and "amd:0x0" in gpu["detail"]["aliases"]
+    assert gpu["vram_used"] == 64957 * MiB and gpu["utilization"] == 4  # amdsmi's used; rocm-smi's use% where amdsmi had none
+    assert gpu["detail"]["amdgpu_driver"] == "7.0.0-38-generic"
+
+
+def test_fy_col_062_a_complete_answer_asks_nothing_else(tmp_path):
+    """FY-COL-062: a source that gave everything is not followed by the CLIs."""
+    run = fake_runner({})
+    r = AmdCollector(amdsmi=FakeAmdsmi(load("amdsmi_gfx1151_apu.json")), run=run, which=lambda n: "/x/" + n,
+                     **_real_machine(tmp_path)).inventory()
+    assert r.source == "amdsmi" and r.reason is None and run.seen == []
+
+
+def test_fy_col_063_what_cannot_be_filled_is_said(tmp_path):
+    """FY-COL-063: nothing else to ask: the partial card is reported, and the reason names the gaps."""
+    r = AmdCollector(amdsmi=NoLibdrmAmdsmi(), **no_tools()).inventory()
+    assert r.ok and r.source == "amdsmi"
+    assert r.reason.endswith("still unknown: #0: pci_bus_id, arch, model")
+    assert r.accelerators[0]["arch"] is None
+
+
+class PartialAmdsmi(FakeAmdsmi):
+    """The real Strix Halo through amdsmi, with the named calls failing."""
+
+    def __init__(self, fails=(), board="N/A"):
+        super().__init__({"handles": [{
+            "asic_info": {"market_name": "AMD Radeon Graphics", "target_graphics_version": "gfx1151",
+                          "device_id": "0x1586", "asic_serial": "0x0000000000000000"},
+            "board_info": {"product_name": board}, "driver_info": {"driver_version": "N/A"},
+            "uuid": REAL_UUID, "bdf": "0000:c6:00.0",
+            "memory": {"VRAM": [96 * GiB, 64957 * MiB], "GTT": [15862 * MiB, 764 * MiB]},
+            "activity": {"gfx_activity": 2}, "temperature": {"EDGE": 31}}]})
+        self._broken = set(fails)
+
+    def __getattribute__(self, name):
+        if name in object.__getattribute__(self, "_broken"):
+            def fail(*a):
+                raise RuntimeError("AMDSMI_STATUS_DRM_ERROR")
+            return fail
+        return super().__getattribute__(name)
+
+    def amdsmi_get_gpu_board_info(self, h):
+        return dict(self._h(h)["board_info"])
+
+
+@pytest.mark.parametrize("gap, fails, board, kfd, cpu", [
+    ("arch", {"amdsmi_get_gpu_asic_info"}, "AMD Radeon 8060S", False, False),
+    ("model", {"amdsmi_get_gpu_asic_info", "amdsmi_get_gpu_board_info"}, "N/A", True, False),
+    ("vram_total", {"amdsmi_get_gpu_memory_total"}, "N/A", True, True),
+    ("pci_bus_id", {"amdsmi_get_gpu_device_bdf"}, "N/A", False, True),
+])
+def test_fy_col_065_each_missing_key_field_asks_the_next_source(tmp_path, gap, fails, board, kfd, cpu):
+    """FY-COL-065: one key field missing at a time (address, target, memory size, name): the CLIs
+    are asked and fill it."""
+    machine = _real_machine(tmp_path)
+    if not kfd:
+        machine["kfd_root"] = tmp_path / "no-kfd"
+    if not cpu:
+        machine["cpuinfo"] = tmp_path / "no-cpuinfo"
+    lib = PartialAmdsmi(fails, board)
+    c = AmdCollector(amdsmi=lib, run=fake_runner({}), which=lambda n: None, **machine)
+    assert gaps(c._lib_reading(lib, 0, 0, None), read_kfd(machine["kfd_root"]), read_cpu_model(machine["cpuinfo"])) == [gap]
+    run = _real_amd_smi()
+    r = AmdCollector(amdsmi=PartialAmdsmi(fails, board), run=run, which=lambda n: "/x/" + n, **machine).inventory()
+    assert r.source == "amdsmi+amd-smi" and "amd-smi static --asic --bus --vram --driver --board --json" in run.seen
+    (gpu,) = r.accelerators
+    assert (gpu["key"], gpu["arch"], gpu["unified_memory"], gpu["vram_total"]) == (REAL_KEY, "gfx1151", True, 96 * GiB)
+    assert gpu["model"] in ("AMD Radeon 8060S", "AMD Radeon Graphics") and "still unknown" not in (r.reason or "")
+
+
+def test_fy_col_066_pairing_and_kfd_only_when_unambiguous(tmp_path):
+    """FY-COL-066: two sources' cards pair by address, by position only if one lacks it; KFD gives
+    an address only for a single card and a single GPU node, and its gfx target counts as a source."""
+    a, b = reading(index=0, bdf="0000:c6:00.0"), reading(index=0, bdf="0000:c7:00.0")
+    assert pair_up([a], [b]) == []
+    assert pair_up([reading(index=0)], [b]) == [(reading(index=0), b)]
+    assert pair_up([a, reading(index=1)], [b]) == []
+    assert pair_up([reading(index=0), reading(index=1)], [b]) == []  # two cards, one reading: no guessing
+    two = {"0000:c6:00.0": {"gfx": "gfx1151"}, "0000:c7:00.0": {"gfx": "gfx1151"}}
+    lone = [reading(index=0)]
+    assert not fill_from_kfd(lone, two) and lone[0]["bdf"] is None
+    machine = _real_machine(tmp_path)
+    run = fake_runner({})
+    r = AmdCollector(amdsmi=PartialAmdsmi({"amdsmi_get_gpu_asic_info"}, "AMD Radeon 8060S"), run=run,
+                     which=lambda n: "/x/" + n, **machine).inventory()
+    assert r.source == "amdsmi+kfd" and r.accelerators[0]["arch"] == "gfx1151" and run.seen == []
+
+
+def test_fy_col_064_c_output_goes_to_stderr_and_stdout_comes_back(capfd):
+    """FY-COL-064"""
+    import ctypes
+
+    from forgeyard.agent.inventory.amd import c_stdout_to_stderr
+
+    with c_stdout_to_stderr():
+        os.write(1, b"fd one\n")
+        ctypes.CDLL(None).printf(b"buffered C\n")
+        print("python print")
+    print("after")
+    out, err = capfd.readouterr()
+    assert out == "after\n" and "fd one" in err and "buffered C" in err and "python print" in err
 
 
 # ------------------------------------------------------------------ CPU

@@ -28,9 +28,16 @@ RUN python -m venv /opt/forgeyard/venv \
 FROM docker:28.5-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS dockercli
 
 FROM base
+# libdrm2 and libdrm-amdgpu1: the host's ROCm (mounted at /opt/rocm) brings libamd_smi.so, which
+# links only libc/libstdc++ but dlopen()s "libdrm.so.2" and, for the card's marketing name,
+# "libdrm_amdgpu.so" (the unversioned name, normally in libdrm-dev; ROCm 7.0 amd_smi_drm.cc and
+# amd_smi_utils.cc). Without them amdsmi reads memory but no ASIC information.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends tini \
+ && apt-get install -y --no-install-recommends tini libdrm2 libdrm-amdgpu1 \
  && rm -rf /var/lib/apt/lists/* \
+ && amdgpu="$(find /usr/lib -name 'libdrm_amdgpu.so.1' | head -n 1)" \
+ && ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so" \
+ && ldconfig \
  && useradd --system --uid 990 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin forgeyard-run
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=venv /opt/forgeyard/venv /opt/forgeyard/venv

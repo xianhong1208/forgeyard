@@ -33,7 +33,18 @@ First run on a real AMD machine (Ryzen AI MAX+ 395 / Radeon 8060S, gfx1151, ROCm
   `/opt/rocm/share/amd_smi`. When `import amdsmi` fails, the agent loads that copy (as `amd-smi`
   itself does) with `ROCM_PATH` pointing at that ROCm; any failure (missing or mismatched
   `libamd_smi.so`, a Python it does not support) is a reason and the CLI is used. What the library
-  prints while loading no longer reaches stdout (`inventory --json` stays valid JSON).
+  prints, from Python or from its C++ code on file descriptor 1, goes to stderr (`inventory --json`
+  stays valid JSON).
+- **The agent image lacked libdrm**, which `libamd_smi.so` loads at run time (`libdrm.so.2`, and the
+  unversioned `libdrm_amdgpu.so` for the marketing name): amdsmi from the mounted ROCm then read the
+  memory but no ASIC information ("Fail to open libdrm.so.2"). The image installs `libdrm2` and
+  `libdrm-amdgpu1` with that link; the smoke test loads both.
+- **A partial answer no longer wins.** That half-working amdsmi was taken as the answer: no name, no
+  `gfx` target, no unified-memory flag. Now, while a card lacks its PCI address, gfx target, memory
+  size or a name, the next sources fill the gaps field by field (amd-smi, rocm-smi, then the KFD
+  topology, which alone gives the address and gfx target of a single GPU); the collector's source
+  names every one that contributed (`via amdsmi+kfd`), what stays unknown is said, and the live
+  metrics keep the merged keys.
 - **The AMD `docker run` failed with `Unable to find group render`**: Docker looks group names up in
   the image. The Machines page, the guide and the image smoke test use the host's numeric ids,
   `--group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)"`.

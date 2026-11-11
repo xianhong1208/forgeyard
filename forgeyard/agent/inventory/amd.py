@@ -20,8 +20,9 @@ amd-smi 26.0.2 on 2026-11-11, see docs/acceptance-m1.md):
   in $ROCM_PATH/lib, then the linker's paths, then next to itself (amdsmi_wrapper.py in ROCm 7.0).
   When `import amdsmi` fails, `import_amdsmi` tries that tree with ROCM_PATH pointing at its ROCm,
   which is what amd-smi itself does (amdsmi_cli/amdsmi_init.py appends ../../share/amd_smi to
-  sys.path). UNCONFIRMED: the library path on real hardware (the 2026-11-11 run had no amdsmi in
-  the agent's Python, so it used the CLI and rocm-smi).
+  sys.path). On the real Strix Halo it loaded that way, but libamd_smi dlopen()s libdrm.so.2 and
+  libdrm_amdgpu.so, which the image lacked: memory came back, ASIC information did not. The image
+  now ships them, and a partial answer like that is completed from the other sources (inventory()).
 * amd-smi CLI — https://github.com/ROCm/amdsmi/blob/amd-staging/amdsmi_cli/amdsmi_commands.py
     static --json: asic.market_name, asic.target_graphics_version, asic.device_id, asic.asic_serial,
                    bus.bdf, driver.version, vram.size {"value", "unit": "MB"}, board.product_name
@@ -61,6 +62,7 @@ detail.aliases, so the server can carry the card's allowlist entry over (machine
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import importlib
 import io
 import json
@@ -462,12 +464,96 @@ def make_card(*, index: int, names: Iterable[Any], gfx: Any, uuid: Any, bdf: Any
     return card
 
 
+# ------------------------------------------------------------------ what each source read, merged
+# Each source yields one "reading" per card: make_card's arguments without the shared context
+# (KFD, CPU model, ROCm version). Readings of the same card from several sources are merged field
+# by field, the first source winning, so a source that answered only in part (amdsmi without
+# libdrm: memory but no ASIC info) never stands alone.
+LIVE = ("vram_used", "gtt_used", "utilization", "temperature")
+
+
+def reading(*, index: int, names: Iterable[Any] = (), gfx: Any = None, uuid: Any = None, bdf: Any = None,
+            vram_total: Optional[int] = None, vram_used: Optional[int] = None, gtt_total: Optional[int] = None,
+            gtt_used: Optional[int] = None, utilization: Optional[int] = None, temperature: Optional[int] = None,
+            amdgpu_driver: Any = None, serial: Optional[int] = None, device_id: Optional[int] = None,
+            legacy_ids: Iterable[Any] = ()) -> dict:
+    """A card as one source saw it, with "N/A"-like values already turned into None."""
+    return {"index": index, "names": tuple(n for n in (useful_name(v) for v in names) if n), "gfx": decode_gfx(gfx),
+            "uuid": present(uuid), "bdf": normalise_bdf(bdf), "vram_total": vram_total, "vram_used": vram_used,
+            "gtt_total": gtt_total, "gtt_used": gtt_used, "utilization": utilization, "temperature": temperature,
+            "amdgpu_driver": present(amdgpu_driver), "serial": serial, "device_id": device_id,
+            "legacy_ids": tuple(i for i in (present(v) for v in legacy_ids) if i)}
+
+
+def card_of(r: dict, kfd: dict[str, dict], *, source: str, cpu_model: Optional[str] = None,
+            rocm: Optional[str] = None) -> dict:
+    return make_card(**r, driver=rocm, kfd=kfd, source=source, cpu_model=cpu_model)
+
+
+def gaps(r: dict, kfd: dict[str, dict], cpu_model: Optional[str] = None) -> list[str]:
+    """What a card still lacks that another source could give: its PCI address (the key, the KFD
+    node), its gfx target (which also decides unified memory), its memory size, a name."""
+    node = kfd.get(r["bdf"]) if r["bdf"] else None
+    gfx = r["gfx"] or (node or {}).get("gfx")
+    out = [] if r["bdf"] else ["pci_bus_id"]
+    if not gfx:
+        out.append("arch")
+    if r["vram_total"] is None:
+        out.append("vram_total")
+    if pick_model(r["names"], bool(unified_reason(gfx, node)), cpu_model) is None:
+        out.append("model")
+    return out
+
+
+def fill(base: dict, extra: dict) -> bool:
+    """Fill what `base` lacks from `extra` (the same card from another source). True if it gave anything."""
+    gave = False
+    for k, v in extra.items():
+        if k == "index":
+            continue
+        if k == "names":
+            new = tuple(n for n in v if n not in base["names"])
+            if new:
+                base["names"], gave = base["names"] + new, True
+        elif k == "legacy_ids":
+            base[k] = base[k] + tuple(i for i in v if i not in base[k])
+        elif base.get(k) is None and v is not None:
+            base[k], gave = v, True
+    return gave
+
+
+def pair_up(base: list[dict], extra: list[dict]) -> list[tuple[dict, dict]]:
+    """The same card in two sources: by PCI address; by position only when one side has no
+    address and both list the same number of cards."""
+    by_bdf = {e["bdf"]: e for e in extra if e["bdf"]}
+    out = []
+    for i, b in enumerate(base):
+        e = by_bdf.get(b["bdf"]) if b["bdf"] else None
+        if e is None and len(base) == len(extra) and not (b["bdf"] and extra[i]["bdf"]):
+            e = extra[i]
+        if e is not None:
+            out.append((b, e))
+    return out
+
+
+def fill_from_kfd(readings: list[dict], kfd: dict[str, dict]) -> bool:
+    """The KFD topology names every GPU by PCI address with its gfx target. One card without an
+    address and one GPU node: they are the same. True if KFD gave anything (an address or the target)."""
+    gave = False
+    if len(readings) == 1 and len(kfd) == 1 and not readings[0]["bdf"]:
+        readings[0]["bdf"], gave = next(iter(kfd)), True
+    for r in readings:
+        node = kfd.get(r["bdf"]) if r["bdf"] else None
+        if not r["gfx"] and node and node.get("gfx"):
+            gave = True  # make_card takes it from the node
+    return gave
+
+
 # ------------------------------------------------------------------ amd-smi / rocm-smi text
-def parse_amd_smi(static: Any, metric: Any, listing: Any, kfd: dict[str, dict], *, cpu_model: Optional[str] = None,
-                  rocm: Optional[str] = None) -> list[dict]:
+def amd_smi_readings(static: Any, metric: Any, listing: Any) -> list[dict]:
     metrics = {integer(m.get("gpu")): m for m in _gpu_list(metric)}
     listed = {integer(m.get("gpu")): m for m in _gpu_list(listing)}
-    cards = []
+    out = []
     for position, g in enumerate(_gpu_list(static)):
         idx = integer(g.get("gpu"))
         idx = position if idx is None else idx
@@ -476,42 +562,49 @@ def parse_amd_smi(static: Any, metric: Any, listing: Any, kfd: dict[str, dict], 
         m, usage, temps = _d(live.get("mem_usage")), _d(live.get("usage")), _d(live.get("temperature"))
         info = _d(listed.get(idx))
         driver = g.get("driver")
-        vram_total = _mib(m.get("total_vram")) or _mib(vram.get("size"))
-        cards.append(make_card(
+        out.append(reading(
             index=idx, names=(asic.get("market_name"), board.get("product_name")),
             gfx=asic.get("target_graphics_version"), uuid=info.get("uuid"),
             bdf=present(bus.get("bdf")) or present(info.get("bdf")),
-            driver=rocm, amdgpu_driver=_d(driver).get("version") if isinstance(driver, dict) else driver,
-            vram_total=vram_total, vram_used=_mib(m.get("used_vram")),
+            amdgpu_driver=_d(driver).get("version") if isinstance(driver, dict) else driver,
+            vram_total=_mib(m.get("total_vram")) or _mib(vram.get("size")), vram_used=_mib(m.get("used_vram")),
             gtt_total=_mib(m.get("total_gtt")), gtt_used=_mib(m.get("used_gtt")),
             utilization=integer(usage.get("gfx_activity")),
             temperature=_celsius(temps.get("edge")) or _celsius(temps.get("hotspot")),
-            serial=hex_int(asic.get("asic_serial")), device_id=hex_int(asic.get("device_id")),
-            kfd=kfd, source="amd-smi", cpu_model=cpu_model))
-    return cards
+            serial=hex_int(asic.get("asic_serial")), device_id=hex_int(asic.get("device_id"))))
+    return out
+
+
+def rocm_smi_readings(data: Any) -> list[dict]:
+    if not isinstance(data, dict):
+        return []
+    kernel = _ci(data.get("system"), "Driver version")
+    out = []
+    for name in sorted((k for k in data if re.fullmatch(r"card\d+", str(k).lower())), key=lambda k: int(str(k)[4:])):
+        c = _d(data[name])
+        uid = present(_ci(c, "Unique ID"))
+        out.append(reading(
+            index=int(str(name)[4:]),
+            names=(_ci(c, "Card Series", "Card series"), _ci(c, "Card Model", "Card model")),
+            gfx=_ci(c, "GFX Version"), serial=hex_int(uid), legacy_ids=(uid,),
+            device_id=hex_int(_ci(c, "Device ID", "Card Model", "Card model")),
+            bdf=_ci(c, "PCI Bus"), amdgpu_driver=kernel,
+            vram_total=integer(_ci(c, "VRAM Total Memory (B)")), vram_used=integer(_ci(c, "VRAM Total Used Memory (B)")),
+            gtt_total=integer(_ci(c, "GTT Total Memory (B)")), gtt_used=integer(_ci(c, "GTT Total Used Memory (B)")),
+            utilization=integer(_ci(c, "GPU use (%)")),
+            temperature=_celsius(_ci(c, "Temperature (Sensor edge) (C)", "Temperature (Sensor junction) (C)"))))
+    return out
+
+
+def parse_amd_smi(static: Any, metric: Any, listing: Any, kfd: dict[str, dict], *, cpu_model: Optional[str] = None,
+                  rocm: Optional[str] = None) -> list[dict]:
+    return [card_of(r, kfd, source="amd-smi", cpu_model=cpu_model, rocm=rocm)
+            for r in amd_smi_readings(static, metric, listing)]
 
 
 def parse_rocm_smi(data: Any, kfd: dict[str, dict], *, cpu_model: Optional[str] = None,
                    rocm: Optional[str] = None) -> list[dict]:
-    if not isinstance(data, dict):
-        return []
-    kernel = _ci(data.get("system"), "Driver version")
-    cards = []
-    for name in sorted((k for k in data if re.fullmatch(r"card\d+", str(k).lower())), key=lambda k: int(str(k)[4:])):
-        c = _d(data[name])
-        uid = present(_ci(c, "Unique ID"))
-        cards.append(make_card(
-            index=int(str(name)[4:]),
-            names=(_ci(c, "Card Series", "Card series"), _ci(c, "Card Model", "Card model")),
-            gfx=_ci(c, "GFX Version"), uuid=None, serial=hex_int(uid), legacy_ids=(uid,),
-            device_id=hex_int(_ci(c, "Device ID", "Card Model", "Card model")),
-            bdf=_ci(c, "PCI Bus"), driver=rocm, amdgpu_driver=kernel,
-            vram_total=integer(_ci(c, "VRAM Total Memory (B)")), vram_used=integer(_ci(c, "VRAM Total Used Memory (B)")),
-            gtt_total=integer(_ci(c, "GTT Total Memory (B)")), gtt_used=integer(_ci(c, "GTT Total Used Memory (B)")),
-            utilization=integer(_ci(c, "GPU use (%)")),
-            temperature=_celsius(_ci(c, "Temperature (Sensor edge) (C)", "Temperature (Sensor junction) (C)")),
-            kfd=kfd, source="rocm-smi", cpu_model=cpu_model))
-    return cards
+    return [card_of(r, kfd, source="rocm-smi", cpu_model=cpu_model, rocm=rocm) for r in rocm_smi_readings(data)]
 
 
 def _json(out: str) -> Any:
@@ -530,6 +623,37 @@ def _json(out: str) -> Any:
             return None
 
 
+def _flush_c_stdio() -> None:
+    try:
+        ctypes.CDLL(None).fflush(None)
+    except Exception:
+        pass
+
+
+@contextlib.contextmanager
+def c_stdout_to_stderr():
+    """libamd_smi is C++: what it prints goes straight to file descriptor 1, past sys.stdout, and
+    would land in the middle of `inventory --json`. While the library runs, descriptor 1 is the
+    process's stderr (and Python's own prints go there too); C's buffer is flushed before it is put back."""
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+    try:
+        saved = os.dup(1)
+        os.dup2(2, 1)
+    except OSError:  # no descriptors to juggle (closed stdout): nothing to protect
+        saved = None
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            yield
+    finally:
+        if saved is not None:
+            _flush_c_stdio()
+            os.dup2(saved, 1)
+            os.close(saved)
+
+
 AMD_SMI_STATIC = [["amd-smi", "static", "--asic", "--bus", "--vram", "--driver", "--board", "--json"],
                   ["amd-smi", "static", "--json"]]
 AMD_SMI_METRIC = [["amd-smi", "metric", "--mem-usage", "--usage", "--temperature", "--json"],
@@ -538,6 +662,9 @@ AMD_SMI_LIST = [["amd-smi", "list", "--json"]]
 AMD_SMI_VERSION = [["amd-smi", "version", "--json"]]
 ROCM_SMI = ["rocm-smi", "--showproductname", "--showmeminfo", "vram", "gtt", "--showdriverversion", "--showbus",
             "--showuniqueid", "--showuse", "--showtemp", "--json"]
+
+# A source's answer: its readings (empty: nothing), why not, and its raw output for --raw.
+Answer = tuple[list[dict], Optional[str], Optional[dict]]
 
 
 class AmdCollector:
@@ -554,6 +681,8 @@ class AmdCollector:
         self._cpuinfo = cpuinfo
         self._importer = importer
         self._backend: Optional[str] = None
+        self._label: Optional[str] = None
+        self._merged: list[dict] = []
         self._lib: Any = None
         self._lib_from: Optional[str] = None
         self._lib_started = False
@@ -575,8 +704,7 @@ class AmdCollector:
             if lib is None:
                 return None, problem
         try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                lib.amdsmi_init()
+            lib.amdsmi_init()
         except Exception as e:
             return None, f"amdsmi_init failed: {error_text(e)}"
         self._lib, self._lib_from, self._lib_started = lib, where, True
@@ -614,7 +742,7 @@ class AmdCollector:
                 break
         return {"utilization": integer(_d(activity).get("gfx_activity")), "temperature": temp}
 
-    def _lib_card(self, lib, index: int, h, raw_out: Optional[list]) -> dict:
+    def _lib_reading(self, lib, index: int, h, raw_out: Optional[list]) -> dict:
         asic = _d(self._get(lib, "amdsmi_get_gpu_asic_info", h))
         board = _d(self._get(lib, "amdsmi_get_gpu_board_info", h))
         driver = _d(self._get(lib, "amdsmi_get_gpu_driver_info", h))
@@ -624,32 +752,30 @@ class AmdCollector:
         if raw_out is not None:
             raw_out.append({"index": index, "asic_info": asic, "board_info": board, "driver_info": driver,
                             "uuid": uuid, "bdf": bdf, "memory": mem, **live})
-        return make_card(index=index, names=(asic.get("market_name"), board.get("product_name")),
-                         gfx=asic.get("target_graphics_version"), uuid=uuid, bdf=bdf, driver=self._rocm,
-                         amdgpu_driver=driver.get("driver_version"), serial=hex_int(asic.get("asic_serial")),
-                         device_id=hex_int(asic.get("device_id")), **mem, **live, kfd=self._kfd, source="amdsmi",
-                         cpu_model=self._cpu_model)
+        return reading(index=index, names=(asic.get("market_name"), board.get("product_name")),
+                       gfx=asic.get("target_graphics_version"), uuid=uuid, bdf=bdf,
+                       amdgpu_driver=driver.get("driver_version"), serial=hex_int(asic.get("asic_serial")),
+                       device_id=hex_int(asic.get("device_id")), **mem, **live)
 
-    def _from_lib(self, raw: bool) -> Result:
-        lib, problem = self._load_lib()
-        if lib is None:
-            return Result(ok=False, source="amdsmi", reason=problem)
-        try:
-            handles = list(lib.amdsmi_get_processor_handles())
-        except Exception as e:
-            return Result(ok=False, source="amdsmi", reason=f"amdsmi could not list GPUs: {error_text(e)}")
-        if not handles:
-            return Result(ok=False, source="amdsmi", reason="amdsmi found no GPUs")
-        if self._rocm is None:
-            ok_version = self._get(lib, "amdsmi_get_rocm_version")
-            if isinstance(ok_version, (tuple, list)) and len(ok_version) == 2 and ok_version[0] is True:
-                self._rocm = parse_version(ok_version[1])
-        raw_out: Optional[list] = [] if raw else None
-        self._handles = list(enumerate(handles))
-        cards = [self._lib_card(lib, i, h, raw_out) for i, h in self._handles]
-        reason = f"amdsmi from {self._lib_from}" if self._lib_from not in (None, "python") else None
-        return Result(accelerators=cards, ok=True, source="amdsmi", reason=reason,
-                      raw={"amdsmi": raw_out} if raw else None)
+    def _from_lib(self, raw: bool) -> Answer:
+        with c_stdout_to_stderr():
+            lib, problem = self._load_lib()
+            if lib is None:
+                return [], problem, None
+            try:
+                handles = list(lib.amdsmi_get_processor_handles())
+            except Exception as e:
+                return [], f"amdsmi could not list GPUs: {error_text(e)}", None
+            if not handles:
+                return [], "amdsmi found no GPUs", None
+            if self._rocm is None:
+                ok_version = self._get(lib, "amdsmi_get_rocm_version")
+                if isinstance(ok_version, (tuple, list)) and len(ok_version) == 2 and ok_version[0] is True:
+                    self._rocm = parse_version(ok_version[1])
+            raw_out: Optional[list] = [] if raw else None
+            self._handles = list(enumerate(handles))
+            readings = [self._lib_reading(lib, i, h, raw_out) for i, h in self._handles]
+        return readings, None, {"amdsmi": raw_out} if raw else None
 
     # -------------------------------------------------------------- CLIs
     def _first_json(self, commands: list[list[str]]) -> tuple[Any, Optional[str]]:
@@ -669,80 +795,117 @@ class AmdCollector:
                 self._rocm = self._rocm or parse_version(_d(item).get("rocm_version"))
         return self._rocm
 
-    def _from_amd_smi(self, raw: bool) -> Result:
+    def _from_amd_smi(self, raw: bool) -> Answer:
         if not self._which("amd-smi"):
-            return Result(ok=False, source="amd-smi", reason="amd-smi not on PATH")
+            return [], "amd-smi not on PATH", None
         static, problem = self._first_json(AMD_SMI_STATIC)
         if static is None:
-            return Result(ok=False, source="amd-smi", reason=f"amd-smi static failed: {problem}")
+            return [], f"amd-smi static failed: {problem}", None
         metric, _ = self._first_json(AMD_SMI_METRIC)
         listing, _ = self._first_json(AMD_SMI_LIST)
-        cards = parse_amd_smi(static, metric, listing, self._kfd, cpu_model=self._cpu_model,
-                              rocm=self._cli_rocm_version())
-        if not cards:
-            return Result(ok=False, source="amd-smi", reason="amd-smi listed no GPUs")
+        readings = amd_smi_readings(static, metric, listing)
+        if not readings:
+            return [], "amd-smi listed no GPUs", None
+        self._cli_rocm_version()
         self._static, self._listing = static, listing
-        return Result(accelerators=cards, ok=True, source="amd-smi",
-                      raw={"static": static, "metric": metric, "list": listing} if raw else None)
+        return readings, None, {"static": static, "metric": metric, "list": listing} if raw else None
 
-    def _from_rocm_smi(self, raw: bool) -> Result:
+    def _from_rocm_smi(self, raw: bool) -> Answer:
         if not self._which("rocm-smi"):
-            return Result(ok=False, source="rocm-smi", reason="rocm-smi not on PATH")
+            return [], "rocm-smi not on PATH", None
         data, problem = self._first_json([ROCM_SMI])
         if data is None:
-            return Result(ok=False, source="rocm-smi", reason=f"rocm-smi failed: {problem}")
-        cards = parse_rocm_smi(data, self._kfd, cpu_model=self._cpu_model, rocm=self._cli_rocm_version())
-        if not cards:
-            return Result(ok=False, source="rocm-smi", reason="rocm-smi listed no GPUs")
-        return Result(accelerators=cards, ok=True, source="rocm-smi", raw={"rocm-smi": data} if raw else None)
+            return [], f"rocm-smi failed: {problem}", None
+        readings = rocm_smi_readings(data)
+        if not readings:
+            return [], "rocm-smi listed no GPUs", None
+        self._cli_rocm_version()
+        return readings, None, {"rocm-smi": data} if raw else None
 
     # -------------------------------------------------------------- collector interface
+    def _incomplete(self, readings: list[dict]) -> bool:
+        return any(gaps(r, self._kfd, self._cpu_model) for r in readings)
+
+    def _cards(self, readings: list[dict]) -> list[dict]:
+        return [card_of(r, self._kfd, source=self._label or "-", cpu_model=self._cpu_model, rocm=self._rocm)
+                for r in readings]
+
     def inventory(self, raw: bool = False) -> Result:
+        """The first source that lists the cards is the base. While a card still lacks its address,
+        gfx target, memory size or a name, the next sources (then the KFD topology) fill the gaps;
+        a partial answer never stands alone. The source label names every one that contributed."""
         self._kfd = read_kfd(self._kfd_root)
         self._cpu_model = read_cpu_model(self._cpuinfo)
         self._rocm = read_rocm_version(self._roots)
-        tried = []
+        base: Optional[list[dict]] = None
+        used, tried, raws = [], [], {}
         for backend, fn in (("amdsmi", self._from_lib), ("amd-smi", self._from_amd_smi), ("rocm-smi", self._from_rocm_smi)):
+            if base is not None and not self._incomplete(base):
+                break
             try:
-                result = fn(raw)
+                readings, problem, raw_part = fn(raw)
             except Exception as e:  # a parser surprise must not take the agent down
-                result = Result(ok=False, source=backend, reason=f"{backend}: {error_text(e)}")
-            if result.ok:
-                self._backend = backend
-                if raw:
-                    result.raw = {**(result.raw or {}), "kfd": self._kfd, "skipped": tried,
-                                  "rocm_version": self._rocm, "cpu_model": self._cpu_model}
-                if tried:
-                    result.reason = "used " + backend + " (" + "; ".join(tried) + ")"
-                return result
-            tried.append(result.reason or backend)
-        self._backend = None
-        return Result(ok=False, source=None, reason="; ".join(tried),
-                      raw={"kfd": self._kfd, "skipped": tried} if raw else None)
+                readings, problem, raw_part = [], f"{backend}: {error_text(e)}", None
+            raws.update(raw_part or {})
+            if not readings:
+                tried.append(problem or backend)
+            elif base is None:
+                base, used, self._backend = readings, [backend], backend
+            elif any([fill(b, e) for b, e in pair_up(base, readings)]):
+                used.append(backend)
+        if base is None:
+            self._backend, self._merged = None, []
+            return Result(ok=False, source=None, reason="; ".join(tried),
+                          raw={"kfd": self._kfd, "skipped": tried} if raw else None)
+        if fill_from_kfd(base, self._kfd):
+            used.append("kfd")
+        self._label, self._merged = "+".join(used), [dict(r) for r in base]
+        cards = self._cards(base)
+        notes = []
+        if tried:
+            notes.append(("used " + self._label + " (" + "; ".join(tried) + ")"))
+        elif self._lib_from not in (None, "python") and self._backend == "amdsmi":
+            notes.append(f"amdsmi from {self._lib_from}")
+        left = [f"#{r['index']}: {', '.join(g)}" for r in base if (g := gaps(r, self._kfd, self._cpu_model))]
+        if left:
+            notes.append("still unknown: " + "; ".join(left))
+        out = {**raws, "kfd": self._kfd, "skipped": tried, "used": used, "rocm_version": self._rocm,
+               "cpu_model": self._cpu_model} if raw else None
+        return Result(accelerators=cards, ok=True, source=self._label, reason="; ".join(notes) or None, raw=out)
+
+    def _fresh(self) -> list[dict]:
+        """The base source's current readings (for the live fields)."""
+        if self._backend == "amdsmi":
+            with c_stdout_to_stderr():
+                return [self._lib_reading(self._lib, i, h, None) for i, h in self._handles]
+        if self._backend == "amd-smi":
+            metric, _ = self._first_json(AMD_SMI_METRIC)
+            return amd_smi_readings(self._static, metric, self._listing)
+        if self._backend == "rocm-smi":
+            data, _ = self._first_json([ROCM_SMI])
+            return rocm_smi_readings(data)
+        return []
 
     def metrics(self) -> list[dict]:
+        """Live values from the base source on top of what the inventory merged, so the keys match it."""
         try:
-            if self._backend == "amdsmi":
-                out = []
-                for i, h in self._handles:
-                    card = self._lib_card(self._lib, i, h, None)
-                    out.append({k: card[k] for k in ("key", "vram_free", "vram_used", "utilization", "temperature")})
-                return out
-            if self._backend == "amd-smi":
-                metric, _ = self._first_json(AMD_SMI_METRIC)
-                cards = parse_amd_smi(self._static, metric, self._listing, self._kfd, cpu_model=self._cpu_model,
-                                      rocm=self._rocm)
-            elif self._backend == "rocm-smi":
-                data, _ = self._first_json([ROCM_SMI])
-                cards = parse_rocm_smi(data, self._kfd, cpu_model=self._cpu_model, rocm=self._rocm)
+            fresh = self._fresh()
+            if len(fresh) == len(self._merged):
+                readings = []
+                for merged, now in zip(self._merged, fresh):
+                    r = dict(merged)
+                    r.update({k: now[k] for k in LIVE if now[k] is not None})
+                    readings.append(r)
             else:
-                return []
+                readings = fresh
+            cards = self._cards(readings)
         except Exception:
             return []
         return [{k: c[k] for k in ("key", "vram_free", "vram_used", "utilization", "temperature")} for c in cards]
 
     def close(self) -> None:
         if self._lib_started:
-            self._call(self._lib.amdsmi_shut_down)
+            with c_stdout_to_stderr():
+                self._call(self._lib.amdsmi_shut_down)
             self._lib_started = False
             self._lib = None

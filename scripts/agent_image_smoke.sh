@@ -41,6 +41,12 @@ docker run --rm --entrypoint id "$IMAGE" forgeyard-run | grep -q "uid=990" || fa
 ok "forgeyard-run account"
 docker run --rm --entrypoint python "$IMAGE" -c "import pynvml" || fail "nvidia-ml-py"
 ok "nvidia-ml-py importable"
+# What the host's libamd_smi.so dlopen()s (ROCm 7.0): without it amdsmi reads no ASIC information.
+docker run --rm --entrypoint sh "$IMAGE" -c 'ldconfig -p | grep -q "libdrm.so.2 " && ldconfig -p | grep -q "libdrm_amdgpu.so.1 "' \
+    || fail "libdrm in ldconfig"
+docker run --rm --entrypoint python "$IMAGE" -c 'import ctypes; ctypes.CDLL("libdrm.so.2"); ctypes.CDLL("libdrm_amdgpu.so")' \
+    || fail "dlopen libdrm.so.2 / libdrm_amdgpu.so"
+ok "libdrm.so.2 and libdrm_amdgpu.so load (for amdsmi on AMD hosts)"
 # The AMD command gives the host's video and render groups by number: a name is looked up in the
 # image's /etc/group, which has no "render" group.
 docker run --rm --group-add 4242 --entrypoint id "$IMAGE" | grep -q "4242" || fail "--group-add with a numeric gid"

@@ -432,3 +432,15 @@ def test_fy_img_001_the_dockerfile_builds_the_same_wheel_and_pins_its_bases():
     assert ignore[ignore.index("*") + 1] == "!forgeyard" and "forgeyard/static" in ignore
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "docker build -f Dockerfile.agent" in ci and "scripts/agent_image_smoke.sh" in ci and "shellcheck" in ci
+
+
+def test_fy_img_002_the_image_has_what_the_hosts_libamd_smi_loads():
+    """FY-IMG-002: libamd_smi.so from the mounted ROCm dlopen()s libdrm.so.2 and the unversioned
+    libdrm_amdgpu.so; without them amdsmi read no ASIC information on the real Strix Halo. The smoke
+    test loads both inside the image."""
+    text = (ROOT / "Dockerfile.agent").read_text()
+    install = re.search(r"apt-get install -y --no-install-recommends ([^\\\n]+)", text).group(1).split()
+    assert {"libdrm2", "libdrm-amdgpu1"} <= set(install)
+    assert 'ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so"' in text and "ldconfig" in text
+    smoke = (ROOT / "scripts" / "agent_image_smoke.sh").read_text()
+    assert 'ctypes.CDLL("libdrm.so.2"); ctypes.CDLL("libdrm_amdgpu.so")' in smoke
