@@ -542,6 +542,18 @@ class UsageDaily(Base):
     unpriced: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cost_reported: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cost_estimated: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Units of the model kinds added in 1.3 (migration 0012), 0 on rows from before: media items sent
+    # in chat (images, audio clips, videos), characters turned into speech, images generated and their
+    # size in kilopixels, audio or video produced in milliseconds, request and answer bytes, and the
+    # milliseconds a replica was busy with the requests.
+    media_items: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    characters: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    images: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    kilopixels: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    media_ms: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    bytes_in: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    bytes_out: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    busy_ms: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     latency_ms_sum: Mapped[int] = mapped_column(BigInteger, default=0)
     # Request counts per latency bucket (forgeyard/gateway/usage.py: BUCKETS_MS), for p50 / p95.
     latency_buckets: Mapped[list] = mapped_column(JSON, default=list)

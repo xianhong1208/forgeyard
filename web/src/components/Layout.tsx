@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { useAuth } from "../auth";
+import { AdvisorProvider, HealthBadge } from "./Advisor";
 import { Mark } from "./Mark";
 import { Notice } from "./ui";
 
@@ -45,6 +46,7 @@ export function Layout() {
   ];
 
   return (
+    <AdvisorProvider enabled={user?.role === "admin"}>
     <div className="shell">
       <header className="topbar">
         <div className="topbar-inner">
@@ -80,6 +82,7 @@ export function Layout() {
               Sign out
             </button>
           </nav>
+          <HealthBadge onClick={() => setNav(false)} />
           <div className="usermenu" ref={menuRef}>
             <button type="button" className="usermenu-button" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
               <IconUserCircle size={20} stroke={1.6} aria-hidden="true" />
@@ -122,5 +125,6 @@ export function Layout() {
         <Outlet />
       </main>
     </div>
+    </AdvisorProvider>
   );
 }

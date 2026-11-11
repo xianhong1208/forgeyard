@@ -195,12 +195,33 @@ def detect_format(paths: list[str], library: Optional[str] = None) -> str:
     return "other"
 
 
+def is_mmproj(path: str) -> bool:
+    """A llama.cpp multimodal projector (mmproj-*.gguf), not a model of its own."""
+    return posixpath.basename(path).lower().startswith("mmproj") and path.lower().endswith(".gguf")
+
+
+def mmproj_choices(files: list[dict]) -> list[dict]:
+    return sorted(({"path": f["path"], "size": int(f.get("size") or 0)} for f in files if is_mmproj(f["path"])),
+                  key=lambda e: e["path"])
+
+
+def default_mmproj(choices: list[dict]) -> Optional[str]:
+    """F16 when there is one (llama.cpp's own default precision for projectors), else BF16, Q8_0,
+    or the first."""
+    for want in ("f16", "bf16", "q8_0"):
+        for c in choices:
+            if re.search(rf"[-_.]{want}\.gguf$", c["path"].lower()):
+                return c["path"]
+    return choices[0]["path"] if choices else None
+
+
 def gguf_choices(files: list[dict]) -> list[dict]:
-    """GGUF files a deployment can pick from; split models appear once (their first part, total size)."""
+    """GGUF files a deployment can pick from; split models appear once (their first part, total size).
+    Projector files (mmproj) are not models and are chosen separately."""
     out: dict[str, dict] = {}
     for f in files:
         path = f["path"]
-        if not path.lower().endswith(".gguf"):
+        if not path.lower().endswith(".gguf") or is_mmproj(path):
             continue
         m = SPLIT_GGUF_RE.match(path)
         if m:
@@ -221,15 +242,19 @@ def default_gguf(choices: list[dict]) -> Optional[str]:
     return choices[0]["path"] if len(choices) == 1 else None
 
 
-def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None) -> list[dict]:
-    """The files a deployment downloads, from the repository's file list."""
+def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmproj: Optional[str] = None) -> list[dict]:
+    """The files a deployment downloads, from the repository's file list (and, for a GGUF vision
+    model, its projector file)."""
     out = []
     for f in files:
         path = f["path"]
         if path in (".gitattributes",) or path.startswith(".") or "/." in path:
             continue
         if fmt == "gguf":
-            if not path.lower().endswith(".gguf"):
+            if mmproj and path == mmproj:
+                out.append(f)
+                continue
+            if not path.lower().endswith(".gguf") or is_mmproj(path):
                 continue
             if chosen is None:
                 raise SourceError("choose which GGUF file to use")

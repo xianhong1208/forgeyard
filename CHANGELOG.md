@@ -6,7 +6,95 @@ version until 1.0.
 
 ## [Unreleased]
 
+1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
+through the gateway, and the usage units for all of 1.3.
+
 ### Added
+
+- **Setup health** for admins: Forgeyard checks its own setup for settings and combinations that
+  are broken, risky or useless, from the settings, the database and the agents' reports, and says
+  what to do with a link to the fix. About 40 checks, among them: a key that may spend on cloud
+  providers with no budget, a route's cloud model without a price under a budget (402
+  `budget_unpriced`), a cloud tier before the local one, a provider marked inside your network with
+  a public address, a shared machine whose GPU access nobody chose, an agent older than the server,
+  `HOST` on loopback while machines joined from elsewhere, a certificate that expires or does not
+  name `PUBLIC_URL`, and keys that never expire and sat unused for 90 days. Shown under
+  **Get started → Setup health**, as a count in the top bar and as a banner on the page concerned.
+  Warnings and notes can be snoozed for 30 days per admin; errors cannot. `GET /api/advisor`.
+- A reminder to **back up `data/secret.key`**, until an admin ticks *I have a backup of key id …*;
+  it comes back when the key changes.
+- The server warns at start about a name in `.env` or the environment that is not a setting ("did
+  you mean …?"), settings that another one makes useless (`TLS_CA_FILE` without your own
+  certificate, any `TLS_*` with `TLS=off`, `SECRET_KEY_FILE` next to `FORGEYARD_SECRET_KEY`), an
+  offline time under 2.5 heartbeats, the private-address switches, `ADMIN_PASSWORD` or the setup
+  token left after setup, and first-value settings (`MODEL_URL_HOSTS`, `GATEWAY_MAX_RPM`,
+  `GATEWAY_CLOUD_MAX`…) that the database overrides.
+- `.env.example` lists every setting, the common ones first and the advanced ones commented out at
+  their defaults; a test keeps it, the code and the reference in step. The reference has a
+  *Common settings* table, units, and what 0 and empty mean.
+- `CONTRIBUTING.md`: rules for new settings.
+- **`scripts/accept_all.py`, the full regression run** on real machines: one command checks every feature
+  shipped so far, so each pull request and release can show the old ones still work. Seven groups, run in
+  order and chosen with `--only` / `--skip`: `server` (HTTPS with the CA, security headers, 421, CSRF,
+  sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh`), `machines` (online, the
+  hardware, the GPU allowlist enforced, join commands pinning the CA), `workloads` (a process service,
+  tasks with retries and `max_duration`, a container task, GPU isolation with `gpu_probe.py`), `models`
+  (small models on the CPU and GPU machines, each skipped when its estimate does not fit; the estimate on
+  the deployment page; Try it), `gateway` (`/v1` with the official SDK: every endpoint, streaming with
+  and without usage, key allowlists, rpm, revoking, locked limits, the key guard, balancing and failover,
+  the Playground, usage, a stopped deployment leaving the list), `cloud` (with `--cloud-provider`:
+  spilling, keys that may not, local only, the cloud maximum, cost, key, person and provider budgets and
+  their alerts, with exactly one request to the provider) and `console` (every main page as an admin and
+  as a plain user at 1440 and 390 px, with Playwright). PASS, FAIL or SKIP with the reason per check, a
+  table per group, totals and the time, `--out` JSON. Everything it makes is named `accept-<run>-…` and
+  removed at the end, also after a failure or Ctrl-C; a provider budget it changes is put back. Guide:
+  *How-to → Check a server end to end*.
+- **Images, audio and video in chat** at `/v1/chat/completions` (and the Playground): `image_url`,
+  `input_image`, `input_audio`, `audio_url`, `video_url` and `input_video` parts. The gateway rebuilds
+  every media part in one shape (`image_url` and `video_url` with a `data:` URI, `input_audio` with
+  base64) and keeps only the fields it checked; other part types and `*_embeds` answer 400
+  `invalid_content_part`.
+- **The gateway fetches media URLs itself**, through the egress rules: public addresses only
+  (`MEDIA_ALLOW_PRIVATE_HOSTS` for a LAN image server; link-local and metadata addresses never), every
+  redirect checked again (at most 3), `MEDIA_FETCH_MAX_MB` (20) per item, 20 seconds per item, the
+  answer's type must match the part. `file://` and other schemes answer 400 `media_url_refused`.
+- A request goes only to a deployment that takes what it carries: what the **model** takes (read
+  from its `config.json`, or a GGUF model's projector), what the **recipe** takes (its new `media`
+  block), and the deployment's **Images per request** (4) and **Videos per request** (0: video is off
+  until enabled), in the deployment form's collapsed **Advanced** section. New codes:
+  `media_not_supported`, `too_many_media_items`, `file_input_not_supported`, `invalid_media_data`,
+  `media_fetch_failed`, `media_too_large` (413), `media_local_only`.
+- **Body limit per deployment:** *Largest request* (`max_body_mb`, 64 MiB for vLLM and llama.cpp); the
+  gateway reads up to the largest any deployment takes, then applies the model's own (413
+  `request_too_large`). Recipes without the parameter keep `GATEWAY_MAX_BODY_MB`.
+- **vLLM**: `--limit-mm-per-prompt` from those parameters; `--enable-prompt-tokens-details`.
+- **llama.cpp**: GGUF catalog entries can carry a **projector file** (`mmproj-*.gguf`, F16 by
+  default, or chosen, or none), downloaded with the model and passed as `--mmproj` (recipes:
+  `optional_args` with `if_model: mmproj` and the `{mmproj_file}` placeholder). Images are scaled to
+  at most *Largest image* (`image_tokens`, 1,024 tokens, Advanced; `--image-max-tokens`): without it a
+  5 MB photo became 4,076 tokens and took 125 s on 8 CPU threads; with it 1,034 tokens and 21 s, the
+  same answer.
+- Measured on the CPU (Qwen3-VL 2B Q4_K_M with its F16 projector, llama.cpp b11977, 8 threads, context
+  4,096 × 2): estimate 3.95 GiB; RSS 3.37 GiB idle, peak 3.86 GiB after a 1,024-token image. A 256 ×
+  256 image takes 66 tokens and 1.1 s; llama-server's `prompt_tokens` include the image tokens.
+- **The catalog shows each model's licence, whether it is gated, and what it takes besides text**,
+  read from Hugging Face when it is added. The recommended list holds only allowed licences
+  (permissive, OpenRAIL-style, or terms that allow commercial use: Gemma's terms and Meta's Llama 3.1 /
+  3.2 licences stay) and adds a **Vision** group: Qwen3-VL 2B, 4B and 8B (vLLM), Qwen3-VL 2B GGUF
+  (CPU) and 8B GGUF (llama.cpp on a GPU or an AMD APU), with their projectors.
+- **The estimate counts the vision encoder:** a recipe's `vision_overhead` (vLLM profiles the
+  encoder at startup before sizing the KV cache: 1.5 GiB to start with, to be calibrated on an A100)
+  and `video_overhead` (1 GiB, when video is on); for GGUF the projector file itself plus llama.cpp's
+  buffers.
+- **Usage units for the whole of 1.3** (migration 0012): `media_items`, `characters`, `images`,
+  `kilopixels`, `media_ms`, `bytes_in`, `bytes_out` and `busy_ms` per usage row, 0 on rows from
+  before, in `GET /api/usage`. This release fills `media_items`; **Usage** shows a Media column once
+  there are any.
+- **Playground:** attach images in the chat tab (sent as `data:` URIs) and see them in the transcript.
+- Recipe parameters can be **advanced** (the deploy form's collapsed Advanced section), and a
+  deployment made before a recipe gained a parameter renders its default.
+- `scripts/accept_mm.py`: the real-hardware acceptance of this part, through the API and the official
+  SDK, with idempotent cleanup.
 - **Container images on Docker Hub**, for linux/amd64 and linux/arm64: the server
   (`docker.io/<namespace>/forgeyard`, new `Dockerfile.server`) and the agent
   (`docker.io/<namespace>/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
@@ -29,12 +117,42 @@ version until 1.0.
   `secret.key`); `images-arm64` builds both images for linux/arm64.
 
 ### Changed
+
+- `COOKIE_SECURE` takes `auto`, `true` or `false` (also `yes`/`no`/`1`/`0`); anything else stops the
+  start, instead of acting as `auto`. A setting the server cannot use is reported by name, without
+  a traceback.
+- The agent's `limits = auto` asks systemd for a throwaway scope (`systemd-run --scope true`) instead
+  of looking for its files, so an agent in a container that sees the host's systemd uses rlimits
+  instead of failing every process workload with *Failed to connect to bus*.
+- Labels: budget fields say that $0 blocks all cloud spend and empty means no budget; a provider's
+  *Answer timeout* shows the server's default; a route's *Wait for a free local slot* says it is in
+  milliseconds; the GPU choice on **Machines** is called *GPU access*, like everywhere else.
 - **Add a machine → Docker** pulls the published agent image of the server's version; building it
   moved to *Advanced / offline*, next to `docker save` / `docker load` for machines without registry
   access (with the tag to use when `AGENT_IMAGE` pins a digest). While nothing is published the page
   shows the build step as before.
 - The agent image builds for linux/arm64 too: its ROCm helpers (libdrm) are installed on amd64 only;
   NVML stays on both. It now carries OCI labels (source, licence, version, revision).
+
+### Fixed
+
+- `PUT /api/keys/cloud` with only one of `default` and `max` reset the other one to `off`; a field
+  left out now keeps its saved value. `PUT /api/keys/limits` does the same (`null` still clears one).
+- The guide said the Docker form's server address defaults to `PUBLIC_URL`; with `PUBLIC_URL` empty
+  it is the address you opened the page with.
+
+### Security
+
+- **Engines never fetch a URL from a request.** vLLM 0.32 and llama-server b11977 download any http(s)
+  media URL themselves, with no private-address filter (vLLM also follows redirects). Besides the
+  gateway doing the fetching, the `vllm` and `vllm-pooling` recipes pass `--allowed-media-domains
+  forgeyard.invalid` (a list that matches nothing turns engine fetches off) and
+  `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`. llama-server has no such switch; only the gateway reaches it
+  (the agent's key guard), and the gateway sends it only `data:` URIs and base64.
+- **Media never go to a provider:** requests with images, audio, video or files are served by local
+  deployments only; a route served only by providers answers 400 `media_local_only`, and on a mixed
+  route they do not spill.
+
 
 ## [1.2.0] — 2026-11-11
 

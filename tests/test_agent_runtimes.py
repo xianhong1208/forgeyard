@@ -511,3 +511,32 @@ def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
     runs = fake.runs()
     assert runs and all(pinned in r for r in runs)
     assert [c for c in fake.calls() if c and c[0] == "pull"] == [["pull", pinned]]
+
+
+def test_fy_rt_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_files():
+    """FY-RT-027: systemd_running() starts a throwaway scope with systemd-run: a failure (a container
+    that sees the host's systemd files but has no bus), a missing systemd-run, a timeout or an OSError
+    all mean "no systemd", and only a scope that really started means yes."""
+    import subprocess
+
+    from forgeyard.agent.workloads import process
+
+    calls = []
+
+    def run(code=0, exc=None):
+        def _run(argv, **kw):
+            calls.append((argv, kw.get("timeout")))
+            if exc:
+                raise exc
+            return subprocess.CompletedProcess(argv, code, b"", b"Failed to connect to bus: No such file or directory")
+        return _run
+
+    found = lambda name: "/usr/bin/" + name  # noqa: E731
+    assert process.systemd_running(run(0), found) is True
+    assert calls[-1] == (process.SYSTEMD_PROBE, process.SYSTEMD_PROBE_TIMEOUT)
+    assert calls[-1][0][:2] == ["systemd-run", "--scope"] and calls[-1][0][-1] == "true"
+    assert process.systemd_running(run(1), found) is False
+    assert process.systemd_running(run(exc=subprocess.TimeoutExpired("systemd-run", 10)), found) is False
+    assert process.systemd_running(run(exc=OSError("no exec")), found) is False
+    n = len(calls)
+    assert process.systemd_running(run(0), lambda name: None) is False and len(calls) == n  # nothing to run
