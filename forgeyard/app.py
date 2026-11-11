@@ -12,8 +12,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from forgeyard import __version__
+from forgeyard import __version__, settings_check
 from forgeyard.api import (
+    advisor as advisor_api,
     audit_log,
     auth,
     budgets,
@@ -74,6 +75,9 @@ async def lifespan(_app: FastAPI):
                     "TLS (docs/https-and-trust.md); admins see a warning while requests arrive over plain HTTP.")
     db = new_session()
     try:
+        # Misspelled, ignored or risky settings: logged here, and shown to admins by the setup advisor.
+        for problem in settings_check.problems(settings, db=db):
+            log.warning("Settings: %s. %s", problem.title, problem.detail)
         liveness.mark_all_offline(db)  # no agent is connected to a server that just started
     finally:
         db.close()
@@ -131,6 +135,7 @@ def create_app() -> FastAPI:
     app.include_router(prices.router)
     app.include_router(routing.router)
     app.include_router(onboarding.router)
+    app.include_router(advisor_api.router)
     app.include_router(tls_api.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
