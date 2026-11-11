@@ -82,8 +82,8 @@ def test_fy_bdg_001_reserve_settle_release():
     assert isinstance(h2, Hold)
     assert isinstance(lg.reserve([key], 1), Blocked)
     lg.release(h2)
-    h3 = lg.reserve([key], 30 * P)
-    lg.release(h2)                               # twice is harmless: h3 is still held
+    assert isinstance(lg.reserve([key], 30 * P), Hold)
+    lg.release(h2)                               # twice is harmless: the 30 stays held
     assert lg._held == {("key", 1): 30 * P} and isinstance(lg.reserve([key], 25 * P), Hold)
     assert isinstance(lg.reserve([key], 1), Blocked)
     u = lg.reserve([person], None)               # no price: blocked, unpriced
@@ -231,6 +231,13 @@ def test_fy_bdg_006_alerts_once_per_scope_month_and_threshold(owner):
     big = Limit("person", 2, 1000, "bob")
     assert isinstance(ledger.reserve([big], 2000 * P), Blocked)                # 0% spent: no alert
     assert ledger.write_alerts() == 0
+    # A budget lowered below what was spent: the next request (here one that still fits) alerts.
+    ledger.reset()
+    h = ledger.reserve([], 0)
+    ledger.settle(h, key_id=9, user_id=9, provider_id=9, picos=90 * P)
+    assert ledger.write_alerts() == 0
+    assert isinstance(ledger.reserve([Limit("key", 9, 100, "lowered")], 5 * P), Hold)
+    assert ledger.write_alerts() == 1 and audit_actions(owner)[0]["detail"]["name"] == "lowered"
 
 
 # ------------------------------------------------------------------ through the gateway

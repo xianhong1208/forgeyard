@@ -15,8 +15,9 @@ provider, in micro-USD.
 - **A model without a price** cannot be reserved: under any budget it is blocked (402
   `budget_unpriced`) until an admin sets its prices. Without a budget it is used as before.
 - **Alerts** at 80% and 100% of a budget's spend: one audit event per scope, month and threshold
-  (the table `budget_alerts` makes it once, also across restarts). A request refused by a budget
-  that is already past 80% counts as reaching 100%.
+  (the table `budget_alerts` makes it once, also across restarts), checked when a request is settled
+  or reserved (so a budget lowered below the month's spend alerts on its next request). A request
+  refused by a budget whose spend and reservations are already past 80% counts as reaching 100%.
 
 The ledger lives in this one server process, under a lock, so concurrent requests cannot reserve
 the same money twice. It is seeded once per month from `usage_daily.cost_micros` (after writing what
@@ -265,6 +266,7 @@ class Ledger:
         with self._lock:
             self._ensure()
             for lim in limits:
+                self._check(lim)      # a budget lowered below this month's spend alerts on the next request
                 spent, held = self._spent.get(lim.slot, 0), self._held.get(lim.slot, 0)
                 if picos is None or spent + held + picos > lim.micros * PICOS:
                     if spent + held >= lim.micros * PICOS * 80 // 100:

@@ -348,7 +348,8 @@ is used as before, and counted as *without a price*.
 
 When a budget's spend this month passes **80%**, and again at **100%**, Forgeyard writes one event to
 the **Audit** log (`budget.warning`, `budget.exhausted`), once per budget and month, also across
-restarts. A request refused by a budget whose spend and reservations together are already past 80%
+restarts. It is checked as requests finish and are reserved, so a budget lowered below the month's
+spend alerts on its next request. A request refused by a budget whose spend and reservations together are already past 80%
 counts as reaching 100% (a single oversized request refused below that does not alert). The pages
 show it too:
 
