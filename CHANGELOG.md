@@ -90,6 +90,19 @@ through the gateway, and the usage units for all of 1.3.
   `kilopixels`, `media_ms`, `bytes_in`, `bytes_out` and `busy_ms` per usage row, 0 on rows from
   before, in `GET /api/usage`. This release fills `media_items`; **Usage** shows a Media column once
   there are any.
+- **llama.cpp on AMD GPUs through Vulkan, built in.** The `llama-cpp` recipe gains a `vulkan` variant
+  (the official `server-vulkan` image, 0.3 GB, Mesa's RADV driver). AMD cards now get, in order:
+  `rocm` for the Instinct cards (`gfx908`, `gfx90a`, `gfx942`, which have no Vulkan) and the discrete
+  Radeon cards the ROCm image is built for (`gfx1030`, `gfx1100`–`gfx1102`, `gfx1200`, `gfx1201`);
+  `vulkan` for every other AMD GPU, among them the APUs with unified memory (Strix Halo `gfx1151`,
+  Strix Point `gfx1150`, Phoenix `gfx1103`) and cards the ROCm image lacks. The custom
+  `llama-cpp-vulkan` recipe used so far on a Strix Halo is no longer needed (guide: *How-to → Add an
+  AMD machine*, also for machines that cannot reach `ghcr.io`).
+- Recipes: **`amd_kfd: false`** on an AMD container variant gives the container only its card's render
+  node (`/dev/dri/renderD*`) and that node's group, not `/dev/kfd` (ROCm's compute interface); the
+  `vulkan` variant uses it. The server marks such a card `"kfd": false` in the replica's GPU list; an
+  older agent ignores the mark and passes `/dev/kfd` as before.
+- Reference: *Built-in recipes*, every variant in order with where it runs and what it pins.
 - **Playground:** attach images in the chat tab (sent as `data:` URIs) and see them in the transcript.
 - Recipe parameters can be **advanced** (the deploy form's collapsed Advanced section), and a
   deployment made before a recipe gained a parameter renders its default.
@@ -118,6 +131,21 @@ through the gateway, and the usage units for all of 1.3.
 
 ### Changed
 
+- **llama.cpp b11977 → b12242** (2026-11-10) in every variant of the `llama-cpp` recipe: the CUDA
+  (still CUDA 12.8, driver ≥ 570), ROCm (7.2.1), Vulkan and CPU images, pinned by digest, and the CPU
+  release archive, pinned by its SHA-256. b12242 is the first build with published images after
+  llama-server gained the OpenAI-compatible `/v1/audio/speech` endpoint (ggml-org/llama.cpp#31763, in
+  b12238), which text-to-speech will use. Every flag Forgeyard passes is unchanged (checked against
+  `llama-server --help` of the release). Measured on the CPU process variant (8 threads), b11977
+  against b12242: Qwen3-1.7B Q4_K_M generates at the same speed within the noise of a shared machine
+  (44.1 and 42.8 tokens/s in one round, 40.8 and 40.7 in the other); Qwen3-VL 2B reads an image by
+  URL in the same 1,034 tokens, in 18 to 20 s on both; Qwen2.5-Omni 3B reads the same audio clip in
+  779 tokens on both.
+- **Video on llama.cpp with Qwen3-VL** now follows the model's own sampling (2 frames a second, in
+  pairs, with timestamps; ggml-org/llama.cpp#31619), and *Video frames per second* applies only to
+  models without a rate of their own. The 6-second sample clip on Qwen3-VL 2B takes 5,345 prompt
+  tokens instead of 3,565, more than a 4,096-token context: give video deployments 8,192 or more
+  (`scripts/accept_mm.py` does for GGUF video runs).
 - `COOKIE_SECURE` takes `auto`, `true` or `false` (also `yes`/`no`/`1`/`0`); anything else stops the
   start, instead of acting as `auto`. A setting the server cannot use is reported by name, without
   a traceback.
@@ -160,7 +188,7 @@ through the gateway, and the usage units for all of 1.3.
 
 ### Security
 
-- **Engines never fetch a URL from a request.** vLLM 0.32 and llama-server b11977 download any http(s)
+- **Engines never fetch a URL from a request.** vLLM 0.32 and llama-server (b11977, b12242) download any http(s)
   media URL themselves, with no private-address filter (vLLM also follows redirects). Besides the
   gateway doing the fetching, the `vllm` and `vllm-pooling` recipes pass `--allowed-media-domains
   forgeyard.invalid` (a list that matches nothing turns engine fetches off) and

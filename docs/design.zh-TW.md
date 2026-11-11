@@ -163,7 +163,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   |---|---|---|---|
   | `vllm` | chat（safetensors） | NVIDIA、AMD | `vllm/vllm-openai:v0.32.0`（CUDA 13.0，driver ≥ 580）、`-cu129`（≥ 575）、`vllm/vllm-openai-rocm:v0.32.0` |
   | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
-  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`，行程用 release `b11977` |
+  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD（Instinct 與 ROCm 映像有編譯的獨立顯卡用 ROCm；APU 與其他 AMD GPU 用 Vulkan，只給 render node）、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` 與 `server-b12242`，行程用 release `b12242` |
   | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
 
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
@@ -239,7 +239,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   可依日期、模型、key、人、來源（API key 或 playground）或本機與雲端分組；**Cost** 分頁再依日期、key、人、模型或供應商顯示費用
   （見〈費用〉）。在記憶體裡計數，每 `USAGE_FLUSH_SECONDS`（5 秒）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
   一列。client 中途離開（499）不算錯誤。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。
-- **對話中的圖片、音訊與影片（1.3，** forgeyard/gateway/media.py**）。** vLLM 0.32 與 llama-server b11977 會自己下載媒體區塊裡的任何 http(s) 網址，沒有私有位址過濾（vLLM 還會跟隨轉址），而且是從你的網路內部連出去。所以：
+- **對話中的圖片、音訊與影片（1.3，** forgeyard/gateway/media.py**）。** vLLM 0.32 與 llama-server（b11977、b12242）會自己下載媒體區塊裡的任何 http(s) 網址，沒有私有位址過濾（vLLM 還會跟隨轉址），而且是從你的網路內部連出去。所以：
   - gateway 走過 `messages[].content[]`，把每個媒體區塊**重建**成同一種形式（`image_url` 與 `video_url` 帶 `data:` URI，`input_audio` 帶 base64），只保留檢查過的欄位；接受 `input_image`、`input_video` 與 `audio_url` 並轉換。文字區塊不變；其他類型與 `*_embeds` 一律拒絕（`invalid_content_part`）；
   - `http(s)` 網址**由 gateway 下載**，用 egress client（forgeyard/gateway/egress.py：`EGRESS_PROXY`、`EGRESS_CA_FILE`、`EGRESS_ALLOWED_HOSTS`）：名稱解析出的每個位址都要檢查，除非 `MEDIA_ALLOW_PRIVATE_HOSTS` 否則只接受公開位址，link-local 與 metadata 位址一律拒絕；連線直接連到檢查過的位址；轉址由 gateway 自己跟隨（最多 3 次），每次重新檢查；每個項目 `MEDIA_FETCH_MAX_MB`、20 秒；內容類型必須與區塊相符（以 `application/octet-stream` 回傳的圖片用 magic number 辨識）。資料取代網址。`file://` 與其他所有 scheme：`media_url_refused`；
   - 引擎本身也加固：`vllm` 與 `vllm-pooling` 帶 `--allowed-media-domains forgeyard.invalid`（清單為空時 vLLM 什麼主機都抓；一個什麼都比對不到的清單就全部拒絕）與 `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`，且不設 `--allowed-local-media-path`；llama-server 沒有這種開關，只能經由 key guard、以 gateway 送來的資料存取；

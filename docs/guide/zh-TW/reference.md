@@ -254,7 +254,7 @@ local_dirs = ["/data/models"]
 |---|---|---|
 | `images`（*Images per request*） | `4` | 一個請求最多可帶的圖片與音訊片段數；0 表示關閉。以 `--limit-mm-per-prompt` 傳給 vLLM |
 | `videos`（*Videos per request*） | `0` | 設為 1 以上才接受影片。在 vLLM 上，啟動時會為一段長影片預留記憶體 |
-| `video_fps`（*Video frames per second*，僅 `llama-cpp`） | `1` | 影片每秒讀取幾格（`--video-fps`）；每一格大約和一張圖片一樣花 token。用 llama-server 自己的預設值（4）時，一段 6 秒的 720p 影片約 11,500 token；開啟影片的部署，上下文請設 8,192 以上 |
+| `video_fps`（*Video frames per second*，僅 `llama-cpp`） | `1` | 影片每秒讀取幾格（`--video-fps`），用於沒有自己取樣率的模型；每一格大約和一張圖片一樣花 token。Qwen3-VL 不管這個值，固定每秒讀 2 格（llama.cpp b12242）：一段 6 秒的影片在 Qwen3-VL 2B 上用了 5,345 token。開啟影片的部署，上下文請設 8,192 以上 |
 | `max_body_mb`（*Largest request*） | `64` | 閘道送給這個部署的最大請求，單位 MiB（超過回 413） |
 | `image_tokens`（*Largest image*） | `1024` | 每張圖片最多縮成這麼多 token：Qwen3-VL 約 1024 × 1024 像素。`llama-cpp` 透過 `--image-max-tokens`；`vllm` 透過 `--mm-processor-kwargs` 的 `max_pixels`，適用於圖片 token 數會隨解析度增加的模型（Qwen-VL；Gemma 每張圖的 token 數固定）。不設的話，一張 5 MB 的照片在 llama.cpp 約 4,000 token（8 個 CPU 執行緒要 125 秒），在 vLLM 約 16,000 token，超過 8,192 token 的上下文。在這個設定出現之前加入的模型，要重新加入後 vLLM 才會套用上限 |
 
@@ -439,6 +439,23 @@ local_dirs = ["/data/models"]
 | `-h`、`--help` | 列出選項 |
 
 再執行一次時，它會把 agent 升級到伺服器的版本，並保留設定和憑據。它需要 x86_64 或 aarch64 的 Linux、root 權限、`curl`，以及能連上 PyPI 以下載 agent 的少數幾個相依套件。它會優先使用已安裝的 `uv`，否則使用系統上已有的 Python 3.13 或更新版本，再不然就把 `uv` 安裝到 `/opt/forgeyard/bin`，它會自備 Python。沒有 systemd 的話，它會安裝好所有東西，並印出啟動 agent 的方法。
+
+## 內建配方
+
+配方的 variant 依序嘗試；第一個 `when` 符合某張卡（或 CPU）、而且機器上有它的執行環境的 variant，就用來執行副本。部署不能自己選 variant；只放你要的 variant 的自訂配方可以。
+
+| 配方 | Variant | 執行在 | 映像檔或 release |
+|---|---|---|---|
+| `vllm`、`vllm-pooling` | `cuda`、`cuda-12.9`、`rocm` | NVIDIA（compute capability 7.0 以上，driver 580 以上；`cuda-12.9` 為 575 以上）；AMD `gfx90a`、`gfx942`、`gfx950`、`gfx1100`、`gfx1101`、`gfx1150`、`gfx1151`、`gfx1200`、`gfx1201` | `vllm/vllm-openai:v0.32.0`、`-cu129`、`vllm/vllm-openai-rocm:v0.32.0` |
+| `llama-cpp` | `cuda` | NVIDIA，compute capability 5.0 以上，driver 570 以上 | `ghcr.io/ggml-org/llama.cpp:server-cuda-b12242`（CUDA 12.8） |
+| | `rocm` | AMD `gfx908`、`gfx90a`、`gfx942`、`gfx1030`、`gfx1100`、`gfx1101`、`gfx1102`、`gfx1200`、`gfx1201` | `…:server-rocm-b12242`（ROCm 7.2.1） |
+| | `vulkan` | 其他所有 AMD GPU：APU（`gfx1151`、`gfx1150`、`gfx1103`…）與 ROCm 映像檔沒有編譯的卡。只給那張卡的 render node，不給 `/dev/kfd` | `…:server-vulkan-b12242`（Mesa RADV） |
+| | `cpu`、`cpu-process` | x86_64 與 aarch64 用容器；x86_64 沒有 Docker 時用行程 | `…:server-b12242`；release `b12242` 的 `llama-b12242-bin-ubuntu-x64.tar.gz`，用它的 SHA-256 檢查 |
+| `faster-whisper` | `cuda`、`cuda-12.4`、`cpu` | NVIDIA、CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
+
+每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
+
+Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎）。
 
 ## 容器映像檔
 

@@ -34,7 +34,30 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 在 AMD 上，模型可以用 `vllm` recipe 的 ROCm 映像檔執行，也可以用 `llama-cpp`。行程類工作負載只會在 `ROCR_VISIBLE_DEVICES` 裡拿到自己的卡，而且只有在分配到 GPU 時，才會加入擁有 `/dev/kfd` 和對應 `/dev/dri/renderD*` 的群組。
 
-> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本作為自訂配方部署模型、透過 `/v1` 呼叫。還沒在實際硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔（是否支援 gfx1151 不確定），以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
+`llama-cpp` 會依每張卡選兩個映像檔之一：
+
+| 卡 | `llama-cpp` 用 | 原因 |
+|---|---|---|
+| Instinct（`gfx908`、`gfx90a`、`gfx942`，包含 MI300A），以及它的 ROCm 映像檔有編譯的獨立 Radeon 卡（`gfx1030`、`gfx1100`、`gfx1101`、`gfx1102`、`gfx1200`、`gfx1201`） | **ROCm**（variant `rocm`，7.7 GB 的映像檔） | Instinct 卡沒有 Vulkan |
+| 其他所有 AMD GPU：統一記憶體的 APU（Strix Halo `gfx1151`、Strix Point `gfx1150`、Phoenix `gfx1103`…），以及 ROCm 映像檔沒有編譯的獨立卡（`gfx1031`、`gfx1032`…） | **Vulkan**（variant `vulkan`，0.3 GB、使用 Mesa RADV 驅動的映像檔） | 映像檔裡不需要 ROCm；在實際的 Strix Halo 上用的就是這條路 |
+
+Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）和擁有它的群組，不會拿到 `/dev/kfd`。它的記憶體和 ROCm 一樣，用同一個記憶體池檢查：APU 取 carve-out 和 GTT 中較大的那個。部署的事件會寫出它用哪個 variant（`… (vulkan; reserves …)`）。
+
+部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂配方（**Models**、*Recipes*、**Add a custom recipe**）：複製 `llama-cpp`、換個名字，`variants` 底下只留你要的那個。
+
+**從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
+
+**連不到 `ghcr.io` 的機器**用檔案拿到映像檔。在連得到的機器上，用 tag 拉取，並確認它就是釘選的那一個（這個 tag 的 `DIGEST` 必須是配方裡的 `sha256:28a56d03…`）：
+
+```bash
+sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242
+sudo docker images --digests ghcr.io/ggml-org/llama.cpp
+sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama-vulkan.tar.gz
+```
+
+把檔案複製過去，在那裡用 `gunzip -c llama-vulkan.tar.gz | sudo docker load` 載入。配方寫的映像檔是 `tag@sha256:digest`，Docker 會用 digest 找它。Docker 用傳統的映像檔儲存方式時（`docker info` 顯示的 storage driver 是 `overlay2` 之類），載入的映像檔保留 tag，但不保留拉取時的 digest（`docker images --digests` 顯示 `<none>`）：`docker run` 找不到它，會試著從 `ghcr.io` 拉取，副本就帶著這個錯誤失敗。用 containerd 映像檔儲存時（`docker info` 裡有 `driver-type: io.containerd.snapshotter.v1`），載入後用 `docker images --digests` 檢查。沒有 digest 的話，就用一個自訂配方，映像檔寫載入的 tag、不加 digest：Docker 會在本機找到它，不會去拉取。
+
+> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本（build b11977）作為自訂配方部署模型、透過 `/v1` 呼叫。還沒在實際硬體上檢查的：內建的 Vulkan variant（b12242）、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔，以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
 
 ## 加入純 CPU 機器
 
@@ -225,9 +248,9 @@ sudo docker build -f Dockerfile.agent -t docker.io/<namespace>/forgeyard-agent:1
    `https://` 網址由閘道下載（只連公開位址，每張圖片最多 `MEDIA_FETCH_MAX_MB`），再以資料形式轉送。區網內的圖片伺服器需要在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true`。
 4. **在 Playground 試用：** 訊息框旁的圖片按鈕可以附上圖片。
 
-**影片：** 在 **Advanced** 把 *Videos per request* 設成 1 以上，再送 `video_url` 區塊。在 vLLM 上，這會讓引擎啟動時為一段長影片預留記憶體，KV cache 能用的就變少：啟動不了的話就調低上下文長度。
+**影片：** 在 **Advanced** 把 *Videos per request* 設成 1 以上，再送 `video_url` 區塊。在 vLLM 上，這會讓引擎啟動時為一段長影片預留記憶體，KV cache 能用的就變少：啟動不了的話就調低上下文長度。在 llama.cpp 上，請把部署的上下文長度設成 8,192 以上：Qwen3-VL 用它自己的每秒 2 幀讀影片（*Video frames per second* 只對其他模型有效），一段 6 秒的影片用了 5,345 個 token。
 
-**自訂的 llama.cpp 配方**（例如 Vulkan 版本）只要傳入 projector 並宣告它接受什麼，就能讀圖片：
+**自訂的 llama.cpp 配方**（例如另一個 build）只要傳入 projector 並宣告它接受什麼，就能讀圖片：
 
 ```yaml
 optional_args:

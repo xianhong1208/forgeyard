@@ -49,7 +49,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 ## 模型、recipe 與估算
 
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。
-- **recipe**（配方）描述某一類模型要怎麼執行：用哪個引擎、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（GPU 或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
+- **recipe**（配方）描述某一類模型要怎麼執行：用哪個引擎、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
 - 每台機器上的**模型快取**（預設 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。
 
