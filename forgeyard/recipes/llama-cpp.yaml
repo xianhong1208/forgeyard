@@ -67,6 +67,10 @@ estimate:
   # With a projector: its file is counted as it is, plus its compute buffers (measured on the CPU
   # with Qwen3-VL-2B, see CHANGELOG 1.3).
   vision_overhead: 512MiB
+  # With video on (videos >= 1): the frames' buffers. Measured on the CPU with Qwen3-VL 2B at a
+  # context of 8,192 and the 6-second sample clip: peak RSS 4.24 GiB on b12242 (4.15 on b11977)
+  # against 3.83 GiB for the same run without video and an estimate of 3.95 GiB without this term.
+  video_overhead: 512MiB
 params:
   context: {type: int, default: 4096, min: 256, max: 1048576, label: Context length (tokens),
             help: Per request. llama-server gets context x concurrency in one shared KV cache.}
