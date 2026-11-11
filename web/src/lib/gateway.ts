@@ -95,3 +95,33 @@ export function answerError(status: number, body: unknown): string {
   if (message) return `${status}: ${message}`;
   return status >= 500 ? `${status}: the server had a problem.` : `Request failed (${status}).`;
 }
+
+// ------------------------------------------------------------------ images in chat (1.3)
+export type Attached = { name: string; uri: string };
+
+// The playground reads an image in the browser and sends it as a data: URI; the gateway checks it
+// and refuses anything over the model's largest request (413).
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
+export function readImage(file: File): Promise<Attached> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error(`${file.name} is not an image.`));
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      reject(new Error(`${file.name} is larger than ${MAX_IMAGE_BYTES / 1024 / 1024} MiB.`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, uri: String(reader.result) });
+    reader.onerror = () => reject(new Error(`${file.name} could not be read.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+// A message's content: plain text, or text and image parts when images are attached.
+export function chatContent(text: string, images?: Attached[]): string | { type: string; text?: string; image_url?: { url: string } }[] {
+  if (!images?.length) return text;
+  return [...(text ? [{ type: "text", text }] : []), ...images.map((i) => ({ type: "image_url", image_url: { url: i.uri } }))];
+}

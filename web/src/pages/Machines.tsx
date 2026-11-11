@@ -1,6 +1,7 @@
 import { IconCpu, IconLock, IconPlus, IconServer2 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { AddMachineWays } from "../components/AddMachine";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Notice, PageHeader } from "../components/ui";
@@ -127,6 +128,7 @@ export function MachinesPage() {
           )
         }
       />
+      <AdvisorBanner pages={["machines"]} />
       <HelpLinks>
         <HelpLink page="quick-start" anchor="3-add-a-machine">How do I add a machine?</HelpLink>
         <HelpLink page="how-to" anchor="restrict-gpus-on-a-shared-machine">Restrict GPUs on a shared machine</HelpLink>
@@ -429,7 +431,7 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
       </p>
       {editing && (
         <fieldset className="allowlist">
-          <legend>GPUs Forgeyard may assign on {m.name}</legend>
+          <legend>GPU access on {m.name}: the GPUs Forgeyard may assign</legend>
           <div className="allowlist-cards">
             {cards.map((a) => (
               <label key={a.key} className="card-pick">

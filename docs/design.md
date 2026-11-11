@@ -185,7 +185,15 @@ page shows that name, its usage, each replica and a small **Try it** that checks
     large-v3 turbo for faster-whisper) and BGE-M3 with its reranker. Each says its task, the
     recipe it is meant for, about how much it downloads and how much memory one copy needs. Gemma 3
     and Llama are **gated**: they need a Hugging Face token whose account accepted the licence
-    (Gemma 4 is not).
+    (Gemma 4 is not). A **Vision** group (1.3) has Qwen3-VL 2B / 4B / 8B for vLLM and Qwen3-VL 2B / 8B
+    as GGUF with their projector files for llama.cpp. Every entry names its **licence**, and the list
+    may hold only licences that allow commercial use (`ALLOWED_LICENSES` in
+    forgeyard/models/recommended.py): permissive ones (Apache-2.0, MIT, BSD), OpenRAIL-style ones, and
+    model licences whose terms allow it. Gemma's terms (commercial use allowed, a prohibited-use policy
+    that passes on to users, and Google's right to restrict use that breaks it) and Meta's Llama 3.1 /
+    3.2 community licences (commercial use below 700 million monthly users, with attribution) stay on
+    the list, marked gated, with their licence shown; licences that forbid commercial use (CC-BY-NC,
+    research-only) may not be added.
     BGE-M3 is added at `refs/pr/130`, Hugging Face's own safetensors conversion (its main branch
     has PyTorch weights only). `python scripts/check_recommended.py` checks every entry against
     Hugging Face with Forgeyard's own inspector and estimator.
@@ -206,6 +214,15 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   `config.json`, the safetensors headers (parameter counts) or the GGUF header (read with HTTP range
   requests). A token for gated repositories is used for that only, never stored. Admins can add
   engine arguments per recipe to a model (Qwen3-Reranker needs vLLM's `--hf-overrides`).
+  Inspection also reads (1.3) the **licence** (the card's `license`, its `license_name` for "other", or
+  a `license:` tag), whether it is **gated**, and **what it takes besides text**: images from a
+  `vision_config` or an image token, audio from an `audio_config`, video from a video token or a
+  `video_preprocessor_config.json` (Omni models through `thinker_config`). A GGUF repository's
+  **projector files** (`mmproj-*.gguf`) are not model choices: one is chosen with the model (F16 by
+  default, else BF16, Q8_0, the first; or none), read for `clip.has_vision_encoder` /
+  `clip.has_audio_encoder` (vision means images and video in llama.cpp), and downloaded with it.
+  Catalog entries from before 1.3 have no such reading: unknown for safetensors (media are passed on
+  and the engine answers), text only for GGUF.
 - **Recipes** are YAML ([forgeyard/recipes](../forgeyard/recipes)): tasks, formats, the protocol per
   task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
   NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
@@ -216,7 +233,11 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   the multi-architecture digest from Docker Hub or GHCR and checks the platforms each variant
   claims), and review the diff; without `--write` it checks that every digest still matches its
   tag. A test fails if a built-in image has no digest. Admins add custom recipes on the Models page
-  (a digest is recommended there too). Built in:
+  (a digest is recommended there too). 1.3 adds to recipes: a `media` block (what the engine takes in
+  chat: `inputs` of image, audio, video, and `files`), `advanced: true` on parameters (the deploy form's
+  collapsed Advanced section), `optional_args` with `if_model` (`mmproj`, or a medium the model takes)
+  and the `{mmproj_file}` placeholder, and the estimate's `vision_overhead` / `video_overhead`. A
+  deployment made before a recipe gained a parameter renders that parameter's default. Built in:
 
   | Recipe | Serves | Runs | Pinned |
   |---|---|---|---|
@@ -230,6 +251,12 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   the recipe's engine overhead + the CUDA context (0.4 GiB, measured on an A100); GGUF = the exact
   tensor sizes of the offloaded layers + their KV cache + the logits buffer + overhead; whisper =
   the model files + overhead. A declared `vram` replaces it (required for `local://` models).
+  A model that takes images (1.3) adds the recipe's **vision term**: on vLLM `vision_overhead`
+  (1.5 GiB: vLLM runs the vision encoder on the largest image at startup and keeps an encoder cache
+  before it sizes the KV cache; the vision weights are already in the model's), plus
+  `video_overhead` (1 GiB) when video is on; on llama.cpp the projector file as it is (it is loaded
+  whole, onto the GPU by default) plus `vision_overhead` for its buffers (measured on the CPU). With
+  images on, the estimate notes that images take context tokens.
 - **Scheduling**: filter (a recipe variant for the hardware and driver, the runtime, the GPU
   allowlist, enough memory), then score: **binpack** (the tightest card that fits; whole cards stay
   free for big models), and on a tie the machine that already **has the model cached**. Memory is
@@ -330,7 +357,43 @@ page contain these lines whenever the server uses its own CA.
   and before a read, one row per UTC day, source, key, person, model and target. A client that went
   away (499) is not an error. Everyone sees their own; admins everyone's. A deployment's page shows
   its last 7 days.
-- **Playground**: chat with streaming, embeddings, rerank and speech to text in the console, through
+- **Images, audio and video in chat (1.3,** forgeyard/gateway/media.py**).** vLLM 0.32 and llama-server
+  b11977 download any http(s) URL they find in a media part, with no private-address filter (vLLM
+  also follows redirects), from inside your network. So:
+  - the gateway walks `messages[].content[]` and **rebuilds every media part** in one shape
+    (`image_url` and `video_url` with a `data:` URI, `input_audio` with base64), keeping only the fields
+    it checked; `input_image`, `input_video` and `audio_url` are accepted and converted. Text parts
+    pass unchanged; other types and `*_embeds` are refused (`invalid_content_part`);
+  - `http(s)` URLs are **fetched by the gateway** with the egress client (forgeyard/gateway/egress.py:
+    `EGRESS_PROXY`, `EGRESS_CA_FILE`, `EGRESS_ALLOWED_HOSTS`): every address the name resolves to is
+    checked, public only unless `MEDIA_ALLOW_PRIVATE_HOSTS`, link-local and metadata never; the
+    connection goes to the checked address; redirects are followed by the gateway itself (at most 3),
+    each checked again; `MEDIA_FETCH_MAX_MB` per item, 20 s per item; the content type must be the
+    part's kind (an image answered as `application/octet-stream` is recognised by its magic number).
+    The data replaces the URL. `file://` and every other scheme: `media_url_refused`;
+  - the engines are hardened too: `vllm` and `vllm-pooling` run with `--allowed-media-domains
+    forgeyard.invalid` (vLLM fetches every host when the list is empty; one that matches nothing
+    refuses all) and `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`, and without `--allowed-local-media-path`;
+    llama-server has no switch, and is reached only through the key guard, with data the gateway sent;
+  - the route is narrowed (`fit_route`) to deployments that take what the request carries: the
+    model's media (from its catalog entry), the recipe's `media.inputs`, the deployment's `images`
+    (images and audio clips, 4) and `videos` (0: video off) counts, `files` only where a recipe says
+    so (none built in: the gateway never converts a file). Otherwise `media_not_supported`,
+    `too_many_media_items` or `file_input_not_supported`, before anything is fetched or sent;
+  - **media never go to a provider** in 1.3 (neither cloud nor inside your network): their targets
+    are left out; a route served only by providers answers `media_local_only`;
+  - the spill rules count each media item as 1,600 tokens instead of its base64 size;
+  - usage counts the media items (`media_items`); image tokens are in `prompt_tokens` as the engine
+    reports them (vLLM with `--enable-prompt-tokens-details`).
+- **Body limit per deployment (1.3).** A deployment's `max_body_mb` (64 MiB for vLLM and llama.cpp) is
+  its limit; recipes without the parameter keep `GATEWAY_MAX_BODY_MB`. The gateway reads a body up to
+  the largest limit of any deployment (read from the database at most every 5 s), then applies the
+  route's own once it knows the model, again after media were inlined (413 `request_too_large`).
+- **Usage units (1.3, migration 0012).** `usage_daily` has one column per unit of the new model
+  kinds: `media_items`, `characters`, `images`, `kilopixels`, `media_ms`, `bytes_in`, `bytes_out`,
+  `busy_ms`; default 0, so rows from before keep their meaning. Multimodal chat fills `media_items`;
+  the later 1.3 kinds fill the rest.
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank and speech to text in the console, through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.
@@ -537,7 +600,7 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
     `exhausted` from 100%; a budget of 0 is exhausted). The API keys page, **Usage → Cost** (*Budgets
     this month*) and a provider's page show them.
 - **Not in 1.2:** native Anthropic or Gemini translators and a `/v1/messages` passthrough; the
-  Responses API, batch, files, images; cloud rerank, score or audio; fallback mid-stream; cost-,
+  Responses API, batch, files, images (and in 1.3 requests with media stay local); cloud rerank, score or audio; fallback mid-stream; cost-,
   latency- or semantic routing between clouds; sticky routing; Entra ID, Vertex or Bedrock auth.
 
 ## Accounts and sign-in
@@ -611,3 +674,36 @@ Two images, both built from this repository and published on Docker Hub by
 - **Without the Docker Hub secrets** (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) or the namespace, or
   when run by hand on a branch, the workflow builds both images for both platforms, smoke-tests the
   amd64 ones and ends green with a notice saying why nothing was pushed.
+
+## Settings and the setup advisor (1.3)
+
+- **Validation at start.** A value the server cannot use stops it with the setting's name and the
+  values it takes (`TLS`, `REGISTRATION`, `COOKIE_SECURE`, the cloud levels, numbers, and only one
+  of `TLS_CERT_FILE` / `TLS_KEY_FILE`). Everything else that is surprising is a warning, never a
+  refusal: `forgeyard/settings_check.py` finds names in `.env` or the environment that are not
+  settings (with "did you mean", like the agent), settings another one makes useless (`TLS_*` with
+  `TLS=off`, `TLS_CA_FILE` without an own certificate, both secret-key settings), risky values (an
+  offline time under 2.5 heartbeats, the private-address switches, `COOKIE_SECURE=false` over
+  HTTPS), setup values left after setup, and env seeds the database overrides. The server logs
+  each one at start (`Settings: …`).
+- **The advisor** (`forgeyard/advisor.py`, `GET /api/advisor`, admins only) runs a list of small
+  checks over the settings, the database and the agents' last reports when the page asks; it stores
+  nothing of its own. A finding is `{id, severity, title, detail, fix_url, fix_label, scope, pages}`:
+  `scope` names the object (`machine:3`, `key:12`, `route:4`), `pages` where the UI shows it as a
+  banner. *error* is broken or unsafe now, *warning* likely to cost money, leak or break, *info*
+  useless or surprising. A check that raises is logged and skipped, so one bug never hides the
+  rest. The list of checks is in the guide's reference (*Setup health checks*); a test keeps it
+  complete.
+- **Where it shows** (decision D8): **Get started → Setup health** lists everything, the top bar
+  shows the number of errors and warnings, and each page (Machines, API keys, Providers, Models, a
+  route, a deployment, Users) shows its own as a banner. Plain users and operators see none of it.
+- **Snoozing** is per admin and per finding (`id@scope`), for 30 days, in the user's `preferences`
+  JSON (`advisor_snoozed`), so no migration. Errors cannot be snoozed. A snoozed finding that still
+  applies comes back after 30 days.
+- **Secret-key backup** (decision D5): a warning until an admin ticks *I have a backup of key id X*.
+  The tick is one `server_settings` row (`secret_key_backup`: the key id, who and when), compared
+  with the current key id, so a new key brings the reminder back. A stale id is refused (409), and
+  the key itself never leaves the server.
+- **Rules for new settings** are in `CONTRIBUTING.md`: a default that works, documented (a test
+  compares `Settings` with `.env.example` and the reference), advanced unless essential, and an
+  advisor check when getting it wrong is risky.

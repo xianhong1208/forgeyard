@@ -354,6 +354,26 @@ local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 admin allows under **Cloud for keys**. In the Playground, admins may use the cloud and everyone else
 gets that most. Details: [When a request spills](cloud-providers.md#when-a-request-spills).
 
+## An image is refused
+
+**You see:** a chat request with an image (or audio, or video) answers 400 or 413; the `code` says
+why. Nothing of it reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `media_not_supported` | The model does not read that medium: a text model, a GGUF model added without its projector file, or video while the deployment's *Videos per request* is 0 | Use a vision model; add the GGUF model again with its projector; turn video on under **Advanced** |
+| `too_many_media_items` | More images than the deployment's *Images per request* (4) | Send fewer, or raise it |
+| `media_url_refused` | The URL is `file://` or another scheme, has credentials, or its host is (or redirects to) a private, loopback, link-local or metadata address | Send a public `https://` URL or a `data:` URI. For an image server on your LAN, set `MEDIA_ALLOW_PRIVATE_HOSTS=true` on the server |
+| `media_fetch_failed` | The gateway could not download it: the server answered another status than 200, took longer than 20 s, redirected more than 3 times, or sent something that is not an image | Open the URL yourself; some sites refuse downloads by programs. Send the file as a `data:` URI instead |
+| `media_too_large` (413) | The file is larger than `MEDIA_FETCH_MAX_MB` (20) | Send a smaller image, or raise the setting |
+| `request_too_large` (413) | The request, with images inlined as base64 (a third larger than the files), is over the deployment's *Largest request* (64 MiB) | Send smaller images, or raise it under **Advanced** |
+| `file_input_not_supported` | A `file` part (PDF): no built-in engine takes files, and the gateway does not convert them | Send the pages as images, or the text |
+| `media_local_only` | The model is served only by cloud providers; media stay on your own deployments | Use a local vision model |
+
+A vision model on vLLM that **does not start after video was turned on**: vLLM reserves memory for
+a long video at startup and is left with too little for the KV cache. Lower the context length, or
+turn video off again.
+
 ## Cost shows requests without a price
 
 **You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above
@@ -386,6 +406,26 @@ limits = "rlimit"
 
 or `--limits rlimit`, or `FORGEYARD_LIMITS=rlimit` (the agent's Docker image sets this already).
 Process workloads then get resource limits per process, and their CPU is counted, not capped.
+
+## The server refuses a setting, or warns about one
+
+**It does not start** and the log says `Setting COOKIE_SECURE: …` (or another name): that value
+cannot be used. The message lists what the setting takes. The same goes for `TLS`, `REGISTRATION`,
+`GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX`, and for setting only one of `TLS_CERT_FILE` and
+`TLS_KEY_FILE` (`HTTPS: Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither`).
+
+**It starts with lines like `Settings: GATEWAY_CLOUD_DEFUALT is not a setting`**: the server ignores
+that name. Each line says why and what to do:
+
+- *is not a setting… Did you mean …?*: a typo, or a setting from another version. Fix the name in
+  `.env` or the environment.
+- *is ignored*: another setting makes it useless, e.g. `TLS_CA_FILE` without your own certificate,
+  or `MODEL_URL_HOSTS` after an admin saved **Model sources** (the saved value wins: change it in
+  the web UI).
+- *ADMIN_PASSWORD is still set*: it is only read on the first start. Remove it from `.env`.
+
+Admins see the same lines, with a link to the fix, under **Get started → Setup health**
+([Check the setup health](how-to.md#check-the-setup-health)).
 
 ## What to include in a bug report
 

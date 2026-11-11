@@ -85,7 +85,8 @@ the next machine:
   without spaces, quotes or colons.
 - **Machine name** (optional): how it is listed on **Machines**; empty means its host name. Letters,
   digits, `.`, `_` and `-`, up to 64 characters. Adds `FORGEYARD_NAME`.
-- **Server address, as that machine reaches it** (default: this server's `PUBLIC_URL`): change it
+- **Server address, as that machine reaches it** (default: this server's `PUBLIC_URL`, or, while
+  `PUBLIC_URL` is empty, the address you opened this page with): change it
   when the machine reaches the server by another address: through a VPN, a forwarded port
   (`https://127.0.0.1:7860`) or another LAN address. When that host is not in the server's certificate the page says so: add it to
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
@@ -297,6 +298,48 @@ output.
 Isolation, in short: a process runs as the unprivileged workload account with only its own cards
 visible; a container gets only its cards, never `--privileged`. See
 [Workloads](concepts.md#workloads).
+
+## Send images to a model
+
+1. **Add a model that reads images.** On **Models → Add a model → Recommended**, the **Vision** group
+   has Qwen3-VL 2B, 4B and 8B for vLLM, and Qwen3-VL as GGUF with its projector file for llama.cpp
+   (a CPU, or an AMD APU). Any model works whose catalog entry says *Images*: the catalog reads it
+   from the model's `config.json`. For a GGUF repository, choose its **Projector** file too (F16 is
+   chosen when there is one; *None* makes it text only).
+2. **Deploy it** as usual. *Images per request* (4), *Videos per request* (0, off) and *Largest
+   request* (64 MiB) are under **Advanced**; the defaults work. The estimate shows the vision
+   encoder (vLLM) or the projector (llama.cpp) as parts of its own.
+3. **Call it** with an image as a `data:` URI or an `https://` URL:
+
+   ```python
+   import base64
+
+   with open("photo.jpg", "rb") as f:
+       photo = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+   client.chat.completions.create(model="qwen3-vl-8b", messages=[{"role": "user", "content": [
+       {"type": "text", "text": "What is in this picture?"},
+       {"type": "image_url", "image_url": {"url": photo}},
+   ]}])
+   ```
+
+   An `https://` URL is downloaded by the gateway (public addresses only, at most
+   `MEDIA_FETCH_MAX_MB` per image) and passed on as data. An image server on your LAN needs
+   `MEDIA_ALLOW_PRIVATE_HOSTS=true` on the server.
+4. **Try it in the Playground:** the image button next to the message box attaches images.
+
+**Video:** set *Videos per request* to 1 or more under **Advanced** and send a `video_url` part.
+On vLLM this makes the engine reserve memory for a long video when it starts, which leaves less for
+the KV cache: lower the context if it does not start.
+
+**A custom llama.cpp recipe** (a Vulkan build, for example) reads images once it passes the
+projector and says what it takes:
+
+```yaml
+optional_args:
+  - if_model: mmproj
+    args: [--mmproj, "{mmproj_file}"]
+media: {inputs: [image, audio, video], files: false}
+```
 
 ## Add a cloud provider
 
@@ -600,6 +643,83 @@ the journal: `journalctl -u forgeyard -f`.
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
 
+## Check the setup health
+
+Forgeyard checks its own setup for settings and combinations that are broken, risky or useless:
+a misspelled setting, a key that may spend on cloud providers with no budget, a shared machine whose
+GPU access nobody chose, an agent older than the server, a route that tries the cloud before its
+local tier. Admins see the results in three places:
+
+- **Get started → Setup health** lists every finding, with what to do and a link to where it is
+  fixed.
+- **A count in the top bar** shows errors and warnings. It disappears when there are none.
+- **A banner on the page concerned** (Machines, API keys, Providers, Models, a route, a
+  deployment, Users) shows that page's findings.
+
+Users and operators see none of it.
+
+- An **error** is broken or unsafe now. It stays until it is fixed.
+- A **warning** is likely to cost money, leak or break. A **note** is useless or surprising. You can
+  **Snooze 30 days** either one: it is hidden for you only, and comes back after 30 days if it still
+  applies. **Show snoozed** lists them, with **Show again**.
+
+Findings are worked out when the page asks, from the settings, the database and the agents' last
+reports, so a fix shows within a minute (or at once on the next page). Settings problems are also
+written to the server's log when it starts, each line beginning with `Settings:`. The full list is
+in the reference: [Setup health checks](reference.md#setup-health-checks).
+
+## Check a server end to end
+
+After an upgrade, or before you rely on a new release, `scripts/accept_all.py` checks every feature
+on your own server and machines: one command, a PASS, FAIL or SKIP line for each check (a SKIP says
+why), and a summary at the end. It uses the API with an admin account, the official OpenAI SDK for
+`/v1`, and a browser for the web console.
+
+Run it from a Forgeyard checkout, on a computer that reaches the server (and, for the key guard
+checks, the machines' replica ports), with the server's CA from **Trust this server**:
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --gpu-machine gpu-01 --cpu-machine cpu-01 --second-cpu-machine cpu-02 \
+  --cloud-provider openai --out accept-all.json --shots accept-shots --install-playwright
+```
+
+Every machine and the provider are optional: leave one out and the checks that need it are skipped,
+saying so. The groups, in the order they run:
+
+| Group | What it checks |
+|---|---|
+| `server` | HTTPS with the CA, security headers, a foreign host name (421), the CSRF rule, sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh` |
+| `machines` | each machine is online with its hardware; its GPU allowlist is enforced; join commands pin the CA |
+| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that a workload sees only its card |
+| `models` | deploys small models and waits for them: Qwen3-1.7B GGUF on each CPU machine; a chat, an embedding, a rerank and a speech model on the GPU machine (each skipped if its estimate does not fit); the estimate on the deployment page; **Try it** |
+| `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
+| `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
+| `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
+
+`--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
+they need even when `models` is not chosen. The exit code is 0 when nothing failed, 1 when a check
+failed, 2 when the run could not start.
+
+What to know before you run it:
+
+- **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
+  workloads, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
+  at the end, also after a failure or **Ctrl-C**. Usage rows and audit events of the run stay.
+- **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
+  cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
+  checks use the run's own keys and user.
+- **Five failed sign-ins** on the throwaway user: the server allows 30 failures per address in 15
+  minutes, so wait between runs if you run it many times in a row.
+- **Time:** about 15 to 20 minutes when the machines already have the models (3 minutes without a GPU
+  machine); downloads come on top.
+- `--kill-local` also checks failover by killing the engine of the CPU replica that runs on the
+  computer where you run the script (one of the two CPU machines).
+- The console checks need Playwright for Python and Chrome (`--chrome`, default
+  `/opt/google/chrome/chrome`); `--install-playwright` puts Playwright, like the OpenAI SDK, in a
+  virtual environment of the script's own (`--venv`). Without it, the console group is skipped.
+
 ## Back up and restore
 
 **What to back up on the server**, all in its `data/` folder unless you moved it (in Docker: the
@@ -620,6 +740,10 @@ cp -a data/tls data/secret.key .env /backup/
 ```
 
 PostgreSQL: `pg_dump` as usual.
+
+Once `secret.key` is backed up, tick **I have a backup of key id …** under **Get started → Setup
+health**. Until an admin does, Setup health reminds every admin, and it reminds them again when
+the key changes. The key itself never leaves the server: the page shows only its id.
 
 **On each machine** (optional): `/var/lib/forgeyard-agent` (the credential; without it the machine
 joins again with a new token) and `/etc/forgeyard/agent.toml`. The model cache can always be

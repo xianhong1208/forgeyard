@@ -2,6 +2,7 @@ import { IconArrowLeft, IconArrowDown, IconPlus, IconTrash, IconX } from "@table
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Field, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -113,6 +114,7 @@ function RouteEditor({ r, admin, opts, reload }: { r: RouteInfo | null; admin: b
         actions={r && admin && r.deployment_id === null && (
           <button type="button" className="btn btn-danger" onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> Delete route</button>
         )} />
+      {r && <AdvisorBanner pages={[`route:${r.id}`]} />}
       <HelpLinks>
         <HelpLink page="cloud-providers" anchor="route-a-model-to-the-cloud">How do I let a model spill to the cloud?</HelpLink>
         <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request move to the next tier?</HelpLink>
@@ -210,7 +212,7 @@ function RouteEditor({ r, admin, opts, reload }: { r: RouteInfo | null; admin: b
             </label>
             <div className="grid-2">
               <Field label="Wait for a free local slot (ms)" name="rt-wait" type="number" min={0} max={10000} value={waitMs} disabled={!admin}
-                onChange={(e) => setWaitMs(e.target.value)} hint="0: spill at once when every local replica is at its concurrency. At most 10,000." />
+                onChange={(e) => setWaitMs(e.target.value)} hint="In milliseconds. 0: spill at once when every local replica is at its concurrency. At most 10,000 (10 s)." />
             </div>
             <p className="muted small">
               A request always moves on when the tier has no ready replica, cannot be connected to, or answers 429 or 503. It never moves on for

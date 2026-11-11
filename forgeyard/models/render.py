@@ -12,6 +12,7 @@ from __future__ import annotations
 import posixpath
 
 from forgeyard.db import Accelerator
+from forgeyard.models import modalities
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import gpu_memory_utilization
 from forgeyard.models.recipes import Variant, render_text
@@ -21,7 +22,10 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
     p = ctx.params
     container = variant.runtime == "container"
     meta = ctx.model.meta or {}
-    out = {k: v for k, v in p.items() if not isinstance(v, (list, dict)) and v is not None}
+    # A recipe's own defaults first: a deployment made before the recipe gained a parameter (1.3's
+    # images, videos, max_body_mb) still renders it.
+    out = {k: q.default for k, q in ctx.recipe.params.items()}
+    out.update({k: v for k, v in p.items() if not isinstance(v, (list, dict)) and v is not None})
     out.update({
         "model_path": "${MODEL_PATH}", "model_file": "${MODEL_FILE}", "model_hub": "${MODEL_HUB}",
         "served_name": ctx.deployment.served_name if ctx.deployment else p.get("served_name", ""),
@@ -33,6 +37,8 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
         "gpu_layers": p.get("gpu_layers", 999) if variant.gpu else 0,
         "threads": p.get("threads", -1), "dtype": p.get("dtype", "auto"),
         "repo": meta.get("repo") or (ctx.deployment.served_name if ctx.deployment else ""),
+        # The projector file of a GGUF vision model (1.3), next to the model file in its directory.
+        "mmproj_file": f"${{MODEL_PATH}}/{mmproj_path(meta)}" if mmproj_path(meta) else "",
     })
     if variant.gpu and cards:
         total = min(int(a.vram_total or 0) for a in cards)
@@ -42,10 +48,24 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
     return out
 
 
+def mmproj_path(meta: dict) -> str:
+    m = (meta or {}).get("mmproj")
+    return m["path"] if isinstance(m, dict) and isinstance(m.get("path"), str) else ""
+
+
+def model_has(ctx: Context, feature: str) -> bool:
+    """For `if_model`: the model has a projector file, or takes that medium."""
+    meta = ctx.model.meta or {}
+    if feature == "mmproj":
+        return bool(mmproj_path(meta))
+    return feature in (modalities.of_model(meta, ctx.model.format) or [])
+
+
 def args_for(ctx: Context, variant: Variant, vals: dict) -> list[str]:
     base = list(variant.args if variant.args is not None else ctx.recipe.args)
     for oa in ctx.recipe.optional_args:
-        if all(str(ctx.params.get(k)) == str(v) for k, v in oa.if_.items()):
+        if all(str(ctx.params.get(k)) == str(v) for k, v in oa.if_.items()) and \
+                (oa.if_model is None or model_has(ctx, oa.if_model)):
             base += oa.args
     base += list((ctx.model.engine_args or {}).get(ctx.recipe.name) or [])
     base += list(ctx.params.get("extra_args") or [])

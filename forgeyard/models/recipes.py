@@ -12,9 +12,22 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     port: 8000                       the port the engine listens on inside a container
     health: {path, start_period, interval, timeout, failure_threshold}
     estimate: {method, overhead, cpu_overhead, kv_sequences, vram}
-    params: {name: {type: int|choice|size, default, min, max, choices, label, help}}
+    params: {name: {type: int|choice|size, default, min, max, choices, label, help, advanced}}
+                                     advanced: true puts it in the deploy form's collapsed
+                                     Advanced section (its default works untouched)
     args: [...]                      the engine's arguments, with {placeholders}
-    optional_args: [{if: {param: value}, args: [...]}]
+    optional_args: [{if: {param: value}, args: [...]}, {if_model: mmproj, args: [...]}]
+                                     if_model: added only when the model has it (mmproj: a
+                                     llama.cpp projector file, {mmproj_file}; image, audio, video:
+                                     the model takes that medium)
+    media: {inputs: [image, video, audio], files: false}
+                                     1.3: what the engine takes in chat besides text; the gateway
+                                     sends a model only the media it takes, at most `images`
+                                     (images, audio clips) and `videos` per request when the
+                                     recipe declares those parameters, and bodies up to its
+                                     `max_body_mb` parameter (else GATEWAY_MAX_BODY_MB). `files`:
+                                     `file` parts (PDF) are passed on. No media block: media are
+                                     passed on and the engine answers
     env: {NAME: value}               with {placeholders}
     api_key_env: VLLM_API_KEY        the variable the engine reads its API key from (M4): each
                                      replica gets a random key there, which only the gateway
@@ -32,7 +45,7 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
         command: /opt/x/bin/server     a program already installed on the machines
 
 Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} {context} {concurrency}
-{kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} and any declared param.
+{kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} {mmproj_file} and any declared param.
 Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
 mount inside a container, the cache directory for a process).
 """
@@ -56,7 +69,10 @@ FORMATS = ("safetensors", "gguf", "ctranslate2")
 APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio")
 ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
-                        "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo"}
+                        "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
+                        "mmproj_file"}
+MEDIA_KINDS = ("image", "audio", "video")
+MODEL_FEATURES = ("mmproj",) + MEDIA_KINDS
 # Parameters every recipe has, handled by Forgeyard itself.
 COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
 MAX_RECIPE_BYTES = 64 * 1024
@@ -180,6 +196,7 @@ class Param(_M):
     choices: Optional[list[str]] = None
     label: Optional[str] = Field(default=None, max_length=80)
     help: Optional[str] = Field(default=None, max_length=300)
+    advanced: bool = False   # shown in the deploy form's collapsed Advanced section
 
     @model_validator(mode="after")
     def _shape(self) -> "Param":
@@ -227,18 +244,36 @@ class Estimate(_M):
     kv_sequences: Literal["concurrency", "one"] = "concurrency"
     # Fixed method: the memory it takes.
     vram: Optional[int] = None
+    # 1.3: on top, for a model that takes images (and video, when enabled): what the vision encoder's
+    # startup profiling (vLLM) or the projector's compute buffers (llama.cpp) take. The vision
+    # weights are inside the model's own (safetensors) or the mmproj file (GGUF, counted separately).
+    vision_overhead: int = 0
+    video_overhead: int = 0
 
-    @field_validator("overhead", "cpu_overhead", "vram", mode="before")
+    @field_validator("overhead", "cpu_overhead", "vram", "vision_overhead", "video_overhead", mode="before")
     @classmethod
     def _size(cls, v):
         return None if v is None else (0 if v in (0, "0") else parse_bytes(v))
 
 
 class OptionalArgs(_M):
-    if_: dict[str, Union[str, int]] = Field(alias="if")
+    if_: dict[str, Union[str, int]] = Field(default_factory=dict, alias="if")
+    if_model: Optional[Literal[MODEL_FEATURES]] = None  # type: ignore[valid-type]
     args: list[Annotated[str, Field(max_length=4096)]] = Field(max_length=32)
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @model_validator(mode="after")
+    def _condition(self) -> "OptionalArgs":
+        if not self.if_ and self.if_model is None:
+            raise ValueError("optional_args: each needs `if` or `if_model`")
+        return self
+
+
+class Media(_M):
+    """What the engine takes in chat besides text (1.3)."""
+    inputs: list[Literal[MEDIA_KINDS]] = Field(default_factory=list)  # type: ignore[valid-type]
+    files: bool = False
 
 
 class Recipe(_M):
@@ -258,6 +293,7 @@ class Recipe(_M):
     params: dict[str, Param] = Field(default_factory=dict, max_length=24)
     args: list[Annotated[str, Field(max_length=4096)]] = Field(default_factory=list, max_length=128)
     optional_args: list[OptionalArgs] = Field(default_factory=list, max_length=16)
+    media: Optional[Media] = None
     env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
     # Where the engine reads its API key (M4). None: the engine has no key and its port answers
     # anyone who can reach it (the gateway still works).

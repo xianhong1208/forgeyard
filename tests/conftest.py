@@ -12,6 +12,7 @@ from forgeyard.db import reset_engine
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.budgets import ledger
 from forgeyard.gateway.limits import key_limiter
+from forgeyard.gateway.proxy import forget_ceiling
 from forgeyard.gateway.usage import recorder
 from forgeyard.models.hub import hub
 from forgeyard.security import crypto, tls
@@ -86,6 +87,7 @@ def isolated(tmp_path, monkeypatch):
     reset_engine()
     for state in (limiter, balancer, key_limiter, recorder, ledger, hub, crypto, tls.live):  # in-memory state of one server
         state.reset()
+    forget_ceiling()
     yield
     close_all_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
     reset_engine()

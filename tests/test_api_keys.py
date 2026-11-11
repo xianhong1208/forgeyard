@@ -195,3 +195,14 @@ def test_fy_key_007_an_admins_own_keys_are_never_locked(owner):
     # the owner saves the form with the locked value unchanged and a new tpm: allowed, although 500 > cap
     r = u.patch(f"/api/keys/{k['id']}", json={"rpm": 500, "tpm": 99})
     assert r.status_code == 200 and r.json()["api_key"]["tpm"] == 99
+
+
+def test_fy_key_008_a_partial_change_of_the_key_limits_keeps_the_others(owner):
+    """FY-KEY-008: PUT /api/keys/limits changes only the fields it names; null clears one (no limit),
+    and a field left out keeps its saved value."""
+    owner.put("/api/keys/limits", json={"default_rpm": 60, "default_tpm": 600, "max_rpm": 120, "max_tpm": 6000})
+    r = owner.put("/api/keys/limits", json={"max_rpm": 100})
+    assert r.status_code == 200
+    assert r.json()["limits"] == {"default_rpm": 60, "default_tpm": 600, "max_rpm": 100, "max_tpm": 6000}
+    r = owner.put("/api/keys/limits", json={"default_tpm": None})
+    assert r.json()["limits"] == {"default_rpm": 60, "default_tpm": None, "max_rpm": 100, "max_tpm": 6000}
