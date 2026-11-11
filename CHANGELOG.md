@@ -135,6 +135,11 @@ through the gateway, and the usage units for all of 1.3.
   NVML stays on both. It now carries OCI labels (source, licence, version, revision).
 
 ### Fixed
+- **Large images on vLLM:** a phone photo sent to Qwen3-VL on vLLM became about 16,000 tokens and
+  was refused by an 8,192-token context (found on a real A100). vLLM now gets the same *Largest image*
+  cap as llama.cpp (`image_tokens`, 1,024 by default) as `--mm-processor-kwargs` `max_pixels`, for
+  models whose image tokens grow with the resolution; the inspector records their pixels per token
+  (`vision_tile_px`). The same photo then took 1,014 tokens and 2 s (FY-MM-025).
 - **After a server restart, connected agents took no new work** until they were restarted: replicas
   placed on them stayed *pending* with no reason. The server numbered each connection's work lists
   from 1, and the agent kept the highest number across connections, silently dropping anything lower.
