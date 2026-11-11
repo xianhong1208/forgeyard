@@ -2,6 +2,7 @@ import { IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } fr
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
@@ -68,6 +69,7 @@ export function DeploymentDetailPage() {
           </>
         )}
       />
+      <AdvisorBanner pages={[`deployment:${id}`]} />
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       {d && w && (

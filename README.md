@@ -45,6 +45,9 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 It speaks HTTPS from its own certificate authority, prints a one-time setup token for `/setup`,
 and keeps everything in `data/` (back up the database, `data/secret.key` and `data/tls/`).
+Admins see what needs attention in the setup under **Get started → Setup health**: misspelled
+settings, keys that may spend on the cloud without a budget, shared GPUs nobody chose, outdated
+agents and more, each with a link to the fix.
 
 A machine: **Machines → Add a machine** gives a one-line install that checks the server's CA
 against its fingerprint, then installs the agent of the server's own version as a systemd service:

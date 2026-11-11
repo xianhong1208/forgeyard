@@ -248,6 +248,18 @@ limits = "rlimit"
 
 或使用 `--limits rlimit`，或 `FORGEYARD_LIMITS=rlimit`（agent 的 Docker 映像檔已經設定好了）。這樣行程類工作負載會以每個行程為單位套用資源限制，CPU 用量只會被計算，不會被設上限。
 
+## 伺服器拒絕某個設定，或對它發出警告
+
+**伺服器無法啟動**，紀錄裡寫著 `Setting COOKIE_SECURE: …`（或其他名稱）：這個值無法使用。訊息會列出這個設定可以填哪些值。`TLS`、`REGISTRATION`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也是一樣，`TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個時也是（`HTTPS: Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither`）。
+
+**伺服器有啟動，但出現像 `Settings: GATEWAY_CLOUD_DEFUALT is not a setting` 這樣的紀錄**：伺服器會忽略那個名稱。每一行都會說明原因和該怎麼做：
+
+- *is not a setting… Did you mean …?*：打錯字，或是其他版本的設定。請在 `.env` 或環境變數裡改正名稱。
+- *is ignored*：另一個設定讓它沒有作用，例如沒有自己的憑證卻設了 `TLS_CA_FILE`，或管理員已經儲存過 **Model sources** 之後的 `MODEL_URL_HOSTS`（以儲存的值為準：請在網頁介面修改）。
+- *ADMIN_PASSWORD is still set*：它只在第一次啟動時讀取。請把它從 `.env` 移除。
+
+管理員也會在 **Get started → Setup health** 看到同樣的內容，並附上修正位置的連結（[檢查設定健康狀態](how-to.md#check-the-setup-health)）。
+
 ## 回報問題時要附上的資訊
 
 ```bash

@@ -39,6 +39,8 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 它一啟動就用自己的憑證授權單位提供 HTTPS，印出 `/setup` 用的一次性設定權杖，所有資料都放在 `data/`
 （要備份資料庫、`data/secret.key` 與 `data/tls/`）。
+管理員可以在 **Get started → Setup health** 看到設定中需要注意的地方：拼錯的設定、沒有預算卻能使用雲端的金鑰、
+沒人選過的共用 GPU、過舊的 agent 等等，每一項都附有前往修正之處的連結。
 
 加入機器：**Machines → Add a machine** 會給你一行安裝指令。它先用指紋核對伺服器的 CA，再把與伺服器同版本的
 agent 裝成 systemd 服務：
