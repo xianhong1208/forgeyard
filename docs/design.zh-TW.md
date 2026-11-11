@@ -220,8 +220,9 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   就換下一個，失敗的那個排到最後，直到它的 agent 回報它又 ready（最多 15 秒）。client 中途斷線會關掉往上游的連線，引擎就停止生成。
   逾時：連線 5 秒；等回應 header 或串流的下一段 600 秒（`GATEWAY_CONNECT_TIMEOUT`、`GATEWAY_READ_TIMEOUT`）。
 - **`/v1/models`** 只列出符合以下條件的路由：這把 key 看得到它（它有在你網路內的目標，或 key 的雲端設定是 `on`）、key 的模型
-  清單包含它，而且它能提供服務：某一層有應該在執行的部署（啟動中、重啟中都算）或啟用中的網路內供應商；或者對 `fallback` 或 `on`
-  的 key、而且路由不是 local only 時，有啟用中的雲端目標。所以停止的模型會從清單消失；`GET /v1/models/{id}` 回 404「…is stopped」，
+  清單包含它，而且它能提供服務：某一層有應該在執行的部署（啟動中、重啟中都算）或啟用中的網路內供應商；或者有這把 key 能用的啟用中
+  雲端目標：`on` 的 key 在路由不是 local only 時可以用；`fallback` 的 key 只有在雲端那層之前有本機層時才能用（跟實際呼叫時能用的層
+  一樣）。所以停止的模型會從清單消失；`GET /v1/models/{id}` 回 404「…is stopped」，
   硬要呼叫則回 503 `no_ready_replica`「The deployment is stopped.」
 - **錯誤**用 OpenAI 的格式 `{"error": {"message", "type", "param", "code"}}`，`type` 依狀態碼而定：400 請求內容不對或這個模型不走
   這個端點；401 沒有／錯誤／過期／已撤銷的 key，或帳號不是啟用狀態；402 預算（見下方）；403 這把 key 不能用這個模型；404 沒有這個

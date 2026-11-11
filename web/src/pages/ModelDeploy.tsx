@@ -115,7 +115,7 @@ export function ModelDeployPage() {
                 <input id="d-name" className="mono" value={view.name} onChange={(e) => set("name", e.target.value)} required /></div>
               <div className="field"><label htmlFor="d-served">Served model name</label>
                 <input id="d-served" className="mono" value={f.servedName} onChange={(e) => set("servedName", e.target.value)} placeholder={view.name || "the deployment name"} />
-                <p className="field-hint">What clients put in <code>model</code> (also through the gateway in M4).</p></div>
+                <p className="field-hint">What clients put in <code>model</code> when they call the gateway.</p></div>
             </div>
           </section>
 

@@ -108,6 +108,17 @@ part B1: cost tracking and prices; part B2: budgets).
   as root or in the `docker` group), and the AMD command puts each `--group-add` on its own line.
 
 ### Fixed
+- `/v1/models` lists a model only when a call from that key could be served: a `fallback` key reaches
+  the cloud only after a local tier, so a route whose cloud tier comes first and whose deployment is
+  stopped is no longer listed for it.
+- An engine's or provider's own `Retry-After` on a 429 or 503 reaches the client with the answer.
+- A cloud request a budget refused before anything was sent is counted under that provider (at no
+  cost), not as local.
+- A budget can no longer be set on a provider inside your network: requests to it cost nothing and
+  it was never enforced (422 `not_cloud`).
+- Stale text: the Users and Audit pages, the session limits on *My account* (now the server's own
+  settings) and the sign-out messages; the audit log can be filtered by API keys, machines,
+  workloads, deployments, models, recipes, routes, providers and budget alerts.
 - Every page names itself in the browser tab ("API keys · Forgeyard"). After the guide, the tab used to
   keep the guide page's title on every page that followed.
 - Gemini's thinking tokens are counted and priced. Its OpenAI-compatible endpoint shows them only in

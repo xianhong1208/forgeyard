@@ -23,8 +23,8 @@ export function loginPath(current: string, reason?: string): string {
 }
 
 export const ENDED_TEXT: Record<string, string> = {
-  idle: "You were signed out after 2 hours without activity.",
-  expired: "Your session reached its 7-day limit. Sign in again.",
+  idle: "You were signed out after a time without activity.",
+  expired: "Your session reached its time limit. Sign in again.",
   signed_out: "You signed out.",
   signed_out_elsewhere: "This session was ended from another browser.",
   signed_out_by_admin: "An admin signed you out.",

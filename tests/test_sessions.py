@@ -191,3 +191,20 @@ def test_fy_ses_018_re_enabling_does_not_revive_old_sessions(owner):
     r = bob.get("/api/auth/me")
     assert r.status_code == 401 and r.json()["detail"]["reason"] == "account_disabled"
     sign_in(owner, "bob", "quiet-meadow-4821")
+
+
+def test_fy_ses_019_my_sessions_say_the_servers_own_limits(owner, monkeypatch):
+    """FY-SES-019: the session list carries this server's idle and maximum limits, so My account states
+    them instead of fixed numbers."""
+    from forgeyard.config import get_settings
+    r = owner.get("/api/auth/sessions").json()
+    assert (r["idle_minutes"], r["max_days"]) == (get_settings().session_idle_minutes, get_settings().session_max_days)
+    monkeypatch.setenv("SESSION_IDLE_MINUTES", "90")
+    monkeypatch.setenv("SESSION_MAX_DAYS", "3")
+    get_settings.cache_clear()
+    try:
+        r = owner.get("/api/auth/sessions").json()
+        assert (r["idle_minutes"], r["max_days"]) == (90, 3)
+    finally:
+        monkeypatch.undo()
+        get_settings.cache_clear()

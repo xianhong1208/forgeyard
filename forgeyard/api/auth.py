@@ -229,7 +229,7 @@ def my_sessions(caller: Caller = Depends(current), db: DbSession = Depends(get_d
             "user_agent": s.user_agent,
         }
         for s in sessions.live_sessions(db, caller.user.id)
-    ]}
+    ], "idle_minutes": get_settings().session_idle_minutes, "max_days": get_settings().session_max_days}
 
 
 @router.delete("/sessions/{public_id}")

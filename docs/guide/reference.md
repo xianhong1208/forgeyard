@@ -216,7 +216,7 @@ What the gateway does with a request:
 | `X-Forgeyard-Replica` | answer | For a local answer: `<model>#<replica>` |
 | `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
 | `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
-| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, and on 429 `provider_rate_limited` when the provider said |
+| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
 
 ### Errors
 

@@ -197,7 +197,7 @@ local_dirs = ["/data/models"]
 | `X-Forgeyard-Replica` | 回應 | 本機回答時：`<model>#<replica>` |
 | `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
 | `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
-| `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`，以及供應商有提供時的 429 `provider_rate_limited` |
+| `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`，以及原樣轉回的副本或供應商自己的 429 或 503 |
 
 ### 錯誤
 

@@ -287,12 +287,11 @@ def serving(route: Route, cloud: str) -> bool:
     model is left out of /v1/models, so clients do not offer it. A deployment that is starting or
     restarting still counts. Calling a stopped model still answers 503 with the reason.
     """
-    for tier in route.tiers:
-        if any(g.running for g in tier.locals) or any(not c.external for c in tier.clouds):
-            return True
-        if tier.clouds and not route.local_only and cloud in ("fallback", "on"):
-            return True
-    return False
+    endpoint = {"openai-chat": "chat/completions", "openai-embeddings": "embeddings"}.get(route.api, "")
+    # The same tiers a request with this cloud setting may use (a `fallback` key reaches the cloud only
+    # after a local tier), so a listed model is one that can be called.
+    return any(any(g.running for g in tier.locals) or tier.clouds
+               for tier in allowed_tiers(route, cloud, False, endpoint))
 
 
 def check_access(caller: KeyCaller, route: Optional[Route], model: str, endpoint: str) -> Route:
@@ -655,6 +654,14 @@ def provider_error(c: CloudTarget, status: int, data: bytes, ra: Optional[float]
     return GatewayError(status, code or "provider_error", f"{c.provider}: {message}", param=param)
 
 
+def upstream_retry_after(response: httpx.Response) -> dict:
+    """An engine's or provider's own Retry-After (on a 429 or 503), passed on with its answer, so
+    clients back off as long as the upstream asked."""
+    if response.status_code < 400:
+        return {}
+    return {k: v for k in ("retry-after", "retry-after-ms") if (v := response.headers.get(k))}
+
+
 class Job:
     """One request on its way through the tiers. Usage is counted once, for whoever answered."""
 
@@ -676,6 +683,7 @@ class Job:
         self.cost: Optional[pricing.Cost] = None  # once finished (budgets settle with it)
         self.hold: Optional[budgets.Hold] = None  # money reserved at the provider it was sent to
         self.budget_blocked: list[str] = []       # budgets that kept it from a provider
+        self.budget_target: Optional[tuple] = None  # (target, provider) a budget kept it from, if nothing was sent
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -730,6 +738,8 @@ class Job:
             if verdict.limit.token not in self.budget_blocked:
                 self.budget_blocked.append(verdict.limit.token)
             log.info("A %s budget (%s) kept a request from %s.", verdict.limit.scope, verdict.limit.name, c.provider)
+            if self.sent_to is None and self.target == "local":
+                self.budget_target = (c.key, c)
             return Failed("budget", verdict.error())
         self.hold = verdict
         return None
@@ -889,7 +899,8 @@ class Job:
                     await response.aclose()
                     balancer.release(pick.uid)
                 log.info("Replica %s of %s answered %s; moving on.", pick.ordinal, g.name, response.status_code)
-                refused = Response(content=data, status_code=response.status_code, headers=out_headers,
+                refused = Response(content=data, status_code=response.status_code,
+                                   headers={**upstream_retry_after(response), **out_headers},
                                    media_type=response.headers.get("content-type") or "application/json")
                 continue
             return await self.serve(response, out_headers, strip, release=pick.uid, who="replica")
@@ -1052,7 +1063,8 @@ class Job:
             except ValueError:
                 pass
         self.finish(response.status_code, usage)
-        return Response(content=data, status_code=response.status_code, headers=out_headers,
+        return Response(content=data, status_code=response.status_code,
+                        headers={**upstream_retry_after(response), **out_headers},
                         media_type=response.headers.get("content-type") or "application/json")
 
 
@@ -1090,6 +1102,9 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
     except GatewayError as e:
         if job.budget_blocked and budgets.HEADER not in e.headers:
             e.headers[budgets.HEADER] = ",".join(job.budget_blocked)
+        if e.status == 402 and job.budget_target is not None and job.sent_to is None:
+            job.target, _ = job.budget_target  # counted under the provider, at no cost
+            job.deployment_id = None
         job.finish(e.status, None)
         raise
     except BaseException:

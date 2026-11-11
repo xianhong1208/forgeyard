@@ -304,8 +304,9 @@ page contain these lines whenever the server uses its own CA.
 - **`/v1/models`** lists a route only when the key may see it (it has a target inside your network,
   or the key's cloud setting is `on`), the key's model list includes it, and it can serve: some tier
   has a deployment that is meant to run (starting and restarting count) or an enabled provider inside
-  your network, or, for a `fallback` or `on` key on a route that is not local only, an enabled cloud
-  target. So a stopped model leaves the list; `GET /v1/models/{id}` says 404 "…is stopped", and a call
+  your network, or an enabled cloud target the key may reach: an `on` key on a route that is not local
+  only, and a `fallback` key only when a local tier comes before the cloud tier (the same tiers a call
+  may use). So a stopped model leaves the list; `GET /v1/models/{id}` says 404 "…is stopped", and a call
   to it anyway answers 503 `no_ready_replica` "The deployment is stopped."
 - **Errors** in OpenAI's shape `{"error": {"message", "type", "param", "code"}}`, `type` following the
   status: 400 bad body or wrong endpoint for the model; 401 key missing, wrong, expired or revoked, or

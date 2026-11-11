@@ -16,9 +16,15 @@ type SessionRow = {
   user_agent: string | null;
 };
 
+/** "2 hours", "90 minutes", "1 hour": the idle limit as people say it. */
+export function sessionLength(minutes: number): string {
+  if (minutes % 60 === 0) return `${minutes / 60} hour${minutes === 60 ? "" : "s"}`;
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 export function AccountPage() {
   const { user, signOut } = useAuth();
-  const { data, error: listError, reload: load } = useApi<{ sessions: SessionRow[] }>("/auth/sessions");
+  const { data, error: listError, reload: load } = useApi<{ sessions: SessionRow[]; idle_minutes?: number; max_days?: number }>("/auth/sessions");
   const sessions = data?.sessions ?? null;
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [pw, setPw] = useState({ current_password: "", new_password: "", confirm: "" });
@@ -101,7 +107,9 @@ export function AccountPage() {
             <h2>Sessions</h2>
             {others > 0 && <button type="button" className="btn btn-quiet" onClick={endOthers}>Sign out all others</button>}
           </div>
-          <p className="muted small">Sessions end after 2 hours without activity, and after 7 days at most.</p>
+          {data?.idle_minutes && data?.max_days && (
+            <p className="muted small">Sessions end after {sessionLength(data.idle_minutes)} without activity, and after {data.max_days} day{data.max_days === 1 ? "" : "s"} at most.</p>
+          )}
           {listError && <Notice tone="error">{listError}</Notice>}
           <ul className="sessions">
             {sessions?.map((s) => (
