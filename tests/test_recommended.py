@@ -37,10 +37,10 @@ def raw() -> dict:
 
 def test_fy_rec_001_the_shipped_list(owner):
     """FY-REC-001: the file loads and covers what was asked for: Qwen3 chat in six sizes plus a CPU
-    GGUF, Qwen3 embedding and reranker 0.6B/4B, gpt-oss, Gemma 3 and Llama marked gated, Whisper small
-    and large-v3-turbo, BGE-M3 and its reranker."""
+    GGUF, Qwen3 embedding and reranker 0.6B/4B, gpt-oss, Gemma 3 and Llama marked gated, Qwen3-VL
+    (1.3), Whisper small and large-v3-turbo, BGE-M3 and its reranker."""
     data = rec.load()
-    assert [g.id for g in data.groups] == ["qwen3", "llm", "speech", "retrieval"]
+    assert [g.id for g in data.groups] == ["qwen3", "llm", "vision", "speech", "retrieval"]
     by = {e.name: e for e in data.models}
     for size in ("0.6b", "1.7b", "4b", "8b", "14b", "32b"):
         assert by[f"qwen3-{size}"].recipe == "vllm" and by[f"qwen3-{size}"].task == "chat"
@@ -83,7 +83,11 @@ BROKEN = [
     ("bad revision", _break("revision", "main; rm -rf"), "revision"),
     ("engine args for an unknown recipe", _break("engine_args", {"nope": ["--x"]}), "unknown recipe"),
     ("multi-line engine arg", _break("engine_args", {"vllm": ["--x\n--y"]}), "one-line"),
-    ("unknown field", _break("license", "mit"), "Extra inputs"),
+    ("unknown field", _break("licence", "mit"), "Extra inputs"),
+    ("a licence that is not allowed", _break("license", "cc-by-nc-4.0"), "not one the recommended list"),
+    ("no licence", _break("license", KeyError), "license"),
+    ("a projector on a safetensors entry", _break("mmproj", "mmproj-x.gguf"), "only a GGUF entry"),
+    ("an unknown input", _break("inputs", ["smell"]), "inputs"),
     ("missing note", _break("note", KeyError), "note"),
     ("no size", _break("download_gib", 0), "download_gib"),
     ("bad task", _break("task", "vision"), "task"),

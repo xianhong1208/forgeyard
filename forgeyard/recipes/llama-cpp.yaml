@@ -11,6 +11,13 @@
 # --fit off and explicit -c / -ngl keep its memory where the estimate puts it: by default
 # llama-server grows its context to fill whatever is free, which on a shared card is someone
 # else's memory.
+#
+# Images, audio and video in chat (1.3; tools/server/server-common.cpp at b11977): a GGUF vision
+# model comes with a projector file (mmproj-*.gguf) in its catalog entry, passed as --mmproj. Video
+# is decoded with ffmpeg (in the official images). llama-server downloads any http(s) URL in a media
+# part with no host check and has no flag to turn that off, so the gateway fetches URLs itself and
+# sends only data: URIs and base64 (and the agent's key guard lets only the gateway reach it);
+# --media-path is never set, so file:// is refused.
 name: llama-cpp
 title: llama.cpp
 description: >-
@@ -33,6 +40,9 @@ estimate:
   # 0.29 + 0.42 GiB of other buffers (measured on real hardware).
   overhead: 512MiB
   cpu_overhead: 512MiB
+  # With a projector: its file is counted as it is, plus its compute buffers (measured on the CPU
+  # with Qwen3-VL-2B, see CHANGELOG 1.3).
+  vision_overhead: 512MiB
 params:
   context: {type: int, default: 4096, min: 256, max: 1048576, label: Context length (tokens),
             help: Per request. llama-server gets context x concurrency in one shared KV cache.}
@@ -42,9 +52,21 @@ params:
   threads: {type: int, default: 8, min: 1, max: 1024, label: CPU threads,
             help: "The cores it reserves on the CPU (counted for placement). Every core of a busy machine
               makes llama.cpp slower, not faster."}
+  images: {type: int, default: 4, min: 0, max: 64, advanced: true, label: Images per request,
+           help: "For models with a projector: the most images (and audio clips) one request may carry. 0 turns
+             them off."}
+  videos: {type: int, default: 0, min: 0, max: 8, advanced: true, label: Videos per request,
+           help: "For models with a vision projector. Off (0) by default; each video is decoded into many frames."}
+  max_body_mb: {type: int, default: 64, min: 1, max: 1024, advanced: true, label: Largest request (MiB),
+                help: "Requests larger than this are refused by the gateway (413). Images are sent as base64,
+                  a third larger than the files."}
 args: [-m, "{model_file}", --alias, "{served_name}", --host, "{host}", --port, "{port}",
        -c, "{kv_tokens}", -np, "{concurrency}", --kv-unified, -ngl, "{gpu_layers}", --fit, "off",
        -t, "{threads}", --no-webui]
+optional_args:
+  - if_model: mmproj
+    args: [--mmproj, "{mmproj_file}"]
+media: {inputs: [image, audio, video], files: false}
 # The replica's internal key (M4). llama-server b11977 reads --api-key from LLAMA_API_KEY
 # (common/arg.cpp: .set_env("LLAMA_API_KEY")) and then answers 401 to every path except /health,
 # /v1/health and the web UI's files (tools/server/server-http.cpp: get_public_endpoints).

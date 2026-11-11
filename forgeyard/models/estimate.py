@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
+from forgeyard.models import modalities
 from forgeyard.models.recipes import Recipe
 
 GIB = 1024**3
@@ -111,8 +112,39 @@ def _safetensors(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int) 
         Part("Engine overhead", recipe.estimate.overhead, "activations, CUDA graphs, workspaces (recipe)"),
         Part("CUDA context", ctx, "per process (measured on an A100)"),
     ]
+    est.parts += _vision(meta, recipe, params, "safetensors")
     est.per_gpu = sum(p.bytes for p in est.parts)
+    _media_note(est, meta, "safetensors", params)
     return est
+
+
+def _media(meta: dict, fmt: str, params: dict) -> tuple[bool, bool]:
+    """(images on, video on) for this model and these parameters."""
+    kinds = modalities.of_model(meta, fmt) or []
+    images = int(params.get("images", modalities.DEFAULT_IMAGES) or 0)
+    videos = int(params.get("videos", modalities.DEFAULT_VIDEOS) or 0)
+    return "image" in kinds and images > 0, "video" in kinds and videos > 0
+
+
+def _vision(meta: dict, recipe: Recipe, params: dict, fmt: str) -> list[Part]:
+    """The vision encoder's share beyond the weights (1.3): vLLM profiles it at startup on the
+    largest image (and video) before it sizes the KV cache; llama.cpp keeps compute buffers for
+    the projector."""
+    image, video = _media(meta, fmt, params)
+    parts = []
+    if image and recipe.estimate.vision_overhead:
+        parts.append(Part("Vision encoder", recipe.estimate.vision_overhead,
+                          "profiling of the largest image and its encoder cache (recipe)"))
+    if video and recipe.estimate.video_overhead:
+        parts.append(Part("Video", recipe.estimate.video_overhead, "profiling of the largest video (recipe)"))
+    return parts
+
+
+def _media_note(est: "Estimate", meta: dict, fmt: str, params: dict) -> None:
+    image, video = _media(meta, fmt, params)
+    if image or video:
+        est.notes.append("Images and video take context tokens too (often 256 to 1,600 per image, depending on the "
+                         "model and the image's size); leave room for them in the context length.")
 
 
 def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device: str) -> Estimate:
@@ -137,7 +169,9 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
             Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
             Part("Engine overhead", recipe.estimate.cpu_overhead, "compute buffers (recipe)"),
         ]
+        est.parts += _projector(meta, recipe, params)
         est.ram = sum(p.bytes for p in est.parts)
+        _media_note(est, meta, "gguf", params)
         return est
     offload = min(int(params.get("gpu_layers", 999)), layers)
     layer_bytes = list(g.get("layer_bytes") or [])
@@ -152,10 +186,22 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
         Part("Engine overhead", recipe.estimate.overhead, "compute buffers (recipe)"),
         Part("CUDA context", ctx, "per process"),
     ]
+    est.parts += _projector(meta, recipe, params)
     est.per_gpu = sum(p.bytes for p in est.parts)
+    _media_note(est, meta, "gguf", params)
     if offload < layers:
         est.notes.append(f"{layers - offload} layers stay on the CPU (host memory).")
     return est
+
+
+def _projector(meta: dict, recipe: Recipe, params: dict) -> list[Part]:
+    """A GGUF vision model's projector (mmproj): its file, loaded whole (llama.cpp offloads it to the
+    GPU by default), plus its compute buffers."""
+    m = meta.get("mmproj") if isinstance(meta.get("mmproj"), dict) else None
+    if not m:
+        return []
+    parts = [Part("Projector (mmproj)", int(m.get("size") or 0), f"{m.get('path')}, loaded whole")]
+    return parts + _vision(meta, recipe, params, "gguf")
 
 
 def _files(meta: dict, recipe: Recipe, gpus: int, ctx: int, device: str) -> Estimate:

@@ -3,7 +3,8 @@
 For every entry: the repository exists, Forgeyard's inspector can read it at its revision (config,
 safetensors headers, GGUF metadata), it holds the format the file says, and the estimate with the
 suggested recipe's defaults (printed next to the file's download_gib and memory_gib, so they can be
-updated). Gated entries need a token whose account accepted the licence: without HF_TOKEN they are
+updated), the licence and what it takes besides text (inputs) against what the inspector reads, and
+for GGUF vision models the projector file. Gated entries need a token whose account accepted the licence: without HF_TOKEN they are
 only checked to exist and to be gated.
 
     HF_TOKEN=hf_… python scripts/check_recommended.py [name …]
@@ -38,7 +39,9 @@ def main(names: list[str]) -> int:
             continue
         repo = e.source.removeprefix("hf://")
         try:
-            meta = inspector.inspect_hf(repo, e.revision, e.file, endpoint=ENDPOINT, policy=policy, token=token)
+            meta = inspector.inspect_hf(repo, e.revision, e.file, endpoint=ENDPOINT, policy=policy, token=token,
+                                        mmproj=e.mmproj if e.format == "gguf" and e.mmproj else
+                                        ("none" if e.format == "gguf" else None))
         except inspector.InspectError as err:
             if e.gated and not token and "gated" in str(err):
                 info = json.loads(fetch.get_bytes(f"{ENDPOINT}/api/models/{repo}", policy))
@@ -54,6 +57,10 @@ def main(names: list[str]) -> int:
             problems.append(f"format is {meta['format']}, the file says {e.format}")
         if bool(meta.get("gated")) != e.gated:
             problems.append(f"gated is {meta.get('gated')}, the file says {e.gated}")
+        if meta.get("license") != e.license:
+            problems.append(f"the licence is {meta.get('license')}, the file says {e.license}")
+        if sorted(meta.get("modalities") or []) != sorted(e.inputs):
+            problems.append(f"it takes {meta.get('modalities')}, the file says {e.inputs}")
         recipe = builtin[e.recipe]
         params = {k: p.default for k, p in recipe.params.items()} | {"gpus": 0 if e.device == "cpu" else 1,
                                                                        "share": recipe.share}
