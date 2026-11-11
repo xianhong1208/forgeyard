@@ -289,6 +289,8 @@ class Ledger:
 
     def release(self, hold: Optional[Hold]) -> None:
         """The request was not sent, failed or was refused: its reservation is free again."""
+        if hold is None:
+            return
         with self._lock:
             self._free(hold)
 

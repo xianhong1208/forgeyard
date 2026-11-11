@@ -1079,7 +1079,9 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
                                                             "and this request may not leave your network.")
             raise GatewayError(503, "no_target", f"{route.served_name!r} has no target that can take this request "
                                                  "(every target is disabled, or none serves this endpoint).")
-        if any(c.external for t in tiers for c in t.clouds):
+        clouds = [c for t in tiers for c in t.clouds if c.external]
+        if clouds and (caller.budget_micros is not None or caller.user_budget_micros is not None
+                       or any(c.budget_micros is not None for c in clouds)):
             try:
                 await run_in_threadpool(budgets.ledger.ensure)  # this month's spend, off the event loop
             except Exception:
