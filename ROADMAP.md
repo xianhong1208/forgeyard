@@ -114,13 +114,30 @@ and thinking.
 Planned as one pull request per kind, each complete (recipe, estimate, gateway, usage, Playground,
 docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
 
-1. **Multimodal chat** (`multimodal-chat`): images in chat on vLLM and llama.cpp (projector files),
-   video opt-in, the usage units for all of 1.3. *In review.*
+1. ✅ **Multimodal chat** (#4): images in chat on vLLM and llama.cpp (projector files), video
+   opt-in, the usage units for all of 1.3.
 2. llama.cpp bump to a current build, with a built-in Vulkan variant.
-3. Text-to-speech (`/v1/audio/speech`).
+3. Text-to-speech (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp on AMD, speaches
+   for small English voices on CPU and CUDA. Voice cloning stays off.
 4. Image generation (`/v1/images/generations`).
-5. Generic passthrough (`/x/<name>/…`).
-6. Video generation (async `/v1/videos`), the first to move to 1.4 if time is short.
+5. Generic passthrough (`/x/<name>/…`), with ready-made workload templates: object detection,
+   segmentation, depth (permissively licensed images only).
+6. Video generation (async `/v1/videos`), the first to move to a later version if time is short.
+
+Also in 1.3, alongside the model types:
+
+- ✅ **Full regression run** on real machines, `scripts/accept_all.py` (#1), before every merge and
+  release.
+- ✅ **Setup health** (#3): checks for risky or useless settings, on Get started, in the top bar and
+  on each page.
+- ✅ **Container images on Docker Hub** (#2): the server and the agent, amd64 and arm64, published by
+  a release tag.
+- **Simpler settings** (the owner's decisions on the settings audit): a provider's *outside your
+  network* from its address; one Hugging Face token for the server; one cloud policy for keys;
+  agent defaults like the installer's; deprecations of developer-only settings.
+- **Deployments stay where they ran:** a restarted deployment goes back to its machine when it still
+  fits, a deployment can be moved or pinned in the console, and a replica no agent has picked up says
+  so (an agent too old for the server).
 
 The owner's decisions for 1.3 (2026-11-11):
 
@@ -142,11 +159,12 @@ The owner's decisions for 1.3 (2026-11-11):
 
 | Version | What you get |
 |---|---|
-| **1.3: more kinds of models** (in progress, above) | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images, documents and video on vLLM (Qwen3-VL, Gemma and similar); **text-to-speech** through speaches (`/v1/audio/speech`); **image and video generation** (a diffusers-family recipe, `/v1/images/generations`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage. That covers detection, segmentation, depth, 3D, tabular and other tasks without a recipe each. |
-| **1.4: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
-| **1.5: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
-| **1.6: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
-| **1.7: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments); scheduled backup and restore. |
+| **1.3: more kinds of models** (in progress, above) | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images and video in chat on vLLM and llama.cpp (Qwen3-VL, Gemma and similar); **text-to-speech** (`/v1/audio/speech`); **image and video generation** (`/v1/images/generations`, async `/v1/videos`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage, with templates for detection, segmentation and depth. That covers 3D, tabular and other tasks without a recipe each. |
+| **1.4: easier to see** | **Charts:** usage and cost over time as line charts on **Usage**, split by key, model, provider or person, with the day, week and month view. **Machines and models, redesigned:** each machine shows what it is at a glance (an icon per kind: NVIDIA, AMD, APU, CPU), and its page lists the models, workloads and memory on it; models are grouped by kind (chat, multimodal, speech, images, embeddings, rerank) with an icon each; the other pages follow the same layout. |
+| **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
+| **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
+| **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
+| **1.8: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
 
 Reinforcement learning, robotics and graph learning are not planned as model types: they are
 training and research workloads, and run as plain tasks.
