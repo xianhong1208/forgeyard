@@ -11,8 +11,9 @@ agent dials out to the server, so the server never needs to reach the machine.
 1. An admin opens **Machines → Add a machine** and gets a **one-time join token** (single use,
    valid 15 minutes, shown once, stored as a hash), with three ways to use it: the one-line install
    (`install.sh` served by the server: the agent of the server's version, `/etc/forgeyard/agent.toml`,
-   a systemd service with `KillMode=process`), the agent's Docker image (`Dockerfile.agent`), or a
-   Forgeyard checkout with a config file. See the [guide](guide/quick-start.md#3-add-a-machine).
+   a systemd service with `KillMode=process`), the agent's Docker image (`Dockerfile.agent`, published
+   with every release; see [Container images](#container-images)), or a Forgeyard checkout with a
+   config file. See the [guide](guide/quick-start.md#3-add-a-machine).
 2. However it starts, the agent joins the same way, e.g. from a checkout:
 
    ```bash
@@ -639,6 +640,40 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   hashed, not encrypted.
 - The UI goes to the sign-in page only on **401**, never on 403, 429 or a server error, and comes
   back to the page you were on afterwards.
+
+## Container images
+
+Two images, both built from this repository and published on Docker Hub by
+`.github/workflows/publish-images.yml` when a release tag `vX.Y.Z` is pushed:
+`docker.io/<namespace>/forgeyard` (the server, `Dockerfile.server`) and
+`docker.io/<namespace>/forgeyard-agent` (`Dockerfile.agent`).
+
+- **One place for the names.** `forgeyard/install/images.py` holds the Docker Hub namespace
+  (`DOCKERHUB_NAMESPACE`) and the repository names. The publish workflow reads them from there
+  (`scripts/publish_plan.py`), and so does the server when it writes the agent's `docker run` on
+  **Add a machine**. An empty namespace means nothing is published: the page then names a local
+  build, `forgeyard-agent:<version>`, and shows its `docker build`.
+- **The agent's tag is the server's version**, so a machine always runs the agent of its server.
+  `AGENT_IMAGE` overrides the repository (a mirror, a private registry), the tag or adds a digest;
+  it is checked against Docker's reference grammar at start, since it goes into a pasted command.
+- **Platforms:** linux/amd64 and linux/arm64, built with buildx (arm64 under QEMU on the runner).
+  The server's web UI is built once, on the build platform, in a node stage: its output is the same
+  for every platform. The agent's ROCm helpers (libdrm) are amd64 only, like ROCm; NVML comes from a
+  pure-Python package on both.
+- **The server image** installs exactly `uv.lock` (no dev group, with PostgreSQL), runs as uid
+  10001, keeps `DATA_DIR=/data` in a volume and listens on `0.0.0.0:7860`. Its `HEALTHCHECK`
+  (`forgeyard/install/healthcheck.py`) asks `/api/health` over the container's loopback without
+  verifying the certificate: nothing leaves the container and no credential is sent, while
+  verifying would fail for reasons unrelated to health (a certificate of your own names the public
+  host).
+- **Tags:** `X.Y.Z`, `X.Y` and `latest`; a pre-release only `X.Y.Z`. A tag that does not match
+  `forgeyard/__init__.py` stops the workflow. Every image has OCI labels, provenance (`mode=max`)
+  and an SBOM. After the push the amd64 images are pulled back by digest and run through the same
+  smoke tests as CI (`scripts/agent_image_smoke.sh`, `scripts/server_image_smoke.sh`); the digests
+  go to the run's summary.
+- **Without the Docker Hub secrets** (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`) or the namespace, or
+  when run by hand on a branch, the workflow builds both images for both platforms, smoke-tests the
+  amd64 ones and ends green with a notice saying why nothing was pushed.
 
 ## Settings and the setup advisor (1.3)
 

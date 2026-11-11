@@ -121,6 +121,8 @@ export type NewJoinToken = JoinToken & {
   // The three ways to add the machine (forgeyard/install/commands.py): null install_command when the
   // server is not reached over HTTPS (install.sh is served over HTTPS only).
   install_command?: string | null;
+  // The agent image the Docker way runs: published (pulled), or a local build while none is published.
+  agent_image?: { reference: string; published: boolean; local_tag: string };
   docker_build_command?: string;
   docker_commands?: { nvidia: string; amd: string; cpu: string };
   config_file?: string;

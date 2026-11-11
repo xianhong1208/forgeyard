@@ -948,6 +948,9 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .docker-reset { justify-self: start; max-width: 100%; overflow-wrap: anywhere; text-align: left; margin-top: -6px; }
 .docker-advanced summary { cursor: pointer; width: max-content; color: var(--info); }
 .docker-advanced[open] summary { margin-bottom: 8px; }
+.docker-offline { margin: 4px 0 12px; }
+.docker-offline summary { width: auto; max-width: 100%; }
+.docker-offline p { margin: 10px 0 4px; }
 .docker-advanced .field { max-width: 420px; }
 
 /* ---------------------------------------------------------------- budgets (1.2) */

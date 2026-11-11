@@ -191,6 +191,7 @@ describe("machines page", () => {
     for (const part of ["-e FORGEYARD_SERVER=https://forge.lan:7860", `-e FORGEYARD_CA_FINGERPRINT=${fp}`, "-e FORGEYARD_JOIN_TOKEN=fyj_secret",
       "-v /srv/forgeyard-models:/srv/forgeyard-models", "-e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models"]) expect(docker()).toContain(part);
     expect(docker().endsWith("\n  forgeyard-agent:1.1.0")).toBe(true);
+    expect(screen.queryByText(/^Advanced \/ offline/)).toBeNull(); // nothing published: the build is a step
     fireEvent.click(screen.getByRole("button", { name: "AMD" }));
     expect(docker()).toContain("--device /dev/kfd --device /dev/dri");
     expect(docker()).not.toContain("--gpus");
@@ -277,5 +278,41 @@ describe("machines page", () => {
     expect((screen.getByLabelText("Machine name") as HTMLInputElement).value).toBe("amd-01");
     expect((screen.getByLabelText("Port range") as HTMLInputElement).value).toBe("33000-33002");
     expect(docker()).toContain("-e FORGEYARD_PORT_RANGE=33000-33002");
+  });
+
+  it("FY-WEB-145 with a published agent image: pulled by the command, building and carrying it are advanced", async () => {
+    const image = "docker.io/forgeyard/forgeyard-agent:1.2.0";
+    const created = { id: "t4", created_at: "2026-11-09T10:00:00Z", expires_at: "2026-11-09T10:15:00Z", created_by: "owner",
+      token: "fyj_secret", server_url: "https://forge.lan:7860", valid_minutes: 15, ca_fingerprint: null, trust_command: null,
+      command: "unused", install_command: "unused", agent_image: { reference: image, published: true, local_tag: image },
+      docker_build_command: "unused", docker_commands: { nvidia: "unused", amd: "unused", cpu: "unused" }, config_file: "",
+      manual_commands: [], version: "1.2.0" };
+    server((url, init) => {
+      if (url === "/api/machines") return machines();
+      if (url === "/api/tls") return { status: 200, body: { mode: "forgeyard-ca", https: true, admin: { trust_command: null, server_certificate: null } } };
+      if (url === "/api/machines/join-tokens" && init?.method === "POST") return { status: 201, body: created };
+      if (url === "/api/machines/join-tokens") return { status: 200, body: { tokens: [] } };
+      return undefined;
+    });
+    mount();
+    await screen.findByRole("article", { name: "Machine a100-box" });
+    fireEvent.click(screen.getByRole("button", { name: "Add a machine" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
+    fireEvent.click(await screen.findByRole("tab", { name: "Docker" }));
+    const panel = screen.getByRole("tabpanel");
+    const docker = screen.getByLabelText("Docker command").textContent ?? "";
+    expect(docker.endsWith(`\n  ${image}`)).toBe(true);
+    expect(panel.textContent).toContain(`Docker pulls ${image} (linux/amd64 and linux/arm64) the first time`);
+    expect(panel.textContent).not.toContain("the image is not published yet");
+    // The steps have no build; it is under Advanced / offline, with the save | load path.
+    const steps = panel.querySelector("ol.steps")!;
+    expect(within(steps as HTMLElement).queryByLabelText("Build command")).toBeNull();
+    const offline = screen.getByText(/^Advanced \/ offline/).closest("details")!;
+    expect(offline.open).toBe(false);
+    expect(within(offline).getByLabelText("Save command").textContent).toBe(
+      `sudo docker pull ${image} && \\\n  sudo docker save ${image} | gzip > forgeyard-agent.tar.gz`);
+    expect(within(offline).getByLabelText("Load command").textContent).toBe("gunzip -c forgeyard-agent.tar.gz | sudo docker load");
+    expect(within(offline).getByLabelText("Build command").textContent).toBe(`sudo docker build -f Dockerfile.agent -t ${image} .`);
+    expect(offline.textContent).toContain("Docker finds the image locally and does not pull it.");
   });
 });

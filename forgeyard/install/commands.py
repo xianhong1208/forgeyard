@@ -1,7 +1,8 @@
 """The ways to add a machine, as the Machines page shows them with a fresh join token:
 
     install   one line: check the CA against the fingerprint, then run the server's install.sh
-    docker    one `docker run` of the agent image (NVIDIA, AMD or CPU only)
+    docker    one `docker run` of the agent image (NVIDIA, AMD or CPU only): the published image
+              (forgeyard/install/images.py, AGENT_IMAGE), or a local build while none is published
     manual    a config file and the agent from a Forgeyard checkout
 
 All of them pin the same CA fingerprint, so a machine in between is refused before the token is
@@ -16,10 +17,10 @@ from typing import Optional
 
 from forgeyard import __version__
 from forgeyard.agent import config as agent_config
-from forgeyard.install import wheel
+from forgeyard.config import get_settings
+from forgeyard.install import images, wheel
 
 TEMPLATE = Path(__file__).with_name("install.sh")
-IMAGE = "forgeyard-agent"
 MODEL_CACHE = "/srv/forgeyard-models"
 # What install.sh may be told about the server: a plain https URL, nothing a shell would expand.
 _SAFE_URL = re.compile(r"^https://([A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?(/[A-Za-z0-9._~\-/]*)?$")
@@ -64,11 +65,19 @@ AMD_GROUPS = ('--group-add "$(getent group video | cut -d: -f3)" '
               '--group-add "$(getent group render | cut -d: -f3)"')
 
 
-def docker_build_command() -> str:
-    return f"docker build -f Dockerfile.agent -t {IMAGE}:{__version__} ."
+def agent_image() -> images.AgentImage:
+    """The agent image for this server: AGENT_IMAGE, the published one, or a local build."""
+    return images.agent_image(get_settings().agent_image, __version__)
 
 
-def docker_command(server: str, token: str, fingerprint: Optional[str], kind: str = "nvidia") -> str:
+def docker_build_command(image: Optional[images.AgentImage] = None) -> str:
+    """Building the agent image from a checkout, named so the `docker run` below finds it (offline
+    machines, or while nothing is published)."""
+    return f"docker build -f Dockerfile.agent -t {(image or agent_image()).local_tag} ."
+
+
+def docker_command(server: str, token: str, fingerprint: Optional[str], kind: str = "nvidia",
+                   image: Optional[images.AgentImage] = None) -> str:
     """`docker run` for the agent image. Host network: the agent's key guard listens on the
     replicas' published ports and reaches each engine on the host's 127.0.0.1. The model cache is
     mounted at the same path inside as outside: the agent hands that path to the host's Docker
@@ -89,7 +98,7 @@ def docker_command(server: str, token: str, fingerprint: Optional[str], kind: st
     if fingerprint:
         lines.append(f"-e FORGEYARD_CA_FINGERPRINT={fingerprint}")
     lines += [f"-e FORGEYARD_JOIN_TOKEN={token}", f"-e FORGEYARD_MODEL_CACHE={MODEL_CACHE}",
-              f"{IMAGE}:{__version__}"]
+              (image or agent_image()).reference]
     return " \\\n  ".join(lines)
 
 
@@ -112,10 +121,14 @@ def manual_commands(token: str) -> list[str]:
 
 
 def all_commands(server: str, token: str, fingerprint: Optional[str]) -> dict:
+    image = agent_image()
     return {
         "install_command": install_command(server, token, fingerprint),
-        "docker_build_command": docker_build_command(),
-        "docker_commands": {kind: docker_command(server, token, fingerprint, kind) for kind in ("nvidia", "amd", "cpu")},
+        # published: pulled by `docker run`; otherwise built first with docker_build_command.
+        "agent_image": {"reference": image.reference, "published": image.published, "local_tag": image.local_tag},
+        "docker_build_command": docker_build_command(image),
+        "docker_commands": {kind: docker_command(server, token, fingerprint, kind, image)
+                            for kind in ("nvidia", "amd", "cpu")},
         "config_file": config_file(server, fingerprint),
         "manual_commands": manual_commands(token),
         "version": __version__,
