@@ -62,6 +62,14 @@ cost and budgets come in part B).
 - The Docker commands on **Add a machine** and in the guide start with `sudo` (said once: leave it out
   as root or in the `docker` group), and the AMD command puts each `--group-add` on its own line.
 
+### Fixed
+- `/v1/models` no longer lists a model whose deployment was stopped, so clients stop offering a model
+  that can only answer 503. It stays listed while its replicas are starting or restarting, and for keys
+  that may use the cloud when its route has a cloud tier to spill to (or a provider inside your
+  network). `GET /v1/models/{name}` answers 404 "is stopped" for it; calling it still answers 503 with
+  the reason.
+
+
 ## [1.1.1] — 2026-11-11
 
 AMD on real hardware. Fixed against a real Strix Halo machine (Radeon 8060S, gfx1151 APU, ROCm 7.0.2, amd-smi 26.0.2), where the agent image now reads the card fully through the amdsmi library.

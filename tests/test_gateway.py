@@ -437,3 +437,28 @@ def test_fy_gw_018_an_all_deployments_key_covers_later_ones_a_list_does_not(gw):
     r = chat(only, model="chat-later")
     assert r.status_code == 403 and err(r)["code"] == "model_not_allowed"
     assert chat(only).status_code == 200
+
+
+def test_fy_gw_019_a_stopped_model_leaves_v1_models(gw):
+    """FY-GW-019: once its deployment is stopped a model leaves /v1/models and GET /v1/models/{name}
+    is 404, while calling it still says why (503, stopped); running again brings it back, and a
+    replica that is only starting does not hide it."""
+    set_state("chat", 0, "starting", "loading; waiting for the health check to pass")
+    assert "chat" in [m["id"] for m in gw.api.get("/v1/models").json()["data"]]
+    dep = next(d for d in gw.owner.get("/api/deployments").json()["deployments"] if d["name"] == "chat")
+    assert gw.owner.post(f"/api/deployments/{dep['id']}/stop").status_code == 200
+    assert [m["id"] for m in gw.api.get("/v1/models").json()["data"]] == ["asr", "embed", "rerank"]
+    r = gw.api.get("/v1/models/chat")
+    assert r.status_code == 404 and err(r)["code"] == "model_not_found" and "stopped" in err(r)["message"]
+    r = chat(gw.api)
+    assert r.status_code == 503 and "stopped" in err(r)["message"]
+    # Started again (the API waits for the agent to confirm the stop first; this agent is a stand-in).
+    from forgeyard.db import Deployment, Workload, new_session
+    db = new_session()
+    try:
+        db.get(Workload, db.get(Deployment, dep["id"]).workload_id).desired_state = "running"
+        db.commit()
+    finally:
+        db.close()
+    assert "chat" in [m["id"] for m in gw.api.get("/v1/models").json()["data"]]
+    assert gw.api.get("/v1/models/chat").status_code == 200

@@ -61,7 +61,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 2. 如果哪裡都放不下，就拒絕這個部署，並逐台機器說明原因和差多少；
 3. 在那台機器上下載模型、啟動引擎，並等到它變成健康狀態。
 
-每個就緒的部署都以它的模型名稱，在 **`https://<server>:7860/v1`**（也就是**閘道**）以 OpenAI API 提供服務：`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/score`、`/v1/audio/transcriptions` 和 `/translations`。
+每個就緒的部署都以它的模型名稱，在 **`https://<server>:7860/v1`**（也就是**閘道**）以 OpenAI API 提供服務：`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/score`、`/v1/audio/transcriptions` 和 `/translations`。`/v1/models` 列出你的金鑰可以用的模型；部署停止後，它會從清單消失，直到再次啟動為止，除非它的路由能把請求送到你的金鑰可以用的雲端供應商。
 
 閘道會把每個請求送到正在處理中請求數最少的就緒副本；如果某個副本沒有回應，就改送下一個。副本無法繞過閘道直接使用：每個副本都有一把只有閘道知道的內部金鑰，agent 會拒絕送到副本連接埠的其他所有請求。
 
