@@ -49,20 +49,29 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 每台機器執行一個 `docker run`，取代安裝腳本。映像檔要從 Forgeyard 的 repository 建置，目前還沒有公開發布。
 
+**Machines** → **Add a machine** → **Docker** 會幫你產生這兩個指令：選好機器的顯示卡（NVIDIA、AMD 或 CPU only），再填好指令上方的表單。指令會隨著你輸入即時更新，**Copy** 複製的就是畫面上顯示的內容，填過的值也會記在這個瀏覽器裡，下一台機器直接沿用：
+
+- **Model directory on that machine**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
+- **Machine name**（選填）：這台機器在 **Machines** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
+- **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`）：機器要透過 SSH 通道（`https://127.0.0.1:7860`）、VPN 或另一個區網位址連過來時，就改這一欄。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
+- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如透過 SSH 通道轉送的 `33000-33002`。
+
+欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的標籤就是伺服器的版本。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
+
 ### 建置映像檔
 
 在這台機器上（或在另一台機器上建置，再用 `docker save` 和 `docker load` 搬過去），在和伺服器同版本的 Forgeyard 原始碼目錄中執行：
 
 ```bash
-docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .
+sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .
 ```
 
 ### NVIDIA
 
-需要 NVIDIA Container Toolkit（`docker run --gpus all` 能正常執行）。伺服器位址、指紋和加入權杖（join token）請從 **Machines** → **Add a machine** → **Docker** 取得，那裡會幫你填好：
+需要 NVIDIA Container Toolkit（`docker run --gpus all` 能正常執行）。表單維持預設值時，頁面產生的指令長這樣（伺服器位址、指紋和加入權杖（join token）會換成你的）：
 
 ```bash
-docker run -d --name forgeyard-agent --restart always --network host \
+sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
@@ -77,7 +86,7 @@ docker run -d --name forgeyard-agent --restart always --network host \
 接著：
 
 ```bash
-docker logs -f forgeyard-agent
+sudo docker logs -f forgeyard-agent
 ```
 
 會印出（還有其他幾行）：
@@ -91,9 +100,10 @@ INFO forgeyard.agent: Connected to https://192.168.1.20:7860 as 'gpu-01' (9 acce
 ### AMD
 
 ```bash
-docker run -d --name forgeyard-agent --restart always --network host \
+sudo docker run -d --name forgeyard-agent --restart always --network host \
   --device /dev/kfd --device /dev/dri \
-  --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
+  --group-add "$(getent group video | cut -d: -f3)" \
+  --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
@@ -110,7 +120,7 @@ docker run -d --name forgeyard-agent --restart always --network host \
 加入之前想先確認 agent 看到什麼，可以用同樣的裝置執行它的 `inventory` 指令（映像檔的指令本身就是 `forgeyard agent`，所以只要加上 `inventory`）：
 
 ```bash
-docker run --rm --device /dev/kfd --device /dev/dri \
+sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
   forgeyard-agent:1.1.0 inventory
@@ -119,7 +129,7 @@ docker run --rm --device /dev/kfd --device /dev/dri \
 ### 純 CPU
 
 ```bash
-docker run -d --name forgeyard-agent --restart always --network host \
+sudo docker run -d --name forgeyard-agent --restart always --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -149,7 +159,7 @@ docker run -d --name forgeyard-agent --restart always --network host \
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
    ```bash
-   docker run -d --name forgeyard-agent --restart always --network host --gpus all \
+   sudo docker run -d --name forgeyard-agent --restart always --network host --gpus all \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -157,7 +167,7 @@ docker run -d --name forgeyard-agent --restart always --network host \
      forgeyard-agent:1.1.0
    ```
 
-4. `docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
+4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
 
 舊 agent 在容器外啟動的行程類工作負載不會被接手：請先從 UI 停止它們。
 

@@ -908,3 +908,13 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   .tier-edit { margin-left: 0; }
   .cell-url { max-width: none; }
 }
+
+/* ---------------------------------------------------------------- add a machine: Docker form */
+.docker-form { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; display: grid; gap: 12px; }
+.docker-form .grid-2 { margin-top: 0; }
+.docker-form .field input { width: 100%; font-family: var(--mono); font-size: 13px; }
+.docker-form .notice { margin: 0; }
+.docker-reset { justify-self: start; max-width: 100%; overflow-wrap: anywhere; text-align: left; margin-top: -6px; }
+.docker-advanced summary { cursor: pointer; width: max-content; color: var(--info); }
+.docker-advanced[open] summary { margin-bottom: 8px; }
+.docker-advanced .field { max-width: 420px; }
