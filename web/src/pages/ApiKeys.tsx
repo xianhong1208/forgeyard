@@ -3,8 +3,10 @@ import { useState, type ChangeEvent, type FormEvent } from "react";
 
 import { useAuth } from "../auth";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
+import { BudgetMeter } from "../components/BudgetMeter";
 import { CopyBox, Field, Notice, PageHeader, TrustHint } from "../components/ui";
 import { api, errorText } from "../lib/api";
+import { budgetInput, LEVEL_LABEL, parseBudget, resetText } from "../lib/budgets";
 import { exact, when } from "../lib/format";
 import { keyModels, num, snippets } from "../lib/gateway";
 import { CLOUD_HELP, CLOUD_LABEL, CLOUD_LEVELS, cloudAbove } from "../lib/routing";
@@ -87,6 +89,7 @@ export function ApiKeysPage() {
       </HelpLinks>
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      {data && <BudgetWarnings data={data} />}
 
       {creating && data && (
         issued ? <IssuedKey issued={issued} models={data.models} onDone={close} />
@@ -142,7 +145,7 @@ export function ApiKeysPage() {
             <div className="table-wrap">
               <table className="table keys-table">
                 <thead>
-                  <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+                  <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Budget</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
                 </thead>
                 <tbody>
                   {data.keys.map((k) => (
@@ -173,6 +176,8 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
   const [tpm, setTpm] = useState(k.tpm ? String(k.tpm) : "");
   const level: CloudLevel = k.cloud ?? "off";
   const [cloudLevel, setCloudLevel] = useState<CloudLevel>(level);
+  const [budget, setBudget] = useState(budgetInput(k.budget?.budget_micros));
+  const budgetLock = k.budget_locked_by ?? null;
   const own = user?.id === k.user.id;
   const lockedBy: Record<LimitName, string | null> = { rpm: k.rpm_locked_by ?? null, tpm: k.tpm_locked_by ?? null };
   const cloudLock = k.cloud_locked_by ?? null;
@@ -182,6 +187,8 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
       .map((n) => [n, values[n] ? Number(values[n]) : null] as const)
       .filter(([n, v]) => v !== k[n]));
     if (cloudLevel !== level) out.cloud = cloudLevel;
+    const b = parseBudget(budget);
+    if (b !== "bad" && b !== (k.budget?.budget_micros ?? null)) out.budget_micros = b;
     return out;
   };
   const send = async (body: Record<string, number | string | null>, done: string) => {
@@ -194,12 +201,16 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
   };
   const save = async (e: FormEvent) => {
     e.preventDefault();
+    if (parseBudget(budget) === "bad") {
+      onError("Monthly budget: US dollars, like 25 or 2.50 (empty: no budget).");
+      return;
+    }
     const body = patch({ rpm, tpm });
     if (Object.keys(body).length === 0) {
       onEdit();
       return;
     }
-    await send(body, `Limits and cloud setting of ${k.name} saved.`);
+    await send(body, `Limits, cloud setting and budget of ${k.name} saved.`);
   };
   const lockHint = (n: LimitName, base: string) => {
     const by = lockedBy[n];
@@ -228,6 +239,12 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
           )}
         </td>
         <td data-label="Cloud" className="small"><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}</td>
+        <td data-label="Budget" className="small">
+          <div>
+            {k.budget ? <BudgetMeter b={k.budget} label={`Budget of ${k.name}`} compact /> : <span className="muted">none</span>}
+            {budgetLock && <LockChip by={budgetLock} />}
+          </div>
+        </td>
         <td data-label="Last used" className="small" title={exact(k.last_used_at)}>{k.last_used_at ? when(k.last_used_at) : "never"}</td>
         <td data-label="Expires" className="small" title={exact(k.expires_at)}>{k.expires_at ? when(k.expires_at) : "never"}</td>
         <td data-label="Status">
@@ -243,7 +260,7 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
       </tr>
       {editing && (
         <tr className="row-edit">
-          <td colSpan={everyone ? 9 : 8}>
+          <td colSpan={everyone ? 10 : 9}>
             <form className="limits-form" onSubmit={save} aria-label={`Limits of ${k.name}`}>
               <Field label="Requests per minute" name={`rpm-${k.id}`} type="number" min={1} value={rpm} onChange={(e) => setRpm(e.target.value)}
                 placeholder={limits.default_rpm ? `default ${limits.default_rpm}` : "server default"} disabled={!isAdmin && !!lockedBy.rpm}
@@ -260,8 +277,20 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
                   : cloudLock ? `Locked for ${k.user.username ?? "the owner"} (set by ${cloudLock}).`
                     : isAdmin && !own ? `${CLOUD_HELP[cloudLevel]} Saving it locks it for ${k.user.username ?? "the owner"}.` : CLOUD_HELP[cloudLevel]}</p>
               </div>
+              <Field label="Monthly budget (USD)" name={`budget-${k.id}`} inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)}
+                placeholder="no budget" disabled={!isAdmin && !!budgetLock}
+                hint={budgetLock && !isAdmin ? <>Set by the admin <strong>{budgetLock}</strong>; only an admin can change it.</>
+                  : budgetLock ? `Locked for ${k.user.username ?? "the owner"} (set by ${budgetLock}). Clear it to unlock.`
+                    : isAdmin && !own ? `Cloud spend per calendar month (UTC). Saving it locks it for ${k.user.username ?? "the owner"}.`
+                      : "Cloud spend per calendar month (UTC). When it is used up, this key stays local. Empty: no budget."} />
               <div className="row-gap limits-actions">
-                <button type="submit" className="btn btn-primary btn-small" disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock}>Save limits</button>
+                <button type="submit" className="btn btn-primary btn-small" disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock && !!budgetLock}>Save limits</button>
+                {isAdmin && budgetLock && (
+                  <button type="button" className="btn btn-quiet btn-small"
+                    onClick={() => void send({ budget_micros: null }, `Budget of ${k.name} removed and unlocked.`)}>
+                    <IconLock size={14} aria-hidden="true" /> Unlock budget
+                  </button>
+                )}
                 {isAdmin && cloudLock && (
                   <button type="button" className="btn btn-quiet btn-small"
                     onClick={() => void send({ cloud: null }, `Cloud setting of ${k.name} unlocked; it is the default again.`)}>
@@ -293,12 +322,18 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
   const [expiry, setExpiry] = useState("");
   const cloudSettings = data.cloud ?? NO_CLOUD;
   const [cloud, setCloud] = useState<CloudLevel>(cloudSettings.default);
+  const [budget, setBudget] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { limits, is_admin: admin } = data;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const budgetMicros = parseBudget(budget);
+    if (budgetMicros === "bad") {
+      setError("Monthly budget: US dollars, like 25 or 2.50 (empty: no budget).");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -306,7 +341,7 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
         method: "POST",
         body: {
           name: name.trim(), models: all ? null : picked, rpm: rpm ? Number(rpm) : null, tpm: tpm ? Number(tpm) : null,
-          expires_in_days: expiry ? Number(expiry) : null, cloud,
+          expires_in_days: expiry ? Number(expiry) : null, cloud, budget_micros: budgetMicros,
         },
       }));
     } catch (err) {
@@ -373,6 +408,12 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
             })}
           </div>
         </fieldset>
+        {cloud !== "off" && (
+          <div className="grid-2">
+            <Field label="Monthly budget (USD)" name="key-budget" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)}
+              placeholder="no budget" hint="What this key may spend at cloud providers per calendar month (UTC). When it is used up, the key stays local." />
+          </div>
+        )}
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
         <div className="row-gap" style={{ marginTop: 16 }}>
           <button type="submit" className="btn btn-primary" disabled={busy || !name.trim() || (!all && picked.length === 0)}>
@@ -409,6 +450,34 @@ function IssuedKey({ issued, models, onDone }: { issued: NewKeyResponse; models:
         <button type="button" className="btn btn-quiet" onClick={onDone}>Done</button>
       </div>
     </section>
+  );
+}
+
+// Budgets past 80% or used up: the person's own, and their keys'.
+function BudgetWarnings({ data }: { data: KeysResponse }) {
+  const mine = data.person_budget;
+  const keys = data.keys.filter((k) => k.status === "active" && (k.budget?.level === "warning" || k.budget?.level === "exhausted"));
+  const reset = resetText(data.resets_at);
+  return (
+    <>
+      {mine && mine.budget_micros !== null && (
+        <section className="panel budget-panel" aria-labelledby="my-budget-title">
+          <h2 id="my-budget-title">Your monthly budget</h2>
+          <p className="muted small">Cloud spend of all your keys and the playground together this month. It resets on {reset}.</p>
+          <BudgetMeter b={mine} label="Your monthly budget" />
+        </section>
+      )}
+      {mine?.level === "exhausted" && (
+        <Notice tone="error">Your monthly cloud budget is used up: until {reset}, requests with your keys stay local, and models that only the cloud serves are refused.</Notice>
+      )}
+      {mine?.level === "warning" && <Notice tone="info">You have used over 80% of your monthly cloud budget.</Notice>}
+      {keys.map((k) => (
+        <Notice key={k.id} tone={k.budget?.level === "exhausted" ? "error" : "info"}>
+          {k.name} ({k.prefix}…){data.keys.some((x) => x.user.id !== k.user.id) && k.user.username ? ` of ${k.user.username}` : ""}: budget {LEVEL_LABEL[k.budget!.level!]}
+          {k.budget?.level === "exhausted" ? `; its requests stay local until ${reset}.` : "."}
+        </Notice>
+      ))}
+    </>
   );
 }
 

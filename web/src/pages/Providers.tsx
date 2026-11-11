@@ -2,10 +2,12 @@ import { IconArrowLeft, IconCloud, IconCopy, IconCurrencyDollar, IconDownload, I
 import { Fragment, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { BudgetMeter } from "../components/BudgetMeter";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { PriceRefresh } from "../components/PriceRefresh";
 import { Field, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
+import { budgetInput, LEVEL_LABEL, LEVEL_TONE, parseBudget, type Budget } from "../lib/budgets";
 import { exact, when } from "../lib/format";
 import { num } from "../lib/gateway";
 import { PRICE_FIELDS, PRICE_LABEL, parsePrice, perMillion, priceText, SOURCE_LABEL } from "../lib/prices";
@@ -126,7 +128,8 @@ export function ProvidersPage() {
                   <td data-label="Provider"><div className="strong"><Link to={`/providers/${p.id}`}>{p.name}</Link></div><div className="muted small">{p.kind_label}</div></td>
                   <td data-label="Base URL" className="mono small cell-url">{p.base_url}</td>
                   <td data-label="Key" className="mono small">{p.key_hint ?? <span className="muted">none</span>}</td>
-                  <td data-label="Where"><WhereChip p={p} /></td>
+                  <td data-label="Where"><WhereChip p={p} />
+                    {p.budget?.level && p.budget.level !== "ok" && <> <span className={`chip chip-tone-${LEVEL_TONE[p.budget.level]}`}>budget {LEVEL_LABEL[p.budget.level]}</span></>}</td>
                   <td data-label="Models" className="small">
                     <div>
                     {p.models.length ? p.models.map((m) => (
@@ -289,11 +292,51 @@ export function ProviderDetailPage() {
       {p && (
         <>
           <div className="wl-status"><WhereChip p={p} /><span className="mono small">{p.key_hint ? `key ${p.key_hint}` : "no key"}</span></div>
+          {p.budget && <ProviderBudget p={p} budget={p.budget} admin={admin} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
           <Models p={p} admin={admin} kinds={data.kinds} onChanged={reload} />
           {admin && <Settings p={p} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
         </>
       )}
     </>
+  );
+}
+
+function ProviderBudget({ p, budget, admin, onSaved }: { p: Provider; budget: Budget; admin: boolean; onSaved: (text: string) => void }) {
+  const [value, setValue] = useState(budgetInput(budget.budget_micros));
+  const [error, setError] = useState<string | null>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    const micros = parseBudget(value);
+    if (micros === "bad") {
+      setError("US dollars, like 100 or 12.50; empty: no budget.");
+      return;
+    }
+    setError(null);
+    try {
+      await api(`/budgets/providers/${p.id}`, { method: "PUT", body: { budget_micros: micros } });
+      onSaved(micros === null ? "Budget removed." : "Budget saved.");
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+  return (
+    <section className="panel budget-panel" aria-labelledby="budget-title">
+      <h2 id="budget-title">Monthly budget</h2>
+      <p className="muted small">
+        What requests to {p.name} may cost per calendar month (UTC), reserved before each one is sent. When it is used up, routes skip {p.name}: other
+        providers or local replicas serve the requests they can.
+      </p>
+      {budget.level === "exhausted" && <Notice tone="error">This month's budget is used up: {p.name} is skipped until the month ends.</Notice>}
+      {budget.level === "warning" && <Notice tone="info">Over 80% of this month's budget is spent.</Notice>}
+      <BudgetMeter b={budget} label={`Budget of ${p.name}`} />
+      {admin && (
+        <form onSubmit={(e) => void save(e)} className="row-gap" style={{ marginTop: 12, alignItems: "flex-end" }}>
+          <Field label="Monthly budget (USD)" name="pb-budget" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)}
+            placeholder="no budget" error={error} />
+          <button type="submit" className="btn">Save budget</button>
+        </form>
+      )}
+    </section>
   );
 }
 

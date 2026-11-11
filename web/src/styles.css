@@ -935,3 +935,21 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .docker-advanced summary { cursor: pointer; width: max-content; color: var(--info); }
 .docker-advanced[open] summary { margin-bottom: 8px; }
 .docker-advanced .field { max-width: 420px; }
+
+/* ---------------------------------------------------------------- budgets (1.2) */
+.budget { display: grid; gap: 4px; min-width: 0; }
+.budget-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.budget-text { font-variant-numeric: tabular-nums; }
+.budget-bar { height: 8px; max-width: 260px; }
+.budget-compact .budget-bar { max-width: 160px; }
+.budget-ok .budget-bar > span { background: var(--ok); }
+.budget-warning .budget-bar > span { background: var(--heat); }
+.budget-exhausted .budget-bar > span { background: var(--bad); }
+.budget-panel h2 { margin-bottom: 4px; }
+.budget-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 14px 22px; margin-top: 12px; }
+.budget-item { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); min-width: 0; }
+.budget-item .budget-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
+.budget-item form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.budget-item input { width: 120px; }
+.budget-group + .budget-group { margin-top: 16px; }
+.budget-group h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }

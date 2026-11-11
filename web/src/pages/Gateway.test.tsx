@@ -80,7 +80,7 @@ describe("API keys", () => {
     fireEvent.change(screen.getByLabelText("Expires"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Create key" }));
     expect(await screen.findByText("Copy your key now")).toBeTruthy();
-    expect(posted).toEqual([{ name: "ci", models: ["chat"], rpm: 30, tpm: null, expires_in_days: 30, cloud: "off" }]);
+    expect(posted).toEqual([{ name: "ci", models: ["chat"], rpm: 30, tpm: null, expires_in_days: 30, cloud: "off", budget_micros: null }]);
     expect(screen.getByLabelText("The new API key").textContent).toBe("fyk_SECRETVALUE0123456789");
     const py = screen.getByLabelText("python example").textContent ?? "";
     expect(py).toContain('base_url="http://forge.lan:7860/v1"');

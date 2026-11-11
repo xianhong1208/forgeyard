@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 
+import { BudgetMeter } from "../components/BudgetMeter";
 import { Notice, PageHeader } from "../components/ui";
-import { api } from "../lib/api";
+import { api, errorText } from "../lib/api";
+import { alerting, budgetInput, LEVEL_LABEL, parseBudget, resetText, type BudgetPerson, type BudgetsResponse } from "../lib/budgets";
 import { ms, num } from "../lib/gateway";
 import { share, usd } from "../lib/prices";
 import type { UsageResponse, UsageRow } from "../lib/types";
@@ -80,6 +82,7 @@ export function UsagePage() {
         )}
       </div>
       <div id="usage-panel" role="tabpanel" aria-labelledby={`usage-tab-${tab}`}>
+      {tab === "cost" && <Budgets everyone={everyone} />}
       {tab === "cost" && data && <CostView data={data} />}
       {tab === "requests" && t && (
         <dl className="fleet usage-totals" aria-label="Totals">
@@ -192,5 +195,112 @@ function CostView({ data }: { data: UsageResponse }) {
         {" "}An estimate of what the providers charge, not their invoice.
       </p>
     </>
+  );
+}
+
+// This month's budgets: the person's own and their keys' (admins with Everyone: every person, key with a budget
+// or spend, and provider), with warnings from 80% on. Admins set people's budgets here.
+function Budgets({ everyone }: { everyone: boolean }) {
+  const { data, error, reload } = useApi<BudgetsResponse>(`/budgets${everyone ? "?everyone=true" : ""}`);
+  usePoll(reload, 10000);
+  if (error) return <Notice tone="error">{error}</Notice>;
+  if (!data) return null;
+  const people = data.people.filter((p) => p.budget_micros !== null || (data.everyone && p.spent_micros > 0) || data.is_admin);
+  const keys = data.keys.filter((k) => k.budget_micros !== null);
+  const providers = data.providers;
+  const warn = [
+    ...alerting(data.people).map((p) => ({ id: `p${p.id}`, text: data.everyone ? `${p.username}'s budget` : "Your budget", level: p.level })),
+    ...alerting(keys).map((k) => ({ id: `k${k.id}`, text: `The budget of the key ${k.name}${data.everyone && k.user.username ? ` (${k.user.username})` : ""}`, level: k.level })),
+    ...alerting(providers).map((p) => ({ id: `v${p.id}`, text: `The budget of the provider ${p.name}`, level: p.level })),
+  ];
+  const reset = resetText(data.resets_at);
+  const any = people.some((p) => p.budget_micros !== null) || keys.length > 0 || providers.some((p) => p.budget_micros !== null);
+  return (
+    <section className="panel budget-panel" aria-labelledby="budgets-title">
+      <h2 id="budgets-title">Budgets this month</h2>
+      <p className="muted small">
+        Cloud spend per calendar month ({data.month}, UTC), reserved before each request is sent. When a budget is used up, requests it covers stay
+        local; ones only the cloud can serve are refused until {reset}. {data.is_admin ? "Admins set budgets for people here, for keys on API keys, and for providers on their page."
+          : <>You set budgets for your keys on <Link to="/keys">API keys</Link>.</>}
+      </p>
+      {warn.map((w) => (
+        <Notice key={w.id} tone={w.level === "exhausted" ? "error" : "info"}>{w.text} is {LEVEL_LABEL[w.level!]}{w.level === "exhausted" ? `: it keeps requests local until ${reset}.` : "."}</Notice>
+      ))}
+      {!any && !data.is_admin && <p className="muted small">No budget applies to you or your keys.</p>}
+      {people.length > 0 && (
+        <div className="budget-group">
+          <h3>{data.everyone ? "People" : "You"}</h3>
+          <div className="budget-grid">
+            {people.map((p) => <PersonBudget key={p.id} p={p} admin={data.is_admin} onSaved={reload} />)}
+          </div>
+        </div>
+      )}
+      {keys.length > 0 && (
+        <div className="budget-group">
+          <h3>Keys</h3>
+          <div className="budget-grid">
+            {keys.map((k) => (
+              <div key={k.id} className="budget-item">
+                <div className="budget-who"><span className="strong">{k.name}</span><span className="mono small muted">{k.prefix}…</span>
+                  {data.everyone && k.user.username && <span className="small muted">{k.user.username}</span>}</div>
+                <BudgetMeter b={k} label={`Budget of the key ${k.name}`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {providers.length > 0 && (
+        <div className="budget-group">
+          <h3>Providers</h3>
+          <div className="budget-grid">
+            {providers.map((p) => (
+              <div key={p.id} className="budget-item">
+                <div className="budget-who"><Link className="strong" to={`/providers/${p.id}`}>{p.name}</Link></div>
+                <BudgetMeter b={p} label={`Budget of the provider ${p.name}`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PersonBudget({ p, admin, onSaved }: { p: BudgetPerson; admin: boolean; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(budgetInput(p.budget_micros));
+  const [error, setError] = useState<string | null>(null);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    const micros = parseBudget(value);
+    if (micros === "bad") {
+      setError("US dollars, like 25 or 2.50; empty: no budget.");
+      return;
+    }
+    try {
+      await api(`/budgets/people/${p.id}`, { method: "PUT", body: { budget_micros: micros } });
+      setEditing(false);
+      setError(null);
+      onSaved();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+  return (
+    <div className="budget-item">
+      <div className="budget-who"><span className="strong">{p.username}</span>
+        {admin && !editing && <button type="button" className="btn btn-quiet btn-small" onClick={() => setEditing(true)}>{p.budget_micros === null ? "Set budget" : "Change"}</button>}
+      </div>
+      <BudgetMeter b={p} label={`Budget of ${p.username}`} />
+      {editing && (
+        <form onSubmit={save} aria-label={`Budget of ${p.username}`}>
+          <label className="sr-only" htmlFor={`pb-${p.id}`}>Monthly budget of {p.username} (USD)</label>
+          <input id={`pb-${p.id}`} inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder="no budget" />
+          <button type="submit" className="btn btn-small">Save</button>
+          <button type="button" className="btn btn-quiet btn-small" onClick={() => { setEditing(false); setError(null); }}>Cancel</button>
+          {error && <p className="field-error">{error}</p>}
+        </form>
+      )}
+    </div>
   );
 }
