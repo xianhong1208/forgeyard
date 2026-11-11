@@ -32,6 +32,7 @@ The server certificate names every address people and agents use:
 
 - the host of `PUBLIC_URL`;
 - every name in `ALLOWED_HOSTS` and `TLS_EXTRA_NAMES`;
+- `HOST`, unless it is `0.0.0.0` or `::`;
 - the machine's host name, short and fully qualified;
 - the machine's own IP addresses;
 - `localhost`, `127.0.0.1` and `::1`.
@@ -39,10 +40,18 @@ The server certificate names every address people and agents use:
 A new server certificate, signed by the same CA, is made by itself:
 
 - when less than 60 days are left;
-- when an address is missing (you set a new `PUBLIC_URL`, the machine got a new address).
+- when an address is missing (you set a new `PUBLIC_URL`, the machine got a new address);
+- when it cannot be read, or was not signed by the current CA.
 
 A running server checks twice a day and switches to the new certificate without a restart.
-Devices and agents notice nothing, because they trust the CA, not the server certificate.
+Devices and agents notice nothing, because they trust the CA, not the server certificate. The CA
+itself lasts 10 years; the server logs a warning when less than a year is left.
+
+The server accepts TLS 1.2 and newer. The CA's fingerprint is `sha256:` followed by the SHA-256 of
+its DER form, in lower-case hex; agents also accept it with colons (`AB:CD:…`) or as plain hex.
+Anyone can download the CA, without signing in: `/api/tls/ca.pem` (PEM, saved as
+`forgeyard-ca.pem`) and `/api/tls/ca.crt` (DER, saved as `forgeyard-ca.crt`). Note that the file
+`data/tls/ca.crt` on the server is PEM, despite its name.
 
 The startup log shows the CA's fingerprint:
 
@@ -101,7 +110,15 @@ trust the CA yet would then never reach the *Trust this server* page. HSTS is se
 
 ## Agents: the fingerprint in the join command
 
-The join command on the Machines page carries the CA's fingerprint:
+Every join command on the Machines page carries the CA's fingerprint, whichever tab you use:
+
+- **One-line install:** the command downloads the CA, checks its SHA-256 against the fingerprint
+  with `sha256sum -c`, and only then downloads `install.sh` over a connection checked against that
+  CA. The script checks the CA again, downloads the agent's wheel with that CA and checks the wheel's
+  SHA-256, then passes `--ca-fingerprint` on to the agent. The server serves `install.sh` and the
+  wheel only over HTTPS (directly, or through a trusted proxy that says `X-Forwarded-Proto: https`).
+- **Docker:** `-e FORGEYARD_CA_FINGERPRINT=sha256:…`.
+- **Manual:** `ca_fingerprint` in `agent.toml`, or the flag:
 
 ```
 uv run --no-sync python -m forgeyard agent --server https://forge.lan:7860 \
@@ -114,7 +131,8 @@ On its first start the agent does the following, in this order:
 2. It refuses the CA unless its SHA-256 matches the fingerprint.
 3. It joins over HTTPS, verifying the server against **that CA only**, not the system's list of
    authorities.
-4. It keeps the CA in its state directory (`server-ca.pem` next to `credential.json`).
+4. It keeps the CA in its state directory (`server-ca.pem` next to `credential.json`). The pinned
+   CA may also be an intermediate CA.
 
 From then on the agent connects over `wss://` and accepts only server certificates signed by the
 pinned CA. A machine in the middle with any other certificate is refused, whether it sends its own
@@ -198,8 +216,9 @@ TLS_KEY_FILE=/etc/forgeyard/tls/privkey.pem
 TLS_CA_FILE=/etc/forgeyard/tls/company-ca.pem    # optional: the CA that issued it
 ```
 
-- Forgeyard then makes no CA of its own and uses these files as they are. A running server reloads
-  them when they change, for example after certbot renews them.
+- Forgeyard then makes no CA of its own and uses these files as they are. A running server checks
+  them every 12 hours and switches to them when they changed, for example after certbot renewed
+  them, without a restart. Restart the server to switch at once.
 - **What agents pin.** When `TLS_CA_FILE` is set, the join command carries that CA's fingerprint
   and agents pin it. Pinning the issuer, not the certificate, means renewals keep working. When it
   is not set, the certificate is taken to be publicly trusted: the join command has no fingerprint
@@ -224,13 +243,16 @@ PUBLIC_URL=https://forge.example.com      # what people, agents and programs use
 TRUSTED_PROXIES=127.0.0.1                 # believe the proxy's X-Forwarded-For / X-Forwarded-Proto
 ```
 
+`TRUSTED_PROXIES` lists exact IP addresses (no ranges): the address the proxy connects from.
+
 With these settings:
 
 - Session cookies are `Secure`, because the proxy says `X-Forwarded-Proto: https`.
 - Admins see no plain-HTTP warning.
 - The gateway address is `https://forge.example.com/v1`.
-- The join command is `… agent --server https://forge.example.com --join-token fyj_…`, without a
-  fingerprint: agents use the system's trust store. If the proxy's certificate comes from a
+- The join commands carry no fingerprint (the one-line install is
+  `curl -fsS https://forge.example.com/install.sh | sudo sh -s -- --join fyj_…`): agents use the
+  system's trust store. If the proxy's certificate comes from a
   company CA, add `--ca-file company-ca.pem` to the join command, or to `agent trust`.
 
 nginx:
@@ -291,7 +313,8 @@ Forgeyard encrypts the secrets it has to read back:
 
 - Hugging Face tokens on deployments;
 - model replicas' internal keys;
-- the values of workload environment variables (the names stay readable).
+- the values of workload environment variables (the names stay readable);
+- cloud providers' API keys (1.2).
 
 They are encrypted with AES-256-GCM under a server key that is **not in the database**:
 `data/secret.key` (32 random bytes, mode 0600, made on the first start), or the file named by
@@ -321,7 +344,8 @@ It makes a new key (the old file, if any, is kept as `secret.key.lost-<time>`) a
 - drops the Hugging Face tokens: enter them again on each deployment of a gated model;
 - places model replicas again, so they restart with new internal keys;
 - empties lost workload environment values (the names stay), and says so in each workload's
-  events: delete such a workload and create it again with its values.
+  events: delete such a workload and create it again with its values;
+- drops cloud providers' keys: enter them again on the **Providers** page.
 
 It refuses to run when the key is not actually lost.
 
