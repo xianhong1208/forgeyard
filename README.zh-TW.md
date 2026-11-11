@@ -125,6 +125,7 @@ docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | agent 的容器映像檔與它的 CI 冒煙測試 |
+| `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](docs/guide/zh-TW/how-to.md#check-a-server-end-to-end)） |
 | `scripts/accept_m3.py`, `accept_m4.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |

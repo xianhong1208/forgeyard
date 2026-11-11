@@ -6,6 +6,24 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+- **`scripts/accept_all.py`, the full regression run** on real machines: one command checks every feature
+  shipped so far, so each pull request and release can show the old ones still work. Seven groups, run in
+  order and chosen with `--only` / `--skip`: `server` (HTTPS with the CA, security headers, 421, CSRF,
+  sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh`), `machines` (online, the
+  hardware, the GPU allowlist enforced, join commands pinning the CA), `workloads` (a process service,
+  tasks with retries and `max_duration`, a container task, GPU isolation with `gpu_probe.py`), `models`
+  (small models on the CPU and GPU machines, each skipped when its estimate does not fit; the estimate on
+  the deployment page; Try it), `gateway` (`/v1` with the official SDK: every endpoint, streaming with
+  and without usage, key allowlists, rpm, revoking, locked limits, the key guard, balancing and failover,
+  the Playground, usage, a stopped deployment leaving the list), `cloud` (with `--cloud-provider`:
+  spilling, keys that may not, local only, the cloud maximum, cost, key, person and provider budgets and
+  their alerts, with exactly one request to the provider) and `console` (every main page as an admin and
+  as a plain user at 1440 and 390 px, with Playwright). PASS, FAIL or SKIP with the reason per check, a
+  table per group, totals and the time, `--out` JSON. Everything it makes is named `accept-<run>-…` and
+  removed at the end, also after a failure or Ctrl-C; a provider budget it changes is put back. Guide:
+  *How-to → Check a server end to end*.
+
 ## [1.2.0] — 2026-11-11
 
 Cloud model APIs behind the same gateway, local first: providers and tiered routes with spill rules,

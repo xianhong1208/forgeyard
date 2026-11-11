@@ -477,6 +477,58 @@ the journal: `journalctl -u forgeyard -f`.
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
 
+## Check a server end to end
+
+After an upgrade, or before you rely on a new release, `scripts/accept_all.py` checks every feature
+on your own server and machines: one command, a PASS, FAIL or SKIP line for each check (a SKIP says
+why), and a summary at the end. It uses the API with an admin account, the official OpenAI SDK for
+`/v1`, and a browser for the web console.
+
+Run it from a Forgeyard checkout, on a computer that reaches the server (and, for the key guard
+checks, the machines' replica ports), with the server's CA from **Trust this server**:
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --gpu-machine gpu-01 --cpu-machine cpu-01 --second-cpu-machine cpu-02 \
+  --cloud-provider openai --out accept-all.json --shots accept-shots --install-playwright
+```
+
+Every machine and the provider are optional: leave one out and the checks that need it are skipped,
+saying so. The groups, in the order they run:
+
+| Group | What it checks |
+|---|---|
+| `server` | HTTPS with the CA, security headers, a foreign host name (421), the CSRF rule, sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh` |
+| `machines` | each machine is online with its hardware; its GPU allowlist is enforced; join commands pin the CA |
+| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that a workload sees only its card |
+| `models` | deploys small models and waits for them: Qwen3-1.7B GGUF on each CPU machine; a chat, an embedding, a rerank and a speech model on the GPU machine (each skipped if its estimate does not fit); the estimate on the deployment page; **Try it** |
+| `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
+| `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
+| `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
+
+`--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
+they need even when `models` is not chosen. The exit code is 0 when nothing failed, 1 when a check
+failed, 2 when the run could not start.
+
+What to know before you run it:
+
+- **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
+  workloads, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
+  at the end, also after a failure or **Ctrl-C**. Usage rows and audit events of the run stay.
+- **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
+  cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
+  checks use the run's own keys and user.
+- **Five failed sign-ins** on the throwaway user: the server allows 30 failures per address in 15
+  minutes, so wait between runs if you run it many times in a row.
+- **Time:** about 15 to 20 minutes when the machines already have the models (3 minutes without a GPU
+  machine); downloads come on top.
+- `--kill-local` also checks failover by killing the engine of the CPU replica that runs on the
+  computer where you run the script (one of the two CPU machines).
+- The console checks need Playwright for Python and Chrome (`--chrome`, default
+  `/opt/google/chrome/chrome`); `--install-playwright` puts Playwright, like the OpenAI SDK, in a
+  virtual environment of the script's own (`--venv`). Without it, the console group is skipped.
+
 ## Back up and restore
 
 **What to back up on the server**, all in its `data/` folder unless you moved it:
