@@ -178,22 +178,31 @@ jobs:
         if: always() && steps.server.outcome == 'success' && steps.agent.outcome == 'success'
         env:
           PUSHED: ${{ steps.plan.outputs.push }}
-          AGENT: ${{ steps.plan.outputs.agent_repository }}@${{ steps.agent.outputs.digest }}
-          SERVER: ${{ steps.plan.outputs.server_repository }}@${{ steps.server.outputs.digest }}
+          AGENT_REPO: ${{ steps.plan.outputs.agent_repository }}
+          SERVER_REPO: ${{ steps.plan.outputs.server_repository }}
+          AGENT_DIGEST: ${{ steps.agent.outputs.digest }}
+          SERVER_DIGEST: ${{ steps.server.outputs.digest }}
           AGENT_TAGS: ${{ steps.plan.outputs.agent_tags }}
           SERVER_TAGS: ${{ steps.plan.outputs.server_tags }}
           AGENT_AMD64: ${{ steps.pushed.outputs.agent }}
           SERVER_AMD64: ${{ steps.pushed.outputs.server }}
         run: |
           {
-            if [ "$PUSHED" = true ]; then echo "### Published images"; else echo "### Built images (not pushed)"; fi
-            echo
-            echo "| Image | Multi-platform digest | Tags |"
-            echo "|---|---|---|"
-            echo "| server | \`$SERVER\` | \`${SERVER_TAGS//,/\` \`}\` |"
-            echo "| agent | \`$AGENT\` | \`${AGENT_TAGS//,/\` \`}\` |"
-            if [ -n "$SERVER_AMD64" ]; then
+            if [ "$PUSHED" = true ]; then
+              echo "### Published images"
+              echo
+              echo "| Image | Multi-platform digest | Tags |"
+              echo "|---|---|---|"
+              echo "| server | \`$SERVER_REPO@$SERVER_DIGEST\` | \`${SERVER_TAGS//,/\` \`}\` |"
+              echo "| agent | \`$AGENT_REPO@$AGENT_DIGEST\` | \`${AGENT_TAGS//,/\` \`}\` |"
               echo
               echo "Smoke-tested (linux/amd64): \`$SERVER_AMD64\`, \`$AGENT_AMD64\`"
+            else
+              echo "### Built, not pushed"
+              echo
+              echo "Both images built for $PLATFORMS; the amd64 ones passed the smoke tests. A release would push:"
+              echo
+              echo "- server: \`${SERVER_TAGS//,/\` \`}\`"
+              echo "- agent: \`${AGENT_TAGS//,/\` \`}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
