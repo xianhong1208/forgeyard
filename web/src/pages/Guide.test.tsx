@@ -92,4 +92,13 @@ describe("guide", () => {
     rememberLang("zh-TW");
     expect(guideHref("quick-start")).toBe("/guide/zh-TW/quick-start");
   });
+  it("FY-WEB-136 the tab title follows the page: the guide's own, then the next page's, never the guide's left behind", async () => {
+    server();
+    mount("/guide/zh-TW/how-to");
+    expect(await screen.findByRole("heading", { level: 1, name: "操作指南" })).toBeTruthy();
+    await waitFor(() => expect(document.title).toBe("操作指南 · Forgeyard"));
+    fireEvent.click(screen.getByRole("link", { name: "登入" }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeTruthy();
+    await waitFor(() => expect(document.title).toBe("Sign in · Forgeyard"));
+  });
 });

@@ -1,0 +1,27 @@
+name: Feature request
+description: Something Forgeyard should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Check ROADMAP.md first; if it is already planned, say what you need from it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation and the problem, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How it should behave for the people who use it.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How you work around it today
+    validations:
+      required: false

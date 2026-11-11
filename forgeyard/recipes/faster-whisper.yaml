@@ -25,7 +25,7 @@ health: {path: /health, start_period: 300, interval: 10, timeout: 5, failure_thr
 estimate:
   # The model files plus CTranslate2's workspace and the cuDNN/cuBLAS handles. CPU: measured with
   # speaches 0.8.3 and faster-whisper-small after one transcription, RSS 1.43 GiB = 0.45 GiB of
-  # model + 0.98 GiB (docs/acceptance-m3.md); the GPU figure awaits the real host.
+  # model + 0.98 GiB; the GPU figure awaits the real host.
   method: files
   overhead: 1GiB
   cpu_overhead: 1GiB

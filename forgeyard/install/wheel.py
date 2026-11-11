@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent.parent
+LICENSE = PACKAGE.parent / "LICENSE"
 NAME = "forgeyard"
 # What `forgeyard agent` imports (tests/test_install.py checks the agent's modules against it).
 REQUIRES = ("websockets>=15", "h11>=0.16", "pydantic>=2.7")
@@ -55,7 +56,7 @@ def _files() -> list[tuple[str, Path]]:
 def _metadata(ver: str) -> str:
     lines = ["Metadata-Version: 2.1", f"Name: {NAME}", f"Version: {ver}",
              "Summary: The Forgeyard agent: joins a Forgeyard server and runs its work on this machine.",
-             "Requires-Python: >=3.13"]
+             "License: Apache-2.0", "Requires-Python: >=3.13"]
     lines += [f"Requires-Dist: {r}" for r in REQUIRES]
     for extra, reqs in EXTRAS.items():
         lines.append(f"Provides-Extra: {extra}")
@@ -73,6 +74,7 @@ def build(ver: str | None = None) -> bytes:
     entries: list[tuple[str, bytes]] = [(name, path.read_bytes()) for name, path in _files()]
     entries += [
         (f"{info}/METADATA", _metadata(ver).encode()),
+        *([(f"{info}/LICENSE", LICENSE.read_bytes())] if LICENSE.is_file() else []),
         (f"{info}/WHEEL", b"Wheel-Version: 1.0\nGenerator: forgeyard\nRoot-Is-Purelib: true\nTag: py3-none-any\n"),
         (f"{info}/entry_points.txt", b"[console_scripts]\nforgeyard = forgeyard.cli:main\n"),
     ]

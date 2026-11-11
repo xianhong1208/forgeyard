@@ -45,8 +45,6 @@ server 不需要能連到機器。
   <file.json>` 用 fixture 取代真實硬體。必須同時設 `FORGEYARD_AGENT_SIMULATION=1` 才能用，server 會把這種機器標成
   *simulated inventory*。
 
-這個里程碑的真機驗收步驟見 [docs/acceptance-m1.md](acceptance-m1.md)（英文）。
-
 ## Workload
 
 **workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
@@ -128,8 +126,6 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   `--model-local-dir DIR`（可重複）與 `--allow-private-model-hosts`。`python -m forgeyard agent runtimes
   [--workload-user …]` 不加入 server，只印出這台機器能用哪些 runtime。
 
-workload 的真機驗收步驟見 [docs/acceptance-m2.md](acceptance-m2.md)（英文）。
-
 ## 模型
 
 **模型 → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
@@ -187,7 +183,7 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](acceptance-m2.md)（�
   對程序也是唯讀檔案。下載和 server 走同一套防護：只接受 https 與公開位址、每次轉址都重新檢查（LAN mirror 用 `--allow-private-model-hosts`）。
 - **權限**：admin 管目錄、配方與模型來源；admin 與 operator 部署；所有登入的人都能看部署並試用。
 
-真機檢查：[docs/acceptance-m3.md](acceptance-m3.md) 與 `scripts/accept_m3.py`。
+真機檢查：`scripts/accept_m3.py`。
 
 ## Gateway 與 API key
 
@@ -251,7 +247,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
     （把部署停止再啟動）。一般 workload（不是模型）沒有 guard。
 
-真機檢查：[docs/acceptance-m4.md](acceptance-m4.md) 與 `scripts/accept_m4.py`。
+真機檢查：`scripts/accept_m4.py`。
 
 ## 雲端供應商與分層路由（1.2）
 

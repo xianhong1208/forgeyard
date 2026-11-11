@@ -7,6 +7,7 @@ import { Mark } from "../components/Mark";
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { type GuideLang, type GuidePageData, isGuideLang, preferredLang, rememberLang } from "../lib/guide";
+import { useDocumentTitle } from "../lib/title";
 
 // The user guide, public like "Trust this server": it explains how to install the server and its
 // agents, before anyone can sign in. The server renders the Markdown (no raw HTML, nothing from
@@ -32,6 +33,7 @@ export function GuidePage() {
   const [error, setError] = useState<string | null>(null);
   const article = useRef<HTMLDivElement>(null);
   const t = UI[lang];
+  useDocumentTitle(data?.title ?? t.guide);
 
   useEffect(() => {
     let alive = true;
@@ -40,7 +42,6 @@ export function GuidePage() {
         if (!alive) return;
         setData(d);
         setError(null);
-        document.title = `${d.title} · Forgeyard`;
       },
       (e) => alive && setError(errorText(e)),
     );

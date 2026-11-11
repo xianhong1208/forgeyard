@@ -298,7 +298,7 @@ def main() -> int:
             report["results"].append(row)
             if spec["key"] == "cpu":
                 log(f"{name}: healthy after {ready_s:.0f} s; RAM is not in the inventory per process: measure "
-                    "`ps -o rss` of llama-server on the host (see docs/acceptance-m3.md)")
+                    "`ps -o rss` of llama-server on the host (measured on real hardware)")
             else:
                 log(f"{name}: healthy after {ready_s:.0f} s; card used {row['card_used_before_gib']} -> "
                     f"{row['card_used_after_gib']} GiB: actual {row['actual_delta_gib']} GiB vs estimate "

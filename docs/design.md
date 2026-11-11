@@ -60,8 +60,6 @@ agent dials out to the server, so the server never needs to reach the machine.
   It works only with `FORGEYARD_AGENT_SIMULATION=1`, and the server marks such machines
   *simulated inventory*.
 
-Real-hardware checks for this milestone: [docs/acceptance-m1.md](acceptance-m1.md).
-
 ## Workloads
 
 A **workload** is something to run on your machines: a **service** (runs until stopped, is
@@ -169,8 +167,6 @@ again.
   `--model-local-dir DIR` (repeatable) and `--allow-private-model-hosts`. `python -m forgeyard agent
   runtimes [--workload-user …]` prints what it can run here without joining.
 
-Real-hardware checks for workloads: [docs/acceptance-m2.md](acceptance-m2.md).
-
 ## Models
 
 **Models → Deploy a model**: pick a model from the catalog and a recipe, set the parameters, and
@@ -258,7 +254,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
 - **Who:** admins manage the catalog, recipes and model sources; admins and operators deploy;
   everyone signed in sees deployments and can try them.
 
-Real-hardware checks: [docs/acceptance-m3.md](acceptance-m3.md) and `scripts/accept_m3.py`.
+Real-hardware check: `scripts/accept_m3.py`.
 
 ## Gateway and API keys
 
@@ -347,7 +343,7 @@ page contain these lines whenever the server uses its own CA.
     (same published port); those from before M4 have no key until they are placed again (stop and
     start the deployment). Plain workloads (not models) are not guarded.
 
-Real-hardware checks: [docs/acceptance-m4.md](acceptance-m4.md) and `scripts/accept_m4.py`.
+Real-hardware check: `scripts/accept_m4.py`.
 
 ## Cloud providers and tiered routes (1.2)
 

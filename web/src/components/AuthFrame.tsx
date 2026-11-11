@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { useDocumentTitle } from "../lib/title";
 import { Mark } from "./Mark";
 
 // Sign-in screens: a yard of machine plates on the left (some hot), the form on the right.
@@ -9,6 +10,7 @@ const PLATES = [
 ];
 
 export function AuthFrame({ title, lead, children }: { title: string; lead?: ReactNode; children: ReactNode }) {
+  useDocumentTitle(title);
   return (
     <div className="auth">
       <aside className="auth-yard" aria-hidden="true">

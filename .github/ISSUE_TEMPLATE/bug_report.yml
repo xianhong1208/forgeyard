@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in Forgeyard does not work as the guide says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems do not belong here: see SECURITY.md and use **Report a vulnerability**.
+        Before pasting logs or commands, remove API keys (`fyk_…`), join tokens (`fyj_…`), passwords
+        and provider keys.
+  - type: input
+    id: version
+    attributes:
+      label: Forgeyard version
+      description: "`curl -k https://<server>:7860/api/health` shows it; each machine's agent version is on the Machines page."
+      placeholder: "1.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Machines and agents (joining, inventory, GPU access)
+        - Workloads (services and tasks)
+        - Models and deployments
+        - Gateway, API keys and usage (/v1)
+        - Cloud providers, cost and budgets
+        - Sign-in, users and HTTPS
+        - Install, upgrade or the agent image
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: The steps, the page or request, and what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: The machines involved
+      description: |
+        OS, GPU vendor and model, driver / ROCm version, and how the agent runs (install.sh, Docker
+        image, from a checkout). For anything about GPUs, attach `forgeyard agent inventory --json --raw`
+        from that machine.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The server's or the agent's output around the problem.
+      render: text
+    validations:
+      required: false

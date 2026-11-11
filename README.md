@@ -66,6 +66,21 @@ or a checkout with `/etc/forgeyard/agent.toml`. Then deploy a model on **Models*
 command on every machine that joined over plain HTTP; see
 [docs/https-and-trust.md](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http).
 
+## Tested on
+
+Every release is checked on real machines, not only in CI. So far:
+
+| Hardware | Software | What ran |
+|---|---|---|
+| NVIDIA A100 80GB PCIe (an 8-GPU host, Forgeyard given some of its cards) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker), speaches 0.8.3 (faster-whisper); the gateway with the official OpenAI SDK; the agent from its container image |
+| AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io` |
+| x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies |
+| Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
+
+Not checked on real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes, discrete AMD
+cards, and the one-line install on a host with systemd. Reports from other machines are welcome
+(see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
 ## Develop
 
 ```bash
@@ -113,3 +128,13 @@ project.
 | `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, secrets file |
 | `forgeyard/migrations/` | Alembic |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |
+
+## Contributing and security
+
+Bug reports, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report a
+vulnerability privately, as [SECURITY.md](SECURITY.md) explains; it also says what Forgeyard assumes
+about the network and the people using it.
+
+## Licence
+
+[Apache License 2.0](LICENSE).

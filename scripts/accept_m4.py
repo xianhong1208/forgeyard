@@ -14,7 +14,7 @@ Through Forgeyard's API only (an admin session), it:
      revoked key getting 401 on the very next call;
   4. calls every replica's own port without its internal key (must be refused), also on the paths
      vLLM itself leaves open (/invocations, /rerank, /pooling): the agent's key guard must answer 401
-     there too (see docs/acceptance-m4.md);
+     there too;
   5. checks model allowlists: a key limited to one deployment lists and reaches only that one (403
      model_not_allowed for the others); a key made before any of the deployments, with no list,
      sees and reaches every one of them;
@@ -25,7 +25,7 @@ then removes everything it created (deployments, catalog entries, keys) and prin
 JSON with --out).
 
     FORGEYARD_PASSWORD=… python3 scripts/accept_m4.py --server https://127.0.0.1:7860 --cacert forgeyard-ca.pem \\
-        --user tony --machine <GPU host> --second-machine <other machine> --out accept-m4.json [--kill-local]
+        --user <admin> --machine <GPU host> --second-machine <other machine> --out accept-m4.json [--kill-local]
 
 With Forgeyard's own CA, --cacert is the CA file (from "Trust this server", or data/tls/ca.crt on
 the server): the SDK gets it the documented way, http_client=httpx.Client(verify=<SSL context>).

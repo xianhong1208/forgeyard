@@ -765,7 +765,7 @@ def test_fy_col_040_inventory_combines_and_contains_crashes():
 
 
 def test_fy_col_041_raw_output_for_bug_reports():
-    """FY-COL-041: --raw keeps what each tool returned, so Tony can send it back."""
+    """FY-COL-041: --raw keeps what each tool returned, so a user can send it back."""
     inv = Inventory([AmdCollector(amdsmi=FakeAmdsmi(load("amdsmi_gfx1151_apu.json")), **no_tools())])
     raw = inv.full(raw=True)["raw"]["amd"]
     assert raw["amdsmi"][0]["asic_info"]["target_graphics_version"] == "gfx1151"

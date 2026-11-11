@@ -30,7 +30,7 @@ estimate:
   kv_sequences: concurrency
   # Compute buffers beyond the logits buffer that is counted from the vocabulary. CPU: measured on
   # Qwen3-1.7B Q4_K_M, 4096 x 2 context, 8 threads: RSS 2.77 GiB = weights 1.19 + KV 0.88 + logits
-  # 0.29 + 0.42 GiB of other buffers (docs/acceptance-m3.md).
+  # 0.29 + 0.42 GiB of other buffers (measured on real hardware).
   overhead: 512MiB
   cpu_overhead: 512MiB
 params:

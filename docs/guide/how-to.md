@@ -49,9 +49,12 @@ Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A pr
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
-> AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2,
-> through `amd-smi` and `rocm-smi`; discrete AMD cards only against recorded data so far. Report
-> anything that looks wrong with the output of `forgeyard agent inventory --json --raw`.
+> AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2: the
+> inventory (through the `amdsmi` library, `amd-smi` and `rocm-smi`), joining, the GPU allowlist,
+> and a model served through `/v1` with llama.cpp's Vulkan build as a custom recipe. Not checked on
+> real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes (whether they support
+> gfx1151 is unknown), and discrete AMD cards (recorded data only). Report anything that looks wrong
+> with the output of `forgeyard agent inventory --json --raw`.
 
 ## Add a CPU-only machine
 

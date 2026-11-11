@@ -36,7 +36,7 @@ SCRIPT = ROOT / "forgeyard" / "install" / "install.sh"
 def test_fy_inst_001_the_wheel_is_the_running_version_and_reproducible():
     """FY-INST-001: the wheel holds the forgeyard package (not the built UI, no bytecode), is named
     and versioned after the running server, declares the agent's requirements, has a RECORD that
-    matches every file, and is byte-for-byte the same when built again."""
+    matches every file, carries the Apache-2.0 licence, and is byte-for-byte the same when built again."""
     data = wheel.build()
     assert data == wheel.build()
     assert wheel.filename() == f"forgeyard-{__version__}-py3-none-any.whl"
@@ -47,6 +47,8 @@ def test_fy_inst_001_the_wheel_is_the_running_version_and_reproducible():
     info = f"forgeyard-{__version__}.dist-info"
     meta = zf.read(f"{info}/METADATA").decode()
     assert f"Version: {__version__}" in meta and "Requires-Python: >=3.13" in meta
+    assert "License: Apache-2.0\n" in meta
+    assert zf.read(f"{info}/LICENSE").startswith(b"\n                                 Apache License")
     for req in wheel.REQUIRES:
         assert f"Requires-Dist: {req}\n" in meta
     assert 'Requires-Dist: nvidia-ml-py>=12.535; extra == "nvidia"' in meta
