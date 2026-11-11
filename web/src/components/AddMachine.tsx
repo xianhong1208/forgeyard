@@ -1,25 +1,49 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 
-import type { NewJoinToken } from "../lib/types";
+import {
+  AGENT_DEFAULT_PORT_RANGE,
+  buildCommand,
+  certificateCovers,
+  loadForm,
+  runCommand,
+  saveForm,
+  serverHost,
+  serverScheme,
+  validate,
+  type DockerErrors,
+  type DockerForm,
+  type DockerKind,
+} from "../lib/dockerAgent";
+import type { NewJoinToken, TlsInfo } from "../lib/types";
 import { HelpLink } from "./HelpLink";
-import { CopyBlock, CopyBox, Notice } from "./ui";
+import { CopyBlock, CopyBox, Field, Notice } from "./ui";
 
 // "Add a machine", once a join token exists: the three ways to put the agent on the machine, all
 // pinning the same CA fingerprint.
 
 type Way = "install" | "docker" | "manual";
-type Kind = "nvidia" | "amd" | "cpu";
 
-const KINDS: { id: Kind; label: string }[] = [
+const KINDS: { id: DockerKind; label: string }[] = [
   { id: "nvidia", label: "NVIDIA" },
   { id: "amd", label: "AMD" },
   { id: "cpu", label: "CPU only" },
 ];
 
-export function AddMachineWays({ issued }: { issued: NewJoinToken }) {
+export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: TlsInfo | null }) {
   const canInstall = Boolean(issued.install_command);
   const [way, setWay] = useState<Way>(canInstall ? "install" : "manual");
-  const [kind, setKind] = useState<Kind>("nvidia");
+  const [kind, setKind] = useState<DockerKind>("nvidia");
+  // One form for the three GPU kinds, kept here so it survives switching tabs.
+  const [docker, setDocker] = useState<DockerForm>(() => loadForm(issued.server_url));
+  const changeDocker = (next: DockerForm) => {
+    setDocker(next);
+    saveForm(next, issued.server_url);
+  };
+  const version = issued.version ?? "latest";
+  const dockerErrors = validate(docker);
+  const run = runCommand(kind, docker, {
+    server: issued.server_url, fingerprint: issued.ca_fingerprint ?? null, token: issued.token, version,
+  });
   const tabs: { id: Way; label: string; badge?: string }[] = [
     { id: "install", label: "One-line install", badge: canInstall ? "recommended" : undefined },
     { id: "docker", label: "Docker" },
@@ -86,16 +110,23 @@ export function AddMachineWays({ issued }: { issued: NewJoinToken }) {
               </button>
             ))}
           </div>
+          <DockerFields form={docker} errors={dockerErrors} serverUrl={issued.server_url} tls={tls} onChange={changeDocker} />
+          <p className="muted small">
+            Both commands start with <code>sudo</code>; as root, or if your account is in the <code>docker</code> group, leave it out.
+          </p>
           <ol className="steps">
             <li>
-              Build the agent image once on that machine, from a Forgeyard checkout of version {issued.version} (the image is not
+              Build the agent image once on that machine, from a Forgeyard checkout of version {version} (the image is not
               published yet):
-              <CopyBox value={issued.docker_build_command ?? ""} label="Build command" />
+              <CopyBox value={buildCommand(version)} label="Build command" />
             </li>
             <li>
-              Start it. Change <code>/srv/forgeyard-models</code> to a disk with room for models, the same path on both sides of the
-              colon.
-              <CopyBlock value={issued.docker_commands?.[kind] ?? ""} label="Docker command" />
+              Start it. The command follows the fields above.
+              {run !== null ? (
+                <CopyBlock value={run} label="Docker command" />
+              ) : (
+                <Notice tone="error">Fix the fields marked above to get the command.</Notice>
+              )}
             </li>
             <li>
               The machine's credential is kept in the <code>forgeyard-agent</code> volume, so the same command after a restart or an
@@ -141,5 +172,56 @@ export function AddMachineWays({ issued }: { issued: NewJoinToken }) {
         </div>
       )}
     </>
+  );
+}
+
+// The Docker tab's form: every value goes straight into the command below it.
+function DockerFields({ form, errors, serverUrl, tls, onChange }: {
+  form: DockerForm; errors: DockerErrors; serverUrl: string; tls?: TlsInfo | null; onChange: (form: DockerForm) => void;
+}) {
+  const set = (key: keyof DockerForm) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...form, [key]: e.target.value });
+  const cert = tls?.admin?.server_certificate;
+  const host = serverHost(form.server);
+  const uncovered = Boolean(cert && host && !errors.server && serverScheme(form.server) === "https"
+    && !certificateCovers(host, cert.names, cert.ips));
+  const certNames = cert ? [...cert.names, ...cert.ips].join(", ") : "";
+  // Open at first when a port range is set, so it is not hidden in the command's inputs.
+  const [advancedOpen] = useState(() => Boolean(form.portRange.trim()));
+  return (
+    <fieldset className="docker-form">
+      <legend className="sr-only">Settings for the command</legend>
+      <div className="grid-2">
+        <Field label="Model directory on that machine" name="docker-model-dir" value={form.modelDir} onChange={set("modelDir")}
+          spellCheck={false} autoComplete="off" error={errors.modelDir}
+          hint={<>A disk with room for models. Mounted at the same path in the container and used as <code>FORGEYARD_MODEL_CACHE</code>.</>} />
+        <Field label="Machine name" name="docker-name" value={form.name} onChange={set("name")} placeholder="its host name"
+          spellCheck={false} autoComplete="off" error={errors.name}
+          hint={<>Optional: how it is listed here. Empty: the machine's host name.</>} />
+      </div>
+      <Field label="Server address, as that machine reaches it" name="docker-server" value={form.server} onChange={set("server")}
+        spellCheck={false} autoComplete="off" inputMode="url" error={errors.server}
+        hint={<>This server's address by default. Change it when the machine comes through an SSH tunnel, a VPN or another LAN address.</>} />
+      {form.server.trim().replace(/\/+$/, "") !== serverUrl && (
+        <button type="button" className="btn btn-quiet btn-small docker-reset" onClick={() => onChange({ ...form, server: serverUrl })}>
+          Use this server's address, {serverUrl}
+        </button>
+      )}
+      {uncovered && (
+        <Notice>
+          <strong>{host}</strong> is not in this server's certificate ({certNames}), so the agent will refuse the connection.{" "}
+          {tls?.mode === "forgeyard-ca" ? (
+            <>Add it to <code>TLS_EXTRA_NAMES</code> and restart the server, or use one of those names.</>
+          ) : (
+            <>Use one of those names, or a certificate that includes it.</>
+          )}
+        </Notice>
+      )}
+      <details className="docker-advanced" open={advancedOpen || undefined}>
+        <summary className="small">Advanced</summary>
+        <Field label="Port range" name="docker-port-range" value={form.portRange} onChange={set("portRange")}
+          placeholder={AGENT_DEFAULT_PORT_RANGE} spellCheck={false} autoComplete="off" inputMode="numeric" error={errors.portRange}
+          hint={<>Host ports for services and model replicas (<code>FORGEYARD_PORT_RANGE</code>, default {AGENT_DEFAULT_PORT_RANGE}). Set it when only some ports reach that machine, e.g. through an SSH tunnel.</>} />
+      </details>
+    </fieldset>
   );
 }

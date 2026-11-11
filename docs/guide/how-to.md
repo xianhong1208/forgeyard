@@ -70,22 +70,44 @@ use: more threads than free cores make llama.cpp slower, not faster.
 One `docker run` per machine, instead of the install script. The image is built from the Forgeyard
 repository; it is not published yet.
 
+**Machines** → **Add a machine** → **Docker** writes both commands for you: pick the machine's GPUs
+(NVIDIA, AMD or CPU only) and fill in the form above the command. The command follows the form as
+you type, **Copy** copies exactly what is shown, and the values are remembered in this browser for
+the next machine:
+
+- **Model directory on that machine** (default `/srv/forgeyard-models`): a disk with room for
+  models. It goes on both sides of the `-v` and into `FORGEYARD_MODEL_CACHE`. An absolute path,
+  without spaces, quotes or colons.
+- **Machine name** (optional): how it is listed on **Machines**; empty means its host name. Letters,
+  digits, `.`, `_` and `-`, up to 64 characters. Adds `FORGEYARD_NAME`.
+- **Server address, as that machine reaches it** (default: this server's `PUBLIC_URL`): change it
+  when the machine comes through an SSH tunnel (`https://127.0.0.1:7860`), a VPN or another LAN
+  address. When that host is not in the server's certificate the page says so: add it to
+  `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
+- **Advanced → Port range** (`FORGEYARD_PORT_RANGE`, default `30000-32767`): the host ports for
+  services and model replicas. Set it when only some ports reach the machine, for example
+  `33000-33002` forwarded through an SSH tunnel.
+
+A field the agent would reject shows its error instead of a command. The image tag is the server's
+version. Like the page, the commands here start with `sudo`; as root, or when your account is in the
+`docker` group, leave it out.
+
 ### Build the image
 
 On the machine (or on another one, then `docker save` and `docker load`), in a Forgeyard checkout of
 the server's version:
 
 ```bash
-docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .
+sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .
 ```
 
 ### NVIDIA
 
-Needs the NVIDIA Container Toolkit (`docker run --gpus all` works). Take the server address,
-fingerprint and join token from **Machines** → **Add a machine** → **Docker**, which fills them in:
+Needs the NVIDIA Container Toolkit (`docker run --gpus all` works). With the form's defaults, the
+page's command looks like this (with your server's address, fingerprint and join token):
 
 ```bash
-docker run -d --name forgeyard-agent --restart always --network host \
+sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
@@ -100,7 +122,7 @@ docker run -d --name forgeyard-agent --restart always --network host \
 Then:
 
 ```bash
-docker logs -f forgeyard-agent
+sudo docker logs -f forgeyard-agent
 ```
 
 It prints, among other lines:
@@ -114,9 +136,10 @@ INFO forgeyard.agent: Connected to https://192.168.1.20:7860 as 'gpu-01' (9 acce
 ### AMD
 
 ```bash
-docker run -d --name forgeyard-agent --restart always --network host \
+sudo docker run -d --name forgeyard-agent --restart always --network host \
   --device /dev/kfd --device /dev/dri \
-  --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
+  --group-add "$(getent group video | cut -d: -f3)" \
+  --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
@@ -137,7 +160,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 (the image's command already is `forgeyard agent`, so add only `inventory`):
 
 ```bash
-docker run --rm --device /dev/kfd --device /dev/dri \
+sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
   forgeyard-agent:1.1.0 inventory
@@ -146,7 +169,7 @@ docker run --rm --device /dev/kfd --device /dev/dri \
 ### CPU only
 
 ```bash
-docker run -d --name forgeyard-agent --restart always --network host \
+sudo docker run -d --name forgeyard-agent --restart always --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -191,7 +214,7 @@ A machine that already joined keeps its identity if the container gets its state
    join variables:
 
    ```bash
-   docker run -d --name forgeyard-agent --restart always --network host --gpus all \
+   sudo docker run -d --name forgeyard-agent --restart always --network host --gpus all \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -199,7 +222,7 @@ A machine that already joined keeps its identity if the container gets its state
      forgeyard-agent:1.1.0
    ```
 
-4. `docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
+4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
    agent takes over the containers the old one started (they carry its id, which is in the state
    directory).
 

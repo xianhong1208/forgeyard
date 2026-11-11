@@ -161,12 +161,12 @@ export function MachinesPage() {
                 Works once and expires at <strong>{new Date(issued.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>{" "}
                 ({issued.valid_minutes} minutes). It is shown only now; the server keeps just a hash.
               </p>
-              <AddMachineWays issued={issued} />
+              <AddMachineWays issued={issued} tls={tlsInfo} />
               {isLoopback(issued.server_url) && (
                 <Notice>
                   <strong>{issued.server_url}</strong> only works on this computer. For other machines, start the server with{" "}
                   <code>HOST=0.0.0.0</code> and set <code>PUBLIC_URL</code> to an address they can reach (a LAN IP or a Tailscale name),
-                  or replace the address in the command.
+                  or replace the address in the command (the Docker tab has a field for it).
                 </Notice>
               )}
               {issued.ca_fingerprint ? (

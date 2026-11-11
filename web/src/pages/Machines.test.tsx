@@ -36,6 +36,7 @@ const machines = (over: Partial<typeof fixture> = {}) => ({ status: 200, body: {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -182,14 +183,20 @@ describe("machines page", () => {
     expect(screen.getByLabelText("Install command").textContent).toBe(created.install_command);
     expect(screen.getByText(/trusts only the certificate authority with the fingerprint/)).toBeTruthy();
     expect(screen.queryByText(/only works on this computer/)).toBeNull();
+    // Docker: built in the page from the token, the server's address and version (FY-WEB-123..135).
     fireEvent.click(screen.getByRole("tab", { name: "Docker" }));
-    expect(screen.getByLabelText("Build command").textContent).toBe(created.docker_build_command);
-    expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.nvidia);
+    expect(screen.getByLabelText("Build command").textContent).toBe("sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .");
+    const docker = () => screen.getByLabelText("Docker command").textContent ?? "";
+    expect(docker()).toMatch(/^sudo docker run -d --name forgeyard-agent .*\n {2}--gpus all \\\n/);
+    for (const part of ["-e FORGEYARD_SERVER=https://forge.lan:7860", `-e FORGEYARD_CA_FINGERPRINT=${fp}`, "-e FORGEYARD_JOIN_TOKEN=fyj_secret",
+      "-v /srv/forgeyard-models:/srv/forgeyard-models", "-e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models"]) expect(docker()).toContain(part);
+    expect(docker().endsWith("\n  forgeyard-agent:1.1.0")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "AMD" }));
-    expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.amd);
+    expect(docker()).toContain("--device /dev/kfd --device /dev/dri");
+    expect(docker()).not.toContain("--gpus");
     expect(screen.getByText(/given by their number on the host: the image has no render group/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "CPU only" }));
-    expect(screen.getByLabelText("Docker command").textContent).toBe(created.docker_commands.cpu);
+    expect(docker()).not.toMatch(/--gpus|--device/);
     fireEvent.click(screen.getByRole("tab", { name: "Manual (config file)" }));
     expect(screen.getByLabelText("Config file").textContent).toBe(created.config_file);
     expect(screen.getByLabelText("Join command").textContent).toBe(created.manual_commands[0]);
@@ -197,5 +204,78 @@ describe("machines page", () => {
     expect(screen.getByLabelText("Join command with flags").textContent).toBe(created.command);
     // "How do I…?" links go to the guide.
     expect(screen.getByRole("link", { name: "How do I add a machine?" }).getAttribute("href")).toMatch(/^\/guide\/(en|zh-TW)\/quick-start#3-add-a-machine$/);
+  });
+  it("FY-WEB-135 the Docker tab is a form: the command follows it live, bad values give errors, values are remembered", async () => {
+    const fp = "sha256:" + "ab".repeat(32);
+    const created = { id: "t3", created_at: "2026-11-09T10:00:00Z", expires_at: "2026-11-09T10:15:00Z", created_by: "owner",
+      token: "fyj_secret", server_url: "https://forge.lan:7860", valid_minutes: 15, ca_fingerprint: fp, trust_command: null,
+      command: "uv run --no-sync python -m forgeyard agent --join-token fyj_secret", install_command: "curl … | sudo sh",
+      docker_build_command: "unused", docker_commands: { nvidia: "unused", amd: "unused", cpu: "unused" }, config_file: "",
+      manual_commands: [], version: "1.1.1" };
+    const cert = { names: ["localhost", "forge.lan"], ips: ["127.0.0.1", "::1"], expires_at: "2027-11-09T00:00:00Z", issuer: "Forgeyard CA" };
+    server((url, init) => {
+      if (url === "/api/machines") return machines();
+      if (url === "/api/tls") return { status: 200, body: { mode: "forgeyard-ca", https: true, admin: { trust_command: null, server_certificate: cert } } };
+      if (url === "/api/machines/join-tokens" && init?.method === "POST") return { status: 201, body: created };
+      if (url === "/api/machines/join-tokens") return { status: 200, body: { tokens: [] } };
+      return undefined;
+    });
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const view = mount();
+    await screen.findByRole("article", { name: "Machine a100-box" });
+    fireEvent.click(screen.getByRole("button", { name: "Add a machine" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
+    fireEvent.click(await screen.findByRole("tab", { name: "Docker" }));
+    fireEvent.click(screen.getByRole("button", { name: "AMD" }));
+    const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    const docker = () => screen.getByLabelText("Docker command").textContent ?? "";
+    expect((screen.getByLabelText("Server address, as that machine reaches it") as HTMLInputElement).value).toBe("https://forge.lan:7860");
+
+    type("Model directory on that machine", "/data/models");
+    type("Machine name", "amd-01");
+    type("Server address, as that machine reaches it", "https://127.0.0.1:7860");
+    type("Port range", "33000-33002");
+    expect(docker().split(" \\\n  ").slice(-8)).toEqual([
+      "-v /data/models:/data/models", "-e FORGEYARD_SERVER=https://127.0.0.1:7860", `-e FORGEYARD_CA_FINGERPRINT=${fp}`,
+      "-e FORGEYARD_JOIN_TOKEN=fyj_secret", "-e FORGEYARD_MODEL_CACHE=/data/models", "-e FORGEYARD_PORT_RANGE=33000-33002",
+      "-e FORGEYARD_NAME=amd-01", "forgeyard-agent:1.1.1"]);
+    expect(screen.queryByText(/is not in this server's certificate/)).toBeNull(); // 127.0.0.1 is in it
+    // The same values on the other kinds.
+    fireEvent.click(screen.getByRole("button", { name: "CPU only" }));
+    expect(docker()).toContain("-e FORGEYARD_NAME=amd-01");
+
+    // Copy copies exactly what is shown.
+    const block = screen.getByLabelText("Docker command").parentElement!;
+    await act(async () => fireEvent.click(within(block).getByRole("button", { name: /Copy/ })));
+    expect(writeText).toHaveBeenCalledWith(docker());
+
+    // An address the certificate does not cover: a warning naming TLS_EXTRA_NAMES; the command stays.
+    type("Server address, as that machine reaches it", "https://192.168.1.21:7860");
+    expect(screen.getByText(/is not in this server's certificate/).textContent).toContain("192.168.1.21");
+    expect(screen.getByText("TLS_EXTRA_NAMES")).toBeTruthy();
+    expect(docker()).toContain("-e FORGEYARD_SERVER=https://192.168.1.21:7860");
+    fireEvent.click(screen.getByRole("button", { name: "Use this server's address, https://forge.lan:7860" }));
+    expect(docker()).toContain("-e FORGEYARD_SERVER=https://forge.lan:7860");
+    expect(screen.queryByText(/is not in this server's certificate/)).toBeNull();
+
+    // A bad value: its error, and no command to copy.
+    type("Model directory on that machine", "/data/my models");
+    expect(screen.getByText("No spaces: the command is pasted into a shell.")).toBeTruthy();
+    expect(screen.queryByLabelText("Docker command")).toBeNull();
+    expect(screen.getByText("Fix the fields marked above to get the command.")).toBeTruthy();
+    type("Model directory on that machine", "/data/models");
+
+    // Remembered in this browser: a new join command starts from the same values.
+    view.unmount();
+    mount();
+    await screen.findByRole("article", { name: "Machine a100-box" });
+    fireEvent.click(screen.getByRole("button", { name: "Add a machine" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create join command" })));
+    fireEvent.click(await screen.findByRole("tab", { name: "Docker" }));
+    expect((screen.getByLabelText("Model directory on that machine") as HTMLInputElement).value).toBe("/data/models");
+    expect((screen.getByLabelText("Machine name") as HTMLInputElement).value).toBe("amd-01");
+    expect((screen.getByLabelText("Port range") as HTMLInputElement).value).toBe("33000-33002");
+    expect(docker()).toContain("-e FORGEYARD_PORT_RANGE=33000-33002");
   });
 });
