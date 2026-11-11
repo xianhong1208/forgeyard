@@ -78,15 +78,17 @@ do not:
   every key from before 1.2), "only to spill" or "allowed"; cloud-only models do not exist for keys
   that may not use them; a route or a single request can be kept local.
 
-Two pull requests:
+Two pull requests (the second in two parts):
 
 1. **Providers and tiered routing** (PR A, `providers`, in review): OpenAI-compatible endpoints only (OpenAI,
    Anthropic, Gemini, Azure OpenAI, OpenRouter, any compatible server) with a quirks table, no LiteLLM;
    tiered routes; the spill rules; the per-key cloud setting; egress rules; usage per target.
-2. **Cost and budgets** (PR B): prices per provider model (entered by hand, or refreshed from
-   OpenRouter's catalogue with a diff to accept), the cost of each request stored in micro-dollars,
-   monthly budgets (UTC calendar month) per key, person and provider with reservation, alerts at 80%
-   and 100%.
+2. **Cost and budgets** (PR B), in two parts:
+   - B1, `cost` (in review): prices per provider model (entered by hand, or refreshed from
+     OpenRouter's catalogue with a diff to accept), the cost of each request stored in micro-dollars,
+     and **Usage → Cost**;
+   - B2: monthly budgets (UTC calendar month) per key, person and provider with reservation, alerts at
+     80% and 100%.
 
 Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
 and thinking.

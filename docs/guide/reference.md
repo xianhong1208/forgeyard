@@ -92,6 +92,7 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | `PROVIDER_READ_TIMEOUT` | `300` | Seconds a provider may take for its answer's headers or the next piece of a stream (a provider can set its own) |
 | `PROVIDER_COOLDOWN_SECONDS` | `30` | A provider target that answered 429 or 5xx, or could not be reached, is tried last for this long (longer if its `Retry-After` says so, up to 5 minutes) |
 | `PROVIDER_RETRY_AFTER_CAP` | `2` | When no other target is left, a `Retry-After` up to this many seconds is waited for once |
+| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Where **Refresh prices from OpenRouter** reads prices (only when an admin asks; no key is sent). Change it only to test against a stand-in |
 
 Request header `X-Forgeyard-Local-Only: 1`: never a cloud target for this request. Answer headers:
 `X-Forgeyard-Target` (`local:<deployment>#<replica>` or `provider:<provider>/<model>`),
