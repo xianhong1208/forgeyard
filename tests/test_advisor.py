@@ -201,11 +201,14 @@ def test_fy_adv_002_snoozing_is_per_admin_for_30_days_and_never_for_errors(owner
     db = new_session()
     try:
         u = db.scalar(select(User).where(User.username == "owner"))
-        u.preferences = {**(u.preferences or {}), advisor.SNOOZE_PREF: {warn["key"]: (utcnow() - timedelta(minutes=1)).isoformat()}}
+        u.preferences = {**(u.preferences or {}), advisor.SNOOZE_PREF: {
+            warn["key"]: (utcnow() - timedelta(minutes=1)).isoformat(),
+            err["key"]: (utcnow() + timedelta(days=3)).isoformat()}}   # an error never hides, even if stored
         db.commit()
     finally:
         db.close()
-    assert warn["key"] in {f["key"] for f in owner.get("/api/advisor").json()["findings"]}
+    shown = {f["key"] for f in owner.get("/api/advisor").json()["findings"]}
+    assert warn["key"] in shown and err["key"] in shown
     assert ada.post("/api/advisor/snooze", json={"key": warn["key"]}).status_code == 200
 
 
@@ -366,6 +369,10 @@ def test_fy_adv_010_gpus_used_by_others_and_no_choice_made(owner):
     r = owner.put(f"/api/machines/{nid}/gpu-allowlist", json={"keys": None})
     assert r.status_code == 200, r.text
     assert "gpus-shared-no-allowlist" not in findings()
+    other = node("server-c")                     # busy cards, but an allowlist is set
+    edit(Accelerator, gpu(other, 0).id, vram_used=40 * GIB)
+    edit(Node, other, gpu_allowlist=[gpu(other, 1).key])
+    assert "gpus-shared-no-allowlist" not in findings()
 
 
 def test_fy_adv_011_machine_cache_runtimes_and_simulation(owner):
@@ -427,7 +434,7 @@ def test_fy_adv_013_a_card_with_a_running_replica_is_almost_full(owner):
         db.close()
     f = findings()["replica-margin-low"][0]
     assert "qwen3-4b" in f.detail and f.scope == f"gpu:{nid}:2" and "0.3 GiB is free" in f.detail
-    edit(Accelerator, a.id, vram_free=2 * GIB)
+    edit(Accelerator, a.id, vram_free=GIB)
     assert "replica-margin-low" not in findings()
 
 
@@ -490,6 +497,7 @@ def test_fy_adv_016_a_key_that_may_spend_with_no_budget(owner):
     finally:
         db.close()
     capped = key("capped", user_id=uid, cloud="on")   # a user's own key, cap off: effectively Never
+    key("expired", cloud="on", expires_at=utcnow() - timedelta(days=1))
     f = findings()["key-cloud-without-budget"]
     assert [x.scope for x in f] == [f"key:{spill}"] and "Only to spill" in f[0].detail and "cloudy" in f[0].detail
     owner.put("/api/keys/cloud", json={"max": "on"})
@@ -551,6 +559,8 @@ def test_fy_adv_019_cloud_for_keys_open_by_default_or_unreachable(owner):
     assert findings()["cloud-default-open"][0].severity == "info"
     key("k", cloud="fallback")
     assert findings()["cloud-default-open"][0].severity == "warning"
+    owner.put("/api/keys/cloud", json={"default": "off", "max": "on"})
+    assert "cloud-default-open" in findings()    # people may give their own keys Allowed
     owner.put("/api/keys/cloud", json={"default": "off", "max": "off"})
     db = new_session()
     try:
@@ -575,15 +585,18 @@ def test_fy_adv_020_routes_with_tiers_that_cannot_work_as_meant(owner):
     d3 = deployment("lonely")
     r3 = route("lonely", [("local", d3, 0)], spill_on_long_prompt=True)
     r4 = route("dead", [("provider", pm, 0, False)])
+    r5 = route("cloud-only", [("provider", pm, 0)])
     edit(GatewayRoute, rid, local_only=True)
     found = findings()
     assert [f.scope for f in found["route-cloud-before-local"]] == [f"route:{r2}"]
     assert sorted(f.scope for f in found["route-cloud-never-used"]) == sorted([f"route:{rid}", f"route:{r3}"])
     assert [f.scope for f in found["route-no-target"]] == [f"route:{r4}"] and found["route-no-target"][0].severity == "error"
     edit(Provider, pid, enabled=False)
-    assert {f.scope for f in findings()["route-no-target"]} == {f"route:{r4}"}  # chat-m still has its local target
+    # chat-m still has its local target; cloud-only has none left
+    assert {f.scope for f in findings()["route-no-target"]} == {f"route:{r4}", f"route:{r5}"}
     edit(Provider, pid, enabled=True)
-    edit(GatewayRoute, rid, local_only=False)
+    edit(GatewayRoute, rid, local_only=False, spill_on_long_prompt=True)   # a later tier exists: fine
+    assert {f.scope for f in findings()["route-cloud-never-used"]} == {f"route:{r3}"}
     db = new_session()
     try:
         db.get(Deployment, did).workload.desired_state = "stopped"

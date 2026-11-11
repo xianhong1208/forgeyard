@@ -53,7 +53,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 - **Model directory on that machine**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **Machine name**（選填）：這台機器在 **Machines** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
-- **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
+- **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`；`PUBLIC_URL` 空白時，則是你開啟這個頁面時使用的位址）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
 - **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。
 
 欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的標籤就是伺服器的版本。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
@@ -361,6 +361,21 @@ sudo systemctl enable --now forgeyard
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
 
+## 檢查設定健康狀態
+
+Forgeyard 會檢查自己的設定，找出壞掉、有風險或沒有作用的設定和組合：拼錯的設定、可以花錢用雲端供應商卻沒有預算的金鑰、沒有人選擇 GPU 存取的共用機器、比伺服器舊的 agent、先試雲端再試本機層的路由。管理員會在三個地方看到結果：
+
+- **Get started → Setup health** 列出每一項檢查結果，附上該怎麼做，以及到修正位置的連結。
+- **頂端列的數字**顯示錯誤和警告的數量。沒有的時候就不會出現。
+- **相關頁面上的橫幅**（Machines、API keys、Providers、Models、路由、部署、Users）顯示那個頁面的檢查結果。
+
+一般使用者和 operator 都看不到這些。
+
+- **錯誤**代表現在就壞了或不安全。它會一直顯示到修好為止。
+- **警告**代表可能會花錢、外洩或壞掉。**提示**代表沒有作用或出乎意料。這兩種都可以 **Snooze 30 days**：只對你自己隱藏，30 天後如果情況還在就會再出現。**Show snoozed** 會列出它們，並提供 **Show again**。
+
+檢查結果在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報算出來，所以修好之後一分鐘內就會反映（下一個頁面則會立刻反映）。設定的問題也會在伺服器啟動時寫進它的紀錄，每一行都以 `Settings:` 開頭。完整清單在參考資料裡：[Setup health 檢查](reference.md#setup-health-checks)。
+
 ## 備份與還原
 
 **伺服器上要備份的東西**，除非你搬過位置，否則都在它的 `data/` 資料夾裡：
@@ -380,6 +395,8 @@ cp -a data/tls data/secret.key .env /backup/
 ```
 
 PostgreSQL：照常使用 `pg_dump`。
+
+備份好 `secret.key` 之後，到 **Get started → Setup health** 勾選 **I have a backup of key id …**。在有管理員勾選之前，Setup health 會提醒每一位管理員；金鑰更換後也會再次提醒。金鑰本身絕不會離開伺服器：頁面只會顯示它的 id。
 
 **每台機器上**（選擇性）：`/var/lib/forgeyard-agent`（憑據；少了它，機器就得用新的權杖重新加入）和 `/etc/forgeyard/agent.toml`。模型快取隨時可以重新下載。
 

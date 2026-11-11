@@ -993,6 +993,13 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .advisor-warning { background: var(--heat-soft); border-color: #f3d39b; color: #5f3700; }
 .advisor-info { background: var(--info-soft); border-color: #c7d9eb; color: #1e3f5e; }
 .advisor-more { margin: 10px 0 0; }
+/* Admins have ten links plus the badge: keep each link on one line. */
+.mainnav a { white-space: nowrap; }
+@media (min-width: 761px) and (max-width: 1260px) {
+  .topbar-inner { gap: 18px; }
+  .mainnav { gap: 0; }
+  .mainnav a, .navbutton { padding: 0 9px; }
+}
 @media (max-width: 760px) {
   .health-badge { order: 2; margin-left: auto; }
   .finding, .advisor-banner li { grid-template-columns: minmax(0, 1fr); }

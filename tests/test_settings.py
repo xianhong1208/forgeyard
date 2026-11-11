@@ -144,7 +144,8 @@ def test_fy_cfg_006_risky_combinations():
 def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatch):
     """FY-CFG-007: once an owner exists, ADMIN_PASSWORD (warning) and FORGEYARD_SETUP_TOKEN (info)
     are reported. An env seed is reported only when it is set and the database holds another value:
-    not while the seed is still used, nor when they agree. Directories compare case-sensitively."""
+    not while the seed is still used, nor when they agree, nor for a seed that is not set (MODEL_URL_HOSTS
+    here). Directories compare case-sensitively."""
     monkeypatch.setenv("ADMIN_PASSWORD", "some-old-password-1")
     monkeypatch.setenv("GATEWAY_MAX_RPM", "30")
     monkeypatch.setenv("GATEWAY_CLOUD_DEFAULT", "fallback")
@@ -161,7 +162,7 @@ def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatc
         db.close()
     assert owner.put("/api/keys/limits", json={"max_rpm": 30}).status_code == 200      # agrees
     assert owner.put("/api/keys/cloud", json={"default": "off"}).status_code == 200    # differs
-    assert owner.put("/api/model-sources", json={"url_hosts": [], "local_dirs": ["/srv/models"]}).status_code == 200
+    assert owner.put("/api/model-sources", json={"url_hosts": ["mirror.example.org"], "local_dirs": ["/srv/models"]}).status_code == 200
     db = new_session()
     try:
         seeds = _ids(settings_check.database_problems(get_settings(), db))["env-seed-ignored"]

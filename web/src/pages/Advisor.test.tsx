@@ -121,7 +121,7 @@ describe("setup health", () => {
   });
 
   it("FY-WEB-144 a page shows only its own findings as a banner, the first three and a link to the rest", async () => {
-    const mine = [1, 2, 3, 4].map((i) => finding("agent-outdated", "warning", { scope: `machine:${i}`, title: `machine ${i} is old`, pages: ["machines"] }));
+    const mine = [1, 2, 3, 4].map((i) => finding("agent-outdated", "warning", { scope: `machine:${i}`, title: `machine ${i} is old`, pages: ["machines"], fix_url: "/machines" }));
     server((url) => (url === "/api/advisor"
       ? { status: 200, body: report([...mine, finding("key-cloud-without-budget", "warning", { pages: ["keys"], title: "a key thing" })]) }
       : undefined));
@@ -132,6 +132,11 @@ describe("setup health", () => {
       .toEqual(["agent-outdated@machine:1", "agent-outdated@machine:2", "agent-outdated@machine:3"]);
     expect(within(banner).queryByText("a key thing")).toBeNull();
     expect(within(banner).getByText(/And 1 more under/)).toBeTruthy();
+    expect(within(banner).queryByRole("link", { name: "Fix agent-outdated" })).toBeNull(); // its fix is this page
+    cleanup();
+    server((url) => (url === "/api/advisor" ? { status: 200, body: report(mine.map((f) => ({ ...f, fix_url: "/keys" }))) } : undefined));
+    mount("/machines");
+    expect((await screen.findAllByRole("link", { name: "Fix agent-outdated" }))[0].getAttribute("href")).toBe("/keys");
     expect(within(banner).getByRole("link", { name: "Get started → Setup health" }).getAttribute("href")).toBe("/start#setup-health");
   });
 

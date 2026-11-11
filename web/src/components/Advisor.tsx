@@ -93,6 +93,7 @@ export function HealthBadge({ onClick }: { onClick?: () => void }) {
 
 function FindingActions({ f, compact }: { f: Finding; compact?: boolean }) {
   const a = useAdvisor();
+  const { pathname } = useLocation();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   if (!a) return null;
@@ -109,9 +110,12 @@ function FindingActions({ f, compact }: { f: Finding; compact?: boolean }) {
   };
   const kid = backupKid(f);
   const days = a.report?.snooze_days ?? 30;
+  const href = fixHref(f.fix_url);
+  // A banner on the page the fix is on needs no link to it.
+  const here = compact && href.split(/[?#]/)[0] === pathname;
   return (
     <div className="finding-actions">
-      <Link to={fixHref(f.fix_url)} className={`btn btn-small${compact ? " btn-quiet" : ""}`}>{f.fix_label}</Link>
+      {!here && <Link to={href} className={`btn btn-small${compact ? " btn-quiet" : ""}`}>{f.fix_label}</Link>}
       {kid && (
         <button type="button" className="btn btn-small" disabled={busy} onClick={() => void run(() => a.confirmBackup(kid))}>
           <IconCircleCheck size={15} aria-hidden="true" /> I have a backup of key id {kid}
