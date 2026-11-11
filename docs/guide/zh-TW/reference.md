@@ -255,7 +255,7 @@ local_dirs = ["/data/models"]
 | `images`（*Images per request*） | `4` | 一個請求最多可帶的圖片與音訊片段數；0 表示關閉。以 `--limit-mm-per-prompt` 傳給 vLLM |
 | `videos`（*Videos per request*） | `0` | 設為 1 以上才接受影片。在 vLLM 上，啟動時會為一段長影片預留記憶體 |
 | `max_body_mb`（*Largest request*） | `64` | 閘道送給這個部署的最大請求，單位 MiB（超過回 413） |
-| `image_tokens`（*Largest image*，僅 `llama-cpp`） | `1024` | 每張圖片最多縮成這麼多 token（`--image-max-tokens`；Qwen3-VL 約 1024 × 1024 像素）。不設的話，一張 5 MB 的照片約 4,000 token：8 個 CPU 執行緒要 125 秒，幾乎占滿 4,096 token 的上下文 |
+| `image_tokens`（*Largest image*） | `1024` | 每張圖片最多縮成這麼多 token：Qwen3-VL 約 1024 × 1024 像素。`llama-cpp` 透過 `--image-max-tokens`；`vllm` 透過 `--mm-processor-kwargs` 的 `max_pixels`，適用於圖片 token 數會隨解析度增加的模型（Qwen-VL；Gemma 每張圖的 token 數固定）。不設的話，一張 5 MB 的照片在 llama.cpp 約 4,000 token（8 個 CPU 執行緒要 125 秒），在 vLLM 約 16,000 token，超過 8,192 token 的上下文。在這個設定出現之前加入的模型，要重新加入後 vLLM 才會套用上限 |
 
 沒有這些參數的配方：4 張圖片或音訊片段、不接受影片、上限為 `GATEWAY_MAX_BODY_MB`。
 

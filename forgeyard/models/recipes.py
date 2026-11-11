@@ -70,9 +70,10 @@ APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio")
 ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
                         "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
-                        "mmproj_file"}
+                        "mmproj_file", "image_max_pixels"}
 MEDIA_KINDS = ("image", "audio", "video")
-MODEL_FEATURES = ("mmproj",) + MEDIA_KINDS
+# mmproj: a GGUF projector file; image_pixels: image tokens scale with the resolution (vision_tile_px).
+MODEL_FEATURES = ("mmproj", "image_pixels") + MEDIA_KINDS
 # Parameters every recipe has, handled by Forgeyard itself.
 COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
 MAX_RECIPE_BYTES = 64 * 1024

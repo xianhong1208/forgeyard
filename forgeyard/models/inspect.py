@@ -146,6 +146,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
             config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=4 * 1024**2))
             out["config"] = config_summary(config)
             out["modalities"] = modalities.from_config(config, paths)
+            if modalities.vision_tile_px(config):
+                out["vision_tile_px"] = modalities.vision_tile_px(config)
             shards = [p for p in paths if p.endswith(".safetensors") and "/" not in p]
             if not shards:
                 shards = [p for p in paths if p.endswith(".safetensors")]
