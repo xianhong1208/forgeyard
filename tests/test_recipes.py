@@ -62,7 +62,8 @@ def test_fy_rec_002_variant_per_vendor_arch_and_driver():
     assert first_variant("vllm", GTX) is None                  # compute capability 6.1 < 7.0
     assert first_variant("vllm", GFX1151) == "rocm"
     assert first_variant("vllm", GFX1030) is None              # not built for gfx1030
-    assert first_variant("llama-cpp", GFX1030) == "rocm"       # llama.cpp ROCm image: any gfx
+    assert first_variant("llama-cpp", GFX1030) == "rocm"       # a discrete card the ROCm image is built for
+    assert first_variant("llama-cpp", GFX1151) == "vulkan"     # an APU: Vulkan (FY-REC-009)
     assert first_variant("llama-cpp", RTX4090_OLD) is None
     assert first_variant("faster-whisper", RTX4090_OLD) == "cuda-12.4"
     assert first_variant("faster-whisper", A100) == "cuda"
@@ -150,7 +151,7 @@ def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
     runs. Bump with scripts/pin_images.py --write."""
     images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
               if v.runtime == "container"]
-    assert len(images) == 12
+    assert len(images) == 13
     unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
     assert unpinned == []
     # One tag, one digest: the same tag in two recipes (vllm and vllm-pooling) is the same image.
@@ -159,3 +160,57 @@ def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
         tag, digest = image.split("@")
         by_tag.setdefault(tag, set()).add(digest)
     assert all(len(d) == 1 for d in by_tag.values()), by_tag
+
+
+def test_fy_rec_009_llama_cpp_variant_per_card():
+    """FY-REC-009: llama.cpp picks CUDA on NVIDIA, ROCm on the Instinct cards and the discrete Radeon
+    cards its ROCm image is built for, Vulkan on every other AMD GPU (APUs with unified memory,
+    cards the ROCm image lacks, a card whose gfx target is unknown), and the CPU image or process
+    on CPUs."""
+    from forgeyard.agent.inventory import amd
+
+    assert first_variant("llama-cpp", A100) == "cuda"
+    assert first_variant("llama-cpp", {"vendor": "nvidia", "arch": "8.9", "driver": "560.35"}) is None
+    for gfx in ("gfx908", "gfx90a", "gfx942", "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201"):
+        assert first_variant("llama-cpp", {"vendor": "amd", "arch": gfx, "driver": "7.0.2"}) == "rocm", gfx
+    # MI300A is an APU too, but CDNA has no Vulkan: it stays on ROCm.
+    assert first_variant("llama-cpp", {"vendor": "amd", "arch": "gfx942", "driver": "6.4", "unified_memory": True}) == "rocm"
+    for gfx in sorted(amd.APU_GFX) + ["gfx1031", "gfx1032", "gfx1010", None]:
+        assert first_variant("llama-cpp", {"vendor": "amd", "arch": gfx, "driver": "7.0.2"}) == "vulkan", gfx
+    assert first_variant("llama-cpp", {"vendor": "amd", "arch": "gfx1151", "driver": None}) == "vulkan"
+    assert first_variant("llama-cpp", CPU_X86) == "cpu" and first_variant("llama-cpp", CPU_ARM) == "cpu"
+    r = recipes.builtin_recipes()["llama-cpp"][0]
+    assert [v.name for v in r.variants] == ["cuda", "rocm", "vulkan", "cpu", "cpu-process"]
+    assert not set(amd.APU_GFX) & set(r.variant("rocm").when.arch)
+
+
+def test_fy_rec_010_amd_kfd_only_for_amd_containers():
+    """FY-REC-010: `amd_kfd: false` (render node only) is for AMD container variants; the built-in
+    Vulkan variant sets it, ROCm keeps the default (true)."""
+    amd_ctr = MINIMAL.replace("    when: {vendor: cpu}\n", "    when: {vendor: amd}\n    amd_kfd: false\n")
+    assert parse_recipe(amd_ctr).variants[0].amd_kfd is False
+    assert parse_recipe(MINIMAL.replace("{vendor: cpu}", "{vendor: amd}")).variants[0].amd_kfd is True
+    for text in (MINIMAL.replace("    when: {vendor: cpu}\n", "    when: {vendor: cpu}\n    amd_kfd: false\n"),
+                 MINIMAL.replace("    when: {vendor: cpu}\n", "    when: {vendor: nvidia}\n    amd_kfd: false\n"),
+                 amd_ctr.replace("    runtime: container\n    image: example/tiny:1\n",
+                                 "    runtime: process\n    command: /opt/tiny/serve\n")):
+        with pytest.raises(RecipeError, match="amd_kfd is for AMD container variants"):
+            parse_recipe(text)
+    r = recipes.builtin_recipes()["llama-cpp"][0]
+    assert r.variant("vulkan").amd_kfd is False and r.variant("rocm").amd_kfd is True
+
+
+def test_fy_rec_011_llama_cpp_is_one_build_everywhere():
+    """FY-REC-011: every llama.cpp variant runs the recipe's version: each image tag ends in it and
+    the process engine is that build's archive, so a bump cannot leave one variant behind."""
+    r = recipes.builtin_recipes()["llama-cpp"][0]
+    assert r.version == "b12242"
+    for v in r.variants:
+        if v.image:
+            assert v.image.split("@")[0].endswith(f"-{r.version}"), v.image
+            assert v.image.startswith("ghcr.io/ggml-org/llama.cpp:server-"), v.image
+    e = r.variant("cpu-process").engine
+    assert e.url == (f"https://github.com/ggml-org/llama.cpp/releases/download/{r.version}/"
+                     f"llama-{r.version}-bin-ubuntu-x64.tar.gz")
+    assert e.binary == f"llama-{r.version}/llama-server" and re.fullmatch(r"[0-9a-f]{64}", e.sha256)
+    assert r.variant("vulkan").image.startswith("ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:")

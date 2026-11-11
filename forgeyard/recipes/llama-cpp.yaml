@@ -1,32 +1,54 @@
-# llama.cpp's llama-server for GGUF models: NVIDIA, AMD and plain CPUs, in a container or (CPU)
-# as a process that needs no Docker.
+# llama.cpp's llama-server for GGUF models: NVIDIA and AMD GPUs (ROCm or Vulkan) and plain CPUs, in
+# a container or (CPU) as a process that needs no Docker.
 #
-# Pinned: build b11977 (2026-10-29). llama.cpp ships a build per merge rather than stable
-# releases, so the pin is one build for which the official images
-# (ghcr.io/ggml-org/llama.cpp:server-*-b11977) and the release archives exist, so every variant
-# runs the same code: https://github.com/ggml-org/llama.cpp/releases/tag/b11977. The CUDA image is
-# CUDA 12.8 (driver >= 570); the CPU process variant downloads the official Ubuntu x64 archive,
-# checked against the SHA-256 GitHub publishes for it.
+# Pinned: build b12242 (2026-11-10). llama.cpp ships a build per merge rather than stable releases,
+# and publishes images only for some builds, so the pin is one build for which the official images
+# (ghcr.io/ggml-org/llama.cpp:server-*-b12242) and the release archives exist, so every variant runs
+# the same code: https://github.com/ggml-org/llama.cpp/releases/tag/b12242. It is the first build
+# with images after the OpenAI-compatible /v1/audio/speech endpoint was merged
+# (ggml-org/llama.cpp#31763, in b12238), which text-to-speech uses. The CUDA image (`server-cuda`,
+# the same digest as `server-cuda12`) is CUDA 12.8 (driver >= 570); the CPU process variant downloads the official Ubuntu x64 archive, checked
+# against the SHA-256 GitHub publishes for it.
+#
+# AMD (.devops/rocm.Dockerfile and vulkan.Dockerfile at b12242), tried in this order:
+# - rocm: the ROCm 7.2.1 image (7.7 GB compressed), built for gfx908, gfx90a, gfx942, gfx1030, gfx1100,
+#   gfx1101, gfx1102, gfx1150, gfx1151, gfx1200 and gfx1201. It runs the Instinct cards (CDNA, which
+#   have no Vulkan at all, MI300A included) and the discrete Radeon cards of that list. The APU
+#   targets (gfx1150, gfx1151) are left out on purpose: they go to Vulkan.
+# - vulkan: Mesa's RADV driver (Ubuntu 26.04 base, 0.3 GB compressed). Every other AMD GPU:
+#   the APUs with unified memory (Strix Halo gfx1151, Strix Point gfx1150, Phoenix gfx1103 and the
+#   rest), where Vulkan is the path checked on real hardware and needs no ROCm in the image, and
+#   discrete cards the ROCm image was not built for (gfx1031, gfx1032 and other RDNA2 cards). It
+#   needs only the card's render node: amd_kfd: false leaves /dev/kfd (ROCm's compute interface)
+#   out of the container. Its memory is checked against the same pool the inventory reports for
+#   the card: for an APU the larger of the BIOS carve-out and GTT.
+# A machine never chooses: the first variant whose `when` matches a card is used. To run a card on
+# the other one, add a custom recipe with only the variant you want.
 #
 # --fit off and explicit -c / -ngl keep its memory where the estimate puts it: by default
 # llama-server grows its context to fill whatever is free, which on a shared card is someone
 # else's memory.
 #
-# Images, audio and video in chat (1.3; tools/server/server-common.cpp at b11977): a GGUF vision
-# model comes with a projector file (mmproj-*.gguf) in its catalog entry, passed as --mmproj. Video
-# is decoded with ffmpeg (in the official images). llama-server downloads any http(s) URL in a media
+# Images, audio and video in chat (1.3; tools/server/server-common.cpp, the same at b11977 and
+# b12242): a GGUF vision model comes with a projector file (mmproj-*.gguf) in its catalog entry,
+# passed as --mmproj. Video is decoded with ffmpeg (in the official images). llama-server downloads any http(s) URL in a media
 # part with no host check and has no flag to turn that off, so the gateway fetches URLs itself and
 # sends only data: URIs and base64 (and the agent's key guard lets only the gateway reach it);
 # --media-path is never set, so file:// is refused. --image-max-tokens caps what one image takes: by
 # default Qwen3-VL lets a 5 MB photo become ~4,000 tokens (measured: 125 s on 8 CPU threads, and it
 # nearly filled a 4,096-token context), so images are scaled to at most image_tokens (1,024).
+# Video: since ggml-org/llama.cpp#31619 (2026-11-03, tools/mtmd/mtmd-helper.cpp) a model with its own
+# video template (Qwen3-VL, LFM3) is sampled at its reference rate and frame size (Qwen3-VL: 2 frames
+# a second, in pairs, with timestamps) and --video-fps applies only to other models. The 6-second
+# sample clip on Qwen3-VL 2B: 3,565 prompt tokens on b11977 (1 frame a second), 5,345 on b12242.
 name: llama-cpp
 title: llama.cpp
 description: >-
-  GGUF (quantised) models with llama-server: on NVIDIA and AMD GPUs in a container, or on the CPU
-  in a container or as a plain process. OpenAI-compatible API.
+  GGUF (quantised) models with llama-server: on NVIDIA GPUs, AMD GPUs (ROCm, or Vulkan for APUs and
+  other cards) in a container, or on the CPU in a container or as a plain process. OpenAI-compatible
+  API.
 engine: llama.cpp
-version: b11977
+version: b12242
 tasks: [chat]
 formats: [gguf]
 api: {chat: openai-chat}
@@ -63,8 +85,9 @@ params:
   videos: {type: int, default: 0, min: 0, max: 8, advanced: true, label: Videos per request,
            help: "For models with a vision projector. Off (0) by default; each video is decoded into many frames."}
   video_fps: {type: float, default: 1.0, min: 0.1, max: 8.0, advanced: true, label: Video frames per second,
-              help: "Frames read from each second of a video. Each frame costs about as much as an image, so a
-                6-second clip at llama-server's own default (4) took about 11,500 tokens; at 1, about a quarter."}
+              help: "Frames read from each second of a video, for models without their own rate (Qwen3-VL reads 2 a
+                second whatever this says: a 6-second clip took 5,345 tokens). Each frame costs about as much as an
+                image; give video a context of 8,192 or more."}
   max_body_mb: {type: int, default: 64, min: 1, max: 1024, advanced: true, label: Largest request (MiB),
                 help: "Requests larger than this are refused by the gateway (413). Images are sent as base64,
                   a third larger than the files."}
@@ -75,7 +98,7 @@ optional_args:
   - if_model: mmproj
     args: [--mmproj, "{mmproj_file}", --image-max-tokens, "{image_tokens}", --video-fps, "{video_fps}"]
 media: {inputs: [image, audio, video], files: false}
-# The replica's internal key (M4). llama-server b11977 reads --api-key from LLAMA_API_KEY
+# The replica's internal key (M4). llama-server (b11977 to b12242) reads --api-key from LLAMA_API_KEY
 # (common/arg.cpp: .set_env("LLAMA_API_KEY")) and then answers 401 to every path except /health,
 # /v1/health and the web UI's files (tools/server/server-http.cpp: get_public_endpoints).
 api_key_env: LLAMA_API_KEY
@@ -83,19 +106,24 @@ variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=570"}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11977@sha256:0283744a35a6e7698b4f7a2d63360233dc769ece51e84bdba7aa187a33978276
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b12242@sha256:a361e47e28e8801e290f3c855292e0f25047e5d8e998b0d101431f54db68e008
   - name: rocm
+    when: {vendor: amd, arch: [gfx908, gfx90a, gfx942, gfx1030, gfx1100, gfx1101, gfx1102, gfx1200, gfx1201]}
+    runtime: container
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm-b12242@sha256:69b0ab208a2e17294195132ab6c75eb6e9d1828c0b87409891aff86b9726cdfd
+  - name: vulkan
     when: {vendor: amd}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-rocm-b11977@sha256:fbe8b1d0da8ff1fe62819fa2c2d6778d82fac4a9a91887ec7a15fc0c868e3502
+    amd_kfd: false
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:28a56d03c5cc4abeb16b2a5422c5286d9e48020a3cb3416434bff5fbf847bfa6
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-b11977@sha256:01c2bc28d51291536df2ccebe5c6af1cdec9ea9b2bd98ac59556408caf96d3f8
+    image: ghcr.io/ggml-org/llama.cpp:server-b12242@sha256:4d2de15a0ffbce704777c64026b40512a71e0bbc0b303a5fe5ea9bf71760dff9
   - name: cpu-process
     when: {vendor: cpu, arch: [x86_64]}
     runtime: process
     engine:
-      url: https://github.com/ggml-org/llama.cpp/releases/download/b11977/llama-b11977-bin-ubuntu-x64.tar.gz
-      sha256: 3b0c3d7d7f7c492f59bb5625bd077727f5322fff72b964dfa32ceca45bbe5053
-      binary: llama-b11977/llama-server
+      url: https://github.com/ggml-org/llama.cpp/releases/download/b12242/llama-b12242-bin-ubuntu-x64.tar.gz
+      sha256: 909eef25cd53e6601c8a07c866d8dbb2983e74177088d55182137a8fb8255d62
+      binary: llama-b12242/llama-server
