@@ -491,3 +491,47 @@ def test_fy_bdg_016_alerts_reach_the_audit_log_through_the_gateway(priced):
         assert db.scalar(select(AuditEvent.actor_name).where(AuditEvent.action == "budget.warning")) == "forgeyard"
     finally:
         db.close()
+
+
+def test_fy_bdg_017_a_provider_inside_your_network_is_never_budgeted(owner, monkeypatch):
+    """FY-BDG-017: a provider marked as inside your network costs nothing and no budget applies to it,
+    even a budget of 0 on the key and the person."""
+    from forgeyard.config import get_settings
+
+    monkeypatch.setenv("PROVIDER_ALLOW_PRIVATE_HOSTS", "true")
+    get_settings.cache_clear()
+    own = FakeCloud("own")
+    try:
+        p = add_provider(owner, own, name="vpn-vllm", kind="openai_compatible", external=False, allow_http=True)
+        pm = model_id(p, "gpt-mini")
+        r = owner.post("/api/routes", json={"served_name": "own", "api": "openai-chat",
+                                            "targets": [{"kind": "provider", "provider_model_id": pm}]})
+        assert r.status_code == 201, r.text
+        api = api_client(owner, cloud_key(owner, "k", "off", budget_micros=0))
+        owner.put("/api/budgets/people/1", json={"budget_micros": 0})
+        r = api.post("/v1/chat/completions", json={"model": "own", "messages": []})
+        assert r.status_code == 200 and "x-forgeyard-budget-exhausted" not in r.headers
+        assert ledger._held == {} and "budget" not in owner.get(f"/api/providers/{p['id']}").json()["provider"]
+    finally:
+        own.close()
+
+
+def test_fy_bdg_018_a_providers_own_failure_is_said_before_a_budget(priced, monkeypatch):
+    """FY-BDG-018: one provider kept out by its budget and the other failing: the client gets the
+    provider's error (502), still with the header naming the budget."""
+    m = priced
+    monkeypatch.setattr(proxy, "rng", _Fixed())
+    second = FakeCloud("second")
+    try:
+        p2 = add_provider(m.owner, second, name="second")
+        pm2 = model_id(p2, "gpt-mini")
+        m.owner.patch(f"/api/provider-models/{pm2}", json=GPT)
+        set_tiers(m.owner, "chat", [[("local", m.dep)], [("provider", m.pm), ("provider", pm2)]])
+        m.owner.put(f"/api/budgets/providers/{m.provider['id']}", json={"budget_micros": 0})
+        second.status = 500
+        set_state("chat", 0, "starting", "loading")
+        r = send(m)
+        assert r.status_code == 502 and r.json()["error"]["code"] == "provider_error"
+        assert r.headers["x-forgeyard-budget-exhausted"] == "provider:cloudy" and ledger._held == {}
+    finally:
+        second.close()

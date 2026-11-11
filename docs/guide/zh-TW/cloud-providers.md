@@ -56,7 +56,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 要用自己的名稱提供雲端模型，請到 **Models** 的 **Routes and cloud**，選 **New route**。填入用戶端會以 `model` 送出的名稱，再加入供應商的模型。只有雲端設定為 **Allowed** 的金鑰看得到這種路由。
 
-每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused` 或 `too_long`。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
+每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
 
 ## 請求何時溢出
 
@@ -237,7 +237,7 @@ prompt size (about 3 bytes a token, on the high side) × input price
 
 ### 80% 與 100% 的警示
 
-預算本月的花費超過 **80%**、以及到達 **100%** 時，Forgeyard 會在 **Audit** 稽核紀錄寫一筆事件（`budget.warning`、`budget.exhausted`），每個預算每個月各一次，重新啟動後也不會重複。預算已經超過 80% 時有請求被它擋下，也算到達 100%。頁面上也看得到：
+預算本月的花費超過 **80%**、以及到達 **100%** 時，Forgeyard 會在 **Audit** 稽核紀錄寫一筆事件（`budget.warning`、`budget.exhausted`），每個預算每個月各一次，重新啟動後也不會重複。預算的花費加上預留已經超過 80% 時有請求被它擋下，也算到達 100%（低於這個比例時，單一過大的請求被擋下不會發出警示）。頁面上也看得到：
 
 - **API keys**：每把金鑰一個量表（已花費 / 預算，以及進行中請求預留的金額）、你自己的預算，以及超過 80% 的警告；
 - **Usage → Cost**：*Budgets this month*，列出適用於你的每個預算（管理員：所有人的，以及供應商的）；

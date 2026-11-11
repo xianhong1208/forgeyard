@@ -92,7 +92,8 @@ keys whose cloud setting is **Allowed** see such a route.
 
 Every answer says who served it, in the header `X-Forgeyard-Target`: `local:<deployment>#<replica>`
 or `provider:<provider>/<model>`. When a request moved past the first tier, `X-Forgeyard-Spilled`
-says why: `unavailable`, `busy`, `refused` or `too_long`. The `model` in the answer's body is what
+says why: `unavailable`, `busy`, `refused`, `too_long`, or `budget` (a [budget](#budgets) kept it
+from the cloud tier before). The `model` in the answer's body is what
 the upstream wrote. The Playground shows the target under each answer.
 
 ## When a request spills
@@ -347,7 +348,8 @@ is used as before, and counted as *without a price*.
 
 When a budget's spend this month passes **80%**, and again at **100%**, Forgeyard writes one event to
 the **Audit** log (`budget.warning`, `budget.exhausted`), once per budget and month, also across
-restarts. A request refused by a budget that is already past 80% counts as reaching 100%. The pages
+restarts. A request refused by a budget whose spend and reservations together are already past 80%
+counts as reaching 100% (a single oversized request refused below that does not alert). The pages
 show it too:
 
 - **API keys**: a meter per key (spent of budget, and what is reserved by requests in flight), your
