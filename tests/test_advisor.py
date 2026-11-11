@@ -249,7 +249,7 @@ def test_fy_adv_004_settings_problems_are_findings(owner, monkeypatch):
     monkeypatch.setenv("MODEL_ALLOW_PRIVATE_HOSTS", "true")
     get_settings.cache_clear()
     found = findings()
-    assert found["setting-unknown"][0].scope == "setting:GATEWAY_CLOUD_DEFUALT"
+    assert "setting:GATEWAY_CLOUD_DEFUALT" in {f.scope for f in found["setting-unknown"]}
     assert found["private-hosts-allowed"][0].severity == "warning"
     assert found["setup-token-left"][0].severity == "info"
 

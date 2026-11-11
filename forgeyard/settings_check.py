@@ -28,9 +28,10 @@ from forgeyard.config import Settings
 
 REFERENCE = "/guide/en/reference"
 
-# Names with these prefixes belong to Forgeyard: an unknown one is a typo or a removed setting.
-PREFIXES = ("GATEWAY_", "PROVIDER_", "EGRESS_", "MODEL_", "TLS_", "AGENT_", "BUDGET_", "SESSION_", "LOGIN_",
-            "COOKIE_", "RATE_LIMIT", "OPENROUTER_", "USAGE_", "ADMIN_", "GPU_", "VRAM_", "MEDIA_", "FORGEYARD_")
+# Names in the environment with these prefixes belong to Forgeyard: an unknown one is a typo or a
+# removed setting. Only prefixes no other software uses: AGENT_, MODEL_, TLS_ or SESSION_ are common
+# elsewhere (a CI runner sets AGENT_TOOLSDIRECTORY), so those names count only when they are close.
+PREFIXES = ("GATEWAY_", "PROVIDER_", "EGRESS_", "BUDGET_", "OPENROUTER_", "VRAM_", "FORGEYARD_")
 # Unprefixed names in the environment are checked only when they are this close to a setting:
 # the environment holds everything else on the machine (HOME, PATH, HOSTNAME...).
 CLOSE_ENOUGH = 0.85

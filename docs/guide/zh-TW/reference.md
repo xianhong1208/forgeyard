@@ -305,7 +305,7 @@ local_dirs = ["/data/models"]
 
 | Id | 嚴重程度 | 何時出現 |
 |---|---|---|
-| `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`TLS_`、`MODEL_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
+| `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`PROVIDER_`、`EGRESS_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
 | `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
 | `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `SECRET_KEY_FILE` 都有設定 |
 | `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 × `AGENT_HEARTBEAT_SECONDS` |

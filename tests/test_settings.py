@@ -74,16 +74,19 @@ def test_fy_cfg_002_the_reference_has_every_setting_and_only_real_ones():
 
 def test_fy_cfg_003_unknown_names_get_did_you_mean():
     """FY-CFG-003: a name in .env that is not a setting is reported, with the closest setting; in the
-    environment only names with a Forgeyard prefix or very close to a setting are (HOME, PATH and
-    HOSTNAME are not); settings in another case, and the agent's FORGEYARD_* names, are fine."""
+    environment only names with a prefix only Forgeyard uses (GATEWAY_, PROVIDER_…) or very close to a
+    setting are (HOME, PATH, HOSTNAME, a CI runner's AGENT_TOOLSDIRECTORY are not); settings in another case, and the agent's FORGEYARD_* names, are fine."""
     env = {"HOME": "/root", "PATH": "/bin", "HOSTNAME": "x", "public_url": "https://a", "GATEWAY_CLOUD_DEFUALT": "on",
            "PUBLC_URL": "https://b", "FORGEYARD_SERVER": "https://s", "FORGEYARD_MODEL_CACHE": "/srv",
-           "FORGEYARD_SECRET_KEY_FILE": "/k", "HF_HOME": "/hf", "TLS": "on"}
+           "FORGEYARD_SECRET_KEY_FILE": "/k", "HF_HOME": "/hf", "TLS": "on",
+           "AGENT_TOOLSDIRECTORY": "/opt/hostedtoolcache", "MODEL_NAME": "x", "TLS_VERSION": "1.3",
+           "AGENT_OFFLINE_SECOND": "40"}
     found = {name: (where, hint) for name, where, hint in
              settings_check.unknown_names(env, ["DATA_DIRS", "PORT", "TOTALLY_UNRELATED"])}
     assert found == {"DATA_DIRS": (".env", "DATA_DIR"), "TOTALLY_UNRELATED": (".env", None),
                      "GATEWAY_CLOUD_DEFUALT": ("the environment", "GATEWAY_CLOUD_DEFAULT"),
                      "PUBLC_URL": ("the environment", "PUBLIC_URL"),
+                     "AGENT_OFFLINE_SECOND": ("the environment", "AGENT_OFFLINE_SECONDS"),
                      "FORGEYARD_SECRET_KEY_FILE": ("the environment", "FORGEYARD_SECRET_KEY")}
     probs = settings_check.static_problems(Settings(_env_file=None), env, ["DATA_DIRS"])
     p = next(p for p in probs if p.scope == "setting:DATA_DIRS")
