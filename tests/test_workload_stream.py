@@ -44,7 +44,7 @@ def test_fy_wst_001_desired_on_connect_and_on_change(owner):
     with connect(owner, j["credential"]) as ws:
         online(ws)
         first = recv_type(ws, "desired")
-        assert first["replicas"] == [] and first["revision"] == 1
+        assert first["replicas"] == [] and first["revision"] > 0
         keys = {a["index"]: a["key"] for a in owner.get("/api/machines").json()["machines"][0]["accelerators"]
                 if a["vendor"] == "nvidia"}
         owner.put(f"/api/machines/{j['node_id']}/gpu-allowlist", json={"keys": [keys[4]]})
@@ -168,3 +168,21 @@ def test_fy_wst_007_unanswered_log_requests_time_out_to_the_stored_tail(owner, m
         wid = owner.post("/api/workloads", json=task(machine_id=j["node_id"])).json()["workload"]["id"]
         r = owner.get(f"/api/workloads/{wid}/replicas/0/logs").json()
         assert r["source"] == "stored" and "did not answer" in r["note"]
+
+
+def test_fy_wst_008_a_new_connection_counts_above_the_old_one(owner):
+    """FY-WST-008: revisions keep growing across connections (a network drop, a server restart), so an
+    agent that remembers the highest one it saw never takes a new connection's lists for old ones.
+    Agents up to 1.2.0 did, and silently took no new work after a reconnect."""
+    j = joined(owner)
+    with connect(owner, j["credential"]) as ws:
+        online(ws)
+        first = recv_type(ws, "desired")
+        r = owner.post("/api/workloads", json=task(machine_id=j["node_id"]))
+        assert r.status_code == 201, r.text
+        last = recv_type(ws, "desired")["revision"]
+    with connect(owner, j["credential"]) as ws:
+        online(ws)
+        again = recv_type(ws, "desired")
+        assert again["revision"] > last > first["revision"]
+        assert [x["workload"] for x in again["replicas"]] == ["job"]

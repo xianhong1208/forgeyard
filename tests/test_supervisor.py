@@ -394,3 +394,27 @@ def test_fy_sup_014_replicas_started_together_get_different_ports(tmp_path):
         assert asyncio.run(scenario()) == [30000, 30001, 30002, 30003]
     finally:
         reap_all(rt)
+
+
+def test_fy_sup_015_a_new_connection_starts_its_own_order_of_revisions(tmp_path, caplog):
+    """FY-SUP-015: on one connection an older list is ignored (and logged); a new connection starts a
+    new order, so its first list is taken even when its revision is lower than the last one seen."""
+    sup, rt = make(tmp_path)
+
+    async def scenario():
+        sup.set_desired(desired(replica("r1", sleeper()), revision=50))
+        await converge(sup, lambda s: s.records["r1"].state == "running")
+        with caplog.at_level("INFO", logger="forgeyard.agent"):
+            sup.set_desired(desired(revision=7))
+        await converge(sup)
+        assert "r1" in sup.records and "Ignored an older desired state (revision 7, after 50)" in caplog.text
+        sup.new_connection()
+        sup.set_desired(desired(replica("r1", sleeper()), replica("r2", sleeper("other")), revision=1))
+        await converge(sup, lambda s: "r2" in s.records and s.records["r2"].state == "running")
+        sup.set_desired(desired(revision=2))
+        await converge(sup, lambda s: not s.records)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        reap_all(rt)
