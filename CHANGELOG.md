@@ -6,6 +6,10 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-11-11
+
+AMD on real hardware. Fixed against a real Strix Halo machine (Radeon 8060S, gfx1151 APU, ROCm 7.0.2, amd-smi 26.0.2), where the agent image now reads the card fully through the amdsmi library.
+
 First run on a real AMD machine (Ryzen AI MAX+ 395 / Radeon 8060S, gfx1151, ROCm 7.0.2, amd-smi
 26.0.2, agent image 1.1.0); its tool output is now a test fixture (`tests/fixtures/strix-halo-gfx1151-amdsmi26`).
 
