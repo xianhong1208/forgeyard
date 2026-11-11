@@ -115,9 +115,9 @@ export function UsagePage() {
                       <div className={data.group_by === "model" || data.group_by === "day" ? "mono" : ""}>{r.name}</div>
                       <span className="bar usage-bar" aria-hidden="true"><span style={{ width: `${Math.round((r.requests / max) * 100)}%` }} /></span>
                     </td>
-                    <td data-label="Requests" className="num">{num(r.requests)}{r.spilled ? <span className="muted small"> · {num(r.spilled)} spilled</span> : null}</td>
-                    <td data-label="Errors" className="num">{num(r.errors)}{r.limited > 0 && <span className="muted small"> · {num(r.limited)} limited</span>}</td>
-                    <td data-label="Tokens in" className="num">{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</td>
+                    <td data-label="Requests" className="num"><span>{num(r.requests)}{r.spilled ? <span className="muted small"> · {num(r.spilled)} spilled</span> : null}</span></td>
+                    <td data-label="Errors" className="num"><span>{num(r.errors)}{r.limited > 0 && <span className="muted small"> · {num(r.limited)} limited</span>}</span></td>
+                    <td data-label="Tokens in" className="num"><span>{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span></td>
                     <td data-label="Tokens out" className="num">{num(r.completion_tokens)}</td>
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
@@ -175,10 +175,10 @@ function CostView({ data }: { data: UsageResponse }) {
                     </div>
                   </td>
                   <td data-label="Requests" className="num">{num(r.requests)}</td>
-                  <td data-label="Tokens" className="num">{num(r.tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</td>
+                  <td data-label="Tokens" className="num"><span>{num(r.tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span></td>
                   <td data-label="Cost" className="num strong">{usd(r.cost_micros)}</td>
                   <td data-label="Share" className="num">{share(r.cost_micros ?? 0, t.cost_micros ?? 0)}</td>
-                  <td data-label="Without a price" className="num">{r.unpriced ? <span className="usage-bad">{num(r.unpriced)}</span> : <span className="muted">0</span>}</td>
+                  <td data-label="Unpriced" className="num">{r.unpriced ? <span className="usage-bad">{num(r.unpriced)}</span> : <span className="muted">0</span>}</td>
                 </tr>
               ))}
             </tbody>

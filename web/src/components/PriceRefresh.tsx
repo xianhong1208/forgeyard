@@ -38,7 +38,8 @@ function Diff({ row }: { row: PriceRow }) {
           <li key={f} className={same ? "muted" : ""}>
             <span className="price-diff-name">{PRICE_LABEL[f]}</span>{" "}
             {same ? <span className="mono">{perMillion(after[f])}</span> : (
-              <><s className="mono muted">{perMillion(row.before[f])}</s> <span aria-label="becomes">→</span> <strong className="mono">{perMillion(after[f])}</strong></>
+              <>{row.before[f] === null ? <span className="muted">not set</span> : <s className="mono muted">{perMillion(row.before[f])}</s>}{" "}
+                <span aria-label="becomes">→</span> <strong className="mono">{perMillion(after[f])}</strong></>
             )}
           </li>
         );
@@ -60,9 +61,13 @@ export function PriceRefresh({ providerId, onClose, onApplied }: { providerId?: 
     const body = { provider_id: providerId ?? null, refs: Object.fromEntries(Object.entries(chosen).filter(([, v]) => v.trim())) };
     return api<PricePreview>("/prices/openrouter/preview", { method: "POST", body });
   }, [providerId]);
+  // A row keeps its tick while its match stays the same; a new match (one the admin just typed) starts
+  // ticked when it is confirmed.
   const show = (out: PricePreview) => {
+    const before = new Map((data?.rows ?? []).map((r) => [r.model_id, r.ref]));
     setData(out);
-    setPicked((was) => Object.fromEntries(out.rows.map((r) => [r.model_id, r.after !== null && (was[r.model_id] ?? ticked(r))])));
+    setPicked((was) => Object.fromEntries(out.rows.map((r) => [r.model_id, r.after !== null
+      && (before.get(r.model_id) === r.ref && r.model_id in was ? was[r.model_id] : ticked(r))])));
   };
   const load = async (chosen: Record<number, string>) => {
     setLoading(true);

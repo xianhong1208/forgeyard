@@ -128,11 +128,13 @@ export function ProvidersPage() {
                   <td data-label="Key" className="mono small">{p.key_hint ?? <span className="muted">none</span>}</td>
                   <td data-label="Where"><WhereChip p={p} /></td>
                   <td data-label="Models" className="small">
+                    <div>
                     {p.models.length ? p.models.map((m) => (
                       <div key={m.id}><span className="mono">{m.upstream_model}</span>
                         {p.external && <span className="muted"> · {m.price_input === null && m.price_output === null ? "no price" : `${perMillion(m.price_input)} / ${perMillion(m.price_output)}`}</span>}
                         {m.cooldown_s > 0 && <> <span className="chip chip-tone-bad" title="It failed recently and is tried last">cooling {Math.ceil(m.cooldown_s)} s</span></>}</div>
                     )) : <span className="muted">none yet</span>}
+                    </div>
                   </td>
                   {admin && (
                     <td className="cell-actions">

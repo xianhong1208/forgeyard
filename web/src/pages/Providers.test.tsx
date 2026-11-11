@@ -174,7 +174,9 @@ describe("Prices", () => {
     server((url, init) => {
       if (url === "/api/prices/openrouter/preview") {
         previews.push(JSON.parse(String(init?.body)));
-        return { status: 200, body: { checked_at: "2026-11-11T00:00:00Z", listed: 470, matched: 2, changed: 2, rows } };
+        const typed = { ...rows[2], ref: "openai/gpt-4.1", match: "confirmed", after: { ...before, price_input: 2_000_000, price_output: 8_000_000 }, changed: true };
+        return { status: 200, body: { checked_at: "2026-11-11T00:00:00Z", listed: 470, matched: 2, changed: 2,
+          rows: previews.length > 1 ? [rows[0], rows[1], typed] : rows } };
       }
       if (url === "/api/prices/openrouter/apply") {
         applied.push(JSON.parse(String(init?.body)));
@@ -199,6 +201,8 @@ describe("Prices", () => {
     fireEvent.change(within(none).getByLabelText("OpenRouter id for my-ft"), { target: { value: "openai/gpt-4.1" } });
     fireEvent.click(within(none).getByRole("button", { name: "Compare" }));
     await waitFor(() => expect(previews[1]).toEqual({ provider_id: 3, refs: { 10: "openai/gpt-4.1" } }));
+    await waitFor(() => expect((within(within(dialog).getByText("my-ft").closest("tr") as HTMLElement).getByRole("checkbox") as HTMLInputElement).checked).toBe(true));
+    fireEvent.click(within(within(dialog).getByText("my-ft").closest("tr") as HTMLElement).getByRole("checkbox"));
     fireEvent.click(within(dialog).getByRole("button", { name: "Apply 1 ticked" }));
     await waitFor(() => expect(applied).toEqual([{ items: [{ model_id: 8, ref: "openai/gpt-4o-mini", price_input: 200_000, price_output: 600_000,
       price_cache_read: null, price_cache_write: null, overwrite_manual: false }] }]));
