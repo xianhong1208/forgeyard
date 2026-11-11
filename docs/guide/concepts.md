@@ -97,6 +97,8 @@ A **deployment** runs one model with one recipe, as one or more replicas. Forgey
 Every ready deployment answers at **`https://<server>:7860/v1`**, the **gateway**, under its model
 name, with the OpenAI API: `/v1/models`, `/v1/chat/completions`, `/v1/completions`,
 `/v1/embeddings`, `/v1/rerank`, `/v1/score`, `/v1/audio/transcriptions` and `/translations`.
+`/v1/models` lists the models your key may use; a stopped deployment leaves the list until it is
+started again, unless its route can send the request to a cloud provider your key may use.
 
 The gateway sends each request to the ready replica with the fewest requests in flight, and to the
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
