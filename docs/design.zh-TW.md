@@ -10,7 +10,7 @@ server 不需要能連到機器。
 1. admin 在 **Machines → Add a machine** 取得**一次性加入 token**（只能用一次、15 分鐘內有效、只顯示一次、
    伺服器只存雜湊），有三種用法：單行安裝（server 提供的 `install.sh`：裝上與 server 同版本的 agent、寫好
    `/etc/forgeyard/agent.toml`、建立 `KillMode=process` 的 systemd 服務）、agent 的 Docker 映像檔
-   （`Dockerfile.agent`），或在 Forgeyard 目錄裡搭配設定檔執行。見[使用指南](guide/zh-TW/quick-start.md#3-add-a-machine)。
+   （`Dockerfile.agent`，每個版本都會發布，見[容器映像檔](#容器映像檔)），或在 Forgeyard 目錄裡搭配設定檔執行。見[使用指南](guide/zh-TW/quick-start.md#3-add-a-machine)。
 2. 不論哪種方式，agent 加入的流程都一樣，例如在 Forgeyard 目錄裡：
 
    ```bash
@@ -402,3 +402,30 @@ Kong 與 GPUStack 之後決定。
   而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 與供應商金鑰要重新輸入，
   replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。
+
+## 容器映像檔
+
+兩個映像檔都從這個 repository 建置，在推送版本 tag `vX.Y.Z` 時由 `.github/workflows/publish-images.yml`
+發布到 Docker Hub：`docker.io/<namespace>/forgeyard`（伺服器，`Dockerfile.server`）與
+`docker.io/<namespace>/forgeyard-agent`（`Dockerfile.agent`）。
+
+- **名稱只寫在一個地方。**`forgeyard/install/images.py` 存放 Docker Hub 的 namespace（`DOCKERHUB_NAMESPACE`）
+  與 repository 名稱。發布的 workflow 從這裡讀取（`scripts/publish_plan.py`），伺服器在 **Add a machine** 產生
+  agent 的 `docker run` 時也是。namespace 是空的就代表還沒有發布：頁面會改用本機建置的
+  `forgeyard-agent:<version>`，並顯示它的 `docker build`。
+- **agent 的 tag 就是伺服器的版本**，所以機器上跑的永遠是和伺服器同版本的 agent。`AGENT_IMAGE` 可以換掉
+  repository（鏡像站、私有 registry）、tag，或加上 digest；因為它會出現在使用者貼上的指令裡，啟動時會依
+  Docker 的映像檔名稱語法檢查。
+- **平台：**linux/amd64 與 linux/arm64，用 buildx 建置（arm64 在 runner 上透過 QEMU）。伺服器的網頁介面只在
+  建置平台上的 node 階段建置一次：每個平台的產出都一樣。agent 的 ROCm 輔助套件（libdrm）和 ROCm 一樣只有
+  amd64；NVML 則來自純 Python 套件，兩個平台都有。
+- **伺服器映像檔**完全依照 `uv.lock` 安裝（不含 dev 群組，含 PostgreSQL），以 uid 10001 執行，把
+  `DATA_DIR=/data` 放在 volume 裡，在 `0.0.0.0:7860` 監聽。它的 `HEALTHCHECK`
+  （`forgeyard/install/healthcheck.py`）透過容器的 loopback 詢問 `/api/health`，不驗證憑證：請求不會離開容器，
+  也不帶任何憑據；驗證反而會因為和健康無關的原因失敗（自己的憑證上寫的是對外的主機名稱）。
+- **tag：**`X.Y.Z`、`X.Y` 與 `latest`；預發布版本只有 `X.Y.Z`。tag 和 `forgeyard/__init__.py` 的版本不符時，
+  workflow 會停止。每個映像檔都有 OCI 標籤、provenance（`mode=max`）與 SBOM。推送後會用 digest 拉回 amd64
+  映像檔，跑和 CI 相同的冒煙測試（`scripts/agent_image_smoke.sh`、`scripts/server_image_smoke.sh`）；
+  digest 會寫進該次執行的摘要。
+- **沒有 Docker Hub 的 secrets**（`DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`）或 namespace，或在分支上手動執行時，
+  workflow 仍會為兩個平台建置兩個映像檔、對 amd64 映像檔跑冒煙測試，並以綠燈結束，用提示說明為什麼沒有推送。

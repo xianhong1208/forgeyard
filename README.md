@@ -25,7 +25,7 @@ Everything you need to set it up and use it is in the **[guide](docs/guide/READM
 |---|---|
 | [Quick start](docs/guide/quick-start.md) | from nothing to your first `/v1` call in about ten minutes |
 | [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, workloads, models, deployments and the gateway, keys, roles |
-| [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
+| [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the server and the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
 | [Cloud providers](docs/guide/cloud-providers.md) | OpenAI, Anthropic, Gemini, Azure, OpenRouter or your own server behind `/v1`; when a request spills; which keys may use the cloud |
 | [Troubleshooting](docs/guide/troubleshooting.md) | problems seen on real machines, with their fix |
 | [Reference](docs/guide/reference.md) | every server and agent setting, the command line, files and ports |
@@ -46,6 +46,18 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 It speaks HTTPS from its own certificate authority, prints a one-time setup token for `/setup`,
 and keeps everything in `data/` (back up the database, `data/secret.key` and `data/tls/`).
 
+Or with Docker, two commands and nothing to build (the images are on Docker Hub for linux/amd64
+and linux/arm64):
+
+```bash
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/<namespace>/forgeyard:1.2.0
+sudo docker logs forgeyard      # the one-time setup token
+```
+
+The image keeps everything in the `forgeyard-data` volume; backups, upgrades by tag and pinning a
+digest: [Run the server in Docker](docs/guide/how-to.md#run-the-server-in-docker).
+
 A machine: **Machines → Add a machine** gives a one-line install that checks the server's CA
 against its fingerprint, then installs the agent of the server's own version as a systemd service:
 
@@ -57,8 +69,8 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
   sudo sh -s -- --join fyj_… --ca-fingerprint sha256:3f9a…
 ```
 
-Or one `docker run` of the agent image (`docker build -f Dockerfile.agent -t forgeyard-agent:<version> .`),
-or a checkout with `/etc/forgeyard/agent.toml`. Then deploy a model on **Models** and call it at
+Or one `docker run` of the agent image, `docker.io/<namespace>/forgeyard-agent` at the server's
+version (the **Docker** tab writes the command), or a checkout with `/etc/forgeyard/agent.toml`. Then deploy a model on **Models** and call it at
 `https://192.168.1.20:7860/v1` with an API key and any OpenAI client.
 
 **Upgrading from 1.0:** `uv sync`, restart the server, then run the one-time `agent trust`
@@ -94,6 +106,7 @@ npm run lint && npm run typecheck && npm test && npm run build
 cd ..
 shellcheck -s sh forgeyard/install/install.sh  # the install script stays POSIX sh
 docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image_smoke.sh forgeyard-agent:dev
+docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smoke.sh forgeyard:dev
 ```
 
 Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrade head`, and a
@@ -131,10 +144,12 @@ project.
 | `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
 | `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks |
-| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page |
+| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, the published images' names (`images.py`), the server image's health check |
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
+| `Dockerfile.server`, `scripts/server_image_smoke.sh` | the server's container image and its CI smoke test |
+| `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | a release tag publishes both images on Docker Hub |
 | `scripts/accept_m3.py`, `accept_m4.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |

@@ -47,24 +47,18 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 ## 用 Docker 執行 agent
 
-每台機器執行一個 `docker run`，取代安裝腳本。映像檔要從 Forgeyard 的 repository 建置，目前還沒有公開發布。
+每台機器執行一個 `docker run`，取代安裝腳本。每個版本發布時，都會把 agent 映像檔發布到 Docker Hub 的 `docker.io/<namespace>/forgeyard-agent`，支援 linux/amd64 和 linux/arm64（AMD 顯示卡只能用 amd64：ROCm 只支援 x86_64），tag 就是該版本的版本號。指令會拉取和你的伺服器相符的那一版。
 
-**Machines** → **Add a machine** → **Docker** 會幫你產生這兩個指令：選好機器的顯示卡（NVIDIA、AMD 或 CPU only），再填好指令上方的表單。指令會隨著你輸入即時更新，**Copy** 複製的就是畫面上顯示的內容，填過的值也會記在這個瀏覽器裡，下一台機器直接沿用：
+**Machines** → **Add a machine** → **Docker** 會幫你產生這個指令：選好機器的顯示卡（NVIDIA、AMD 或 CPU only），再填好指令上方的表單。指令會隨著你輸入即時更新，**Copy** 複製的就是畫面上顯示的內容，填過的值也會記在這個瀏覽器裡，下一台機器直接沿用：
 
 - **Model directory on that machine**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **Machine name**（選填）：這台機器在 **Machines** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
 - **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
 - **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。
 
-欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的標籤就是伺服器的版本。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
+欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的 tag 就是伺服器自己的版本，所以 agent 和伺服器的版本永遠一致。管理員可以用 [`AGENT_IMAGE`](reference.md#machines) 讓指令改用鏡像站、私有 registry 或指定的 digest。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
 
-### 建置映像檔
-
-在這台機器上（或在另一台機器上建置，再用 `docker save` 和 `docker load` 搬過去），在和伺服器同版本的 Forgeyard 原始碼目錄中執行：
-
-```bash
-sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.2.0 .
-```
+連不到 Docker Hub 的機器，可以用檔案的方式取得映像檔，或自己建置：見[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)。
 
 ### NVIDIA
 
@@ -80,7 +74,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.2.0
+  docker.io/<namespace>/forgeyard-agent:1.2.0
 ```
 
 接著：
@@ -112,7 +106,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.2.0
+  docker.io/<namespace>/forgeyard-agent:1.2.0
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -123,7 +117,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  forgeyard-agent:1.2.0 inventory
+  docker.io/<namespace>/forgeyard-agent:1.2.0 inventory
 ```
 
 ### 純 CPU
@@ -137,7 +131,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.2.0
+  docker.io/<namespace>/forgeyard-agent:1.2.0
 ```
 
 ### 為什麼要用這些選項
@@ -150,11 +144,36 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 - agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程類工作負載時切換到無特權帳號 `forgeyard-run`。工作負載絕不會以 root 執行。
 - 容器裡沒有 systemd，所以行程類工作負載用 rlimit 限制資源（映像檔已設定 `FORGEYARD_LIMITS=rlimit`）。行程類工作負載在 agent 的容器裡執行，會隨容器一起停止；模型和容器類工作負載則會繼續在主機上執行。
 
+### 離線機器，或自己建置映像檔
+
+頁面把這些放在 **Advanced / offline** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
+
+```bash
+sudo docker pull docker.io/<namespace>/forgeyard-agent:1.2.0 && \
+  sudo docker save docker.io/<namespace>/forgeyard-agent:1.2.0 | gzip > forgeyard-agent.tar.gz
+```
+
+把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
+
+```bash
+gunzip -c forgeyard-agent.tar.gz | sudo docker load
+```
+
+如果兩台機器的架構不同（x86_64 和 arm64），在 `docker pull` 加上 `--platform linux/arm64` 或 `--platform linux/amd64`。之後照原樣執行頁面上的指令即可：Docker 會在本機找到映像檔，不會再去拉取。如果 `AGENT_IMAGE` 指定了 digest，指令最後一行要改用 tag 而不是 digest：載入的映像檔只保留 tag，不保留拉取時用的 digest（頁面上也會提醒）。
+
+或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
+
+```bash
+sudo docker build -f Dockerfile.agent -t docker.io/<namespace>/forgeyard-agent:1.2.0 .
+```
+
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.2.0`，頁面的第一步就是這個 `docker build`。
+
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 建置映像檔（見上方）。
+1. 拉取映像檔：`sudo docker pull docker.io/<namespace>/forgeyard-agent:1.2.0`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類工作負載和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -164,7 +183,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     forgeyard-agent:1.2.0
+     docker.io/<namespace>/forgeyard-agent:1.2.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -304,6 +323,70 @@ sudo forgeyard agent trust --server https://forge.example.com
 
 （如果是公司的 CA，請加上 `--ca-file company-ca.pem`），然後執行 `sudo systemctl restart forgeyard-agent`。
 
+## 用 Docker 執行伺服器
+
+每個版本也會發布伺服器映像檔：`docker.io/<namespace>/forgeyard`，支援 linux/amd64 和 linux/arm64。只需要 Docker，不需要原始碼、uv 或 Node。伺服器以無特權帳號（uid 10001）執行，所有要保存的資料都放在掛載於 `/data` 的 volume 裡：
+
+```bash
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/<namespace>/forgeyard:1.2.0
+sudo docker logs forgeyard
+```
+
+紀錄的內容和[快速入門](quick-start.md#1-install-the-server)裡的一樣，包含一次性的設定權杖（setup token）；接著照[建立擁有者並信任 CA](quick-start.md#2-create-the-owner-and-trust-the-ca)繼續。之後要再看一次權杖：`sudo docker logs forgeyard 2>&1 | grep -A 2 "setup token"`。
+
+- **`PUBLIC_URL`**：大家和 agent 使用的位址，連接埠要是你對外公開的那個。伺服器在容器裡只看得到容器自己的位址，所以主機的位址要靠這個設定才會寫進伺服器憑證和 **Machines** 上的指令。要加更多名稱或位址：`-e TLS_EXTRA_NAMES=forge.example.com,192.168.1.21`。
+- **`-p 7860:7860`**：映像檔在容器所有位址的 7860 連接埠上監聽（`HOST=0.0.0.0`）。想對外公開別的連接埠也可以，例如 `-p 443:7860` 搭配 `PUBLIC_URL=https://192.168.1.20`。
+- **`--hostname forgeyard`**：固定主機名稱。沒有它的話，每個新容器的主機名稱都不同，伺服器憑證會在啟動時重新產生。這沒有害處（瀏覽器和 agent 信任的是 CA，不是憑證），只是紀錄比較多。
+- **volume** 裡有資料庫、`secret.key`、`secrets.json` 和 `tls/`：升級時要保留。也可以改用主機上的資料夾，擁有者要是 uid 10001：`sudo install -d -o 10001 -g 10001 -m 700 /srv/forgeyard-data`，再用 `-v /srv/forgeyard-data:/data`。
+- **其他設定**都用 `-e` 指定（[伺服器設定](reference.md#server-settings)），或用 `--env-file` 搭配 `.env` 檔。`ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 會在第一次啟動時直接建立擁有者，不必用設定權杖。要用 PostgreSQL 就設定 `DATABASE_URL`：映像檔裡已經有驅動程式。
+- **健康檢查**：映像檔內建健康檢查，`/api/health` 有回應後，`docker ps` 就會顯示 `healthy`。它透過容器自己的 loopback 詢問，而且不檢查憑證：這個請求不會離開容器，也不帶任何機密。
+
+**備份** volume。先停止伺服器，資料庫的副本才會一致：
+
+```bash
+sudo docker stop forgeyard
+sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
+  docker.io/<namespace>/forgeyard:1.2.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+sudo docker start forgeyard
+```
+
+用同一個映像檔還原到新的空 volume（tar 以 root 執行，所以檔案會保留原本的擁有者，也就是伺服器的帳號）：
+
+```bash
+sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
+  docker.io/<namespace>/forgeyard:1.2.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+```
+
+和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
+
+**升級**靠 tag。先備份，再拉取新版本，用它執行同一個指令；volume 會保留所有資料，資料庫的變更會在啟動時執行：
+
+```bash
+sudo docker pull docker.io/<namespace>/forgeyard:1.2.1
+sudo docker rm -f forgeyard
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/<namespace>/forgeyard:1.2.1
+```
+
+`1.2.1` 就是那個版本；`1.2` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
+
+**釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
+
+```bash
+sudo docker buildx imagetools inspect docker.io/<namespace>/forgeyard:1.2.0
+```
+
+輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/<namespace>/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/<namespace>/forgeyard-agent@sha256:…`：**Machines** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
+
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.2.0 .`
+
 ## 把伺服器當成服務執行
 
 讓伺服器隨電腦開機啟動，停止時自動重新啟動。以 root 執行，假設原始碼在 `/opt/forgeyard-server`，設定在 `/opt/forgeyard-server/.env`：
@@ -344,7 +427,7 @@ sudo systemctl enable --now forgeyard
    uv sync
    ```
 
-   然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。
+   然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。用 Docker 的話：拉取新的 tag，再用它執行同一個 `docker run`（[做法](#run-the-server-in-docker)）。
 3. **agent**：一台一台來。執行中的 agent 重新啟動時，會保留它的工作負載。
    - **用單行安裝裝的**：再執行一次，但不加 `--join`。它會安裝伺服器的新版本，並保留設定和憑據：
 
@@ -356,14 +439,14 @@ sudo systemctl enable --now forgeyard
        sudo sh -s -- --ca-fingerprint sha256:3f9a…
      ```
 
-   - **Docker**：建置新的映像檔，然後執行 `docker rm -f forgeyard-agent`，再用新的 tag 執行同一個 `docker run`。volume 會保留這台機器。
+   - **Docker**：用 `docker pull` 拉取伺服器新版本的映像檔（**Machines** 頁面上有名稱），然後執行 `docker rm -f forgeyard-agent`，再用新的 tag 執行同一個 `docker run`。volume 會保留這台機器。
    - **手動安裝**：`git pull`、`uv sync`，然後重新啟動 agent。
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
 
 ## 備份與還原
 
-**伺服器上要備份的東西**，除非你搬過位置，否則都在它的 `data/` 資料夾裡：
+**伺服器上要備份的東西**，除非你搬過位置，否則都在它的 `data/` 資料夾裡（用 Docker 的話是 `/data` volume，[這樣備份](#run-the-server-in-docker)）：
 
 | 項目 | 原因 |
 |---|---|

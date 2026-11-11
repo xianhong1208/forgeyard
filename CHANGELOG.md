@@ -6,6 +6,36 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Container images on Docker Hub**, for linux/amd64 and linux/arm64: the server
+  (`docker.io/<namespace>/forgeyard`, new `Dockerfile.server`) and the agent
+  (`docker.io/<namespace>/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
+  `.github/workflows/publish-images.yml`, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only
+  `X.Y.Z`), with OCI labels, provenance and an SBOM, then pulls the amd64 images back by digest and
+  smoke-tests them. Without the Docker Hub secrets or the namespace it builds and tests both and ends
+  green with a notice instead of pushing. The namespace is one constant,
+  `forgeyard/install/images.py: DOCKERHUB_NAMESPACE`.
+- **The server image**: the web UI built in a node stage, exactly `uv.lock` (with PostgreSQL) on
+  Python 3.13 slim, run as uid 10001, everything kept in a `/data` volume (database, `secret.key`,
+  `tls/`), port 7860, a `HEALTHCHECK` on `/api/health`, the setup token in `docker logs`. Guide:
+  *Run the server in Docker* (volume, `PUBLIC_URL`, backups, upgrading by tag, pinning a digest);
+  the quick start and the README offer it as a two-command start.
+- **`AGENT_IMAGE`** (server setting): the agent image **Add a machine → Docker** puts in its
+  command; a mirror, a private registry, a tag or a digest. Empty: the published image at the
+  server's own version. Anything that is not a plain image reference stops the server at start.
+- CI: `server-image` builds the server image, lints both Dockerfiles with hadolint and runs
+  `scripts/server_image_smoke.sh` (first start and setup through the API, HTTPS from the volume's
+  CA, the health check, then a new container on the same volume keeps the owner, the CA and
+  `secret.key`); `images-arm64` builds both images for linux/arm64.
+
+### Changed
+- **Add a machine → Docker** pulls the published agent image of the server's version; building it
+  moved to *Advanced / offline*, next to `docker save` / `docker load` for machines without registry
+  access (with the tag to use when `AGENT_IMAGE` pins a digest). While nothing is published the page
+  shows the build step as before.
+- The agent image builds for linux/arm64 too: its ROCm helpers (libdrm) are installed on amd64 only;
+  NVML stays on both. It now carries OCI labels (source, licence, version, revision).
+
 ## [1.2.0] — 2026-11-11
 
 Cloud model APIs behind the same gateway, local first: providers and tiered routes with spill rules,

@@ -70,10 +70,12 @@ use: more threads than free cores make llama.cpp slower, not faster.
 
 ## Run the agent in Docker
 
-One `docker run` per machine, instead of the install script. The image is built from the Forgeyard
-repository; it is not published yet.
+One `docker run` per machine, instead of the install script. Each release publishes the agent image
+on Docker Hub as `docker.io/<namespace>/forgeyard-agent`, for linux/amd64 and linux/arm64 (AMD GPUs
+need amd64: ROCm is x86_64 only), tagged with the release's version. The command pulls the one that
+matches your server.
 
-**Machines** → **Add a machine** → **Docker** writes both commands for you: pick the machine's GPUs
+**Machines** → **Add a machine** → **Docker** writes the command for you: pick the machine's GPUs
 (NVIDIA, AMD or CPU only) and fill in the form above the command. The command follows the form as
 you type, **Copy** copies exactly what is shown, and the values are remembered in this browser for
 the next machine:
@@ -91,18 +93,13 @@ the next machine:
   services and model replicas. Set it when only some ports reach the machine, for example
   `40000-40099` opened in a firewall. The server must be able to reach these ports.
 
-A field the agent would reject shows its error instead of a command. The image tag is the server's
-version. Like the page, the commands here start with `sudo`; as root, or when your account is in the
-`docker` group, leave it out.
+A field the agent would reject shows its error instead of a command. The image's tag is the
+server's own version, so agent and server always match. An admin can point the command at a mirror,
+a private registry or a digest with [`AGENT_IMAGE`](reference.md#machines). Like the page, the
+commands here start with `sudo`; as root, or when your account is in the `docker` group, leave it out.
 
-### Build the image
-
-On the machine (or on another one, then `docker save` and `docker load`), in a Forgeyard checkout of
-the server's version:
-
-```bash
-sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.2.0 .
-```
+A machine that cannot reach Docker Hub gets the image as a file, or builds it:
+[Offline machines, or build it yourself](#offline-machines-or-build-it-yourself).
 
 ### NVIDIA
 
@@ -119,7 +116,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.2.0
+  docker.io/<namespace>/forgeyard-agent:1.2.0
 ```
 
 Then:
@@ -151,7 +148,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.2.0
+  docker.io/<namespace>/forgeyard-agent:1.2.0
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -166,7 +163,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  forgeyard-agent:1.2.0 inventory
+  docker.io/<namespace>/forgeyard-agent:1.2.0 inventory
 ```
 
 ### CPU only
@@ -180,7 +177,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.2.0
+  docker.io/<namespace>/forgeyard-agent:1.2.0
 ```
 
 ### Why these options
@@ -206,11 +203,46 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   sets `FORGEYARD_LIMITS=rlimit`). Process workloads run inside the agent's container and stop
   with it; models and container workloads keep running on the host.
 
+### Offline machines, or build it yourself
+
+The page shows these under **Advanced / offline**. A machine that cannot reach Docker Hub (no
+internet access, or a DNS filter) gets the image as a file. On a machine that can, pull it and save
+it:
+
+```bash
+sudo docker pull docker.io/<namespace>/forgeyard-agent:1.2.0 && \
+  sudo docker save docker.io/<namespace>/forgeyard-agent:1.2.0 | gzip > forgeyard-agent.tar.gz
+```
+
+Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
+
+```bash
+gunzip -c forgeyard-agent.tar.gz | sudo docker load
+```
+
+When the two machines differ (x86_64 and arm64), add `--platform linux/arm64` or
+`--platform linux/amd64` to `docker pull`. Then run the page's command as it is: Docker finds the
+image locally and does not pull it. With a digest in `AGENT_IMAGE`, put the tag on the command's last
+line instead of the digest: a loaded image keeps its tag, not the digest it was pulled by (the page
+says so too).
+
+Or build the image on that machine, in a Forgeyard checkout of the server's version, under the same
+name:
+
+```bash
+sudo docker build -f Dockerfile.agent -t docker.io/<namespace>/forgeyard-agent:1.2.0 .
+```
+
+A server that names no published image ([Container images](reference.md#container-images)) puts a
+local build, `forgeyard-agent:1.2.0`, in the command, and the page shows that `docker build` as its
+first step.
+
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Build the image (above).
+1. Pull the image: `sudo docker pull docker.io/<namespace>/forgeyard-agent:1.2.0` (or bring it
+   over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its container workloads and models keep running.
 3. Start the container with the old state directory and the same model cache, and **without** the
@@ -222,7 +254,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     forgeyard-agent:1.2.0
+     docker.io/<namespace>/forgeyard-agent:1.2.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -414,6 +446,95 @@ sudo forgeyard agent trust --server https://forge.example.com
 
 (add `--ca-file company-ca.pem` for a company CA), then `sudo systemctl restart forgeyard-agent`.
 
+## Run the server in Docker
+
+Each release also publishes the server, as `docker.io/<namespace>/forgeyard` for linux/amd64 and linux/arm64.
+It needs only Docker: no checkout, uv or Node. The server runs as an unprivileged account (uid
+10001) and keeps everything it stores in a volume at `/data`:
+
+```bash
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/<namespace>/forgeyard:1.2.0
+sudo docker logs forgeyard
+```
+
+The log is the one in the [quick start](quick-start.md#1-install-the-server), with the one-time
+setup token; continue with [Create the owner and trust the CA](quick-start.md#2-create-the-owner-and-trust-the-ca).
+To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "setup token"`.
+
+- **`PUBLIC_URL`**: the address people and agents use, with the port you publish. Inside the
+  container the server sees only the container's own addresses, so this is how the host's address
+  gets into the server certificate and into the commands on **Machines**. More names or addresses:
+  `-e TLS_EXTRA_NAMES=forge.example.com,192.168.1.21`.
+- **`-p 7860:7860`**: the image listens on port 7860 on all the container's addresses
+  (`HOST=0.0.0.0`). Publish another port if you like, e.g. `-p 443:7860` with
+  `PUBLIC_URL=https://192.168.1.20`.
+- **`--hostname forgeyard`**: a fixed host name. Without it every new container has another one,
+  and the server certificate is made again on start. That is harmless (browsers and agents trust
+  the CA, not the certificate), only noisier.
+- **The volume** holds the database, `secret.key`, `secrets.json` and `tls/`: keep it when you
+  upgrade. A folder on the host works too, owned by uid 10001:
+  `sudo install -d -o 10001 -g 10001 -m 700 /srv/forgeyard-data`, then `-v /srv/forgeyard-data:/data`.
+- **Every other setting** is an `-e` ([Server settings](reference.md#server-settings)), or
+  `--env-file` with a `.env` file. `ADMIN_USERNAME` and `ADMIN_PASSWORD` create the owner on the
+  first start instead of the setup token. For PostgreSQL set `DATABASE_URL`: the image has the
+  driver.
+- **Health**: the image has a health check, so `docker ps` shows `healthy` once `/api/health`
+  answers. It asks over the container's own loopback without checking the certificate: the request
+  never leaves the container and carries nothing secret.
+
+**Back up** the volume. Stop the server for a consistent copy of the database:
+
+```bash
+sudo docker stop forgeyard
+sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
+  docker.io/<namespace>/forgeyard:1.2.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+sudo docker start forgeyard
+```
+
+Restore into a new, empty volume with the same image (tar runs as root, so the files keep their
+owner, the server's account):
+
+```bash
+sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
+  docker.io/<namespace>/forgeyard:1.2.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+```
+
+As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
+
+**Upgrade** by tag. Back up first, then pull the new version and start the same command with it; the
+volume keeps everything, and database changes run on start:
+
+```bash
+sudo docker pull docker.io/<namespace>/forgeyard:1.2.1
+sudo docker rm -f forgeyard
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/<namespace>/forgeyard:1.2.1
+```
+
+`1.2.1` is exactly that release, `1.2` follows its newest patch release and `latest` the newest
+release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
+right after it ([how](#upgrade-the-server-and-the-agents)).
+
+**Pin a digest** when a tag must never change under you. Look it up:
+
+```bash
+sudo docker buildx imagetools inspect docker.io/<namespace>/forgeyard:1.2.0
+```
+
+It prints, among other lines, `Digest: sha256:…`: run `docker.io/<namespace>/forgeyard@sha256:…` instead of the tag. For
+the agents, set `AGENT_IMAGE=docker.io/<namespace>/forgeyard-agent@sha256:…` on the server: **Machines** then puts that
+digest in every agent's command. Each image also carries its build provenance and an SBOM
+(`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
+
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.2.0 .`
+
 ## Run the server as a service
 
 So that the server starts with the computer and restarts if it stops. As root, with the checkout in
@@ -457,7 +578,8 @@ the journal: `journalctl -u forgeyard -f`.
    ```
 
    Then restart it (`sudo systemctl restart forgeyard`). Database changes run by themselves on
-   start. Read the CHANGELOG for anything that needs a step.
+   start. Read the CHANGELOG for anything that needs a step. In Docker: pull the new tag and start
+   the same `docker run` with it ([how](#run-the-server-in-docker)).
 3. **The agents**, one by one. Running agents keep their workloads while they restart.
    - **Installed** with the one-line install: run it again, without `--join`. It installs the
      server's new version and keeps the settings and the credential:
@@ -470,8 +592,9 @@ the journal: `journalctl -u forgeyard -f`.
        sudo sh -s -- --ca-fingerprint sha256:3f9a…
      ```
 
-   - **Docker**: build the new image, then `docker rm -f forgeyard-agent` and the same `docker run`
-     with the new tag. The volume keeps the machine.
+   - **Docker**: `docker pull` the image of the server's new version (the **Machines** page names
+     it), then `docker rm -f forgeyard-agent` and the same `docker run` with the new tag. The
+     volume keeps the machine.
    - **Manual**: `git pull`, `uv sync`, restart the agent.
 
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
@@ -479,7 +602,8 @@ older agent may lack what a newer server asks for.
 
 ## Back up and restore
 
-**What to back up on the server**, all in its `data/` folder unless you moved it:
+**What to back up on the server**, all in its `data/` folder unless you moved it (in Docker: the
+`/data` volume, [backed up like this](#run-the-server-in-docker)):
 
 | What | Why |
 |---|---|

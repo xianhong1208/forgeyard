@@ -5,7 +5,7 @@ download. You need:
 
 - **A server**: any Linux, macOS or Windows (WSL) computer that the other machines can reach, with
   [uv](https://docs.astral.sh/uv/) (it gets Python 3.13 by itself when needed) and Node 22.12 or
-  newer to build the web UI. It does not need a GPU.
+  newer to build the web UI, or with only Docker. It does not need a GPU.
 - **A machine to run models on**: Linux on x86_64 or aarch64, with an NVIDIA GPU (driver 575 or
   newer, Docker with the NVIDIA Container Toolkit), an AMD GPU (ROCm and Docker), or only a CPU.
   It can be the same computer as the server.
@@ -45,6 +45,20 @@ Forgeyard has no owner yet. Open https://192.168.1.20:7860/setup and enter this 
 ================================================================
 INFO:     Uvicorn running on https://0.0.0.0:7860 (Press CTRL+C to quit)
 ```
+
+**Or with Docker**, instead of all of the above (nothing to build; linux/amd64 or linux/arm64):
+
+```bash
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/<namespace>/forgeyard:1.2.0
+sudo docker logs forgeyard
+```
+
+The log is the same, with `/data` for `data/`; everything is kept in the `forgeyard-data` volume.
+Details, backups and upgrades: [Run the server in Docker](how-to.md#run-the-server-in-docker).
 
 Keep it running. Everything Forgeyard stores goes into `data/` next to it: the database, the
 certificate authority (`data/tls/`) and the key that encrypts secrets (`data/secret.key`). Back up
@@ -142,9 +156,9 @@ What happened, in order:
 
 Back on the Machines page, the machine appears within seconds, with its GPUs.
 
-Other ways: the **Docker** tab runs the agent as a container
-([Run the agent in Docker](how-to.md#run-the-agent-in-docker)); the **Manual** tab uses a Forgeyard
-checkout and a config file. AMD and CPU-only machines work the same way
+Other ways: the **Docker** tab runs the agent as a container, one `docker run` that pulls the
+agent image of your server's version ([Run the agent in Docker](how-to.md#run-the-agent-in-docker));
+the **Manual** tab uses a Forgeyard checkout and a config file. AMD and CPU-only machines work the same way
 ([AMD](how-to.md#add-an-amd-machine), [CPU only](how-to.md#add-a-cpu-only-machine)).
 
 ## 4. Choose the GPUs Forgeyard may use

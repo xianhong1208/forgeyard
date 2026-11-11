@@ -91,6 +91,31 @@ helpers. That is enough for every built-in engine image, since they are all publ
   then finds it locally;
 - or fix the helper (`docker-credential-<name> list` must work for the user the agent runs as).
 
+## The Forgeyard image does not pull
+
+**You see:** `docker run` of the agent (or the server) stops with one of:
+
+- `manifest unknown` or `not found`: no image with that tag;
+- `no matching manifest for linux/arm/v7` (or another platform);
+- `toomanyrequests: You have reached your pull rate limit`;
+- `dial tcp: lookup registry-1.docker.io … no such host`, or a timeout.
+
+**Why, and what to do:**
+
+- **No such tag.** The agent's tag is the server's version. A server built from source between two
+  releases names a version that was never published. Build the image on the machine instead
+  ([Offline machines, or build it yourself](how-to.md#offline-machines-or-build-it-yourself)), or
+  point `AGENT_IMAGE` at a published version.
+- **Another platform.** The images are built for linux/amd64 and linux/arm64 only; `uname -m` must
+  say `x86_64` or `aarch64`.
+- **Rate limit.** Docker Hub limits anonymous pulls per address. Sign in once on that machine
+  (`sudo docker login`), wait, or pull through a mirror and set `AGENT_IMAGE` to it.
+- **No access to Docker Hub** (no internet, a firewall or a DNS filter): carry the image over as a
+  file: pull and `docker save` it on a machine that can, then `docker load` it on this one
+  ([how](how-to.md#offline-machines-or-build-it-yourself)). The agent's `docker run` then finds it
+  locally. The models' engine images need the same on such a machine: pull or load them once, and
+  the agent uses them.
+
 ## Hugging Face downloads are slow
 
 **You see:** a deployment stays in *downloading* for a long time; its page shows the progress and

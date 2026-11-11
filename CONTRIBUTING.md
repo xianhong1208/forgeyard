@@ -13,7 +13,7 @@ Thank you for helping. Bug reports with the output that shows the problem are as
 ## Setting up
 
 You need Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22.12+ for the UI, and Docker
-only to build the agent image.
+only to build the container images.
 
 ```bash
 uv sync
@@ -45,12 +45,38 @@ A machine without GPUs can still act as one with made-up hardware, for developme
    uv run --no-sync python -m pytest -q
    cd web && npm run lint && npm run typecheck && npm test && npm run build
    shellcheck -s sh forgeyard/install/install.sh
+   shellcheck scripts/agent_image_smoke.sh scripts/server_image_smoke.sh
    ```
+
+   CI also builds both container images and runs their smoke tests (`agent-image`, `server-image`)
+   and builds them for linux/arm64 (`images-arm64`).
 
    `TEST_DATABASE_URL=postgresql+psycopg://…` runs the backend suite on PostgreSQL too. It
    **wipes that database**: use a throwaway one.
 
 Commit messages say what changed and why, in plain English. Keep pull requests to one topic.
+
+## Releasing
+
+Maintainers only. On a release branch off `dev`: bump the version in `pyproject.toml`,
+`forgeyard/__init__.py` and `web/package.json` (then `uv lock` and `npm install --package-lock-only`),
+date the `CHANGELOG.md` section, and open the release pull request into `dev`. After it merges,
+`main` follows `dev`, and the annotated tag `vX.Y.Z` goes on that commit.
+
+Pushing the tag runs `.github/workflows/publish-images.yml`, which publishes both images on Docker
+Hub (`docker.io/<namespace>/forgeyard` and `docker.io/<namespace>/forgeyard-agent`) for linux/amd64
+and linux/arm64, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only `X.Y.Z`), with provenance
+and an SBOM. It then pulls the amd64 images back by digest, smoke-tests them and lists the digests
+in the run's summary. It needs:
+
+- the namespace in `forgeyard/install/images.py` (`DOCKERHUB_NAMESPACE`), the one place it is
+  written: the Machines page names the agent image from it too;
+- the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token with
+  *Read & Write*).
+
+Without them, or run by hand (*Actions → Publish images → Run workflow*) on a branch, it builds and
+smoke-tests both images, pushes nothing and ends green with a notice saying why. Run by hand on a
+tag, it publishes that tag again. The tag must be `v` plus the version in `forgeyard/__init__.py`.
 
 ## Licence
 
