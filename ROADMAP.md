@@ -95,10 +95,32 @@ and thinking.
 
 | Version | What you get |
 |---|---|
-| **1.3: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
-| **1.4: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
-| **1.5: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
-| **1.6: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments); scheduled backup and restore. |
+| **1.3: more kinds of models** | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images, documents and video on vLLM (Qwen3-VL, Gemma and similar); **text-to-speech** through speaches (`/v1/audio/speech`); **image and video generation** (a diffusers-family recipe, `/v1/images/generations`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage. That covers detection, segmentation, depth, 3D, tabular and other tasks without a recipe each. |
+| **1.4: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
+| **1.5: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
+| **1.6: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
+| **1.7: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments); scheduled backup and restore. |
+
+Reinforcement learning, robotics and graph learning are not planned as model types: they are
+training and research workloads, and run as plain tasks.
+
+### Training: to be designed
+
+Fine-tuning already runs today as a one-off task in your own trainer container (Unsloth,
+LLaMA-Factory, axolotl), with only the GPUs it was given. The direction under discussion is a
+first-class **single-machine LoRA / QLoRA fine-tune** flow:
+
+1. pick a base model from the catalog;
+2. upload a dataset (checked on upload);
+3. a recipe chooses the trainer and sensible defaults;
+4. a training memory estimate places the job;
+5. a loss curve and logs show progress;
+6. the adapter is saved to the model cache and **deployed in one click** on vLLM with
+   `--enable-lora`, so one card serves many fine-tuned variants.
+
+Training holds whole GPUs for hours, so on shared machines it needs priorities against serving
+(preemptible jobs, quiet-hours windows). Multi-machine distributed training is much later. The
+version and the details are not decided yet.
 
 ## Later, when there is a need
 
