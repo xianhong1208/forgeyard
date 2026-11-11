@@ -2,14 +2,19 @@ import { useState, type ChangeEvent } from "react";
 
 import {
   AGENT_DEFAULT_PORT_RANGE,
+  agentImage,
   buildCommand,
+  carryCommands,
   certificateCovers,
+  IMAGE_FILE,
+  pinnedByDigest,
   loadForm,
   runCommand,
   saveForm,
   serverHost,
   serverScheme,
   validate,
+  type AgentImage,
   type DockerErrors,
   type DockerForm,
   type DockerKind,
@@ -40,9 +45,10 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
     saveForm(next, issued.server_url);
   };
   const version = issued.version ?? "latest";
+  const image = agentImage(issued.agent_image, version);
   const dockerErrors = validate(docker);
   const run = runCommand(kind, docker, {
-    server: issued.server_url, fingerprint: issued.ca_fingerprint ?? null, token: issued.token, version,
+    server: issued.server_url, fingerprint: issued.ca_fingerprint ?? null, token: issued.token, image: image.reference,
   });
   const tabs: { id: Way; label: string; badge?: string }[] = [
     { id: "install", label: "One-line install", badge: canInstall ? "recommended" : undefined },
@@ -112,16 +118,25 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
           </div>
           <DockerFields form={docker} errors={dockerErrors} serverUrl={issued.server_url} tls={tls} onChange={changeDocker} />
           <p className="muted small">
-            Both commands start with <code>sudo</code>; as root, or if your account is in the <code>docker</code> group, leave it out.
+            The commands start with <code>sudo</code>; as root, or if your account is in the <code>docker</code> group, leave it out.
           </p>
           <ol className="steps">
+            {!image.published && (
+              <li>
+                Build the agent image once on that machine, from a Forgeyard checkout of version {version} (the image is not
+                published yet):
+                <CopyBox value={buildCommand(image.local_tag)} label="Build command" />
+              </li>
+            )}
             <li>
-              Build the agent image once on that machine, from a Forgeyard checkout of version {version} (the image is not
-              published yet):
-              <CopyBox value={buildCommand(version)} label="Build command" />
-            </li>
-            <li>
-              Start it. The command follows the fields above.
+              {image.published ? (
+                <>
+                  On the new machine, start the agent. Docker pulls <code>{image.reference}</code> (linux/amd64 and linux/arm64) the
+                  first time; the command follows the fields above.
+                </>
+              ) : (
+                <>Start it. The command follows the fields above.</>
+              )}
               {run !== null ? (
                 <CopyBlock value={run} label="Docker command" />
               ) : (
@@ -133,6 +148,7 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
               upgrade keeps the machine; the join token is used only once.
             </li>
           </ol>
+          {image.published && <OfflineImage image={image} version={version} />}
           <p className="muted small">
             <strong>Why host network:</strong> model replicas listen on the host's 127.0.0.1 behind the agent's key guard, which must
             reach them. <strong>Why the same path:</strong> the agent asks the host's Docker to mount models by their path on the
@@ -172,6 +188,38 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
         </div>
       )}
     </>
+  );
+}
+
+// The published image on a machine that cannot pull it: carried over as a file, or built there.
+function OfflineImage({ image, version }: { image: AgentImage; version: string }) {
+  const carry = carryCommands(image);
+  return (
+    <details className="docker-advanced docker-offline">
+      <summary className="small">Advanced / offline: no access to the registry, or build the image yourself</summary>
+      <p className="small">On a machine that can reach the registry, pull the image and save it to a file:</p>
+      <CopyBlock value={carry.save} label="Save command" />
+      <p className="small">
+        Copy <code>{IMAGE_FILE}</code> to the new machine (<code>scp</code>, a USB disk), and load it there:
+      </p>
+      <CopyBox value={carry.load} label="Load command" />
+      <p className="small muted">
+        The two machines differ (x86_64 and arm64)? Add <code>--platform linux/arm64</code> or <code>--platform linux/amd64</code>{" "}
+        to <code>docker pull</code>.
+      </p>
+      <p className="small">Or build it on the new machine, from a Forgeyard checkout of version {version}:</p>
+      <CopyBox value={buildCommand(image.local_tag)} label="Build command" />
+      <p className="small muted">
+        {pinnedByDigest(image) ? (
+          <>
+            Then use <code>{image.local_tag}</code> instead of <code>{image.reference}</code> as the last line of the command above: a
+            loaded or built image has the tag, not the digest.
+          </>
+        ) : (
+          <>Then run the command above: Docker finds the image locally and does not pull it.</>
+        )}
+      </p>
+    </details>
   );
 }
 
