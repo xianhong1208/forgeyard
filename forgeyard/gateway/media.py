@@ -1,9 +1,9 @@
 """Images, audio and video in chat requests (1.3): the content parts the gateway accepts, how it
 rewrites them, and how it fetches media URLs itself.
 
-Engines must never fetch a URL from a request: vLLM 0.32 and llama-server b11977 both download any
-http(s) URL they find in a media part, with no private-address filter (vLLM also follows redirects),
-from inside the machine's network. So the gateway
+Engines must never fetch a URL from a request: vLLM 0.32 and llama-server (b11977, b12242) both
+download any http(s) URL they find in a media part, with no private-address filter (vLLM also follows
+redirects), from inside the machine's network. So the gateway
 
 - walks `messages[].content[]` and **rebuilds every media part** in one canonical shape, keeping only
   the fields it checked: `image_url` (also from `input_image`), `video_url` (also from

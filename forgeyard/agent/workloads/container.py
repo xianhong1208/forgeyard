@@ -196,7 +196,8 @@ class ContainerRuntime:
             fh.write(plan.env_file_text(env))
         amd = [g for g in rec.gpus if g.get("vendor") == "amd"]
         devices = render_devices(rec.gpus) if amd else []
-        gids = sorted({os.stat(d).st_gid for d in ["/dev/kfd", *devices] if os.path.exists(d)}) if amd else []
+        kfd = ["/dev/kfd"] if plan.needs_kfd(rec.gpus) else []
+        gids = sorted({os.stat(d).st_gid for d in [*kfd, *devices] if os.path.exists(d)}) if amd else []
         argv = plan.container_run_argv(
             self.engine, name=name, image=rt.image, command=rt.command,
             args=plan.substitute(rt.args, {}, extra) if extra else rt.args, env_file=str(env_file),
