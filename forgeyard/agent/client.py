@@ -237,6 +237,7 @@ class Agent:
             if self.workloads:
                 local = getattr(ws, "local_address", None)
                 self.supervisor.set_address(local[0] if local else None)
+                self.supervisor.new_connection()
                 tasks.add(asyncio.create_task(self._status_loop(ws)))
             elif self.supervisor is not None:
                 log.warning("The server does not run workloads (an older Forgeyard); only reporting hardware.")

@@ -117,9 +117,14 @@ class Supervisor:
     def model_cache_info(self) -> Optional[dict]:
         return self.models.info() if self.models is not None else None
 
+    def new_connection(self) -> None:
+        """Revisions order the desired lists of one connection: a new one starts its own order."""
+        self.revision = -1
+
     def set_desired(self, msg: dict) -> None:
         revision = int(msg.get("revision") or 0)
         if revision and revision < self.revision:
+            log.info("Ignored an older desired state (revision %d, after %d).", revision, self.revision)
             return  # an older list, overtaken
         self.revision = revision
         desired = {}

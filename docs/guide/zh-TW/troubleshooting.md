@@ -125,6 +125,14 @@ sudo forgeyard agent config
 
 **做法：** 釋出卡上的記憶體（停掉某些東西）、允許更多卡（[GPU 存取權](how-to.md#restrict-gpus-on-a-shared-machine)）、降低上下文長度或並行數、選擇量化過或較小的模型，或者先部署，讓它等到有空間為止（API 的 `"wait": true`）。
 
+## 副本一直停在 pending
+
+**你會看到：**部署或 workload 已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**，沒有任何原因：沒有下載、也沒有啟動。
+
+**原因：**那台機器的 agent 沒有處理它的工作清單。1.2.0 以前的 agent 會跨連線記住最後收到的工作清單編號，而之後重新啟動過的伺服器又從 1 開始編號：agent 把這些清單全當成舊的，默默丟掉。1.3.0 起的伺服器編號方式不會再這樣，連舊版 agent 也一樣；1.3.0 起的 agent 每次連線都重新計數，丟掉清單時也會留下紀錄。
+
+**怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
+
 ## 來自 /v1 的錯誤：401、403、429、503
 
 閘道以 OpenAI 的格式回應錯誤：`{"error": {"message", "type", "param", "code"}}`。`code` 會說明發生了什麼事。
