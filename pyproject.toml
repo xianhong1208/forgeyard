@@ -3,6 +3,8 @@ name = "forgeyard"
 version = "1.1.1"
 description = "Forgeyard: one control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.120",
@@ -28,7 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
 # Agent on NVIDIA machines: NVML bindings (read-only; no CUDA context, no GPU memory).
-# AMD machines use the amdsmi library that ships with ROCm (see docs/acceptance-m1.md).
+# AMD machines use the amdsmi library that ships with ROCm.
 nvidia = ["nvidia-ml-py>=12.535"]
 
 [dependency-groups]
@@ -48,7 +50,7 @@ target-version = "py313"
 extend-exclude = ["web", "forgeyard/static"]
 
 [tool.ruff.lint]
-# Correctness rules, the same baseline as Tony's other projects.
+# Correctness rules on top of ruff's defaults.
 select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]

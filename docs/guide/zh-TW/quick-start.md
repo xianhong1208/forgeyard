@@ -74,24 +74,24 @@ Forgeyard 接著會顯示 **Get started**：一份接下來步驟的檢查清單
 forgeyard-ca.der: OK
 
 ==> Checking this machine
-Linux x86_64, server https://192.168.1.20:7860, agent 1.1.0.
+Linux x86_64, server https://192.168.1.20:7860, agent 1.2.0.
 
 ==> Checking the server's certificate authority
 The CA matches sha256:3f9a….
 
-==> Downloading the agent 1.1.0
-forgeyard-1.1.0-py3-none-any.whl (335662 bytes, SHA-256 checked).
+==> Downloading the agent 1.2.0
+forgeyard-1.2.0-py3-none-any.whl (335662 bytes, SHA-256 checked).
 NVIDIA driver found: installing NVML support too.
 
 ==> Installing it in /opt/forgeyard/venv
 Installed with uv (uv 0.9.24).
-forgeyard 1.1.0, as /usr/local/bin/forgeyard (try: forgeyard agent config).
+forgeyard 1.2.0, as /usr/local/bin/forgeyard (try: forgeyard agent config).
 
 ==> Account for process workloads
 Created the system account 'forgeyard-run' (no password, no shell, no home).
 
 ==> Settings (/etc/forgeyard/agent.toml)
-# Forgeyard agent settings, written by `forgeyard agent init` (1.1.0).
+# Forgeyard agent settings, written by `forgeyard agent init` (1.2.0).
 …
 # GPUs: 2 x NVIDIA GeForce RTX 4090 (driver 580.95.05). Choose which ones Forgeyard may use on the Machines page.
 …
@@ -234,7 +234,7 @@ python hello.py
 Hello, how are you?
 ```
 
-任何支援 OpenAI API 的程式都是同樣的用法：把它指向 `https://192.168.1.20:7860/v1`，給它金鑰，並讓它信任 `forgeyard-ca.pem`（很多程式只要設定 `SSL_CERT_FILE=forgeyard-ca.pem` 就夠了）。
+任何支援 OpenAI API 的程式都是同樣的用法：把它指向 `https://192.168.1.20:7860/v1`，給它金鑰，並讓它信任 `forgeyard-ca.pem`（很多程式只要設定 `SSL_CERT_FILE=forgeyard-ca.pem` 就夠了；這個變數會取代什麼、Node.js 怎麼設定，請見[程式不信任憑證](troubleshooting.md#a-program-does-not-trust-the-certificate)）。
 
 ## 接下來
 

@@ -39,7 +39,7 @@ env:
   DO_NOT_TRACK: "1"
 # The replica's internal key (M4): VLLM_API_KEY, as in the vllm recipe. Note that vLLM guards only
 # /v1, /v2, /inference and /cohere: /rerank, /score and /pooling without the /v1 prefix stay open
-# on the replica's own port (see docs/acceptance-m4.md).
+# on the replica's own port (the agent's key guard covers them).
 api_key_env: VLLM_API_KEY
 variants:
   - name: cuda

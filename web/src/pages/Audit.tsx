@@ -21,6 +21,15 @@ const FILTERS = [
   { value: "auth.", label: "Sign-ins and sessions" },
   { value: "user.", label: "User changes" },
   { value: "setup.", label: "Setup" },
+  { value: "api_key", label: "API keys" },
+  { value: "machine.", label: "Machines" },
+  { value: "workload.", label: "Workloads" },
+  { value: "deployment.", label: "Deployments" },
+  { value: "model", label: "Models and sources" },
+  { value: "recipe.", label: "Recipes" },
+  { value: "route.", label: "Routes" },
+  { value: "provider.", label: "Providers" },
+  { value: "budget.", label: "Budget alerts" },
 ];
 
 function detailText(d: Record<string, unknown>): string {
@@ -102,7 +111,7 @@ export function AuditPage() {
       <PageHeader
         index="04 · Audit log"
         title="Audit log"
-        lead="Sign-ins, failed sign-ins and every change to accounts, newest first."
+        lead="Sign-ins, failed sign-ins and every change to accounts, API keys, machines, workloads, models, providers and budgets, newest first."
         actions={
           <div className="field field-inline">
             <label htmlFor="audit-filter">Show</label>

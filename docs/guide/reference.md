@@ -22,7 +22,7 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | Variable | Default | What it does |
 |---|---|---|
 | `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key (both or neither); reloaded when they change |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key (both or neither); checked every 12 hours and reloaded when they changed |
 | `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it |
 | `TLS_EXTRA_NAMES` | — | More names or IP addresses for Forgeyard's own server certificate, comma-separated |
 
@@ -83,7 +83,7 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | Variable | Default | What it does |
 |---|---|---|
 | `GATEWAY_CLOUD_DEFAULT` | `off` | The cloud setting a new API key gets: `off`, `fallback` or `on`. Admins change it on **API keys** (stored in the database); existing keys keep theirs |
-| `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key. Admins may give any key anything |
+| `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key, also applied to existing keys on every request. Admins may give any key anything |
 | `EGRESS_PROXY` | empty | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
 | `EGRESS_ALLOWED_HOSTS` | empty | Only these provider hosts, comma-separated (`*.example.org` for subdomains). Empty: any |
 | `EGRESS_CA_FILE` | empty | A CA file to trust for providers on top of the system's (a company proxy that inspects TLS) |
@@ -95,10 +95,7 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Where **Refresh prices from OpenRouter** reads prices (only when an admin asks; no key is sent). Change it only to test against a stand-in |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | Budgets reserve a cloud request's estimated cost before it is sent. A request without `max_tokens` is estimated with an answer of this many tokens |
 
-Request header `X-Forgeyard-Local-Only: 1`: never a cloud target for this request. Answer headers:
-`X-Forgeyard-Target` (`local:<deployment>#<replica>` or `provider:<provider>/<model>`),
-`X-Forgeyard-Spilled` (`unavailable`, `busy`, `refused` or `too_long`) when the request left the
-first tier, and `X-Forgeyard-Replica` for a local answer, as before.
+The headers and error codes of `/v1` are listed under [The gateway (/v1)](#the-gateway-v1).
 
 ## Agent settings
 
@@ -160,30 +157,172 @@ cache = "/srv/forgeyard-models"
 local_dirs = ["/data/models"]
 ```
 
+### Other variables the agent reads
+
+These are not settings in `agent.toml`:
+
+| Variable | What it does |
+|---|---|
+| `FORGEYARD_AGENT_CONFIG` | The settings file, instead of `/etc/forgeyard/agent.toml` (same as `--config PATH`) |
+| `FORGEYARD_JOIN_TOKEN` | The one-time join token (same as `--join-token`) |
+| `DOCKER_HOST`, `DOCKER_CONFIG`, `CONTAINER_HOST`, `XDG_RUNTIME_DIR` | Passed on to the `docker` or `podman` command, so a non-default engine socket or configuration works. Nothing else of the agent's environment reaches the engine |
+| `ROCM_PATH`, `ROCM_HOME` | Where ROCm is installed, when it is not `/opt/rocm` (AMD cards) |
+| `FORGEYARD_AGENT_SIMULATION` | `1` allows `--simulate-inventory FIXTURE`: the agent reports recorded hardware instead of its own. For development and tests only; the server marks such a machine as simulated |
+
+## The gateway (/v1)
+
+Programs call the models at `https://<server>:7860/v1` with an API key:
+`Authorization: Bearer fyk_…`. The gateway takes no cookies and sends no CORS headers, so a web
+page cannot use a signed-in browser against it.
+
+### Endpoints
+
+| Endpoint | What it serves | Cloud providers |
+|---|---|---|
+| `GET /v1/models` | The models this key may use. Leaves out a model that does not exist for the key (cloud-only, and the key's cloud setting is not **Allowed**), a model outside the key's model list, and a model whose deployments are all stopped (unless a provider the key may use can still serve it) | — |
+| `GET /v1/models/{model}` | One model, in the same shape. 404 `model_not_found` for a model that is missing, hidden from this key or stopped; 403 `model_not_allowed` outside the key's model list | — |
+| `POST /v1/chat/completions` | Chat models (vLLM, llama.cpp, provider chat models). `stream: true` streams server-sent events | yes |
+| `POST /v1/completions` | The same models, with a plain `prompt` | yes |
+| `POST /v1/embeddings` | Embedding models | yes |
+| `POST /v1/rerank` | Rerankers (vLLM's rerank API) | no |
+| `POST /v1/score` | Rerankers (vLLM's score API) | no |
+| `POST /v1/audio/transcriptions` | Speech to text (faster-whisper), as `multipart/form-data` with a `model` field | no |
+| `POST /v1/audio/translations` | Speech to English text, as above | no |
+
+Any other path under `/v1` answers 404 `unknown_endpoint`.
+
+What the gateway does with a request:
+
+- It reads `model` from the body and sends the request to that model's route. A model served at
+  another endpoint (an embedding model at `/v1/chat/completions`) answers 400 `wrong_endpoint`.
+- It replaces `model` with the name the replica or the provider expects, adds the replica's internal
+  key or the provider's key, and passes nothing else of yours on: not your API key, not your other
+  headers.
+- `max_tokens` (or `max_completion_tokens`) counts against the key's tokens per minute when the
+  request arrives, and sets the most a request may cost under a budget.
+- A streamed chat or completion gets a final usage chunk (`stream_options.include_usage`) so that
+  tokens are counted. If you did not ask for it, the gateway removes it again.
+- The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB).
+- If you close the connection, the gateway closes its request upstream at once, so the engine stops
+  generating.
+
+### Headers
+
+| Header | Direction | Value |
+|---|---|---|
+| `Authorization` | request | `Bearer fyk_…`: your API key |
+| `X-Forgeyard-Local-Only` | request | `1` (or `true`, `yes`, `on`): no cloud provider for this request. It never widens what the key may do |
+| `X-Forgeyard-Target` | answer | Who answered: `local:<deployment>#<replica>` or `provider:<provider>/<model>`. Never a key |
+| `X-Forgeyard-Replica` | answer | For a local answer: `<model>#<replica>` |
+| `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
+| `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
+| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
+
+### Errors
+
+Errors have OpenAI's shape, so every OpenAI client library reads them:
+
+```json
+{"error": {"message": "This API key was revoked.", "type": "authentication_error", "param": null, "code": "revoked_api_key"}}
+```
+
+`type` follows the status (`invalid_request_error`, `authentication_error`, `insufficient_quota`,
+`permission_error`, `rate_limit_error`, `upstream_error`, `service_unavailable`). Handle errors by
+`code`:
+
+| Status | `code` | Means | What to do |
+|---|---|---|---|
+| 400 | `invalid_json` | The body is not JSON | Send JSON |
+| 400 | `invalid_request` | No `model`, a body that is not an object, or audio not sent as `multipart/form-data` | Fix the request |
+| 400 | `wrong_endpoint` | The model is served at another endpoint; the message names it | Use that endpoint |
+| 400 | `context_length_exceeded` | Only on a route with **Spill a prompt that is too long**: the prompt does not fit the local context, and nothing else could take it | Shorten the prompt or lower `max_tokens` |
+| 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
+| 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
+| 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
+| 401 | `revoked_api_key` | The key was revoked | Create a new key |
+| 401 | `expired_api_key` | The key is past its expiry | Create a new key |
+| 401 | `account_disabled` | The key's owner is disabled or waiting for approval | Ask an admin |
+| 402 | `budget_exhausted` | A monthly budget kept the request from every provider that could serve it, and nothing local could. The `budget` object says which and when it resets | Wait for the month to end, raise the budget, or use a local model. Do not retry |
+| 402 | `budget_unpriced` | A budget applies, and the provider's model has no price, so its cost cannot be reserved | An admin sets its prices |
+| 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
+| 404 | `model_not_found` | No such model for this key: it does not exist, or it is cloud-only and the key's cloud setting is not **Allowed**. From `GET /v1/models/{model}`, also a stopped model | Check `GET /v1/models` |
+| 404 | `unknown_endpoint` | The gateway has no such path | Use an endpoint above |
+| 413 | `request_too_large` | The body is larger than `GATEWAY_MAX_BODY_MB` | Send less, or raise the setting |
+| 421 | `host_not_allowed` | The server does not answer to the host name in the URL | Use its address, or add the name to `ALLOWED_HOSTS` |
+| 429 | `rate_limit_exceeded` | Over the key's requests or tokens per minute | Wait `Retry-After` seconds |
+| 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
+| 502 | `upstream_unreachable` | No replica could be connected to | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
+| 502 | `upstream_error` | The connection to the replica or provider broke while the answer was coming | Retry |
+| 502 | `replica_refused_key` | The replica refused the gateway's internal key | Stop and start the deployment |
+| 502 | `provider_auth_failed` | The provider refused Forgeyard's key for it. Never passed on as 401, which would make you doubt your own key | An admin fixes the provider's key |
+| 502 | `provider_blocked` | The egress rules refused the provider's address before anything was sent | An admin checks the provider's base URL and `EGRESS_*` |
+| 502 | `provider_redirect` | The provider answered with a redirect, which is never followed | An admin checks the provider's base URL |
+| 502 | `provider_unreachable` | The provider could not be reached | Retry later |
+| 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
+| 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
+| 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it | Retry |
+| 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
+| 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
+| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT` | Lower `max_tokens`, or raise the setting |
+| 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
+
+Two more cases:
+
+- **An error from the engine or the provider itself** is passed on with its own status. A replica's
+  answer is passed on unchanged (for example vLLM's 400 when a prompt is too long). A provider's
+  other 4xx keeps its status and its `code`, with the provider's name before its message and anything that
+  looks like a key removed. A replica's 429 or 503 is passed on when no other replica or tier could
+  take the request.
+- **A stream that breaks off** after it started cannot change its status any more. The gateway ends
+  it with one last event, an error with the code `upstream_stream_broken`:
+  `data: {"error": {…, "code": "upstream_stream_broken"}}`.
+
+## Workload environment
+
+A workload's replica starts with an empty environment. It gets only what its spec declares, plus:
+
+| Variable | Value |
+|---|---|
+| `FORGEYARD_WORKLOAD` | The workload's name |
+| `FORGEYARD_REPLICA` | The replica's id |
+| `FORGEYARD_REPLICA_INDEX` | The replica's number, from 0 |
+| `PORT`, `PORT_<NAME>` | For each declared port: a process gets the host port it must listen on; a container gets its own port (the engine maps the host port to it). `PORT` is the first one |
+| `CUDA_VISIBLE_DEVICES`, `NVIDIA_VISIBLE_DEVICES`, `CUDA_DEVICE_ORDER` | NVIDIA: the UUIDs of its cards only. A replica without GPUs sees none |
+| `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES` | AMD: its cards only |
+| `PATH`, `HOME`, `LANG`, `USER`, `LOGNAME` | A process only: a basic `PATH`, its own directory as `HOME`, `LANG=C.UTF-8`, and the workload account |
+
+A spec that sets a GPU variable (also `HIP_VISIBLE_DEVICES` and `GPU_DEVICE_ORDINAL`), `PORT`, or
+any name that starts with `FORGEYARD_` or `PORT_` is refused. In a process's arguments and in
+environment values, `${PORT}` and `${PORT_<NAME>}` become the port.
+
 ## Command line
 
 ### The server
 
 | Command | What it does |
 |---|---|
-| `uv run python main.py` | Start the server (same as `python -m forgeyard serve`). Database changes run on start |
-| `python -m forgeyard secrets reset --yes` | The secret key is lost: make a new one and drop what it encrypted (stop the server first) |
+| `uv run python main.py` | Start the server (same as `python -m forgeyard serve`, or `python -m forgeyard` alone). Database changes run on start |
+| `python -m forgeyard secrets reset --yes` | The secret key is lost: make a new one and drop what it encrypted (stop the server first). Without `--yes` it only says what it would drop |
 | `python -m forgeyard --version` | The version |
 
 ### The agent
 
 Installed with the one-line install, the agent's command is `forgeyard` (in `/usr/local/bin`); from
-a checkout it is `uv run --no-sync python -m forgeyard`.
+a checkout it is `uv run --no-sync python -m forgeyard`. Every command takes the flags of the
+[agent settings](#agent-settings), before or after the command's name, and `-v` (`--verbose`) for debug output.
+`--fingerprint` is another name for `--ca-fingerprint`. In the agent's Docker image the command is
+already `forgeyard agent`, so add only the rest (`… forgeyard-agent:<version> inventory`).
 
 | Command | What it does |
 |---|---|
-| `forgeyard agent` | Run the agent (the service runs `forgeyard agent --config /etc/forgeyard/agent.toml`). With a join token and no credential yet, it joins first |
+| `forgeyard agent` | Run the agent (the service runs `forgeyard agent --config /etc/forgeyard/agent.toml`). With a join token and no credential yet, it joins first; `--rejoin` joins again as a new machine |
 | `forgeyard agent init [--print] [--force]` | Write `/etc/forgeyard/agent.toml` from what is detected (GPUs, Docker or Podman, systemd, a workload account), and print it. `--print` only prints. Flags given here (`--server`, `--ca-fingerprint`, `--model-cache`…) go into the file |
 | `forgeyard agent join --join-token fyj_…` | Join with the file's settings, save the credential and exit. Already joined: nothing to do; `--rejoin` joins again as a new machine |
 | `forgeyard agent config [--get KEY]` | Every setting in effect and where it came from; `--get models.cache` prints one value |
 | `forgeyard agent trust --server https://… [--ca-fingerprint …]` | Switch a joined machine to another address or CA, keeping its credential |
 | `forgeyard agent inventory [--json] [--raw]` | What the agent detects (GPUs, CPU, memory), without joining |
-| `forgeyard agent runtimes` | What it can run here (processes, containers, NVIDIA in containers), without joining |
+| `forgeyard agent runtimes [--json]` | What it can run here (processes, containers, NVIDIA in containers), without joining |
+| `forgeyard --version` | The agent's version |
 
 ### The install script
 
@@ -191,8 +330,8 @@ a checkout it is `uv run --no-sync python -m forgeyard`.
 
 | Option | What it does |
 |---|---|
-| `--join fyj_…` | The join token (first install) |
-| `--ca-fingerprint sha256:…` | The server CA's fingerprint: checked before anything is downloaded, then pinned by the agent |
+| `--join fyj_…` | The join token (first install). Also `--join-token` |
+| `--ca-fingerprint sha256:…` | The server CA's fingerprint: checked before anything is downloaded, then pinned by the agent. Also `--fingerprint` |
 | `--ca-file PEM` | Pin this CA file instead |
 | `--server URL` | The server's address (default: the server the script came from) |
 | `--name NAME`, `--label KEY=VALUE` | The machine's name and labels (first install) |
@@ -201,6 +340,7 @@ a checkout it is `uv run --no-sync python -m forgeyard`.
 | `--no-start` | Install and join, but do not start the service |
 | `--rejoin` | Join again as a new machine |
 | `--uninstall [--purge]` | Remove the service and the program; `--purge` also deletes the settings and the credential |
+| `-h`, `--help` | The options |
 
 Run again, it upgrades the agent to the server's version and keeps the settings and the credential.
 It needs Linux on x86_64 or aarch64, root, `curl`, and access to PyPI for the agent's few

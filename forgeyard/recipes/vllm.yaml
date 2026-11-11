@@ -30,7 +30,7 @@ estimate:
   method: safetensors-kv
   kv_sequences: concurrency
   # Activations of the profiling run, CUDA graphs, sampler and workspaces (on top of weights,
-  # KV cache and the CUDA context). Calibrated on real hardware: see docs/acceptance-m3.md.
+  # KV cache and the CUDA context). Calibrated on real hardware (an A100).
   overhead: 2GiB
 params:
   context: {type: int, default: 8192, min: 256, max: 1048576, label: Context length (tokens),
@@ -55,7 +55,7 @@ env:
 # given (vllm/entrypoints/serve/middleware/register.py) and then requires `Authorization: Bearer` on
 # paths under /v1, /v2, /inference and /cohere (serve/middleware/authenticate.py: GUARDED_PREFIX).
 # /health stays open, so the health check needs no key. Other paths (/invocations, /tokenize,
-# /pooling, /score, /rerank without /v1) are not guarded by vLLM: see docs/acceptance-m4.md.
+# /pooling, /score, /rerank without /v1) are not guarded by vLLM; the agent's key guard covers them.
 api_key_env: VLLM_API_KEY
 variants:
   - name: cuda

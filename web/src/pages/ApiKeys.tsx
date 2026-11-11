@@ -238,7 +238,12 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
             <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
           )}
         </td>
-        <td data-label="Cloud" className="small"><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}</td>
+        <td data-label="Cloud" className="small"><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}
+          {k.effective_cloud && k.effective_cloud !== level && (
+            <span className="chip chip-tone-off" title="The server's current maximum for people's own keys is lower; this key works as if set to it until the maximum is raised again.">
+              now {CLOUD_LABEL[k.effective_cloud]} (server maximum)
+            </span>
+          )}</td>
         <td data-label="Budget" className="small">
           <div>
             {k.budget ? <BudgetMeter b={k.budget} label={`Budget of ${k.name}`} compact /> : <span className="muted">none</span>}
@@ -508,8 +513,9 @@ function CloudPanel({ cloud, onSaved }: { cloud: CloudSettings; onSaved: () => v
       <h2 id="cloud-title">Cloud for keys</h2>
       <p className="muted small">
         Whether requests with a key may reach cloud providers. Keys made before 1.2 are “Never”, and changing the default here changes no existing
-        key. People may set their own keys up to the most allowed; admins may set any key, which locks it for its owner. In the playground, admins
-        may use the cloud and others get the most allowed.
+        key. People may set their own keys up to the most allowed; admins may set any key, which locks it for its owner. Lowering the most allowed
+        applies at once to people's keys set higher (not to values an admin set, nor to admins' own keys); raising it again gives them their
+        setting back. In the playground, admins may use the cloud and others get the most allowed.
       </p>
       <form onSubmit={save}>
         <div className="grid-2">

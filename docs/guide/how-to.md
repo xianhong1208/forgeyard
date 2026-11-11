@@ -49,9 +49,12 @@ Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A pr
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
-> AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2,
-> through `amd-smi` and `rocm-smi`; discrete AMD cards only against recorded data so far. Report
-> anything that looks wrong with the output of `forgeyard agent inventory --json --raw`.
+> AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2: the
+> inventory (through the `amdsmi` library, `amd-smi` and `rocm-smi`), joining, the GPU allowlist,
+> and a model served through `/v1` with llama.cpp's Vulkan build as a custom recipe. Not checked on
+> real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes (whether they support
+> gfx1151 is unknown), and discrete AMD cards (recorded data only). Report anything that looks wrong
+> with the output of `forgeyard agent inventory --json --raw`.
 
 ## Add a CPU-only machine
 
@@ -81,12 +84,12 @@ the next machine:
 - **Machine name** (optional): how it is listed on **Machines**; empty means its host name. Letters,
   digits, `.`, `_` and `-`, up to 64 characters. Adds `FORGEYARD_NAME`.
 - **Server address, as that machine reaches it** (default: this server's `PUBLIC_URL`): change it
-  when the machine comes through an SSH tunnel (`https://127.0.0.1:7860`), a VPN or another LAN
-  address. When that host is not in the server's certificate the page says so: add it to
+  when the machine reaches the server by another address: through a VPN, a forwarded port
+  (`https://127.0.0.1:7860`) or another LAN address. When that host is not in the server's certificate the page says so: add it to
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
 - **Advanced → Port range** (`FORGEYARD_PORT_RANGE`, default `30000-32767`): the host ports for
   services and model replicas. Set it when only some ports reach the machine, for example
-  `33000-33002` forwarded through an SSH tunnel.
+  `40000-40099` opened in a firewall. The server must be able to reach these ports.
 
 A field the agent would reject shows its error instead of a command. The image tag is the server's
 version. Like the page, the commands here start with `sudo`; as root, or when your account is in the
@@ -98,7 +101,7 @@ On the machine (or on another one, then `docker save` and `docker load`), in a F
 the server's version:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .
+sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.2.0 .
 ```
 
 ### NVIDIA
@@ -116,7 +119,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.1.0
+  forgeyard-agent:1.2.0
 ```
 
 Then:
@@ -148,7 +151,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.1.0
+  forgeyard-agent:1.2.0
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -163,7 +166,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  forgeyard-agent:1.1.0 inventory
+  forgeyard-agent:1.2.0 inventory
 ```
 
 ### CPU only
@@ -177,7 +180,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.1.0
+  forgeyard-agent:1.2.0
 ```
 
 ### Why these options
@@ -219,7 +222,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     forgeyard-agent:1.1.0
+     forgeyard-agent:1.2.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -228,6 +231,40 @@ A machine that already joined keeps its identity if the container gets its state
 
 Process workloads the old agent started outside the container are not taken over: stop them from
 the UI first.
+
+## Run a service or a task
+
+Admins and operators run their own programs on the machines as **workloads**: open **Workloads** →
+**New workload**, fill in the form, and choose **Create and start**.
+
+1. **What:** **Service** (runs until you stop it; restarted when it exits) or **Task** (runs to the
+   end). A **Name**: `a-z`, `0-9` and `-`, unique.
+2. **Run:** **Container** (an **Image**, for example `python:3.13-slim`, with an optional
+   **Entrypoint**) or **Process** (a **Command** on the basic `PATH` or an absolute path, run by the
+   agent as its workload account). **Arguments** go one per line, without shell quoting.
+3. **Where:** a **Machine**, or *Any online machine with room*; **GPUs**: *None*, *How many* (and
+   a **Vendor**), or *These cards* on a chosen machine; **CPU cores**, **Memory** (for example `4Gi`)
+   and **Replicas** (1 to 16, each on one machine).
+4. **Environment:** the variables it needs. It starts from an empty environment; the variables
+   Forgeyard adds are in the [reference](reference.md#workload-environment). Values are stored
+   encrypted.
+5. **Ports and health** (a service): **Add port** for each port it listens on. The agent picks a host
+   port from its range and shows the address on the workload's page. A process listens on `$PORT`
+   (or `${PORT_<NAME>}` in its arguments); a container gives its own port, which the host port maps
+   to. **Health check**: *None*, *HTTP* (a **Path**) or *TCP*. **Restart**: *Always*, *On failure* or
+   *Never*.
+6. **Limits and retries** (a task): **Max duration (s)** stops and fails it when it runs longer;
+   **Retries** after a non-zero exit, with a **Retry backoff (s)** that doubles each time, up to 5
+   minutes.
+
+*Spec that will be sent* shows the JSON the form makes. The workload's page shows each replica, its machine, GPUs and address, the
+events, and the last lines of its output. **Stop** stops every replica (SIGTERM, then SIGKILL after
+10 s) and frees its GPUs; **Start** places them again; **Delete** also removes its history and
+output.
+
+Isolation, in short: a process runs as the unprivileged workload account with only its own cards
+visible; a container gets only its cards, never `--privileged`. See
+[Workloads](concepts.md#workloads).
 
 ## Add a cloud provider
 
@@ -238,24 +275,64 @@ a tier with the cloud model, and save. Give the keys that may use it a cloud set
 **Never** on **API keys**. [Cloud providers](cloud-providers.md#add-a-provider) has the steps for
 each provider, and what each one's endpoint cannot do.
 
+## Track and limit cloud spend
+
+Admins, once providers are in use:
+
+1. **Set prices.** On **Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
+   matches, tick the rows to take, and choose **Apply ticked**. For a model OpenRouter does not list,
+   open its provider, choose **Prices** on the model, type the prices from the provider's pricing
+   page (US dollars per million tokens), and **Save prices**. A cloud model without a price is counted
+   *without a price*, and is refused under any budget.
+2. **Watch the cost.** **Usage** → **Cost** shows the cost per day, key, person, model or provider,
+   and how much was served locally.
+3. **Set budgets**, per calendar month (UTC), in US dollars:
+   - a key: **API keys** → the key's **Limits** → **Monthly budget (USD)** → **Save limits**. An
+     admin's value on someone else's key is locked for its owner; **Unlock budget** removes it;
+   - a person: **Usage** → **Cost** → **Budgets this month**, with **Everyone** selected → **Set
+     budget**;
+   - a provider: its page → **Monthly budget** → **Save budget**.
+4. **Watch the alerts.** At 80% and 100% of a budget, the **Audit log** gets one event
+   (`budget.warning`, `budget.exhausted`), and the pages show a warning. There is no e-mail.
+
+How cost is worked out, how a budget reserves money and what happens when it runs out:
+[Cost and prices](cloud-providers.md#cost-and-prices) and [Budgets](cloud-providers.md#budgets).
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, find the machine, choose **Change GPU access**.
-2. Tick only the cards Forgeyard may use, for example card 4, and choose **Save**.
+2. Tick only the cards Forgeyard may use, for example cards 2 and 3, and choose **Save**.
 
 From then on:
 
 - nothing Forgeyard runs is given another card, whatever a workload or deployment asks;
 - the other cards show *not for Forgeyard*;
-- memory is counted from what each allowed card reports **free**, so other people's use of the
+- memory is counted from what each allowed card reports **free**, so what other programs use on the
   same card is respected.
 
 A card in use cannot be taken off the list: stop what runs on it first. Every change is in the
 audit log, with before and after.
 
-To keep a model on one card next to other people's work, deploy it with **GPU sharing** →
+To keep a model on one card next to other programs, deploy it with **GPU sharing** →
 **Share VRAM**: it then reserves only its estimate, and vLLM is told to use just that much (see
 [vLLM does not start on a shared card](troubleshooting.md#vllm-does-not-start-on-a-shared-card)).
+
+## Add people
+
+Admins, on **Users**:
+
+1. **Add user**: a **Username**, an optional **Email (optional)**, and a **Role** (`user`,
+   `operator` or `admin`; see [Roles](concepts.md#roles)). Choose **Create and get link**.
+2. Send them the one-time link. It sets their password, works once, and expires in 72 hours. You never
+   see their password.
+
+Later, from the same list: **Password link** gives a new link (24 hours) to someone who forgot their
+password; **Sign out** ends all their sessions; **Disable** stops them signing in and stops their API
+keys; **Delete** removes them. The owner cannot be disabled, demoted or deleted.
+
+To let people ask for an account themselves, start the server with `REGISTRATION=approval`. The
+sign-in page then offers to request an account, and requests wait on **Users** until an admin chooses
+**Approve** or **Reject**.
 
 ## Use your own certificate or a reverse proxy
 
@@ -270,7 +347,8 @@ TLS_CA_FILE=/etc/forgeyard/tls/company-ca.pem
 
 `TLS_CA_FILE` is the CA that issued it; agents then pin that CA, and **Trust this server** offers it.
 Leave it out for a publicly trusted certificate: join commands then carry no fingerprint and agents
-use the system's trust store. The server reloads the files when they change (after a renewal).
+use the system's trust store. The server checks the files every 12 hours and switches to a renewed certificate without a restart;
+restart it to switch at once.
 
 **Behind a reverse proxy** that already handles HTTPS (nginx, Caddy):
 

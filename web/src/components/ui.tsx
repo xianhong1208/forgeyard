@@ -2,7 +2,10 @@ import { IconAlertTriangle, IconCheck, IconCopy, IconInfoCircle } from "@tabler/
 import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { Link } from "react-router";
 
+import { useDocumentTitle } from "../lib/title";
+
 export function PageHeader({ index, title, lead, actions }: { index: string; title: string; lead?: string; actions?: ReactNode }) {
+  useDocumentTitle(title);
   return (
     <header className="page-header">
       <div>

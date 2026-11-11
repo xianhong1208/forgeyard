@@ -75,7 +75,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 - 用戶端已經離開；
 - 回答已經開始串流。
 
-如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會等待本機副本。
+如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會送到本機副本，不再受 *Concurrent requests* 限制：由引擎排隊處理。
 
 在雲端層內，回應 429 或 5xx、或連不上的目標會被略過，並在 30 秒內（`PROVIDER_COOLDOWN_SECONDS`）排到最後才嘗試。同一層的多個目標會依權重分攤請求。當沒有其他目標可試、而供應商要求等待不超過 2 秒時（`Retry-After`，`PROVIDER_RETRY_AFTER_CAP`），請求會等一次再試。
 
@@ -101,7 +101,8 @@ curl https://192.168.1.20:7860/v1/chat/completions \
 | **Allowed**（`on`） | 依上面的規則溢出 | 會列出，也可以使用 |
 
 - 1.2 以前建立的金鑰一律是 **Never**。新金鑰會拿到伺服器的預設值，除非管理員改過，否則是 **Never**。
-- 每個人能替自己的金鑰設定的值，最多到「the most people may give their own keys」，除非管理員調高，否則是 **Never**。兩者都在 **API keys** 的 **Cloud for keys**。
+- 每個人能替自己的金鑰設定的值，最多到 **The most people may give their own keys** 的設定，除非管理員調高，否則是 **Never**。兩者都在 **API keys** 的 **Cloud for keys**。
+- 調低 **The most people may give their own keys** 會立刻生效：設得比較高的個人金鑰，從下一個請求起就照新的上限運作（API keys 表格會在旁邊顯示「now …（server maximum）」），之後把上限調回來，金鑰原本的設定也會恢復。管理員設定的值，以及管理員自己的金鑰，不受影響。
 - 管理員可以設定任何金鑰的雲端設定。設在別人的金鑰上時，這個值會像限制一樣對擁有者**鎖定**。**Unlock cloud** 會把它還原成預設值。
 - 在你網路內的供應商（沒有勾選 *Outside your network*）不算雲端：每把金鑰都能使用。
 - 在 **Playground** 裡，管理員可以使用雲端；其他人則拿到他們能替金鑰設定的最大值。
@@ -133,7 +134,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 - 這個端點還在 **beta**，不認得的參數會被默默忽略。
 - 不支援檔案上傳或下載。context 快取只能透過 `extra_body.google.cached_content` 使用。
 - **Gemini 3 thought signature**（每個工具呼叫上的 `extra_content.google.thought_signature`）必須在下一輪送回。Forgeyard 會原封不動地傳遞。如果對話較早的回合是由本機模型回答，就不會有 signature，Gemini 可能以 400 拒絕。
-- 有些模型無法關閉 thinking。thinking token 是否計入 `completion_tokens`，目前還沒確認。
+- 有些模型無法關閉 thinking。thinking token 不計入 `completion_tokens`，只算在 `total_tokens`；Forgeyard 會把它補回來（請見[費用與價格](#cost-and-prices)）。
 
 ### Azure OpenAI
 
@@ -207,17 +208,15 @@ prompt size (about 3 bytes a token, on the high side) × input price
   + (max_tokens, or 4096 without it, × n) × output price
 ```
 
-也就是：提示的大小（大約 3 bytes 一個 token，偏高估）乘以輸入價格，加上 `max_tokens`（沒有時用 4096）乘以 `n` 再乘以輸出價格。
-
 只要其中一個預算付不起（已花費 + 進行中請求的預留 + 這個請求 > 預算），請求就**不會送到那個供應商**。請求結束時，預留會換成它實際的費用；請求失敗或被拒絕時，預留會釋放。同時進來的多個請求不會一起超支：預留是在這台伺服器裡、在鎖之下計算的。請求的實際費用仍可能超過預留（供應商不理會 `max_tokens`，或沒有設定 `max_tokens` 的請求回答很長），所以如果預算必須精確到分，請在程式裡設定 `max_tokens`，或調低 `BUDGET_DEFAULT_MAX_TOKENS`。
 
 ### 預算用完時
 
 路由對**這個範圍變成只用本機**；只要還有別的目標能服務，就不會失敗：
 
-- 請求原本因為本機**忙碌**而要溢出：改成等待本機副本；
+- 請求原本因為本機**忙碌**而要溢出：最後還是送到本機副本，由引擎排隊處理；
 - 雲端那一層還有別的供應商有額度：由那個供應商服務；
-- 回應會帶 `X-Forgeyard-Budget-Exhausted`，說明是哪個預算讓請求沒有送到某個供應商：`key`、`person` 或 `provider:<名稱>`。
+- 回應會帶 `X-Forgeyard-Budget-Exhausted`，說明是哪個預算讓請求沒有送到某個供應商：`key`、`person` 或 `provider:<name>`。
 
 只有在**沒有任何目標能服務**時（本機副本都停擺，或模型只有雲端），請求才會失敗，回應 **402**：
 
@@ -255,8 +254,8 @@ prompt size (about 3 bytes a token, on the high side) × input price
 - `EGRESS_PROXY` 會改經由你指定的 proxy。`EGRESS_ALLOWED_HOSTS` 會限制只能連到某些主機。`EGRESS_CA_FILE` 會額外信任公司的 CA。
 - 只允許 **https**。雲端供應商必須解析到公開位址。私有位址只給你網路內的供應商使用，純 http 只給勾選 **Allow plain HTTP** 的供應商。
 - **link-local 和雲端 metadata 位址**（169.254.169.254、fd00:ec2::254）一律拒絕。每次請求前都會檢查位址，而且連線會直接連到檢查過的那個位址。
-- 供應商金鑰絕不會寫進記錄檔、稽核紀錄或任何回應，複製供應商時也絕不會一起複製（複本沒有金鑰，而且預設停用）。
-- 提示和回答絕不會寫進記錄檔。
+- 供應商金鑰絕不會寫進紀錄、稽核紀錄或任何回應，複製供應商時也絕不會一起複製（複本沒有金鑰，而且預設停用）。
+- 提示和回答絕不會寫進紀錄。
 
 ## 疑難排解
 

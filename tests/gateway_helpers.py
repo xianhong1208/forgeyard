@@ -35,6 +35,7 @@ class FakeEngine:
         self.hold = hold            # before a non-streamed answer
         self.usage = usage or USAGE
         self.status: Optional[int] = None   # answer every request with this status instead
+        self.retry_after: Optional[str] = None  # sent with `status`
         self.cut_after: Optional[int] = None  # a stream breaks off after this many chunks (1.2)
         self.seen: list[dict] = []
         self.refused = 0
@@ -46,9 +47,11 @@ class FakeEngine:
             def log_message(self, *a):
                 pass
 
-            def _json(self, status, obj):
+            def _json(self, status, obj, headers=None):
                 body = json.dumps(obj).encode()
                 self.send_response(status)
+                for k, v in (headers or {}).items():
+                    self.send_header(k, v)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -73,7 +76,8 @@ class FakeEngine:
                     return self._json(401, {"error": "Unauthorized"})
                 if engine.status:
                     return self._json(engine.status, {"error": {"message": "engine says no", "type": "BadRequestError",
-                                                                "code": engine.status}})
+                                                                "code": engine.status}},
+                                      {"Retry-After": engine.retry_after} if engine.retry_after else None)
                 body = entry["body"] or {}
                 if self.path == "/v1/chat/completions" and body.get("stream"):
                     return self._stream(body)

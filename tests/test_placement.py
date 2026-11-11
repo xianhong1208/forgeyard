@@ -30,7 +30,7 @@ def gpu_indices(rep):
 
 # ------------------------------------------------------------------ allowlist
 def test_fy_place_001_gpus_only_from_the_allowlist(owner):
-    """FY-PLACE-001: GPU #4 only (Tony's shared host): every GPU workload gets #4 and nothing else,
+    """FY-PLACE-001: one allowed card (#4): every GPU workload gets #4 and nothing else,
     a second one waits, and asking for another card by index is refused."""
     nid = make_node("a100", allowlist=[4])
     w = create(owner, task("one", machine_id=nid, resources={"gpus": {"count": 1}}))["workload"]

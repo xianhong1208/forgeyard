@@ -9,7 +9,7 @@ users get, not how it is built. Versions are minor releases unless a change brea
 the agent; services and tasks as containers or processes with only the GPUs they were given;
 models deployed from a catalog with engine recipes and memory estimates; one OpenAI-compatible
 gateway at `/v1` with API keys, limits and usage. Each milestone was accepted on a real 8×A100
-host (Forgeyard limited to one shared card) plus a CPU machine. See [CHANGELOG.md](CHANGELOG.md).
+host plus a CPU machine. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Shipped: 1.1.0 (2026-11-11), easier to start and safe on the network
 
@@ -62,6 +62,22 @@ something the alternatives do not (see below). One pull request before the 1.2 r
 5. **Repository settings:** public; secret scanning, push protection and Dependabot alerts on; a
    ruleset protecting `main` and `dev`.
 
+Where it stands (PR `publish-prep`):
+
+- ✅ 2, 3 and 4. The scan covered every blob and message on every branch, tag and pull request ref,
+  plus every issue, pull request, comment, review, release and label: nothing private was found, and
+  the GPU UUIDs in test fixtures are not those of any real machine used in testing. The detailed
+  acceptance records of the test machines are kept out of the published repository.
+- ✅ 1 in part, on a real Strix Halo (Radeon 8060S, gfx1151, ROCm 7.0.2):
+  - the inventory, through the `amdsmi` library;
+  - joining from another network, and the GPU allowlist;
+  - a model deployed and called through `/v1` with llama.cpp's Vulkan build as a custom recipe, on
+    a machine with no internet access.
+
+  Still open: the ROCm images of the `vllm` and `llama-cpp` recipes on real hardware, and a
+  discrete AMD card. The guide says so.
+- 5 is done when the repository is made public.
+
 ## Next: 1.2, cloud model APIs behind the same gateway
 
 Researched on 2026-11-11 (LiteLLM, OpenRouter, Portkey, Envoy's AI gateway, Kong, GPUStack). "One
@@ -80,14 +96,14 @@ do not:
 
 Two pull requests (the second in two parts):
 
-1. **Providers and tiered routing** (PR A, `providers`, in review): OpenAI-compatible endpoints only (OpenAI,
+1. ✅ **Providers and tiered routing** (PR #16): OpenAI-compatible endpoints only (OpenAI,
    Anthropic, Gemini, Azure OpenAI, OpenRouter, any compatible server) with a quirks table, no LiteLLM;
    tiered routes; the spill rules; the per-key cloud setting; egress rules; usage per target.
 2. **Cost and budgets** (PR B), in two parts:
    - ✅ B1, `cost` (PR #19): prices per provider model (entered by hand, or refreshed from
      OpenRouter's catalogue with a diff to accept), the cost of each request stored in micro-dollars,
      and **Usage → Cost**;
-   - ✅ B2, `budgets` (in review): monthly budgets (UTC calendar month) per key, person and provider
+   - ✅ B2, `budgets` (PR #21): monthly budgets (UTC calendar month) per key, person and provider
      with reservation, alerts at 80% and 100%.
 
 Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
@@ -143,16 +159,21 @@ version and the details are not decided yet.
 - Answer 404, as for an unknown model, when a key may not use a model, so a restricted key cannot
   tell which other models exist.
 - Spread scoring for plain tasks (they still use first fit).
+- A built-in llama.cpp **Vulkan** recipe for AMD (and other) GPUs: on a Strix Halo it is a 0.3 GB
+  image that ran where the 7.2 GB ROCm image is untested.
+- **Import an image** from a file, for machines that cannot reach a registry (seen on a machine
+  whose DNS blocked ghcr.io and Hugging Face).
 - Tune each recipe's memory overhead from real runs (estimates were 7–39% above actual).
 
 ## Verification still to do
 
-- **AMD ROCm on real hardware.** The inventory has run on a real Strix Halo (gfx1151, ROCm 7.0.2;
-  see docs/acceptance-m1.md): the `gfx` target, unified memory and the 96 GiB pool are right. Still to
-  confirm there:
-  - the `amdsmi` library loaded from the mounted ROCm, and a discrete card;
-  - vLLM's ROCm image;
-  - `ROCR_VISIBLE_DEVICES`.
+- **AMD ROCm on real hardware.** Done on a real Strix Halo (gfx1151, ROCm 7.0.2): the
+  inventory through the `amdsmi` library, unified memory and the 96 GiB
+  pool, joining, the GPU allowlist, and a llama.cpp Vulkan deployment served through `/v1`. Still to
+  confirm:
+  - the ROCm images of the `vllm` and `llama-cpp` recipes (gfx1151 support in them is unknown);
+  - a discrete card;
+  - `ROCR_VISIBLE_DEVICES` for a process workload.
 - **The systemd scope for process limits.** It has not run on a host with systemd yet.
 - **The one-line install on a systemd host, and the agent image on real GPUs.** Both ran in a
   container without systemd or Docker (the install with a stand-in `systemctl`, the image in CI on a

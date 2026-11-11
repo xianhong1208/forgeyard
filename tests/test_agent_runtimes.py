@@ -355,7 +355,7 @@ def test_fy_rt_019_health_probes():
 
 def test_fy_rt_020_gpu_probe_script(monkeypatch, capsys):
     """FY-RT-020: scripts/gpu_probe.py formats UUIDs like nvidia-smi and says plainly when there
-    is no NVIDIA driver (exit 2). The GPU part runs on Tony's machine (docs/acceptance-m2.md)."""
+    is no NVIDIA driver (exit 2). The GPU part runs on a real NVIDIA host."""
     import importlib.util
     from pathlib import Path
 

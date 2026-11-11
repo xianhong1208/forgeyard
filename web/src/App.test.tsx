@@ -146,6 +146,6 @@ describe("ended sessions", () => {
     });
     mount("/account");
     await waitFor(() => expect(where()).toBe("/login?next=%2Faccount&ended=idle"));
-    expect(await screen.findByText(/2 hours without activity/)).toBeTruthy();
+    expect(await screen.findByText(/signed out after a time without activity/)).toBeTruthy();
   });
 });

@@ -367,4 +367,13 @@ describe("gateway helpers", () => {
     expect(snippets("http://h/v1", "fyk_x", "r", "rerank").curl).toContain("http://h/v1/rerank");
     expect(snippets("http://h/v1", "fyk_x", "a", "openai-audio").curl).toContain("-F model=a");
   });
+  it("FY-WEB-140 a key above the server's current maximum says what it works as now", async () => {
+    const capped = key({ user: { id: 2, username: "ursula" }, cloud: "on", effective_cloud: "off" });
+    const same = key({ id: "k2", name: "plain", cloud: "fallback", effective_cloud: "fallback" });
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ is_admin: false, keys: [capped, same] }) } : undefined), USER);
+    mount("/keys");
+    const chip = await screen.findByText("now Never (server maximum)");
+    expect(chip.getAttribute("title")).toMatch(/maximum for people's own keys is lower/);
+    expect(screen.getAllByText(/server maximum/)).toHaveLength(1);
+  });
 });

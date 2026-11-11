@@ -104,6 +104,10 @@ The gateway sends each request to the ready replica with the fewest requests in 
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
+The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
+streaming), embeddings, rerank and speech to text. Its requests count as `console` in Usage, and its
+cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
+
 ## API keys, limits and usage
 
 - Programs call `/v1` with an **API key** (`fyk_…`). Everyone creates their own on **API keys**. A
@@ -113,8 +117,10 @@ that only the gateway knows, and the agent refuses every other request on the re
 - Admins set **defaults** (for keys without their own limits) and **caps** (the most anyone may
   give their own key), and can set limits on anyone's key. A limit an admin set on someone else's
   key is **locked**: its owner cannot change it.
-- **Usage** counts requests, errors, tokens and latency per day, model, key and person. Everyone
-  sees their own; admins see everyone's. It counts, it does not bill.
+- Each key also has a **cloud** setting and may have a monthly **budget** (see below).
+- **Usage** counts requests, errors, tokens and latency per day, model, key, person, source and
+  local or cloud. Everyone sees their own; admins see everyone's. Its **Cost** tab shows what cloud
+  requests cost (see below).
 
 ## Cloud providers and tiers
 
@@ -135,6 +141,26 @@ that only the gateway knows, and the agent refuses every other request on the re
 
 [Cloud providers](cloud-providers.md) has the details for each provider.
 
+## Cost and budgets
+
+- **Cost.** Every request is priced once, when it finishes. Local replicas and providers inside your
+  network cost 0. A cloud request costs what the provider reports (OpenRouter does), or else its
+  tokens at the provider model's **prices** in US dollars per million tokens, which an admin enters
+  or refreshes from OpenRouter's public list. A cloud request whose model has no price is counted as
+  *without a price*, not as 0. **Usage** → **Cost** shows the cost per day, key, person, model or
+  provider. It is Forgeyard's estimate of what the providers charge, not their invoice.
+- **Budgets.** A budget is what cloud requests may cost per calendar month (UTC), in US dollars, set
+  on an API key (by its owner, or by an admin, which locks it), on a person (by an admin) or on a
+  provider (by an admin). Before a request goes to a cloud provider, its largest possible cost is
+  **reserved** against every budget that applies; a budget that cannot cover it keeps the request
+  from that provider. The request then stays local if it can, and fails with **402** only when
+  nothing else can serve it.
+- **Alerts.** At 80% and at 100% of a budget, Forgeyard writes one event to the **Audit log** and
+  shows a warning on **API keys**, **Usage** → **Cost** and the provider's page.
+
+[Cost and prices](cloud-providers.md#cost-and-prices) and [Budgets](cloud-providers.md#budgets)
+have the details.
+
 ## Roles
 
 | Role | Can |
@@ -146,3 +172,15 @@ that only the gateway knows, and the agent refuses every other request on the re
 The **owner** is the first account. It is always an admin and cannot be demoted, disabled or
 deleted, so nobody can lock administration out. New people get a one-time link to set their own
 password; self-registration is off unless `REGISTRATION=approval`.
+
+## Sign-in and sessions
+
+- Passwords have at least 12 characters, and common passwords are refused. Repeated failed sign-ins
+  make each further try wait (`LOGIN_FREE_FAILURES`, `LOGIN_IP_FAILURES`).
+- A session ends after 2 hours without a request, and after 7 days in any case
+  (`SESSION_IDLE_MINUTES`, `SESSION_MAX_DAYS`).
+- On **My account**, you change your password (your other sessions are signed out) and see every
+  browser signed in as you, each of which you can sign out. An admin can sign someone out everywhere,
+  disable them, or give them a new set-password link on **Users**.
+- The **Audit log** (admins) records sign-ins, failed sign-ins, changes to accounts, machines, models,
+  keys and providers, and budget alerts.

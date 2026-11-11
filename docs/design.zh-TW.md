@@ -19,25 +19,25 @@ server 不需要能連到機器。
    ```
 
    agent 先下載 server 的 CA，指紋不符就拒絕；之後 `https://` 與 `wss://` 都**只信任這個 CA**（不用系統的清單），
-   所以中間人會被拒絕。接著 agent 用 token 換到**這台機器專屬的憑證**，存在 state 目錄（root 時是 `/var/lib/forgeyard-agent`，
+   所以中間人會被拒絕。接著 agent 用 token 換到**這台機器專屬的憑據**，存在 state 目錄（root 時是 `/var/lib/forgeyard-agent`，
    否則 `~/.local/state/forgeyard-agent`；可用 `--state-dir` 指定），權限 0600；server 只存它的 SHA-256。
    之後啟動不需要 token：`python -m forgeyard agent`。
-3. agent 以 `Authorization: Bearer <憑證>` 開 WebSocket 到 `/agent/v1/stream`，先送完整 inventory，之後每 10 秒
+3. agent 以 `Authorization: Bearer <credential>` 開 WebSocket 到 `/agent/v1/stream`，先送完整 inventory，之後每 10 秒
    送一次 heartbeat，只帶會變的值（可用／已用記憶體、使用率、溫度）。硬體有變動時再送一次完整 inventory。
 
 - **Inventory：** NVIDIA 用 NVML（`nvidia-ml-py`）：型號、UUID、compute capability 當作 `arch`（`8.0`）、記憶體、
   driver。AMD 用 ROCm 附的 `amdsmi` 函式庫，沒有時退回 `amd-smi` CLI，再退回 `rocm-smi`；`arch` 是 gfx target
   （`gfx1100`、`gfx1151`）。Strix Halo 這類 APU 會標示 **unified memory**，大小取 VRAM carve-out 與 GTT 中較大者。
   CPU 與系統記憶體一定會列成一筆。某個 collector 找不到東西時會說明原因，不會讓 agent 停掉。這些都是唯讀查詢：
-  不配置 GPU 記憶體，也不碰執行中的程序。
+  不配置 GPU 記憶體，也不碰執行中的行程。
 - **`python -m forgeyard agent inventory [--json] [--raw]`** 不加入 server，只印出 agent 偵測到的硬體。
 - **上線／離線：** 30 秒沒收到任何訊息，server 就把機器標成離線。這是 server 每 2 秒自己檢查一次，所以拔網路線
   或 agent 卡住、TCP 連線看起來還在時也抓得到。agent 會自己重連，指數退避加隨機抖動，最長 15 秒。
-- **撤銷與移除**（admin）：憑證立即失效，開著的連線也立刻被關掉（agent 會結束）。登入的人都能看 Machines 頁，
+- **撤銷與移除**（admin）：憑據立即失效，開著的連線也立刻被關掉（agent 會結束）。登入的人都能看 Machines 頁，
   只有 admin 能新增、撤銷、移除機器。建立 token、加入、被拒絕的加入、撤銷與移除都記在稽核紀錄。
 - **傳輸：** `wss://`，用釘選的 CA（存在 state 目錄的 `server-ca.pem`）驗證。用一般 HTTP 加入的 agent（1.0）
   執行一次 `python -m forgeyard agent trust --server https://<server>:7860 --ca-fingerprint sha256:…` 即可切換，
-  機器憑證不變；在那之前它會一直離線，log 會說明該怎麼做。`--ca-file` 改為釘選你自己的 CA 檔（公司 CA、TLS proxy）。
+  機器憑據不變；在那之前它會一直離線，log 會說明該怎麼做。`--ca-file` 改為釘選你自己的 CA 檔（公司 CA、TLS proxy）。
   Host 檢查對 agent 也適用：agent 若用名稱而不是 IP
   連 server，該名稱要列在 `ALLOWED_HOSTS`（或設為 `PUBLIC_URL`）。agent 端點永遠不接受瀏覽器的 session cookie，
   且拒絕任何帶 `Origin` 標頭的請求。
@@ -45,13 +45,11 @@ server 不需要能連到機器。
   <file.json>` 用 fixture 取代真實硬體。必須同時設 `FORGEYARD_AGENT_SIMULATION=1` 才能用，server 會把這種機器標成
   *simulated inventory*。
 
-這個里程碑的真機驗收步驟見 [docs/acceptance-m1.md](acceptance-m1.md)（英文）。
-
 ## Workload
 
 **workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
 可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。在
-**Workloads → New workload** 建立，或用 `POST /api/workloads` 送出 spec（欄位見英文 README 的表格）：
+**Workloads → New workload** 建立，或用 `POST /api/workloads` 送出 spec：
 
 ```json
 {"name": "web", "kind": "service",
@@ -60,19 +58,19 @@ server 不需要能連到機器。
  "resources": {"cpu": 1, "memory": "512Mi", "gpus": {"count": 0}}, "machine_id": null}
 ```
 
-- **runtime：** `container`（Docker 或 Podman；`image`，可選 `command` 取代 entrypoint、`args`）或 `process`
-  （`command`、`args`、可選 `workdir`）。
-- **resources：** `cpu`（核心數）、`memory`（`4Gi`、`512Mi` 或位元組數）、`gpus`：`{"count": n}` 或
-  `{"indices": [4]}`（要先選機器），可加 `"vendor": "nvidia"/"amd"`。
-- **ports（service）：** agent 從自己的範圍（預設 30000-32767）挑 **host port**，頁面上會顯示位址。程序要聽在
-  這個 port：`$PORT`，或在參數裡寫 `${PORT}`／`${PORT_<NAME>}`。
-- **health（service）：** HTTP 或 TCP；只顯示 healthy／unhealthy，不會因此重啟。**restart：** `always`（預設）、
-  `on-failure`、`never`，重啟間隔 1、2、4… 秒，最多 60 秒。
-- **task：** 跑超過 `max_duration` 秒會被停止並判定失敗（不重試）；非 0 結束會重試 `retries` 次，間隔
-  `retry_backoff` 秒、每次加倍、最多 5 分鐘。
+| 欄位 | 內容 |
+|---|---|
+| `runtime` | `{"type": "container", "image", "command"?, "args"?}`（Docker 或 Podman；`command` 取代 entrypoint）或 `{"type": "process", "command", "args"?, "workdir"?}` |
+| `env` | 只有明確宣告的變數（見〈隔離〉） |
+| `resources` | `cpu`（核心數）、`memory`（`4Gi`、`512Mi` 或位元組數）、`gpus`：`{"count": n}` 或 `{"indices": [2]}`（要先選機器），可加 `"vendor": "nvidia"/"amd"` |
+| `ports` | service：`[{"name", "port"}]`。agent 從自己的範圍（預設 30000-32767）挑 **host port**，頁面上會顯示位址。行程要聽在這個 port：`$PORT`，或在參數裡寫 `${PORT}`／`${PORT_<NAME>}` |
+| `health` | service：`{"type": "http" 或 "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay", "start_period"}`。只顯示 healthy／unhealthy，不會因此重啟任何東西。`start_period` 內（第一次成功之前）的失敗不算 |
+| `restart` | service：`always`（預設）、`on-failure`、`never`。重啟間隔 1、2、4… 秒，最多 60 秒 |
+| `max_duration`、`retries`、`retry_backoff` | task：跑超過 `max_duration` 秒會被停止並判定失敗（不重試）；非 0 結束會重試 `retries` 次，間隔 `retry_backoff` 秒、每次加倍、最多 5 分鐘 |
+| `replicas`、`machine_id` | 要幾份；指定一台機器，或 `null` 表示第一台有空間的線上機器 |
 
 **放置（M2）：** 你選的機器，或依名稱排序第一台有空間的線上機器：有對應的 runtime、allowlist 裡有足夠的空閒 GPU、
-spec 宣告的 CPU 與記憶體放得下（扣掉已在上面的 replica）。GPU 是**獨佔**的：一張卡只給一個 replica。放不下的
+spec 宣告的 CPU 與記憶體放得下（扣掉已在上面的 replica）。GPU 是**獨占**的：一張卡只給一個 replica。放不下的
 replica 會停在 *pending* 並寫明原因，一有空間就自動放上去。workload 也可以宣告每張卡需要的記憶體（`gpus.vram`），
 並和同樣宣告的 workload 共用卡（`gpus.share: vram`）；模型部署用 M3 的排程器（見「模型」）。
 
@@ -85,22 +83,22 @@ replica 會停在 *pending* 並寫明原因，一有空間就自動放上去。w
 
 ### 隔離
 
-- **空的環境變數。** 程序只拿到 `PATH`、`HOME`（自己的空目錄）、`LANG`、`USER`／`LOGNAME`、spec 宣告的
+- **空的環境變數。** 行程只拿到 `PATH`、`HOME`（自己的空目錄）、`LANG`、`USER`／`LOGNAME`、spec 宣告的
   `env`、GPU 與 port 變數，以及 `FORGEYARD_REPLICA`／`FORGEYARD_WORKLOAD`／`FORGEYARD_REPLICA_INDEX`。容器只拿到
   宣告的 `env`、GPU 變數與身分變數，其他由 image 提供。agent 自己的環境變數與主機的憑證絕不會傳給 workload。
   GPU 變數、`FORGEYARD_*`、`PORT*` 不能在 spec 裡宣告。
-- **GPU（程序）：** `CUDA_VISIBLE_DEVICES` 與 `NVIDIA_VISIBLE_DEVICES` 放分配到的卡的 **UUID**（CUDA 預設依速度
+- **GPU（行程）：** `CUDA_VISIBLE_DEVICES` 與 `NVIDIA_VISIBLE_DEVICES` 放分配到的卡的 **UUID**（CUDA 預設依速度
   排序、nvidia-smi 依 PCI bus 排序，用編號可能指到另一張卡，UUID 不會），並設 `CUDA_DEVICE_ORDER=PCI_BUS_ID`。
   AMD：`ROCR_VISIBLE_DEVICES` 放 ROCr UUID（`GPU-<KFD unique_id>`，沒有時用編號），`HIP_VISIBLE_DEVICES` 放重新
-  編號的 `0..n-1`。沒有 GPU 時每個清單都是空的（`NVIDIA_VISIBLE_DEVICES=void`），AMD 上程序也不會拿到裝置的
-  群組，由核心擋住 `/dev/kfd`。NVIDIA 程序的隔離是「配合式」的（`/dev/nvidia*` 通常人人可讀）；容器才是強制的。
+  編號的 `0..n-1`。沒有 GPU 時每個清單都是空的（`NVIDIA_VISIBLE_DEVICES=void`），AMD 上行程也不會拿到裝置的
+  群組，由核心擋住 `/dev/kfd`。NVIDIA 行程的隔離是「配合式」的（`/dev/nvidia*` 通常人人可讀）；容器才是強制的。
 - **GPU（容器）：** `--gpus "device=<uuid>"`（NVIDIA Container Toolkit）或 CDI `--device nvidia.com/gpu=<uuid>`；
   AMD：`--device /dev/kfd` 加上分配到的那幾個 `/dev/dri/renderD*`。一定會設 `NVIDIA_VISIBLE_DEVICES`（沒 GPU 時
-  為 `void`），因為 CUDA image 預設寫 `all`，若主機 Docker 的預設 runtime 是 `nvidia`，否則會看到全部的卡。
-- **預設不用 root 跑。** agent 以 root 執行時，程序 workload 以 `--workload-user`（無特權帳號，例如 `nobody` 或
-  專用帳號）執行；沒設就拒絕執行程序 workload，Machines 頁會寫原因。agent 不是 root 時，程序以 agent 自己的身分
+  為 `void`），因為 CUDA image 預設寫 `all`，而主機 Docker 的預設 runtime 若是 `nvidia`，不覆寫就會看到全部的卡。
+- **預設不用 root 跑。** agent 以 root 執行時，行程 workload 以 `--workload-user`（無特權帳號，例如 `nobody` 或
+  專用帳號）執行；沒設就拒絕執行行程 workload，Machines 頁會寫原因。agent 不是 root 時，行程以 agent 自己的身分
   執行。容器用引擎預設值，加上 `--security-opt no-new-privileges`，絕不用 `--privileged`。
-- **資源限制。** 程序在自己的 process group。systemd 主機上、agent 為 root 時，放進有 `MemoryMax` 與 `CPUQuota`
+- **資源限制。** 行程在自己的 process group。systemd 主機上、agent 為 root 時，放進有 `MemoryMax` 與 `CPUQuota`
   的 transient scope；否則只有 rlimit：不產生 core dump，沒有 GPU 的 workload 用位址空間上限限制記憶體（GPU
   runtime 會保留很大的位址空間）。這時 CPU 不會被限制，只在放置時計算。容器用 `--cpus` 與 `--memory`。
 - **Port。** 容器的 port 只綁在一個位址：agent 連到 server 時用的本機位址（可用 `--bind-address` 改）。
@@ -113,26 +111,24 @@ server 為每台機器保存「應該在跑的 replica 完整清單」（spec �
 replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，所以掉訊息、重連或 agent 重啟後都只是再收斂一次。
 
 - **接管（adopt）：** agent 把每個 replica 記在 `<state dir>/replicas/`（pid、核心記錄的啟動時間與 boot id；
-  容器名稱）。重啟後的 agent 會找到自己的程序（同一個 pid；pid 被別人重用也不會認錯）與容器（label
+  容器名稱）。重啟後的 agent 會找到自己的行程（同一個 pid；pid 被別人重用也不會認錯）與容器（label
   `forgeyard.agent`、`forgeyard.replica`、`forgeyard.generation`），直接接管，不會重複啟動。收到 server 的第一份
   清單之前只觀察、不動作。**停掉 agent 不會停掉 workload**；要停請從 UI 停。
-- **輸出：** 程序直接寫到 `<state dir>/logs/<replica>/output.log`，只保留最後 `--log-max-mb` MB（預設 10）；
+- **輸出：** 行程直接寫到 `<state dir>/logs/<replica>/output.log`，只保留最後 `--log-max-mb` MB（預設 10）；
   容器用引擎的 log driver，額度相同。詳細頁會即時顯示：瀏覽器每 2 秒問 server，server 透過 WebSocket 問 agent。
   replica 結束時，最後 100 行會存在 server 給頁面用。
 - **協定：** 仍是第 1 版，以相容方式擴充。agent 在 `hello` 列出 `features: ["workloads"]`，server 在 `welcome`
   回覆自己的；雙方都有時才會傳 `desired`、`status`、`logs_request`／`logs`。M1 的 agent 照常運作（只是不會被
   派工作）；M2 的 agent 連到 M1 的 server 只回報硬體。
-- **agent 選項：** `--workload-user`、`--work-dir`（每個程序 replica 一個目錄；預設在 state 目錄旁邊，不在裡面）、
-  `--port-range`（30000-32767）、`--bind-address`、`--container-engine auto|docker|podman|none|<路徑>`、
+- **agent 選項：** `--workload-user`、`--work-dir`（每個行程 replica 一個目錄；預設在 state 目錄旁邊，不在裡面）、
+  `--port-range`（30000-32767）、`--bind-address`、`--container-engine auto|docker|podman|none|<path>`、
   `--limits auto|systemd|rlimit`、`--log-max-mb`、`--no-workloads`；模型用 `--model-cache DIR`、
   `--model-local-dir DIR`（可重複）與 `--allow-private-model-hosts`。`python -m forgeyard agent runtimes
   [--workload-user …]` 不加入 server，只印出這台機器能用哪些 runtime。
 
-workload 的真機驗收步驟見 [docs/acceptance-m2.md](acceptance-m2.md)（英文）。
-
 ## 模型
 
-**模型 → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
+**Models → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
 會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
 （見「Gateway 與 API key」）。部署頁顯示這個名稱、用量、每個 replica，並有一個直接檢查單一 replica 的小小 **Try it**。
 
@@ -166,7 +162,7 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](acceptance-m2.md)（�
   |---|---|---|---|
   | `vllm` | chat（safetensors） | NVIDIA、AMD | `vllm/vllm-openai:v0.32.0`（CUDA 13.0，driver ≥ 580）、`-cu129`（≥ 575）、`vllm/vllm-openai-rocm:v0.32.0` |
   | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
-  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD、CPU（容器或程序） | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`，程序用 release `b11977` |
+  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`，行程用 release `b11977` |
   | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
 
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
@@ -174,20 +170,20 @@ workload 的真機驗收步驟見 [docs/acceptance-m2.md](acceptance-m2.md)（�
   GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
 - **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
-  整張大卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
+  讓整張空著的卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
   並列出每台機器的原因與差多少（`wait: true` 則改為排隊等候）。同一個部署的多個 replica 會盡量放在**不同機器**上（優先於 binpack），
   讓 gateway 能在它們之間分流與容錯。這是預設行為，一直開著；只有在沒有別台機器放得下時，replica 才會放在同一台。
-- **共用 GPU**（`share: vram`）：同一張卡上多個 replica，各自被限制在自己的保留量內；共用的卡不會再給獨佔的 replica。
+- **共用 GPU**（`share: vram`）：同一張卡上多個 replica，各自被限制在自己的保留量內；共用的卡不會再給獨占的 replica。
   vLLM 的 `--gpu-memory-utilization` 是卡**總**記憶體的比例，而且**空閒**量不夠就拒絕啟動，所以在共用卡上固定 0.9 永遠起不來：
   Forgeyard 把它設成（保留量 − CUDA context）÷ 總量，無條件捨去。同一張卡上的 replica 一個一個啟動（前一個 healthy 才啟動下一個），
   避免兩個引擎同時依同一份空閒量決定自己的大小。
 - **模型快取**在每台機器上（`agent --model-cache DIR`）：以來源 + revision 為 key，目錄結構同 Hugging Face cache，該機器上所有 replica
   共用；由 agent 下載（可續傳、每個檔案以 SHA-256 或 git blob id 驗證、頁面顯示進度），以**唯讀**方式掛進容器（只掛該模型的目錄）；
-  對程序也是唯讀檔案。下載和 server 走同一套防護：只接受 https 與公開位址、每次轉址都重新檢查（LAN mirror 用 `--allow-private-model-hosts`）。
+  對行程也是唯讀檔案。下載和 server 走同一套防護：只接受 https 與公開位址、每次轉址都重新檢查（LAN mirror 用 `--allow-private-model-hosts`）。
 - **權限**：admin 管目錄、配方與模型來源；admin 與 operator 部署；所有登入的人都能看部署並試用。
 
-真機檢查：[docs/acceptance-m3.md](acceptance-m3.md) 與 `scripts/accept_m3.py`。
+真機檢查：`scripts/accept_m3.py`。
 
 ## Gateway 與 API key
 
@@ -210,10 +206,11 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 也可以。server 用自己的 CA 時，API keys 頁上的範例會自動加上這幾行。
 
 - **API key**（**API keys** 頁）：每個人自己建立；key 是 `fyk_` 加 43 個隨機字元，**只顯示一次**，同時給一段 curl 與 Python 範例；
-  server 只存 SHA-256 與 12 字元的前綴。可選：到期時間、可用的模型（不選就是所有部署，包括之後新增的）、每分鐘請求數與 token 數。
-  撤銷、到期或帳號停用後，下一個請求就失效。admin 可以看與撤銷所有人的 key、改任何 key 的限制，並設定**預設值**（key 沒設時套用）
+  server 只存 SHA-256 與 12 字元的前綴。可選：到期時間、可用的模型（不選就是所有部署，包括之後新增的）、每分鐘請求數與 token 數、
+  它的**雲端**設定與每月**預算**（見〈雲端供應商與分層路由〉）。撤銷、到期或帳號停用後，下一個請求就失效。admin 可以看與撤銷
+  所有人的 key、改任何 key 的限制、雲端設定與預算，並設定**預設值**（key 沒設時套用）
   與**上限**（一般人替自己的 key 設的最大值）。建立、修改、撤銷 key 都記在稽核紀錄。
-- **admin 設的限制會鎖定。** admin 替別人的 key 設定每分鐘請求數或 token 數後，key 的主人就不能再改這個值（403 `limit_locked`）；
+- **admin 設的限制會鎖定。** admin 替別人的 key 設定每分鐘請求數、token 數、雲端設定或每月預算後，key 的主人就不能再改這個值（403 `limit_locked`）；
   key 上會顯示鎖頭與設定它的 admin。主人仍然可以撤銷這把 key，也可以設定 admin 沒設的那個限制。admin 可以隨時修改鎖定的值，
   清空它就是**解鎖**（回到預設值，主人又能自己設定）。鎖定與解鎖都記在稽核紀錄（`api_key.changed` 的 `locked`／`unlocked`）。
   admin 自己的 key 不會被鎖。
@@ -222,26 +219,37 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 - **路由：** 該模型 ready 的 replica 中，經這台 server 進行中請求最少的優先，同分輪流。連線失敗（還沒回任何東西給 client 之前）
   就換下一個，失敗的那個排到最後，直到它的 agent 回報它又 ready（最多 15 秒）。client 中途斷線會關掉往上游的連線，引擎就停止生成。
   逾時：連線 5 秒；等回應 header 或串流的下一段 600 秒（`GATEWAY_CONNECT_TIMEOUT`、`GATEWAY_READ_TIMEOUT`）。
-- **錯誤**用 OpenAI 的格式 `{"error": {"message", "type", "param", "code"}}`：401 沒有／錯誤／過期／已撤銷的 key；403 這把 key
-  不能用這個模型；404 沒有這個模型；400 這個模型不走這個端點；429 超過限制，附 `Retry-After`；503 沒有 ready 的 replica，附每個
-  replica 的狀態；502 連不上 replica 或它拒絕內部 key；504 逾時。引擎自己的錯誤原樣轉回。
+- **`/v1/models`** 只列出符合以下條件的路由：這把 key 看得到它（它有在你網路內的目標，或 key 的雲端設定是 `on`）、key 的模型
+  清單包含它，而且它能提供服務：某一層有應該在執行的部署（啟動中、重啟中都算）或啟用中的網路內供應商；或者有這把 key 能用的啟用中
+  雲端目標：`on` 的 key 在路由不是 local only 時可以用；`fallback` 的 key 只有在雲端那層之前有本機層時才能用（跟實際呼叫時能用的層
+  一樣）。所以停止的模型會從清單消失；`GET /v1/models/{id}` 回 404「…is stopped」，
+  硬要呼叫則回 503 `no_ready_replica`「The deployment is stopped.」
+- **錯誤**用 OpenAI 的格式 `{"error": {"message", "type", "param", "code"}}`，`type` 依狀態碼而定：400 請求內容不對或這個模型不走
+  這個端點；401 沒有／錯誤／過期／已撤銷的 key，或帳號不是啟用狀態；402 預算（見下方）；403 這把 key 不能用這個模型；404 沒有這個
+  模型或路徑；413 請求內容超過 `GATEWAY_MAX_BODY_MB`；421 不認得的主機名稱；429 超過限制，附 `Retry-After`；502 連不上 replica 或
+  供應商、對方拒絕金鑰、重新導向或失敗；503 沒有 ready 的 replica（附每個 replica 的狀態）、沒有可用的目標，或讀不到本月花費；504
+  逾時。每個 `code` 都列在 docs/guide/zh-TW/reference.md，並有測試確保清單完整。引擎自己的錯誤回應以原本的狀態碼與內容轉回（不含它的
+  header）。串流開始後才中斷時，最後會送出一個 `upstream_stream_broken` 錯誤事件。
 - **限制**以 key 計，滑動視窗（最近 60 秒），計數在這台 server 的記憶體裡（多台 server 共用限制之後再做）：每分鐘請求數（被拒絕的
   不算）與每分鐘 token 數（取自回應的 `usage`；串流 chat 由 gateway 向引擎要最後的 usage chunk，client 沒要的話再拿掉）；
   請求進行中先保留它的 `max_tokens`，避免同時送出的請求一起超過限制。
-- **用量**（**Usage** 頁）：請求數、錯誤、被限流次數、prompt／completion token、延遲 p50／p95，可依日期、模型、key、人或來源
-  （API key 或 playground）分組。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。只統計，不計費。
+- **用量**（**Usage** 頁）：請求數、錯誤、因速率限制被拒的次數、prompt／completion／快取／推理 token、溢出的請求數、延遲 p50／p95，
+  可依日期、模型、key、人、來源（API key 或 playground）或本機與雲端分組；**Cost** 分頁再依日期、key、人、模型或供應商顯示費用
+  （見〈費用〉）。在記憶體裡計數，每 `USAGE_FLUSH_SECONDS`（5 秒）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
+  一列。client 中途離開（499）不算錯誤。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。
 - **Playground**：在 console 裡用串流 chat，也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
-  （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。
+  （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。它的雲端設定對 admin 是 `on`，對其他人是
+  server 允許的上限；個人的預算適用，沒有 key 的預算。
 - **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；
   UI、API、spec 與 log 裡都看不到。agent 只把它存在記憶體，並用它的 **key guard** 把關：
-  - **引擎只聽 loopback**，用只有 agent 知道的 port：process 綁 `127.0.0.1`（配方的 `{host}`），容器發布在 `127.0.0.1:<內部 port>`。
-  - agent 自己聽 replica **對外公布**的位址與 port（server 與 gateway 知道的那個），只有帶 `Authorization: Bearer <內部 key>`
+  - **引擎只聽 loopback**，用只有 agent 知道的 port：行程綁 `127.0.0.1`（配方的 `{host}`），容器發布在 `127.0.0.1:<internal port>`。
+  - agent 自己聽 replica **對外公布**的位址與 port（server 與 gateway 知道的那個），只有帶 `Authorization: Bearer <internal key>`
     的請求才轉給引擎，**每個路徑、每個 method** 都一樣（以固定時間比對 key）；其他一律 401 `replica_key_required`，到不了引擎。
     這補上引擎自己沒擋的地方：vLLM 0.32 只在 `/v1`、`/v2`、`/inference`、`/cohere` 檢查自己的 key，`/invocations`、`/rerank`、
     `/score`、`/pooling`、`/classify`、`/tokenize` 原本誰都能用。
   - 內容雙向串流、不暫存（SSE、chunked 與 multipart 上傳、大型回應）；client 斷線就關掉往引擎的連線；hop-by-hop header 會拿掉。
     引擎沒起來時 guard 直接關掉連線不回應，gateway 就改試下一個 replica。
-  - guard 沒有任何開放的路徑，連 `/health` 也沒有：agent 直接到引擎的 loopback port 做 health check。process 引擎若被發現聽在
+  - guard 沒有任何開放的路徑，連 `/health` 也沒有：agent 直接到引擎的 loopback port 做 health check。行程引擎若被發現聽在
     loopback 以外（配方沒用 `{host}`），會被停掉並標為失敗。
   - 引擎仍然會從**環境變數**拿到 key（vLLM `VLLM_API_KEY`、llama.cpp `LLAMA_API_KEY`、speaches `API_KEY`；配方用 `api_key_env`
     指定變數名），絕不放在命令列，多一層防護。沒有 `api_key_env` 的配方一樣有 guard。
@@ -251,7 +259,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
     （把部署停止再啟動）。一般 workload（不是模型）沒有 guard。
 
-真機檢查：[docs/acceptance-m4.md](acceptance-m4.md) 與 `scripts/accept_m4.py`。
+真機檢查：`scripts/accept_m4.py`。
 
 ## 雲端供應商與分層路由（1.2）
 
@@ -266,52 +274,131 @@ Kong 與 GPUStack 之後決定。
   寫在文件裡（docs/guide/cloud-providers.md），而不是藏起來。**不用 LiteLLM**，不論當函式庫或 sidecar：它在 2026 年兩度在 PyPI
   上被植入惡意程式（3 月的 1.82.7/1.82.8，經由被入侵的 CI 工具；10 月的 1.107.0 與其 Docker 映像，會讀取 proxy 的憑證資料表），
   而且它自己的金鑰與預算系統會和 Forgeyard 的重疊。
-- **路由與目標。** 路由是一個 served name，加上分層的目標（`route_targets`）：本機部署與供應商的模型（`providers`、
-  `provider_models`），每個目標有權重與開關。部署會建立自己的路由（第 0 層就是它自己），刪除時一起刪；admin 可以加層，
-  或自己建立路由（只有雲端，或多個部署共用一個名稱）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
+- **供應商**（`providers`、`provider_models`；**Providers** 頁，只有 admin）。供應商包含種類、base URL、加密的金鑰、最多 16 個額外
+  header（不是機密；用來帶金鑰的名稱、`Host` 與 `Cookie` 會被拒絕）、可選的回應逾時（1–3600 秒）、是否**在你的網路外**（依種類預設：
+  除了 *OpenAI-compatible server* 都是），以及（只有在網路內時）是否允許純 http。它的每個模型提供 `openai-chat` 或
+  `openai-embeddings`，可以額外拿掉參數（`drop_params`），並帶有價格。**Test connection** 帶著金鑰呼叫 `GET {base}/models`；
+  **Import from /models** 列出可以加入的模型。模型還在路由裡的供應商不能刪除（409）。**Clone** 會複製它、它的模型、價格與預算，
+  但不含金鑰，而且是停用狀態。
+
+  | 種類 | 金鑰怎麼送 | 差異 |
+  |---|---|---|
+  | OpenAI | `Authorization: Bearer` | `max_tokens` 改送 `max_completion_tokens` |
+  | Anthropic | Bearer、`x-api-key`、`anthropic-version: 2023-06-01` | 沒有 embeddings；用量沒有快取 token（`reports_cached` 為 false）；拿掉 `response_format: {"type": "text"}` |
+  | Google Gemini | Bearer | 列出的 id 拿掉 `models/` |
+  | Azure OpenAI | `api-key` | 要填自己的 base URL（v1 API）；`max_tokens` 改名 |
+  | OpenRouter | Bearer | 保留 `top_k`、`min_p`、`repetition_penalty`；回報每個請求的費用 |
+  | OpenAI-compatible server | Bearer，金鑰可省略 | 預設在網路內；什麼都不拿掉 |
+
+  除了最後一種，每種都會在送出時拿掉只有引擎才認得的參數（`chat_template_kwargs`、`guided_*`、llama.cpp 的取樣設定、`top_k`…）。
+- **讀回用量**（`quirks.read_usage`）：`prompt_tokens`、`completion_tokens`、快取（`prompt_tokens_details.cached_tokens`）、快取寫入
+  （OpenRouter 的 `cache_write_tokens`）、推理（`completion_tokens_details.reasoning_tokens`）、回報的 `usage.cost`，以及 Anthropic
+  的原生名稱（`input_tokens`、`output_tokens`、`cache_read_input_tokens`、`cache_creation_input_tokens`，此時 prompt 是三種輸入的總和）。
+  **Gemini** 的相容端點不把思考 token 算進 `completion_tokens`，只算在 `total_tokens`：當 `total_tokens` 大於 prompt 加 completion，
+  差額會加到 completion 與推理 token，因此和 Google 的計費一樣以輸出價格計價。快取 token 不超過 prompt，推理 token 不超過 completion。
+  速率限制以同一份讀數的 prompt 加 completion 計算。
+- **路由與目標。** 路由是一個 served name，加上分層的目標（`route_targets`）：本機部署與供應商的模型，每個目標有開關；供應商目標
+  另有權重（1–100）。部署會建立自己的路由（第 0 層就是它自己），不能拿掉這個目標，刪除時一起刪；admin 可以加層，或自己建立路由
+  （只有雲端，或多個部署共用一個名稱）。最多 8 層、32 個目標；served name 在所有路由中不能重複；供應商目標只能放在 chat 或
+  embeddings 路由，模型也要相符。每個登入的人都能讀路由（含是否可用，以及種類：local、mixed 或 cloud）；admin 才能修改（稽核紀錄
+  `route.created`、`route.changed`、`route.deleted`）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
   名稱不變，所以行為完全和以前一樣。
 - **溢出規則，只在第一個 byte 之前。** 這一層 *unavailable*（沒有就緒的副本、每個連線都失敗）、*busy*（每個就緒副本經由這台
   server 處理中的請求數都達到部署的 `concurrency`；名額是原子地取得的，兩個請求不會同時拿到最後一個；`wait_ms` 會先等名額）或
   *refusing*（429 或 503）時，才用下一層。*too long*（估計的提示加上 `max_tokens` 超過部署的 `context`）只有路由選擇時才算。
-  其他 4xx、請求送出後逾時、副本拒絕內部金鑰、用戶端離開、或串流進行中，都絕不溢出。如果本機是忙碌、而之後每一層都失敗，
-  請求最後仍然會等本機的名額。
-- **雲端層**依權重（加權洗牌）嘗試目標；回應 429 或 5xx、或連不上的目標會冷卻 30 秒（或依它的 Retry-After，最多 5 分鐘），
-  排到最後才試。沒有其他目標時，不超過 2 秒的 Retry-After 會等一次。供應商的錯誤保留狀態碼與訊息（看起來像金鑰的字串會被拿掉）；
-  供應商拒絕它的金鑰時回 502 `provider_auth_failed`，絕不回 401 讓用戶端以為是自己的金鑰有問題。
-- **誰可以把資料送出去。** 每把 API key 有 `cloud` = `off`（1.2 以前的每把 key，也是預設值）／`fallback`（只能當溢出目標）／
-  `on`（也包括只有雲端的模型）。對 `off` 與 `fallback` 的 key，只有雲端的模型會回 404 且不會列出。admin 設定預設值與一般人
-  替自己的 key 能設的上限；admin 替別人的 key 設的值會像限制一樣鎖定。標示在你網路內的供應商（VPN 上的 vLLM）不算雲端。
-  標示 `local_only` 的路由與帶 `X-Forgeyard-Local-Only: 1` 的請求絕不使用雲端目標。回應帶 `X-Forgeyard-Target`，溢出時另有
-  `X-Forgeyard-Spilled`。
+  其他 4xx、請求送出後逾時、副本拒絕內部金鑰、用戶端離開、或串流進行中，都絕不溢出。並行上限、`wait_ms`（0–10,000 毫秒，每 25
+  毫秒檢查一次）與太長的檢查，只在後面還有東西可以接手時（同一層或之後的層）才適用；沒有 `concurrency` 的部署永遠不算忙碌，沒有
+  `context` 的永遠放得下。提示以它的 UTF-8 大小（messages、prompt 或 input）÷ 3，加上 `max_completion_tokens` 或 `max_tokens` 估計。
+  如果本機是忙碌、而之後每一層都失敗，請求最後還是會送到負載最輕的本機副本，不再受 `concurrency` 限制（由引擎排隊），
+  並拿掉 `X-Forgeyard-Spilled`。沒有其他目標能取代的本機 429 或 503 會原樣轉回。
+- **雲端層**依權重（加權洗牌）嘗試目標；回應 429 或 5xx、連不上、重新導向或被對外連線規則拒絕的目標會冷卻
+  `PROVIDER_COOLDOWN_SECONDS`（30 秒，或依它的 `Retry-After`／`retry-after-ms`，最多 5 分鐘），排到最後才試，而不是跳過。沒有
+  其他目標時（最後一層），不超過 `PROVIDER_RETRY_AFTER_CAP`（2 秒）的 `Retry-After` 會等一次。供應商的回應會變成：429 → 429
+  `provider_rate_limited`（附它的 `Retry-After`）；5xx → 502 `provider_error`；401、403 或 407 → 立刻回 502 `provider_auth_failed`，
+  不再試其他目標（絕不回 401 讓用戶端以為是自己的金鑰有問題）；重新導向 → 502 `provider_redirect`，絕不跟隨；其他 4xx 保留狀態碼與
+  供應商的 `code`，訊息前加上供應商名稱，看起來像金鑰的字串會被拿掉。送出後逾時是 504 `provider_timeout`，不會改試別的。
+- **誰可以把資料送出去。** 每把 API key 有 `cloud` = `off`（1.2 以前的每把 key，也是預設值）／`fallback`（只能當溢出目標：
+  雲端目標只用在某一層之後，而那一層要有部署或網路內的供應商，所以不會和本機在同一層）／`on`（也包括只有雲端的模型）。對 `off`
+  與 `fallback` 的 key，只有雲端的模型會回 404 且不會列出。admin 設定預設值與一般人替自己的 key 能設的上限（一開始取自
+  `GATEWAY_CLOUD_DEFAULT` 與 `GATEWAY_CLOUD_MAX`，之後存在資料庫；預設值不能高於上限；稽核紀錄 `api_key_cloud.changed`）。
+  修改它們不會改寫任何 key，但上限在每個請求都會套用：個人自己設得比上限高的 key，會照上限運作（key 清單裡的
+  `effective_cloud`），直到上限調回來；admin 鎖定的值和 admin 自己的 key 不受上限限制。admin 替別人的 key 設的值會像限制一樣鎖定；使用者清空自己 key 的值時會拿到預設值。標示在你網路內的
+  供應商（VPN 上的 vLLM）不算雲端。標示 `local_only` 的路由與帶 `X-Forgeyard-Local-Only: 1`（或 `true`、`yes`、`on`）的請求絕不
+  使用雲端目標。只有 chat、completions 與 embeddings 會送到供應商。回應帶 `X-Forgeyard-Target`，溢出時另有 `X-Forgeyard-Spilled`
+  （`unavailable`、`busy`、`refused`、`too_long` 或 `budget`），預算讓請求沒送到某個供應商時另有 `X-Forgeyard-Budget-Exhausted`。
 - **對外連線。** 供應商用獨立的 HTTP client：驗證 TLS（可加 `EGRESS_CA_FILE`）、絕不跟隨重新導向、絕不用環境變數裡的 proxy
   （改用 `EGRESS_PROXY`）、`EGRESS_ALLOWED_HOSTS`。只允許 https；雲端供應商必須解析到公開位址；私有位址只給網路內的供應商，
-  純 http 要 admin 為它開啟；link-local 與 metadata 位址一律拒絕。每次請求前都會解析並檢查名稱，連線直接連到檢查過的位址
-  （TLS 仍然驗證名稱）。
+  純 http 要 admin 為它開啟（而且絕不連到公開位址）；link-local、metadata（169.254.169.254、fd00:ec2::254、100.100.100.200）、
+  multicast、保留與未指定位址一律拒絕；CGNAT（100.64.0.0/10）算私有位址。base URL 帶帳密、query 或 fragment 會被拒絕。每次請求前都
+  會解析（快取 30 秒）並檢查名稱，連線直接連到檢查過的位址（TLS 仍然驗證名稱）。設定 `EGRESS_PROXY` 時由 proxy 解析名稱，所以只會
+  檢查 IP 位址，限制名稱的是 `EGRESS_ALLOWED_HOSTS`。逾時：`PROVIDER_CONNECT_TIMEOUT`（10 秒）、`PROVIDER_READ_TIMEOUT`（300 秒，或
+  供應商自己的設定）。
 - **供應商金鑰**是 `EncryptedText("providers.api_key")`：只能寫入（API 只顯示最後四個字元）、絕不寫入記錄、稽核或回應、
   **Clone** 時絕不複製（複本沒有金鑰且停用），`secrets reset` 時會被丟棄。
-- **用量**列現在記錄目標（`local` 或 `pm:<provider model id>`）、快取與推理 token，以及溢出的請求數，之後才能依供應商模型計價。
-  供應商模型已經有可為空的價格欄位（每百萬 token 的微美元）。費用、預算與從 OpenRouter 更新價格是下一步。
+- **用量**列記錄目標（`local` 或 `pm:<provider model id>`）、快取與推理 token、溢出的請求數與費用，所以能依供應商與模型顯示費用。
+- **費用**（`forgeyard/gateway/pricing.py`），只用美元。請求在結束時計價一次；之後改價格絕不會改寫已經算過的數字。
+  - 本機副本與你網路內的供應商費用是 0。
+  - 上游回報的費用（`usage.cost`，OpenRouter）照用。
+  - 否則：(prompt − 快取 − 快取寫入) × 輸入 + 快取 × 快取輸入 + 快取寫入 × 快取寫入價格 + completion × 輸出，價格單位是每百萬 token 的
+    微美元。推理 token 包含在 completion 裡，只以輸出價格計一次。
+  - 用到的 token 沒有輸入或輸出價格：費用未知（NULL，算作 *unpriced*），而不是 0。沒有快取或快取寫入價格：改用輸入價格，費用標為
+    *estimated*；送到不回報快取 token 的種類（Anthropic）、有 prompt 的請求也一樣。
+  - 完全沒有 token：上游拒絕或失敗時是 0（供應商不收這些錢）；上游有回答時是 unpriced（用量送達前就關閉的串流）。
+  - 費用以皮美元加總，每列用量寫入時取整到微美元，餘數帶到下一次，所以大量很小的請求加起來仍然精確。
+- **價格**存在供應商模型上：輸入、輸出、快取輸入與快取寫入，各自可選，並記錄來源（`manual` 或 `openrouter`）、時間，以及對應的
+  OpenRouter id。只有網路外供應商的模型會計價。**Refresh prices from OpenRouter**（admin，`forgeyard/api/prices.py`）讀取 OpenRouter
+  的公開模型清單（`OPENROUTER_MODELS_URL`，不送金鑰，走對外連線規則），回傳預覽：每個模型、它的對應、新舊價格。對應分成 `confirmed`
+  （已存的 id）、`exact`（OpenRouter 供應商自己的 id）、`suggested`（種類的 OpenRouter 廠商加上原名、拿掉日期後綴的名稱，或把版本的
+  `-` 換成 `.`；名稱本身有 `/` 時就用它）、`not_listed` 或 `none`；admin 可以輸入一個 id 來比較。**Apply** 會重新讀取清單，只寫入
+  勾選、而且價格仍和預覽相同的列（否則以 `changed` 略過），只有要求時才覆蓋手動輸入的價格，並記錄 `provider.prices_refreshed`。
+  OpenRouter 每 token 的字串會精確換算；負數（「依情況而定」）或讀不懂的價格算未知。沒有背景同步，也沒有內建的價格表。
+- **預算**（`forgeyard/gateway/budgets.py`、`forgeyard/api/budgets.py`）：雲端請求每個 UTC 日曆月可以花的金額，單位微美元（最多
+  10^15），設在 **API key**（主人設定，或 admin 設定並鎖定）、**個人**（admin，`user.budget_changed`）或**供應商**（admin，
+  `provider.changed`）上；設為 null 就移除。只適用於網路外的供應商。
+  - **帳本。** server 行程裡的一份記憶體內帳本，在鎖之下運作：本月每個 key、個人與供應商的已花費與已預留金額，單位皮美元。每個月
+    第一次需要時，從 `usage_daily.cost_micros` 讀入（先寫入用量紀錄器還沒寫的部分；供應商的花費透過它的供應商模型計算），只要有
+    預算適用，就會在路由之前於事件迴圈之外讀取。讀不到時，預算之下不送任何雲端請求（503 `budget_unavailable`）。
+  - **預留。** 請求送到網路外的供應商之前，先估計它最多花多少：prompt 以 messages、prompt、input、tools 與 functions 的 UTF-8 大小
+    ÷ 3 無條件進位，加上（`max_completion_tokens` 或 `max_tokens`，沒有就用 `BUDGET_DEFAULT_MAX_TOKENS` = 4096）× `n`（2–128）個
+    completion token（embeddings 沒有），以模型的價格計算。這筆金額一次對每個適用的預算預留；只要已花費 + 已預留 + 這個請求超過其中
+    一個預算，或模型沒有價格（OpenRouter 也一樣，因為它事後才回報費用），就略過這個目標，下一個目標、下一層或忙碌的本機副本仍然
+    可以處理它。
+  - **結算與釋放。** 請求結束時，預留換成它的實際費用，加到 key、個人與供應商上（和計入用量在同一把鎖之下，所以讀入時剛好算一次）。
+    失敗或被拒絕的請求會釋放預留。有回答、費用卻未知的請求以它的預留計算，只存在記憶體裡，直到 server 重新啟動。
+  - **402。** 沒有其他目標能處理時：`402`（type `insufficient_quota`），code 是 `budget_exhausted` 或 `budget_unpriced`，另附一個
+    `budget` 物件（範圍、名稱、預算、已花費、已預留與這個請求的金額，單位微美元，以及月份與 `resets_at`），以及
+    `X-Forgeyard-Budget-Exhausted`（`key`、`person`、`provider:<name>`）；由其他目標成功回答時也會帶這個 header。用 402 是因為
+    OpenAI 的 SDK 會重試 429 但不重試 402，而在月底之前重試也沒有用。
+  - **警示。** 預算到 80% 與 100% 時，每個範圍、月份與門檻各一次：`budget_alerts` 資料表（唯一，所以重啟後也只有一次），以及稽核
+    事件 `budget.warning` 或 `budget.exhausted`（操作者 `forgeyard`）。在請求預留與結算時檢查，所以預算調低到本月花費以下時，下一個
+    請求就會警示；花費加預留已超過 80% 時被拒絕的請求，算作到達 100%。和用量一起，每 `USAGE_FLUSH_SECONDS` 以及關機時寫入。
+  - `GET /api/budgets`（admin：`?everyone=true`）回傳月份、`resets_at`，以及每個 key、個人與供應商的預算、已花費、已預留、使用比例
+    與等級（`ok`、80% 起 `warning`、100% 起 `exhausted`；預算為 0 時是 exhausted）。API keys 頁、**Usage → Cost**（*Budgets this
+    month*）與供應商的頁面會顯示它們。
 - **1.2 不做：**Anthropic 或 Gemini 的原生翻譯與 `/v1/messages` 直通；Responses API、batch、檔案、圖片；雲端的 rerank、score、
   語音；串流中途切換；雲端之間依成本、延遲或語意的路由；黏著路由；Entra ID、Vertex 或 Bedrock 認證。
 
 ## 帳號與登入
 
-- **角色：** `admin` 管理使用者、機器與其 GPU allowlist、模型目錄、配方與模型來源，並看稽核紀錄；`operator` 執行 workload 與部署模型；`user` 只能看，並透過 playground 與自己的 API key 使用已部署的模型、看自己的用量。
+- **角色：** `admin` 管理使用者、機器與其 GPU allowlist、模型目錄、配方與模型來源、雲端供應商、路由與價格、key 的雲端設定，以及
+  個人與供應商的預算，並看稽核紀錄；`operator` 執行 workload 與部署模型；`user` 可以瀏覽，並透過 playground 與自己的 API key
+  使用已部署的模型、看自己的用量。
   **owner**（第一個帳號）永遠是 admin，不能被降級、停用或刪除，所以不會有人把管理權整個鎖死。
 - **密碼：** argon2id；至少 12 字元；常見密碼（含尾巴加數字或符號的變形）與包含使用者名稱的密碼會被拒絕。
 - **新使用者**由 admin 建立，admin 拿到一條**一次性連結**（72 小時）轉交對方，由本人自己設定密碼；
-  重設密碼也是同樣的連結（24 小時）。token 放在網址的 `#` 後面，不會進到伺服器 log 或 `Referer`。
+  admin 也可以用同樣方式發出重設密碼的連結（24 小時）。token 放在網址的 `#` 後面，不會進到伺服器 log 或 `Referer`。
 - **自行註冊**預設關閉。`REGISTRATION=approval` 時可以申請帳號，會先處於 *pending*，等 admin 核准。
 - **Session 存在伺服器端。** Cookie（`HttpOnly`、`SameSite=Strict`，HTTPS 時加 `Secure`）只放隨機 token，
   資料庫只存它的 SHA-256。登出、改密碼、停用帳號或 admin 強制登出後，下一個請求就失效——複製走的
   cookie 也不能用。閒置 2 小時、最長 7 天就結束，都在伺服器端檢查。*My account* 可以看到並登出每個 session。
-- **限流：** 同一帳號失敗 5 次後，每次重試都要等待（2 秒起倍增，最多 5 分鐘）；同一 IP 15 分鐘內失敗 30 次也要等。
-  不會永久鎖定，限流也絕不會把人登出。`X-Forwarded-For` 只採信 `TRUSTED_PROXIES`。
+- **速率限制：** 同一帳號失敗 5 次後，每次重試都要等待（2 秒起倍增，最多 5 分鐘）；同一 IP 15 分鐘內失敗 30 次也要等。
+  不會永久鎖定，速率限制也絕不會把人登出。`X-Forwarded-For` 只採信 `TRUSTED_PROXIES`。
 - **請求防護：** Host 不是自己的名稱回 **421**（防 DNS rebinding）；對 `/api` 的寫入必須帶 `X-Forgeyard: 1`，
   瀏覽器有送 `Origin`／`Referer` 時必須同源。
-- **稽核紀錄：** 登入、登入失敗與所有帳號變更，含操作者、對象與來源 IP。
-- **靜態加密的機密：** Hugging Face token、replica 內部金鑰與 workload 環境變數的值以 AES-256-GCM 加密儲存，金鑰不在資料庫裡
+- **稽核紀錄：** 登入、登入失敗、所有帳號變更，以及機器、模型、配方、部署、workload、key、供應商、路由與價格的變更，還有預算
+  警示，含操作者、對象與來源 IP。
+- **靜態加密的機密：** Hugging Face token、replica 內部金鑰、workload 環境變數的值與雲端供應商的 API key 以 AES-256-GCM 加密儲存，金鑰不在資料庫裡
   （`data/secret.key`，權限 0600；或 `SECRET_KEY_FILE`／`FORGEYARD_SECRET_KEY`）。金鑰不見或不對時 server 拒絕啟動，
-  而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 要重新輸入，
+  而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 與供應商金鑰要重新輸入，
   replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。

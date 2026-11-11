@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/xianhong1208/forgeyard/security/advisories/new
+    about: Privately, never in a public issue (see SECURITY.md).
+  - name: The user guide
+    url: https://github.com/xianhong1208/forgeyard/blob/main/docs/guide/README.md
+    about: Setting up machines, models, keys and cloud providers; troubleshooting.

@@ -60,8 +60,6 @@ agent dials out to the server, so the server never needs to reach the machine.
   It works only with `FORGEYARD_AGENT_SIMULATION=1`, and the server marks such machines
   *simulated inventory*.
 
-Real-hardware checks for this milestone: [docs/acceptance-m1.md](acceptance-m1.md).
-
 ## Workloads
 
 A **workload** is something to run on your machines: a **service** (runs until stopped, is
@@ -80,7 +78,7 @@ workload**, or `POST /api/workloads` with the spec:
 |---|---|
 | `runtime` | `{"type": "container", "image", "command"?, "args"?}` (Docker or Podman; `command` replaces the entrypoint) or `{"type": "process", "command", "args"?, "workdir"?}` |
 | `env` | explicit variables only (see *Isolation*) |
-| `resources` | `cpu` (cores), `memory` (`4Gi`, `512Mi` or bytes), `gpus`: `{"count": n}` or `{"indices": [4]}` (on a chosen machine), optional `"vendor": "nvidia"/"amd"` |
+| `resources` | `cpu` (cores), `memory` (`4Gi`, `512Mi` or bytes), `gpus`: `{"count": n}` or `{"indices": [2]}` (on a chosen machine), optional `"vendor": "nvidia"/"amd"` |
 | `ports` | services: `[{"name", "port"}]`. The agent picks the **host port** from its range (30000-32767 by default) and the page shows the address. A process must listen on it: `$PORT`, or `${PORT}` / `${PORT_<NAME>}` in its arguments |
 | `health` | services: `{"type": "http" or "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay", "start_period"}`. Shown as healthy / unhealthy; it does not restart anything. Failures within `start_period` (before the first success) do not count |
 | `restart` | services: `always` (default), `on-failure`, `never`. Restarts back off 1, 2, 4… s, at most 60 s |
@@ -169,8 +167,6 @@ again.
   `--model-local-dir DIR` (repeatable) and `--allow-private-model-hosts`. `python -m forgeyard agent
   runtimes [--workload-user …]` prints what it can run here without joining.
 
-Real-hardware checks for workloads: [docs/acceptance-m2.md](acceptance-m2.md).
-
 ## Models
 
 **Models → Deploy a model**: pick a model from the catalog and a recipe, set the parameters, and
@@ -258,7 +254,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
 - **Who:** admins manage the catalog, recipes and model sources; admins and operators deploy;
   everyone signed in sees deployments and can try them.
 
-Real-hardware checks: [docs/acceptance-m3.md](acceptance-m3.md) and `scripts/accept_m3.py`.
+Real-hardware check: `scripts/accept_m3.py`.
 
 ## Gateway and API keys
 
@@ -285,12 +281,15 @@ page contain these lines whenever the server uses its own CA.
 - **API keys** (page **API keys**): everyone creates their own; a key is `fyk_` + 43 random
   characters, **shown once** with a curl and a Python example; the server keeps its SHA-256 and a
   12-character prefix. Optional: an expiry, the models it may use (else every deployment, also later
-  ones), requests and tokens per minute. Revoking, an expiry or a disabled account stop it on the next
-  request. Admins see and revoke everyone's keys, change any key's limits, and set the **defaults**
+  ones), requests and tokens per minute, its **cloud** setting and a monthly **budget** (see *Cloud
+  providers and tiered routes*). Revoking, an expiry or a disabled account stop it on the next
+  request. Admins see and revoke everyone's keys, change any key's limits, cloud setting and budget,
+  and set the **defaults**
   (for keys without their own limit) and **caps** (the most people may give their own keys). Creating,
   changing and revoking keys are in the audit log.
-- **Limits an admin sets are locked.** When an admin sets the requests or tokens per minute of
-  someone else's key, its owner can no longer change that value (403 `limit_locked`); the key shows a
+- **Limits an admin sets are locked.** When an admin sets the requests or tokens per minute, the
+  cloud setting or the monthly budget of someone else's key, its owner can no longer change that
+  value (403 `limit_locked`); the key shows a
   lock with the admin's name. The owner can still revoke the key and set a limit no admin set. An
   admin changes a locked value at will and **unlocks** it by clearing it (back to the default, the
   owner's to set again). Locking and unlocking are in the audit log (`api_key.changed`, `locked` /
@@ -302,22 +301,38 @@ page contain these lines whenever the server uses its own CA.
   last until its agent reports it ready again (at most 15 s). A client that disconnects closes the
   request upstream, so the engine stops. Timeouts: 5 s to connect, 600 s for the headers or the next
   piece of a stream (`GATEWAY_CONNECT_TIMEOUT`, `GATEWAY_READ_TIMEOUT`).
-- **Errors** in OpenAI's shape `{"error": {"message", "type", "param", "code"}}`: 401 key missing,
-  wrong, expired or revoked; 403 model not allowed for the key; 404 unknown model; 400 wrong endpoint
-  for the model; 429 over a limit, with `Retry-After`; 503 no ready replica, with each replica's state;
-  502 replica unreachable or refusing its internal key; 504 no answer in time. An engine's own errors
-  are passed on as they are.
+- **`/v1/models`** lists a route only when the key may see it (it has a target inside your network,
+  or the key's cloud setting is `on`), the key's model list includes it, and it can serve: some tier
+  has a deployment that is meant to run (starting and restarting count) or an enabled provider inside
+  your network, or an enabled cloud target the key may reach: an `on` key on a route that is not local
+  only, and a `fallback` key only when a local tier comes before the cloud tier (the same tiers a call
+  may use). So a stopped model leaves the list; `GET /v1/models/{id}` says 404 "…is stopped", and a call
+  to it anyway answers 503 `no_ready_replica` "The deployment is stopped."
+- **Errors** in OpenAI's shape `{"error": {"message", "type", "param", "code"}}`, `type` following the
+  status: 400 bad body or wrong endpoint for the model; 401 key missing, wrong, expired or revoked, or
+  its account not active; 402 a budget (below); 403 model not allowed for the key; 404 unknown model or
+  path; 413 body over `GATEWAY_MAX_BODY_MB`; 421 foreign host name; 429 over a limit, with
+  `Retry-After`; 502 replica or provider unreachable, refusing a key, redirecting or failing; 503 no
+  ready replica (with each replica's state), no usable target, or this month's spend unreadable; 504
+  no answer in time. Every `code` is listed in docs/guide/reference.md, and a test keeps that list
+  complete. An engine's own error answers are passed on with their status and body (not its headers).
+  A stream that breaks off after it started ends with an `upstream_stream_broken` error event.
 - **Limits** per key, sliding windows over the last 60 s, counted in this server's memory (several
   servers sharing limits come later): requests per minute (refused requests do not count) and tokens
   per minute from the answers' `usage` (for a streamed chat the gateway asks the engine for its usage
   chunk and removes it unless the client asked for it); while a request runs, its `max_tokens` is held
   so parallel requests cannot all slip past.
-- **Usage** (page **Usage**): requests, errors, limit refusals, prompt and completion tokens, latency
-  p50/p95, per day, model, key, person or source (API key or playground). Everyone sees their own;
-  admins everyone's. A deployment's page shows its last 7 days. Counting only, no billing.
+- **Usage** (page **Usage**): requests, errors, limit refusals, prompt, completion, cached and
+  reasoning tokens, spilled requests, latency p50/p95, per day, model, key, person, source (API key or
+  playground) or local and cloud; its **Cost** tab adds the cost per day, key, person, model or
+  provider (see *Cost*). Counted in memory and written every `USAGE_FLUSH_SECONDS` (5 s), on shutdown
+  and before a read, one row per UTC day, source, key, person, model and target. A client that went
+  away (499) is not an error. Everyone sees their own; admins everyone's. A deployment's page shows
+  its last 7 days.
 - **Playground**: chat with streaming, embeddings, rerank and speech to text in the console, through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
-  no API key and counts as "console" in usage.
+  no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
+  most-allowed for everyone else; the person's budget applies, there is no key budget.
 - **Replicas cannot be used around the gateway.** Every model replica gets an **internal key**, new
   with every placement. Only the gateway and *Try it* send it; it is never shown in the UI, the API,
   a spec or a log. The agent keeps it in memory only and enforces it with its **key guard**:
@@ -347,7 +362,7 @@ page contain these lines whenever the server uses its own CA.
     (same published port); those from before M4 have no key until they are placed again (stop and
     start the deployment). Plain workloads (not models) are not guarded.
 
-Real-hardware checks: [docs/acceptance-m4.md](acceptance-m4.md) and `scripts/accept_m4.py`.
+Real-hardware check: `scripts/accept_m4.py`.
 
 ## Cloud providers and tiered routes (1.2)
 
@@ -366,45 +381,160 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   was compromised on PyPI twice in 2026 (1.82.7/1.82.8 in March through a compromised CI tool; 1.107.0
   and its Docker images in October, which read a proxy's credential tables), and its key and budget
   system would duplicate Forgeyard's.
+- **Providers** (`providers`, `provider_models`; page **Providers**, admins only). A provider is a
+  kind, a base URL, an encrypted key, up to 16 extra headers (not secret; the names that carry keys,
+  `Host` and `Cookie` are refused), an optional answer timeout (1–3600 s), whether it is **outside
+  your network** (the kind's default: every kind but *OpenAI-compatible server*) and, only then not,
+  whether plain http is allowed. Its models each serve `openai-chat` or `openai-embeddings`, may drop
+  more parameters (`drop_params`), and carry prices. **Test connection** asks `GET {base}/models` with
+  the key; **Import from /models** lists what to add. A provider whose models are in a route cannot
+  be deleted (409). **Clone** copies it with its models, prices and budget, without its key and disabled.
+
+  | Kind | Key sent as | Differences |
+  |---|---|---|
+  | OpenAI | `Authorization: Bearer` | `max_tokens` sent as `max_completion_tokens` |
+  | Anthropic | Bearer, `x-api-key`, `anthropic-version: 2023-06-01` | no embeddings; usage has no cached tokens (`reports_cached` false); `response_format: {"type": "text"}` dropped |
+  | Google Gemini | Bearer | `models/` removed from listed ids |
+  | Azure OpenAI | `api-key` | your own base URL (the v1 API); `max_tokens` renamed |
+  | OpenRouter | Bearer | keeps `top_k`, `min_p`, `repetition_penalty`; reports each request's cost |
+  | OpenAI-compatible server | Bearer, key optional | inside your network by default; drops nothing |
+
+  Every kind but the last drops engine-only parameters (`chat_template_kwargs`, `guided_*`,
+  llama.cpp's samplers, `top_k`…) on the way out.
+- **Usage read back** (`quirks.read_usage`): `prompt_tokens`, `completion_tokens`, cached
+  (`prompt_tokens_details.cached_tokens`), cache writes (OpenRouter's `cache_write_tokens`), reasoning
+  (`completion_tokens_details.reasoning_tokens`), a reported `usage.cost`, and Anthropic's native names
+  (`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, the prompt
+  then being all three inputs). **Gemini's** compatibility endpoint leaves thinking tokens out of
+  `completion_tokens` and counts them only in `total_tokens`: when `total_tokens` is more than prompt
+  plus completion, the difference is added to the completion and to the reasoning tokens, so it is
+  priced as output, as Google bills it. Cached tokens are capped at the prompt, reasoning at the
+  completion. Rate limits count prompt plus completion from the same reading.
 - **Routes and targets.** A route is a served name with targets in tiers (`route_targets`): local
-  deployments and provider models (`providers`, `provider_models`), each with a weight and an on/off
-  switch. A deployment creates its own route (tier 0: itself) and deletes it with itself; admins add
-  tiers or create routes of their own (cloud only, or several deployments behind one name). Migration
-  0009 turned every existing route into one tier-0 target with the same upstream model name, so they
-  behave exactly as before.
+  deployments and provider models, each with an on/off switch; provider targets also have a weight
+  (1–100). A deployment creates its own route (tier 0: itself), cannot lose that target, and deletes
+  the route with itself; admins add tiers or create routes of their own (cloud only, or several
+  deployments behind one name). At most 8 tiers and 32 targets; a served name is unique across
+  routes; provider targets only on chat or embedding routes, with a matching model. Everyone signed in
+  reads routes (with whether each is usable, and its kind: local, mixed or cloud); admins change them
+  (`route.created`, `route.changed`, `route.deleted` in the audit log). Migration 0009 turned every
+  existing route into one tier-0 target with the same upstream model name, so they behave exactly as
+  before.
 - **Spill rules, only before the first byte.** The next tier is used when this one is *unavailable*
   (no ready replica, every connection failed), *busy* (every ready replica has as many requests in
   flight through this server as its deployment's `concurrency`; the slot is taken atomically, so two
   requests cannot both get the last one; `wait_ms` waits for one first) or *refusing* (429 or 503).
   *Too long* (estimated prompt plus `max_tokens` over the deployment's `context`) only when the route
   opts in. Never on another 4xx, a timeout once the request was sent, a replica refusing the internal
-  key, a client that went away, or mid-stream. If local was busy and every later tier failed, the
-  request waits for a local slot after all.
-- **The cloud tier** tries its targets by weight (a weighted shuffle); one that answers 429 or 5xx or
-  cannot be reached cools down for 30 s (or its Retry-After, up to 5 min) and is tried last. A
-  Retry-After up to 2 s is waited for once when nothing else is left. Provider errors keep their status
-  and message (anything that looks like a key removed); a provider refusing its key is 502
-  `provider_auth_failed`, never a 401 the client would blame on its own key.
+  key, a client that went away, or mid-stream. The concurrency cap, `wait_ms` (0–10,000 ms, polled
+  every 25 ms) and the too-long check apply only when something can follow, in this tier or a later
+  one; a deployment without `concurrency` is never busy, one without `context` always fits. The prompt
+  is estimated as its UTF-8 size (messages, prompt or input) ÷ 3, plus `max_completion_tokens` or
+  `max_tokens`. If local was busy and every later tier failed, the request goes to the least-loaded
+  local replica after all, past its `concurrency` (the engine queues it), and `X-Forgeyard-Spilled` is
+  dropped. A local 429 or 503 that nothing else could replace is passed on.
+- **The cloud tier** tries its targets by weight (a weighted shuffle); one that answers 429 or 5xx,
+  cannot be reached, redirects or is refused by the egress rules cools down for
+  `PROVIDER_COOLDOWN_SECONDS` (30 s, or its `Retry-After` / `retry-after-ms`, up to 5 min) and is
+  tried last, not skipped. When nothing else is left (the last tier), a `Retry-After` up to
+  `PROVIDER_RETRY_AFTER_CAP` (2 s) is waited for once. Provider answers become: 429 → 429
+  `provider_rate_limited` (with its `Retry-After`); 5xx → 502 `provider_error`; 401, 403 or 407 → 502
+  `provider_auth_failed` at once, without trying another target (never a 401 the client would blame
+  on its own key); a redirect → 502 `provider_redirect`, never followed; any other 4xx keeps its status
+  and the provider's `code`, with the provider's name before its message and anything that looks like
+  a key removed. A timeout after sending is 504 `provider_timeout`, with no fallback.
 - **Who may send data out.** Each API key has `cloud` = `off` (every key from before 1.2, and the
-  default) / `fallback` (only as a spill target) / `on` (cloud-only models too). A cloud-only model is
-  404 and unlisted for `off` and `fallback` keys. Admins set the default and the most a user may give
-  their own key; an admin's value on someone else's key is locked, like limits. A provider marked as
+  default) / `fallback` (only as a spill target: a cloud target is used only in a tier after one that
+  has a deployment or a provider inside your network, so not in the same tier as the local one) /
+  `on` (cloud-only models too). A cloud-only model is 404 and unlisted for `off` and `fallback` keys.
+  Admins set the default and the most a user may give their own key (`GATEWAY_CLOUD_DEFAULT` and
+  `GATEWAY_CLOUD_MAX` at first, then stored; the default may not be above the most; audit
+  `api_key_cloud.changed`). Changing them rewrites no key, but the most is applied on every request: a
+  person's own key set above it works at the most (`effective_cloud` in the key list) until it is
+  raised again; an admin's locked value and an admin's own key are not capped. An admin's value on someone else's key is
+  locked, like limits; a user who clears their key's value gets the default. A provider marked as
   inside your network (a vLLM on your VPN) is not cloud. A route marked `local_only` and a request with
-  `X-Forgeyard-Local-Only: 1` never use cloud targets. Answers carry `X-Forgeyard-Target` and, after a
-  spill, `X-Forgeyard-Spilled`.
+  `X-Forgeyard-Local-Only: 1` (or `true`, `yes`, `on`) never use cloud targets. Only chat,
+  completions and embeddings go to providers. Answers carry `X-Forgeyard-Target`, after a spill
+  `X-Forgeyard-Spilled` (`unavailable`, `busy`, `refused`, `too_long` or `budget`), and
+  `X-Forgeyard-Budget-Exhausted` when a budget kept the request from a provider.
 - **Egress.** A separate HTTP client for providers: TLS verified (plus `EGRESS_CA_FILE`), redirects
   never followed, never a proxy from the environment (`EGRESS_PROXY` instead), `EGRESS_ALLOWED_HOSTS`.
   https only; cloud providers must resolve to public addresses; private addresses for providers inside
-  your network, plain http only when an admin allows it for one; link-local and metadata addresses
-  always refused. The name is resolved and checked before every request, and the connection goes to
-  the checked address (TLS still verifies the name).
+  your network, plain http only when an admin allows it for one (and never to a public address);
+  link-local, metadata (169.254.169.254, fd00:ec2::254, 100.100.100.200), multicast, reserved and
+  unspecified addresses always refused; CGNAT (100.64.0.0/10) counts as private. A base URL with
+  credentials, a query or a fragment is refused. The name is resolved (cached 30 s) and checked before
+  every request, and the connection goes to the checked address (TLS still verifies the name). With
+  `EGRESS_PROXY`, the proxy resolves names, so only IP addresses are checked and
+  `EGRESS_ALLOWED_HOSTS` is what limits names. Timeouts: `PROVIDER_CONNECT_TIMEOUT` (10 s),
+  `PROVIDER_READ_TIMEOUT` (300 s, or the provider's own).
 - **Provider keys** are `EncryptedText("providers.api_key")`: write-only (the API shows the last four
   characters), never logged, audited or returned, never copied by **Clone** (the copy starts without a
   key, disabled), and dropped by `secrets reset`.
-- **Usage** rows now carry the target (`local` or `pm:<provider model id>`), cached and reasoning
-  tokens, and how many requests spilled, so cost can be priced per provider model. Provider models
-  already have nullable price columns (micro-USD per million tokens). Cost, budgets and a price refresh
-  from OpenRouter come next.
+- **Usage** rows carry the target (`local` or `pm:<provider model id>`), cached and reasoning tokens,
+  how many requests spilled, and the cost, so cost can be shown per provider and model.
+- **Cost** (`forgeyard/gateway/pricing.py`), in US dollars only. A request is priced once, when it
+  finishes; changing a price later never rewrites what was counted.
+  - Local replicas and providers inside your network cost 0.
+  - A cost the upstream reports (`usage.cost`, OpenRouter) is used as it is.
+  - Otherwise: (prompt − cached − cache writes) × input + cached × cached input + cache writes × cache
+    write + completion × output, with prices in micro-USD per million tokens. Reasoning tokens are
+    inside the completion, billed once at the output price.
+  - No input or output price for the tokens used: the cost is unknown (NULL, counted as *unpriced*),
+    not 0. No cached or cache-write price: the input price, and the cost is marked *estimated*; so is
+    every request with a prompt to a kind that does not report cached tokens (Anthropic).
+  - No tokens at all: 0 when the upstream refused or failed (providers do not bill those); unpriced
+    when it answered (a stream closed before the usage arrived).
+  - Costs are summed in pico-USD and written as whole micro-USD per usage row, the rounding remainder
+    carried, so many tiny requests add up exactly.
+- **Prices** live on provider models: input, output, cached input and cache write, each optional,
+  with where they came from (`manual` or `openrouter`), when, and the OpenRouter id they match. Only
+  models of providers outside your network are priced. **Refresh prices from OpenRouter** (admins,
+  `forgeyard/api/prices.py`) reads OpenRouter's public model list (`OPENROUTER_MODELS_URL`, no key,
+  through the egress rules) and returns a preview: each model, its match and old and new prices. The
+  match is `confirmed` (the stored id), `exact` (an OpenRouter provider's own id), `suggested` (the
+  kind's OpenRouter vendor plus the name as is, without a date suffix, or with version dashes as dots;
+  or the name itself when it has a `/`), `not_listed` or `none`; an admin may type an id to compare.
+  **Apply** reads the list again and writes only the ticked rows whose prices are still those shown
+  (else skipped as `changed`), overwrites a manual price only when asked, and records
+  `provider.prices_refreshed`. OpenRouter's per-token strings are converted exactly; negative
+  ("variable") or unreadable prices are unknown. No background sync and no bundled price list.
+- **Budgets** (`forgeyard/gateway/budgets.py`, `forgeyard/api/budgets.py`): what cloud requests may
+  cost per UTC calendar month, in micro-USD (up to 10^15), on an **API key** (its owner, or an admin,
+  which locks it), a **person** (admins, `user.budget_changed`) or a **provider** (admins,
+  `provider.changed`); null removes one. They apply only to providers outside your network.
+  - **Ledger.** One in-memory ledger in the server process, under a lock: this month's spent and
+    reserved amounts per key, person and provider, in pico-USD. It is seeded once a month, lazily,
+    from `usage_daily.cost_micros` (after writing what the usage recorder still holds; a provider's
+    spend through its provider models), and read off the event loop before routing when any budget
+    applies. If it cannot be read, no cloud request is sent under a budget (503
+    `budget_unavailable`).
+  - **Reserve.** Before a request is sent to a provider outside your network, its largest cost is
+    estimated: the prompt as ceil(UTF-8 size of messages, prompt, input, tools and functions ÷ 3),
+    plus (`max_completion_tokens` or `max_tokens`, else `BUDGET_DEFAULT_MAX_TOKENS` = 4096) × `n` (2–128)
+    completion tokens (none for embeddings), at the model's prices. It is reserved against every budget
+    that applies at once; if spent + reserved + this request is more than one of them, or the model has
+    no price (also for OpenRouter, which reports cost only afterwards), that target is skipped, and the
+    next target, tier or a busy local replica may still serve it.
+  - **Settle and release.** When the request finishes, its reservation is replaced by its real cost,
+    added to the key, the person and the provider (under the same lock as counting its usage, so the
+    seeding sees it exactly once). A failed or refused request releases its reservation. An answered
+    request whose cost is unknown counts at its reservation, in memory only, until the server restarts.
+  - **402.** When nothing else can serve: `402` (type `insufficient_quota`), code `budget_exhausted` or
+    `budget_unpriced`, with an extra `budget` object (scope, name, budget, spent, reserved and request
+    in micro-USD, month and `resets_at`) and `X-Forgeyard-Budget-Exhausted` (`key`, `person`,
+    `provider:<name>`); that header also comes on a successful answer from another target. 402 because
+    OpenAI's SDKs retry 429 but not 402, and retrying cannot help before the month ends.
+  - **Alerts.** At 80% and 100% of a budget, once per scope, month and threshold: the `budget_alerts`
+    table (unique, so also once across restarts) and an audit event `budget.warning` or
+    `budget.exhausted` (actor `forgeyard`). Checked when a request is reserved and settled, so a budget
+    lowered below the month's spend alerts on its next request; a refusal while spend and reservations
+    are past 80% counts as 100%. Written with the usage, every `USAGE_FLUSH_SECONDS`, and on shutdown.
+  - `GET /api/budgets` (admins: `?everyone=true`) gives the month, `resets_at` and, per key, person
+    and provider, the budget, spent, reserved, the share used and a level (`ok`, `warning` from 80%,
+    `exhausted` from 100%; a budget of 0 is exhausted). The API keys page, **Usage → Cost** (*Budgets
+    this month*) and a provider's page show them.
 - **Not in 1.2:** native Anthropic or Gemini translators and a `/v1/messages` passthrough; the
   Responses API, batch, files, images; cloud rerank, score or audio; fallback mid-stream; cost-,
   latency- or semantic routing between clouds; sticky routing; Entra ID, Vertex or Bedrock auth.
@@ -412,7 +542,8 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
 ## Accounts and sign-in
 
 - **Roles:** `admin` manages users, machines and their GPU allowlists, the model catalog, recipes
-  and sources, and sees the audit log; `operator` runs workloads and deploys models; `user` can
+  and sources, cloud providers, routes and prices, the cloud setting for keys, and people's and
+  providers' budgets, and sees the audit log; `operator` runs workloads and deploys models; `user` can
   look, use deployed models through the playground and their own API keys, and see their own usage. The **owner** (the first account) is always an
   admin and cannot be demoted, disabled or deleted, so nobody can lock administration out.
 - **Passwords:** argon2id; at least 12 characters; common passwords (also with digits or
@@ -433,13 +564,15 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
 - **Request guards:** a request for a host name that is not ours gets **421** (DNS rebinding);
   writes to `/api` need the `X-Forgeyard: 1` header and, when the browser sends one, a
   same-origin `Origin` / `Referer`.
-- **Audit log:** sign-ins, failed sign-ins and every account change, with who, what and from where.
-- **Secrets at rest:** Hugging Face tokens, replicas' internal keys and workload environment values
-  are stored encrypted (AES-256-GCM) with a server key that is not in the database
+- **Audit log:** sign-ins, failed sign-ins, every account change, and changes to machines, models,
+  recipes, deployments, workloads, keys, providers, routes and prices, plus budget alerts, with who,
+  what and from where.
+- **Secrets at rest:** Hugging Face tokens, replicas' internal keys, workload environment values and
+  cloud providers' API keys are stored encrypted (AES-256-GCM) with a server key that is not in the database
   (`data/secret.key`, mode 0600, or `SECRET_KEY_FILE` / `FORGEYARD_SECRET_KEY`). The server refuses
   to start with a missing or wrong key, instead of making a new one over the old secrets. If the
-  key is lost, `python -m forgeyard secrets reset --yes` starts over: the tokens are entered again,
-  and the replicas restart with new keys. Passwords, sessions, API keys and join tokens are
+  key is lost, `python -m forgeyard secrets reset --yes` starts over: the tokens and provider keys are
+  entered again, and the replicas restart with new keys. Passwords, sessions, API keys and join tokens are
   hashed, not encrypted.
 - The UI goes to the sign-in page only on **401**, never on 403, 429 or a server error, and comes
   back to the page you were on afterwards.

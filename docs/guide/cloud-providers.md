@@ -118,8 +118,8 @@ It **never** moves on when:
 - the client went away;
 - the answer has started streaming.
 
-If the local tier was busy and the cloud cannot take the request either, the request waits for a
-local replica after all.
+If the local tier was busy and the cloud cannot take the request either, the request goes to a local
+replica after all, past its *Concurrent requests*: the engine queues it.
 
 Within a cloud tier, a target that answers 429 or 5xx, or cannot be reached, is skipped and tried
 last for 30 seconds (`PROVIDER_COOLDOWN_SECONDS`). Several targets in one tier share the requests by
@@ -151,8 +151,12 @@ Each API key has a **cloud** setting:
 
 - Every key made before 1.2 is **Never**. A new key gets the server's default, which is **Never**
   unless an admin changes it.
-- People may give their own keys at most **the most people may give their own keys**, which is
+- People may give their own keys at most the setting **The most people may give their own keys**, which is
   **Never** unless an admin raises it. Both are under **API keys**, then **Cloud for keys**.
+- Lowering **The most people may give their own keys** applies at once: a person's key set higher works
+  at the new maximum from the next request (the API keys table shows "now … (server maximum)" next to
+  it), and gets its own setting back when the maximum is raised again. Values an admin set, and admins'
+  own keys, are not affected.
 - An admin can set any key's cloud setting. On someone else's key the value is then **locked** for
   its owner, as limits are. **Unlock cloud** gives it back the default.
 - A provider inside your network (not ticked *Outside your network*) is not cloud: every key may use
@@ -197,8 +201,9 @@ On the newest Claude models, a `temperature` below 1 together with `top_p`, or a
 - **Gemini 3 thought signatures** (`extra_content.google.thought_signature` on each tool call) must
   be sent back on the next turn. Forgeyard passes them through untouched. A conversation whose
   earlier turns were answered by a local model has none, and Gemini may refuse it with 400.
-- Thinking cannot be turned off on some models. Whether thinking tokens count in
-  `completion_tokens` has not been checked yet.
+- Thinking cannot be turned off on some models. Thinking tokens are left out of
+  `completion_tokens` and counted only in `total_tokens`; Forgeyard adds them back (see
+  [Cost and prices](#cost-and-prices)).
 
 ### Azure OpenAI
 
@@ -269,16 +274,16 @@ by hand* or *from OpenRouter*) and when. Admins set them:
   tokens, as the provider's pricing page lists them. Leave a field empty when it does not apply.
 - **Refresh prices from OpenRouter**, on a provider (its models) or on the Providers page (every
   provider outside your network). Forgeyard reads OpenRouter's public model list,
-  `https://openrouter.ai/api/v1/models` (no key is sent; it goes through the egress rules below, so add
-  `openrouter.ai` to `EGRESS_ALLOWED_HOSTS` if you use it), and shows a **diff**: each model, how it
-  matched, and the old and new prices. Nothing changes until you tick rows and **Apply**.
+  `https://openrouter.ai/api/v1/models` (no key is sent; it goes through the egress rules below, so if you set
+  `EGRESS_ALLOWED_HOSTS`, add `openrouter.ai` to it), and shows a **diff**: each model, how it
+  matched, and the old and new prices. Nothing changes until you tick rows and choose **Apply ticked**.
   - An OpenRouter provider's models match by their own id (*same id*). Other providers' models get a
     **suggested** match from their name (`gpt-4o-mini` → `openai/gpt-4o-mini`,
     `claude-sonnet-4-5-20250929` → `anthropic/claude-sonnet-4.5`); check it and tick it yourself. For a
     model that did not match, type its OpenRouter id and **Compare**. Once applied, the match is
     remembered (*confirmed*).
   - Prices **entered by hand are kept** unless you tick that row to overwrite them.
-  - If OpenRouter's price changed between the diff and **Apply**, that row is skipped; read again.
+  - If OpenRouter's price changed between the diff and **Apply ticked**, that row is skipped; read again.
   - There is no automatic sync and no bundled price list: prices change only when an admin applies
     them.
 
@@ -294,7 +299,7 @@ cost nothing and are never limited. Without a budget, nothing changes.
 
 | Budget on | Who sets it | When it is used up |
 |---|---|---|
-| **An API key** | its owner, on **API keys** (**Limits**, *Monthly budget*); an admin on any key, which locks it for the owner | that key's requests no longer spill or go to the cloud |
+| **An API key** | its owner, on **API keys** (**Limits**, *Monthly budget (USD)*); an admin on any key, which locks it for the owner | that key's requests no longer spill or go to the cloud |
 | **A person** | admins, on **Usage → Cost** (*Budgets this month*) | none of that person's keys, nor their Playground, can |
 | **A provider** | admins, on the provider's page | that provider is skipped; other providers in the tier, or local replicas, still serve |
 
@@ -320,7 +325,8 @@ long answer to a request without it), so set `max_tokens` in your programs, or l
 
 The route becomes **local-only for that scope**; nothing fails if something else can serve:
 
-- the request would have spilled because local was **busy**: it waits for a local replica instead;
+- the request would have spilled because local was **busy**: it goes to a local replica after all,
+  where the engine queues it;
 - another provider in the cloud tier has room: that provider serves it;
 - the answer carries `X-Forgeyard-Budget-Exhausted`, naming the budget that kept the request from a
   provider: `key`, `person` or `provider:<name>`.

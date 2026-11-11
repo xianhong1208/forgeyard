@@ -4,7 +4,7 @@ All three are read-only management interfaces (no HIP context, no allocation), s
 busy with other work.
 
 Sources for the field names (checked 2026-11-09, then on a real Strix Halo with ROCm 7.0.2 and
-amd-smi 26.0.2 on 2026-11-11, see docs/acceptance-m1.md):
+amd-smi 26.0.2 on 2026-11-11):
 
 * amdsmi Python API — https://rocm.docs.amd.com/projects/amdsmi/en/latest/reference/amdsmi-py-api.html
     amdsmi_init(), amdsmi_get_processor_handles()

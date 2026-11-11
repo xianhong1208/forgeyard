@@ -34,7 +34,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 在 AMD 上，模型可以用 `vllm` recipe 的 ROCm 映像檔執行，也可以用 `llama-cpp`。行程類工作負載只會在 `ROCR_VISIBLE_DEVICES` 裡拿到自己的卡，而且只有在分配到 GPU 時，才會加入擁有 `/dev/kfd` 和對應 `/dev/dri/renderD*` 的群組。
 
-> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上透過 `amd-smi` 和 `rocm-smi` 檢查過；獨立 AMD 顯示卡目前只用錄下來的資料驗證過。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
+> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本作為自訂配方部署模型、透過 `/v1` 呼叫。還沒在實際硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔（是否支援 gfx1151 不確定），以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
 
 ## 加入純 CPU 機器
 
@@ -53,8 +53,8 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 - **Model directory on that machine**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **Machine name**（選填）：這台機器在 **Machines** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
-- **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`）：機器要透過 SSH 通道（`https://127.0.0.1:7860`）、VPN 或另一個區網位址連過來時，就改這一欄。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
-- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如透過 SSH 通道轉送的 `33000-33002`。
+- **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
+- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。
 
 欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的標籤就是伺服器的版本。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
 
@@ -63,7 +63,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 在這台機器上（或在另一台機器上建置，再用 `docker save` 和 `docker load` 搬過去），在和伺服器同版本的 Forgeyard 原始碼目錄中執行：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .
+sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.2.0 .
 ```
 
 ### NVIDIA
@@ -80,7 +80,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.1.0
+  forgeyard-agent:1.2.0
 ```
 
 接著：
@@ -112,7 +112,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.1.0
+  forgeyard-agent:1.2.0
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -123,7 +123,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  forgeyard-agent:1.1.0 inventory
+  forgeyard-agent:1.2.0 inventory
 ```
 
 ### 純 CPU
@@ -137,7 +137,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  forgeyard-agent:1.1.0
+  forgeyard-agent:1.2.0
 ```
 
 ### 為什麼要用這些選項
@@ -164,31 +164,71 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     forgeyard-agent:1.1.0
+     forgeyard-agent:1.2.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
 
 舊 agent 在容器外啟動的行程類工作負載不會被接手：請先從 UI 停止它們。
 
+## 執行服務或任務
+
+管理員和操作員可以把自己的程式當成**工作負載**在機器上執行：打開 **Workloads** → **New workload**，填好表單，選 **Create and start**。
+
+1. **What：** **Service**（一直執行到你停止它；結束時會重新啟動）或 **Task**（執行到結束）。**Name**：`a-z`、`0-9` 和 `-`，不能重複。
+2. **Run：** **Container**（一個 **Image**，例如 `python:3.13-slim`，可選填 **Entrypoint**）或 **Process**（基本 `PATH` 上的 **Command** 或絕對路徑，由 agent 以工作負載帳號執行）。**Arguments** 一行一個，不需要 shell 引號。
+3. **Where：** 一台 **Machine**，或 *Any online machine with room*；**GPUs**：*None*、*How many*（再加上 **Vendor**），或在選定的機器上指定 *These cards*；**CPU cores**、**Memory**（例如 `4Gi`）和 **Replicas**（1 到 16 個，每個在一台機器上）。
+4. **Environment：** 它需要的變數。它從空的環境開始；Forgeyard 會加入的變數列在[參考資料](reference.md#workload-environment)。值會加密儲存。
+5. **Ports and health**（服務）：它監聽的每個連接埠都按一次 **Add port**。agent 會從它的範圍挑一個主機連接埠，並把位址顯示在工作負載的頁面上。行程監聽 `$PORT`（參數裡用 `${PORT_<NAME>}`）；容器則填它自己的連接埠，主機連接埠會對應過去。**Health check**：*None*、*HTTP*（一個 **Path**）或 *TCP*。**Restart**：*Always*、*On failure* 或 *Never*。
+6. **Limits and retries**（任務）：**Max duration (s)** 超過時會停止並標為失敗；非零結束時依 **Retries** 重試，**Retry backoff (s)** 每次加倍，最多 5 分鐘。
+
+*Spec that will be sent* 會顯示表單產生的 JSON。工作負載的頁面會顯示每個副本、它的機器、GPU 和位址、事件，以及最後幾行輸出。**Stop** 會停止每個副本（先 SIGTERM，10 秒後 SIGKILL）並釋出它的 GPU；**Start** 會重新配置它們；**Delete** 還會刪除它的歷史和輸出。
+
+隔離方式簡述：行程以無特權的工作負載帳號執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[工作負載](concepts.md#workloads)。
+
 ## 加入雲端供應商
 
 管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
 
+## 追蹤並限制雲端花費
+
+管理員在開始使用供應商之後：
+
+1. **設定價格。** 在 **Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
+2. **查看費用。** **Usage** → **Cost** 依日期、金鑰、個人、模型或供應商顯示費用，以及有多少由本機處理。
+3. **設定預算**，以日曆月（UTC）計，單位是美元：
+   - 金鑰：**API keys** → 金鑰的 **Limits** → **Monthly budget (USD)** → **Save limits**。管理員在別人金鑰上設定的值會對擁有者鎖定；**Unlock budget** 會移除它；
+   - 個人：**Usage** → **Cost** → **Budgets this month**，選擇 **Everyone** → **Set budget**；
+   - 供應商：它的頁面 → **Monthly budget** → **Save budget**。
+4. **留意警示。** 預算用到 80% 和 100% 時，**Audit log** 會各記錄一筆事件（`budget.warning`、`budget.exhausted`），頁面也會顯示警告。不會寄電子郵件。
+
+費用怎麼算、預算如何預留金額、用完之後會怎樣：請見[費用與價格](cloud-providers.md#cost-and-prices)和[預算](cloud-providers.md#budgets)。
+
 ## 在共用機器上限制 GPU
 
 1. 開啟 **Machines**，找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
-2. 只勾選 Forgeyard 可以使用的卡，例如第 4 張，然後選擇 **Save**。
+2. 只勾選 Forgeyard 可以使用的卡，例如第 2 和第 3 張，然後選擇 **Save**。
 
 從此之後：
 
 - 不管工作負載或部署要求什麼，Forgeyard 執行的任何東西都不會分配到其他卡；
 - 其他卡會顯示 *not for Forgeyard*；
-- 記憶體以每張允許使用的卡回報的**可用**量計算，所以別人在同一張卡上的使用量會被考慮進去。
+- 記憶體以每張允許使用的卡回報的**可用**量計算，所以其他程式在同一張卡上的使用量會被考慮進去。
 
 正在使用中的卡不能從清單中移除：請先停止在它上面執行的東西。每次變更都會記錄在稽核紀錄裡，包含變更前後的內容。
 
-如果要讓模型和別人的工作共用同一張卡，部署時選擇 **GPU sharing** → **Share VRAM**：這樣它只會保留估算的記憶體量，vLLM 也會被設定成只使用這麼多（請看 [vLLM 在共用的卡上無法啟動](troubleshooting.md#vllm-does-not-start-on-a-shared-card)）。
+如果要讓模型和其他程式共用同一張卡，部署時選擇 **GPU sharing** → **Share VRAM**：這樣它只會保留估算的記憶體量，vLLM 也會被設定成只使用這麼多（請看 [vLLM 在共用的卡上無法啟動](troubleshooting.md#vllm-does-not-start-on-a-shared-card)）。
+
+## 加入其他人
+
+管理員在 **Users**：
+
+1. **Add user**：一個 **Username**、選填的 **Email (optional)**，以及 **Role**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **Create and get link**。
+2. 把一次性連結傳給對方。它用來設定對方的密碼，只能用一次，72 小時後失效。你永遠看不到對方的密碼。
+
+之後在同一份清單上：**Password link** 會給忘記密碼的人一個新連結（24 小時）；**Sign out** 會結束對方所有的工作階段；**Disable** 讓對方無法登入，他的 API 金鑰也會失效；**Delete** 會刪除對方。擁有者不能被停用、降級或刪除。
+
+如果要讓別人自己申請帳號，請以 `REGISTRATION=approval` 啟動伺服器。登入頁就會提供申請帳號的連結，申請會在 **Users** 等待，直到管理員選 **Approve** 或 **Reject**。
 
 ## 使用自己的憑證或反向代理
 
@@ -200,7 +240,7 @@ TLS_KEY_FILE=/etc/forgeyard/tls/privkey.pem
 TLS_CA_FILE=/etc/forgeyard/tls/company-ca.pem
 ```
 
-`TLS_CA_FILE` 是簽發這張憑證的 CA；agent 會改為釘選這個 CA，**Trust this server** 也會提供它。如果是公開信任的憑證，就不要設定這一項：這樣加入指令不會帶指紋，agent 會使用系統的信任存放區。檔案有變更時（例如憑證更新後），伺服器會重新載入。
+`TLS_CA_FILE` 是簽發這張憑證的 CA；agent 會改為釘選這個 CA，**Trust this server** 也會提供它。如果是公開信任的憑證，就不要設定這一項：這樣加入指令不會帶指紋，agent 會使用系統的信任存放區。伺服器每 12 小時檢查一次這些檔案，憑證更新後不需重新啟動就會換用新的；想立刻換用就重新啟動伺服器。
 
 **放在已經處理 HTTPS 的反向代理後面**（nginx、Caddy）：
 

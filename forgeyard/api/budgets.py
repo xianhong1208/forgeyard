@@ -93,6 +93,9 @@ def set_provider_budget(provider_id: int, body: BudgetIn, caller: Caller = Depen
     p = db.get(Provider, provider_id)
     if p is None:
         raise fail(404, "not_found", "No such provider.")
+    if not p.external and body.budget_micros is not None:
+        raise fail(422, "not_cloud", f"{p.name} is inside your network: requests to it cost nothing, so it has no "
+                                     "budget. Budgets are for cloud providers.")
     before = p.budget_micros
     if before != body.budget_micros:
         p.budget_micros = body.budget_micros

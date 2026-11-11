@@ -10,6 +10,9 @@ Cloud model APIs behind the same gateway, local first (1.2, part A: providers an
 part B1: cost tracking and prices; part B2: budgets).
 
 ### Added
+- **Open source under the Apache License 2.0** (`LICENSE`; also in the agent's wheel and the package
+  metadata). `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reports, what Forgeyard assumes,
+  known limits) and issue forms for bugs and feature requests.
 - **Cloud providers** (admins, page **Providers**): OpenAI, Anthropic, Google Gemini, Azure OpenAI (v1
   API), OpenRouter, or any OpenAI-compatible server, each through its own OpenAI-compatible endpoint,
   with a small quirks table per kind (how the key is sent, engine-only parameters dropped, `max_tokens`
@@ -80,13 +83,16 @@ part B1: cost tracking and prices; part B2: budgets).
   `GATEWAY_CLOUD_MAX`, `EGRESS_*` and `PROVIDER_*`.
 - **Machines → Add a machine → Docker is a form** that writes the complete `docker run`: the model
   directory on that machine (both sides of the `-v` and `FORGEYARD_MODEL_CACHE`), an optional machine
-  name (`FORGEYARD_NAME`), the server address as that machine reaches it (an SSH tunnel, a VPN, another
+  name (`FORGEYARD_NAME`), the server address as that machine reaches it (a VPN, a forwarded port, another
   LAN address; a warning when its host is not in the server's certificate, with `TLS_EXTRA_NAMES`), and
   under *Advanced* a port range (`FORGEYARD_PORT_RANGE`). The command follows the form as you type, a
   value the agent would reject shows its error instead of a broken command, and the values are
   remembered in the browser. No more hand-editing the command.
 
 ### Changed
+- Lowering *The most people may give their own keys* applies at once to people's own keys set higher:
+  they work at the new maximum on every request (the API keys table shows it), and get their own
+  setting back when it is raised. An admin's value and admins' own keys are not capped.
 - Migration `0009_providers`: every route becomes one tier-0 target (its deployment, the same upstream
   model name), so existing routes behave exactly as before; `api_keys.cloud` is `off` for every
   existing key; usage rows get a target. The downgrade keeps deployments' routes and drops providers.
@@ -105,6 +111,19 @@ part B1: cost tracking and prices; part B2: budgets).
   as root or in the `docker` group), and the AMD command puts each `--group-add` on its own line.
 
 ### Fixed
+- `/v1/models` lists a model only when a call from that key could be served: a `fallback` key reaches
+  the cloud only after a local tier, so a route whose cloud tier comes first and whose deployment is
+  stopped is no longer listed for it.
+- An engine's or provider's own `Retry-After` on a 429 or 503 reaches the client with the answer.
+- A cloud request a budget refused before anything was sent is counted under that provider (at no
+  cost), not as local.
+- A budget can no longer be set on a provider inside your network: requests to it cost nothing and
+  it was never enforced (422 `not_cloud`).
+- Stale text: the Users and Audit pages, the session limits on *My account* (now the server's own
+  settings) and the sign-out messages; the audit log can be filtered by API keys, machines,
+  workloads, deployments, models, recipes, routes, providers and budget alerts.
+- Every page names itself in the browser tab ("API keys · Forgeyard"). After the guide, the tab used to
+  keep the guide page's title on every page that followed.
 - Gemini's thinking tokens are counted and priced. Its OpenAI-compatible endpoint shows them only in
   `total_tokens`, so the gateway counted a `gemini-2.5-flash` answer at less than half of what Google
   bills (found by a real request); the difference now counts as reasoning, priced as output.
@@ -375,8 +394,8 @@ The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared c
   embeddings, rerank, speech to text; no API key is created; counted as "console".
 - Pages **API keys**, **Usage**, **Playground**; a deployment's page shows its `/v1` model name and
   endpoint, its usage and each replica's requests and whether its engine requires the internal key.
-- `scripts/accept_m4.py` (makes its own venv with the official `openai` SDK when needed) and
-  `docs/acceptance-m4.md`.
+- `scripts/accept_m4.py` (makes its own venv with the official `openai` SDK when needed): the
+  real-hardware run.
 - Migration `0005_gateway`. `httpx` is a runtime dependency; `openai` a dev dependency (tests).
 
 ### Changed — M4
@@ -435,7 +454,7 @@ The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared c
 - Agent protocol v1 extended compatibly: feature `models`; desired replicas carry a rendered spec,
   the model (with a token when needed) and an engine; status carries download progress and the model
   cache. M2 agents get specs without the new fields.
-- `scripts/accept_m3.py` and `docs/acceptance-m3.md`: the real-hardware run.
+- `scripts/accept_m3.py`: the real-hardware run.
 - Migration `0004_models`.
 
 ### Changed — M3
@@ -486,7 +505,6 @@ The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared c
   run workloads; users see them without environment values or output. Audit events
   `workload.created`, `workload.stopped`, `workload.started`, `workload.deleted`.
 - `scripts/gpu_probe.py`: which NVIDIA GPU a workload sees, through the CUDA driver only.
-- `docs/acceptance-m2.md`: the real-hardware checklist for a shared 8-GPU host restricted to one card.
 - Migration `0003_workloads`.
 
 ### Changed — M2
@@ -523,7 +541,6 @@ The MVP: milestones M0 to M4, each accepted on a real 8×A100 host (one shared c
   machines; everyone signed in can look.
 - Audit events `machine.join_token_created`, `machine.join_token_cancelled`, `machine.joined`,
   `machine.join_refused`, `machine.revoked`, `machine.removed`.
-- `docs/acceptance-m1.md`: real-hardware checklist (NVIDIA, AMD ROCm, CPU, several machines).
 - Settings `AGENT_HEARTBEAT_SECONDS` (10) and `AGENT_OFFLINE_SECONDS` (30).
 
 ### Added — M0: skeleton and sign-in

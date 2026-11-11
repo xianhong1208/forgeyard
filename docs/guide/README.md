@@ -24,17 +24,21 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
    its GPUs, add a recommended model, deploy it, create an API key, and call it with curl and the
    OpenAI SDK.
 2. [Concepts](concepts.md): machines and agents, GPU access, workloads, models and recipes and
-   estimates, deployments and the gateway, API keys and limits and usage, roles.
-3. [How-to](how-to.md): add an AMD machine or a CPU-only machine, run the agent in Docker,
-   restrict GPUs on a shared machine, use your own certificate or a reverse proxy, upgrade, back up
-   and restore, move a model cache, rotate keys, revoke a machine, uninstall the agent.
+   estimates, deployments, the gateway and the Playground, API keys and limits and usage, cloud
+   providers and tiers, cost and budgets, roles, sign-in and sessions.
+3. [How-to](how-to.md): add an AMD machine or a CPU-only machine, run the agent in Docker, run a
+   service or a task, add a cloud provider, track and limit cloud spend, restrict GPUs on a shared
+   machine, add people, use your own certificate or a reverse proxy, run the server as a service,
+   upgrade, back up and restore, move a model cache, rotate keys, revoke a machine, uninstall the
+   agent.
 4. [Troubleshooting](troubleshooting.md): problems seen on real machines, with their symptom, cause
-   and fix.
+   and fix: certificates, offline agents, downloads, memory, every error from `/v1`, programs that
+   do not trust the CA, missing models, spill and cost.
 5. [Cloud providers](cloud-providers.md): add OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter
    or a server of your own; route a model to the cloud; when a request spills; which keys may use the
    cloud; what each provider's endpoint cannot do; what leaves your server.
-6. [Reference](reference.md): every server setting, every agent setting, the command line, files
-   and ports.
+6. [Reference](reference.md): every server setting, every agent setting, the gateway's endpoints,
+   headers and error codes, a workload's environment, the command line, files and ports.
 
 ## Conventions
 

@@ -232,3 +232,83 @@ def test_fy_ck_009_a_stopped_deployment_with_a_cloud_tier_stays_listed_for_cloud
     set_tiers(o, "local-m", [[("local", deployment_id(o, "local-m"))], [("provider", world.opm)]])
     assert o.post(f"/api/deployments/{deployment_id(o, 'local-m')}/stop").status_code == 200
     assert "local-m" in listed(k["off"])
+
+
+def usage_rows(model):
+    from forgeyard.db import UsageDaily
+    from forgeyard.gateway.usage import recorder
+    recorder.flush()
+    db = new_session()
+    try:
+        return {(r.target, r.requests, r.errors) for r in db.scalars(select(UsageDaily).where(UsageDaily.model == model))}
+    finally:
+        db.close()
+
+
+def test_fy_ck_010_v1_models_follows_the_tiers_a_key_may_use(world):
+    """FY-CK-010: a `fallback` key reaches the cloud only after a local tier. A route whose cloud tier
+    comes first and whose only deployment is stopped can answer nothing for it, so it is not listed;
+    an `on` key still gets it, and both agree with what a call answers."""
+    o, k = world.owner, world.keys
+    set_tiers(o, "mixed-m", [[("provider", world.pm)], [("local", deployment_id(o, "mixed-m"))]])
+    assert "mixed-m" in listed(k["fallback"])                # the deployment still runs
+    assert o.post(f"/api/deployments/{deployment_id(o, 'mixed-m')}/stop").status_code == 200
+    assert "mixed-m" not in listed(k["fallback"]) and k["fallback"].get("/v1/models/mixed-m").status_code == 404
+    assert chat(k["fallback"], "mixed-m").status_code == 503
+    assert "mixed-m" in listed(k["on"])
+    assert chat(k["on"], "mixed-m").status_code == 200
+
+
+def test_fy_ck_011_an_upstream_retry_after_reaches_the_client(world):
+    """FY-CK-011: when a replica answers 429 with its own Retry-After and nothing else may take the
+    request, the client gets that Retry-After with the 429, so it backs off as long as the engine
+    asked."""
+    world.e2.status, world.e2.retry_after = 429, "7"
+    r = chat(world.keys["off"], "mixed-m")
+    assert r.status_code == 429 and r.headers.get("retry-after") == "7"
+    assert r.headers["x-forgeyard-target"] == "local:mixed-m#0"
+    world.e2.status = None
+    r = chat(world.keys["off"], "mixed-m")
+    assert r.status_code == 200 and "retry-after" not in r.headers
+
+
+def test_fy_ck_012_budgets_count_refusals_for_the_provider_and_ignore_providers_inside_the_network(world):
+    """FY-CK-012: a cloud-only request a budget refused before anything was sent is counted for that
+    provider (at no cost), not as local. A provider inside your network costs nothing, so it takes
+    no budget (422); clearing one is still allowed."""
+    o, k = world.owner, world.keys
+    providers = {p["name"]: p for p in o.get("/api/providers").json()["providers"]}
+    assert o.put(f"/api/budgets/providers/{providers['cloudy']['id']}", json={"budget_micros": 0}).status_code == 200
+    r = chat(k["on"], "cloud-m")
+    assert r.status_code == 402 and r.json()["error"]["code"] in ("budget_exhausted", "budget_unpriced")
+    assert world.cloud.posts() == []
+    assert usage_rows("cloud-m") == {(f"pm:{world.pm}", 1, 1)}
+    r = o.put(f"/api/budgets/providers/{providers['vpn-vllm']['id']}", json={"budget_micros": 5_000_000})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "not_cloud"
+    assert o.put(f"/api/budgets/providers/{providers['vpn-vllm']['id']}", json={"budget_micros": None}).status_code == 200
+
+
+def test_fy_ck_013_lowering_the_cap_applies_at_once_to_peoples_own_keys(world):
+    """FY-CK-013: a person's own key set to "allowed" works as "never" from the moment an admin lowers
+    the most people may give their keys: no cloud-only model, no spill. The key keeps its own setting
+    (shown with its effective one) and gets it back when the cap is raised. A value an admin set, and
+    an admin's own key, are not capped."""
+    o, k = world.owner, world.keys
+    assert o.put("/api/keys/cloud", json={"default": "off", "max": "on"}).status_code == 200
+    add_user(o, "ursula")
+    u = sign_in(o, "ursula", PW)
+    mine = api_client(o, new_key(u, "mine", cloud="on")["key"])
+    by_admin = new_key(u, "by-admin")["api_key"]
+    assert o.patch(f"/api/keys/{by_admin['id']}", json={"cloud": "on"}).status_code == 200
+    assert "cloud-m" in listed(mine)
+    assert o.put("/api/keys/cloud", json={"default": "off", "max": "off"}).status_code == 200
+    assert "cloud-m" not in listed(mine) and chat(mine, "cloud-m").status_code == 404
+    set_state("mixed-m", 0, "starting", "loading")
+    r = chat(mine, "mixed-m")
+    assert r.status_code == 503 and world.cloud.posts() == []
+    rows = {x["name"]: x for x in u.get("/api/keys").json()["keys"]}
+    assert rows["mine"]["cloud"] == "on" and rows["mine"]["effective_cloud"] == "off"
+    assert rows["by-admin"]["effective_cloud"] == "on"           # an admin's value stays
+    assert "cloud-m" in listed(k["on"])                           # an admin's own key stays
+    assert o.put("/api/keys/cloud", json={"default": "off", "max": "on"}).status_code == 200
+    assert "cloud-m" in listed(mine)

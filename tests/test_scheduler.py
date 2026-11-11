@@ -57,7 +57,7 @@ def seed_catalog():
 
 @pytest.fixture()
 def fleet(owner):
-    """Tony's shared host (8 x A100, only #4 for Forgeyard, ~45 GB free on it), a 2 x 4090 box
+    """An 8 x A100 host with one card allowed (#4, partly used), a 2 x 4090 box
     with an older driver, and catalog entries for the acceptance models."""
     seed_catalog()
     a100 = make_node("a100", allowlist=[4], features=MODELS)
