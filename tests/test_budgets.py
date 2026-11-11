@@ -81,9 +81,11 @@ def test_fy_bdg_001_reserve_settle_release():
     h2 = lg.reserve([key], 55 * P)               # 45 + 55 = 100: exactly fits
     assert isinstance(h2, Hold)
     assert isinstance(lg.reserve([key], 1), Blocked)
+    h3 = lg.reserve([person], 30 * P)
     lg.release(h2)
-    lg.release(h2)                               # twice is harmless
-    assert lg._held == {} and isinstance(lg.reserve([key], 55 * P), Hold)
+    lg.release(h2)                               # twice is harmless: h3 is still held
+    assert lg._held == {("person", 7): 30 * P} and isinstance(lg.reserve([key], 55 * P), Hold)
+    lg.release(h3)
     u = lg.reserve([person], None)               # no price: blocked, unpriced
     assert isinstance(u, Blocked) and u.unpriced and u.error().code == "budget_unpriced"
     assert isinstance(lg.reserve([], None), Hold)  # no budget applies: nothing to reserve
@@ -199,6 +201,7 @@ def test_fy_bdg_006_alerts_once_per_scope_month_and_threshold(owner):
     ledger.settle(h, key_id=1, user_id=1, provider_id=1, picos=30 * P)         # 80%
     h = ledger.reserve([lim], 5 * P)
     ledger.settle(h, key_id=1, user_id=1, provider_id=1, picos=5 * P)          # 85%: no second 80% alert
+    assert len(ledger._pending) == 1                                           # not queued again either
     assert ledger.write_alerts() == 1
     assert isinstance(ledger.reserve([lim], 20 * P), Blocked)                  # 85 + 20 > 100, past 80%
     assert ledger.write_alerts() == 1
@@ -526,7 +529,8 @@ def test_fy_bdg_018_a_providers_own_failure_is_said_before_a_budget(priced, monk
         p2 = add_provider(m.owner, second, name="second")
         pm2 = model_id(p2, "gpt-mini")
         m.owner.patch(f"/api/provider-models/{pm2}", json=GPT)
-        set_tiers(m.owner, "chat", [[("local", m.dep)], [("provider", m.pm), ("provider", pm2)]])
+        # second first: it fails, then cloudy is kept out by its budget, last.
+        set_tiers(m.owner, "chat", [[("local", m.dep)], [("provider", pm2), ("provider", m.pm)]])
         m.owner.put(f"/api/budgets/providers/{m.provider['id']}", json={"budget_micros": 0})
         second.status = 500
         set_state("chat", 0, "starting", "loading")
@@ -535,3 +539,24 @@ def test_fy_bdg_018_a_providers_own_failure_is_said_before_a_budget(priced, monk
         assert r.headers["x-forgeyard-budget-exhausted"] == "provider:cloudy" and ledger._held == {}
     finally:
         second.close()
+
+
+def test_fy_bdg_019_a_failed_cloud_attempt_holds_nothing_while_waiting_for_local(priced):
+    """FY-BDG-019: local busy, the cloud tier fails (500): the request waits for the local replica
+    after all, and its reservation is released at once, not held while it waits."""
+    m = priced
+    m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": 1_000_000})
+    m.engine.hold = 1.2
+    t, first = background(lambda: send(m))
+    in_flight_soon()
+    m.cloud.status = 500
+    t2, second = background(lambda: send(m))
+    deadline = time.monotonic() + 5
+    while len(m.cloud.posts()) < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.2)
+    held_while_waiting = dict(ledger._held)
+    t.join()
+    t2.join()
+    assert held_while_waiting == {}
+    assert second["r"].status_code == 200 and second["r"].headers["x-forgeyard-target"] == "local:chat#0"

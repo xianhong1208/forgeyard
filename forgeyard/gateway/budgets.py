@@ -296,9 +296,8 @@ class Ledger:
         count its usage with `then`, so seeding sees it exactly once."""
         with self._lock:
             self._free(hold)
-            if self._month is not None and self._month != month_of(self.clock()):
-                self._month = None    # a new month: read it again before the next reservation
-            # Not read yet: the reading will find this request in the usage counted below.
+            # Not read yet: the reading will find this request in the usage counted below. (After the
+            # turn of a month, the next reading starts the new month from the usage rows.)
             if picos > 0 and self._month is not None:
                 for slot in (("key", key_id), ("person", user_id), ("provider", provider_id)):
                     if slot[1]:
