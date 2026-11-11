@@ -2,6 +2,7 @@ import { IconArrowRight, IconCheck } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, Navigate } from "react-router";
 
+import { SetupHealth } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Notice, PageHeader, TrustHint } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -88,6 +89,8 @@ function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void })
       <ol className="onb-steps">
         {c.steps.map((s, i) => <StepRow key={s.id} s={s} n={i + 1} current={s === next} />)}
       </ol>
+
+      <SetupHealth />
 
       <ExampleCall c={c} />
 

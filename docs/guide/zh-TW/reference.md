@@ -4,15 +4,35 @@
 
 ## 伺服器設定
 
-伺服器從環境變數讀取設定，也可以從它啟動時所在資料夾裡的 `.env` 檔讀取（`.env.example` 列出了所有設定並附有註解）。修改後請重新啟動伺服器。
+伺服器從環境變數讀取設定，也可以從它啟動時所在資料夾裡的 `.env` 檔讀取（`.env.example` 列出了所有設定並附有註解，常用的排在最前面）。修改後請重新啟動伺服器。
+
+伺服器啟動時會檢查它的設定：
+
+- **無法使用的值會讓伺服器停止啟動**，並指出是哪個設定、可以填哪些值：`TLS`、`REGISTRATION`、`COOKIE_SECURE`、`GATEWAY_CLOUD_DEFAULT`、`GATEWAY_CLOUD_MAX`、不是數字的數字設定，以及 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個。
+- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定，以及有風險的組合。
+
+### 常用設定
+
+大多數安裝只會設定其中幾個。這張表之後的都是進階設定：預設值幾乎適合所有人。
+
+| 變數 | 預設值 | 用途 |
+|---|---|---|
+| `HOST` | `127.0.0.1` | 監聽的位址。`0.0.0.0` 代表對網路開放，其他機器要加入就需要這樣設定 |
+| `PORT` | `7860` | 連接埠，網頁介面、API、`/v1` 和 agent 都用這個 |
+| `PUBLIC_URL` | — | 使用者和 agent 使用的位址，例如 `https://192.168.1.20:7860`。加入指令、設定密碼的連結和閘道位址都會用到它；它的主機一律會被接受，也會包含在憑證裡。留空：使用每個瀏覽器開啟 Forgeyard 時的位址；如果那是 `127.0.0.1`，其他機器就無法使用 |
+| `DATA_DIR` | `data` | 資料庫（SQLite）、`secret.key`、`tls/` 和設定權杖（setup token）的位置。相對路徑是相對於伺服器啟動時所在的資料夾 |
+| `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra postgres`） |
+| `TLS` | `on` | `on`：以 Forgeyard 自己的 CA（建立在 `data/tls/`）或你的憑證提供 HTTPS。`off`：純 HTTP，只能用在處理 HTTPS 的代理後面 |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰：兩個都設或都不設（只設一個會停止啟動）。每 12 小時檢查一次，有變更就重新載入。`TLS=off` 時會被忽略 |
+| `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**Trust this server** 也會提供它。沒有自己的憑證時會被忽略 |
+| `REGISTRATION` | `off` | `approval`：使用者可以申請帳號，申請會等待管理員核准 |
+| `HF_ENDPOINT` | `https://huggingface.co` | 從哪裡查詢和下載 Hugging Face 模型（可以填鏡像站） |
+| `EGRESS_PROXY` | — | 送往供應商的請求改經由這個 proxy（`http://host:port`）。絕不使用環境變數裡的 proxy |
 
 ### 網路與位址
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `HOST` | `127.0.0.1` | 監聽的位址。`0.0.0.0` 代表對網路開放 |
-| `PORT` | `7860` | 連接埠，網頁介面、API、`/v1` 和 agent 都用這個 |
-| `PUBLIC_URL` | — | 使用者和 agent 使用的位址，例如 `https://192.168.1.20:7860`。加入指令、設定密碼的連結和閘道位址都會用到它；它的主機一律會被接受，也會包含在憑證裡 |
 | `ALLOWED_HOSTS` | — | 其他要回應的主機名稱，以逗號分隔。`localhost` 和 IP 位址一律可用；其他名稱會得到 421 |
 | `TRUSTED_PROXIES` | — | 信任其 `X-Forwarded-For` 和 `X-Forwarded-Proto` 的代理，以逗號分隔的 IP |
 
@@ -20,31 +40,27 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `TLS` | `on` | `on`：以 Forgeyard 自己的 CA（建立在 `data/tls/`）或你的憑證提供 HTTPS。`off`：純 HTTP，只能用在處理 HTTPS 的代理後面 |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰（兩個都設或都不設）；每 12 小時檢查一次，有變更就重新載入 |
-| `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**Trust this server** 也會提供它 |
-| `TLS_EXTRA_NAMES` | — | 要加進 Forgeyard 自己的伺服器憑證的其他名稱或 IP 位址，以逗號分隔 |
+| `TLS_EXTRA_NAMES` | — | 要加進 Forgeyard 自己的伺服器憑證的其他名稱或 IP 位址，以逗號分隔。使用自己的憑證時會被忽略 |
+
+`TLS`、`TLS_CERT_FILE`、`TLS_KEY_FILE` 和 `TLS_CA_FILE` 在[常用設定](#common-settings)裡。
 
 ### 資料與機密
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `DATA_DIR` | `data` | 資料庫（SQLite）、`secret.key`、`tls/` 和設定權杖（setup token）的位置 |
-| `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra postgres`） |
 | `SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰。請和資料庫分開備份 |
-| `FORGEYARD_SECRET_KEY` | — | 直接給金鑰本身（32 位元組的 base64），取代檔案 |
+| `FORGEYARD_SECRET_KEY` | — | 直接給金鑰本身（32 位元組的 base64），取代檔案。兩者只設一個：兩個都設的話，會使用這一個，並忽略檔案 |
 
 ### 帳號與登入
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | 在第一次啟動時建立擁有者，取代設定頁面 |
-| `FORGEYARD_SETUP_TOKEN` | — | 使用這個設定權杖，而不是隨機產生的 |
-| `REGISTRATION` | `off` | `approval`：使用者可以申請帳號，申請會等待管理員核准 |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | 在第一次啟動時建立擁有者，取代設定頁面。只在那時讀取：之後請移除 |
+| `FORGEYARD_SETUP_TOKEN` | — | 使用這個設定權杖，而不是隨機產生的（設定完成後就沒有作用） |
 | `SESSION_IDLE_MINUTES` | `120` | 超過這段時間沒有任何請求就自動登出 |
 | `SESSION_MAX_DAYS` | `7` | 無論如何，超過這段時間就自動登出 |
-| `COOKIE_SECURE` | `auto` | `auto`：瀏覽器使用 HTTPS 時就使用 `Secure` cookie；設成 `true` 或 `false` 可強制指定 |
-| `RATE_LIMIT_PER_MINUTE` | `600` | 每個位址每分鐘的 API 請求數（0：不限制） |
+| `COOKIE_SECURE` | `auto` | `auto`：瀏覽器使用 HTTPS 時就使用 `Secure` cookie；設成 `true` 或 `false` 可強制指定。其他任何值都會停止啟動 |
+| `RATE_LIMIT_PER_MINUTE` | `600` | 每個位址每分鐘對網頁介面的 API（`/api`）的請求數（0：不限制）。閘道 `/v1` 則改用每把金鑰的限制 |
 | `LOGIN_FREE_FAILURES` | `5` | 每個帳號登入失敗幾次後，之後每次嘗試都要等待（2 秒起，每次加倍，最多 5 分鐘） |
 | `LOGIN_IP_FAILURES` | `30` | 每個位址在 15 分鐘內登入失敗幾次後，該位址就要等待 |
 
@@ -53,16 +69,15 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `AGENT_HEARTBEAT_SECONDS` | `10` | agent 送出心跳的頻率 |
-| `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線 |
+| `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。請至少設為心跳間隔的 2.5 倍，否則機器會在上線和離線之間反覆跳動 |
 
 ### 模型
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `HF_ENDPOINT` | `https://huggingface.co` | 從哪裡查詢和下載 Hugging Face 模型（可以填鏡像站） |
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
-| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔（管理員可以在 **Models** 修改） |
-| `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔（管理員可以在 **Models** 修改） |
+| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準 |
+| `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
 | `VRAM_HEADROOM_MIB` | `512` | 放置副本時，每張卡一律保留不用的記憶體 |
 
@@ -93,7 +108,6 @@
 |---|---|---|
 | `GATEWAY_CLOUD_DEFAULT` | `off` | 新 API 金鑰拿到的雲端設定：`off`、`fallback` 或 `on`。管理員可以在 **API keys** 修改（存在資料庫裡）；既有的金鑰維持原本的設定 |
 | `GATEWAY_CLOUD_MAX` | `off` | 任何人能為自己的金鑰設定的最大值，每個請求也會套用到既有的金鑰。管理員可以為任何金鑰設定任何值 |
-| `EGRESS_PROXY` | 空白 | 送往供應商的請求改經由這個 proxy（`http://host:port`）。絕不使用環境變數裡的 proxy |
 | `EGRESS_ALLOWED_HOSTS` | 空白 | 只允許這些供應商主機，以逗號分隔（`*.example.org` 代表子網域）。空白：不限 |
 | `EGRESS_CA_FILE` | 空白 | 除了系統的 CA 之外，供應商連線額外信任的 CA 檔（例如會檢查 TLS 的公司 proxy） |
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | 讓標示為在你網路外的供應商也能使用私有或 loopback 位址和純 http。只用於以替身伺服器測試；link-local 和 metadata 位址仍然一律拒絕 |
@@ -103,6 +117,25 @@
 | `PROVIDER_RETRY_AFTER_CAP` | `2` | 沒有其他目標可試時，不超過這個秒數的 `Retry-After` 會等一次再試 |
 | `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | **Refresh prices from OpenRouter** 讀取價格的位置（只在管理員要求時讀取，不送出金鑰）。只有在用替身伺服器測試時才需要修改 |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | 預算會在雲端請求送出前先預留它的估計費用。沒有 `max_tokens` 的請求，以這個 token 數估計它的回應 |
+
+`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud for keys** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。
+
+### 單位、零與空白
+
+| 種類 | 寫法 |
+|---|---|
+| 時間長度 | 單位是秒，除非名稱裡有 `MINUTES` 或 `DAYS`。路由的 *Wait for a free local slot* 單位是毫秒 |
+| 大小 | `_MIB` 是 MiB。`GATEWAY_MAX_BODY_MB` 和 agent 的 `log_max_mb` 雖然名稱是 MB，單位也是 MiB。在表單裡輸入的大小可以寫 `8Gi`（GiB）；`8G` 和 `8GB` 是十進位（10⁹ 位元組） |
+| 金額 | 網頁介面裡是美元；API 裡是微美元（`_micros`）；價格以每百萬 token 計 |
+| 頻率 | 以每分鐘計；`LOGIN_IP_FAILURES` 是計算 15 分鐘內的次數 |
+
+| 設定 | `0` 代表 | 空白代表 |
+|---|---|---|
+| `GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、**Limits for keys** | 不限制 | 不限制 |
+| 金鑰自己的每分鐘請求數或 token 數 | 拒絕（至少為 1） | 伺服器的預設值 |
+| 預算（金鑰、個人、供應商） | **$0：它適用的每個雲端請求都會被擋下** | 沒有預算 |
+| `RATE_LIMIT_PER_MINUTE` | 關閉 | — |
+| 路由的 *Wait for a free local slot* | 立刻溢出 | — |
 
 `/v1` 的標頭和錯誤碼列在[閘道（/v1）](#the-gateway-v1)。
 
@@ -312,6 +345,53 @@ local_dirs = ["/data/models"]
 | `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及工作負載帳號 |
 
 規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。
+
+## Setup health 檢查
+
+管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。
+
+| Id | 嚴重程度 | 何時出現 |
+|---|---|---|
+| `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`PROVIDER_`、`EGRESS_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
+| `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
+| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `SECRET_KEY_FILE` 都有設定 |
+| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS`、`PROVIDER_ALLOW_PRIVATE_HOSTS` 或 `MEDIA_ALLOW_PRIVATE_HOSTS` 已開啟 |
+| `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
+| `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
+| `setup-token-left` | 提示 | 設定完成後，`FORGEYARD_SETUP_TOKEN` 還設定著 |
+| `env-seed-ignored` | 提示 | 某個初始值設定（`MODEL_URL_HOSTS`、`MODEL_LOCAL_DIRS`、`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_*`）和管理員儲存的值不同，而儲存的值優先 |
+| `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
+| `host-loopback` | 錯誤 | `HOST` 是 loopback 位址，卻有機器從其他位址加入（而且前面沒有代理） |
+| `public-url-unset` | 提示 | 其他機器連得到這台伺服器，`PUBLIC_URL` 卻是空白。如果你是以 `127.0.0.1` 或 `localhost` 開啟頁面，則是警告 |
+| `certificate-name-missing` | 錯誤 | 你自己的憑證沒有包含 `PUBLIC_URL` 的主機 |
+| `certificate-expiring` | 警告 | 你自己的憑證在 30 天內到期，或 Forgeyard 的 CA 在 90 天內到期。14 天內到期則是錯誤 |
+| `registrations-pending` | 提示 | 有人在等待核准 |
+| `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
+| `gpus-shared-no-allowlist` | 警告 | 某台機器的顯示卡佔用的記憶體比 Forgeyard 在那裡保留的多出至少 1 GiB，而且沒有人選擇它的 GPU 存取 |
+| `machine-no-models` | 提示 | 某個上線的 agent 沒有模型快取，所以不會有模型放到那裡。如果它有 GPU，則是警告 |
+| `process-workloads-off` | 提示 | 某個上線的 agent 拒絕行程類工作負載；檢查結果會說明原因 |
+| `model-cache-full` | 警告 | 某台機器的模型快取磁碟剩餘空間不到 10% |
+| `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |
+| `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
+| `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
+| `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
+| `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
+| `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |
+| `cloud-model-unpriced` | 錯誤 | 已經有預算存在時，某條路由的雲端模型沒有輸入或輸出價格：它的請求會回應 402 `budget_unpriced` |
+| `cloud-model-cost-unknown` | 提示 | 同樣的情況但沒有預算：它的費用未知 |
+| `provider-no-key` | 錯誤 | 某個已啟用、而且種類需要 API 金鑰的供應商沒有金鑰 |
+| `provider-blocked-by-egress` | 錯誤 | 某個供應商的主機不在 `EGRESS_ALLOWED_HOSTS` 裡 |
+| `provider-inside-public-address` | 警告 | 某個標示為在你網路內的供應商，只解析得到公開位址 |
+| `cloud-default-open` | 提示 | 新金鑰拿到的設定高於 **Never**，或使用者可以把自己的金鑰設為 **Allowed**。如果某把金鑰同時沒有預算，則是警告 |
+| `cloud-unreachable` | 提示 | 路由有雲端目標，卻沒有任何金鑰可以使用雲端 |
+| `route-cloud-before-local` | 警告 | 某條路由的雲端層排在它的第一個本機層之前 |
+| `route-cloud-never-used` | 提示 | 勾選了 **Local only** 的路由有雲端目標，或某條溢出規則在本機層之後沒有其他層 |
+| `route-no-target` | 錯誤 | 某條路由沒有任何目標能回應：每個目標都被停用，或它的供應商被停用 |
+| `route-local-stopped` | 警告 | 某條同時有本機層和雲端層的路由，它的本機部署全部停止 |
+| `budget-zero` | 提示 | 某個預算是 $0，會擋下它適用的每個雲端請求 |
+| `prices-stale` | 提示 | 某條路由使用的模型，來自 OpenRouter 的價格已經超過 60 天 |
+| `keys-idle-never-expire` | 提示 | 永不過期的金鑰已經 90 天沒有使用 |
 
 ## 命令列
 

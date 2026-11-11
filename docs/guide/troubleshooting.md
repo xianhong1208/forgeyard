@@ -382,6 +382,26 @@ limits = "rlimit"
 or `--limits rlimit`, or `FORGEYARD_LIMITS=rlimit` (the agent's Docker image sets this already).
 Process workloads then get resource limits per process, and their CPU is counted, not capped.
 
+## The server refuses a setting, or warns about one
+
+**It does not start** and the log says `Setting COOKIE_SECURE: …` (or another name): that value
+cannot be used. The message lists what the setting takes. The same goes for `TLS`, `REGISTRATION`,
+`GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX`, and for setting only one of `TLS_CERT_FILE` and
+`TLS_KEY_FILE` (`HTTPS: Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither`).
+
+**It starts with lines like `Settings: GATEWAY_CLOUD_DEFUALT is not a setting`**: the server ignores
+that name. Each line says why and what to do:
+
+- *is not a setting… Did you mean …?*: a typo, or a setting from another version. Fix the name in
+  `.env` or the environment.
+- *is ignored*: another setting makes it useless, e.g. `TLS_CA_FILE` without your own certificate,
+  or `MODEL_URL_HOSTS` after an admin saved **Model sources** (the saved value wins: change it in
+  the web UI).
+- *ADMIN_PASSWORD is still set*: it is only read on the first start. Remove it from `.env`.
+
+Admins see the same lines, with a link to the fix, under **Get started → Setup health**
+([Check the setup health](how-to.md#check-the-setup-health)).
+
 ## What to include in a bug report
 
 ```bash

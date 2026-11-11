@@ -67,11 +67,13 @@ class KeyPatchIn(BaseModel):
 
 
 class CloudIn(BaseModel):
-    default: Cloud = "off"
-    max: Cloud = "off"
+    # A field left out keeps its saved value.
+    default: Optional[Cloud] = None
+    max: Optional[Cloud] = None
 
 
 class LimitsIn(BaseModel):
+    # null: no limit / no cap. A field left out keeps its saved value.
     default_rpm: Optional[int] = Field(default=None, ge=0, le=MAX_LIMIT)
     default_tpm: Optional[int] = Field(default=None, ge=0, le=MAX_LIMIT)
     max_rpm: Optional[int] = Field(default=None, ge=0, le=MAX_LIMIT)
@@ -276,7 +278,7 @@ def get_key_limits(_: Caller = Depends(current), db: DbSession = Depends(get_db)
 @router.put("/keys/limits")
 def set_key_limits(body: LimitsIn, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     before = gkeys.get_limits(db)
-    gkeys.set_limits(db, body.model_dump(), caller.user.username)
+    gkeys.set_limits(db, {**before, **body.model_dump(include=body.model_fields_set)}, caller.user.username)
     db.flush()
     after = gkeys.get_limits(db)
     audit.record(db, "api_key_limits.changed", actor=caller.user, ip=caller.ip, before=before, after=after)
@@ -287,11 +289,13 @@ def set_key_limits(body: LimitsIn, caller: Caller = Depends(require_admin), db: 
 @router.put("/keys/cloud")
 def set_key_cloud(body: CloudIn, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     """The cloud setting a new key gets, and the most a user may give their own key. Existing keys keep
-    theirs: raising the default never sends anything out for a key that was off."""
-    if gkeys.cloud_above(body.default, body.max):
-        raise fail(422, "default_over_max", "The default for new keys cannot be more than what users may choose.")
+    theirs: raising the default never sends anything out for a key that was off. A field left out keeps
+    its saved value."""
     before = gkeys.get_cloud(db)
-    gkeys.set_cloud(db, body.model_dump(), caller.user.username)
+    value = {**before, **body.model_dump(exclude_none=True)}
+    if gkeys.cloud_above(value["default"], value["max"]):
+        raise fail(422, "default_over_max", "The default for new keys cannot be more than what users may choose.")
+    gkeys.set_cloud(db, value, caller.user.username)
     db.flush()
     after = gkeys.get_cloud(db)
     audit.record(db, "api_key_cloud.changed", actor=caller.user, ip=caller.ip, before=before, after=after)

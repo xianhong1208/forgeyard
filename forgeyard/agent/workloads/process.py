@@ -157,8 +157,28 @@ def beyond_loopback(ports: list[int], proc_net: Path = Path("/proc/net")) -> lis
     return sorted(set(out))
 
 
-def systemd_running() -> bool:
-    return Path("/run/systemd/system").is_dir() and shutil.which("systemd-run") is not None
+# `limits = auto` asks systemd for a throwaway scope instead of looking for its files: an agent in a
+# container can see the host's /run/systemd and systemd-run and still fail with "Failed to connect to
+# bus" (A14 of the settings audit). Only a root agent probes (a scope needs root).
+SYSTEMD_PROBE = ["systemd-run", "--scope", "--quiet", "--collect", "--", "true"]
+SYSTEMD_PROBE_TIMEOUT = 10.0
+
+
+def systemd_running(run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+                    which: Callable[[str], Optional[str]] = shutil.which) -> bool:
+    """Whether a systemd scope really works here: systemd-run exists and starting a scope succeeds."""
+    if which("systemd-run") is None:
+        return False
+    try:
+        done = run(SYSTEMD_PROBE, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                   timeout=SYSTEMD_PROBE_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if done.returncode != 0:
+        log.info("systemd-run cannot start a scope here (%s): process workloads get rlimits only.",
+                 (done.stderr or b"").decode("utf-8", "replace").strip()[:200] or f"exit {done.returncode}")
+        return False
+    return True
 
 
 class ProcessRuntime:

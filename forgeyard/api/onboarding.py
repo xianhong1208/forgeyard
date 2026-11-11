@@ -68,6 +68,16 @@ def machines_step(db: DbSession, admin: bool) -> tuple[dict, list[Node]]:
     return step, list(nodes)
 
 
+def gpu_choice_made(db: DbSession) -> set[int]:
+    """The machines whose GPU access an admin saved. Deciding "all of them" leaves the allowlist
+    empty, so a saved choice is read from the audit log."""
+    decided_ids = set()
+    for detail in db.scalars(select(AuditEvent.detail).where(AuditEvent.action == "machine.gpu_allowlist_changed")):
+        if isinstance(detail, dict) and isinstance(detail.get("machine_id"), int):
+            decided_ids.add(detail["machine_id"])
+    return decided_ids
+
+
 def gpus_step(db: DbSession, nodes: list[Node], admin: bool) -> dict:
     why = "Shared machines often have cards other people use: say which ones Forgeyard may take."
     who = None if admin else "An admin chooses the GPUs."
@@ -79,11 +89,7 @@ def gpus_step(db: DbSession, nodes: list[Node], admin: bool) -> dict:
         return _step("gpus", "Choose which GPUs Forgeyard may use", why, True,
                      "Your machines have no GPU: models run on the CPU, nothing to choose.",
                      to="/machines", label="Open Machines", who=who)
-    # Deciding "all of them" leaves the allowlist empty, so a saved choice is read from the audit log.
-    decided_ids = set()
-    for detail in db.scalars(select(AuditEvent.detail).where(AuditEvent.action == "machine.gpu_allowlist_changed")):
-        if isinstance(detail, dict) and isinstance(detail.get("machine_id"), int):
-            decided_ids.add(detail["machine_id"])
+    decided_ids = gpu_choice_made(db)
     open_ = [n for n in with_gpus if n.gpu_allowlist is None and n.id not in decided_ids]
     if open_:
         names = ", ".join(n.name for n in open_)
