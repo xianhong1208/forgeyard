@@ -7,7 +7,7 @@ version until 1.0.
 ## [Unreleased]
 
 Cloud model APIs behind the same gateway, local first (1.2, part A: providers and tiered routing;
-cost and budgets come in part B).
+part B1: cost tracking and prices; budgets come next).
 
 ### Added
 - **Cloud providers** (admins, page **Providers**): OpenAI, Anthropic, Google Gemini, Azure OpenAI (v1
@@ -39,8 +39,27 @@ cost and budgets come in part B).
   proxy from the environment (`EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS`, `EGRESS_CA_FILE`), https only,
   public addresses only for cloud providers, link-local and metadata addresses always refused, the
   checked address is the one connected to.
-- Usage per target (**Usage → Local or cloud**), with cached and reasoning tokens and spilled requests;
-  provider models carry nullable prices for part B.
+- Usage per target (**Usage → Local or cloud**), with cached and reasoning tokens and spilled requests.
+- **Cost tracking** (USD; part B1). Every request is priced when it finishes and its cost is stored on
+  its usage row in integer micro-dollars, so later price changes never rewrite history: 0 for local
+  replicas and providers inside your network; the upstream's own figure when it reports one
+  (OpenRouter's `usage.cost`); otherwise `(prompt − cached − cache writes) × input + cached × cached
+  input + cache writes × cache write + completion × output` from the provider model's prices (reasoning
+  tokens are inside the completion, billed once). A missing price makes the cost unknown, never 0:
+  such requests are counted as *without a price*. Anthropic's endpoint (no cached-token details) and a
+  missing cache price give estimates, counted as such. Cache writes are now read from usage
+  (OpenRouter's `cache_write_tokens`, Anthropic's native `cache_creation_input_tokens`).
+- **Usage → Cost**: cost per day, key, person, model or provider, the local and cloud parts, the share
+  served locally, and the requests without a price with a link to set prices. `GET /api/usage` returns
+  `cost_micros`, `unpriced`, `cost_reported` and `cost_estimated` per row and a local/cloud `split` in
+  the totals; `group=provider` is new.
+- **Prices per provider model** (admins): input, output, cached input and cache write in USD per
+  million tokens, shown with their source and date. **Refresh prices from OpenRouter** (a provider, or
+  every provider) reads OpenRouter's public model list without a key through the egress rules, matches
+  models (an OpenRouter provider's by id; others by a suggested name that the admin confirms, or an id
+  they type), shows old → new, and applies only the rows the admin ticks, only if OpenRouter still
+  lists those prices; prices entered by hand are kept unless ticked. No background sync, no bundled
+  price list. `POST /api/prices/openrouter/preview` and `/apply`; setting `OPENROUTER_MODELS_URL`.
 - Guide page **Cloud providers** (en, zh-TW): each provider, what each endpoint cannot do, the spill
   rules, the key setting, egress, troubleshooting. Settings `GATEWAY_CLOUD_DEFAULT`,
   `GATEWAY_CLOUD_MAX`, `EGRESS_*` and `PROVIDER_*`.
@@ -59,6 +78,11 @@ cost and budgets come in part B).
 - `GET /api/routes` returns each route's targets, tiers and flags, and whether the signed-in person may
   use it; route management moved to `/api/routes/*` and `/api/route-options`.
 - `python -m forgeyard secrets reset` also drops provider keys it cannot read.
+- Migration `0010_cost`: `usage_daily` gets `cost_micros`, `unpriced`, `cost_reported` and
+  `cost_estimated` (0 on existing rows), `provider_models` gets `price_ref` (the confirmed OpenRouter
+  id). Clearing every price of a model clears its price source.
+- Anthropic's native usage names (`input_tokens`, which leave the cache out) now count cache reads and
+  writes into the prompt, like the OpenAI shape.
 - The Docker commands on **Add a machine** and in the guide start with `sudo` (said once: leave it out
   as root or in the `docker` group), and the AMD command puts each `--group-add` on its own line.
 

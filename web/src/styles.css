@@ -469,6 +469,23 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .usage-bar { display: block; margin-top: 6px; max-width: 220px; height: 5px; }
 .usage-bar > span { background: var(--heat); }
 .usage-foot { margin-top: 12px; }
+/* Cost (1.2): the Usage page's Cost tab, provider model prices and the OpenRouter refresh. */
+.cost-table td.strong { font-weight: 650; }
+.price-cell { display: grid; gap: 2px; line-height: 1.35; }
+.price-edit-row td { background: var(--surface-2); }
+.price-edit { display: grid; gap: 12px; padding: 4px 0; }
+.price-edit p { margin: 0; max-width: 80ch; }
+.price-edit .row-gap { margin: 0; }
+.price-refresh { border-color: var(--line-strong); box-shadow: inset 3px 0 0 var(--heat); }
+.price-refresh > p { margin: 0 0 12px; max-width: 90ch; }
+.price-table td { vertical-align: top; }
+.price-pick .check { gap: 8px; }
+.price-diff { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 13px; }
+.price-diff-name { display: inline-block; min-width: 92px; color: var(--muted); }
+.price-diff s { text-decoration-thickness: 1px; }
+.price-ref { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.price-ref input { min-width: 0; flex: 1 1 180px; min-height: 30px; font-size: 13px; }
+.price-actions { margin-top: 14px; align-items: center; }
 
 .play-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 18px; margin: -6px 0 18px; }
 .play-bar .field { min-width: 260px; max-width: 420px; flex: 1; }

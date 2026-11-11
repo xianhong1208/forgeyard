@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     provider_cooldown_seconds: float = 30.0
     # A provider's Retry-After up to this many seconds is waited for once, when no other target is left.
     provider_retry_after_cap: float = 2.0
+    # OpenRouter's public model list, read (without a key, through the egress rules) only when an
+    # admin asks to refresh prices from it. Changed only to point tests at a stand-in.
+    openrouter_models_url: str = "https://openrouter.ai/api/v1/models"
 
     @field_validator("gateway_cloud_default", "gateway_cloud_max")
     @classmethod

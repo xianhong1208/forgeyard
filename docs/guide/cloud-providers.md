@@ -212,6 +212,80 @@ Only what is specific to one provider behind them. OpenRouter accepts `top_k`, `
 engine-only parameters (vLLM's `chat_template_kwargs`, `guided_*`, llama.cpp's sampler settings)
 when a request leaves for them.
 
+## Cost and prices
+
+**Usage → Cost** shows what requests cost, in US dollars, per day, key, person (admins), model or
+provider, with the share served locally and the requests that have no price. It is Forgeyard's
+estimate of what the providers charge, not their invoice.
+
+### How a request's cost is worked out
+
+A request is priced once, when it finishes, and its cost is added to the usage numbers. Changing a
+price later does not change what was already counted.
+
+- **Local replicas, and providers inside your network** (not marked as cloud), cost 0.
+- When the provider **reports the cost itself**, that figure is used. OpenRouter does
+  (`usage.cost`); it is exact for OpenRouter traffic.
+- Otherwise the cost comes from the provider model's prices, in USD per million tokens:
+
+  ```
+  (prompt − cached − cache writes) × input
+    + cached × cached input
+    + cache writes × cache write
+    + completion × output
+  ```
+
+  Cached tokens and cache writes are part of the prompt tokens, so they are not counted twice.
+  **Reasoning tokens** are part of the completion tokens and are billed at the output price once:
+  they are shown on **Requests**, but never added on top. Embeddings have input tokens only.
+- Costs are kept in whole **micro-dollars** (millionths of a dollar). Cheap requests are summed
+  exactly before rounding, so a thousand requests of $0.0000004 each still add up to $0.0004.
+
+### Requests without a price, and estimates
+
+- A cloud request whose model has **no input or output price** (whichever it used) has an
+  **unknown** cost, not 0: it is counted under *Without a price*, and the Cost tab says how many
+  there are, with a link to set prices.
+- A cloud request that was answered but reported **no tokens at all** (for example a stream the
+  client closed before the usage arrived) is also without a price. One the provider refused or failed
+  (a 429, a 5xx) costs 0: providers do not bill those.
+- **Estimates** are counted too, and said under the table:
+  - **Anthropic** leaves `cached_tokens` empty on its OpenAI-compatible endpoint, so cached tokens are
+    unknown there; those requests are priced as if nothing was cached. (That endpoint does no prompt
+    caching anyway, so the estimate is normally right.)
+  - A model with cached tokens or cache writes but no cached or cache-write price is priced at the
+    input price for those tokens.
+- **Gemini**: whether its compatibility endpoint counts thinking tokens in `completion_tokens` has not
+  been verified. If its costs look low for a thinking model, compare them with your Google bill.
+
+### Prices
+
+On a provider's page, each model shows its prices per million tokens, where they came from (*entered
+by hand* or *from OpenRouter*) and when. Admins set them:
+
+- **Prices** on a model: input, output, cached input and cache write, in US dollars per million
+  tokens, as the provider's pricing page lists them. Leave a field empty when it does not apply.
+- **Refresh prices from OpenRouter**, on a provider (its models) or on the Providers page (every
+  provider outside your network). Forgeyard reads OpenRouter's public model list,
+  `https://openrouter.ai/api/v1/models` (no key is sent; it goes through the egress rules below, so add
+  `openrouter.ai` to `EGRESS_ALLOWED_HOSTS` if you use it), and shows a **diff**: each model, how it
+  matched, and the old and new prices. Nothing changes until you tick rows and **Apply**.
+  - An OpenRouter provider's models match by their own id (*same id*). Other providers' models get a
+    **suggested** match from their name (`gpt-4o-mini` → `openai/gpt-4o-mini`,
+    `claude-sonnet-4-5-20250929` → `anthropic/claude-sonnet-4.5`); check it and tick it yourself. For a
+    model that did not match, type its OpenRouter id and **Compare**. Once applied, the match is
+    remembered (*confirmed*).
+  - Prices **entered by hand are kept** unless you tick that row to overwrite them.
+  - If OpenRouter's price changed between the diff and **Apply**, that row is skipped; read again.
+  - There is no automatic sync and no bundled price list: prices change only when an admin applies
+    them.
+
+> OpenRouter's prices are usually the provider's list price, but not always (a different region, a
+> discount, a model OpenRouter serves through another provider). **Spot-check** a few against the
+> provider's own pricing page before relying on them.
+
+Budgets per key, per person and per provider build on these numbers and come next.
+
 ## Egress: what leaves your server
 
 - Requests to providers use their own HTTP client: TLS is verified, **redirects are never followed**

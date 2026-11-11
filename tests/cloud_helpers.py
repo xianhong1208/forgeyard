@@ -41,6 +41,7 @@ class FakeCloud:
         self.models = [{"id": "gpt-mini", "object": "model", "owned_by": "stub"},
                        {"id": "text-embed-small", "object": "model", "owned_by": "stub"}]
         self.seen: list[dict] = []
+        self.usage: Optional[dict] = None    # the usage to answer with (None: the style's)
         self.lock = threading.Lock()
         cloud = self
 
@@ -105,7 +106,7 @@ class FakeCloud:
                                                          "code": f"e{status}", "param": "messages"}},
                                       cloud.headers_out)
                 body = entry["body"] or {}
-                usage = ANTHROPIC_USAGE if cloud.style == "anthropic" else USAGE
+                usage = cloud.usage or (ANTHROPIC_USAGE if cloud.style == "anthropic" else USAGE)
                 if self.path.endswith("/chat/completions") and body.get("stream"):
                     return self._stream(body, usage)
                 if cloud.hold:
@@ -214,3 +215,53 @@ def set_tiers(c, served_name: str, tiers: list[list[tuple[str, int]]], status: i
 
 def cloud_key(c, name: str, cloud: str, **body) -> str:
     return new_key(c, name, cloud=cloud, **body)["key"]
+
+
+class FakeCatalog:
+    """OpenRouter's public model list (/api/v1/models) as a stand-in: `models` is what it lists,
+    `status` / `body` override the answer. Records the headers of each request."""
+
+    def __init__(self, models: Optional[list] = None):
+        self.models = models if models is not None else []
+        self.status = 200
+        self.body: Optional[bytes] = None
+        self.seen: list[dict] = []
+        cat = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                cat.seen.append({"path": self.path, "headers": dict(self.headers)})
+                body = cat.body if cat.body is not None else json.dumps({"data": cat.models}).encode()
+                self.send_response(cat.status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/api/v1/models"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def or_model(mid: str, prompt: str, completion: str, read: Optional[str] = None, write: Optional[str] = None) -> dict:
+    """One entry of OpenRouter's model list (USD per token, as strings)."""
+    pricing = {"prompt": prompt, "completion": completion, "request": "0", "image": "0"}
+    if read is not None:
+        pricing["input_cache_read"] = read
+    if write is not None:
+        pricing["input_cache_write"] = write
+    return {"id": mid, "name": mid, "context_length": 128000, "pricing": pricing}

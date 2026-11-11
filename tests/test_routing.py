@@ -366,6 +366,9 @@ def test_fy_rt_015_busy_and_the_cloud_failing_waits_for_local_after_all(mixed):
     t.join()
     assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0"
     assert "x-forgeyard-spilled" not in r.headers and len(mixed.cloud.posts()) == 1
+    # Answered locally after the cloud failed: free, not an unpriced cloud request (1.2 cost).
+    total = mixed.owner.get("/api/usage?group=target").json()["total"]
+    assert (total["unpriced"], total["split"]["local"]["requests"]) == (0, 2)
 
 
 def test_fy_rt_016_embeddings_spill_and_rerank_stays_local(mixed):

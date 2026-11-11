@@ -25,6 +25,7 @@ from forgeyard.config import get_settings
 from forgeyard.db import GatewayRoute, Provider, ProviderModel, RouteTarget, get_db, utcnow
 from forgeyard.gateway import egress, quirks
 from forgeyard.gateway.balancer import balancer
+from forgeyard.gateway.pricing import PRICE_FIELDS
 
 router = APIRouter(prefix="/api", tags=["providers"])
 
@@ -75,7 +76,7 @@ class ModelIn(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=128)
     context_length: Optional[int] = Field(default=None, ge=1, le=100_000_000)
     drop_params: list[str] = Field(default_factory=list, max_length=64)
-    # Micro-USD per million tokens (cost and budgets come later; kept now so prices can be entered).
+    # Micro-USD per million tokens (forgeyard/gateway/pricing.py); None: unknown.
     price_input: Optional[int] = Field(default=None, ge=0, le=10**12)
     price_output: Optional[int] = Field(default=None, ge=0, le=10**12)
     price_cache_read: Optional[int] = Field(default=None, ge=0, le=10**12)
@@ -103,6 +104,7 @@ def model_out(pm: ProviderModel) -> dict:
             "display_name": pm.display_name, "context_length": pm.context_length, "drop_params": pm.drop_params or [],
             "price_input": pm.price_input, "price_output": pm.price_output, "price_cache_read": pm.price_cache_read,
             "price_cache_write": pm.price_cache_write, "price_source": pm.price_source,
+            "price_checked_at": pm.price_checked_at, "price_ref": pm.price_ref,
             "cooldown_s": round(balancer.cooldown_left(key), 1), "in_flight": balancer.snapshot(key)["in_flight"],
             "sent": balancer.snapshot(key)["served"], "created_at": pm.created_at}
 
@@ -302,7 +304,8 @@ def clone_provider(provider_id: int, body: CloneIn, caller: Caller = Depends(req
                                       context_length=m.context_length, drop_params=list(m.drop_params or []),
                                       price_input=m.price_input, price_output=m.price_output,
                                       price_cache_read=m.price_cache_read, price_cache_write=m.price_cache_write,
-                                      price_source=m.price_source, price_checked_at=m.price_checked_at))
+                                      price_source=m.price_source, price_checked_at=m.price_checked_at,
+                                      price_ref=m.price_ref))
     db.add(p)
     db.flush()
     audit.record(db, "provider.cloned", actor=caller.user, target=name, ip=caller.ip, provider_id=p.id,
@@ -474,7 +477,10 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
             changes[name] = {"before": getattr(pm, name), "after": value}
             setattr(pm, name, value)
     if any(n.startswith("price_") for n in changes):
-        pm.price_source, pm.price_checked_at = "manual", utcnow()
+        if all(getattr(pm, n) is None for n in PRICE_FIELDS):
+            pm.price_source, pm.price_checked_at = None, None
+        else:
+            pm.price_source, pm.price_checked_at = "manual", utcnow()
     if changes:
         audit.record(db, "provider.model_changed", actor=caller.user, target=pm.provider.name, ip=caller.ip,
                      model=pm.upstream_model, changes=changes)

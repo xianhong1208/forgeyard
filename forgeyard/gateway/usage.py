@@ -9,8 +9,9 @@ once per request. Latency is kept as a histogram per row (`BUCKETS_MS`), so p50 
 for any selection of rows; they are interpolated within a bucket.
 
 Tokens come from the engine's own `usage` (prompt_tokens, completion_tokens; embeddings and rerank
-report only input tokens; providers' usage is read by forgeyard/gateway/quirks.py). Only counting,
-never billing.
+report only input tokens; providers' usage is read by forgeyard/gateway/quirks.py). Each request's
+cost (forgeyard/gateway/pricing.py) is added to its row when it finishes: micro-USD, 0 for local
+targets, and requests whose cost is unknown are counted as unpriced instead.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.db import ApiKey, Provider, ProviderModel, UsageDaily, new_session
+from forgeyard.gateway import pricing
 
 log = logging.getLogger("forgeyard")
 
@@ -68,8 +70,30 @@ class _Count:
     cached_tokens: int = 0
     reasoning_tokens: int = 0
     spilled: int = 0
+    cost_picos: int = 0
+    unpriced: int = 0
+    cost_reported: int = 0
+    cost_estimated: int = 0
     latency_ms_sum: int = 0
     buckets: list[int] = field(default_factory=lambda: [0] * (len(BUCKETS_MS) + 1))
+
+    def add_cost(self, picos: Optional[int], method: str) -> None:
+        if picos is None or method == pricing.UNPRICED:
+            self.unpriced += 1
+            return
+        self.cost_picos += max(0, int(picos))
+        self.cost_reported += 1 if method == pricing.REPORTED else 0
+        self.cost_estimated += 1 if method == pricing.ESTIMATED else 0
+
+    def merge(self, c: "_Count") -> None:
+        for name in COUNTS:
+            setattr(self, name, getattr(self, name) + getattr(c, name))
+        self.buckets = [a + b for a, b in zip(self.buckets, c.buckets)]
+        self.deployment_id = self.deployment_id or c.deployment_id
+
+
+COUNTS = ("requests", "errors", "limited", "prompt_tokens", "completion_tokens", "cached_tokens", "reasoning_tokens",
+          "spilled", "cost_picos", "unpriced", "cost_reported", "cost_estimated", "latency_ms_sum")
 
 
 def day_of(ts: float) -> str:
@@ -82,15 +106,21 @@ class Recorder:
         self._lock = threading.Lock()
         self._flush_lock = threading.Lock()
         self._pending: dict[tuple, _Count] = {}
+        # Per slot, what the written micro-dollars were rounded by (within half a micro-dollar either
+        # way), taken into the next write so cheap requests add up exactly.
+        self._carry: dict[tuple, int] = {}
 
     def reset(self) -> None:
         with self._lock:
             self._pending.clear()
+            self._carry.clear()
 
     def record(self, *, source: str, key_id: int, user_id: int, username: str, model: str,
                deployment_id: Optional[int], status: int, latency_ms: float, prompt_tokens: int = 0,
                completion_tokens: int = 0, limited: bool = False, target: str = "local", cached_tokens: int = 0,
-               reasoning_tokens: int = 0, spilled: bool = False) -> None:
+               reasoning_tokens: int = 0, spilled: bool = False, cost_picos: Optional[int] = 0,
+               cost_method: str = pricing.LOCAL) -> None:
+        """One finished request. cost_picos None (or cost_method "unpriced"): its cost is unknown."""
         slot = (day_of(self.clock()), source, int(key_id or 0), int(user_id or 0), username or "", (model or "")[:128],
                 (target or "local")[:32])
         with self._lock:
@@ -107,6 +137,7 @@ class Recorder:
             c.cached_tokens += max(0, int(cached_tokens or 0))
             c.reasoning_tokens += max(0, int(reasoning_tokens or 0))
             c.spilled += 1 if spilled else 0
+            c.add_cost(cost_picos, cost_method)
             c.latency_ms_sum += int(latency_ms)
             c.buckets[bucket_of(latency_ms)] += 1
 
@@ -119,8 +150,14 @@ class Recorder:
                 return 0
             own = db is None
             db = db or new_session()
+            carry: dict[tuple, int] = {}
             try:
-                for (day, source, key_id, user_id, username, model, target), c in pending.items():
+                for slot, c in pending.items():
+                    day, source, key_id, user_id, username, model, target = slot
+                    picos = c.cost_picos + self._carry.get(slot, 0)
+                    micros = pricing.micros_of(picos)
+                    if picos != micros * pricing.PICOS_PER_MICRO:
+                        carry[slot] = picos - micros * pricing.PICOS_PER_MICRO
                     row = db.scalar(select(UsageDaily).where(
                         UsageDaily.day == day, UsageDaily.source == source, UsageDaily.key_id == key_id,
                         UsageDaily.user_id == user_id, UsageDaily.model == model, UsageDaily.target == target))
@@ -128,6 +165,7 @@ class Recorder:
                         row = UsageDaily(day=day, source=source, key_id=key_id, user_id=user_id, username=username,
                                          model=model, target=target, requests=0, errors=0, limited=0, prompt_tokens=0,
                                          completion_tokens=0, cached_tokens=0, reasoning_tokens=0, spilled=0,
+                                         cost_micros=0, unpriced=0, cost_reported=0, cost_estimated=0,
                                          latency_ms_sum=0, latency_buckets=[0] * (len(BUCKETS_MS) + 1))
                         db.add(row)
                     if c.deployment_id is not None:
@@ -141,28 +179,26 @@ class Recorder:
                     row.cached_tokens = (row.cached_tokens or 0) + c.cached_tokens
                     row.reasoning_tokens = (row.reasoning_tokens or 0) + c.reasoning_tokens
                     row.spilled = (row.spilled or 0) + c.spilled
+                    row.cost_micros = (row.cost_micros or 0) + micros
+                    row.unpriced = (row.unpriced or 0) + c.unpriced
+                    row.cost_reported = (row.cost_reported or 0) + c.cost_reported
+                    row.cost_estimated = (row.cost_estimated or 0) + c.cost_estimated
                     row.latency_ms_sum += c.latency_ms_sum
                     merged = list(row.latency_buckets or [])
                     merged += [0] * (len(c.buckets) - len(merged))
                     row.latency_buckets = [a + b for a, b in zip(merged, c.buckets)]
                 db.commit()
+                with self._lock:
+                    for slot in pending:
+                        self._carry.pop(slot, None)
+                    self._carry.update(carry)
+                    today = day_of(self.clock())
+                    self._carry = {k: v for k, v in self._carry.items() if k[0] >= today}
             except Exception:
                 db.rollback()
                 with self._lock:  # keep the counts for the next try
                     for slot, c in pending.items():
-                        self._pending.setdefault(slot, _Count())
-                        mine = self._pending[slot]
-                        mine.requests += c.requests
-                        mine.errors += c.errors
-                        mine.limited += c.limited
-                        mine.prompt_tokens += c.prompt_tokens
-                        mine.completion_tokens += c.completion_tokens
-                        mine.cached_tokens += c.cached_tokens
-                        mine.reasoning_tokens += c.reasoning_tokens
-                        mine.spilled += c.spilled
-                        mine.latency_ms_sum += c.latency_ms_sum
-                        mine.buckets = [a + b for a, b in zip(mine.buckets, c.buckets)]
-                        mine.deployment_id = mine.deployment_id or c.deployment_id
+                        self._pending.setdefault(slot, _Count()).merge(c)
                 raise
             finally:
                 if own:
@@ -182,12 +218,21 @@ recorder = Recorder()
 
 
 # ------------------------------------------------------------------ reading
-GROUPS = ("day", "model", "key", "user", "source", "target")
+GROUPS = ("day", "model", "key", "user", "source", "target", "provider")
+
+
+@dataclass
+class TargetInfo:
+    name: str                 # "Local replicas", "<provider>/<model>"
+    provider_id: str          # "local", "p:<id>", "deleted"
+    provider: str             # "Local replicas", the provider's name
+    cloud: bool               # a provider outside your network
 
 
 def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, deployment_id: Optional[int] = None,
             group_by: str = "model", today: Optional[str] = None) -> dict:
-    """Totals and one row per group over the last `days` days (today included)."""
+    """Totals and one row per group over the last `days` days (today included), with cost; the
+    totals also split local (replicas and providers inside your network) from cloud."""
     end = datetime.fromisoformat(today).date() if today else datetime.now(timezone.utc).date()
     first = (end - timedelta(days=max(1, days) - 1)).isoformat()
     q = select(UsageDaily).where(UsageDaily.day >= first, UsageDaily.day <= end.isoformat())
@@ -197,7 +242,7 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
         q = q.where(UsageDaily.deployment_id == deployment_id)
     rows = db.scalars(q).all()
     keys = {k.id: k for k in db.scalars(select(ApiKey).where(ApiKey.id.in_({r.key_id for r in rows if r.key_id}))).all()}
-    targets = target_names(db, {r.target for r in rows}) if group_by == "target" else {}
+    targets = target_info(db, {r.target or "local" for r in rows})
 
     def label(r: UsageDaily) -> tuple[str, str]:
         if group_by == "day":
@@ -213,28 +258,37 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
             return r.source, "API keys" if r.source == "api" else "Console playground"
         if group_by == "target":
             t = r.target or "local"
-            return t, targets.get(t, t)
+            return t, targets[t].name
+        if group_by == "provider":
+            t = targets[r.target or "local"]
+            return t.provider_id, t.provider
         return r.model, r.model
 
     groups: dict[str, dict] = {}
     total = _empty("total", "Total")
+    split = {"local": _empty("local", "Local"), "cloud": _empty("cloud", "Cloud")}
     for r in rows:
         gid, name = label(r)
         g = groups.setdefault(gid, _empty(gid, name))
-        for target in (g, total):
+        if group_by in ("target", "provider"):
+            g["cloud"] = targets[r.target or "local"].cloud
+        where = split["cloud" if targets[r.target or "local"].cloud else "local"]
+        for target in (g, total, where):
             _add(target, r)
     out = [_finish(g) for g in groups.values()]
     if group_by == "day":
         out.sort(key=lambda g: g["id"])
     else:
         out.sort(key=lambda g: (-g["requests"], g["name"]))
-    return {"from": first, "to": end.isoformat(), "days": days, "group_by": group_by, "total": _finish(total),
-            "rows": out}
+    totals = _finish(total)
+    totals["split"] = {k: _finish(v) for k, v in split.items()}
+    return {"from": first, "to": end.isoformat(), "days": days, "group_by": group_by, "total": totals, "rows": out}
 
 
 def _empty(gid: str, name: str) -> dict:
     return {"id": gid, "name": name, "requests": 0, "errors": 0, "limited": 0, "prompt_tokens": 0,
-            "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "spilled": 0, "latency_ms_sum": 0,
+            "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "spilled": 0, "cost_micros": 0,
+            "unpriced": 0, "cost_reported": 0, "cost_estimated": 0, "latency_ms_sum": 0,
             "buckets": [0] * (len(BUCKETS_MS) + 1)}
 
 
@@ -244,9 +298,9 @@ def _add(g: dict, r: UsageDaily) -> None:
     g["limited"] += r.limited
     g["prompt_tokens"] += r.prompt_tokens
     g["completion_tokens"] += r.completion_tokens
-    g["cached_tokens"] += r.cached_tokens or 0
-    g["reasoning_tokens"] += r.reasoning_tokens or 0
-    g["spilled"] += r.spilled or 0
+    for name in ("cached_tokens", "reasoning_tokens", "spilled", "cost_micros", "unpriced", "cost_reported",
+                 "cost_estimated"):
+        g[name] += getattr(r, name) or 0
     g["latency_ms_sum"] += r.latency_ms_sum
     b = list(r.latency_buckets or [])
     b += [0] * (len(g["buckets"]) - len(b))
@@ -263,13 +317,19 @@ def _finish(g: dict) -> dict:
     return g
 
 
-def target_names(db: DbSession, targets: set) -> dict[str, str]:
-    """"local" -> "Local replicas"; "pm:<id>" -> "<provider>/<model>" (or "deleted provider model #id")."""
+def target_info(db: DbSession, targets: set) -> dict[str, TargetInfo]:
+    """"local" -> Local replicas; "pm:<id>" -> "<provider>/<model>", its provider and whether that is
+    outside your network (a provider model deleted since: "deleted provider model #id", counted as
+    cloud)."""
     ids = {int(t[3:]) for t in targets if isinstance(t, str) and t.startswith("pm:") and t[3:].isdigit()}
-    rows = db.execute(select(ProviderModel.id, ProviderModel.upstream_model, Provider.name)
+    rows = db.execute(select(ProviderModel.id, ProviderModel.upstream_model, Provider.id, Provider.name,
+                             Provider.external)
                       .join(Provider, Provider.id == ProviderModel.provider_id).where(ProviderModel.id.in_(ids))).all() \
         if ids else []
-    out = {"local": "Local replicas"}
-    out.update({f"pm:{i}": f"{p}/{m}" for i, m, p in rows})
-    out.update({f"pm:{i}": f"deleted provider model #{i}" for i in ids if f"pm:{i}" not in out})
+    out = {t: TargetInfo(f"unknown target {t}", "deleted", "Deleted providers", True) for t in targets}
+    out["local"] = TargetInfo("Local replicas", "local", "Local replicas", False)
+    out.update({f"pm:{i}": TargetInfo(f"{p}/{m}", f"p:{pid}", p, bool(ext)) for i, m, pid, p, ext in rows})
+    out.update({f"pm:{i}": TargetInfo(f"deleted provider model #{i}", "deleted", "Deleted providers", True)
+                for i in ids if f"pm:{i}" not in {f"pm:{r[0]}" for r in rows}})
     return out
+

@@ -59,8 +59,13 @@ def test_fy_qk_003_usage_in_every_shape():
     assert (u.prompt, u.cached) == (13, 0)
     assert quirks.read_usage({"prompt_tokens": 4, "total_tokens": 4}).prompt == 4
     assert quirks.read_usage({"total_tokens": 12}).prompt == 12
-    u = quirks.read_usage({"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 2})
-    assert (u.prompt, u.completion, u.cached) == (7, 3, 2)
+    # Anthropic's native input_tokens leave the cache out: the prompt is input + reads + writes (1.2 cost).
+    u = quirks.read_usage({"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 2,
+                           "cache_creation_input_tokens": 4})
+    assert (u.prompt, u.completion, u.cached, u.cache_write) == (13, 3, 2, 4)
+    u = quirks.read_usage({"prompt_tokens": 50, "completion_tokens": 9,
+                           "prompt_tokens_details": {"cached_tokens": 30, "cache_write_tokens": 40}})
+    assert (u.prompt, u.cached, u.cache_write) == (50, 30, 20)    # never more than the prompt in all
     assert quirks.read_usage({"prompt_tokens": 5, "completion_tokens": 1, "cost": 0.00042}).cost == 0.00042
     u = quirks.read_usage({"prompt_tokens": 3, "prompt_tokens_details": {"cached_tokens": 9}})
     assert u.cached == 3                                     # never more than the prompt
