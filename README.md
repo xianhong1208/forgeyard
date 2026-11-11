@@ -3,7 +3,8 @@
 One control plane for the GPUs (and CPUs) you own: NVIDIA, AMD ROCm and CPU-only machines on one
 LAN or VPN. An agent on each machine reports its hardware; you run services and tasks on them, and
 deploy models from recipes behind one OpenAI-compatible gateway at `/v1`, with API keys, limits
-and usage statistics.
+and usage statistics. Cloud model APIs can sit behind the same gateway, local first, with cost
+tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
 
@@ -72,7 +73,7 @@ Every release is checked on real machines, not only in CI. So far:
 
 | Hardware | Software | What ran |
 |---|---|---|
-| NVIDIA A100 80GB PCIe (an 8-GPU host, Forgeyard given some of its cards) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker), speaches 0.8.3 (faster-whisper); the gateway with the official OpenAI SDK; the agent from its container image |
+| NVIDIA A100 80GB PCIe (an 8-GPU host, with a GPU allowlist) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker), speaches 0.8.3 (faster-whisper); the gateway with the official OpenAI SDK; the agent from its container image |
 | AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io` |
 | x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies |
 | Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
@@ -105,28 +106,40 @@ project.
 
 | Path | What |
 |---|---|
-| `forgeyard/app.py` | FastAPI app: guards, routes, the built UI |
-| `forgeyard/cli.py` | `python -m forgeyard [serve]` and `python -m forgeyard agent …` |
-| `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
-| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page |
-| `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
-| `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
-| `forgeyard/api/` | `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads` |
+| `forgeyard/app.py` | FastAPI app: guards, routes, background jobs (usage, alerts, certificate renewal), the built UI |
+| `forgeyard/cli.py` | `python -m forgeyard [serve]`, `secrets reset` and `forgeyard agent …` |
+| `forgeyard/config.py` | every server setting (environment and `.env`) |
+| `forgeyard/db.py`, `forgeyard/migrations/` | the database models; Alembic migrations, run on start |
+| `forgeyard/api/` | the HTTP API: `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads`, `onboarding` (Get started), `tls` (the CA download), `install` (`/install.sh` and the wheel), `guide` |
+| `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground; API keys, their limits, cloud setting and budget, and usage |
+| `forgeyard/api/providers.py` | cloud providers and their models: add, test, import, prices by hand, clone |
+| `forgeyard/api/routing.py` | routes and their tiers of targets |
+| `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |
+| `forgeyard/api/budgets.py` | monthly budgets of people and providers, and this month's spend |
+| `forgeyard/gateway/proxy.py` | forwarding a request through a route's tiers: replicas, providers, spill, streaming |
+| `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API key checks and cloud settings; requests and tokens per minute; replica order and provider cooldowns |
+| `forgeyard/gateway/quirks.py` | what differs per provider kind: how the key is sent, parameters dropped or renamed, how usage is read back |
+| `forgeyard/gateway/egress.py` | the HTTP client for providers: TLS, no redirects, the address checks, `EGRESS_*` |
+| `forgeyard/gateway/pricing.py` | a request's cost from its usage and prices; OpenRouter's list and price matching |
+| `forgeyard/gateway/budgets.py` | the budget ledger: reserve, settle, release, the 80% and 100% alerts, 402 |
+| `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
-| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF), estimates, recipes, the scheduler, routes |
-| `forgeyard/recipes/` | the built-in engine recipes (YAML) |
-| `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it, routes |
-| `forgeyard/gateway/` | the gateway: API keys, limits, the balancer, forwarding and streaming, usage |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground; API keys, key limits and usage |
-| `scripts/accept_m4.py` | the M4 acceptance run on real machines, with the official OpenAI SDK |
+| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF), estimates, recipes, the scheduler, routes, the recommended list |
+| `forgeyard/recipes/` | the built-in engine recipes (YAML), images pinned by digest |
+| `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, HTTPS and the CA, secrets at rest, `secrets reset` |
+| `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`) |
+| `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
-| `scripts/accept_m3.py` | the M3 acceptance run on a real machine, through the API |
-| `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state file |
-| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, logs, health checks |
+| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks |
+| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page |
+| `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
+| `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
+| `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
+| `scripts/accept_m3.py`, `accept_m4.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
-| `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, secrets file |
-| `forgeyard/migrations/` | Alembic |
+| `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |
 
 ## Contributing and security
