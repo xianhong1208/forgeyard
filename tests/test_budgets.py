@@ -81,11 +81,11 @@ def test_fy_bdg_001_reserve_settle_release():
     h2 = lg.reserve([key], 55 * P)               # 45 + 55 = 100: exactly fits
     assert isinstance(h2, Hold)
     assert isinstance(lg.reserve([key], 1), Blocked)
-    h3 = lg.reserve([person], 30 * P)
     lg.release(h2)
+    h3 = lg.reserve([key], 30 * P)
     lg.release(h2)                               # twice is harmless: h3 is still held
-    assert lg._held == {("person", 7): 30 * P} and isinstance(lg.reserve([key], 55 * P), Hold)
-    lg.release(h3)
+    assert lg._held == {("key", 1): 30 * P} and isinstance(lg.reserve([key], 25 * P), Hold)
+    assert isinstance(lg.reserve([key], 1), Blocked)
     u = lg.reserve([person], None)               # no price: blocked, unpriced
     assert isinstance(u, Blocked) and u.unpriced and u.error().code == "budget_unpriced"
     assert isinstance(lg.reserve([], None), Hold)  # no budget applies: nothing to reserve
