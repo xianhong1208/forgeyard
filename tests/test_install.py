@@ -441,8 +441,8 @@ def test_fy_img_002_the_image_has_what_the_hosts_libamd_smi_loads():
     libdrm_amdgpu.so; without them amdsmi read no ASIC information on the real Strix Halo. The smoke
     test loads both inside the image."""
     text = (ROOT / "Dockerfile.agent").read_text()
-    install = re.search(r"apt-get install -y --no-install-recommends ([^\\\n]+)", text).group(1).split()
-    assert {"libdrm2", "libdrm-amdgpu1"} <= set(install)
+    installs = re.findall(r"apt-get install -y --no-install-recommends ([^;\\\n]+)", text)
+    assert {"libdrm2", "libdrm-amdgpu1"} <= {p for i in installs for p in i.split()}
     assert 'ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so"' in text and "ldconfig" in text
     smoke = (ROOT / "scripts" / "agent_image_smoke.sh").read_text()
     assert 'ctypes.CDLL("libdrm.so.2"); ctypes.CDLL("libdrm_amdgpu.so")' in smoke

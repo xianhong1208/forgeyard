@@ -1,6 +1,7 @@
-// "Add a machine" → Docker: the `docker build` and `docker run` commands for the agent image, from a
-// small form (model directory, machine name, server address, port range). Pure, so every field and
-// every guard is tested on its own; the page only shows what this returns.
+// "Add a machine" → Docker: the `docker run` command for the agent image, from a small form (model
+// directory, machine name, server address, port range), and the ways to get the image onto a machine
+// without registry access (`docker save | docker load`, or `docker build` from a checkout). Pure, so
+// every field and every guard is tested on its own; the page only shows what this returns.
 
 export type DockerKind = "nvidia" | "amd" | "cpu";
 
@@ -8,8 +9,14 @@ export type DockerKind = "nvidia" | "amd" | "cpu";
 export type DockerForm = { modelDir: string; name: string; server: string; portRange: string };
 export type DockerErrors = Partial<Record<keyof DockerForm, string>>;
 
-// What the join token gives: the server's address, the pinned CA, the token and the server version.
-export type DockerJoin = { server: string; fingerprint: string | null; token: string; version: string };
+// The agent image the server names (forgeyard/install/images.py): the published one, pulled by
+// `docker run` (reference: repository:version, or repository@sha256:… when an admin pinned a digest),
+// or, while nothing is published, a local build. local_tag: the name without a digest, for a local
+// build or `docker load`.
+export type AgentImage = { reference: string; published: boolean; local_tag: string };
+
+// What the join token gives: the server's address, the pinned CA, the token and the agent image.
+export type DockerJoin = { server: string; fingerprint: string | null; token: string; image: string };
 
 export const DEFAULT_MODEL_DIR = "/srv/forgeyard-models";
 export const IMAGE = "forgeyard-agent";
@@ -117,9 +124,30 @@ export function imageTag(version: string): string {
   return `${IMAGE}:${version}`;
 }
 
-// `sudo` on both commands: the page says once to leave it out as root or for a member of the docker group.
-export function buildCommand(version: string): string {
-  return `sudo docker build -f Dockerfile.agent -t ${imageTag(version)} .`;
+// The server's answer, or (from a server that does not say) a local build of its version.
+export function agentImage(image: AgentImage | null | undefined, version: string): AgentImage {
+  return image ?? { reference: imageTag(version), published: false, local_tag: imageTag(version) };
+}
+
+export function pinnedByDigest(image: AgentImage): boolean {
+  return image.reference.includes("@sha256:");
+}
+
+// `sudo` on every command: the page says once to leave it out as root or for a member of the docker group.
+export function buildCommand(localTag: string): string {
+  return `sudo docker build -f Dockerfile.agent -t ${localTag} .`;
+}
+
+export const IMAGE_FILE = "forgeyard-agent.tar.gz";
+
+// For a machine that cannot reach the registry: pull and save on one that can, load on this one. A
+// pinned digest is pulled by digest and saved under local_tag: a loaded image keeps its tag, not
+// the digest it was pulled by.
+export function carryCommands(image: AgentImage): { save: string; load: string } {
+  const lines = [`sudo docker pull ${image.reference}`];
+  if (image.reference !== image.local_tag) lines.push(`sudo docker tag ${image.reference} ${image.local_tag}`);
+  lines.push(`sudo docker save ${image.local_tag} | gzip > ${IMAGE_FILE}`);
+  return { save: lines.join(" && \\\n  "), load: `gunzip -c ${IMAGE_FILE} | sudo docker load` };
 }
 
 const AMD_GROUPS = [
@@ -150,7 +178,7 @@ export function runCommand(kind: DockerKind, form: DockerForm, join: DockerJoin)
   lines.push(`-e FORGEYARD_JOIN_TOKEN=${join.token}`, `-e FORGEYARD_MODEL_CACHE=${dir}`);
   if (range) lines.push(`-e FORGEYARD_PORT_RANGE=${range}`);
   if (name) lines.push(`-e FORGEYARD_NAME=${name}`);
-  lines.push(imageTag(join.version));
+  lines.push(join.image);
   return lines.join(" \\\n  ");
 }
 

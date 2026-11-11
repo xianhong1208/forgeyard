@@ -77,6 +77,7 @@ are fine for almost everyone.
 |---|---|---|
 | `AGENT_HEARTBEAT_SECONDS` | `10` | How often agents send a heartbeat |
 | `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Keep it at least 2.5 heartbeats long, or machines flap |
+| `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/<namespace>/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
 ### Models
 
@@ -502,9 +503,32 @@ dependencies. It uses `uv` when it is installed, else a Python 3.13 or newer tha
 else it installs `uv` into `/opt/forgeyard/bin`, which brings its own Python. Without systemd it
 installs everything and prints how to start the agent.
 
+## Container images
+
+Each release publishes two images on Docker Hub, built by CI from the release's tag:
+
+| Image | What | Platforms |
+|---|---|---|
+| `docker.io/<namespace>/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
+| `docker.io/<namespace>/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
+
+- **Tags**: `1.2.0` (exactly that release), `1.2` (its newest patch release), `latest` (the newest
+  release). A pre-release only gets its own version. Each image carries OCI labels (source,
+  licence, version, revision), its build provenance and an SBOM.
+- **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with
+  `DATA_DIR=/data` (a volume), `HOST=0.0.0.0` and `PORT=7860` (exposed), and a health check on
+  `/api/health`. [Run the server in Docker](how-to.md#run-the-server-in-docker).
+- **The agent image** runs `forgeyard agent` behind `tini`, as root (it drives the host's Docker),
+  with `FORGEYARD_LIMITS=rlimit`, the workload account `forgeyard-run` (uid 990) and a volume at
+  `/var/lib/forgeyard-agent`. [Run the agent in Docker](how-to.md#run-the-agent-in-docker).
+- **Which agent image a server names**: [`AGENT_IMAGE`](#machines), else the published one at the
+  server's version. When nothing is published (the namespace in `forgeyard/install/images.py` is
+  empty) and `AGENT_IMAGE` is not set, it names a local build, `forgeyard-agent:<version>`, and
+  **Add a machine** shows how to build it.
+
 ## Files and directories
 
-On the server, in its folder:
+On the server, in its folder (in the server image: in the `/data` volume, without `data/`):
 
 | Path | What |
 |---|---|

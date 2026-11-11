@@ -66,6 +66,22 @@ sudo forgeyard agent config
 - 自己在機器上拉取一次映像檔：`docker pull vllm/vllm-openai:v0.32.0`；之後 agent 就會在本機找到它；
 - 或修好輔助程式（`docker-credential-<name> list` 必須能以 agent 執行時的使用者身分正常執行）。
 
+## 拉不到 Forgeyard 的映像檔
+
+**你會看到：**agent（或伺服器）的 `docker run` 停在下列其中一種訊息：
+
+- `manifest unknown` 或 `not found`：沒有這個 tag 的映像檔；
+- `no matching manifest for linux/arm/v7`（或其他平台）；
+- `toomanyrequests: You have reached your pull rate limit`；
+- `dial tcp: lookup registry-1.docker.io … no such host`，或逾時。
+
+**原因與處理方式：**
+
+- **沒有這個 tag。**agent 的 tag 就是伺服器的版本。在兩個版本之間從原始碼建置的伺服器，會用到一個從未發布過的版本號。請改在機器上自己建置映像檔（[離線機器，或自己建置映像檔](how-to.md#offline-machines-or-build-it-yourself)），或把 `AGENT_IMAGE` 指向一個已發布的版本。
+- **平台不同。**映像檔只有 linux/amd64 和 linux/arm64；`uname -m` 必須是 `x86_64` 或 `aarch64`。
+- **次數限制。**Docker Hub 會限制每個位址的匿名拉取次數。在那台機器上登入一次（`sudo docker login`）、等一段時間，或透過鏡像站拉取並把 `AGENT_IMAGE` 指向它。
+- **連不到 Docker Hub**（沒有網路、防火牆或 DNS 過濾）：用檔案帶過去：在連得到的機器上拉取並 `docker save`，再到這台機器上 `docker load`（[做法](how-to.md#offline-machines-or-build-it-yourself)）。agent 的 `docker run` 就會在本機找到它。在這種機器上，模型的引擎映像檔也要這樣處理：拉取或載入一次，agent 就會使用它。
+
 ## Hugging Face 下載很慢
 
 **你會看到：** 部署長時間停在 *downloading*；它的頁面會顯示進度和速度。

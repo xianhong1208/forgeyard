@@ -2,7 +2,7 @@
 
 從零開始到第一次呼叫 API，大約十分鐘，另加模型下載的時間。你需要：
 
-- **一台伺服器**：任何一台其他機器連得到的 Linux、macOS 或 Windows（WSL）電腦，裝好 [uv](https://docs.astral.sh/uv/)（需要時它會自己取得 Python 3.13），以及用來建置網頁介面的 Node 22.12 或更新版本。伺服器不需要 GPU。
+- **一台伺服器**：任何一台其他機器連得到的 Linux、macOS 或 Windows（WSL）電腦，裝好 [uv](https://docs.astral.sh/uv/)（需要時它會自己取得 Python 3.13），以及用來建置網頁介面的 Node 22.12 或更新版本；或者只要有 Docker。伺服器不需要 GPU。
 - **一台用來跑模型的機器**：x86_64 或 aarch64 的 Linux，搭配 NVIDIA GPU（驅動程式 575 或更新版本，以及裝好 NVIDIA Container Toolkit 的 Docker）、AMD GPU（ROCm 和 Docker），或只有 CPU。它也可以和伺服器是同一台電腦。
 - 這台機器要能連上網路，用來下載幾個 Python 套件和模型。
 
@@ -40,6 +40,19 @@ Forgeyard has no owner yet. Open https://192.168.1.20:7860/setup and enter this 
 ================================================================
 INFO:     Uvicorn running on https://0.0.0.0:7860 (Press CTRL+C to quit)
 ```
+
+**或者用 Docker**，取代上面所有步驟（不用建置任何東西；linux/amd64 或 linux/arm64）：
+
+```bash
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/<namespace>/forgeyard:1.2.0
+sudo docker logs forgeyard
+```
+
+紀錄的內容相同，只是 `data/` 變成 `/data`；所有資料都存在 `forgeyard-data` volume 裡。細節、備份和升級：見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 
 讓它保持執行。Forgeyard 存的所有東西都放在旁邊的 `data/` 裡：資料庫、憑證授權單位（`data/tls/`），以及加密機密資料的金鑰（`data/secret.key`）。請備份這個資料夾（[做法](how-to.md#back-up-and-restore)）。如果要在登出後讓伺服器繼續執行，請看[把伺服器當成服務執行](how-to.md#run-the-server-as-a-service)。
 
@@ -121,7 +134,7 @@ Next, on https://192.168.1.20:7860:
 
 回到 Machines 頁面，幾秒內就會看到這台機器和它的 GPU。
 
-其他方式：**Docker** 分頁會把 agent 當成容器執行（[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)）；**Manual** 分頁則使用 Forgeyard 的原始碼和一個設定檔。AMD 和純 CPU 機器的做法相同（[AMD](how-to.md#add-an-amd-machine)、[純 CPU](how-to.md#add-a-cpu-only-machine)）。
+其他方式：**Docker** 分頁會把 agent 當成容器執行，一個 `docker run` 就會拉取和你的伺服器同版本的 agent 映像檔（[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)）；**Manual** 分頁則使用 Forgeyard 的原始碼和一個設定檔。AMD 和純 CPU 機器的做法相同（[AMD](how-to.md#add-an-amd-machine)、[純 CPU](how-to.md#add-a-cpu-only-machine)）。
 
 ## 4. 選擇 Forgeyard 可以使用的 GPU
 
