@@ -6,6 +6,10 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-11-11
+
+Easier to start and safe on the network: a first-run checklist and recommended models, an agent key guard in front of every model replica, HTTPS from Forgeyard's own CA, secrets encrypted at rest, a one-line agent install, an agent container image and a user guide in English and Traditional Chinese. Accepted on the real 8×A100 host (one shared card) plus a CPU machine.
+
 ### Added
 - **Key guard in front of every model replica.** vLLM 0.32's `VLLM_API_KEY` only covers `/v1`, `/v2`,
   `/inference` and `/cohere`; `/invocations`, `/rerank`, `/pooling`, `/score`, `/classify` and

@@ -7,7 +7,7 @@ and usage statistics.
 
 [繁體中文說明](README.zh-TW.md)
 
-> **Status: 1.0.0 is the MVP** (milestones M0 to M4, each accepted on a real 8×A100 host and a CPU
+> **Status: 1.1.0.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on a real 8×A100 host and a CPU
 > machine). 1.1 adds a first-run checklist and recommended models, HTTPS out of the box, a
 > one-line agent install, an agent container image and this guide. See [CHANGELOG.md](CHANGELOG.md)
 > and [ROADMAP.md](ROADMAP.md).

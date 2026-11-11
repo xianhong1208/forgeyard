@@ -11,7 +11,7 @@ models deployed from a catalog with engine recipes and memory estimates; one Ope
 gateway at `/v1` with API keys, limits and usage. Each milestone was accepted on a real 8×A100
 host (Forgeyard limited to one shared card) plus a CPU machine. See [CHANGELOG.md](CHANGELOG.md).
 
-## Done: 1.1, easier to start and safe on the network
+## Shipped: 1.1.0 (2026-11-11), easier to start and safe on the network
 
 Three pull requests, in this order:
 

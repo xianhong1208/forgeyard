@@ -5,7 +5,7 @@
 
 [English](README.md)
 
-> **狀態：1.0.0 是 MVP**（里程碑 M0 到 M4，每一個都在真實的 8×A100 主機與一台 CPU 機器上驗收過）。1.1 加入首次使用清單與
+> **狀態：1.1.0。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的 8×A100 主機與一台 CPU 機器上驗收過）。1.1 加入首次使用清單與
 > 推薦模型、開箱即用的 HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。見 [CHANGELOG.md](CHANGELOG.md)
 > 與 [ROADMAP.md](ROADMAP.md)。
 
