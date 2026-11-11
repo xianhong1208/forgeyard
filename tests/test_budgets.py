@@ -567,3 +567,11 @@ def test_fy_bdg_019_a_failed_cloud_attempt_holds_nothing_while_waiting_for_local
     t2.join()
     assert held_while_waiting == {}
     assert second["r"].status_code == 200 and second["r"].headers["x-forgeyard-target"] == "local:chat#0"
+
+
+def test_fy_bdg_020_dollar_amounts_in_messages():
+    """FY-BDG-020: amounts in budget messages read as dollars: cents from $0.01 up, every significant
+    digit below, and a budget of 0 as "$0.00" (it printed "$0." in the real Gemini acceptance)."""
+    from forgeyard.gateway.budgets import usd
+    assert [usd(x) for x in (0, 250, 1_215, 10_000, 1_234_567, None)] == \
+        ["$0.00", "$0.00025", "$0.001215", "$0.01", "$1.23", "unknown"]

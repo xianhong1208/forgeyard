@@ -105,6 +105,9 @@ part B1: cost tracking and prices; part B2: budgets).
   as root or in the `docker` group), and the AMD command puts each `--group-add` on its own line.
 
 ### Fixed
+- Gemini's thinking tokens are counted and priced. Its OpenAI-compatible endpoint shows them only in
+  `total_tokens`, so the gateway counted a `gemini-2.5-flash` answer at less than half of what Google
+  bills (found by a real request); the difference now counts as reasoning, priced as output.
 - `/v1/models` no longer lists a model whose deployment was stopped, so clients stop offering a model
   that can only answer 503. It stays listed while its replicas are starting or restarting, and for keys
   that may use the cloud when its route has a cloud tier to spill to (or a provider inside your

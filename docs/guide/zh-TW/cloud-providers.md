@@ -173,7 +173,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 - **估算值**也會計數，並在表格下方說明：
   - **Anthropic** 的 OpenAI 相容端點不填 `cached_tokens`，所以無法得知快取了多少 token；這些請求會當作沒有快取來計價。（那個端點本來就不做提示快取，所以這個估算通常是對的。）
   - 模型有快取讀取或快取寫入的 token，卻沒有對應的價格時，這些 token 以輸入價格計算。
-- **Gemini**：它的相容端點是否把思考 token 算進 `completion_tokens` 還沒有驗證過。如果思考模型的費用看起來偏低，請和 Google 的帳單比對。
+- **Gemini**：它的相容端點不會把思考 token 算進 `completion_tokens`，只反映在 `total_tokens`（在 `gemini-2.5-flash` 上確認過）。Forgeyard 會把差額當成推理 token，以輸出價格計算，和 Google 的計費方式一致。
 
 ### 價格
 

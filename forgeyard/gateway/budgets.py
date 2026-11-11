@@ -73,7 +73,9 @@ def resets_at(month: str) -> datetime:
 def usd(micros: Optional[int]) -> str:
     if micros is None:
         return "unknown"
-    return f"${micros / 1_000_000:,.2f}" if micros >= 10_000 else f"${micros / 1_000_000:.6f}".rstrip("0")
+    if micros >= 10_000 or micros == 0:
+        return f"${micros / 1_000_000:,.2f}"
+    return f"${micros / 1_000_000:.6f}".rstrip("0")
 
 
 # ------------------------------------------------------------------ what applies

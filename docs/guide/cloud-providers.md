@@ -256,8 +256,9 @@ price later does not change what was already counted.
     caching anyway, so the estimate is normally right.)
   - A model with cached tokens or cache writes but no cached or cache-write price is priced at the
     input price for those tokens.
-- **Gemini**: whether its compatibility endpoint counts thinking tokens in `completion_tokens` has not
-  been verified. If its costs look low for a thinking model, compare them with your Google bill.
+- **Gemini**: its compatibility endpoint leaves thinking tokens out of `completion_tokens` and shows them
+  only in `total_tokens` (checked on `gemini-2.5-flash`). Forgeyard counts the difference as reasoning
+  tokens, priced as output, as Google bills them.
 
 ### Prices
 
