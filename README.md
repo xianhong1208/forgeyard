@@ -8,14 +8,12 @@ tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
 
-> **Status: 1.1.1.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on a real 8×A100 host and a CPU
-> machine). 1.1 adds a first-run checklist and recommended models, HTTPS out of the box, a
-> one-line agent install, an agent container image and this guide. Coming in 1.2 (on `dev`): cloud
-> providers behind the same gateway, local first: a model spills to OpenAI, Anthropic, Gemini, Azure
-> or OpenRouter when its replicas are busy or down, and only for keys allowed to send data out, with
-> the cost of each cloud request counted in US dollars (prices entered by hand or refreshed from
-> OpenRouter after review) and monthly budgets per key, person and provider, reserved before a
-> request is sent: a used-up budget keeps requests local. See
+> **Status: 1.2.0.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on real machines). 1.1
+> added a first-run checklist and recommended models, HTTPS out of the box, a one-line agent install,
+> an agent container image and this guide. 1.2 puts cloud providers behind the same gateway, local
+> first: a model spills to OpenAI, Anthropic, Gemini, Azure or OpenRouter when its replicas are busy
+> or down, only for keys allowed to send data out; each cloud request's cost is counted in US dollars,
+> and monthly budgets per key, person and provider are reserved before a request is sent. See
 > [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
 
 ## The guide

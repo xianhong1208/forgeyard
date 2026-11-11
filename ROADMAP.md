@@ -45,7 +45,7 @@ Three pull requests, in this order:
 
 1.1 is complete.
 
-## Publishing the source: with 1.2
+## Shipped with 1.2: publishing the source
 
 Agreed on 2026-11-10. Forgeyard becomes public with 1.2. By then a newcomer can install it alone
 (the agent image, the one-line install, the guide), it is on HTTPS by default, and it offers
@@ -62,7 +62,7 @@ something the alternatives do not (see below). One pull request before the 1.2 r
 5. **Repository settings:** public; secret scanning, push protection and Dependabot alerts on; a
    ruleset protecting `main` and `dev`.
 
-Where it stands (PR `publish-prep`):
+Where it stands (PR #22):
 
 - ✅ 2, 3 and 4. The scan covered every blob and message on every branch, tag and pull request ref,
   plus every issue, pull request, comment, review, release and label: nothing private was found, and
@@ -78,7 +78,7 @@ Where it stands (PR `publish-prep`):
   discrete AMD card. The guide says so.
 - 5 is done when the repository is made public.
 
-## Next: 1.2, cloud model APIs behind the same gateway
+## Shipped: 1.2.0 (2026-11-11), cloud model APIs behind the same gateway
 
 Researched on 2026-11-11 (LiteLLM, OpenRouter, Portkey, Envoy's AI gateway, Kong, GPUStack). "One
 gateway for your GPUs and cloud APIs" alone is no longer new: **GPUStack 2.1 to 2.3 already has
@@ -109,7 +109,7 @@ Two pull requests (the second in two parts):
 Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
 and thinking.
 
-## Then
+## Next
 
 | Version | What you get |
 |---|---|
