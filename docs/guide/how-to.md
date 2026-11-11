@@ -521,7 +521,8 @@ What to know before you run it:
   checks use the run's own keys and user.
 - **Five failed sign-ins** on the throwaway user: the server allows 30 failures per address in 15
   minutes, so wait between runs if you run it many times in a row.
-- **Time:** about 15 minutes when the machines already have the models; downloads come on top.
+- **Time:** about 15 to 20 minutes when the machines already have the models (3 minutes without a GPU
+  machine); downloads come on top.
 - `--kill-local` also checks failover by killing the engine of the CPU replica that runs on the
   computer where you run the script (one of the two CPU machines).
 - The console checks need Playwright for Python and Chrome (`--chrome`, default

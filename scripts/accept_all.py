@@ -420,6 +420,15 @@ def utc(ts: str):
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
+def why(r: "Resp") -> str:
+    """The message of an error answer (either shape), or its start."""
+    d = r.data if isinstance(r.data, dict) else {}
+    for k in ("detail", "error"):
+        if isinstance(d.get(k), dict) and d[k].get("message"):
+            return str(d[k]["message"])[:200]
+    return r.text[:200]
+
+
 def target_of(headers) -> str:
     return (headers.get("x-forgeyard-target") or headers.get("X-Forgeyard-Target") or "") if headers else ""
 
@@ -550,6 +559,7 @@ class Run:
         self.deps: dict[str, dict] = {}           # model key -> ready deployment
         self.models_done = False
         self.cloud_calls = 0
+        self.cloud_ok = False
         self.password = ""
         self._user: Optional[dict] = None
 
@@ -592,10 +602,10 @@ class Run:
             raise Fail(f"revoking {key_id}: {r.status} {r.code()}")
 
     def sdk(self, key: str, headers: Optional[dict] = None):
-        import httpx
         import openai
 
-        http = httpx.Client(verify=self.tls, timeout=300) if self.tls else None
+        # The SDK's own client class: httpx in openai 1.x/2.x, httpx2 in later 3.x releases.
+        http = openai.DefaultHttpxClient(verify=self.tls, timeout=300) if self.tls else None
         return openai.OpenAI(base_url=self.args.server + "/v1", api_key=key, max_retries=0, timeout=300,
                              http_client=http, default_headers=headers)
 
@@ -657,7 +667,8 @@ class Run:
             self.check(f"{g.name}: interrupted", False, "Ctrl-C or SIGTERM")
             raise
         except Exception as e:  # noqa: BLE001 - one broken group must not stop the run or the cleanup
-            tb = traceback.extract_tb(e.__traceback__)[-1]
+            frames = traceback.extract_tb(e.__traceback__)
+            tb = next((f for f in reversed(frames) if f.filename == __file__), frames[-1])
             self.check(f"{g.name}: the group stopped", False,
                        f"{type(e).__name__}: {e} (line {tb.lineno} in {tb.name})")
         finally:
@@ -707,7 +718,8 @@ def leftovers(run: Run) -> None:
         if pat.match(k["name"]) and k["status"] == "active":
             found.append(f"API key {k['name']}")
     if found:
-        note = ("left over from an earlier run, not touched (remove them by hand): " + ", ".join(found))
+        note = ("named like this script's, from an earlier run that was killed (or one still running), not touched: "
+                + ", ".join(found))
         run.report.notes.append(note)
         log("NOTE: " + note)
 
@@ -1439,9 +1451,9 @@ def group_gateway(run: Run) -> None:
     limited = sum(x.get("limited") or 0 for x in ours)
     run.check("usage: rows per key, with the refused (limited) request", len(ours) >= 3 and limited >= 1,
               f"{len(ours)} keys, {limited} limited")
-    src = {x["name"]: x for x in c.ok("GET", "/api/usage?days=1&group=source&everyone=true")["rows"]}
+    src = {x["id"]: x for x in c.ok("GET", "/api/usage?days=1&group=source&everyone=true")["rows"]}
     run.check("usage: the Playground counts as console", (src.get("console") or {}).get("requests", 0) >= 2,
-              ", ".join(f"{k} {v['requests']}" for k, v in src.items()))
+              ", ".join(f"{v['name']} {v['requests']}" for v in src.values()))
 
     stopped_leaves_list(run, sdk)
 
@@ -1644,8 +1656,10 @@ def group_cloud(run: Run) -> None:
     priced = pm.get("price_input") is not None and pm.get("price_output") is not None
     run.report.info["cloud_model"] = f"{p['name']}/{pm['upstream_model']}" + ("" if priced else " (no price)")
     t = c.request("POST", f"/api/providers/{p['id']}/test", timeout=60)
-    run.check(f"{p['name']}: Test connection (GET /models, no tokens)", t.status == 200 and (t.data or {}).get("ok"),
-              f"{(t.data or {}).get('status')} in {(t.data or {}).get('ms')} ms, {(t.data or {}).get('models')} models")
+    td = t.data if isinstance(t.data, dict) else {}
+    run.check(f"{p['name']}: Test connection (GET /models, no tokens)", t.status == 200 and td.get("ok"),
+              f"{td.get('status')} in {td.get('ms')} ms, {td.get('models')} models" if t.status == 200 and td.get("ok")
+              else f"{t.status} {t.code()}: {why(t)}")
     if not p.get("enabled"):
         run.check(f"{p['name']} is enabled", False, "enable it on its page first")
         return
@@ -1696,11 +1710,15 @@ def group_cloud(run: Run) -> None:
     run.check("a prompt too long for the local model spills to the cloud (X-Forgeyard-Spilled: too_long)",
               r.status == 200 and tgt.startswith("provider:") and r.headers.get("x-forgeyard-spilled") == "too_long",
               f"{r.status}, {tgt}, spilled {r.headers.get('x-forgeyard-spilled')}: "
-              f"{str(((r.data or {}).get('choices') or [{}])[0].get('message', {}).get('content'))[:40]!r}")
+              + (f"{str(((r.data or {}).get('choices') or [{}])[0].get('message', {}).get('content'))[:40]!r}"
+                 if r.status == 200 else f"{r.code()}: {why(r)}"))
+    run.cloud_ok = r.status == 200
     time.sleep(1)
     rows = [x for x in c.ok("GET", "/api/usage?days=1&group=key&everyone=true")["rows"] if x["name"].startswith(k_on["api_key"]["name"] + " ")]
     row = rows[0] if rows else {}
-    if priced:
+    if not run.cloud_ok:
+        run.skip("its cost is recorded", "the request did not reach the provider (see above)")
+    elif priced:
         run.check("its cost is recorded (priced model)", (row.get("cost_micros") or 0) > 0,
                   f"${(row.get('cost_micros') or 0) / 1e6:.6f}, {row.get('spilled')} spilled")
     else:
@@ -1758,6 +1776,7 @@ def budgets(run: Run, p: dict, pm: dict, priced: bool, k_on: dict, cloud_name: s
     budget = choose_budget(spent_micros) if priced else None
     if budget is None:
         run.skip("budget alerts at 80% and 100%, once each", "the one cloud request " + (
+            "failed, so nothing was spent" if not run.cloud_ok else
             f"cost {spent_micros} micro-USD, too little to place a budget between 80% and 100% of it" if priced
             else "has no price, so nothing was spent"))
     else:
@@ -1898,10 +1917,9 @@ def console_page(run: Run, ctx, who: str, path: str, title: Optional[str], shots
             page.screenshot(path=str(shots / f"{who}-390-{slug}.png"), full_page=True)
         title_ok = got.endswith(" · Forgeyard") and (want is None or got == f"{want} · Forgeyard")
         scroll = [w for w, (sw, cw) in (("1440", wide), ("390", narrow)) if sw > cw + 1]
-        run.check(f"{who} {path}: loads, tab '{got}', no console error, no sideways scroll",
-                  title_ok and not errors and not scroll,
-                  ("" if title_ok else f"tab should be {want!r}; ") + (f"errors: {errors[:3]}; " if errors else "")
-                  + (f"scrolls sideways at {', '.join(scroll)} px" if scroll else "ok at 1440 and 390 px"))
+        run.check(f"{who} {path}: tab title, no errors, no sideways scroll", title_ok and not errors and not scroll,
+                  f"tab {got!r}" + ("" if title_ok else f" (should be {want!r})") + (f"; errors: {errors[:3]}" if errors else "")
+                  + (f"; scrolls sideways at {', '.join(scroll)} px" if scroll else "; fits 1440 and 390 px"))
     except Exception as e:  # noqa: BLE001 - one page must not stop the others
         run.check(f"{who} {path}: loads", False, f"{type(e).__name__}: {str(e).splitlines()[0][:160]}")
     finally:
