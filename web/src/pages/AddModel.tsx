@@ -10,7 +10,7 @@ import {
 } from "../lib/addmodel";
 import { when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { TASK_LABEL, gib } from "../lib/models";
+import { TASK_LABEL, gib, mediaText } from "../lib/models";
 import type { Task } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -91,6 +91,8 @@ function RecommendedList({ data, error, onPick, chosen }: {
                   <span className="strong">{m.title}</span>
                   <span className="chip">{TASK_LABEL[m.task]}</span>
                   {m.device === "cpu" && <span className="chip"><IconCpu size={11} aria-hidden="true" /> CPU</span>}
+                  {m.inputs.length > 0 && <span className="chip chip-tone-run">{mediaText(m.inputs)}</span>}
+                  <span className="chip mono" title="Licence">{m.license}</span>
                 </div>
                 <p className="rec-note small">{m.note}</p>
                 <p className="rec-size small muted">
@@ -262,12 +264,12 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
   const [needsToken, setNeedsToken] = useState(initial.gated);
   const [busy, setBusy] = useState(false);
   // What the inspection depends on, changed only by the person (not by what an answer fills in).
-  const [ask, setAsk] = useState({ file: initial.file, task: initial.task, device: initial.device as string, format: "", round: 0 });
+  const [ask, setAsk] = useState({ file: initial.file, mmproj: initial.mmproj, task: initial.task, device: initial.device as string, format: "", round: 0 });
   const [answered, setAnswered] = useState<string | null>(null);
   const isLocal = f.source.startsWith("local://");
   const set = (k: keyof Pick, v: string) => {
     setF((cur) => ({ ...cur, [k]: v }));
-    if (k === "file" || k === "task" || k === "device" || k === "format") setAsk((cur) => ({ ...cur, [k]: v }));
+    if (k === "file" || k === "mmproj" || k === "task" || k === "device" || k === "format") setAsk((cur) => ({ ...cur, [k]: v }));
   };
 
   // Inspect on open, and again after a token, a GGUF file, the task, the device or the format is chosen.
@@ -277,7 +279,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
   useEffect(() => {
     if (skip) return;
     let alive = true;
-    const body = { source: f.source, revision: f.revision || undefined, file: ask.file || undefined, token: f.token.trim() || undefined,
+    const body = { source: f.source, revision: f.revision || undefined, file: ask.file || undefined, mmproj: ask.mmproj || undefined, token: f.token.trim() || undefined,
       task: ask.task || undefined, recipe: f.recipe || undefined, device: ask.device || undefined, format: ask.format || undefined };
     api<InspectResponse>("/models/inspect", { method: "POST", body }).then(
       (r) => {
@@ -306,7 +308,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
     setBusy(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = { source: f.source, revision: f.revision || undefined, file: f.file || undefined,
+      const body: Record<string, unknown> = { source: f.source, revision: f.revision || undefined, file: f.file || undefined, mmproj: f.mmproj || undefined,
         token: f.token.trim() || undefined, name: f.name.trim(), title: f.title.trim() || undefined, task: f.task || undefined,
         format: f.format || undefined };
       if (Object.keys(f.engine_args).length) body.engine_args = f.engine_args;
@@ -372,6 +374,8 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
           <div className="fact"><dt>Pinned to</dt><dd className="mono small">{meta.revision ? `${meta.revision.slice(0, 12)} (${meta.ref || "main"})` : "—"}</dd></div>
           <div className="fact"><dt>Download</dt><dd>{bytes(meta.size_bytes)} in {meta.file_count} files</dd></div>
           {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
+          {meta.modalities !== undefined && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
+          {meta.license !== undefined && <div className="fact"><dt>Licence</dt><dd className="mono small">{meta.license ?? "not stated"}{meta.gated ? " · gated" : ""}</dd></div>}
           {meta.config && <div className="fact"><dt>Shape</dt><dd>{meta.config.layers} layers, {meta.config.kv_heads} KV heads, up to {meta.config.max_context.toLocaleString("en-US")} tokens, {meta.config.dtype}</dd></div>}
         </dl>
       )}
@@ -382,6 +386,16 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
             {meta.gguf_files.map((g) => <option key={g.path} value={g.path}>{g.path} ({bytes(g.size)})</option>)}
           </select>
           <p className="field-hint">Smaller files (Q4) need less memory and run faster; larger ones (Q8, F16) answer a little better.</p>
+        </div>
+      )}
+      {meta?.mmproj_files && meta.mmproj_files.length > 0 && (
+        <div className="field gguf-pick">
+          <label htmlFor="m-mmproj">Projector (for images)</label>
+          <select id="m-mmproj" value={f.mmproj || meta.mmproj?.path || "none"} onChange={(e) => set("mmproj", e.target.value)}>
+            {meta.mmproj_files.map((g) => <option key={g.path} value={g.path}>{g.path} ({bytes(g.size)})</option>)}
+            <option value="none">None: text only</option>
+          </select>
+          <p className="field-hint">llama.cpp reads images through this file (<code>--mmproj</code>). F16 is the usual choice; Q8_0 needs about half the memory.</p>
         </div>
       )}
       {s && !isLocal && <SuggestionPanel s={s} device={f.device} onDevice={(d) => set("device", d)} />}

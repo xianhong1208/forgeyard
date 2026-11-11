@@ -1,5 +1,5 @@
 import { bytes } from "./machines";
-import type { CatalogModel, Recipe, Replica, Task } from "./types";
+import type { CatalogModel, Medium, Recipe, Replica, Task } from "./types";
 
 export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text" };
 
@@ -7,6 +7,14 @@ export const API_LABEL: Record<string, string> = {
   "openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", rerank: "/v1/rerank",
   "openai-audio": "/v1/audio/transcriptions",
 };
+
+export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };
+
+// "Images, video" for what a model takes besides text; null: unknown (a catalog entry from before 1.3).
+export function mediaText(m: Medium[] | null | undefined): string | null {
+  if (m === null || m === undefined) return null;
+  return m.length ? m.map((x, i) => (i ? MEDIUM_LABEL[x].toLowerCase() : MEDIUM_LABEL[x])).join(", ") : "Text only";
+}
 
 export function gib(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";

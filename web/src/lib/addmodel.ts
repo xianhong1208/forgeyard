@@ -1,7 +1,7 @@
 // Adding a model: the recommended list, Hugging Face search (run by the server) and the
 // inspection with its suggestion (recipe, estimate, where it fits).
 
-import type { Estimate, Task } from "./types";
+import type { Estimate, Medium, Task } from "./types";
 
 export type RecommendedGroup = { id: string; title: string; description: string };
 
@@ -9,6 +9,7 @@ export type RecommendedModel = {
   name: string; title: string; source: string; revision: string | null; file: string | null; group: string;
   task: Task; format: string; recipe: string; device: "gpu" | "cpu"; download_gib: number; memory_gib: number;
   gated: boolean; engine_args: Record<string, string[]>; note: string; in_catalog: string | null;
+  license: string; inputs: Medium[]; mmproj: string | null;
 };
 
 export type RecommendedResponse = { groups: RecommendedGroup[]; models: RecommendedModel[] };
@@ -31,6 +32,8 @@ export type Suggestion = {
 export type InspectMeta = {
   format: string; revision?: string; ref?: string; task_hint?: Task | null; size_bytes: number; file?: string; file_count: number;
   gated?: boolean; gguf_files?: { path: string; size: number }[];
+  license?: string | null; modalities?: Medium[] | null; mmproj?: { path: string; size: number } | null;
+  mmproj_files?: { path: string; size: number }[];
   config?: { layers: number; kv_heads: number; max_context: number; dtype: string };
   weights?: { params: Record<string, number> }; gguf?: { layers: number; architecture: string; elements: number };
 };
@@ -40,18 +43,20 @@ export type InspectResponse = { meta: InspectMeta; recipes: string[]; suggestion
 // What is being added: picked from the list or the search, or typed in.
 export type Pick = {
   source: string; revision: string; file: string; name: string; title: string; task: string; token: string;
+  // GGUF vision models: the projector file; "" the default (F16, if the repository has one), "none" none.
+  mmproj: string;
   recipe: string; device: "" | "gpu" | "cpu"; engine_args: Record<string, string[]>; gated: boolean; from: "list" | "search" | "source";
   // local:// models only: the server cannot look at them, so the format is given.
   format: string;
 };
 
 export function emptyPick(): Pick {
-  return { source: "", revision: "", file: "", name: "", title: "", task: "", token: "", recipe: "", device: "",
+  return { source: "", revision: "", file: "", mmproj: "", name: "", title: "", task: "", token: "", recipe: "", device: "",
     engine_args: {}, gated: false, from: "source", format: "" };
 }
 
 export function pickFromList(m: RecommendedModel): Pick {
-  return { source: m.source, revision: m.revision ?? "", file: m.file ?? "", name: m.name, title: m.title, task: m.task,
+  return { source: m.source, revision: m.revision ?? "", file: m.file ?? "", mmproj: m.mmproj ?? "", name: m.name, title: m.title, task: m.task,
     token: "", recipe: m.recipe, device: m.device, engine_args: m.engine_args, gated: m.gated, from: "list", format: "" };
 }
 

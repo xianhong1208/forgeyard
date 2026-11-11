@@ -8,7 +8,7 @@ import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, type DeployForm } from "../lib/models";
-import type { CatalogResponse, EstimateResponse, MachineVerdict, MachinesResponse, Placement } from "../lib/types";
+import type { CatalogModel, CatalogResponse, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 export const ESTIMATE_DELAY_MS = 400;
@@ -75,7 +75,10 @@ export function ModelDeployPage() {
     }
   };
 
-  const shown = recipe ? Object.entries(recipe.params).filter(([k]) => !(view.device === "cpu" && k === "gpu_layers") && !(view.device === "gpu" && k === "threads")) : [];
+  const relevant = recipe ? Object.entries(recipe.params).filter(([k]) => !(view.device === "cpu" && k === "gpu_layers") && !(view.device === "gpu" && k === "threads")
+    && paramApplies(k, model)) : [];
+  const shown = relevant.filter(([, p]) => !p.advanced);
+  const advanced = relevant.filter(([, p]) => p.advanced);
   const usable = (machines?.machines ?? []).filter((m) => m.status !== "revoked");
 
   return (
@@ -141,19 +144,7 @@ export function ModelDeployPage() {
                       <p className="field-hint">Shared cards hold several replicas, each held to its own reservation.</p></div>
                   </>
                 )}
-                {shown.map(([k, p]) => (
-                  <div className="field" key={k}>
-                    <label htmlFor={`d-p-${k}`}>{p.label ?? k}</label>
-                    {p.type === "choice" ? (
-                      <select id={`d-p-${k}`} value={view.params[k]} onChange={(e) => setParam(k, e.target.value)}>
-                        {(p.choices ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    ) : (
-                      <input id={`d-p-${k}`} inputMode="numeric" value={view.params[k] ?? ""} onChange={(e) => setParam(k, e.target.value)} />
-                    )}
-                    {p.help && <p className="field-hint">{p.help}</p>}
-                  </div>
-                ))}
+                {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam} />)}
                 <div className="field"><label htmlFor="d-replicas">Replicas</label>
                   <input id="d-replicas" inputMode="numeric" value={f.replicas} onChange={(e) => set("replicas", e.target.value)} /></div>
                 <div className="field"><label htmlFor="d-machine">Machine</label>
@@ -163,8 +154,10 @@ export function ModelDeployPage() {
                   </select></div>
               </div>
               <details className="spec-preview" style={{ marginTop: 14 }}>
-                <summary>More: memory override, engine arguments, token</summary>
+                <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, token</summary>
+                <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
                 <div className="grid-3">
+                  {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam} />)}
                   <div className="field"><label htmlFor="d-vram">Memory per device (override)</label>
                     <input id="d-vram" value={f.vram} onChange={(e) => set("vram", e.target.value)} placeholder="e.g. 20Gi" />
                     <p className="field-hint">Replaces the estimate. Required for local:// models.</p></div>
@@ -197,6 +190,33 @@ export function ModelDeployPage() {
         </aside>
       </form>
     </>
+  );
+}
+
+// The media parameters (1.3) only mean something for a model that takes media: hidden for one that
+// is known to take none of them (a catalog entry from before 1.3 is unknown, so they show).
+export function paramApplies(name: string, model: CatalogModel | undefined): boolean {
+  const m = model?.modalities;
+  if (m === null || m === undefined) return true;
+  if (name === "images") return m.includes("image") || m.includes("audio");
+  if (name === "image_tokens") return m.includes("image");
+  if (name === "videos") return m.includes("video");
+  return true;
+}
+
+function ParamField({ name, p, value, onChange }: { name: string; p: RecipeParam; value: string | undefined; onChange: (k: string, v: string) => void }) {
+  return (
+    <div className="field">
+      <label htmlFor={`d-p-${name}`}>{p.label ?? name}</label>
+      {p.type === "choice" ? (
+        <select id={`d-p-${name}`} value={value} onChange={(e) => onChange(name, e.target.value)}>
+          {(p.choices ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      ) : (
+        <input id={`d-p-${name}`} inputMode="numeric" value={value ?? ""} onChange={(e) => onChange(name, e.target.value)} />
+      )}
+      {p.help && <p className="field-hint">{p.help}</p>}
+    </div>
   );
 }
 

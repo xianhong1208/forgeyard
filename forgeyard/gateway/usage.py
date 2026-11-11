@@ -12,6 +12,11 @@ Tokens come from the engine's own `usage` (prompt_tokens, completion_tokens; emb
 report only input tokens; providers' usage is read by forgeyard/gateway/quirks.py). Each request's
 cost (forgeyard/gateway/pricing.py) is added to its row when it finishes: micro-USD, 0 for local
 targets, and requests whose cost is unknown are counted as unpriced instead.
+
+1.3 adds one counter per unit of the new model kinds (UNITS, migration 0012): media items sent in
+chat (filled since multimodal chat), characters, images, kilopixels, media milliseconds, bytes in
+and out, and busy milliseconds (filled by the PRs that add those kinds). Every one is 0 on rows
+from before.
 """
 
 from __future__ import annotations
@@ -74,6 +79,14 @@ class _Count:
     unpriced: int = 0
     cost_reported: int = 0
     cost_estimated: int = 0
+    media_items: int = 0
+    characters: int = 0
+    images: int = 0
+    kilopixels: int = 0
+    media_ms: int = 0
+    bytes_in: int = 0
+    bytes_out: int = 0
+    busy_ms: int = 0
     latency_ms_sum: int = 0
     buckets: list[int] = field(default_factory=lambda: [0] * (len(BUCKETS_MS) + 1))
 
@@ -92,8 +105,10 @@ class _Count:
         self.deployment_id = self.deployment_id or c.deployment_id
 
 
+# The units added in 1.3 (migration 0012): one column each in usage_daily, 0 when a request has none.
+UNITS = ("media_items", "characters", "images", "kilopixels", "media_ms", "bytes_in", "bytes_out", "busy_ms")
 COUNTS = ("requests", "errors", "limited", "prompt_tokens", "completion_tokens", "cached_tokens", "reasoning_tokens",
-          "spilled", "cost_picos", "unpriced", "cost_reported", "cost_estimated", "latency_ms_sum")
+          "spilled", "cost_picos", "unpriced", "cost_reported", "cost_estimated", "latency_ms_sum") + UNITS
 
 
 def day_of(ts: float) -> str:
@@ -119,8 +134,9 @@ class Recorder:
                deployment_id: Optional[int], status: int, latency_ms: float, prompt_tokens: int = 0,
                completion_tokens: int = 0, limited: bool = False, target: str = "local", cached_tokens: int = 0,
                reasoning_tokens: int = 0, spilled: bool = False, cost_picos: Optional[int] = 0,
-               cost_method: str = pricing.LOCAL) -> None:
-        """One finished request. cost_picos None (or cost_method "unpriced"): its cost is unknown."""
+               cost_method: str = pricing.LOCAL, units: Optional[dict] = None) -> None:
+        """One finished request. cost_picos None (or cost_method "unpriced"): its cost is unknown.
+        `units`: the request's counts of UNITS ({"media_items": 2}); unknown names are ignored."""
         slot = (day_of(self.clock()), source, int(key_id or 0), int(user_id or 0), username or "", (model or "")[:128],
                 (target or "local")[:32])
         with self._lock:
@@ -138,6 +154,9 @@ class Recorder:
             c.reasoning_tokens += max(0, int(reasoning_tokens or 0))
             c.spilled += 1 if spilled else 0
             c.add_cost(cost_picos, cost_method)
+            for name, n in (units or {}).items():
+                if name in UNITS:
+                    setattr(c, name, getattr(c, name) + max(0, int(n or 0)))
             c.latency_ms_sum += int(latency_ms)
             c.buckets[bucket_of(latency_ms)] += 1
 
@@ -166,7 +185,8 @@ class Recorder:
                                          model=model, target=target, requests=0, errors=0, limited=0, prompt_tokens=0,
                                          completion_tokens=0, cached_tokens=0, reasoning_tokens=0, spilled=0,
                                          cost_micros=0, unpriced=0, cost_reported=0, cost_estimated=0,
-                                         latency_ms_sum=0, latency_buckets=[0] * (len(BUCKETS_MS) + 1))
+                                         **{name: 0 for name in UNITS}, latency_ms_sum=0,
+                                         latency_buckets=[0] * (len(BUCKETS_MS) + 1))
                         db.add(row)
                     if c.deployment_id is not None:
                         row.deployment_id = c.deployment_id
@@ -183,6 +203,8 @@ class Recorder:
                     row.unpriced = (row.unpriced or 0) + c.unpriced
                     row.cost_reported = (row.cost_reported or 0) + c.cost_reported
                     row.cost_estimated = (row.cost_estimated or 0) + c.cost_estimated
+                    for name in UNITS:
+                        setattr(row, name, (getattr(row, name) or 0) + getattr(c, name))
                     row.latency_ms_sum += c.latency_ms_sum
                     merged = list(row.latency_buckets or [])
                     merged += [0] * (len(c.buckets) - len(merged))
@@ -288,7 +310,7 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
 def _empty(gid: str, name: str) -> dict:
     return {"id": gid, "name": name, "requests": 0, "errors": 0, "limited": 0, "prompt_tokens": 0,
             "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "spilled": 0, "cost_micros": 0,
-            "unpriced": 0, "cost_reported": 0, "cost_estimated": 0, "latency_ms_sum": 0,
+            "unpriced": 0, "cost_reported": 0, "cost_estimated": 0, **{name: 0 for name in UNITS}, "latency_ms_sum": 0,
             "buckets": [0] * (len(BUCKETS_MS) + 1)}
 
 
@@ -299,7 +321,7 @@ def _add(g: dict, r: UsageDaily) -> None:
     g["prompt_tokens"] += r.prompt_tokens
     g["completion_tokens"] += r.completion_tokens
     for name in ("cached_tokens", "reasoning_tokens", "spilled", "cost_micros", "unpriced", "cost_reported",
-                 "cost_estimated"):
+                 "cost_estimated") + UNITS:
         g[name] += getattr(r, name) or 0
     g["latency_ms_sum"] += r.latency_ms_sum
     b = list(r.latency_buckets or [])

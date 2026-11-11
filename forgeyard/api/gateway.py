@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from forgeyard.db import new_session
-from forgeyard.gateway import keys, proxy
+from forgeyard.gateway import keys, media as gmedia, proxy
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.security import sessions
@@ -71,10 +71,18 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
     parsed = None
     try:
         kind = proxy.ENDPOINTS[endpoint][1]
-        body = await proxy.read_body(request)
+        body = await proxy.read_body(request, await run_in_threadpool(proxy.body_ceiling))
         parsed = proxy.parse_body(body, request.headers.get("content-type", ""), kind)
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
+        # Images, audio and video (1.3): parts rebuilt, the route narrowed to what can take them,
+        # media URLs fetched by the gateway, and the size checked again with them inlined.
+        media = proxy.scan_media(parsed, endpoint)
+        route = proxy.fit_route(route, parsed, parsed.size)
+        if media is not None and media.fetch:
+            await gmedia.fetch_all(media)
+            parsed.size = proxy.body_size(parsed)
+            route = proxy.fit_route(route, parsed, parsed.size)
     except GatewayError as e:
         if parsed is not None:  # a body without a model is not counted under any model
             proxy.record(caller, parsed.model, route.deployment_id if route else None, e.status, started)

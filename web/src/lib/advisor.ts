@@ -27,6 +27,16 @@ export type AdvisorReport = {
   checked_at: string;
 };
 
+/** A report as the advisor API sends it, or null: anything else (an older server, a proxy's error page
+ * answered with 200, a stand-in in tests) never reaches the badge or the panels. */
+export function asReport(value: unknown): AdvisorReport | null {
+  const r = value as Partial<AdvisorReport> | null;
+  if (!r || typeof r !== "object" || !Array.isArray(r.findings) || typeof r.badge !== "number") return null;
+  const c = r.counts as Partial<Record<Severity, unknown>> | undefined;
+  if (!c || typeof c !== "object" || !["error", "warning", "info"].every((k) => typeof c[k as Severity] === "number")) return null;
+  return { ...r, snoozed: Array.isArray(r.snoozed) ? r.snoozed : [] } as AdvisorReport;
+}
+
 export const SEVERITY_LABEL: Record<Severity, string> = { error: "Error", warning: "Warning", info: "Note" };
 
 // The findings a page shows as its banner: those tagged with the page ("keys") or with one of its

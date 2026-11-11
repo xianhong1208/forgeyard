@@ -329,6 +329,26 @@ local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 admin allows under **Cloud for keys**. In the Playground, admins may use the cloud and everyone else
 gets that most. Details: [When a request spills](cloud-providers.md#when-a-request-spills).
 
+## An image is refused
+
+**You see:** a chat request with an image (or audio, or video) answers 400 or 413; the `code` says
+why. Nothing of it reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `media_not_supported` | The model does not read that medium: a text model, a GGUF model added without its projector file, or video while the deployment's *Videos per request* is 0 | Use a vision model; add the GGUF model again with its projector; turn video on under **Advanced** |
+| `too_many_media_items` | More images than the deployment's *Images per request* (4) | Send fewer, or raise it |
+| `media_url_refused` | The URL is `file://` or another scheme, has credentials, or its host is (or redirects to) a private, loopback, link-local or metadata address | Send a public `https://` URL or a `data:` URI. For an image server on your LAN, set `MEDIA_ALLOW_PRIVATE_HOSTS=true` on the server |
+| `media_fetch_failed` | The gateway could not download it: the server answered another status than 200, took longer than 20 s, redirected more than 3 times, or sent something that is not an image | Open the URL yourself; some sites refuse downloads by programs. Send the file as a `data:` URI instead |
+| `media_too_large` (413) | The file is larger than `MEDIA_FETCH_MAX_MB` (20) | Send a smaller image, or raise the setting |
+| `request_too_large` (413) | The request, with images inlined as base64 (a third larger than the files), is over the deployment's *Largest request* (64 MiB) | Send smaller images, or raise it under **Advanced** |
+| `file_input_not_supported` | A `file` part (PDF): no built-in engine takes files, and the gateway does not convert them | Send the pages as images, or the text |
+| `media_local_only` | The model is served only by cloud providers; media stay on your own deployments | Use a local vision model |
+
+A vision model on vLLM that **does not start after video was turned on**: vLLM reserves memory for
+a long video at startup and is left with too little for the KV cache. Lower the context length, or
+turn video off again.
+
 ## Cost shows requests without a price
 
 **You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above

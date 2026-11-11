@@ -267,6 +267,48 @@ Isolation, in short: a process runs as the unprivileged workload account with on
 visible; a container gets only its cards, never `--privileged`. See
 [Workloads](concepts.md#workloads).
 
+## Send images to a model
+
+1. **Add a model that reads images.** On **Models → Add a model → Recommended**, the **Vision** group
+   has Qwen3-VL 2B, 4B and 8B for vLLM, and Qwen3-VL as GGUF with its projector file for llama.cpp
+   (a CPU, or an AMD APU). Any model works whose catalog entry says *Images*: the catalog reads it
+   from the model's `config.json`. For a GGUF repository, choose its **Projector** file too (F16 is
+   chosen when there is one; *None* makes it text only).
+2. **Deploy it** as usual. *Images per request* (4), *Videos per request* (0, off) and *Largest
+   request* (64 MiB) are under **Advanced**; the defaults work. The estimate shows the vision
+   encoder (vLLM) or the projector (llama.cpp) as parts of its own.
+3. **Call it** with an image as a `data:` URI or an `https://` URL:
+
+   ```python
+   import base64
+
+   with open("photo.jpg", "rb") as f:
+       photo = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+   client.chat.completions.create(model="qwen3-vl-8b", messages=[{"role": "user", "content": [
+       {"type": "text", "text": "What is in this picture?"},
+       {"type": "image_url", "image_url": {"url": photo}},
+   ]}])
+   ```
+
+   An `https://` URL is downloaded by the gateway (public addresses only, at most
+   `MEDIA_FETCH_MAX_MB` per image) and passed on as data. An image server on your LAN needs
+   `MEDIA_ALLOW_PRIVATE_HOSTS=true` on the server.
+4. **Try it in the Playground:** the image button next to the message box attaches images.
+
+**Video:** set *Videos per request* to 1 or more under **Advanced** and send a `video_url` part.
+On vLLM this makes the engine reserve memory for a long video when it starts, which leaves less for
+the KV cache: lower the context if it does not start.
+
+**A custom llama.cpp recipe** (a Vulkan build, for example) reads images once it passes the
+projector and says what it takes:
+
+```yaml
+optional_args:
+  - if_model: mmproj
+    args: [--mmproj, "{mmproj_file}"]
+media: {inputs: [image, audio, video], files: false}
+```
+
 ## Add a cloud provider
 
 Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure

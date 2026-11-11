@@ -26,6 +26,7 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
                           utcnow)
+from forgeyard.gateway import proxy
 from forgeyard.machines.hub import hub
 from forgeyard.models import catalog, routes, scheduler
 from forgeyard.models.catalog import Context
@@ -278,6 +279,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
                  machine_id=body.machine_id, gpus=ctx.gpus, share=ctx.share, estimate=ctx.estimate.amount,
                  token=bool(d.hf_token) or None)
     db.commit()
+    proxy.forget_ceiling()  # its max_body_mb may raise how much the gateway reads
     placement.place_and_poke(db)
     db.expire_all()
     d = _get(db, d.id)

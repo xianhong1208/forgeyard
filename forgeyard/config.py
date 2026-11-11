@@ -101,6 +101,13 @@ class Settings(BaseSettings):
     gateway_default_tpm: int = 0
     gateway_max_rpm: int = 0
     gateway_max_tpm: int = 0
+    # Images, audio and video in chat (1.3). The gateway fetches http(s) media URLs itself, through the
+    # egress rules (public addresses only, every redirect checked), and sends them on as data: URIs;
+    # engines never fetch. At most this many MiB per fetched item.
+    media_fetch_max_mb: int = Field(default=20, ge=1, le=1024)
+    # Let media URLs point at private or loopback addresses (an image server on your LAN). Link-local
+    # and metadata addresses stay refused.
+    media_allow_private_hosts: bool = False
     # How often gateway usage counted in memory is written to the database (seconds).
     usage_flush_seconds: float = 5.0
 

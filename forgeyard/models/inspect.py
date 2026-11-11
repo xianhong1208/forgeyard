@@ -10,7 +10,7 @@ import json
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import fetch, gguf, safetensors, sources
+from forgeyard.models import fetch, gguf, modalities, safetensors, sources
 from forgeyard.models.sources import Source, SourceError
 
 MAX_SHARDS = 256
@@ -54,8 +54,25 @@ def config_summary(config: dict) -> dict:
     }
 
 
+def license_of(info: dict) -> Optional[str]:
+    """The licence a Hugging Face repository declares: its card's `license` (or `license_name` for
+    "other"), else a `license:` tag. Lower case, as Hugging Face writes them (apache-2.0, mit, gemma…)."""
+    card = info.get("cardData") if isinstance(info.get("cardData"), dict) else {}
+    lic = card.get("license")
+    if isinstance(lic, list):
+        lic = lic[0] if lic else None
+    if lic == "other" and isinstance(card.get("license_name"), str):
+        lic = card["license_name"]
+    if not isinstance(lic, str) or not lic.strip():
+        lic = next((t.split(":", 1)[1] for t in info.get("tags") or [] if isinstance(t, str) and t.startswith("license:")),
+                   None)
+    return lic.strip().lower()[:64] if isinstance(lic, str) and lic.strip() else None
+
+
 def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: str, policy: fetch.Policy,
-               token: Optional[str] = None) -> dict:
+               token: Optional[str] = None, mmproj: Optional[str] = None) -> dict:
+    """`mmproj` (GGUF only): the projector file to use; None picks one when the repository has
+    any, "none" uses none."""
     ref = (ref or "main").strip()
     if not (sources.REVISION_RE.match(ref) or sources.REF_RE.match(ref)) or ".." in ref:
         raise InspectError("revision: a branch, tag or commit")
@@ -93,6 +110,7 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         "task_hint": sources.task_hint(info.get("pipeline_tag"), info.get("tags") or []) or (
             "chat" if fmt == "gguf" else None),
         "gated": bool(info.get("gated")), "private": bool(info.get("private")),
+        "license": license_of(info),
     }
 
     def url(path: str) -> str:
@@ -112,9 +130,22 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
                 raise InspectError(f"{chosen} is not one of its GGUF files")
             out["file"] = chosen
             out["gguf"] = gguf.read_remote(ranged(chosen)).summary()
+            projectors = sources.mmproj_choices(files)
+            out["mmproj_files"] = projectors
+            pick = sources.default_mmproj(projectors) if mmproj is None else (None if mmproj in ("", "none") else mmproj)
+            if pick is not None and pick not in {p["path"] for p in projectors}:
+                raise InspectError(f"{pick} is not one of its projector (mmproj) files")
+            out["modalities"] = []
+            if pick:
+                header = gguf.read_remote(ranged(pick))
+                size = next(p["size"] for p in projectors if p["path"] == pick)
+                out["mmproj"] = {"path": pick, "size": size,
+                                 "projector": str(header.metadata.get("clip.projector_type") or "")[:40] or None}
+                out["modalities"] = modalities.from_mmproj(header.metadata)
         elif fmt == "safetensors":
             config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=4 * 1024**2))
             out["config"] = config_summary(config)
+            out["modalities"] = modalities.from_config(config, paths)
             shards = [p for p in paths if p.endswith(".safetensors") and "/" not in p]
             if not shards:
                 shards = [p for p in paths if p.endswith(".safetensors")]
@@ -129,7 +160,7 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         raise _hf_error(e, repo) from None
     except (gguf.GGUFError, safetensors.SafetensorsError, ValueError) as e:
         raise InspectError(str(e)) from None
-    selected = sources.select_files(files, fmt, out.get("file"))
+    selected = sources.select_files(files, fmt, out.get("file"), (out.get("mmproj") or {}).get("path"))
     out["files"] = selected
     out["size_bytes"] = sum(f["size"] for f in selected)
     if fmt == "safetensors" and out["weights"]["bytes"] == 0:
@@ -154,9 +185,9 @@ def inspect_url(url: str, *, policy: fetch.Policy) -> dict:
 
 def inspect_source(src: Source, *, ref: Optional[str], file: Optional[str], endpoint: str, policy: fetch.Policy,
                    url_policy: fetch.Policy, local_dirs: list[str], token: Optional[str] = None,
-                   fmt: Optional[str] = None, size_bytes: Optional[int] = None) -> dict:
+                   fmt: Optional[str] = None, size_bytes: Optional[int] = None, mmproj: Optional[str] = None) -> dict:
     if src.kind == "hf":
-        return inspect_hf(src.repo, ref, file, endpoint=endpoint, policy=policy, token=token)
+        return inspect_hf(src.repo, ref, file, endpoint=endpoint, policy=policy, token=token, mmproj=mmproj)
     if src.kind == "url":
         return inspect_url(src.url, policy=url_policy)
     if not sources.local_allowed(src.path, local_dirs):

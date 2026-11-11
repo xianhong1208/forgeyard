@@ -31,8 +31,13 @@ params:
   dtype: {type: choice, default: auto, choices: [auto, bfloat16, float16], label: Weights dtype}
 args: ["{model_path}", --runner, pooling, --served-model-name, "{served_name}", --host, "{host}", --port, "{port}",
        --max-model-len, "{context}", --max-num-seqs, "{concurrency}",
-       --gpu-memory-utilization, "{gpu_util}", --tensor-parallel-size, "{gpus}", --dtype, "{dtype}"]
+       --gpu-memory-utilization, "{gpu_util}", --tensor-parallel-size, "{gpus}", --dtype, "{dtype}",
+       --allowed-media-domains, forgeyard.invalid]
+# The engine never fetches a URL itself (1.3): vLLM's pooling endpoints also read image URLs, and
+# a non-empty --allowed-media-domains that matches nothing (.invalid never resolves) refuses them;
+# redirects are off too. See the vllm recipe.
 env:
+  VLLM_MEDIA_URL_ALLOW_REDIRECTS: "0"
   HF_HUB_OFFLINE: "1"
   HF_HUB_CACHE: "{model_hub}"
   VLLM_NO_USAGE_STATS: "1"
