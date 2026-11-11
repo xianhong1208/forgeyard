@@ -131,6 +131,18 @@ sudo forgeyard agent config
 
 其他錯誤：`404 model_not_found`（沒有這個模型名稱的部署：請查看 `/v1/models`）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒）。
 
+### 來自雲端供應商的錯誤
+
+送往雲端供應商的模型會多出這些錯誤。回應的 `X-Forgeyard-Target` 會說明是不是由供應商回答的。
+
+- 模型明明列在 **Models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
+- `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **Local only**），但這個模型只由雲端供應商提供。
+- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
+- `429 provider_rate_limited`：雲端層的每個目標都被限流了；請依 `Retry-After` 等待。
+- 其他 4xx 會保留供應商的狀態碼、代碼和訊息，並在訊息前加上供應商的名稱。
+
+更多內容請見[雲端供應商](cloud-providers.md#troubleshooting)。
+
 ## 在沒有 systemd 的容器裡執行 agent
 
 **你會看到：** 行程類工作負載無法啟動，agent 的紀錄裡提到 `systemd-run` 或 `Failed to connect to bus`。

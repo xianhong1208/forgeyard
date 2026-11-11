@@ -24,6 +24,8 @@ from forgeyard.api import (
     machines,
     models,
     onboarding,
+    providers,
+    routing,
     tls as tls_api,
     users,
     workloads,
@@ -31,7 +33,7 @@ from forgeyard.api import (
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import get_engine, new_session
-from forgeyard.gateway import proxy as gateway_proxy
+from forgeyard.gateway import egress as gateway_egress, proxy as gateway_proxy
 from forgeyard.gateway.usage import recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
@@ -85,6 +87,7 @@ async def lifespan(_app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await gateway_proxy.close_client()
+        await gateway_egress.close_client()
         try:
             await asyncio.to_thread(usage_recorder.flush)  # what was counted since the last write
         except Exception:
@@ -116,6 +119,8 @@ def create_app() -> FastAPI:
     app.include_router(models.router)
     app.include_router(deployments.router)
     app.include_router(keys.router)
+    app.include_router(providers.router)
+    app.include_router(routing.router)
     app.include_router(onboarding.router)
     app.include_router(tls_api.router)
     app.include_router(gateway.console)

@@ -8,6 +8,12 @@ again, so a revoke, an expiry or a disabled account stops it on the very next re
 Limits per key are requests (rpm) and tokens (tpm) per minute. A key without its own value gets
 the server's default; admins set the defaults and the caps (the most a user may give their own
 key), and may give any key any value. 0 or None: no limit.
+
+The `cloud` setting of a key (1.2) says whether its requests may reach a provider outside your
+network: off (never; every key from before 1.2), fallback (only when a route spills from a local
+tier) or on (cloud-only models too). Admins set the value a new key gets and the most a user may
+give their own key; as with limits, a value an admin sets on someone else's key is locked for its
+owner. The console's playground uses the most a user may give a key (admins: on).
 """
 
 from __future__ import annotations
@@ -29,6 +35,8 @@ from forgeyard.gateway.errors import GatewayError
 KEY_PREFIX = "fyk_"
 PREFIX_CHARS = 12          # "fyk_" + 8: what lists show
 LIMITS_KEY = "gateway_limits"
+CLOUD_KEY = "gateway_cloud"
+CLOUD_LEVELS = ("off", "fallback", "on")
 LAST_USED_EVERY = timedelta(seconds=60)  # last_used_at is written at most this often per key
 
 
@@ -92,6 +100,41 @@ def check_own_limit(name: str, value: Optional[int], cap: Optional[int]) -> Opti
     return None
 
 
+# ------------------------------------------------------------------ cloud
+def cloud_level(value) -> str:
+    return value if value in CLOUD_LEVELS else "off"
+
+
+def get_cloud(db: DbSession) -> dict:
+    """{default, max}: what a new key gets, and the most a user may give their own key."""
+    row = db.get(ServerSetting, CLOUD_KEY)
+    s = get_settings()
+    value = row.value if row is not None else {"default": s.gateway_cloud_default, "max": s.gateway_cloud_max}
+    out = {"default": cloud_level(value.get("default")), "max": cloud_level(value.get("max"))}
+    if CLOUD_LEVELS.index(out["default"]) > CLOUD_LEVELS.index(out["max"]):
+        out["default"] = out["max"]
+    return out
+
+
+def set_cloud(db: DbSession, value: dict, by: str) -> None:
+    row = db.get(ServerSetting, CLOUD_KEY)
+    if row is None:
+        row = ServerSetting(key=CLOUD_KEY)
+        db.add(row)
+    row.value = {"default": cloud_level(value.get("default")), "max": cloud_level(value.get("max"))}
+    row.updated_by = by
+    row.updated_at = utcnow()
+
+
+def cloud_above(value: str, cap: str) -> bool:
+    return CLOUD_LEVELS.index(cloud_level(value)) > CLOUD_LEVELS.index(cloud_level(cap))
+
+
+def console_cloud(db: DbSession, user: User) -> str:
+    """The playground's cloud setting: admins on; others what they could give their own key."""
+    return "on" if user.role == "admin" else get_cloud(db)["max"]
+
+
 # ------------------------------------------------------------------ authentication
 @dataclass
 class KeyCaller:
@@ -105,6 +148,7 @@ class KeyCaller:
     models: Optional[list] = None     # None: every deployment
     rpm: Optional[int] = None
     tpm: Optional[int] = None
+    cloud: str = "off"                # off | fallback | on
 
 
 def bearer(header: Optional[str]) -> Optional[str]:
@@ -144,4 +188,4 @@ def authenticate(db: DbSession, authorization: Optional[str], *, now: Optional[d
     return KeyCaller(source="api", user_id=user.id, username=user.username, key_id=key.id, key_name=key.name,
                      models=list(key.models) if key.models is not None else None,
                      rpm=effective(key.rpm, limits["default_rpm"], limits["max_rpm"]),
-                     tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]))
+                     tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]), cloud=cloud_level(key.cloud))

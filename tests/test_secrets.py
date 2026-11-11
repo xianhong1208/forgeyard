@@ -229,7 +229,7 @@ def test_fy_sec_006_secrets_reset_after_a_lost_key(owner, caplog):
     path.unlink()
     crypto.reset()
     assert cli_main(["secrets", "reset", "--yes"]) == 0
-    assert "Dropped 1 Hugging Face token(s), placed 1 model replica(s) again and emptied 2 workload" in caplog.text
+    assert "Dropped 1 Hugging Face token(s), placed 1 model replica(s) again, emptied 2 workload" in caplog.text
     assert path.exists() and stat.S_IMODE(path.stat().st_mode) == 0o600
     crypto.reset()
     reset_engine()

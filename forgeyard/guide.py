@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent / "docs" / "guide"
 LANGUAGES = {"en": "English", "zh-TW": "繁體中文"}
 # slug -> file; the order is the guide's table of contents.
 PAGES = {"index": "README.md", "quick-start": "quick-start.md", "concepts": "concepts.md", "how-to": "how-to.md",
-         "troubleshooting": "troubleshooting.md", "reference": "reference.md"}
+         "troubleshooting": "troubleshooting.md", "cloud-providers": "cloud-providers.md", "reference": "reference.md"}
 _FILES = {v: k for k, v in PAGES.items()}
 
 

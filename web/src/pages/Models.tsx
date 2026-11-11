@@ -1,4 +1,4 @@
-import { IconBrain, IconCpu, IconMicrophone, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconMicrophone, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -8,8 +8,10 @@ import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
+import { API_KIND } from "../lib/gateway";
 import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, params } from "../lib/models";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe } from "../lib/types";
+import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, targetName, targetWhere, tiers } from "../lib/routing";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
@@ -23,7 +25,7 @@ const KINDS = [
 
 export function ModelsPage() {
   const [search, setSearch] = useSearchParams();
-  const tab = search.get("tab") === "catalog" ? "catalog" : "deployments";
+  const tab = search.get("tab") === "catalog" ? "catalog" : search.get("tab") === "routes" ? "routes" : "deployments";
   const deps = useApi<DeploymentsResponse>("/deployments");
   const cat = useApi<CatalogResponse>("/models");
   usePoll(deps.reload, WORKLOADS_POLL_MS);
@@ -47,10 +49,12 @@ export function ModelsPage() {
       <div className="tabs" role="tablist" aria-label="Models">
         <button type="button" role="tab" aria-selected={tab === "deployments"} className={tab === "deployments" ? "on" : ""}
           onClick={() => setSearch({})}>Deployments{deps.data ? ` (${deps.data.deployments.length})` : ""}</button>
+        <button type="button" role="tab" aria-selected={tab === "routes"} className={tab === "routes" ? "on" : ""}
+          onClick={() => setSearch({ tab: "routes" })}>Routes and cloud</button>
         <button type="button" role="tab" aria-selected={tab === "catalog"} className={tab === "catalog" ? "on" : ""}
           onClick={() => setSearch({ tab: "catalog" })}>Catalog and recipes</button>
       </div>
-      {tab === "deployments" ? (
+      {tab === "routes" ? <Routes /> : tab === "deployments" ? (
         <>
           {deps.error && <Notice tone="error">{deps.error}</Notice>}
           {deps.data && deps.data.deployments.length === 0 && (
@@ -89,6 +93,58 @@ export function ModelsPage() {
         </>
       ) : (
         <Catalog data={cat.data} error={cat.error} reload={cat.reload} />
+      )}
+    </>
+  );
+}
+
+function Routes() {
+  const { data, error } = useApi<RoutesResponse>("/routes");
+  if (error) return <Notice tone="error">{error}</Notice>;
+  if (!data) return <p className="muted">Loading…</p>;
+  return (
+    <>
+      <section className="panel routes-intro">
+        <div className="panel-head">
+          <h2>Model names at /v1</h2>
+          {data.is_admin && <Link to="/models/routes/new" className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> New route</Link>}
+        </div>
+        <p className="muted small">
+          Each name clients send as <code>model</code> has targets in tiers: its deployment first, and, if an admin adds one, a cloud provider's model
+          to spill to when local is busy or down. A route can also serve a cloud model only. API keys decide whether a request may use the cloud at all.{" "}
+          {data.is_admin && <Link to="/providers">Cloud providers</Link>}
+        </p>
+      </section>
+      {data.routes.length === 0 ? <p className="muted">No routes yet: deploy a model, or add a provider and a route.</p> : (
+        <div className="workloads">
+          {data.routes.map((r) => (
+            <article key={r.id} className="wl" aria-label={`Route ${r.served_name}`}>
+              <header className="wl-head">
+                <div className="wl-title">
+                  {r.kind !== "local" && <IconCloud size={16} aria-hidden="true" />}
+                  <h2 className="mono"><Link to={`/models/routes/${r.id}`}>{r.served_name}</Link></h2>
+                  <span className={`chip chip-tone-${ROUTE_KIND_TONE[r.kind]}`}>{ROUTE_KIND_LABEL[r.kind]}</span>
+                  <span className="chip">{API_KIND[r.api] ?? r.api}</span>
+                  {r.local_only && <span className="chip chip-tone-ok">local only</span>}
+                  {r.usable === false && <span className="chip chip-tone-off" title="Your keys and the playground cannot use cloud-only models">not for you</span>}
+                </div>
+                <Link className="btn btn-quiet btn-small" to={`/models/routes/${r.id}`}>{data.is_admin ? "Edit routing" : "Details"}</Link>
+              </header>
+              <ol className="route-tiers">
+                {tiers(r).map((tier, i) => (
+                  <li key={i}>
+                    <span className="tier-n">{i === 0 ? "First" : "Then"}</span>
+                    {tier.map((t) => (
+                      <span key={t.id} className={`route-target${t.enabled ? "" : " off"}`}>
+                        <span className="mono">{targetName(t)}</span> <span className="muted small">{targetWhere(t)}</span>
+                      </span>
+                    ))}
+                  </li>
+                ))}
+              </ol>
+            </article>
+          ))}
+        </div>
       )}
     </>
   );

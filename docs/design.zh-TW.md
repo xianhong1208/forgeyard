@@ -253,6 +253,47 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 
 真機檢查：[docs/acceptance-m4.md](acceptance-m4.md) 與 `scripts/accept_m4.py`。
 
+## 雲端供應商與分層路由（1.2）
+
+閘道也可以把請求送到 Forgeyard 以外的模型 API，但本機優先。2026-11-11 研究過 LiteLLM、OpenRouter、Portkey、Envoy 的 AI gateway、
+Kong 與 GPUStack 之後決定。
+
+- **上游只用 OpenAI 相容端點。** Forgeyard 以 OpenAI 的格式呼叫各供應商自己的相容端點（OpenAI、Anthropic `…/v1/`、Gemini
+  `…/v1beta/openai/`、Azure OpenAI 的 v1 API、OpenRouter、任何 OpenAI 相容伺服器），回應原樣傳回。每種供應商有一張小小的
+  **quirks 表**（`forgeyard/gateway/quirks.py`）處理差異：金鑰怎麼送（Bearer、Azure 的 `api-key`、Anthropic 的 `x-api-key` 與版本）、
+  拿掉只有引擎才認得的參數（`chat_template_kwargs`、`top_k`、`guided_*`、llama.cpp 的取樣設定…）、OpenAI 與 Azure 的 `max_tokens`
+  改名、Gemini 的 `models/` 前綴，以及怎麼讀回 `usage`（快取與推理 token；Anthropic 的永遠是空的）。不做原生翻譯：各端點少了什麼
+  寫在文件裡（docs/guide/cloud-providers.md），而不是藏起來。**不用 LiteLLM**，不論當函式庫或 sidecar：它在 2026 年兩度在 PyPI
+  上被植入惡意程式（3 月的 1.82.7/1.82.8，經由被入侵的 CI 工具；10 月的 1.107.0 與其 Docker 映像，會讀取 proxy 的憑證資料表），
+  而且它自己的金鑰與預算系統會和 Forgeyard 的重疊。
+- **路由與目標。** 路由是一個 served name，加上分層的目標（`route_targets`）：本機部署與供應商的模型（`providers`、
+  `provider_models`），每個目標有權重與開關。部署會建立自己的路由（第 0 層就是它自己），刪除時一起刪；admin 可以加層，
+  或自己建立路由（只有雲端，或多個部署共用一個名稱）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
+  名稱不變，所以行為完全和以前一樣。
+- **溢出規則，只在第一個 byte 之前。** 這一層 *unavailable*（沒有就緒的副本、每個連線都失敗）、*busy*（每個就緒副本經由這台
+  server 處理中的請求數都達到部署的 `concurrency`；名額是原子地取得的，兩個請求不會同時拿到最後一個；`wait_ms` 會先等名額）或
+  *refusing*（429 或 503）時，才用下一層。*too long*（估計的提示加上 `max_tokens` 超過部署的 `context`）只有路由選擇時才算。
+  其他 4xx、請求送出後逾時、副本拒絕內部金鑰、用戶端離開、或串流進行中，都絕不溢出。如果本機是忙碌、而之後每一層都失敗，
+  請求最後仍然會等本機的名額。
+- **雲端層**依權重（加權洗牌）嘗試目標；回應 429 或 5xx、或連不上的目標會冷卻 30 秒（或依它的 Retry-After，最多 5 分鐘），
+  排到最後才試。沒有其他目標時，不超過 2 秒的 Retry-After 會等一次。供應商的錯誤保留狀態碼與訊息（看起來像金鑰的字串會被拿掉）；
+  供應商拒絕它的金鑰時回 502 `provider_auth_failed`，絕不回 401 讓用戶端以為是自己的金鑰有問題。
+- **誰可以把資料送出去。** 每把 API key 有 `cloud` = `off`（1.2 以前的每把 key，也是預設值）／`fallback`（只能當溢出目標）／
+  `on`（也包括只有雲端的模型）。對 `off` 與 `fallback` 的 key，只有雲端的模型會回 404 且不會列出。admin 設定預設值與一般人
+  替自己的 key 能設的上限；admin 替別人的 key 設的值會像限制一樣鎖定。標示在你網路內的供應商（VPN 上的 vLLM）不算雲端。
+  標示 `local_only` 的路由與帶 `X-Forgeyard-Local-Only: 1` 的請求絕不使用雲端目標。回應帶 `X-Forgeyard-Target`，溢出時另有
+  `X-Forgeyard-Spilled`。
+- **對外連線。** 供應商用獨立的 HTTP client：驗證 TLS（可加 `EGRESS_CA_FILE`）、絕不跟隨重新導向、絕不用環境變數裡的 proxy
+  （改用 `EGRESS_PROXY`）、`EGRESS_ALLOWED_HOSTS`。只允許 https；雲端供應商必須解析到公開位址；私有位址只給網路內的供應商，
+  純 http 要 admin 為它開啟；link-local 與 metadata 位址一律拒絕。每次請求前都會解析並檢查名稱，連線直接連到檢查過的位址
+  （TLS 仍然驗證名稱）。
+- **供應商金鑰**是 `EncryptedText("providers.api_key")`：只能寫入（API 只顯示最後四個字元）、絕不寫入記錄、稽核或回應、
+  **Clone** 時絕不複製（複本沒有金鑰且停用），`secrets reset` 時會被丟棄。
+- **用量**列現在記錄目標（`local` 或 `pm:<provider model id>`）、快取與推理 token，以及溢出的請求數，之後才能依供應商模型計價。
+  供應商模型已經有可為空的價格欄位（每百萬 token 的微美元）。費用、預算與從 OpenRouter 更新價格是下一步。
+- **1.2 不做：**Anthropic 或 Gemini 的原生翻譯與 `/v1/messages` 直通；Responses API、batch、檔案、圖片；雲端的 rerank、score、
+  語音；串流中途切換；雲端之間依成本、延遲或語意的路由；黏著路由；Entra ID、Vertex 或 Bedrock 認證。
+
 ## 帳號與登入
 
 - **角色：** `admin` 管理使用者、機器與其 GPU allowlist、模型目錄、配方與模型來源，並看稽核紀錄；`operator` 執行 workload 與部署模型；`user` 只能看，並透過 playground 與自己的 API key 使用已部署的模型、看自己的用量。

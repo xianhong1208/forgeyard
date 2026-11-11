@@ -17,6 +17,8 @@ import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
 import { PlaygroundPage } from "./pages/Playground";
+import { ProviderDetailPage, ProvidersPage } from "./pages/Providers";
+import { RouteDetailPage } from "./pages/RouteDetail";
 import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
 import { SetupPage } from "./pages/Setup";
@@ -70,6 +72,9 @@ export default function App() {
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/models/deploy" element={<ModelDeployPage />} />
         <Route path="/models/deployments/:id" element={<DeploymentDetailPage />} />
+        <Route path="/models/routes/:id" element={<RouteDetailPage />} />
+        <Route path="/providers" element={<AdminOnly><ProvidersPage /></AdminOnly>} />
+        <Route path="/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />
         {/* M0-M2 sent "Deployments" to the workloads; model deployments live under Models since M3. */}
         <Route path="/deployments" element={<Navigate to="/models" replace />} />
         <Route path="/playground" element={<PlaygroundPage />} />

@@ -43,12 +43,13 @@ function mount(path: string) {
 const key = (over: Partial<ApiKey> = {}): ApiKey => ({
   id: "k1", name: "laptop", prefix: "fyk_AbCdEfGh", models: null, rpm: null, tpm: null, effective_rpm: 60, effective_tpm: null,
   expires_at: null, created_at: "2026-11-10T10:00:00Z", last_used_at: null, revoked_at: null, revoked_by: null, status: "active",
-  user: { id: 1, username: "owner" }, this_minute: { requests: 0, tokens: 0 }, ...over,
+  user: { id: 1, username: "owner" }, this_minute: { requests: 0, tokens: 0 }, cloud: "off", ...over,
 });
 
 const keys = (over: Partial<KeysResponse> = {}): KeysResponse => ({
   keys: [key()], limits: { default_rpm: 60, default_tpm: null, max_rpm: 120, max_tpm: null }, is_admin: true,
-  gateway_url: "http://forge.lan:7860/v1", models: [{ name: "chat", api: "openai-chat" }, { name: "embed", api: "openai-embeddings" }], ...over,
+  gateway_url: "http://forge.lan:7860/v1", models: [{ name: "chat", api: "openai-chat" }, { name: "embed", api: "openai-embeddings" }],
+  cloud: { default: "off", max: "off" }, ...over,
 });
 
 afterEach(() => {
@@ -79,7 +80,7 @@ describe("API keys", () => {
     fireEvent.change(screen.getByLabelText("Expires"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Create key" }));
     expect(await screen.findByText("Copy your key now")).toBeTruthy();
-    expect(posted).toEqual([{ name: "ci", models: ["chat"], rpm: 30, tpm: null, expires_in_days: 30 }]);
+    expect(posted).toEqual([{ name: "ci", models: ["chat"], rpm: 30, tpm: null, expires_in_days: 30, cloud: "off" }]);
     expect(screen.getByLabelText("The new API key").textContent).toBe("fyk_SECRETVALUE0123456789");
     const py = screen.getByLabelText("python example").textContent ?? "";
     expect(py).toContain('base_url="http://forge.lan:7860/v1"');
@@ -200,9 +201,10 @@ describe("Usage", () => {
   });
 });
 
-const ROUTES = { routes: [
-  { served_name: "embed", api: "openai-embeddings", upstream_model: "embed", deployment_id: 2, workload_id: 2, endpoints: [] },
-  { served_name: "chat", api: "openai-chat", upstream_model: "chat", deployment_id: 1, workload_id: 1,
+const LOCAL = { local_only: false, spill_on_long_prompt: false, wait_ms: 0, kind: "local", has_local: true, has_cloud: false, targets: [], usable: true };
+const ROUTES = { cloud: "on", is_admin: true, routes: [
+  { ...LOCAL, id: 2, served_name: "embed", api: "openai-embeddings", upstream_model: "embed", deployment_id: 2, endpoints: [] },
+  { ...LOCAL, id: 1, served_name: "chat", api: "openai-chat", upstream_model: "chat", deployment_id: 1,
     endpoints: [{ replica: 0, machine: "cpu-a", state: "healthy", ready: true, url: "http://10.0.0.5:31000/" }] },
 ] };
 
@@ -252,6 +254,74 @@ describe("Playground", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.getByTestId("where").textContent).toContain("/login"));
     expect(screen.getByTestId("where").textContent).toContain("ended=idle");
+  });
+});
+
+describe("cloud setting of keys (1.2)", () => {
+  it("shows each key's cloud setting and creates one that may spill", async () => {
+    const posted: Record<string, unknown>[] = [];
+    server((url, init) => {
+      if (url === "/api/keys" && init?.method === "POST") {
+        posted.push(JSON.parse(String(init.body)));
+        return { status: 201, body: { key: "fyk_X", gateway_url: "http://h/v1", api_key: key({ id: "k3", cloud: "fallback" }) } };
+      }
+      if (url.startsWith("/api/keys")) return { status: 200, body: keys({ keys: [key(), key({ id: "k2", name: "spiller", cloud: "fallback" })] }) };
+    });
+    mount("/keys");
+    const first = (await screen.findByText("laptop")).closest("tr") as HTMLElement;
+    expect(within(first).getByText("Never")).toBeTruthy();
+    expect(within(screen.getByText("spiller").closest("tr") as HTMLElement).getByText("Only to spill")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /New key/ }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "batch" } });
+    const group = screen.getByRole("radiogroup", { name: "May this key use cloud providers?" });
+    fireEvent.click(within(group).getByLabelText(/Only to spill/));
+    fireEvent.click(screen.getByRole("button", { name: "Create key" }));
+    await waitFor(() => expect(posted[0]).toMatchObject({ name: "batch", cloud: "fallback" }));
+    expect(screen.getByRole("heading", { name: "Cloud for keys" })).toBeTruthy();
+  });
+
+  it("a user cannot go above the cap, and an admin's value is locked", async () => {
+    const locked = key({ cloud: "fallback", cloud_locked_by: "owner" });
+    server((url) => url.startsWith("/api/keys") ? { status: 200, body: keys({ is_admin: false, keys: [locked],
+      cloud: { default: "off", max: "fallback" } }) } : undefined, USER);
+    mount("/keys");
+    expect(await screen.findByText(/set by owner/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Limits" }));
+    expect((screen.getByLabelText("Cloud providers") as HTMLSelectElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /New key/ }));
+    const group = screen.getByRole("radiogroup", { name: "May this key use cloud providers?" });
+    expect((within(group).getByLabelText(/Allowed/) as HTMLInputElement).disabled).toBe(true);
+    expect((within(group).getByLabelText(/Only to spill/) as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByRole("heading", { name: "Cloud for keys" })).toBeNull();
+  });
+});
+
+describe("Playground and the cloud (1.2)", () => {
+  it("lists only the models the person may use and names who answered", async () => {
+    const routes = { cloud: "off", is_admin: false, routes: [
+      { ...ROUTES.routes[1], kind: "mixed", has_cloud: true },
+      { ...LOCAL, id: 7, served_name: "gpt", api: "openai-chat", upstream_model: null, deployment_id: null, endpoints: [], kind: "cloud",
+        has_local: false, has_cloud: true, usable: false },
+    ] };
+    const sent: RequestInit[] = [];
+    server((url, init) => {
+      if (url === "/api/routes") return { status: 200, body: routes };
+      if (url === "/api/playground/chat/completions") {
+        sent.push(init as RequestInit);
+        return { status: 200, headers: { "Content-Type": "text/event-stream", "X-Forgeyard-Target": "provider:openai/gpt-4o-mini",
+          "X-Forgeyard-Spilled": "busy" }, stream: ['data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n', "data: [DONE]\n\n"] };
+      }
+    }, USER);
+    mount("/playground");
+    const select = (await screen.findByLabelText("Model")) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["chat"]);
+    expect(select.options[0].textContent).toContain("local, then cloud");
+    fireEvent.click(screen.getByLabelText(/Local only/));
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const convo = screen.getByLabelText("Conversation");
+    expect(await within(convo).findByText(/openai\/gpt-4o-mini · spilled: busy/)).toBeTruthy();
+    expect((sent[0].headers as Record<string, string>)["X-Forgeyard-Local-Only"]).toBe("1");
   });
 });
 

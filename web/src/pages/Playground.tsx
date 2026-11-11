@@ -6,15 +6,17 @@ import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
 import { API_KIND, answerError, ms, readEvents } from "../lib/gateway";
-import type { RouteInfo } from "../lib/types";
+import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
+import type { RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean };
 
 // The playground talks to /api/playground/<endpoint>: the gateway's routing, as the signed-in
 // user (the session cookie and the CSRF header), counted as "console" in usage. No API key.
-async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?: FormData): Promise<Response> {
+async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?: FormData, localOnly = false): Promise<Response> {
   const headers: Record<string, string> = { "X-Forgeyard": "1" };
+  if (localOnly) headers["X-Forgeyard-Local-Only"] = "1";
   if (!form) headers["Content-Type"] = "application/json";
   const res = await fetch(`/api/playground/${endpoint}`, {
     method: "POST", credentials: "same-origin", headers, signal, body: form ?? JSON.stringify(body),
@@ -32,13 +34,15 @@ async function failure(res: Response): Promise<string> {
 }
 
 export function PlaygroundPage() {
-  const { data, error } = useApi<{ routes: RouteInfo[] }>("/routes");
+  const { data, error } = useApi<RoutesResponse>("/routes");
   const { user } = useAuth();
   const canDeploy = user?.role === "admin" || user?.role === "operator";
-  const routes = data?.routes ?? [];
+  // Cloud-only models need the cloud setting the signed-in person may give a key.
+  const routes = (data?.routes ?? []).filter((r) => r.usable !== false);
   const [picked, setModel] = useState<string>("");
   // Until someone picks one: a ready chat model, else anything ready, else the first.
   const fallback = routes.find((r) => r.api === "openai-chat" && r.endpoints.length) ?? routes.find((r) => r.endpoints.length) ?? routes[0];
+  const ready = (r: (typeof routes)[number]) => r.endpoints.length > 0 || r.kind === "cloud";
   const model = picked || fallback?.served_name || "";
   const route = routes.find((r) => r.served_name === model);
 
@@ -64,15 +68,17 @@ export function PlaygroundPage() {
             <select id="play-model" value={model} onChange={(e) => setModel(e.target.value)}>
               {routes.map((r) => (
                 <option key={r.served_name} value={r.served_name}>
-                  {r.served_name} · {API_KIND[r.api] ?? r.api}{r.endpoints.length ? "" : " (not ready)"}
+                  {r.served_name} · {API_KIND[r.api] ?? r.api}{r.kind && r.kind !== "local" ? ` · ${ROUTE_KIND_LABEL[r.kind]}` : ""}{ready(r) ? "" : " (not ready)"}
                 </option>
               ))}
             </select>
           </div>
           {route && (
             <p className="muted small play-ready">
-              {route.endpoints.length ? `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}` : "No replica is ready yet."}{" "}
-              <Link to={`/models/deployments/${route.deployment_id}`}>Deployment</Link>
+              {route.kind === "cloud" ? "Served by a cloud provider." : route.endpoints.length ? `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}` : "No replica is ready yet."}
+              {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
+              {route.deployment_id ? <Link to={`/models/deployments/${route.deployment_id}`}>Deployment</Link>
+                : route.id ? <Link to={`/models/routes/${route.id}`}>Route</Link> : null}
             </p>
           )}
         </div>
@@ -91,6 +97,7 @@ function Chat({ model }: { model: string }) {
   const [maxTokens, setMaxTokens] = useState(256);
   const [temperature, setTemperature] = useState(0.7);
   const [thinking, setThinking] = useState(false);
+  const [localOnly, setLocalOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -119,13 +126,16 @@ function Chat({ model }: { model: string }) {
         model, stream: true, max_tokens: maxTokens, temperature, stream_options: { include_usage: true },
         chat_template_kwargs: { enable_thinking: thinking },
         messages: history.map(({ role, content }) => ({ role, content })),
-      }, ctrl.signal);
+      }, ctrl.signal, undefined, localOnly);
       if (!res.ok || !res.body) {
         const why = await failure(res);
         update((m) => ({ ...m, content: why, error: true }));
         return;
       }
       const replica = res.headers.get("X-Forgeyard-Replica");
+      const target = res.headers.get("X-Forgeyard-Target");
+      const spilled = res.headers.get("X-Forgeyard-Spilled");
+      const who = target && !target.startsWith("local:") ? targetHeader(target) : replica ? `replica ${replica.split("#")[1]}` : null;
       await readEvents(res.body, (d) => {
         if (d === "[DONE]") return;
         let chunk: { choices?: { delta?: { content?: string; reasoning_content?: string } }[]; usage?: typeof usage; error?: { message?: string } };
@@ -145,7 +155,7 @@ function Chat({ model }: { model: string }) {
       const total = performance.now() - started;
       const u = usage as { prompt_tokens?: number; completion_tokens?: number } | null;
       const out = u?.completion_tokens;
-      const meta = [replica ? `replica ${replica.split("#")[1]}` : null, first !== null ? `first token ${ms(first - started)}` : null,
+      const meta = [who, spilled ? `spilled: ${spilled}` : null, first !== null ? `first token ${ms(first - started)}` : null,
         `${ms(total)}`, u ? `${u.prompt_tokens ?? 0} in · ${out ?? 0} out` : null,
         out && first !== null && total - (first - started) > 0 ? `${(out / ((total - (first - started)) / 1000)).toFixed(1)} tok/s` : null]
         .filter(Boolean).join(" · ");
@@ -193,6 +203,7 @@ function Chat({ model }: { model: string }) {
         <label>Max tokens <input type="number" min={1} max={32768} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value) || 1)} /></label>
         <label>Temperature <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /></label>
         <label className="check"><input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} /> Thinking (models that support it)</label>
+        <label className="check" title="Sends X-Forgeyard-Local-Only: 1"><input type="checkbox" checked={localOnly} onChange={(e) => setLocalOnly(e.target.checked)} /> Local only (never the cloud)</label>
       </div>
     </section>
   );

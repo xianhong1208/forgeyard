@@ -263,6 +263,8 @@ export type Deployment = {
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
+  // 1.2: the deployment's own route with its tiers, and other routes it is a target of.
+  routing?: RouteInfo | null; also_in?: string[];
   usage?: { days: number; total: UsageRow; by_day: UsageRow[] };
 };
 
@@ -275,17 +277,23 @@ export type TryResponse = { status: number; ok: boolean; api: string; endpoint: 
 // ---------------------------------------------------------------- gateway (M4)
 export type KeyLimits = { default_rpm: number | null; default_tpm: number | null; max_rpm: number | null; max_tpm: number | null };
 
+// 1.2: may a key's requests reach cloud providers? off, only when a route spills (fallback), or on.
+export type CloudLevel = "off" | "fallback" | "on";
+export type CloudSettings = { default: CloudLevel; max: CloudLevel };
+
 export type ApiKey = {
   id: string; name: string; prefix: string; models: string[] | null; rpm: number | null; tpm: number | null;
   // The admin who set that limit on someone else's key: locked for its owner.
   rpm_locked_by?: string | null; tpm_locked_by?: string | null;
+  cloud: CloudLevel; cloud_locked_by?: string | null;
   effective_rpm: number | null; effective_tpm: number | null; expires_at: string | null; created_at: string;
   last_used_at: string | null; revoked_at: string | null; revoked_by: string | null; status: "active" | "revoked" | "expired";
   user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };
 };
 
 export type KeysResponse = {
-  keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; models: { name: string; api: string }[];
+  keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
+  models: { name: string; api: string; kind?: RouteKind }[];
 };
 
 export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string; trust_url?: string | null };
@@ -293,11 +301,60 @@ export type NewKeyResponse = { key: string; api_key: ApiKey; gateway_url: string
 export type UsageRow = {
   id: string; name: string; requests: number; errors: number; limited: number; prompt_tokens: number; completion_tokens: number;
   tokens: number; latency_avg_ms: number | null; latency_p50_ms: number | null; latency_p95_ms: number | null;
+  cached_tokens?: number; reasoning_tokens?: number; spilled?: number;
 };
 
 export type UsageResponse = {
   from: string; to: string; days: number; group_by: string; total: UsageRow; rows: UsageRow[]; everyone: boolean; is_admin: boolean;
 };
 
-export type RouteInfo = { served_name: string; api: string; upstream_model: string; deployment_id: number; workload_id: number;
-  endpoints: Endpoint[] };
+// ---------------------------------------------------------------- routes and providers (1.2)
+export type RouteKind = "local" | "mixed" | "cloud";
+
+export type ProviderRef = { id: number; name: string; kind: string; external: boolean; enabled: boolean };
+
+export type RouteTarget = {
+  id: number; tier: number; kind: "local" | "provider"; weight: number; enabled: boolean; upstream_model: string | null; cloud: boolean;
+  deployment: { id: number; name: string; served_name: string; ready: number; replicas: number; concurrency: number | null; context: number | null } | null;
+  provider_model: { id: number; upstream_model: string; display_name: string | null; api: string; context_length: number | null; provider: ProviderRef } | null;
+};
+
+export type RouteInfo = {
+  id: number; served_name: string; api: string; upstream_model: string | null; deployment_id: number | null;
+  local_only: boolean; spill_on_long_prompt: boolean; wait_ms: number; kind: RouteKind; has_local: boolean; has_cloud: boolean;
+  created_by?: string | null; endpoints: Endpoint[]; targets: RouteTarget[]; usable?: boolean;
+};
+
+export type RoutesResponse = { routes: RouteInfo[]; cloud: CloudLevel; is_admin: boolean };
+
+export type RouteOptions = {
+  deployments: { id: number; name: string; served_name: string; api: string | null }[];
+  provider_models: { id: number; upstream_model: string; display_name: string | null; api: string; provider: ProviderRef }[];
+};
+
+export type ProviderKind = {
+  kind: string; label: string; base_url: string; base_url_hint: string; auth: string; embeddings: boolean; models_endpoint: boolean;
+  default_external: boolean; key_required: boolean; note: string;
+};
+
+export type ProviderModel = {
+  id: number; provider_id: number; upstream_model: string; api: string; display_name: string | null; context_length: number | null;
+  drop_params: string[]; price_input: number | null; price_output: number | null; price_cache_read: number | null; price_cache_write: number | null;
+  price_source: string | null; cooldown_s: number; in_flight: number; sent: number; created_at: string; routes: string[];
+};
+
+export type Provider = {
+  id: number; name: string; kind: string; kind_label: string; base_url: string; has_key: boolean; key_hint: string | null;
+  external: boolean; allow_http: boolean; enabled: boolean; timeout_s: number | null; created_by: string | null; created_at: string;
+  updated_at: string; models: ProviderModel[]; headers?: Record<string, string>;
+};
+
+export type Egress = { proxy: boolean; allowed_hosts: string[]; ca_file: boolean; private_hosts: boolean; cooldown_s: number; read_timeout_s: number };
+
+export type ProvidersResponse = { providers: Provider[]; kinds: ProviderKind[]; egress: Egress; is_admin: boolean };
+
+export type ProviderResponse = { provider: Provider; kinds: ProviderKind[]; egress: Egress; is_admin: boolean };
+
+export type TestResult = { ok: boolean; status: number; ms: number; models: number; sample: string[]; message: string | null };
+
+export type UpstreamModel = { id: string; owned_by: string | null; context_length: number | null; api: string; display_name: string | null; added: boolean };

@@ -348,18 +348,115 @@ class Deployment(Base):
 
 
 class GatewayRoute(Base):
-    """What the gateway (M4) needs: a model name, the protocol, and the service that serves it."""
+    """A model name the gateway serves (`model` in a /v1 request) and how: its protocol, its targets
+    in tiers (RouteTarget), and when a request may move on to the next tier (1.2).
+
+    A deployment creates its own route (`deployment_id`, deleted with it); an admin can add tiers to
+    it (a cloud model to spill to) or create routes without one (a cloud-only model)."""
 
     __tablename__ = "gateway_routes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     served_name: Mapped[str] = mapped_column(String(128), unique=True)
     api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio
-    # The `model` value the engine expects (the served name, or the Hugging Face id for speaches).
-    upstream_model: Mapped[str] = mapped_column(String(256))
-    deployment_id: Mapped[int] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"), unique=True)
-    workload_id: Mapped[int] = mapped_column(ForeignKey("workloads.id", ondelete="CASCADE"), index=True)
+    # The deployment this route was created with (NULL: a route an admin made, e.g. cloud only).
+    deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"),
+                                                         unique=True, nullable=True)
+    # Never leaves your network: cloud targets are not used, whatever a key allows.
+    local_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Spill to the next tier when the prompt (estimated) does not fit a local deployment's context.
+    spill_on_long_prompt: Mapped[bool] = mapped_column(Boolean, default=False)
+    # How long a request waits for a free local slot before it spills because local is busy.
+    wait_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    targets: Mapped[list["RouteTarget"]] = relationship(
+        back_populates="route", cascade="all, delete-orphan", order_by="[RouteTarget.tier, RouteTarget.id]")
+
+
+class RouteTarget(Base):
+    """Who answers for a route: a local deployment (its ready replicas) or a provider's model.
+    Tier 0 is tried first; a request moves to the next tier only before the first byte."""
+
+    __tablename__ = "route_targets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    route_id: Mapped[int] = mapped_column(ForeignKey("gateway_routes.id", ondelete="CASCADE"), index=True)
+    tier: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(String(16))           # local | provider
+    deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"),
+                                                         nullable=True, index=True)
+    provider_model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("provider_models.id", ondelete="CASCADE"),
+                                                             nullable=True, index=True)
+    # The `model` a local engine expects (the served name, or the Hugging Face id for speaches).
+    # Provider targets use their ProviderModel's upstream name.
+    upstream_model: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    weight: Mapped[int] = mapped_column(Integer, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    route: Mapped[GatewayRoute] = relationship(back_populates="targets")
+    deployment: Mapped[Optional[Deployment]] = relationship()
+    provider_model: Mapped[Optional["ProviderModel"]] = relationship()
+
+
+class Provider(Base):
+    """A model API outside Forgeyard, spoken to through its OpenAI-compatible endpoint (1.2): OpenAI,
+    Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible URL (a vLLM elsewhere)."""
+
+    __tablename__ = "providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    kind: Mapped[str] = mapped_column(String(24))           # forgeyard/gateway/quirks.py: KINDS
+    base_url: Mapped[str] = mapped_column(String(512))
+    # Write-only: never returned, logged, audited or copied; the API shows its last 4 characters.
+    api_key: Mapped[Optional[str]] = mapped_column(EncryptedText("providers.api_key"), nullable=True)
+    key_last4: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    # Extra request headers that are not secret (anthropic-workspace-id, OpenRouter's X-Title).
+    headers: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Outside your network: counts as cloud for a key's `cloud` setting. False: a server of your
+    # own (a vLLM on your VPN), used like a local target.
+    external: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Plain http and private addresses, for a provider inside your network only (external False).
+    allow_http: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Seconds to wait for an answer (headers, or the next piece of a stream); NULL: the server's.
+    timeout_s: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    models: Mapped[list["ProviderModel"]] = relationship(
+        back_populates="provider", cascade="all, delete-orphan", order_by="ProviderModel.upstream_model")
+
+
+class ProviderModel(Base):
+    """One model of a provider that routes may use. Prices are for cost tracking and budgets (later):
+    micro-USD per million tokens, NULL while unknown."""
+
+    __tablename__ = "provider_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id", ondelete="CASCADE"), index=True)
+    # The provider's model name (for Azure: the deployment name).
+    upstream_model: Mapped[str] = mapped_column(String(256))
+    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings
+    display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    context_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Request parameters to remove on top of the provider kind's own list.
+    drop_params: Mapped[list] = mapped_column(JSON, default=list)
+    price_input: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    price_output: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    price_cache_read: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    price_cache_write: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    price_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)   # manual | openrouter | upstream
+    price_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    provider: Mapped[Provider] = relationship(back_populates="models")
+
+    __table_args__ = (Index("ix_provider_models_name", "provider_id", "upstream_model", "api", unique=True),)
 
 
 class ApiKey(Base):
@@ -383,6 +480,10 @@ class ApiKey(Base):
     # The admin who set that limit on someone else's key (username); NULL: the owner may change it.
     rpm_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     tpm_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # May requests with this key go to cloud providers (1.2)? off: never (every key from before 1.2);
+    # fallback: only when a route spills from local; on: cloud-only models too.
+    cloud: Mapped[str] = mapped_column(String(8), default="off", server_default="off")
+    cloud_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -406,18 +507,26 @@ class UsageDaily(Base):
     user_id: Mapped[int] = mapped_column(Integer, default=0)
     username: Mapped[str] = mapped_column(String(64), default="")
     model: Mapped[str] = mapped_column(String(128))                       # the served name asked for
+    # Who answered: "local" (a deployment's replica) or "pm:<provider model id>" (1.2), so cost can
+    # be priced per provider model later.
+    target: Mapped[str] = mapped_column(String(32), default="local", server_default="local")
     deployment_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     requests: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[int] = mapped_column(Integer, default=0)               # answered with a 4xx/5xx
     limited: Mapped[int] = mapped_column(Integer, default=0)              # of which 429 from the key's limits
     prompt_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
     completion_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Of the prompt tokens, read from the provider's prompt cache; of the completion, reasoning.
+    cached_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    reasoning_tokens: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    # Requests that moved on from the first tier (local busy, unavailable or refusing).
+    spilled: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     latency_ms_sum: Mapped[int] = mapped_column(BigInteger, default=0)
     # Request counts per latency bucket (forgeyard/gateway/usage.py: BUCKETS_MS), for p50 / p95.
     latency_buckets: Mapped[list] = mapped_column(JSON, default=list)
 
     __table_args__ = (
-        Index("ix_usage_daily_slot", "day", "source", "key_id", "user_id", "model", unique=True),
+        Index("ix_usage_daily_slot", "day", "source", "key_id", "user_id", "model", "target", unique=True),
         Index("ix_usage_daily_user_day", "user_id", "day"),
         Index("ix_usage_daily_deployment_day", "deployment_id", "day"),
     )

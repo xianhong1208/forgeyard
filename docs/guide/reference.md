@@ -78,6 +78,26 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
 | `USAGE_FLUSH_SECONDS` | `5` | How often usage counted in memory is written to the database |
 
+### Cloud providers
+
+| Variable | Default | What it does |
+|---|---|---|
+| `GATEWAY_CLOUD_DEFAULT` | `off` | The cloud setting a new API key gets: `off`, `fallback` or `on`. Admins change it on **API keys** (stored in the database); existing keys keep theirs |
+| `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key. Admins may give any key anything |
+| `EGRESS_PROXY` | empty | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
+| `EGRESS_ALLOWED_HOSTS` | empty | Only these provider hosts, comma-separated (`*.example.org` for subdomains). Empty: any |
+| `EGRESS_CA_FILE` | empty | A CA file to trust for providers on top of the system's (a company proxy that inspects TLS) |
+| `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | Let providers outside your network use private or loopback addresses and plain http. For testing with a stand-in only; link-local and metadata addresses stay refused |
+| `PROVIDER_CONNECT_TIMEOUT` | `10` | Seconds to connect to a provider before trying the next target |
+| `PROVIDER_READ_TIMEOUT` | `300` | Seconds a provider may take for its answer's headers or the next piece of a stream (a provider can set its own) |
+| `PROVIDER_COOLDOWN_SECONDS` | `30` | A provider target that answered 429 or 5xx, or could not be reached, is tried last for this long (longer if its `Retry-After` says so, up to 5 minutes) |
+| `PROVIDER_RETRY_AFTER_CAP` | `2` | When no other target is left, a `Retry-After` up to this many seconds is waited for once |
+
+Request header `X-Forgeyard-Local-Only: 1`: never a cloud target for this request. Answer headers:
+`X-Forgeyard-Target` (`local:<deployment>#<replica>` or `provider:<provider>/<model>`),
+`X-Forgeyard-Spilled` (`unavailable`, `busy`, `refused` or `too_long`) when the request left the
+first tier, and `X-Forgeyard-Replica` for a local answer, as before.
+
 ## Agent settings
 
 The agent reads `/etc/forgeyard/agent.toml` when it exists (another file with `--config PATH` or

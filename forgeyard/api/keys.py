@@ -8,12 +8,16 @@ changing the defaults, are in the audit log.
 A limit an admin sets on someone else's key is locked: its owner can no longer change that value
 (they can still revoke the key, and change the other limit if no admin set it). The key shows who set
 it. An admin unlocks a limit by clearing it (null: back to the server's default, the owner's again).
+
+The same goes for a key's `cloud` setting (1.2): off (the default, and every key from before 1.2),
+fallback or on. A user may give their own key at most the server's cap; an admin's value on someone
+else's key is locked; null unlocks it and sets the server's default again.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
@@ -24,6 +28,7 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
 from forgeyard.api.tls import trust_page
 from forgeyard.db import ApiKey, Deployment, GatewayRoute, as_utc, get_db, utcnow
+from forgeyard.models import routes as mroutes
 from forgeyard.gateway import keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
 
@@ -31,6 +36,7 @@ router = APIRouter(prefix="/api", tags=["keys"])
 
 MAX_MODELS = 64
 MAX_LIMIT = 100_000_000
+Cloud = Literal["off", "fallback", "on"]
 
 
 class KeyIn(BaseModel):
@@ -40,6 +46,8 @@ class KeyIn(BaseModel):
     rpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
     tpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
     expires_in_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    # None: the server's default for new keys.
+    cloud: Optional[Cloud] = None
 
 
 class KeyPatchIn(BaseModel):
@@ -47,6 +55,12 @@ class KeyPatchIn(BaseModel):
     models: Optional[list[str]] = Field(default=None, max_length=MAX_MODELS)
     rpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
     tpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
+    cloud: Optional[Cloud] = None
+
+
+class CloudIn(BaseModel):
+    default: Cloud = "off"
+    max: Cloud = "off"
 
 
 class LimitsIn(BaseModel):
@@ -69,7 +83,7 @@ def key_status(k: ApiKey) -> str:
     return "active"
 
 
-LIMIT_NAMES = {"rpm": "requests-per-minute", "tpm": "tokens-per-minute"}
+LIMIT_NAMES = {"rpm": "requests-per-minute", "tpm": "tokens-per-minute", "cloud": "cloud"}
 
 
 def key_out(k: ApiKey, limits: dict) -> dict:
@@ -77,6 +91,7 @@ def key_out(k: ApiKey, limits: dict) -> dict:
     return {
         "id": k.public_id, "name": k.name, "prefix": k.prefix, "models": k.models,
         "rpm": k.rpm, "tpm": k.tpm, "rpm_locked_by": k.rpm_locked_by, "tpm_locked_by": k.tpm_locked_by,
+        "cloud": gkeys.cloud_level(k.cloud), "cloud_locked_by": k.cloud_locked_by,
         "effective_rpm": gkeys.effective(k.rpm, limits["default_rpm"], limits["max_rpm"]),
         "effective_tpm": gkeys.effective(k.tpm, limits["default_tpm"], limits["max_tpm"]),
         "expires_at": k.expires_at, "created_at": k.created_at, "last_used_at": k.last_used_at,
@@ -107,13 +122,16 @@ def _get(db: DbSession, key_id: str, caller: Caller) -> ApiKey:
     return k
 
 
-def _check_own(caller: Caller, owner_id: int, limits: dict, rpm: Optional[int], tpm: Optional[int]) -> None:
+def _check_own(caller: Caller, owner_id: int, limits: dict, rpm: Optional[int], tpm: Optional[int],
+               cloud: Optional[str] = None, cloud_cap: str = "on") -> None:
     if caller.user.role == "admin":
         return  # admins may give any key any limit
     for name, value, cap in (("rpm", rpm, limits["max_rpm"]), ("tpm", tpm, limits["max_tpm"])):
         problem = gkeys.check_own_limit(name, value, cap)
         if problem:
             raise fail(422, "over_cap", problem)
+    if cloud is not None and gkeys.cloud_above(cloud, cloud_cap):
+        raise fail(422, "over_cap", f"cloud: at most {cloud_cap!r} on your own keys; an admin can allow more")
 
 
 @router.get("/keys")
@@ -126,25 +144,27 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
     if not (all and admin):
         q = q.where(ApiKey.user_id == caller.user.id)
     limits = gkeys.get_limits(db)
-    routes = db.execute(select(GatewayRoute.served_name, GatewayRoute.api).order_by(GatewayRoute.served_name)).all()
+    rows = db.scalars(mroutes.query().order_by(GatewayRoute.served_name)).all()
     return {"keys": [key_out(k, limits) for k in db.scalars(q).all()], "limits": limits, "is_admin": admin,
-            "gateway_url": gateway_url(request), "trust_url": trust_page(request),
-            "models": [{"name": n, "api": a} for n, a in routes]}
+            "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
+            "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows]}
 
 
 @router.post("/keys", status_code=201)
 def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     limits = gkeys.get_limits(db)
-    _check_own(caller, caller.user.id, limits, body.rpm, body.tpm)
+    cloud_settings = gkeys.get_cloud(db)
+    _check_own(caller, caller.user.id, limits, body.rpm, body.tpm, body.cloud, cloud_settings["max"])
     models = _models(db, body.models)
+    cloud = body.cloud or cloud_settings["default"]
     raw, prefix, digest = gkeys.new_key()
     k = ApiKey(user_id=caller.user.id, name=body.name.strip(), prefix=prefix, hash=digest, models=models,
-               rpm=body.rpm, tpm=body.tpm,
+               rpm=body.rpm, tpm=body.tpm, cloud=cloud,
                expires_at=utcnow() + timedelta(days=body.expires_in_days) if body.expires_in_days else None)
     db.add(k)
     db.flush()
     audit.record(db, "api_key.created", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
-                 prefix=prefix, models=models, rpm=body.rpm, tpm=body.tpm, expires_at=k.expires_at.isoformat()
+                 prefix=prefix, models=models, rpm=body.rpm, tpm=body.tpm, cloud=cloud, expires_at=k.expires_at.isoformat()
                  if k.expires_at else None)
     db.commit()
     db.refresh(k)
@@ -158,30 +178,35 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
     k = _get(db, key_id, caller)
     own = k.user_id == caller.user.id
     fields = body.model_fields_set
-    if not own and fields - {"rpm", "tpm"}:
-        raise fail(403, "forbidden", "On someone else's key an admin changes only the limits.")
+    if not own and fields - {"rpm", "tpm", "cloud"}:
+        raise fail(403, "forbidden", "On someone else's key an admin changes only the limits and the cloud setting.")
     if k.revoked_at is not None:
         raise fail(409, "revoked", "This key was revoked.")
     limits = gkeys.get_limits(db)
     admin = caller.user.role == "admin"
-    fields_ = ("name", "models", "rpm", "tpm", "rpm_locked_by", "tpm_locked_by")
+    fields_ = ("name", "models", "rpm", "tpm", "cloud", "rpm_locked_by", "tpm_locked_by", "cloud_locked_by")
     before = {f: getattr(k, f) for f in fields_}
-    new = {name: getattr(body, name) for name in ("rpm", "tpm") if name in fields}
+    cloud_settings = gkeys.get_cloud(db)
+    new = {name: getattr(body, name) for name in ("rpm", "tpm", "cloud") if name in fields}
+    if "cloud" in new and new["cloud"] is None and not admin:
+        new["cloud"] = cloud_settings["default"]  # "the default", for a user
     if not admin:
         # Only values that change count: a form that sends a locked value back unchanged is fine.
         new = {name: v for name, v in new.items() if v != getattr(k, name)}
         for name in new:
             by = getattr(k, f"{name}_locked_by")
             if by:
-                raise fail(403, "limit_locked", f"An admin ({by}) set this key's {LIMIT_NAMES[name]} limit; only an "
-                                                "admin can change it. You can still revoke the key.")
-    _check_own(caller, k.user_id, limits, new.get("rpm"), new.get("tpm"))
+                what = "cloud setting" if name == "cloud" else f"{LIMIT_NAMES[name]} limit"
+                raise fail(403, "limit_locked", f"An admin ({by}) set this key's {what}; only an admin can change "
+                                                "it. You can still revoke the key.")
+    _check_own(caller, k.user_id, limits, new.get("rpm"), new.get("tpm"), new.get("cloud"), cloud_settings["max"])
     if "name" in fields and body.name:
         k.name = body.name.strip()
     if "models" in fields:
         k.models = _models(db, body.models)
     for name, value in new.items():
-        setattr(k, name, value)
+        # A key always has a cloud setting: clearing it means the server's default for new keys.
+        setattr(k, name, cloud_settings["default"] if name == "cloud" and value is None else value)
         if admin:
             # On someone else's key an admin's value is locked for its owner; clearing it unlocks.
             # On their own key there is nobody to lock it against.
@@ -189,8 +214,9 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
     after = {f: getattr(k, f) for f in fields_}
     changed = {f: {"before": before[f], "after": after[f]} for f in before if before[f] != after[f]}
     if changed:
-        locked = [n for n in ("rpm", "tpm") if after[f"{n}_locked_by"] and after[f"{n}_locked_by"] != before[f"{n}_locked_by"]]
-        unlocked = [n for n in ("rpm", "tpm") if before[f"{n}_locked_by"] and not after[f"{n}_locked_by"]]
+        names = ("rpm", "tpm", "cloud")
+        locked = [n for n in names if after[f"{n}_locked_by"] and after[f"{n}_locked_by"] != before[f"{n}_locked_by"]]
+        unlocked = [n for n in names if before[f"{n}_locked_by"] and not after[f"{n}_locked_by"]]
         audit.record(db, "api_key.changed", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
                      owner=k.user.username if k.user else None, changes=changed, locked=locked or None,
                      unlocked=unlocked or None)
@@ -227,6 +253,21 @@ def set_key_limits(body: LimitsIn, caller: Caller = Depends(require_admin), db: 
     audit.record(db, "api_key_limits.changed", actor=caller.user, ip=caller.ip, before=before, after=after)
     db.commit()
     return {"limits": after}
+
+
+@router.put("/keys/cloud")
+def set_key_cloud(body: CloudIn, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """The cloud setting a new key gets, and the most a user may give their own key. Existing keys keep
+    theirs: raising the default never sends anything out for a key that was off."""
+    if gkeys.cloud_above(body.default, body.max):
+        raise fail(422, "default_over_max", "The default for new keys cannot be more than what users may choose.")
+    before = gkeys.get_cloud(db)
+    gkeys.set_cloud(db, body.model_dump(), caller.user.username)
+    db.flush()
+    after = gkeys.get_cloud(db)
+    audit.record(db, "api_key_cloud.changed", actor=caller.user, ip=caller.ip, before=before, after=after)
+    db.commit()
+    return {"cloud": after}
 
 
 # ------------------------------------------------------------------ usage

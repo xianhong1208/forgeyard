@@ -181,6 +181,25 @@ Others: `404 model_not_found` (no deployment with that model name: see `/v1/mode
 replica could not be reached or refused its internal key: usually its agent restarted; it recovers
 within seconds), `504` (no answer within `GATEWAY_READ_TIMEOUT`, 600 s by default).
 
+### Errors from cloud providers
+
+A model that goes to a cloud provider adds these. The answer's `X-Forgeyard-Target` says whether a
+provider answered.
+
+- `404 model_not_found` for a model listed on **Models**: it is cloud-only, and the key's cloud
+  setting is not **Allowed**.
+- `400 cloud_only_model`: the request had `X-Forgeyard-Local-Only: 1` (or the route is
+  **Local only**), but the model is served only by a cloud provider.
+- `502 provider_auth_failed`: the provider refused Forgeyard's key for it; an admin fixes it on
+  **Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
+  `502 provider_redirect`: the provider answered with a redirect, which is never followed; check its
+  base URL.
+- `429 provider_rate_limited`: every target of the cloud tier was rate limited; wait for
+  `Retry-After`.
+- Any other 4xx keeps the provider's status, code and message, prefixed with the provider's name.
+
+More in [Cloud providers](cloud-providers.md#troubleshooting).
+
 ## Agent in a container without systemd
 
 **You see:** process workloads fail to start, and the agent's log mentions `systemd-run` or

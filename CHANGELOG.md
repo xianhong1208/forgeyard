@@ -6,6 +6,53 @@ version until 1.0.
 
 ## [Unreleased]
 
+Cloud model APIs behind the same gateway, local first (1.2, part A: providers and tiered routing;
+cost and budgets come in part B).
+
+### Added
+- **Cloud providers** (admins, page **Providers**): OpenAI, Anthropic, Google Gemini, Azure OpenAI (v1
+  API), OpenRouter, or any OpenAI-compatible server, each through its own OpenAI-compatible endpoint,
+  with a small quirks table per kind (how the key is sent, engine-only parameters dropped, `max_tokens`
+  as `max_completion_tokens` for OpenAI and Azure, Gemini's `models/` prefix, usage read back with
+  cached and reasoning tokens). No native translators and no LiteLLM. The provider key is encrypted at
+  rest, write-only (the last four characters are shown), never logged, audited or returned, and never
+  copied by **Clone**. **Test connection** asks the configured base URL for `/models`; **Import from
+  /models** lists what can be added. A provider can be marked as inside your network (a vLLM on your
+  VPN): then it does not count as cloud.
+- **Tiered routes.** A model name at `/v1` has targets in tiers: local deployments and provider models,
+  with weights. Admins add a cloud tier to a deployment's route (**Routing and cloud spill**) or make
+  routes of their own, such as a cloud-only model (**Models → Routes and cloud**).
+- **Spill rules**, only before the first byte: to the next tier when the local tier is unavailable, busy
+  (every replica at its deployment's concurrency; optional `wait_ms`) or answers 429/503; a prompt too
+  long for the local context only when the route opts in. Never on other errors, a timeout after
+  sending, a refused internal key, a client that went away, or mid-stream; a busy request whose cloud
+  tier fails waits for local after all. Within a cloud tier: the next target on 429, 5xx or no
+  connection, a 30 s cooldown, one short Retry-After wait (≤ 2 s).
+- **A key's cloud setting**: Never (default; every existing key), Only to spill, Allowed. Cloud-only
+  models are 404 and unlisted for keys that may not use them. Admins set the default and the most
+  people may give their own keys (**API keys → Cloud for keys**); an admin's value on someone else's
+  key is locked, like limits. The Playground lists only what the person may use (admins: everything)
+  and shows who answered; its **Local only** box sends `X-Forgeyard-Local-Only: 1`.
+- Headers: request `X-Forgeyard-Local-Only: 1`; answers `X-Forgeyard-Target`
+  (`local:<deployment>#<replica>` or `provider:<provider>/<model>`) and `X-Forgeyard-Spilled`.
+- **Egress rules** for providers: their own HTTP client, TLS verified, redirects never followed, no
+  proxy from the environment (`EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS`, `EGRESS_CA_FILE`), https only,
+  public addresses only for cloud providers, link-local and metadata addresses always refused, the
+  checked address is the one connected to.
+- Usage per target (**Usage → Local or cloud**), with cached and reasoning tokens and spilled requests;
+  provider models carry nullable prices for part B.
+- Guide page **Cloud providers** (en, zh-TW): each provider, what each endpoint cannot do, the spill
+  rules, the key setting, egress, troubleshooting. Settings `GATEWAY_CLOUD_DEFAULT`,
+  `GATEWAY_CLOUD_MAX`, `EGRESS_*` and `PROVIDER_*`.
+
+### Changed
+- Migration `0009_providers`: every route becomes one tier-0 target (its deployment, the same upstream
+  model name), so existing routes behave exactly as before; `api_keys.cloud` is `off` for every
+  existing key; usage rows get a target. The downgrade keeps deployments' routes and drops providers.
+- `GET /api/routes` returns each route's targets, tiers and flags, and whether the signed-in person may
+  use it; route management moved to `/api/routes/*` and `/api/route-options`.
+- `python -m forgeyard secrets reset` also drops provider keys it cannot read.
+
 ## [1.1.1] — 2026-11-11
 
 AMD on real hardware. Fixed against a real Strix Halo machine (Radeon 8060S, gfx1151 APU, ROCm 7.0.2, amd-smi 26.0.2), where the agent image now reads the card fully through the amdsmi library.

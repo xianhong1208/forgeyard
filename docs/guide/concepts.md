@@ -114,11 +114,30 @@ that only the gateway knows, and the agent refuses every other request on the re
 - **Usage** counts requests, errors, tokens and latency per day, model, key and person. Everyone
   sees their own; admins see everyone's. It counts, it does not bill.
 
+## Cloud providers and tiers
+
+- A **provider** is a model API outside Forgeyard (OpenAI, Anthropic, Gemini, Azure OpenAI,
+  OpenRouter, or an OpenAI-compatible server of yours). Admins add it with its key, which is stored
+  encrypted and never shown again.
+- Each model name at `/v1` is a **route**. A route has **targets** in **tiers**: local deployments
+  and providers' models. A deployment's own route starts with one tier, the deployment. An admin
+  can add a cloud model as a second tier, or make a route that is only a cloud model.
+- **Local first.** A request goes to the next tier only before its answer starts, and only when the
+  local tier is unavailable, **busy** (every replica at its deployment's *Concurrent requests*), or
+  answers 429 or 503. A prompt too long for the local context spills only if the route says so.
+- Each API key's **cloud** setting decides whether its requests may leave your network: **Never**
+  (the default, and every key from before 1.2), **Only to spill**, or **Allowed** (cloud-only models
+  too). A route marked **Local only**, and a request with `X-Forgeyard-Local-Only: 1`, never leave
+  either.
+- Answers name who served them in `X-Forgeyard-Target`. Usage counts local and cloud apart.
+
+[Cloud providers](cloud-providers.md) has the details for each provider.
+
 ## Roles
 
 | Role | Can |
 |---|---|
-| `admin` | everything: users, machines and their GPU access, the model catalog and recipes, the audit log, everyone's keys and limits |
+| `admin` | everything: users, machines and their GPU access, the model catalog and recipes, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
 | `operator` | run workloads and deploy models; everything a user can |
 | `user` | look around, use deployed models in the Playground and with their own API keys, see their own usage |
 
