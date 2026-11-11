@@ -60,7 +60,7 @@ def gguf_header(meta: dict) -> bytes:
 def vl_meta(**over) -> dict:
     meta = _st_meta("Qwen/Qwen3-VL-4B-Instruct", QWEN4B_REV, "qwen3-4b.config.json", 4022468096, 8044936192,
                     3633315840)
-    meta.update(modalities=["image", "video"], license="apache-2.0", **over)
+    meta.update(modalities=["image", "video"], license="apache-2.0", vision_tile_px=32, **over)
     return meta
 
 
@@ -630,9 +630,11 @@ def test_fy_mm_018_a_gguf_repository_with_projectors(owner, monkeypatch):
 
 def test_fy_mm_019_a_safetensors_vision_model_is_recognised(owner, monkeypatch):
     """FY-MM-019: config.json with vision_config and video tokens, plus video_preprocessor_config.json:
-    image and video; the licence comes from a license: tag when the card has none."""
+    image and video; the licence comes from a license: tag when the card has none; the vision tower's
+    patch and merge sizes give the pixels per image token."""
     config = json.loads((FIX / "qwen3-4b.config.json").read_text())
-    config.update(vision_config={"depth": 24}, image_token_id=1, video_token_id=2)
+    config.update(vision_config={"depth": 24, "patch_size": 16, "spatial_merge_size": 2}, image_token_id=1,
+                  video_token_id=2)
     header = {"model.embed_tokens.weight": {"dtype": "BF16", "shape": [16, 8], "data_offsets": [0, 256]}}
     files = {"config.json": json.dumps(config).encode(), "model.safetensors": safetensors_bytes(header, bytes(256)),
              "video_preprocessor_config.json": b"{}"}
@@ -647,6 +649,11 @@ def test_fy_mm_019_a_safetensors_vision_model_is_recognised(owner, monkeypatch):
         assert r.status_code == 201, r.text
         m = r.json()["model"]
         assert m["modalities"] == ["image", "video"] and m["license"] == "mit" and m["mmproj"] is None
+        db = new_session()
+        try:   # 1.3: pixels per image token, for vLLM's image-token cap (FY-MM-025)
+            assert db.query(CatalogModel).filter_by(name="tiny-vl").one().meta["vision_tile_px"] == 32
+        finally:
+            db.close()
     finally:
         hf.close()
 
@@ -768,3 +775,34 @@ def test_fy_mm_024_the_recorder_sums_units():
     finally:
         db.close()
     assert (total["media_items"], total["characters"], total["images"], total["requests"]) == (5, 7, 0, 4)
+
+
+
+def test_fy_mm_025_vllm_scales_large_images_down_for_qwen_vl(mm):
+    """FY-MM-025: for a vision tower whose tokens grow with the resolution (Qwen-VL: patch 16, merge 2,
+    so 32x32 pixels a token) vLLM gets --mm-processor-kwargs max_pixels = image_tokens x 32 x 32, from the
+    recipe's default (1,024) or the deployment's value; a model without that metadata, or a text model,
+    gets none. Unscaled, a 5 MB photo was 16,244 tokens on a real A100 and refused by an 8,192 context."""
+    from forgeyard.models import catalog, render
+    args = replica_spec("vl")["runtime"]["args"]
+    assert json.loads(args[args.index("--mm-processor-kwargs") + 1]) == {"max_pixels": 1024 * 32 * 32}
+    assert "--mm-processor-kwargs" not in replica_spec("txt")["runtime"]["args"]
+    assert modalities.vision_tile_px({"vision_config": {"patch_size": 16, "spatial_merge_size": 2}}) == 32
+    assert modalities.vision_tile_px({"thinker_config": {"vision_config": {"patch_size": 14, "spatial_merge_size": 2}}}) == 28
+    assert modalities.vision_tile_px({"vision_config": {"patch_size": 14}}) == 0          # Gemma-like: fixed tokens
+    assert modalities.vision_tile_px({"vision_config": {"patch_size": "16", "spatial_merge_size": 2}}) == 0
+    db = new_session()
+    try:
+        d = db.query(Deployment).filter_by(name="vl").one()
+        d.params = {**d.params, "image_tokens": 256}
+        ctx = catalog.context_for(db, d)
+        cards = [a for a in db.query(Accelerator).all() if a.index == 4 and a.vendor == "nvidia"][:1]
+        out = render.render(ctx, ctx.recipe.variants[0], cards, "vl-0", gpu_context=400 * 1024**2)
+        a = out["runtime"]["args"]
+        assert json.loads(a[a.index("--mm-processor-kwargs") + 1]) == {"max_pixels": 256 * 32 * 32}
+        ctx.model.meta = {k: v for k, v in ctx.model.meta.items() if k != "vision_tile_px"}   # inspected before 1.3
+        out = render.render(ctx, ctx.recipe.variants[0], cards, "vl-0", gpu_context=400 * 1024**2)
+        assert "--mm-processor-kwargs" not in out["runtime"]["args"]
+        db.rollback()
+    finally:
+        db.close()

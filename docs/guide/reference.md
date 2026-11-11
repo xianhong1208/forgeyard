@@ -297,7 +297,7 @@ The deployment parameters, under **Advanced** in the deploy form (recipes `vllm`
 | `images` (*Images per request*) | `4` | The most images, and audio clips, one request may carry; 0 turns them off. Passed to vLLM in `--limit-mm-per-prompt` |
 | `videos` (*Videos per request*) | `0` | Video is off until this is 1 or more. On vLLM it reserves memory for a long video at startup |
 | `max_body_mb` (*Largest request*) | `64` | The largest request the gateway sends this deployment, in MiB (413 above) |
-| `image_tokens` (*Largest image*, `llama-cpp` only) | `1024` | Each image is scaled down to at most this many tokens (`--image-max-tokens`; about 1024 × 1024 pixels on Qwen3-VL). Without it a 5 MB photo became about 4,000 tokens: 125 s on 8 CPU threads, nearly a whole 4,096-token context |
+| `image_tokens` (*Largest image*) | `1024` | Each image is scaled down to at most this many tokens: about 1024 × 1024 pixels on Qwen3-VL. On `llama-cpp` through `--image-max-tokens`; on `vllm` through `--mm-processor-kwargs` `max_pixels`, for models whose image tokens grow with the resolution (Qwen-VL; Gemma takes a fixed number per image). Without it a 5 MB photo became about 4,000 tokens on llama.cpp (125 s on 8 CPU threads) and about 16,000 on vLLM, more than an 8,192-token context. A model added before this setting existed is not capped on vLLM until it is added again |
 
 A recipe without these parameters gets 4 images or audio clips, no video and `GATEWAY_MAX_BODY_MB`.
 
