@@ -62,6 +62,10 @@ params:
   images: {type: int, default: 4, min: 0, max: 64, advanced: true, label: Images per request,
            help: "For models that take images: the most images (and audio clips) one request may carry. 0 turns
              them off."}
+  image_tokens: {type: int, default: 1024, min: 64, max: 16384, advanced: true, label: Largest image (tokens),
+                 help: "For models whose image tokens grow with the resolution (Qwen-VL): larger images are scaled
+                   down to at most this many tokens. Unscaled, a phone photo takes about 16,000 tokens, more
+                   than a usual context."}
   videos: {type: int, default: 0, min: 0, max: 8, advanced: true, label: Videos per request,
            help: "For models that take video. Off (0) by default: with video on, vLLM reserves memory for a long
              video at startup, which leaves less for the KV cache."}
@@ -77,6 +81,10 @@ media: {inputs: [image, audio, video], files: false}
 optional_args:
   - if: {quantization: fp8}
     args: [--quantization, fp8]
+  # vLLM hands these to the model's processor (Qwen2VLImageProcessor's max_pixels): measured on an A100,
+  # a 5 MB photo went from about 16,000 tokens (refused by an 8,192 context) to 1,014.
+  - if_model: image_pixels
+    args: [--mm-processor-kwargs, '{"max_pixels":{image_max_pixels}}']
 env:
   VLLM_MEDIA_URL_ALLOW_REDIRECTS: "0"
   HF_HUB_OFFLINE: "1"

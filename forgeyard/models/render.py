@@ -40,6 +40,9 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
         # The projector file of a GGUF vision model (1.3), next to the model file in its directory.
         "mmproj_file": f"${{MODEL_PATH}}/{mmproj_path(meta)}" if mmproj_path(meta) else "",
     })
+    # The largest image in pixels for an image-token cap, where tokens grow with the resolution.
+    tile = int(meta.get("vision_tile_px") or 0)
+    out["image_max_pixels"] = int(out.get("image_tokens") or 0) * tile * tile
     if variant.gpu and cards:
         total = min(int(a.vram_total or 0) for a in cards)
         out["gpu_util"] = f"{gpu_memory_utilization(ctx.estimate.per_gpu, total, gpu_context):.3f}"
@@ -58,6 +61,8 @@ def model_has(ctx: Context, feature: str) -> bool:
     meta = ctx.model.meta or {}
     if feature == "mmproj":
         return bool(mmproj_path(meta))
+    if feature == "image_pixels":
+        return bool(meta.get("vision_tile_px")) and "image" in (modalities.of_model(meta, ctx.model.format) or [])
     return feature in (modalities.of_model(meta, ctx.model.format) or [])
 
 

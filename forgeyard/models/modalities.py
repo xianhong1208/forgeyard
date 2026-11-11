@@ -47,6 +47,18 @@ def from_config(config: dict, paths: list[str]) -> list[str]:
     return out
 
 
+def vision_tile_px(config: dict) -> int:
+    """The side in pixels of the square one image token covers, for vision towers whose token count
+    grows with the image's resolution (Qwen2-VL, Qwen2.5-VL, Qwen3-VL: patch_size x spatial_merge_size);
+    0 for the others (Gemma and similar take a fixed number of tokens per image)."""
+    for c in (config, config.get("thinker_config") if isinstance(config.get("thinker_config"), dict) else {}):
+        v = c.get("vision_config") if isinstance(c.get("vision_config"), dict) else {}
+        patch, merge = v.get("patch_size"), v.get("spatial_merge_size")
+        if isinstance(patch, int) and isinstance(merge, int) and 0 < patch <= 64 and 0 < merge <= 8:
+            return patch * merge
+    return 0
+
+
 def from_mmproj(metadata: dict) -> list[str]:
     """Media a llama.cpp projector (mmproj GGUF) adds: vision means images and video."""
     out = []
