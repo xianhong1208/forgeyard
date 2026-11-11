@@ -135,6 +135,7 @@ project.
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
+| `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](docs/guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
