@@ -84,11 +84,11 @@ Two pull requests (the second in two parts):
    Anthropic, Gemini, Azure OpenAI, OpenRouter, any compatible server) with a quirks table, no LiteLLM;
    tiered routes; the spill rules; the per-key cloud setting; egress rules; usage per target.
 2. **Cost and budgets** (PR B), in two parts:
-   - B1, `cost` (in review): prices per provider model (entered by hand, or refreshed from
+   - ✅ B1, `cost` (PR #19): prices per provider model (entered by hand, or refreshed from
      OpenRouter's catalogue with a diff to accept), the cost of each request stored in micro-dollars,
      and **Usage → Cost**;
-   - B2: monthly budgets (UTC calendar month) per key, person and provider with reservation, alerts at
-     80% and 100%.
+   - ✅ B2, `budgets` (in review): monthly budgets (UTC calendar month) per key, person and provider
+     with reservation, alerts at 80% and 100%.
 
 Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
 and thinking.
