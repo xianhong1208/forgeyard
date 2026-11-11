@@ -12,7 +12,6 @@ name: Publish images
 on:
   push:
     tags: ["v*"]
-    branches: [docker-images]  # TEMPORARY: prove the workflow before it reaches main; removed again
   workflow_dispatch:
 
 permissions:
