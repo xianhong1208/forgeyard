@@ -116,7 +116,7 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
 
 1. ✅ **Multimodal chat** (#4): images in chat on vLLM and llama.cpp (projector files), video
    opt-in, the usage units for all of 1.3.
-2. *In review:* llama.cpp bump to a current build (b12242), with a built-in Vulkan variant for AMD
+2. *In review* (#9): llama.cpp bump to a current build (b12242), with a built-in Vulkan variant for AMD
    APUs and the cards the ROCm image lacks.
 3. Text-to-speech (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp on AMD, speaches
    for small English voices on CPU and CUDA. Voice cloning stays off.
