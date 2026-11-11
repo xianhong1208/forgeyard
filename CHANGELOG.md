@@ -135,6 +135,12 @@ through the gateway, and the usage units for all of 1.3.
   NVML stays on both. It now carries OCI labels (source, licence, version, revision).
 
 ### Fixed
+- **Video on llama.cpp** read 4 frames a second (llama-server's default), so a 6-second 720p clip took
+  about 11,500 tokens and overran a 4,096-token context (found on a real CPU machine). The `llama-cpp`
+  recipe gets *Video frames per second* (`video_fps`, 1 by default, advanced).
+- `scripts/accept_mm.py` covers every medium on both engines: `--video-url sample` (a 6.5 MB clip) and
+  an audio model for llama.cpp (Qwen2.5-Omni-3B GGUF); a model name with a dot no longer makes an
+  invalid deployment name.
 - **Large images on vLLM:** a phone photo sent to Qwen3-VL on vLLM became about 16,000 tokens and
   was refused by an 8,192-token context (found on a real A100). vLLM now gets the same *Largest image*
   cap as llama.cpp (`image_tokens`, 1,024 by default) as `--mm-processor-kwargs` `max_pixels`, for

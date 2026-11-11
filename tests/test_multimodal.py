@@ -484,6 +484,7 @@ def test_fy_mm_014_vllm_is_hardened_and_old_deployments_render(mm):
     g = replica_spec("vlg")["runtime"]["args"]
     assert g[g.index("--mmproj") + 1] == "${MODEL_PATH}/mmproj-Qwen3VL-2B-Instruct-F16.gguf"
     assert g[g.index("--image-max-tokens") + 1] == "1024"
+    assert float(g[g.index("--video-fps") + 1]) == 1.0          # llama-server's own default (4) overran 4,096 tokens
     assert "--mmproj" not in replica_spec("txt")["runtime"]["args"]
     assert "--image-max-tokens" not in replica_spec("txt")["runtime"]["args"]
     pooling, _ = recipes.builtin_recipes()["vllm-pooling"]
