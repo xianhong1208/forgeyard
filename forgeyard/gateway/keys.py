@@ -130,6 +130,17 @@ def cloud_above(value: str, cap: str) -> bool:
     return CLOUD_LEVELS.index(cloud_level(value)) > CLOUD_LEVELS.index(cloud_level(cap))
 
 
+def effective_cloud(key: ApiKey, user: Optional[User], cap: str) -> str:
+    """What a key may do with the cloud right now: its own setting, at most the server's current cap
+    for the keys people set themselves. Lowering the cap takes effect at once, and raising it again
+    gives those keys their own setting back. An admin's value (locked for the owner) and an admin's
+    own key are not capped: admins may set any key."""
+    level = cloud_level(key.cloud)
+    if key.cloud_locked_by or (user is not None and user.role == "admin"):
+        return level
+    return cloud_level(cap) if cloud_above(level, cap) else level
+
+
 def console_cloud(db: DbSession, user: User) -> str:
     """The playground's cloud setting: admins on; others what they could give their own key."""
     return "on" if user.role == "admin" else get_cloud(db)["max"]
@@ -190,5 +201,6 @@ def authenticate(db: DbSession, authorization: Optional[str], *, now: Optional[d
     return KeyCaller(source="api", user_id=user.id, username=user.username, key_id=key.id, key_name=key.name,
                      models=list(key.models) if key.models is not None else None,
                      rpm=effective(key.rpm, limits["default_rpm"], limits["max_rpm"]),
-                     tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]), cloud=cloud_level(key.cloud),
+                     tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]),
+                     cloud=effective_cloud(key, user, get_cloud(db)["max"]),
                      budget_micros=key.budget_micros, user_budget_micros=user.budget_micros)

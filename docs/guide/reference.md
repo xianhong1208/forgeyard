@@ -83,7 +83,7 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | Variable | Default | What it does |
 |---|---|---|
 | `GATEWAY_CLOUD_DEFAULT` | `off` | The cloud setting a new API key gets: `off`, `fallback` or `on`. Admins change it on **API keys** (stored in the database); existing keys keep theirs |
-| `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key. Admins may give any key anything |
+| `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key, also applied to existing keys on every request. Admins may give any key anything |
 | `EGRESS_PROXY` | empty | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
 | `EGRESS_ALLOWED_HOSTS` | empty | Only these provider hosts, comma-separated (`*.example.org` for subdomains). Empty: any |
 | `EGRESS_CA_FILE` | empty | A CA file to trust for providers on top of the system's (a company proxy that inspects TLS) |

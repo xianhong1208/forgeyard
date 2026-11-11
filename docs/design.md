@@ -448,8 +448,10 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   has a deployment or a provider inside your network, so not in the same tier as the local one) /
   `on` (cloud-only models too). A cloud-only model is 404 and unlisted for `off` and `fallback` keys.
   Admins set the default and the most a user may give their own key (`GATEWAY_CLOUD_DEFAULT` and
-  `GATEWAY_CLOUD_MAX` at first, then stored; the default may not be above the most; changing them
-  changes no existing key; audit `api_key_cloud.changed`). An admin's value on someone else's key is
+  `GATEWAY_CLOUD_MAX` at first, then stored; the default may not be above the most; audit
+  `api_key_cloud.changed`). Changing them rewrites no key, but the most is applied on every request: a
+  person's own key set above it works at the most (`effective_cloud` in the key list) until it is
+  raised again; an admin's locked value and an admin's own key are not capped. An admin's value on someone else's key is
   locked, like limits; a user who clears their key's value gets the default. A provider marked as
   inside your network (a vLLM on your VPN) is not cloud. A route marked `local_only` and a request with
   `X-Forgeyard-Local-Only: 1` (or `true`, `yes`, `on`) never use cloud targets. Only chat,

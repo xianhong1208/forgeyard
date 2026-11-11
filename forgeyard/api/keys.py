@@ -104,13 +104,14 @@ def budget_out(budget: Optional[int], spent: int, reserved: int) -> dict:
     return {"budget_micros": budget, "spent_micros": spent, "reserved_micros": reserved, "used": used, "level": level}
 
 
-def key_out(k: ApiKey, limits: dict, spend: Optional[gbudgets.Spend] = None) -> dict:
+def key_out(k: ApiKey, limits: dict, spend: Optional[gbudgets.Spend] = None, *, cloud_cap: str = "on") -> dict:
     requests, tokens = key_limiter.used(k.id)
     spend = spend or gbudgets.ledger.snapshot()
     return {
         "id": k.public_id, "name": k.name, "prefix": k.prefix, "models": k.models,
         "rpm": k.rpm, "tpm": k.tpm, "rpm_locked_by": k.rpm_locked_by, "tpm_locked_by": k.tpm_locked_by,
         "cloud": gkeys.cloud_level(k.cloud), "cloud_locked_by": k.cloud_locked_by,
+        "effective_cloud": gkeys.effective_cloud(k, k.user, cloud_cap),
         "effective_rpm": gkeys.effective(k.rpm, limits["default_rpm"], limits["max_rpm"]),
         "effective_tpm": gkeys.effective(k.tpm, limits["default_tpm"], limits["max_tpm"]),
         "expires_at": k.expires_at, "created_at": k.created_at, "last_used_at": k.last_used_at,
@@ -168,7 +169,8 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
     rows = db.scalars(mroutes.query().order_by(GatewayRoute.served_name)).all()
     spend = gbudgets.ledger.snapshot()
     me = caller.user
-    return {"keys": [key_out(k, limits, spend) for k in db.scalars(q).all()], "limits": limits, "is_admin": admin,
+    cap = gkeys.get_cloud(db)["max"]
+    return {"keys": [key_out(k, limits, spend, cloud_cap=cap) for k in db.scalars(q).all()], "limits": limits, "is_admin": admin,
             "month": spend.month, "resets_at": gbudgets.resets_at(spend.month),
             "person_budget": budget_out(me.budget_micros, spend.spent.get(("person", me.id), 0),
                                         spend.held.get(("person", me.id), 0)),
@@ -196,7 +198,7 @@ def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current),
     db.commit()
     db.refresh(k)
     # The only time the key itself leaves the server.
-    return {"key": raw, "api_key": key_out(k, limits), "gateway_url": gateway_url(request),
+    return {"key": raw, "api_key": key_out(k, limits, cloud_cap=gkeys.get_cloud(db)["max"]), "gateway_url": gateway_url(request),
             "trust_url": trust_page(request)}
 
 
@@ -249,7 +251,7 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
                      unlocked=unlocked or None)
     db.commit()
     db.refresh(k)
-    return {"api_key": key_out(k, limits)}
+    return {"api_key": key_out(k, limits, cloud_cap=gkeys.get_cloud(db)["max"])}
 
 
 @router.delete("/keys/{key_id}")
@@ -263,7 +265,7 @@ def revoke_key(key_id: str, caller: Caller = Depends(current), db: DbSession = D
                      prefix=k.prefix, owner=k.user.username if k.user else None)
         db.commit()
     db.refresh(k)
-    return {"api_key": key_out(k, gkeys.get_limits(db))}
+    return {"api_key": key_out(k, gkeys.get_limits(db), cloud_cap=gkeys.get_cloud(db)["max"])}
 
 
 @router.get("/keys/limits")

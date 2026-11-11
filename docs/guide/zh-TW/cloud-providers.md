@@ -102,6 +102,7 @@ curl https://192.168.1.20:7860/v1/chat/completions \
 
 - 1.2 以前建立的金鑰一律是 **Never**。新金鑰會拿到伺服器的預設值，除非管理員改過，否則是 **Never**。
 - 每個人能替自己的金鑰設定的值，最多到 **The most people may give their own keys** 的設定，除非管理員調高，否則是 **Never**。兩者都在 **API keys** 的 **Cloud for keys**。
+- 調低 **The most people may give their own keys** 會立刻生效：設得比較高的個人金鑰，從下一個請求起就照新的上限運作（API keys 表格會在旁邊顯示「now …（server maximum）」），之後把上限調回來，金鑰原本的設定也會恢復。管理員設定的值，以及管理員自己的金鑰，不受影響。
 - 管理員可以設定任何金鑰的雲端設定。設在別人的金鑰上時，這個值會像限制一樣對擁有者**鎖定**。**Unlock cloud** 會把它還原成預設值。
 - 在你網路內的供應商（沒有勾選 *Outside your network*）不算雲端：每把金鑰都能使用。
 - 在 **Playground** 裡，管理員可以使用雲端；其他人則拿到他們能替金鑰設定的最大值。

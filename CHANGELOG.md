@@ -90,6 +90,9 @@ part B1: cost tracking and prices; part B2: budgets).
   remembered in the browser. No more hand-editing the command.
 
 ### Changed
+- Lowering *The most people may give their own keys* applies at once to people's own keys set higher:
+  they work at the new maximum on every request (the API keys table shows it), and get their own
+  setting back when it is raised. An admin's value and admins' own keys are not capped.
 - Migration `0009_providers`: every route becomes one tier-0 target (its deployment, the same upstream
   model name), so existing routes behave exactly as before; `api_keys.cloud` is `off` for every
   existing key; usage rows get a target. The downgrade keeps deployments' routes and drops providers.

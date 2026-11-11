@@ -153,6 +153,10 @@ Each API key has a **cloud** setting:
   unless an admin changes it.
 - People may give their own keys at most the setting **The most people may give their own keys**, which is
   **Never** unless an admin raises it. Both are under **API keys**, then **Cloud for keys**.
+- Lowering **The most people may give their own keys** applies at once: a person's key set higher works
+  at the new maximum from the next request (the API keys table shows "now … (server maximum)" next to
+  it), and gets its own setting back when the maximum is raised again. Values an admin set, and admins'
+  own keys, are not affected.
 - An admin can set any key's cloud setting. On someone else's key the value is then **locked** for
   its owner, as limits are. **Unlock cloud** gives it back the default.
 - A provider inside your network (not ticked *Outside your network*) is not cloud: every key may use

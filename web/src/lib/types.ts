@@ -287,7 +287,7 @@ export type ApiKey = {
   id: string; name: string; prefix: string; models: string[] | null; rpm: number | null; tpm: number | null;
   // The admin who set that limit on someone else's key: locked for its owner.
   rpm_locked_by?: string | null; tpm_locked_by?: string | null;
-  cloud: CloudLevel; cloud_locked_by?: string | null;
+  cloud: CloudLevel; cloud_locked_by?: string | null; effective_cloud?: CloudLevel;
   effective_rpm: number | null; effective_tpm: number | null; expires_at: string | null; created_at: string;
   last_used_at: string | null; revoked_at: string | null; revoked_by: string | null; status: "active" | "revoked" | "expired";
   user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };

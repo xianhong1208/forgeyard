@@ -320,8 +320,9 @@ Kong 與 GPUStack 之後決定。
 - **誰可以把資料送出去。** 每把 API key 有 `cloud` = `off`（1.2 以前的每把 key，也是預設值）／`fallback`（只能當溢出目標：
   雲端目標只用在某一層之後，而那一層要有部署或網路內的供應商，所以不會和本機在同一層）／`on`（也包括只有雲端的模型）。對 `off`
   與 `fallback` 的 key，只有雲端的模型會回 404 且不會列出。admin 設定預設值與一般人替自己的 key 能設的上限（一開始取自
-  `GATEWAY_CLOUD_DEFAULT` 與 `GATEWAY_CLOUD_MAX`，之後存在資料庫；預設值不能高於上限；修改它們不會改到既有的 key；稽核紀錄
-  `api_key_cloud.changed`）。admin 替別人的 key 設的值會像限制一樣鎖定；使用者清空自己 key 的值時會拿到預設值。標示在你網路內的
+  `GATEWAY_CLOUD_DEFAULT` 與 `GATEWAY_CLOUD_MAX`，之後存在資料庫；預設值不能高於上限；稽核紀錄 `api_key_cloud.changed`）。
+  修改它們不會改寫任何 key，但上限在每個請求都會套用：個人自己設得比上限高的 key，會照上限運作（key 清單裡的
+  `effective_cloud`），直到上限調回來；admin 鎖定的值和 admin 自己的 key 不受上限限制。admin 替別人的 key 設的值會像限制一樣鎖定；使用者清空自己 key 的值時會拿到預設值。標示在你網路內的
   供應商（VPN 上的 vLLM）不算雲端。標示 `local_only` 的路由與帶 `X-Forgeyard-Local-Only: 1`（或 `true`、`yes`、`on`）的請求絕不
   使用雲端目標。只有 chat、completions 與 embeddings 會送到供應商。回應帶 `X-Forgeyard-Target`，溢出時另有 `X-Forgeyard-Spilled`
   （`unavailable`、`busy`、`refused`、`too_long` 或 `budget`），預算讓請求沒送到某個供應商時另有 `X-Forgeyard-Budget-Exhausted`。

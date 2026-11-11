@@ -286,3 +286,29 @@ def test_fy_ck_012_budgets_count_refusals_for_the_provider_and_ignore_providers_
     r = o.put(f"/api/budgets/providers/{providers['vpn-vllm']['id']}", json={"budget_micros": 5_000_000})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "not_cloud"
     assert o.put(f"/api/budgets/providers/{providers['vpn-vllm']['id']}", json={"budget_micros": None}).status_code == 200
+
+
+def test_fy_ck_013_lowering_the_cap_applies_at_once_to_peoples_own_keys(world):
+    """FY-CK-013: a person's own key set to "allowed" works as "never" from the moment an admin lowers
+    the most people may give their keys: no cloud-only model, no spill. The key keeps its own setting
+    (shown with its effective one) and gets it back when the cap is raised. A value an admin set, and
+    an admin's own key, are not capped."""
+    o, k = world.owner, world.keys
+    assert o.put("/api/keys/cloud", json={"default": "off", "max": "on"}).status_code == 200
+    add_user(o, "ursula")
+    u = sign_in(o, "ursula", PW)
+    mine = api_client(o, new_key(u, "mine", cloud="on")["key"])
+    by_admin = new_key(u, "by-admin")["api_key"]
+    assert o.patch(f"/api/keys/{by_admin['id']}", json={"cloud": "on"}).status_code == 200
+    assert "cloud-m" in listed(mine)
+    assert o.put("/api/keys/cloud", json={"default": "off", "max": "off"}).status_code == 200
+    assert "cloud-m" not in listed(mine) and chat(mine, "cloud-m").status_code == 404
+    set_state("mixed-m", 0, "starting", "loading")
+    r = chat(mine, "mixed-m")
+    assert r.status_code == 503 and world.cloud.posts() == []
+    rows = {x["name"]: x for x in u.get("/api/keys").json()["keys"]}
+    assert rows["mine"]["cloud"] == "on" and rows["mine"]["effective_cloud"] == "off"
+    assert rows["by-admin"]["effective_cloud"] == "on"           # an admin's value stays
+    assert "cloud-m" in listed(k["on"])                           # an admin's own key stays
+    assert o.put("/api/keys/cloud", json={"default": "off", "max": "on"}).status_code == 200
+    assert "cloud-m" in listed(mine)

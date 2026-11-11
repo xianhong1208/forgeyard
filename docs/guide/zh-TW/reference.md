@@ -82,7 +82,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `GATEWAY_CLOUD_DEFAULT` | `off` | 新 API 金鑰拿到的雲端設定：`off`、`fallback` 或 `on`。管理員可以在 **API keys** 修改（存在資料庫裡）；既有的金鑰維持原本的設定 |
-| `GATEWAY_CLOUD_MAX` | `off` | 任何人能為自己的金鑰設定的最大值。管理員可以為任何金鑰設定任何值 |
+| `GATEWAY_CLOUD_MAX` | `off` | 任何人能為自己的金鑰設定的最大值，每個請求也會套用到既有的金鑰。管理員可以為任何金鑰設定任何值 |
 | `EGRESS_PROXY` | 空白 | 送往供應商的請求改經由這個 proxy（`http://host:port`）。絕不使用環境變數裡的 proxy |
 | `EGRESS_ALLOWED_HOSTS` | 空白 | 只允許這些供應商主機，以逗號分隔（`*.example.org` 代表子網域）。空白：不限 |
 | `EGRESS_CA_FILE` | 空白 | 除了系統的 CA 之外，供應商連線額外信任的 CA 檔（例如會檢查 TLS 的公司 proxy） |
