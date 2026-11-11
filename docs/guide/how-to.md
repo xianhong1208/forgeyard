@@ -83,7 +83,8 @@ the next machine:
   without spaces, quotes or colons.
 - **Machine name** (optional): how it is listed on **Machines**; empty means its host name. Letters,
   digits, `.`, `_` and `-`, up to 64 characters. Adds `FORGEYARD_NAME`.
-- **Server address, as that machine reaches it** (default: this server's `PUBLIC_URL`): change it
+- **Server address, as that machine reaches it** (default: this server's `PUBLIC_URL`, or, while
+  `PUBLIC_URL` is empty, the address you opened this page with): change it
   when the machine reaches the server by another address: through a VPN, a forwarded port
   (`https://127.0.0.1:7860`) or another LAN address. When that host is not in the server's certificate the page says so: add it to
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
@@ -477,6 +478,31 @@ the journal: `journalctl -u forgeyard -f`.
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
 
+## Check the setup health
+
+Forgeyard checks its own setup for settings and combinations that are broken, risky or useless:
+a misspelled setting, a key that may spend on cloud providers with no budget, a shared machine whose
+GPU access nobody chose, an agent older than the server, a route that tries the cloud before its
+local tier. Admins see the results in three places:
+
+- **Get started → Setup health** lists every finding, with what to do and a link to where it is
+  fixed.
+- **A count in the top bar** shows errors and warnings. It disappears when there are none.
+- **A banner on the page concerned** (Machines, API keys, Providers, Models, a route, a
+  deployment, Users) shows that page's findings.
+
+Users and operators see none of it.
+
+- An **error** is broken or unsafe now. It stays until it is fixed.
+- A **warning** is likely to cost money, leak or break. A **note** is useless or surprising. You can
+  **Snooze 30 days** either one: it is hidden for you only, and comes back after 30 days if it still
+  applies. **Show snoozed** lists them, with **Show again**.
+
+Findings are worked out when the page asks, from the settings, the database and the agents' last
+reports, so a fix shows within a minute (or at once on the next page). Settings problems are also
+written to the server's log when it starts, each line beginning with `Settings:`. The full list is
+in the reference: [Setup health checks](reference.md#setup-health-checks).
+
 ## Back up and restore
 
 **What to back up on the server**, all in its `data/` folder unless you moved it:
@@ -496,6 +522,10 @@ cp -a data/tls data/secret.key .env /backup/
 ```
 
 PostgreSQL: `pg_dump` as usual.
+
+Once `secret.key` is backed up, tick **I have a backup of key id …** under **Get started → Setup
+health**. Until an admin does, Setup health reminds every admin, and it reminds them again when
+the key changes. The key itself never leaves the server: the page shows only its id.
 
 **On each machine** (optional): `/var/lib/forgeyard-agent` (the credential; without it the machine
 joins again with a new token) and `/etc/forgeyard/agent.toml`. The model cache can always be

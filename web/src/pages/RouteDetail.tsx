@@ -2,6 +2,7 @@ import { IconArrowLeft, IconArrowDown, IconPlus, IconTrash, IconX } from "@table
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Field, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -113,6 +114,7 @@ function RouteEditor({ r, admin, opts, reload }: { r: RouteInfo | null; admin: b
         actions={r && admin && r.deployment_id === null && (
           <button type="button" className="btn btn-danger" onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> Delete route</button>
         )} />
+      {r && <AdvisorBanner pages={[`route:${r.id}`]} />}
       <HelpLinks>
         <HelpLink page="cloud-providers" anchor="route-a-model-to-the-cloud">How do I let a model spill to the cloud?</HelpLink>
         <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request move to the next tier?</HelpLink>

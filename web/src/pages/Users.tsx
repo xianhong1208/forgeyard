@@ -1,6 +1,7 @@
 import { IconPlus } from "@tabler/icons-react";
 import { useState, type FormEvent } from "react";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { useAuth } from "../auth";
 import { CopyBox, Field, Notice, PageHeader, StatusChip } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -79,6 +80,7 @@ export function UsersPage() {
           </button>
         }
       />
+      <AdvisorBanner pages={["users"]} />
       {loadError && <Notice tone="error">{loadError}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       {link && (

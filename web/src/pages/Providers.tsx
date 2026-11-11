@@ -2,6 +2,7 @@ import { IconArrowLeft, IconCloud, IconCopy, IconCurrencyDollar, IconDownload, I
 import { Fragment, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { PriceRefresh } from "../components/PriceRefresh";
@@ -97,6 +98,7 @@ export function ProvidersPage() {
             </button>
           </>
         )} />
+      <AdvisorBanner pages={["providers"]} />
       <HelpLinks>
         <HelpLink page="cloud-providers" anchor="add-a-provider">How do I add OpenAI, Anthropic, Gemini or Azure?</HelpLink>
         <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request go to the cloud?</HelpLink>
@@ -287,6 +289,7 @@ export function ProviderDetailPage() {
             <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> Delete</button>
           </>
         )} />
+      <AdvisorBanner pages={[`provider:${id}`]} />
       {error && <Notice tone="error">{error}</Notice>}
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       {p && (

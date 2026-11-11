@@ -67,7 +67,9 @@ def test_fy_cfg_002_the_reference_has_every_setting_and_only_real_ones():
         for name in known:
             assert f"`{name}`" in server, (lang, name)
         common = server.split("\n### ", 2)[1]
-        assert set(re.findall(r"^\| `([A-Z][A-Z0-9_]+)`", common, re.M)) == COMMON, lang
+        names = set(re.findall(r"^\| `([A-Z][A-Z0-9_]+)`", common, re.M))
+        names |= set(re.findall(r"^\| `[A-Z0-9_]+`, `([A-Z][A-Z0-9_]+)`", common, re.M))
+        assert names == COMMON, (lang, names ^ COMMON)
 
 
 def test_fy_cfg_003_unknown_names_get_did_you_mean():

@@ -317,7 +317,7 @@ def host_loopback(ctx: Context) -> Iterator[Finding]:
         yield Finding("host-loopback", "error", f"The server listens on {s.host} only",
                       f"{_names(n.name for n in remote)} joined from another address, but HOST={s.host} accepts "
                       "connections from this machine only, so their agents cannot reach the server. Set "
-                      "HOST=0.0.0.0 and restart.", f"{REFERENCE}#network-and-addresses", "Open the reference",
+                      "HOST=0.0.0.0 and restart.", f"{REFERENCE}#common-settings", "Open the reference",
                       pages=("machines",))
 
 
@@ -332,13 +332,13 @@ def public_url_unset(ctx: Context) -> Iterator[Finding]:
         yield Finding("public-url-unset", "warning", "PUBLIC_URL is not set",
                       f"You opened Forgeyard as {here}, so join commands, set-password links and the gateway "
                       "address made on this page say that too, and other machines cannot use them. Set PUBLIC_URL "
-                      "to the address other machines use.", f"{REFERENCE}#network-and-addresses", "Open the reference",
+                      "to the address other machines use.", f"{REFERENCE}#common-settings", "Open the reference",
                       pages=("machines",))
     else:
         yield Finding("public-url-unset", "info", "PUBLIC_URL is not set",
                       "Join commands, set-password links and the gateway address use whatever address each browser "
                       "opened Forgeyard with. Set PUBLIC_URL so they are always the one other machines use.",
-                      f"{REFERENCE}#network-and-addresses", "Open the reference")
+                      f"{REFERENCE}#common-settings", "Open the reference")
 
 
 def _covers(names: list[str], ips: list[str], host: str) -> bool:
@@ -518,7 +518,7 @@ def offline_with_replicas(ctx: Context) -> Iterator[Finding]:
             yield Finding("machine-offline-with-replicas", "warning", f"{n.name} is offline with replicas on it",
                           f"{n.name} has been offline {since}, and {_names(names)} still "
                           f"{'has' if len(names) == 1 else 'have'} replicas placed there that cannot answer. Start its "
-                          "agent again, or revoke the machine so they are placed elsewhere.",
+                          "agent again; if the machine is gone for good, revoke it.",
                           "/guide/en/troubleshooting#an-agent-shows-offline", "Why a machine is offline",
                           scope=f"machine:{n.id}", pages=("machines", "models"))
 

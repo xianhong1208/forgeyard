@@ -1,6 +1,7 @@
 import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { useAuth } from "../auth";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -82,6 +83,7 @@ export function ApiKeysPage() {
           </button>
         }
       />
+      <AdvisorBanner pages={["keys"]} />
       <HelpLinks>
         <HelpLink page="quick-start" anchor="8-call-it">How do I call /v1 with curl or the OpenAI SDK?</HelpLink>
         <HelpLink page="concepts" anchor="api-keys-limits-and-usage">Keys, limits and usage</HelpLink>
