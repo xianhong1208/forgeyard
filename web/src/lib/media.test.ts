@@ -43,6 +43,8 @@ describe("images in chat (1.3)", () => {
     expect(paramApplies("videos", model(["image", "video"]))).toBe(true);
     expect(paramApplies("images", model(null))).toBe(true);
     expect(paramApplies("max_body_mb", model([]))).toBe(true);
+    expect(paramApplies("image_tokens", model(["audio"]))).toBe(false);
+    expect(paramApplies("image_tokens", model(["image"]))).toBe(true);
     expect(paramApplies("context", undefined)).toBe(true);
   });
 });

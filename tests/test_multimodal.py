@@ -76,7 +76,7 @@ def gguf_vl_meta(seeded_g: dict) -> dict:
 
 class MediaServer:
     """http://127.0.0.1:<port> serving test media: /img.png, /octet (a PNG as octet-stream), /page.html,
-    /big (MEDIA_FETCH_MAX_MB + 1 MiB), /missing (404), /to-metadata (a redirect to 169.254.169.254),
+    /big (MEDIA_FETCH_MAX_MB + 1 MiB), /big-stream (the same without Content-Length), /missing (404), /to-metadata (a redirect to 169.254.169.254),
     /to/<url> (a redirect to <url>), /loop (redirects to itself), /clip.wav, /video.mp4."""
 
     def __init__(self, big_mb: int = 2):
@@ -107,6 +107,17 @@ class MediaServer:
                     return self._send(200, b"<html></html>", "text/html")
                 if p == "/big":
                     return self._send(200, b"\0" * (big_mb * 1024**2 + 1024), "image/png")
+                if p == "/big-stream":       # no Content-Length: the size shows only while reading
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.end_headers()
+                    try:
+                        for _ in range(big_mb * 16 + 16):
+                            self.wfile.write(b"\0" * 65536)
+                    except OSError:
+                        pass
+                    self.close_connection = True
+                    return
                 if p == "/clip.wav":
                     return self._send(200, b"RIFF....WAVE", "audio/wav")
                 if p == "/video.mp4":
@@ -378,7 +389,7 @@ def test_fy_mm_009_the_gateway_fetches_a_url_and_sends_data(mm):
     parts = sent(mm.engines["vl"])
     assert parts[1]["image_url"]["url"] == PNG_URI and parts[2]["image_url"]["url"] == PNG_URI
     assert mm.media.url not in json.dumps(parts)
-    assert mm.media.hits == ["/img.png", "/octet"]
+    assert sorted(mm.media.hits) == ["/img.png", "/octet"]          # fetched at the same time
     vlv = modalities.Accepts(limits=(("image", 4), ("audio", 4)), files=False, max_body=64 * 1024**2)
     assert vlv.kinds == ["image", "audio"]
     obj = {"messages": [{"role": "user", "content": [{"type": "audio_url", "audio_url": {"url": f"{mm.media.url}/clip.wav"}}]}]}
@@ -423,15 +434,19 @@ def test_fy_mm_010_private_and_metadata_addresses_are_refused(mm, monkeypatch):
 
 
 def test_fy_mm_011_fetch_failures(mm, monkeypatch):
-    """FY-MM-011: a 404, an HTML page for an image, a redirect loop and a file over MEDIA_FETCH_MAX_MB
-    are refused with media_fetch_failed (400) or media_too_large (413); credentials in the URL too."""
+    """FY-MM-011: a 404, an HTML page for an image, a redirect loop (stopped after 3 redirects) and a file
+    over MEDIA_FETCH_MAX_MB (declared, or found while reading) are refused with media_fetch_failed (400) or media_too_large (413); credentials in the URL too."""
     monkeypatch.setenv("MEDIA_FETCH_MAX_MB", "1")
     get_settings.cache_clear()
     for path, status, code in (("/missing", 400, "media_fetch_failed"), ("/page.html", 400, "media_fetch_failed"),
-                               ("/loop", 400, "media_fetch_failed"), ("/big", 413, "media_too_large")):
+                               ("/loop", 400, "media_fetch_failed"), ("/big", 413, "media_too_large"),
+                               ("/big-stream", 413, "media_too_large")):
         r = ask(mm.api, "vl", image(f"{mm.media.url}{path}"))
         assert (r.status_code, err(r)["code"]) == (status, code), (path, r.text)
     assert "text/html" in err(ask(mm.api, "vl", image(f"{mm.media.url}/page.html")))["message"]
+    before = mm.media.hits.count("/loop")
+    assert "more than 3 redirects" in err(ask(mm.api, "vl", image(f"{mm.media.url}/loop")))["message"]
+    assert mm.media.hits.count("/loop") - before == 4          # the URL and 3 redirects, then it stops
     r = ask(mm.api, "vl", image(f"http://user:pw@127.0.0.1:{mm.media.port}/img.png"))
     assert err(r)["code"] == "media_url_refused"
     r = ask(mm.api, "vl", {"type": "video_url", "video_url": {"url": f"{mm.media.url}/img.png"}})
@@ -469,7 +484,9 @@ def test_fy_mm_014_vllm_is_hardened_and_old_deployments_render(mm):
     assert "--enable-prompt-tokens-details" in args and spec["env"]["VLLM_MEDIA_URL_ALLOW_REDIRECTS"] == "0"
     g = replica_spec("vlg")["runtime"]["args"]
     assert g[g.index("--mmproj") + 1] == "${MODEL_PATH}/mmproj-Qwen3VL-2B-Instruct-F16.gguf"
+    assert g[g.index("--image-max-tokens") + 1] == "1024"
     assert "--mmproj" not in replica_spec("txt")["runtime"]["args"]
+    assert "--image-max-tokens" not in replica_spec("txt")["runtime"]["args"]
     pooling, _ = recipes.builtin_recipes()["vllm-pooling"]
     assert "--allowed-media-domains" in pooling.args and pooling.env["VLLM_MEDIA_URL_ALLOW_REDIRECTS"] == "0"
     # A deployment from before 1.3: its params lack images/videos/max_body_mb.

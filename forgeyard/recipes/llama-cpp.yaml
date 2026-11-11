@@ -17,7 +17,9 @@
 # is decoded with ffmpeg (in the official images). llama-server downloads any http(s) URL in a media
 # part with no host check and has no flag to turn that off, so the gateway fetches URLs itself and
 # sends only data: URIs and base64 (and the agent's key guard lets only the gateway reach it);
-# --media-path is never set, so file:// is refused.
+# --media-path is never set, so file:// is refused. --image-max-tokens caps what one image takes: by
+# default Qwen3-VL lets a 5 MB photo become ~4,000 tokens (measured: 125 s on 8 CPU threads, and it
+# nearly filled a 4,096-token context), so images are scaled to at most image_tokens (1,024).
 name: llama-cpp
 title: llama.cpp
 description: >-
@@ -55,6 +57,9 @@ params:
   images: {type: int, default: 4, min: 0, max: 64, advanced: true, label: Images per request,
            help: "For models with a projector: the most images (and audio clips) one request may carry. 0 turns
              them off."}
+  image_tokens: {type: int, default: 1024, min: 64, max: 16384, advanced: true, label: Largest image (tokens),
+                 help: "Each image is scaled down to at most this many tokens (about 1024 x 1024 pixels at the default for
+                   Qwen3-VL). Larger images read small text better but take more context, memory and time."}
   videos: {type: int, default: 0, min: 0, max: 8, advanced: true, label: Videos per request,
            help: "For models with a vision projector. Off (0) by default; each video is decoded into many frames."}
   max_body_mb: {type: int, default: 64, min: 1, max: 1024, advanced: true, label: Largest request (MiB),
@@ -65,7 +70,7 @@ args: [-m, "{model_file}", --alias, "{served_name}", --host, "{host}", --port, "
        -t, "{threads}", --no-webui]
 optional_args:
   - if_model: mmproj
-    args: [--mmproj, "{mmproj_file}"]
+    args: [--mmproj, "{mmproj_file}", --image-max-tokens, "{image_tokens}"]
 media: {inputs: [image, audio, video], files: false}
 # The replica's internal key (M4). llama-server b11977 reads --api-key from LLAMA_API_KEY
 # (common/arg.cpp: .set_env("LLAMA_API_KEY")) and then answers 401 to every path except /health,

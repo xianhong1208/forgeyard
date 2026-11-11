@@ -255,7 +255,11 @@ def _shown(url: str) -> str:
     """The URL without its query (which may hold a signature), shortened."""
     p = urlsplit(url)
     host = p.hostname or ""
-    return f"{p.scheme}://{host}{p.path[:80]}" if host else url[:40]
+    try:
+        port = f":{p.port}" if p.port else ""
+    except ValueError:
+        port = ""
+    return f"{p.scheme}://{host}{port}{p.path[:80]}" if host else url[:40]
 
 
 async def _target(url: str) -> tuple[str, dict, dict]:
@@ -291,7 +295,7 @@ async def _target(url: str) -> tuple[str, dict, dict]:
         problem = egress.address_problem(addr, private_ok=s.media_allow_private_hosts,
                                          private_why="MEDIA_ALLOW_PRIVATE_HOSTS is off")
         if problem:
-            raise _refused(url, f"{host} resolves to {problem}")
+            raise _refused(url, f"{host} is at a refused address ({problem})" if addr != host else problem)
     if s.egress_proxy.strip():
         return url.split("#", 1)[0], {}, {}
     ip = ipaddress.ip_address(addresses[0].split("%", 1)[0])
