@@ -1,16 +1,16 @@
-import { IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { IconPhoto, IconPlayerStop, IconSend, IconTrash, IconX } from "@tabler/icons-react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link } from "react-router";
 
 import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
-import { API_KIND, answerError, ms, readEvents } from "../lib/gateway";
+import { API_KIND, answerError, chatContent, ms, readEvents, readImage, type Attached } from "../lib/gateway";
 import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
 import type { RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
-type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean };
+type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean; images?: Attached[] };
 
 // The playground talks to /api/playground/<endpoint>: the gateway's routing, as the signed-in
 // user (the session cookie and the CSRF header), counted as "console" in usage. No API key.
@@ -99,22 +99,39 @@ function Chat({ model }: { model: string }) {
   const [thinking, setThinking] = useState(false);
   const [localOnly, setLocalOnly] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Images for the next message (1.3), read in the browser and sent as data: URIs.
+  const [attached, setAttached] = useState<Attached[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "nearest" });
   }, [messages]);
+
+  const attach = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    setAttachError(null);
+    try {
+      const read = await Promise.all(files.map(readImage));
+      setAttached((cur) => [...cur, ...read]);
+    } catch (err) {
+      setAttachError((err as Error).message);
+    }
+  };
 
   const update = (fn: (last: Msg) => Msg) => setMessages((m) => [...m.slice(0, -1), fn(m[m.length - 1])]);
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text || busy) return;
-    const history = [...messages.filter((m) => !m.error), { role: "user" as const, content: text }];
+    if ((!text && !attached.length) || busy) return;
+    const history = [...messages.filter((m) => !m.error), { role: "user" as const, content: text, images: attached.length ? attached : undefined }];
     setMessages([...history, { role: "assistant", content: "" }]);
     setInput("");
+    setAttached([]);
     setBusy(true);
     const ctrl = new AbortController();
     abort.current = ctrl;
@@ -125,7 +142,7 @@ function Chat({ model }: { model: string }) {
       const res = await post("chat/completions", {
         model, stream: true, max_tokens: maxTokens, temperature, stream_options: { include_usage: true },
         chat_template_kwargs: { enable_thinking: thinking },
-        messages: history.map(({ role, content }) => ({ role, content })),
+        messages: history.map(({ role, content, images }) => ({ role, content: chatContent(content, images) })),
       }, ctrl.signal, undefined, localOnly);
       if (!res.ok || !res.body) {
         const why = await failure(res);
@@ -182,21 +199,46 @@ function Chat({ model }: { model: string }) {
         {messages.map((m, i) => (
           <div key={i} className={`msg msg-${m.role}${m.error ? " msg-error" : ""}`}>
             <span className="msg-role">{m.role === "user" ? "You" : model}</span>
-            <div className="msg-text">{m.content || (busy && i === messages.length - 1 ? <span className="cursor" aria-label="Writing" /> : "")}
-              {busy && i === messages.length - 1 && m.content && <span className="cursor" aria-hidden="true" />}</div>
+            {m.images && (
+              <div className="msg-images">
+                {m.images.map((img, k) => <img key={k} src={img.uri} alt={`Attached: ${img.name}`} />)}
+              </div>
+            )}
+            {(m.content || m.role === "assistant") && (
+              <div className="msg-text">{m.content || (busy && i === messages.length - 1 ? <span className="cursor" aria-label="Writing" /> : "")}
+                {busy && i === messages.length - 1 && m.content && <span className="cursor" aria-hidden="true" />}</div>
+            )}
             {m.meta && <span className="msg-meta">{m.meta}</span>}
           </div>
         ))}
         <div ref={end} />
       </div>
-      <form className="chat-form" onSubmit={send}>
+      {(attached.length > 0 || attachError) && (
+        <div className="attached" aria-label="Images for the next message">
+          {attached.map((img, i) => (
+            <span key={i} className="attached-item">
+              <img src={img.uri} alt="" />
+              <span className="small mono attached-name">{img.name}</span>
+              <button type="button" className="btn btn-quiet btn-small" aria-label={`Remove ${img.name}`}
+                onClick={() => setAttached((cur) => cur.filter((_, j) => j !== i))}><IconX size={14} aria-hidden="true" /></button>
+            </span>
+          ))}
+          {attachError && <span className="field-error small">{attachError}</span>}
+        </div>
+      )}
+      <form className="chat-form chat-form-media" onSubmit={send}>
+        <input ref={picker} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(e) => void attach(e)}
+          aria-label="Attach images" data-testid="attach-input" />
+        <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => picker.current?.click()} title="Attach an image (for models that read images)">
+          <IconPhoto size={16} aria-hidden="true" /><span className="sr-only">Attach an image</span>
+        </button>
         <label htmlFor="chat-input" className="sr-only">Message</label>
         <textarea id="chat-input" value={input} rows={2} placeholder="Write a message…" onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(e); } }} />
         {busy ? (
           <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
         ) : (
-          <button type="submit" className="btn btn-primary" disabled={!input.trim()}><IconSend size={16} aria-hidden="true" /> Send</button>
+          <button type="submit" className="btn btn-primary" disabled={!input.trim() && !attached.length}><IconSend size={16} aria-hidden="true" /> Send</button>
         )}
       </form>
       <div className="chat-settings">

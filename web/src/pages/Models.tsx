@@ -1,4 +1,4 @@
-import { IconBrain, IconCloud, IconCpu, IconMicrophone, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -9,7 +9,7 @@ import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { API_KIND } from "../lib/gateway";
-import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, params } from "../lib/models";
+import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
 import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, targetName, targetWhere, tiers } from "../lib/routing";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -204,7 +204,7 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
         ) : (
           <div className="table-wrap">
             <table className="table catalog-table">
-              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Recipes</th><th /></tr></thead>
+              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Recipes</th><th /></tr></thead>
               <tbody>{data.models.map((m) => <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload} />)}</tbody>
             </table>
           </div>
@@ -236,14 +236,24 @@ function ModelRow({ m, canManage, canDeploy, reload }: { m: CatalogModel; canMan
       <td data-label="Model">
         <div className="strong">{m.title ?? m.name}</div>
         <div className="mono small muted" title={m.revision ?? undefined}>{m.source}{m.file ? ` · ${m.file}` : ""}{m.revision ? ` @ ${m.revision.slice(0, 10)}` : ""}</div>
+        {m.mmproj && <div className="mono small muted" title="Projector file (llama.cpp --mmproj)">+ {m.mmproj.path}</div>}
         {error && <div className="field-error">{error}</div>}
       </td>
-      <td data-label="Task"><span className="chip">{m.task_label}</span></td>
+      <td data-label="Task">
+        <span className="chip">{m.task_label}</span>
+        {m.modalities && m.modalities.length > 0 && (
+          <span className="chip chip-tone-run" title="What it takes in chat besides text"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>
+        )}
+      </td>
       <td data-label="Format" className="mono small">{m.format}</td>
       <td data-label="Size" className="small">{bytes(m.size_bytes)}</td>
       <td data-label="Architecture" className="small">
         {m.summary.architecture ?? "—"}{m.summary.params ? ` · ${params(m.summary.params)} params` : ""}
         {m.summary.layers ? <div className="muted">{m.summary.layers} layers{m.summary.kv_heads ? `, ${m.summary.kv_heads} KV heads` : ""}{m.summary.max_context ? `, ${m.summary.max_context} ctx` : ""}</div> : null}
+      </td>
+      <td data-label="Licence" className="small">
+        <span className="mono">{m.license ?? "—"}</span>
+        {m.gated && <div className="muted"><IconLock size={11} aria-hidden="true" /> gated</div>}
       </td>
       <td data-label="Recipes" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
       <td className="cell-actions">
