@@ -1027,3 +1027,10 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   .finding, .advisor-banner li { grid-template-columns: minmax(0, 1fr); }
   .finding-icon { display: none; }
 }
+
+/* A recipe's commands for machines without registry access. */
+.recipe-offline { margin-top: 10px; }
+.recipe-offline summary { width: auto; max-width: 100%; }
+.recipe-offline-pick { margin: 8px 0 0; }
+.recipe-offline-pick select { width: 100%; }
+.recipe .recipe-offline-image { margin: 8px 0; overflow-wrap: anywhere; }
