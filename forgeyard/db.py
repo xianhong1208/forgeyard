@@ -304,7 +304,7 @@ class CatalogModel(Base):
     ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)       # what was asked: main, a tag
     revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)   # the commit it is pinned to
     file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)      # the GGUF file
-    format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2
+    format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2 | onnx
     task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     # Extra engine arguments per recipe (e.g. Qwen3-Reranker's --hf-overrides for vllm-pooling).
@@ -362,7 +362,7 @@ class GatewayRoute(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     served_name: Mapped[str] = mapped_column(String(128), unique=True)
-    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio
+    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio | openai-speech
     # The deployment this route was created with (NULL: a route an admin made, e.g. cloud only).
     deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"),
                                                          unique=True, nullable=True)
