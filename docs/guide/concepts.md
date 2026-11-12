@@ -75,7 +75,7 @@ machines. Model deployments are workloads too; most people only deploy models.
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
 - A **recipe** says how to run a kind of model: which engine, which container image (pinned by
   digest) or release, which parameters, and how much memory it needs. Built in: `vllm` (chat on
-  NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on GPU or CPU) and
+  NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that

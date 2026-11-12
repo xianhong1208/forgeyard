@@ -807,3 +807,24 @@ def test_fy_mm_025_vllm_scales_large_images_down_for_qwen_vl(mm):
         db.rollback()
     finally:
         db.close()
+
+
+def test_fy_mm_026_llama_cpp_counts_video_frames_once_video_is_on():
+    """FY-MM-026: a GGUF vision model on llama.cpp adds the recipe's video term (512 MiB, measured on
+    the CPU) only when the deployment takes video, on the CPU and on a GPU; a text-only GGUF never."""
+    llama, _ = recipes.builtin_recipes()["llama-cpp"]
+    assert llama.estimate.video_overhead == 512 * 1024**2
+    labels = lambda e: {p.label: (p.bytes, p.detail) for p in e.parts}  # noqa: E731
+    g = gguf.parse((FIX / "qwen3-1.7b-q4_k_m.gguf-header").read_bytes()).summary()
+    lp = {k: p.default for k, p in llama.params.items()}
+    assert lp["videos"] == 0
+    for device, gpus in (("cpu", 0), ("gpu", 1)):
+        off = estimate(gguf_vl_meta(g), llama, lp | {"gpus": gpus}, device=device, gpu_context=0)
+        on = estimate(gguf_vl_meta(g), llama, lp | {"gpus": gpus, "videos": 1}, device=device, gpu_context=0)
+        assert "Video" not in labels(off)
+        assert labels(on)["Video"] == (512 * 1024**2, "buffers for a video's frames (recipe)")
+        assert on.amount - off.amount == 512 * 1024**2
+        text = gguf_vl_meta(g)
+        text.pop("mmproj")
+        text["modalities"] = []
+        assert "Video" not in labels(estimate(text, llama, lp | {"gpus": gpus, "videos": 1}, device=device, gpu_context=0))

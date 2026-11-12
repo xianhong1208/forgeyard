@@ -243,7 +243,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   |---|---|---|---|
   | `vllm` | chat (safetensors) | NVIDIA, AMD | `vllm/vllm-openai:v0.32.0` (CUDA 13.0, driver ≥ 580), `-cu129` (≥ 575), `vllm/vllm-openai-rocm:v0.32.0` |
   | `vllm-pooling` | embeddings, rerank | NVIDIA, AMD, shares a GPU by default | the same images, `--runner pooling` |
-  | `llama-cpp` | chat (GGUF) | NVIDIA, AMD, CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`, release `b11977` for the process |
+  | `llama-cpp` | chat (GGUF) | NVIDIA, AMD (ROCm for Instinct and the discrete cards its image is built for, Vulkan for APUs and every other AMD GPU, with the render node only), CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` and `server-b12242`, release `b12242` for the process |
   | `faster-whisper` | speech to text | NVIDIA, CPU, shares a GPU by default | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
 
 - **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
@@ -358,7 +358,7 @@ page contain these lines whenever the server uses its own CA.
   away (499) is not an error. Everyone sees their own; admins everyone's. A deployment's page shows
   its last 7 days.
 - **Images, audio and video in chat (1.3,** forgeyard/gateway/media.py**).** vLLM 0.32 and llama-server
-  b11977 download any http(s) URL they find in a media part, with no private-address filter (vLLM
+  (b11977, b12242) download any http(s) URL they find in a media part, with no private-address filter (vLLM
   also follows redirects), from inside your network. So:
   - the gateway walks `messages[].content[]` and **rebuilds every media part** in one shape
     (`image_url` and `video_url` with a `data:` URI, `input_audio` with base64), keeping only the fields

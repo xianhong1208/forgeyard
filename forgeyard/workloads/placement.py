@@ -238,14 +238,18 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
     return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards)
 
 
-def gpu_ref(a: Accelerator) -> dict:
-    """What the agent needs to give exactly this card to a replica."""
+def gpu_ref(a: Accelerator, *, kfd: bool = True) -> dict:
+    """What the agent needs to give exactly this card to a replica. `kfd` False (an AMD card for a
+    Vulkan engine): the container gets the card's render node only, not /dev/kfd. Agents older than
+    1.3 ignore the flag and pass /dev/kfd as well, which the engine then does not use."""
     detail = a.detail or {}
     ref = {"key": a.key, "vendor": a.vendor, "index": a.index, "uuid": a.uuid, "model": a.model,
            "pci_bus_id": detail.get("pci_bus_id")}
     if a.vendor == "amd":
         ref["rocr_uuid"] = detail.get("rocr_uuid")
         ref["render_minor"] = detail.get("render_minor")
+        if not kfd:
+            ref["kfd"] = False
     return ref
 
 
