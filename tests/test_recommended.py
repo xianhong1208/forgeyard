@@ -40,7 +40,7 @@ def test_fy_rec_001_the_shipped_list(owner):
     GGUF, Qwen3 embedding and reranker 0.6B/4B, gpt-oss, Gemma 3 and Llama marked gated, Qwen3-VL
     (1.3), Whisper small and large-v3-turbo, BGE-M3 and its reranker."""
     data = rec.load()
-    assert [g.id for g in data.groups] == ["qwen3", "llm", "vision", "speech", "tts", "retrieval"]
+    assert [g.id for g in data.groups] == ["qwen3", "llm", "vision", "speech", "tts", "images", "retrieval"]
     by = {e.name: e for e in data.models}
     for size in ("0.6b", "1.7b", "4b", "8b", "14b", "32b"):
         assert by[f"qwen3-{size}"].recipe == "vllm" and by[f"qwen3-{size}"].task == "chat"
@@ -49,7 +49,8 @@ def test_fy_rec_001_the_shipped_list(owner):
         assert by[n].recipe == "vllm-pooling"
     assert "--hf-overrides" in by["qwen3-reranker-4b"].engine_args["vllm-pooling"]
     gated = {e.name for e in data.models if e.gated}
-    assert gated == {"gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it", "llama-3.2-3b-instruct", "llama-3.1-8b-instruct"}
+    assert gated == {"gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it", "llama-3.2-3b-instruct", "llama-3.1-8b-instruct",
+                     "flux.1-schnell"}
     assert not by["gpt-oss-20b"].gated
     gemma4 = {"gemma-4-e2b-it", "gemma-4-e4b-it", "gemma-4-12b-it", "gemma-4-26b-a4b-it", "gemma-4-31b-it"}
     assert gemma4 <= set(by) and not any(by[n].gated for n in gemma4)

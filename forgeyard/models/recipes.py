@@ -3,8 +3,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
 
     name: vllm                       a-z, 0-9, '-'; unique
     engine, version, title, description
-    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts
-    formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx
+    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image
+    formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx,
+                                     diffusers (a repository with model_index.json)
     api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
     upstream_model: served_name      what the engine expects in a request's `model` field:
                                      served_name, or repo (the model's Hugging Face id)
@@ -23,6 +24,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     tts: {formats: [wav, pcm], default_format: wav, stream_formats: [audio], voices: /props, ...}
                                      1.3, text to speech (/v1/audio/speech): what the engine makes and
                                      how the gateway talks to it (see Speech below)
+    image: {request: fields, output_formats: [png, jpeg, webp], max_n: 10}
+                                     1.3, image generation (/v1/images/generations): how the gateway
+                                     sends the request's extras (see ImageGen below)
     media: {inputs: [image, video, audio], files: false}
                                      1.3: what the engine takes in chat besides text; the gateway
                                      sends a model only the media it takes, at most `images`
@@ -49,13 +53,16 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
       - name: cpu-process
         when: {vendor: cpu, arch: [x86_64]}
         runtime: process
-        engine: {url, sha256, binary}  a pinned release the agent downloads (sha256-checked), or
+        engine: {url, sha256, binary}  a pinned release (.tar.gz or .zip) the agent downloads
+                                       (sha256-checked), or
         command: /opt/x/bin/server     a program already installed on the machines
 
 Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} {context} {concurrency}
 {kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} {mmproj_file} {image_max_pixels}
 {gpu_util_main} {gpu_util_codec} (two-stage engines: the share of each stage, see estimate.codec_overhead)
-and any declared param.
+{width} {height} {max_pixels} (image models: the deployment's default size and its largest image in pixels)
+{vae_file} {llm_file} {clip_l_file} {clip_g_file} {t5xxl_file} (image models made of separate files: the
+component's path) {gpu_budget_gib} (the reservation in GiB, less the CUDA context) and any declared param.
 Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
 mount inside a container, the cache directory for a process).
 """
@@ -74,16 +81,20 @@ from forgeyard.workloads.spec import ENV_KEY_RE, IMAGE_RE, RESERVED_ENV, RESERVE
 BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-TASKS = ("chat", "embed", "rerank", "asr", "tts")
-FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx")
-APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech")
-ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed")
+TASKS = ("chat", "embed", "rerank", "asr", "tts", "image")
+FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
+APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images")
+ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed", "diffusers")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
                         "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
-                        "mmproj_file", "image_max_pixels", "gpu_util_main", "gpu_util_codec"}
+                        "mmproj_file", "image_max_pixels", "gpu_util_main", "gpu_util_codec", "width", "height",
+                        "max_pixels", "gpu_budget_gib"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
 MEDIA_KINDS = ("image", "audio", "video")
 # mmproj: a GGUF projector file; image_pixels: image tokens scale with the resolution (vision_tile_px).
-MODEL_FEATURES = ("mmproj", "image_pixels") + MEDIA_KINDS
+# Image models (1.3): image_single (one checkpoint file with everything: -m), image_split (a diffusion
+# model with separate text encoders: --diffusion-model), and each separate component file it has.
+IMAGE_COMPONENTS = ("vae", "llm", "clip_l", "clip_g", "t5xxl")
+MODEL_FEATURES = ("mmproj", "image_pixels") + MEDIA_KINDS + ("image_single", "image_split") + IMAGE_COMPONENTS
 # Parameters every recipe has, handled by Forgeyard itself.
 COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
 MAX_RECIPE_BYTES = 64 * 1024
@@ -137,8 +148,8 @@ class When(_M):
 
 
 class Engine(_M):
-    """A prebuilt engine the agent downloads for a process variant: a tar.gz release, pinned by its
-    SHA-256, and the program inside it."""
+    """A prebuilt engine the agent downloads for a process variant: a .tar.gz or .zip release, pinned
+    by its SHA-256, and the program inside it."""
     url: str = Field(max_length=1024)
     sha256: str
     binary: str = Field(max_length=256)
@@ -272,9 +283,18 @@ class Estimate(_M):
     # 1.3, text to speech on llama.cpp: each concurrent request (slot) keeps its own audio pipeline (the
     # code predictor and the decoder's buffers), counted per `concurrency` for tts models.
     speech_overhead: int = 0
+    # 1.3, image generation (method diffusers): what one image takes while it is made, per megapixel of
+    # its size (the denoiser's activations; `parallel`: the images of a request are made together, so
+    # they add up; else one after another), and what decoding it takes (the VAE, per megapixel, once).
+    activation_per_mp: int = 0
+    vae_per_mp: int = 0
+    parallel: bool = True
+    # Weights the engine holds in 16 bits whatever the file stores (vLLM-Omni casts float32 to bfloat16);
+    # False: the files' own size (stable-diffusion.cpp keeps a GGUF's quantisation).
+    cast_16bit: bool = False
 
     @field_validator("overhead", "cpu_overhead", "vram", "vision_overhead", "video_overhead", "codec_overhead",
-                     "speech_overhead", mode="before")
+                     "speech_overhead", "activation_per_mp", "vae_per_mp", mode="before")
     @classmethod
     def _size(cls, v):
         return None if v is None else (0 if v in (0, "0") else parse_bytes(v))
@@ -340,6 +360,24 @@ class Speech(_M):
         return self
 
 
+IMAGE_FORMATS = ("png", "jpeg", "webp")
+
+
+class ImageGen(_M):
+    """Image generation (1.3): how the gateway talks to the engine at /v1/images/generations.
+
+        request: fields                 the extras (negative_prompt, num_inference_steps, guidance_scale,
+                                        seed) go as fields of the request (vLLM-Omni); sd-cpp: inside the
+                                        prompt as <sd_cpp_extra_args>{…}</sd_cpp_extra_args>
+                                        (stable-diffusion.cpp's sd-server), built by the gateway
+        output_formats: [png, jpeg]     the output_format values it makes
+        max_n: 10                       the most images the engine makes for one request
+    """
+    request: Literal["fields", "sd-cpp"] = "fields"
+    output_formats: list[Literal[IMAGE_FORMATS]] = Field(default_factory=lambda: ["png"], min_length=1)  # type: ignore[valid-type]
+    max_n: int = Field(default=10, ge=1, le=64)
+
+
 class Recipe(_M):
     name: str
     title: str = Field(max_length=80)
@@ -359,6 +397,7 @@ class Recipe(_M):
     optional_args: list[OptionalArgs] = Field(default_factory=list, max_length=16)
     media: Optional[Media] = None
     tts: Optional[Speech] = None
+    image: Optional[ImageGen] = None
     env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
     # Where the engine reads its API key (M4). None: the engine has no key and its port answers
     # anyone who can reach it (the gateway still works).
@@ -420,7 +459,18 @@ class Recipe(_M):
             raise ValueError("tts: only for recipes that serve the tts task")
         if "tts" in self.tasks and self.api.get("tts") != "openai-speech":
             raise ValueError("api: tts is served as openai-speech")
+        if self.image is not None and "image" not in self.tasks:
+            raise ValueError("image: only for recipes that serve the image task")
+        if "image" in self.tasks and self.api.get("image") != "openai-images":
+            raise ValueError("api: image is served as openai-images")
+        if "image" in self.tasks and self.estimate.method not in ("diffusers", "fixed"):
+            raise ValueError("estimate: an image recipe uses the diffusers (or fixed) method")
         return self
+
+    @property
+    def imagegen(self) -> ImageGen:
+        """Its image settings (the defaults when it declares none)."""
+        return self.image or ImageGen()
 
     @property
     def speech(self) -> Speech:

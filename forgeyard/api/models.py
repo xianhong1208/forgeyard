@@ -34,7 +34,8 @@ from forgeyard.workloads import images, placement
 router = APIRouter(prefix="/api", tags=["models"])
 
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
-TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech"}
+TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
+              "image": "Images"}
 
 
 def _engine_args(raw) -> dict:
@@ -84,7 +85,20 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "task_label": TASK_LABEL.get(m.task, m.task), "size_bytes": m.size_bytes, "engine_args": m.engine_args or {},
             "summary": model_summary(m), "recipes": compatible(m, all_recipes), "deployments": deployments,
             "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
-            "voices": list((m.meta or {}).get("voices") or []), **media_out(m.meta or {}, m.format)}
+            "voices": list((m.meta or {}).get("voices") or []), "image": image_out(m.meta or {}),
+            **media_out(m.meta or {}, m.format)}
+
+
+def image_out(meta: dict) -> Optional[dict]:
+    """An image model's native size, the multiple its sizes take, and its parts: a diffusers pipeline's
+    components, or the component files beside a stable-diffusion.cpp model (1.3)."""
+    img = meta.get("image") if isinstance(meta.get("image"), dict) else None
+    if img is None:
+        return None
+    d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
+    return {"size": img.get("size"), "multiple": img.get("multiple"), "single": img.get("single"),
+            "components": dict(img.get("components") or {}), "pipeline": d.get("pipeline"),
+            "parts": {k: {"class": v.get("class"), "params": v.get("params")} for k, v in (d.get("components") or {}).items()}}
 
 
 def media_out(meta: dict, fmt: str) -> dict:
@@ -145,13 +159,29 @@ class InspectIn(BaseModel):
     token: Optional[str] = Field(default=None, max_length=512)
     format: Optional[str] = Field(default=None, max_length=16)       # local models
     size_bytes: Optional[int] = Field(default=None, ge=0)             # local models
+    # Image models for stable-diffusion.cpp (1.3): the component files beside the model file, by role
+    # (vae, llm, t5xxl, clip_l, clip_g). Not given: found by their names.
+    components: Optional[dict[str, Optional[str]]] = None
+    # What the model does (chat, embed, rerank, asr, tts, image); for an inspection, what the suggestion
+    # is for (default: what Hugging Face says). "image" reads a GGUF repository as an image model.
+    task: Optional[str] = Field(default=None, max_length=16)
 
 
 class ModelIn(InspectIn):
     name: str = Field(max_length=64)
     title: Optional[str] = Field(default=None, max_length=120)
-    task: Optional[str] = Field(default=None, max_length=16)
     engine_args: Optional[dict] = None
+
+
+def _recommended_components(source: str, file: Optional[str]) -> Optional[dict]:
+    """The component files the recommended list names for this source and file (an image model for
+    stable-diffusion.cpp), or None."""
+    try:
+        e = next((e for e in rec.recommended().models if e.source == source.strip() and e.components
+                  and (e.file or None) == (file or None)), None)
+    except rec.RecommendedError:
+        return None
+    return dict(e.components) if e is not None else None
 
 
 def _inspect(db: DbSession, body: InspectIn) -> dict:
@@ -159,12 +189,16 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
         src = sources.parse_source(body.source)
     except sources.SourceError as e:
         raise fail(422, "invalid_source", str(e)) from None
+    if body.components is None and body.task == "image":
+        body.components = _recommended_components(body.source, body.file)
     s = catalog.get_sources(db)
     try:
         return inspector.inspect_source(src, ref=body.revision, file=body.file, endpoint=s["hf_endpoint"],
                                         policy=catalog.hf_policy(), url_policy=catalog.url_policy(db),
                                         local_dirs=s["local_dirs"], token=(body.token or "").strip() or None,
-                                        fmt=body.format, size_bytes=body.size_bytes, mmproj=body.mmproj)
+                                        fmt=body.format, size_bytes=body.size_bytes, mmproj=body.mmproj,
+                                        task=body.task if body.task in recipes.TASKS else None,
+                                        components=body.components)
     except (inspector.InspectError, sources.SourceError) as e:
         raise fail(422, "cannot_inspect", str(e)) from None
 
@@ -172,7 +206,6 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
 class InspectPreviewIn(InspectIn):
     # What the suggestion is for: the task chosen (default: what Hugging Face says), the recipe
     # and device to estimate with (default: the first recipe that serves it, on a GPU if one is free).
-    task: Optional[str] = Field(default=None, max_length=16)
     recipe: Optional[str] = Field(default=None, max_length=40)
     device: Optional[str] = Field(default=None, max_length=8)
 
@@ -305,8 +338,12 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     meta = _inspect(db, body)
     task = (body.task or meta.get("task_hint") or "").strip()
     if task not in recipes.TASKS:
-        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr or tts)")
-    if task == "tts":
+        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr, tts or image)")
+    if task == "image" and "image" not in meta and meta.get("kind") != "local":
+        raise fail(422, "not_an_image_model", "This repository is not one Forgeyard can make images with: a diffusers "
+                                              "pipeline (model_index.json) or GGUF / safetensors files for "
+                                              "stable-diffusion.cpp.")
+    if task in ("tts", "image"):
         # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
         # takes in chat.
         meta["modalities"] = []
@@ -351,7 +388,7 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
         changed["title"] = m.title
     if body.task is not None:
         if body.task not in recipes.TASKS:
-            raise fail(422, "bad_task", "task: chat, embed, rerank, asr or tts")
+            raise fail(422, "bad_task", "task: chat, embed, rerank, asr, tts or image")
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:

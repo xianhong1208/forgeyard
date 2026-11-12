@@ -9,12 +9,12 @@
 #   name          the catalog name it is added as (a-z, 0-9, '.', '_', '-')
 #   title         what people see
 #   source        hf://<org>/<name>
-#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech entries are
-#                 pinned to a commit (their voices and measured memory belong to those files)
-#   file          GGUF only: which file of the repository
+#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech and image
+#                 entries are pinned to a commit (their voices, files and measured memory belong to it)
+#   file          GGUF (and image models' safetensors files) only: which file of the repository
 #   group         one of the groups below
-#   task          chat | embed | rerank | asr | tts
-#   format        safetensors | gguf | ctranslate2 | onnx (what the repository holds)
+#   task          chat | embed | rerank | asr | tts | image
+#   format        safetensors | gguf | ctranslate2 | onnx | diffusers (what the repository holds)
 #   recipe        the recipe suggested for it (it must serve that task and format)
 #   device        optional: cpu to suggest running it on the CPU (the recipe must have a CPU variant)
 #   download_gib  about how much a machine downloads
@@ -31,6 +31,8 @@
 #   mmproj        GGUF vision models: the projector file of the repository to use with it (and for
 #                 text-to-speech GGUFs, the audio decoder)
 #   languages     tts: the languages it speaks (shown on the list)
+#   components    image models for stable-diffusion.cpp: the files beside `file` (vae, llm, t5xxl, clip_l,
+#                 clip_g); without it they are found by their names
 #   engine_args   optional: extra engine arguments per recipe, stored with the catalog entry
 #   note          one line: what it is good for
 
@@ -50,6 +52,9 @@ groups:
   - id: tts
     title: Text to speech
     description: Built-in voices for /v1/audio/speech. Qwen3-TTS speaks Chinese (Mandarin and dialects), English and eight more languages on NVIDIA GPUs with vLLM-Omni, or as GGUF with llama.cpp on an AMD APU or the CPU; Kokoro and Chatterbox are small English voices that run on a CPU. No voice cloning.
+  - id: images
+    title: Images (text to image)
+    description: Models for /v1/images/generations. Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell on NVIDIA GPUs with vLLM-Omni; GGUF versions for stable-diffusion.cpp on an AMD GPU or APU (Vulkan), and Stable Diffusion 1.5 small enough for a CPU. Apache-2.0 and OpenRAIL licences only.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -525,3 +530,89 @@ models:
     memory_gib: 6.3
     languages: [en]
     note: An English voice for llama.cpp on the CPU or any GPU; one built-in voice (default).
+  # ---------------------------------------------------------------- Images (1.3)
+  # Not listed, by licence: FLUX.1-dev and FLUX.2-dev (non-commercial), SD-Turbo and SDXL-Turbo
+  # (Stability AI Community licence: commercial use only below US$1M revenue), SD3.5 (the same).
+  # Qwen-Image (Apache-2.0) is left out by size: 20B + a 7B text encoder, about 58 GB in 16 bits.
+  - name: z-image-turbo
+    title: Z-Image-Turbo (vLLM-Omni)
+    source: hf://Tongyi-MAI/Z-Image-Turbo
+    revision: f332072aa78be7aecdf3ee76d5c247082da564a6
+    license: apache-2.0
+    group: images
+    task: image
+    format: diffusers
+    recipe: vllm-omni-image
+    download_gib: 30.6
+    memory_gib: 30.6
+    note: Photorealistic 1024x1024 images in 8 steps, good at text in images, Chinese and English prompts. NVIDIA.
+  - name: sdxl-base-1.0
+    title: Stable Diffusion XL base 1.0 (vLLM-Omni)
+    source: hf://stabilityai/stable-diffusion-xl-base-1.0
+    revision: 462165984030d82259a11f4367a4eed129e94a7b
+    license: openrail++
+    group: images
+    task: image
+    format: diffusers
+    recipe: vllm-omni-image
+    download_gib: 13.0
+    memory_gib: 18.0
+    note: The well-known 1024x1024 model with a large ecosystem; 30 or more steps. NVIDIA.
+  - name: flux.1-schnell
+    title: FLUX.1 schnell (vLLM-Omni)
+    source: hf://black-forest-labs/FLUX.1-schnell
+    revision: 741f7c3ce8b383c54771c7003378a50191e9efe9
+    license: apache-2.0
+    gated: true
+    group: images
+    task: image
+    format: diffusers
+    recipe: vllm-omni-image
+    download_gib: 31.4
+    memory_gib: 44.0
+    note: High quality in 4 steps; large (12B and a T5-XXL text encoder). Needs a token that accepted its terms. NVIDIA.
+  - name: z-image-turbo-gguf
+    title: Z-Image-Turbo Q8_0 (GGUF, stable-diffusion.cpp)
+    source: hf://wbruna/Z-Image-Turbo-sdcpp-GGUF
+    revision: ea7669b52d27042b4909e3413f58581c0d52d522
+    file: z_image_turbo-Q8_0.gguf
+    components: {llm: qwen_3_4b-Q8_0.gguf, vae: ae_bf16.safetensors}
+    license: apache-2.0
+    group: images
+    task: image
+    format: gguf
+    recipe: sd-cpp
+    download_gib: 10.2
+    memory_gib: 14.0
+    engine_args: {sd-cpp: [--cfg-scale, "1", --steps, "8"]}
+    note: Z-Image-Turbo for an AMD GPU or APU (Vulkan) or any GPU; model, Qwen3-4B text encoder and VAE in one repository.
+  - name: flux.1-schnell-gguf
+    title: FLUX.1 schnell Q4_0 (GGUF, stable-diffusion.cpp)
+    source: hf://second-state/FLUX.1-schnell-GGUF
+    revision: 8c45a2ba25e2d02bd34230989fb54983f39e44ec
+    file: flux1-schnell-Q4_0.gguf
+    components: {t5xxl: t5xxl-Q8_0.gguf, clip_l: clip_l-Q8_0.gguf, vae: ae.safetensors}
+    license: apache-2.0
+    group: images
+    task: image
+    format: gguf
+    recipe: sd-cpp
+    download_gib: 11.9
+    memory_gib: 15.0
+    engine_args: {sd-cpp: [--cfg-scale, "1", --steps, "4"]}
+    note: FLUX.1 schnell in 4 steps for an AMD GPU or APU (Vulkan) or any GPU; T5-XXL, CLIP-L and VAE in the same repository.
+  - name: sd-1.5-gguf
+    title: Stable Diffusion 1.5 Q8_0 (GGUF, CPU)
+    source: hf://second-state/stable-diffusion-v1-5-GGUF
+    revision: 031b5f5df991f511b3f5fa8fed6d99048ababb69
+    file: stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf
+    license: creativeml-openrail-m
+    group: images
+    task: image
+    format: gguf
+    recipe: sd-cpp
+    device: cpu
+    download_gib: 1.64
+    memory_gib: 3.0
+    engine_args: {sd-cpp: [--steps, "20", --cfg-scale, "7"]}
+    note: Small and old (512x512), but it runs on a CPU without a GPU. A check that images work, not for quality.

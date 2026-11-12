@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from forgeyard.db import new_session
-from forgeyard.gateway import keys, media as gmedia, proxy, speech
+from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -78,6 +78,8 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         route = proxy.check_access(caller, route, parsed.model, endpoint)
         if endpoint == speech.ENDPOINT:
             route = proxy.fit_speech(route, parsed)  # 1.3: checked, voice cloning refused, counted
+        elif endpoint == imagegen.ENDPOINT:
+            route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
         # Images, audio and video (1.3): parts rebuilt, the route narrowed to what can take them,
         # media URLs fetched by the gateway, and the size checked again with them inlined.
         media = proxy.scan_media(parsed, endpoint)
@@ -142,6 +144,24 @@ async def translations(request: Request):
 @router.post("/audio/speech")
 async def speech_create(request: Request):
     return await _api(request, "audio/speech")
+
+
+@router.post("/images/generations")
+async def images_generate(request: Request):
+    return await _api(request, "images/generations")
+
+
+@router.post("/images/edits")
+@router.post("/images/variations")
+async def images_edit(request: Request):
+    """Image edits and variations: not in 1.3 (vLLM-Omni's edit route fetches any URL it is given, and
+    variations are a retired DALL-E 2 feature)."""
+    try:
+        await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+    except GatewayError as e:
+        return e.response()
+    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway does not edit images or make variations "
+                                                       "(yet): it serves /v1/images/generations.").response()
 
 
 def _speaks_out(sp: Optional[speech.Speaks]) -> dict:
@@ -245,11 +265,40 @@ async def get_model(model: str, request: Request):
 async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
-                                                 "/v1/score, /v1/audio/transcriptions, /v1/audio/speech and "
-                                                 "/v1/audio/voices.").response()
+                                                 "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
+                                                 "/v1/audio/voices and /v1/images/generations.").response()
 
 
 # ------------------------------------------------------------------ the console's playground
+def image_options(model: Optional[str], caller: KeyCaller) -> dict:
+    """What an image model's deployments take (1.3), for the Playground's Image tab: the most images per
+    request, the largest side, the default size, the multiple sizes must be of, the formats, the most
+    steps, the longest prompt (over every deployment of the route: what at least one takes)."""
+    if not model:
+        raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
+    route = proxy.check_access(caller, _route(model), model, imagegen.ENDPOINT)
+    ds = [g.draws for tier in route.tiers for g in tier.locals if g.draws is not None]
+    if not ds:
+        raise GatewayError(503, "no_target", f"{model!r} has no image deployment.")
+    first = ds[0]
+    return {"model": model, "max_n": max(d.max_n for d in ds), "max_side": max(d.max_side for d in ds),
+            "default_size": f"{first.width}x{first.height}", "multiple": min(d.multiple for d in ds),
+            "formats": sorted({f for d in ds for f in d.formats}, key=imagegen.FORMATS.index),
+            "max_steps": max(d.max_steps for d in ds), "max_prompt_chars": max(d.max_prompt for d in ds)}
+
+
+@console.get("/images/options")
+async def playground_image_options(request: Request, model: Optional[str] = None):
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
+                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+    try:
+        return await run_in_threadpool(image_options, model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
 @console.get("/audio/voices")
 async def playground_voices(request: Request, model: Optional[str] = None):
     """The playground's voice list for a speech model, as the signed-in user."""
