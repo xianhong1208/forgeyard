@@ -167,7 +167,9 @@ engines serve them:
   the queue is full, a request gets 429 with `Retry-After`.
 - **Licences.** The catalog shows each model's licence and whether it is gated. The recommended list
   holds only Apache-2.0 and OpenRAIL models; FLUX.1-dev, SD-Turbo and SD3.5 are not on it (non-commercial
-  or revenue-limited terms), though they can be added by hand.
+  or revenue-limited terms), though they can be added by hand. OpenRAIL models (SDXL, SD 1.5) may be used
+  commercially, but their licence forbids some uses: their cards mark the licence and link to it, as they
+  do for Gemma and Llama.
 - **No prompt filtering.** Forgeyard checks a request's shape and caps, not what it asks for.
 - Usage counts the **images**, their **kilopixels** and the **busy time** (GPU time on a GPU).
 - Images stay on your own deployments; they never go to a cloud provider.

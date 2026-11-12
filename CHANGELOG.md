@@ -240,6 +240,10 @@ generation.
   CA, the health check, then a new container on the same volume keeps the owner, the CA and
   `secret.key`); `images-arm64` builds both images for linux/arm64.
 
+- **Licences with terms are marked on the recommended list.** OpenRAIL (SDXL, SD 1.5), Gemma and Llama
+  cards show the licence in a warning colour, say what it asks, and link to it (the original model's
+  page for a conversion). Apache-2.0, MIT and BSD models are unchanged.
+
 ### Changed
 - `speaches-tts` runs on the CPU only: on a real A100 Kokoro used no GPU memory in speaches' CUDA image
   (ONNX Runtime stayed on the CPU) while the deployment reserved the card; on a CPU it makes speech about
