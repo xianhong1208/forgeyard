@@ -223,7 +223,9 @@ export type RecipeParam = {
 // What a model takes in chat besides text (1.3).
 export type Medium = "image" | "audio" | "video";
 
-export type RecipeVariant = { name: string; vendor: "nvidia" | "amd" | "cpu"; runtime: "container" | "process"; image: string | null; arch: string[] | null; compute_capability: string | null; driver: string | null; engine: string | null };
+export type RecipeVariant = { name: string; vendor: "nvidia" | "amd" | "cpu"; runtime: "container" | "process"; image: string | null; arch: string[] | null; compute_capability: string | null; driver: string | null; engine: string | null;
+  // Ids are recorded for the image: a copy loaded with `docker load` is checked and used offline.
+  image_check?: boolean };
 
 export type Recipe = {
   name: string; title: string; description: string; engine: string; version: string; tasks: Task[]; formats: string[];
