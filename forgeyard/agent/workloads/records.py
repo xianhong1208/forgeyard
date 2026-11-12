@@ -64,6 +64,9 @@ class Record:
     # Behind the agent's key guard (guard.py): the server gave it an internal key. Its ports then
     # carry an `internal` loopback port for the engine; the guard listens on `host_port`.
     guarded: bool = False
+    # The recorded ids of a pinned image ({ids, content}, workloads/images.py), from `desired`: a
+    # copy loaded with `docker load` that matches them runs without a pull.
+    image_ids: Optional[dict] = None
 
     def public(self, *, with_tail: Optional[str] = None) -> dict:
         out = {"id": self.id, "generation": self.generation, "state": self.state, "reason": self.reason,
