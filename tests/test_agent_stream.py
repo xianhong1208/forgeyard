@@ -1,5 +1,6 @@
 """The agent WebSocket: authentication, hello, heartbeats, revocation (FY-AGS-*)."""
 
+import threading
 import time
 
 import pytest
@@ -233,3 +234,26 @@ def test_fy_ags_017_a_revoked_flag_alone_refuses_the_credential(owner):
     node.revoked_at, node.status = node.joined_at, "revoked"
     db.commit()
     assert _denied(owner, j["credential"]) == 401
+
+
+def test_fy_ags_018_a_cancelled_connection_still_records_the_machine_offline(owner, monkeypatch):
+    """FY-AGS-018: the server's handler can be cancelled while it is busy, as a shutting-down server
+    does and as the test client does right after closing the socket; recording the machine offline
+    is shielded from that cancel, so the machine never stays "online" until the offline timeout."""
+    from forgeyard.machines import agent_api
+
+    heartbeat = agent_api._heartbeat
+    started = threading.Event()
+
+    def slow(*args):
+        started.set()
+        time.sleep(0.5)  # the close and the cancel arrive while the handler waits for this
+        return heartbeat(*args)
+
+    monkeypatch.setattr(agent_api, "_heartbeat", slow)
+    j = joined(owner)
+    with connect(owner, j["credential"]) as ws:
+        _online(ws)
+        ws.send_json({"v": 1, "type": "heartbeat", "seq": 1, "metrics": []})
+        assert started.wait(5)
+    assert machine(owner, j["node_id"])["status"] == "offline"
