@@ -7,9 +7,52 @@ version until 1.0.
 ## [Unreleased]
 
 1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
-through the gateway, and the usage units for all of 1.3.
+through the gateway, and the usage units for all of 1.3. Third part: text to speech.
 
 ### Added
+
+- **Text to speech** at `POST /v1/audio/speech`, OpenAI's request shape, with three engines:
+  - **`vllm-omni-tts`** (new recipe): Qwen3-TTS CustomVoice on NVIDIA with vLLM-Omni 0.32.0
+    (`vllm/vllm-omni:v0.32.0`, pinned by digest), nine built-in voices, Chinese (with Mandarin
+    dialects), English and eight more languages, style `instructions`, wav, pcm, flac, mp3 and opus,
+    raw and SSE streaming. Its two stages (talker and audio decoder) share one card: the estimate adds
+    the decoder (`codec_overhead`, 4.5 GiB) and each stage gets its share of the reservation through
+    `--stage-overrides`.
+  - **`llama-cpp`** now also serves `tts`: a TTS GGUF with its projector (Qwen3-TTS, Chatterbox) on
+    llama.cpp b12242's `/v1/audio/speech`, on every variant (AMD Vulkan and ROCm, NVIDIA, the CPU),
+    wav and pcm, raw streaming. The gateway sets `lang` from the text's script and `n_predict` from
+    its length when a request leaves them out.
+  - **`speaches-tts`** (new recipe): Kokoro-82M and Piper voices (a new model format, `onnx`) with the
+    same speaches 0.8.3 images as faster-whisper, CPU and CUDA, mp3, flac, wav and pcm. English only:
+    its released versions delete Chinese, Japanese and Korean characters, so such input is refused
+    (400 `language_not_supported`) instead of answered with silence.
+- **Voice cloning is blocked:** reference recordings (`ref_audio`, `speaker_ref_b64`, …), a voice given
+  as audio or a link, Qwen3-TTS's `task_type: "Base"` and uploading or deleting voices answer 400
+  `voice_cloning_not_supported`; nothing reaches an engine.
+- The gateway checks a speech request before sending it (input, format, `speed`, `stream_format`),
+  sends each deployment only what it can do (400 `unsupported_response_format`,
+  `stream_format_not_supported`), caps the input per deployment (**Longest input**,
+  `max_input_chars`, under Advanced: by default a quarter of the context for vLLM-Omni and llama.cpp,
+  4,096 for speaches; 400 `input_too_long`), fills in the engine's default format, and replaces a
+  missing voice or an OpenAI voice name the model lacks with its default voice, named in the new
+  `X-Forgeyard-Voice` header. The audio streams through as the engine makes it.
+- **Usage** counts the characters spoken (`characters`) and the audio's length (`media_ms`, read from
+  wav and pcm headers or rates, flac, mp3, aac and opus framing, SSE deltas), shown on **Usage**. A
+  key's **tpm counts one token per character** of speech, held before sending. Speech is local only:
+  routes of the new `openai-speech` API take no provider.
+- `GET /v1/audio/voices?model=` lists a speech model's voices (asked of a replica, kept 5 minutes),
+  its default voice, formats, stream formats and input cap.
+- **Playground: Speak**, for speech models: text with its character count against the cap, the
+  model's voices, its formats, streaming, an audio player and a download link. A deployment's **Try
+  it** speaks a short sentence and shows the audio's length.
+- **Recommended models:** a *Text to speech* group with Qwen3-TTS 0.6B and 1.7B CustomVoice
+  (vLLM-Omni), Qwen3-TTS 1.7B GGUF and Chatterbox Turbo (llama.cpp) and Kokoro 82M (speaches), each
+  pinned to a commit, with its languages and licence (Apache-2.0 or MIT; a conversion without a
+  licence of its own names its original in `license_from`). The catalog reads Qwen3-TTS's voices and
+  talker, and Hugging Face's `text-to-speech` as the new `tts` task.
+- `scripts/accept_tts.py`: the real-hardware acceptance of text to speech with the official SDK
+  (Chinese and English, streaming, every format, voices, refusals, usage, the key guard, and an
+  intelligibility check through speech to text), and a `tts` group in `scripts/accept_all.py`.
 
 - **Setup health** for admins: Forgeyard checks its own setup for settings and combinations that
   are broken, risky or useless, from the settings, the database and the agents' reports, and says

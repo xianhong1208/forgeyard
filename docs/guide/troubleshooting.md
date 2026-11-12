@@ -390,6 +390,33 @@ A vision model on vLLM that **does not start after video was turned on**: vLLM r
 a long video at startup and is left with too little for the KV cache. Lower the context length, or
 turn video off again.
 
+## Speech is refused, or sounds wrong
+
+**You see:** `/v1/audio/speech` answers 400; the `code` says why. Nothing reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `voice_cloning_not_supported` | The request carries a reference recording (`ref_audio`, `speaker_ref_b64`, …), a voice given as audio or a link, or `task_type: "Base"`; or a program tried to upload a voice | Use one of the model's voices: `GET /v1/audio/voices?model=…` |
+| `input_too_long` | More characters than the deployment's *Longest input* (by default a quarter of the context, 1,024, for vLLM-Omni and llama.cpp; 4,096 for speaches) | Split the text into sentences or paragraphs, or raise it under **Advanced** (and the context with it) |
+| `unsupported_response_format` | The engine does not make that format (mp3 or opus from llama.cpp, opus or aac from speaches) | Ask for one it makes; the message lists them |
+| `stream_format_not_supported` | `stream_format: sse` to llama.cpp or speaches | Use `audio`, or leave it out |
+| `language_not_supported` | Chinese, Japanese or Korean to speaches: its released versions delete those characters | Use a Qwen3-TTS deployment |
+
+**The audio is cut off at the end:** llama.cpp stops at `n_predict` audio frames; the gateway sets
+ten a character (at least 512, at most the context) when the request gives none. A model that speaks
+slowly may need more: send `n_predict` yourself, and keep it within the deployment's context.
+
+**The Chinese is read in English, or badly:** on llama.cpp, Qwen3-TTS speaks English unless it gets
+`lang`. The gateway sets it from Chinese, Japanese or Korean characters; for text mostly in Latin
+letters, send `"lang": "zh"` yourself.
+
+**The voice is not the one asked for:** OpenAI's names (`alloy`, `nova`, …) are not the model's
+voices; the gateway uses the model's default voice and names it in `X-Forgeyard-Voice`. Ask for one
+the model lists.
+
+**Streaming sends everything at the end:** some models make the whole utterance before any audio
+comes out (Chatterbox on llama.cpp does). Qwen3-TTS streams.
+
 ## Cost shows requests without a price
 
 **You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above

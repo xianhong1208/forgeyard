@@ -219,6 +219,9 @@ local_dirs = ["/data/models"]
 | `POST /v1/score` | 重排序模型（vLLM 的 score API） | 否 |
 | `POST /v1/audio/transcriptions` | 語音轉文字（faster-whisper），以 `multipart/form-data` 送出，含 `model` 欄位 | 否 |
 | `POST /v1/audio/translations` | 語音轉成英文文字，格式同上 | 否 |
+| `POST /v1/audio/speech` | 文字轉語音（1.3）：OpenAI 的請求格式，音訊一邊產生一邊傳回。見[文字轉語音](#text-to-speech) | 否 |
+| `GET /v1/audio/voices?model=<model>` | 語音模型的聲音、預設聲音、它能產生的格式、串流方式與輸入上限 | — |
+| `POST /v1/audio/voices`、`DELETE /v1/audio/voices/{name}` | 上傳或刪除聲音（聲音複製）：1.3 一律回應 400 `voice_cloning_not_supported` | — |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
 
@@ -226,7 +229,7 @@ local_dirs = ["/data/models"]
 
 - 從請求內容讀取 `model`，把請求送到這個模型的路由。模型在另一個端點提供時（例如把嵌入模型送到 `/v1/chat/completions`），回 400 `wrong_endpoint`。
 - 把 `model` 換成副本或供應商預期的名稱，加上副本的內部金鑰或供應商的金鑰，你的其他東西一概不轉送：不轉送你的 API 金鑰，也不轉送你的其他標頭。
-- `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。
+- `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。文字轉語音則改成 `input` 的每個字元算一個 token（見[文字轉語音](#text-to-speech)）。
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
 - 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
 - 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
@@ -260,6 +263,37 @@ local_dirs = ["/data/models"]
 
 沒有這些參數的配方：4 張圖片或音訊片段、不接受影片、上限為 `GATEWAY_MAX_BODY_MB`。
 
+### 文字轉語音
+
+`POST /v1/audio/speech` 接受 OpenAI 的請求，回應的是音訊本身（不是 JSON），引擎一邊產生閘道就一邊轉送。三種引擎提供這項服務（配方 `vllm-omni-tts`、搭配 TTS GGUF 的 `llama-cpp`、`speaches-tts`）；只由本機部署提供，絕不送往雲端供應商。
+
+| 欄位 | 閘道怎麼處理 |
+|---|---|
+| `model` | 語音模型的名稱，和平常一樣 |
+| `input` | 必填，最多為部署的 *Longest input*（`max_input_chars`；0 代表 vLLM-Omni 與 llama.cpp 取上下文長度的四分之一，預設即 1,024；speaches 為 4,096）。超過時回應 400 `input_too_long` |
+| `voice` | 模型的聲音之一（`GET /v1/audio/voices`），名稱或 `{"id": …}` 皆可。模型沒有的 OpenAI 聲音名稱（`alloy`、`nova` 等），或沒有指定聲音時，改用配方的預設聲音或引擎列出的第一個；回應以 `X-Forgeyard-Voice` 標出（模型沒有內建聲音、只用它自己的一種聲音時為 `default`） |
+| `response_format` | `mp3`、`opus`、`aac`、`flac`、`wav` 或 `pcm`，且必須是引擎能產生的；否則回應 400 `unsupported_response_format`。沒指定時用引擎的預設（vLLM-Omni 與 llama.cpp 為 `wav`，speaches 為 `mp3`），不是 OpenAI 的 `mp3` |
+| `stream_format` | `audio`：一邊產生一邊傳原始音訊（串流的 WAV 會宣告未知長度）。`sse`：OpenAI 的 `speech.audio.delta` / `speech.audio.done` 事件（僅 vLLM-Omni）。沒指定時傳回整個檔案。引擎不支援時回應 400 `stream_format_not_supported`。`stream: true` 等同 `stream_format: audio` |
+| `speed` | 0.25 到 4，原樣轉送（llama.cpp 只接受 1.0，speaches 的 Kokoro 為 0.5 到 2） |
+| `instructions` | 原樣轉送：vLLM-Omni 的 Qwen3-TTS 會用它（風格與情緒），其他引擎忽略 |
+| `language`、`lang`、`sample_rate`、`seed` 等 | 原樣轉送。對 llama.cpp，若請求沒給，閘道會依文字的書寫系統設定 `lang`（`zh`、`ja`、`ko`），並設定 `n_predict`（每個字元十個音訊幀，至少 512，最多到上下文長度） |
+
+**1.3 不提供聲音複製。** 參考錄音（`ref_audio`、`ref_text`、`speaker_ref_b64`、`speaker_embedding` 等）、以音訊資料或連結當作聲音、Qwen3-TTS 的 `task_type: "Base"`，以及上傳或刪除聲音，都回應 400 `voice_cloning_not_supported`，任何內容都不會送到引擎。
+
+每個有回應的請求會計入（`GET /api/usage` 與 **Usage** 頁面）：
+
+| 單位 | 怎麼算 |
+|---|---|
+| `characters` | 輸入的字元數（Unicode 碼位），送出前就算好 |
+| `media_ms` | 音訊長度（毫秒），在轉送時讀出：`wav` 看檔頭（串流時算檔頭之後的位元組），`pcm` 依大小與回應標明的取樣率（`x-audio-sample-rate`，或類型裡的 `rate=`；否則用該聲音自己的取樣率），`flac` 看 STREAMINFO，`mp3` 與 `aac` 數音框，`opus` 看最後一個 Ogg 頁；SSE 依 `pcm` 片段的大小。其他回應不計 |
+| tokens | 只計引擎回報的：vLLM-Omni 的 `x-vllm-omni-input-tokens` 與 `-output-tokens`，或 `speech.audio.done` 的 usage |
+
+**限制：** rpm 和所有請求一樣；**tpm 以 `input` 的每個字元算一個 token**，在請求到達時先預留（15 個字元的請求需要 15 個 token 的額度）。預算只管雲端花費，而語音從不送往雲端。金鑰的模型清單同樣適用於語音和聲音清單。
+
+`GET /v1/audio/voices?model=<model>` 回應
+`{"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", "formats",
+"default_format", "stream_formats", "max_input_chars"}`，向一個就緒的副本詢問，保留 5 分鐘。上傳到引擎的聲音一律不列出。
+
 ### 標頭
 
 | 標頭 | 方向 | 值 |
@@ -269,6 +303,7 @@ local_dirs = ["/data/models"]
 | `X-Forgeyard-Target` | 回應 | 由誰回答：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。絕不包含金鑰 |
 | `X-Forgeyard-Replica` | 回應 | 本機回答時：`<model>#<replica>` |
 | `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
+| `X-Forgeyard-Voice` | 回應 | 文字轉語音：請求沒指定聲音、或指定了模型沒有的 OpenAI 聲音時，閘道所選的聲音；模型只有自己的一種聲音時為 `default` |
 | `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
 | `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`，以及原樣轉回的副本或供應商自己的 429 或 503 |
 
@@ -285,7 +320,7 @@ local_dirs = ["/data/models"]
 | 狀態碼 | `code` | 意思 | 怎麼做 |
 |---|---|---|---|
 | 400 | `invalid_json` | 請求內容不是 JSON | 送 JSON |
-| 400 | `invalid_request` | 沒有 `model`、請求內容不是物件，或音訊不是以 `multipart/form-data` 送出 | 修正請求 |
+| 400 | `invalid_request` | 沒有 `model`、請求內容不是物件，或音訊不是以 `multipart/form-data` 送出；語音請求沒有 `input`、`speed` 不在 0.25 到 4 之間、`stream_format` 是別的值，或 `GET /v1/audio/voices` 沒帶 `model` | 修正請求 |
 | 400 | `wrong_endpoint` | 這個模型在另一個端點提供；訊息會寫出是哪一個 | 改用那個端點 |
 | 400 | `context_length_exceeded` | 只出現在開啟 **Spill a prompt that is too long** 的路由：提示放不進本機的上下文，而且沒有其他目標能接手 | 縮短提示或降低 `max_tokens` |
 | 400 | `invalid_content_part` | 內容區塊不是帶 `type` 的物件、閘道不接受的類型（`*_embeds`、未知類型），或媒體區塊沒有網址 | 使用[對話中的圖片、音訊與影片](#images-audio-and-video-in-chat)列出的區塊 |
@@ -296,6 +331,11 @@ local_dirs = ["/data/models"]
 | 400 | `too_many_media_items` | 圖片（或音訊片段、影片）多於部署的 *Images per request* 或 *Videos per request* | 少送一些，或調高參數 |
 | 400 | `file_input_not_supported` | 把 `file` 區塊（PDF）送給配方不接受檔案的模型；閘道不會轉換檔案 | 改送頁面圖片或文字 |
 | 400 | `media_local_only` | 把帶媒體的請求送給只由供應商提供的模型 | 改用本機模型 |
+| 400 | `input_too_long` | 文字轉語音：`input` 超過部署的 *Longest input* | 把文字拆開，或調高 `max_input_chars` |
+| 400 | `unsupported_response_format` | 文字轉語音：`response_format` 不是 OpenAI 的格式，或引擎不產生這種格式；訊息會列出它能產生的格式 | 改用其中一種 |
+| 400 | `stream_format_not_supported` | 文字轉語音：引擎不提供這種 `stream_format`（llama.cpp 或 speaches 的 `sse`） | 拿掉它，或用 `audio` |
+| 400 | `language_not_supported` | 文字轉語音：把中文、日文或韓文送給 speaches，它會把這些字刪掉 | 改用 Qwen3-TTS 部署 |
+| 400 | `voice_cloning_not_supported` | 文字轉語音：帶了參考錄音、以音訊或連結當聲音、`task_type: "Base"`，或上傳聲音。1.3 不提供 | 使用模型自己的聲音 |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
@@ -452,6 +492,10 @@ local_dirs = ["/data/models"]
 | | `vulkan` | 其他所有 AMD GPU：APU（`gfx1151`、`gfx1150`、`gfx1103`…）與 ROCm 映像檔沒有編譯的卡。只給那張卡的 render node，不給 `/dev/kfd` | `…:server-vulkan-b12242`（Mesa RADV） |
 | | `cpu`、`cpu-process` | x86_64 與 aarch64 用容器；x86_64 沒有 Docker 時用行程 | `…:server-b12242`；release `b12242` 的 `llama-b12242-bin-ubuntu-x64.tar.gz`，用它的 SHA-256 檢查 |
 | `faster-whisper` | `cuda`、`cuda-12.4`、`cpu` | NVIDIA、CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
+| `speaches-tts`（1.3） | `cuda`、`cuda-12.4`、`cpu` | NVIDIA、CPU（容器） | 同樣的 `ghcr.io/speaches-ai/speaches:0.8.3-*` 映像檔 |
+| `vllm-omni-tts`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | `vllm/vllm-omni:v0.32.0`（CUDA 13.0） |
+
+`llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
 每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
 

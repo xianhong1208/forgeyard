@@ -1,7 +1,7 @@
 # Forgeyard
 
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器。每台機器上的 agent
-回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
+回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
 
 [English](README.md)
 
@@ -9,7 +9,7 @@
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
 > 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3（進行中）加入更多種類的模型；第一步是 vLLM 與 llama.cpp 上的
-> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.md](ROADMAP.md)。
+> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.md](ROADMAP.md)。
 
 ## 使用指南
 
@@ -80,7 +80,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 |---|---|---|
 | NVIDIA A100 80GB PCIe（8 卡主機，使用 GPU 允許清單） | driver 580、CUDA 13.0、Docker | 加入伺服器與 GPU 允許清單；服務和任務以行程或容器執行，各自只看到分配到的顯示卡；vLLM 0.32（Qwen3-4B 對話、Qwen3 embedding 與 reranker）、speaches 0.8.3（faster-whisper）；用官方 OpenAI SDK 呼叫閘道；以容器映像檔執行 agent |
 | AMD Ryzen AI MAX+ 395 與 Radeon 8060S（Strix Halo，gfx1151 APU，BIOS 切出 96 GiB 給 VRAM） | Ubuntu 24.04、ROCm 7.0.2、amd-smi 26.0.2 | 透過 `amdsmi` 函式庫偵測硬體（統一記憶體）、加入伺服器，並在連不到 Hugging Face 和 `ghcr.io` 的機器上用 llama.cpp 的 Vulkan 版本跑 Qwen3-1.7B GGUF，透過 `/v1` 提供服務 |
-| 沒有 GPU 的 x86-64 | Linux | llama.cpp（Qwen3-1.7B GGUF）同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台 |
+| 沒有 GPU 的 x86-64 | Linux | llama.cpp（Qwen3-1.7B GGUF）同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；llama.cpp b12242 的文字轉語音（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo），並以 faster-whisper 聽寫確認內容 |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
 還沒在真實硬體上檢查的：`llama-cpp` 內建的 Vulkan variant（b12242）、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
@@ -127,6 +127,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/pricing.py` | 依用量與價格計算請求的費用；OpenRouter 的清單與價格對應 |
 | `forgeyard/gateway/budgets.py` | 預算帳本：預留、結算、釋放、80% 與 100% 警示、402 |
 | `forgeyard/gateway/media.py` | 對話中的圖片、音訊與影片：重建內容區塊、依 egress 規則下載媒體網址 |
+| `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種引擎拿到什麼、音訊長度 |
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
@@ -146,6 +147,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](docs/guide/zh-TW/how-to.md#check-a-server-end-to-end)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
+| `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |
 
