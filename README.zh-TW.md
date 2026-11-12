@@ -47,7 +47,7 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 ```bash
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/<namespace>/forgeyard:1.2.0
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.2.0
 sudo docker logs forgeyard      # the one-time setup token
 ```
 
@@ -65,7 +65,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
   sudo sh -s -- --join fyj_… --ca-fingerprint sha256:3f9a…
 ```
 
-也可以用 agent 映像檔跑一個 `docker run`，映像檔是伺服器版本的 `docker.io/<namespace>/forgeyard-agent`
+也可以用 agent 映像檔跑一個 `docker run`，映像檔是伺服器版本的 `docker.io/tonyhuang1101/forgeyard-agent`
 （**Docker** 分頁會產生指令），或在 Forgeyard 目錄裡搭配 `/etc/forgeyard/agent.toml` 執行。接著在 **Models** 部署模型，用 API 金鑰和任何 OpenAI
 用戶端呼叫 `https://192.168.1.20:7860/v1`。
 
