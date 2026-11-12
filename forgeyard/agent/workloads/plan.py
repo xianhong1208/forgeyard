@@ -32,6 +32,12 @@ def _amd(gpus: list[dict]) -> list[dict]:
     return [g for g in gpus if g.get("vendor") == "amd"]
 
 
+def needs_kfd(gpus: list[dict]) -> bool:
+    """A container with AMD cards gets /dev/kfd (ROCm's compute interface) unless every card was
+    given for an engine that uses only the render node (Vulkan: `"kfd": false`)."""
+    return any(g.get("kfd", True) is not False for g in _amd(gpus))
+
+
 def nvidia_ids(gpus: list[dict]) -> list[str]:
     """UUIDs ("GPU-…"), else indices. A UUID names one physical card whatever the enumeration
     order: CUDA numbers cards fastest-first by default, NVML and nvidia-smi by PCI bus, so an
@@ -248,7 +254,8 @@ def container_run_argv(engine: str, *, name: str, image: str, command: Optional[
             # The quotes are part of the value: docker splits --gpus on commas otherwise.
             argv += ["--gpus", f'"device={",".join(nv)}"']
     if _amd(gpus):
-        argv += ["--device", "/dev/kfd"]
+        if needs_kfd(gpus):
+            argv += ["--device", "/dev/kfd"]
         for dev in render_devices:
             argv += ["--device", dev]
         for gid in render_gids:

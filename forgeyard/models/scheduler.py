@@ -313,7 +313,7 @@ def place_replica(db: DbSession, r: Replica) -> Optional[int]:
         r.reason = f"Cannot be placed: {e}"[:400]
         return None
     r.node_id = opt.node.id
-    r.gpus = [placement.gpu_ref(a) for a in opt.cards]
+    r.gpus = [placement.gpu_ref(a, kfd=opt.variant.amd_kfd) for a in opt.cards]
     r.vram = ctx.amount
     r.spec = spec
     r.model = model_block(ctx.model)

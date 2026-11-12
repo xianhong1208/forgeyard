@@ -540,3 +540,45 @@ def test_fy_rt_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_fil
     assert process.systemd_running(run(exc=OSError("no exec")), found) is False
     n = len(calls)
     assert process.systemd_running(run(0), lambda name: None) is False and len(calls) == n  # nothing to run
+
+
+def test_fy_rt_028_vulkan_amd_container_gets_the_render_node_only(tmp_path, monkeypatch):
+    """FY-RT-028: an AMD card sent with "kfd": false (a Vulkan engine) gets only its render node and
+    the group that owns it: no /dev/kfd and not its group. Without the flag (ROCm, or a server
+    older than 1.3) /dev/kfd stays, and so does its group."""
+    import forgeyard.agent.workloads.container as ctr_mod
+
+    gids = {"/dev/kfd": 991, "/dev/dri/renderD129": 992}
+    real_exists, real_stat = os.path.exists, os.stat
+
+    class St:
+        def __init__(self, gid):
+            self.st_gid = gid
+
+    monkeypatch.setattr(ctr_mod.os.path, "exists", lambda p: p in gids or real_exists(p))
+    monkeypatch.setattr(ctr_mod.os, "stat", lambda p, *a, **k: St(gids[p]) if p in gids else real_stat(p, *a, **k))
+    fake = FakeDocker(tmp_path / "bin")
+    rt = _ctr(tmp_path, fake)
+    gpu_spec = container(resources={"gpus": {"count": 1}})
+
+    def run_with(card, rid):
+        async def scenario():
+            sup = Supervisor(tmp_path / rid, {"container": rt}, tick=0.05, bind_address="127.0.0.1")
+            sup.set_desired(desired(replica(rid, gpu_spec, gpus=[card])))
+            await converge(sup, lambda s: s.records[rid].state == "running")
+        asyncio.run(scenario())
+        run = fake.runs()[-1]
+        return ([run[i + 1] for i, a in enumerate(run) if a == "--device"],
+                [run[i + 1] for i, a in enumerate(run) if a == "--group-add"])
+
+    assert run_with(dict(amd_card(1, minor=129), kfd=False), "r-vk-000000001") == (["/dev/dri/renderD129"], ["992"])
+    assert run_with(amd_card(1, minor=129), "r-rocm-0000001") == (["/dev/kfd", "/dev/dri/renderD129"], ["991", "992"])
+    # The argv alone: one card that needs ROCm is enough for /dev/kfd.
+    argv = plan.container_run_argv("docker", name="n", image="i", command=None, args=[], env_file="e", labels={},
+                                   ports=[], bind="127.0.0.1", cpu=None, memory=None,
+                                   gpus=[dict(amd_card(1), kfd=False), amd_card(2, minor=130)], gpu_mode=None,
+                                   render_devices=["/dev/dri/renderD129", "/dev/dri/renderD130"], render_gids=[],
+                                   log_max_bytes=1024**2)
+    assert "/dev/kfd" in argv
+    assert plan.needs_kfd([dict(amd_card(1), kfd=False)]) is False and plan.needs_kfd([]) is False
+    assert plan.needs_kfd([amd_card(1)]) is True and plan.needs_kfd([dict(amd_card(1), kfd=True)]) is True

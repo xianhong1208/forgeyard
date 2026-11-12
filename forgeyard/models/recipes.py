@@ -38,6 +38,11 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
         runtime: container
         image: vllm/vllm-openai:v0.32.0
         entrypoint: [vllm, serve]
+      - name: vulkan
+        when: {vendor: amd}
+        runtime: container
+        amd_kfd: false                 AMD cards get only their render node, not /dev/kfd (ROCm's
+                                       compute interface): Vulkan needs nothing else. Default true
       - name: cpu-process
         when: {vendor: cpu, arch: [x86_64]}
         runtime: process
@@ -166,9 +171,14 @@ class Variant(_M):
     command: Optional[str] = Field(default=None, max_length=1024)  # process: an installed program
     args: Optional[list[Annotated[str, Field(max_length=4096)]]] = Field(default=None, max_length=128)
     env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
+    # AMD containers: pass /dev/kfd (ROCm/HIP) besides each card's render node. False for engines
+    # that use only the render node (Vulkan), so the container gets nothing it does not use.
+    amd_kfd: bool = True
 
     @model_validator(mode="after")
     def _runtime(self) -> "Variant":
+        if not self.amd_kfd and (self.when.vendor != "amd" or self.runtime != "container"):
+            raise ValueError(f"variant {self.name}: amd_kfd is for AMD container variants")
         if self.runtime == "container":
             if not self.image or not IMAGE_RE.match(self.image):
                 raise ValueError(f"variant {self.name}: a container variant needs an image")

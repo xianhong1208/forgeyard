@@ -223,6 +223,10 @@ def main() -> int:
                 params["threads"] = args.threads
             if args.video_url:
                 params["videos"] = 1
+                if gguf:
+                    # llama.cpp b12242 samples a Qwen3-VL video at the model's own 2 frames a second
+                    # (--video-fps no longer applies): the 6-second sample takes ~5,300 tokens.
+                    params["context"] = max(int(params.get("context") or 0), 8192)
             if args.context:
                 params["context"] = args.context
             if args.concurrency:

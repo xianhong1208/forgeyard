@@ -254,7 +254,7 @@ def test_fy_sch_008_cpu_gguf_container_or_process(owner):
     d = deploy(owner, "small", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})
     row = replica_row("small")
     assert row.spec["runtime"]["type"] == "process" and row.spec["runtime"]["command"] == "llama-server"
-    assert row.engine["sha256"] == "3b0c3d7d7f7c492f59bb5625bd077727f5322fff72b964dfa32ceca45bbe5053"
+    assert row.engine["sha256"] == "909eef25cd53e6601c8a07c866d8dbb2983e74177088d55182137a8fb8255d62"
     args = row.spec["runtime"]["args"]
     assert args[:2] == ["-m", "${MODEL_FILE}"] and args[args.index("--host") + 1] == "${BIND_ADDRESS}"
     assert args[args.index("--port") + 1] == "${PORT}" and args[args.index("-ngl") + 1] == "0"
@@ -268,7 +268,7 @@ def test_fy_sch_008_cpu_gguf_container_or_process(owner):
         db.close()
     deploy(owner, "small2", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})
     row2 = replica_row("small2")
-    assert row2.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-b11977@sha256:") and row2.engine is None
+    assert row2.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-b12242@sha256:") and row2.engine is None
     many = owner.post("/api/deployments/estimate", json={"name": "t", "model": "qwen3-1.7b-gguf", "recipe": "llama-cpp",
                                                          "params": {"gpus": 0, "threads": 24}}).json()["placement"]
     assert many["fits"] is False and "needs 24 CPU threads, 16 free of 32" in many["machines"][0]["reason"]
@@ -347,3 +347,41 @@ def test_fy_sch_012_replicas_of_one_deployment_spread_over_machines(owner):
         db.close()
     one = owner.post("/api/deployments/estimate", json={**body, "machine_id": a}).json()["placement"]
     assert [p["machine"] for p in one["placed"]] == ["cpu-a", "cpu-a"]
+
+
+def test_fy_sch_013_llama_cpp_on_amd_apu_takes_vulkan_and_discrete_takes_rocm(owner):
+    """FY-SCH-013: llama.cpp on an AMD APU (gfx1151, unified memory) runs the Vulkan image, and its
+    card is sent without /dev/kfd; the same machine with a discrete gfx1100 runs ROCm with /dev/kfd
+    (the card reference carries no flag, as before 1.3). The memory checked is the pool the
+    inventory reports for the card."""
+    seed_catalog()
+    apu = make_node("strix", "amd-gfx1151-apu", features=MODELS)
+    plan = owner.post("/api/deployments/estimate", json={"name": "t", "model": "qwen3-1.7b-gguf",
+                                                         "recipe": "llama-cpp"}).json()["placement"]
+    assert plan["placed"][0]["variant"] == "vulkan" and plan["placed"][0]["gpus"] == [0]
+    big = owner.post("/api/deployments/estimate", json={"name": "t", "model": "qwen3-1.7b-gguf", "recipe": "llama-cpp",
+                                                        "params": {"vram": "200Gi"}}).json()["placement"]
+    # The pool is what the inventory reports for the card: here its GTT (104 GiB free of 110, less
+    # the headroom), not the 512 MiB carve-out.
+    assert big["fits"] is False and "available: #0 103.50 GiB" in big["machines"][0]["reason"], big
+    deploy(owner, "apu", "qwen3-1.7b-gguf", "llama-cpp")
+    row = replica_row("apu")
+    vulkan = recipes.builtin_recipes()["llama-cpp"][0].variant("vulkan")
+    assert row.node_id == apu and row.spec["runtime"]["image"] == vulkan.image
+    assert row.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:")
+    assert row.spec["resources"]["gpus"]["vendor"] == "amd"
+    assert [(g["vendor"], g["index"], g["kfd"]) for g in row.gpus] == [("amd", 0, False)]
+    args = row.spec["runtime"]["args"]
+    assert args[args.index("-ngl") + 1] == "999" and args[args.index("--port") + 1] == "8080"
+    radeon = make_node("radeon", "amd-gfx1151-apu", features=MODELS)
+    db = new_session()
+    try:
+        card = db.scalar(select(Accelerator).where(Accelerator.node_id == radeon, Accelerator.vendor == "amd"))
+        card.arch, card.unified_memory, card.vram_total = "gfx1100", False, 48 * GIB
+        db.commit()
+    finally:
+        db.close()
+    deploy(owner, "dgpu", "qwen3-1.7b-gguf", "llama-cpp", machine_id=radeon)
+    row = replica_row("dgpu")
+    assert row.spec["runtime"]["image"] == recipes.builtin_recipes()["llama-cpp"][0].variant("rocm").image
+    assert row.gpus and all("kfd" not in g for g in row.gpus)
