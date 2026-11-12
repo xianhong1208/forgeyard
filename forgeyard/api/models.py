@@ -29,7 +29,7 @@ from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
 from forgeyard.security.ratelimit import limiter, retry_after
-from forgeyard.workloads import placement
+from forgeyard.workloads import images, placement
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -104,7 +104,10 @@ def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
            "media": r.media.model_dump() if r.media is not None else None,
            "params": {k: p.model_dump(exclude_none=True) for k, p in r.params.items()},
            "devices": sorted({"gpu" if v.gpu else "cpu" for v in r.variants}),
+           # image_check: ids are recorded for the image, so a copy loaded with `docker load` is
+           # checked and run on a machine that cannot reach the registry (workloads/images.py).
            "variants": [{"name": v.name, "vendor": v.when.vendor, "runtime": v.runtime, "image": v.image,
+                         "image_check": images.check_for(v.image) is not None,
                          "arch": v.when.arch, "compute_capability": v.when.compute_capability,
                          "driver": v.when.driver,
                          "engine": v.engine.url if v.engine else v.command} for v in r.variants]}

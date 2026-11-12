@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:95d89570949fa16f3f5e3b270719c7b9fef2d8aa06d2400ad6919b8973667a61",
+    "size": 7720
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:afa7f7d582de8ee3433df193ede10fc2c50d3398de31c14d329b643e7a69b852",
+      "size": 41122308
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:6f01cc7d6fb3d703f324d1ccddfddeaa2e8c97cf4b5d6936a66396eaf4089d99",
+      "size": 388
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:6e60e8205eb4e4d2e708fa52e4a8c9cb7fd7382776e6b7c0f9ebbdbed81ecbea",
+      "size": 236710654
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:ecbe09760da22a4c0d4c0bc37dd9687dc0778294ac888634ff3d9977e34e4c28",
+      "size": 27199049
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:3fa9b0bcb9c3b94230b2f5f55e63dcd681dfdb8df31b3b5c6490e99885426464",
+      "size": 27757
+    },
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+      "size": 32
+    }
+  ],
+  "annotations": {
+    "org.opencontainers.image.created": "2026-11-10T04:23:43Z",
+    "org.opencontainers.image.description": "LLM inference in C/C++",
+    "org.opencontainers.image.revision": "3b4d6ab3f79651935fba1dd93732f29022a7f5f5",
+    "org.opencontainers.image.source": "https://github.com/ggml-org/llama.cpp",
+    "org.opencontainers.image.title": "llama.cpp",
+    "org.opencontainers.image.url": "https://github.com/ggml-org/llama.cpp",
+    "org.opencontainers.image.version": "b12242"
+  }
+}

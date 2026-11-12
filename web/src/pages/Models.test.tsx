@@ -197,4 +197,39 @@ describe("models", () => {
     const post = fetch.mock.calls.find(([u, i]) => u === "/api/models" && i?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ source: "hf://Qwen/Qwen3-4B", name: "qwen3-4b", task: "chat" });
   });
+
+  it("FY-WEB-170 a recipe lists the commands that carry its images to a machine without registry access", async () => {
+    const digest = "sha256:" + "a".repeat(64);
+    const pinned = `vllm/vllm-openai:v0.32.0@${digest}`;
+    const own = "registry.example/team/vllm-rocm:7@sha256:" + "b".repeat(64);
+    const recipe = { ...catalog.recipes[0], variants: [
+      { ...catalog.recipes[0].variants[0], image: pinned, image_check: true },
+      { ...catalog.recipes[0].variants[0], name: "pooling", image: pinned, image_check: true },
+      { ...catalog.recipes[0].variants[0], name: "rocm", vendor: "amd" as const, image: own, image_check: false },
+      { ...catalog.recipes[0].variants[0], name: "cpu-process", vendor: "cpu" as const, runtime: "process" as const, image: null,
+        engine: "https://example.org/x.tar.gz" },
+    ] };
+    server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
+      : url === "/api/models" ? { status: 200, body: { ...catalog, recipes: [recipe] } } : undefined);
+    mount("/models?tab=catalog");
+    const card = await screen.findByRole("article", { name: "Recipe vllm" });
+    fireEvent.click(within(card).getByText("Machine without registry access: load the image"));
+    const save = within(card).getByLabelText("Save command for cuda, pooling");
+    expect(save.textContent).toBe(`sudo docker pull vllm/vllm-openai@${digest} && \\\n` +
+      `  sudo docker tag vllm/vllm-openai@${digest} vllm/vllm-openai:v0.32.0 && \\\n` +
+      "  sudo docker save vllm/vllm-openai:v0.32.0 | gzip > vllm-openai-v0.32.0.tar.gz");
+    expect(within(card).getByLabelText("Load command for cuda, pooling").textContent).toBe(
+      "gunzip -c vllm-openai-v0.32.0.tar.gz | sudo docker load");
+    expect(within(card).getByText(/so this recipe works offline as it is/)).toBeTruthy();
+    // One image at a time; the process variant has none to carry.
+    const pick = within(card).getByLabelText("Variant") as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.text)).toEqual(["cuda, pooling · vllm-openai:v0.32.0", "rocm · vllm-rocm:7"]);
+    fireEvent.change(pick, { target: { value: "1" } });
+    expect(within(card).queryByLabelText("Save command for cuda, pooling")).toBeNull();
+    expect(within(card).getByLabelText("Save command for rocm").textContent).toContain(
+      "sudo docker save registry.example/team/vllm-rocm:7 | gzip > vllm-rocm-7.tar.gz");
+    expect(within(card).getByText(/No ids are recorded for this image/)).toBeTruthy();
+    expect(within(card).queryByText(/so this recipe works offline as it is/)).toBeNull();
+    expect(within(card).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
+  });
 });
