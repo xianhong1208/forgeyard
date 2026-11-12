@@ -259,7 +259,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   | `vllm-pooling` | embeddings, rerank | NVIDIA, AMD, shares a GPU by default | the same images, `--runner pooling` |
   | `llama-cpp` | chat (GGUF) | NVIDIA, AMD (ROCm for Instinct and the discrete cards its image is built for, Vulkan for APUs and every other AMD GPU, with the render node only), CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` and `server-b12242`, release `b12242` for the process |
   | `faster-whisper` | speech to text | NVIDIA, CPU, shares a GPU by default | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
-  | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | NVIDIA, CPU (container), shares a GPU by default | the same speaches images |
+  | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | CPU (container) only: ONNX Runtime ran Kokoro on the CPU even in the CUDA image | the speaches CPU image |
   | `vllm-omni-tts` (1.3) | text to speech (safetensors: Qwen3-TTS) | NVIDIA, one GPU, shares it by default | `vllm/vllm-omni:v0.32.0` (CUDA 13.0, driver ≥ 580), `vllm serve <model> --omni` |
 
   `llama-cpp` also serves `tts` (a TTS GGUF with its projector) on every variant.

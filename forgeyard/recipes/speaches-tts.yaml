@@ -66,15 +66,10 @@ env:
   DO_NOT_TRACK: "1"
 # The replica's internal key: as in the faster-whisper recipe (API_KEY; /health needs it too).
 api_key_env: API_KEY
+# CPU only: Kokoro and Piper run on ONNX Runtime, and in speaches' CUDA image Kokoro still ran on the CPU
+# (an A100 run showed no GPU memory used) while the deployment reserved the card. On a CPU Kokoro makes
+# speech about four times faster than it plays.
 variants:
-  - name: cuda
-    when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=575"}
-    runtime: container
-    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda@sha256:9abc6968a883e77ead9286c38a6ccf3139dcad518b783deeebb7be2ced50e972
-  - name: cuda-12.4
-    when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=550"}
-    runtime: container
-    image: ghcr.io/speaches-ai/speaches:0.8.3-cuda-12.4.1@sha256:6a64b1dfe7fe650c72ff01027048858d51c5851993d0f76ba6046f4ca94545c7
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
