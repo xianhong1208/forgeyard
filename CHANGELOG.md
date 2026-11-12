@@ -228,6 +228,9 @@ through the gateway, and the usage units for all of 1.3. Third part: text to spe
   NVML stays on both. It now carries OCI labels (source, licence, version, revision).
 
 ### Fixed
+- **A machine whose agent disconnected while the server was busy could stay "online"** until the
+  offline timeout: when the connection's handler was cancelled (a server shutting down) before it
+  recorded the machine offline, that step was skipped. It is now shielded from the cancel.
 - **Video on llama.cpp** read 4 frames a second (llama-server's default), so a 6-second 720p clip took
   about 11,500 tokens and overran a 4,096-token context (found on a real CPU machine). The `llama-cpp`
   recipe gets *Video frames per second* (`video_fps`, 1 by default, advanced).
