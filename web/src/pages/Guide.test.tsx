@@ -68,7 +68,7 @@ describe("guide", () => {
     expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/login");
     fireEvent.click(zh);
     expect(await screen.findByRole("heading", { level: 1, name: "操作指南" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "複製" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "複製" })).toBeTruthy();
     expect(preferredLang(["en-US"])).toBe("zh-TW"); // the choice is remembered
   });
 
