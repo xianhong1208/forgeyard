@@ -13,6 +13,7 @@ import { bytes } from "../lib/machines";
 import { TASK_LABEL, gib, mediaText } from "../lib/models";
 import type { Task } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { licencePage, licenceTerms } from "../lib/licences";
 
 type Mode = "list" | "search" | "source";
 export const SEARCH_DELAY_MS = 500;
@@ -111,12 +112,18 @@ function RecommendedList({ data, error, onPick, chosen }: {
                   {m.device === "cpu" && <span className="chip"><IconCpu size={11} aria-hidden="true" /> CPU</span>}
                   {m.inputs.length > 0 && <span className="chip chip-tone-run">{mediaText(m.inputs)}</span>}
                   {m.languages && m.languages.length > 0 && <span className="chip" title="Languages it speaks">{languagesText(m.languages)}</span>}
-                  <span className="chip mono" title={m.license_from ? `Licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : "Licence"}>{m.license}</span>
+                  <span className={`chip mono${licenceTerms(m.license) ? " chip-tone-run" : ""}`} title={m.license_from ? `Licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : "Licence"}>{m.license}</span>
                 </div>
                 <p className="rec-note small">{m.note}</p>
                 <p className="rec-size small muted">
                   About {m.download_gib} GiB to download; one copy needs about {m.memory_gib} GiB of {m.device === "cpu" ? "RAM" : "GPU memory"}.
                 </p>
+                {licenceTerms(m.license) && (
+                  <p className="rec-terms small">
+                    {licenceTerms(m.license)}{" "}
+                    {licencePage(m.source, m.license_from) && <a href={licencePage(m.source, m.license_from)!} target="_blank" rel="noreferrer">The licence</a>}
+                  </p>
+                )}
                 {m.gated && (
                   <p className="rec-gated small"><IconLock size={13} aria-hidden="true" /> Needs a Hugging Face token and accepting the licence on Hugging Face.</p>
                 )}

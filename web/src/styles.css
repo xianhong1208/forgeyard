@@ -762,7 +762,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .rec-on { border-color: var(--heat); box-shadow: inset 3px 0 0 var(--heat); background: #fffdf8; }
 .rec-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .rec-head .strong { margin-right: auto; }
-.rec-note, .rec-size, .rec-gated { margin: 0; }
+.rec-note, .rec-size, .rec-gated, .rec-terms { margin: 0; }
+.rec-terms { color: var(--heat-ink); }
 .rec-gated { display: flex; align-items: flex-start; gap: 6px; color: var(--heat-ink); }
 .rec-gated svg { flex: none; margin-top: 3px; }
 .rec-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 4px; min-width: 0; }
