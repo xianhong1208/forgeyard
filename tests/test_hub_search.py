@@ -205,7 +205,7 @@ def test_fy_hub_005_no_internet_is_a_clear_503(owner, fake, monkeypatch, mode):
 def test_fy_hub_006_what_may_be_searched(owner, fake):
     """FY-HUB-006: the text, task, format and limit are checked before anything is asked; bad entries
     in an answer (odd ids) are dropped."""
-    for params in ({"q": "x" * 101}, {"q": "qwen\x01"}, {"task": "vision"}, {"format": "onnx"}, {"limit": 0},
+    for params in ({"q": "x" * 101}, {"q": "qwen\x01"}, {"task": "vision"}, {"format": "pytorch"}, {"limit": 0},
                    {"limit": 31}):
         r = search(owner, **params)
         assert r.status_code == 422, (params, r.text)

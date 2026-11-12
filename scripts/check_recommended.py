@@ -57,14 +57,20 @@ def main(names: list[str]) -> int:
             problems.append(f"format is {meta['format']}, the file says {e.format}")
         if bool(meta.get("gated")) != e.gated:
             problems.append(f"gated is {meta.get('gated')}, the file says {e.gated}")
-        if meta.get("license") != e.license:
-            problems.append(f"the licence is {meta.get('license')}, the file says {e.license}")
-        if sorted(meta.get("modalities") or []) != sorted(e.inputs):
+        lic = meta.get("license")
+        if lic is None and e.license_from:
+            # A conversion without a licence of its own: the original model's.
+            origin = json.loads(fetch.get_bytes(f"{ENDPOINT}/api/models/{e.license_from.removeprefix('hf://')}", policy))
+            lic = inspector.license_of(origin)
+        if lic != e.license:
+            problems.append(f"the licence is {lic}, the file says {e.license}")
+        # A speech model's projector is its decoder (and voice encoder), not media it takes in chat.
+        if e.task != "tts" and sorted(meta.get("modalities") or []) != sorted(e.inputs):
             problems.append(f"it takes {meta.get('modalities')}, the file says {e.inputs}")
         recipe = builtin[e.recipe]
         params = {k: p.default for k, p in recipe.params.items()} | {"gpus": 0 if e.device == "cpu" else 1,
                                                                        "share": recipe.share}
-        est = estimate(meta, recipe, params, device=e.device, gpu_context=400 * 1024**2)
+        est = estimate(meta, recipe, params, device=e.device, gpu_context=400 * 1024**2, task=e.task)
         size, need = meta["size_bytes"] / GIB, est.amount / GIB
         line = (f"{e.name:30} {meta['revision'][:12]}  download {size:6.2f} GiB (file: {e.download_gib:6.2f})  "
                 f"{e.device} {need:6.2f} GiB (file: {e.memory_gib:6.2f})")

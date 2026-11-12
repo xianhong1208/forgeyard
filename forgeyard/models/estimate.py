@@ -6,7 +6,9 @@
   engine overhead and the CUDA context of the process.
 - GGUF (llama.cpp): the exact tensor sizes from the header, the KV cache of the offloaded layers
   (f16), the logits buffer (vocabulary x 512-token micro-batch x 4 bytes) and the recipe overhead.
-- files (faster-whisper): the model files plus the recipe overhead.
+- files (faster-whisper, speaches TTS): the model files plus the recipe overhead.
+- two-stage speech engines (vLLM-Omni, 1.3): the talker as above (its config is the talker's), plus
+  the recipe's `codec_overhead` for the audio decoder stage on the same card.
 - fixed: the recipe's number.
 - A declared `vram` parameter replaces all of it (and is required for local:// models, whose
   files the server cannot read).
@@ -27,6 +29,9 @@ GIB = 1024**3
 MIB = 1024**2
 LLAMA_UBATCH = 512
 _DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "half": 2, "float32": 4, "float": 4, "fp8": 1}
+
+
+CODEC_LABEL = "Audio decoder"
 
 
 class EstimateError(ValueError):
@@ -113,6 +118,9 @@ def _safetensors(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int) 
         Part("CUDA context", ctx, "per process (measured on an A100)"),
     ]
     est.parts += _vision(meta, recipe, params, "safetensors")
+    if recipe.estimate.codec_overhead:
+        est.parts.append(Part(CODEC_LABEL, recipe.estimate.codec_overhead,
+                              "the second stage (code2wav), with its own CUDA context (recipe)"))
     est.per_gpu = sum(p.bytes for p in est.parts)
     _media_note(est, meta, "safetensors", params)
     return est
@@ -149,7 +157,17 @@ def _media_note(est: "Estimate", meta: dict, fmt: str, params: dict) -> None:
                          "model and the image's size); leave room for them in the context length.")
 
 
-def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device: str) -> Estimate:
+def _speech(recipe: Recipe, params: dict, task: Optional[str]) -> list[Part]:
+    """A speech model's audio pipeline per concurrent request (llama.cpp keeps one per slot)."""
+    if task != "tts" or not recipe.estimate.speech_overhead:
+        return []
+    n = max(1, int(params.get("concurrency") or 1))
+    return [Part("Speech pipeline", recipe.estimate.speech_overhead * n,
+                 f"audio code predictor and decoder buffers, {n} concurrent request{'s' if n > 1 else ''} (recipe)")]
+
+
+def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device: str,
+          task: Optional[str] = None) -> Estimate:
     g = meta.get("gguf") or {}
     layers = int(g.get("layers") or 0)
     if not layers or not g.get("tensor_bytes"):
@@ -171,7 +189,7 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
             Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
             Part("Engine overhead", recipe.estimate.cpu_overhead, "compute buffers (recipe)"),
         ]
-        est.parts += _projector(meta, recipe, params)
+        est.parts += _projector(meta, recipe, params) + _speech(recipe, params, task)
         est.ram = sum(p.bytes for p in est.parts)
         _media_note(est, meta, "gguf", params)
         return est
@@ -188,7 +206,7 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
         Part("Engine overhead", recipe.estimate.overhead, "compute buffers (recipe)"),
         Part("CUDA context", ctx, "per process"),
     ]
-    est.parts += _projector(meta, recipe, params)
+    est.parts += _projector(meta, recipe, params) + _speech(recipe, params, task)
     est.per_gpu = sum(p.bytes for p in est.parts)
     _media_note(est, meta, "gguf", params)
     if offload < layers:
@@ -221,8 +239,10 @@ def _files(meta: dict, recipe: Recipe, gpus: int, ctx: int, device: str) -> Esti
     return est
 
 
-def estimate(meta: dict, recipe: Recipe, params: dict, *, device: str, gpu_context: int) -> Estimate:
-    """The memory one replica needs on each device. `params` are validated already."""
+def estimate(meta: dict, recipe: Recipe, params: dict, *, device: str, gpu_context: int,
+             task: Optional[str] = None) -> Estimate:
+    """The memory one replica needs on each device. `params` are validated already; `task` is the
+    model's (a tts model on llama.cpp adds its speech pipeline)."""
     gpus = int(params.get("gpus") or 0) if device == "gpu" else 0
     if device == "gpu" and gpus < 1:
         raise EstimateError("a GPU replica needs at least one GPU")
@@ -243,7 +263,7 @@ def estimate(meta: dict, recipe: Recipe, params: dict, *, device: str, gpu_conte
             raise EstimateError(f"{recipe.name} runs on GPUs only")
         return _safetensors(meta, recipe, params, gpus, gpu_context)
     if method == "gguf":
-        return _gguf(meta, recipe, params, gpus, gpu_context, device)
+        return _gguf(meta, recipe, params, gpus, gpu_context, device, task)
     if method == "files":
         return _files(meta, recipe, gpus, gpu_context, device)
     est = Estimate("fixed", device, gpus)

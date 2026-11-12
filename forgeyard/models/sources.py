@@ -192,6 +192,9 @@ def detect_format(paths: list[str], library: Optional[str] = None) -> str:
         return "safetensors"
     if (library or "").lower() == "ctranslate2" or ("model.bin" in paths and any(p.startswith("vocabulary") for p in paths)):
         return "ctranslate2"
+    # ONNX speech models for speaches (Kokoro, Piper): model.onnx with its voices or config (1.3).
+    if any(p.lower().endswith(".onnx") for p in paths):
+        return "onnx"
     return "other"
 
 
@@ -277,6 +280,7 @@ TASK_FROM_PIPELINE = {
     "feature-extraction": "embed", "sentence-similarity": "embed",
     "text-ranking": "rerank", "text-classification": "rerank",
     "automatic-speech-recognition": "asr",
+    "text-to-speech": "tts",
 }
 
 
