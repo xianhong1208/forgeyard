@@ -213,6 +213,47 @@ sudo docker build -f Dockerfile.agent -t docker.io/<namespace>/forgeyard-agent:1
 
 舊 agent 在容器外啟動的行程類工作負載不會被接手：請先從 UI 停止它們。
 
+## 離線機器
+
+連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
+引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
+
+1. **找出映像檔。** 在 **Models → Catalog and recipes**，打開 recipe 上的 **Machine without registry access:
+   load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
+   variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
+   上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
+2. **在連得到 registry 的機器上**，用 digest 拉映像檔、加上它的 tag，再存成檔案。以 llama.cpp 的 Vulkan variant
+   為例（頁面上的指令已填好它的 digest）：
+
+   ```bash
+   sudo docker pull ghcr.io/ggml-org/llama.cpp@sha256:<digest> && \
+     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 && \
+     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama.cpp-server-vulkan-b12242.tar.gz
+   ```
+
+   用 digest 拉，檔案裡就正好是 recipe 釘住的映像檔；`docker load` 會保留 tag，agent 就是靠 tag 找到它。
+   兩台機器架構不同（x86_64 和 arm64）時，在 `docker pull` 加上 `--platform linux/amd64` 或
+   `--platform linux/arm64`。
+3. **把檔案複製到**離線機器（`scp`、USB 隨身碟），在那裡載入（Podman 用 `podman load`）：
+
+   ```bash
+   gunzip -c llama.cpp-server-vulkan-b12242.tar.gz | sudo docker load
+   ```
+
+4. 照平常一樣**部署**。
+
+**Forgeyard 怎麼檢查載入的映像檔。** recipe 用 `tag@sha256:…` 釘住映像檔，而 Docker 只用 digest 找這種參照。
+載入的副本常常沒有這個 digest：Docker 傳統的映像檔儲存會保留 tag、丟掉 registry 的 digest，containerd
+儲存則可能給副本一個它自己的 id。所以 digest 不在、但 tag 在時，agent 會拿那個映像檔和釘住時記錄下來的 id
+（`forgeyard/recipes/images.lock.json`）比對：registry 的 digest（index，以及每個平台的 manifest 和
+config），或者當 id 是儲存自己產生的時候，比對它的內容（各層、平台、entrypoint、command、環境變數、使用者、
+工作目錄和停止訊號）。相符就用它在本機的映像檔 id 執行，不會去拉。tag 底下若是別的映像檔，一律不執行：agent
+改向 registry 要釘住的那個。所以內建 recipe 原封不動就能離線用，不需要另寫只用 tag 指定映像檔的自訂 recipe。
+
+內建 recipe 的每個映像檔都有記錄 id；自訂 recipe 只要寫的是完全相同的映像檔參照，也一樣。其他用 digest
+釘住的映像檔無法檢查：在離線機器上，請在你的自訂 recipe 裡只用 tag 指定它。這項檢查需要這一版或更新的
+agent；舊版 agent 會試著去拉。
+
 ## 執行服務或任務
 
 管理員和操作員可以把自己的程式當成**工作負載**在機器上執行：打開 **Workloads** → **New workload**，填好表單，選 **Create and start**。

@@ -36,6 +36,11 @@ An agent that also lists "replica_guard" puts its key guard in front of every re
 (the engine on loopback, the guard on the published port, every path requiring the key); such an
 agent gets a key for every model replica, with `env` null when the recipe's engine reads none.
 
+An agent that lists "image_ids" can run an engine image loaded with `docker load` on a machine that
+cannot reach the registry: a desired replica whose image is in forgeyard/recipes/images.lock.json then
+carries `image_ids` ({ids, content}: the digests and content ids a correct copy can show), next to
+`spec` and never inside it, which older agents validate with extra="forbid". They get no such key.
+
 Workloads extend version 1 compatibly instead of bumping it. Each side lists its `features` (the
 agent in hello, the server in welcome), and `desired` / `status` / `logs` flow only when both list
 "workloads". An M1 agent (no features) keeps working with this server and is never sent work; an
@@ -79,6 +84,9 @@ FEATURE_MODELS = "models"
 FEATURE_REPLICA_KEYS = "replica_keys"
 # The agent guards each keyed replica's published port itself (agent/workloads/guard.py).
 FEATURE_REPLICA_GUARD = "replica_guard"
+# The agent checks a loaded image's tag against the recorded ids of a pinned image (workloads/images.py)
+# before it runs it without a pull. Only agents that list it are sent the ids.
+FEATURE_IMAGE_IDS = "image_ids"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS)
 RUNTIMES = ("process", "container")
 

@@ -80,7 +80,25 @@ sudo forgeyard agent config
 - **沒有這個 tag。**agent 的 tag 就是伺服器的版本。在兩個版本之間從原始碼建置的伺服器，會用到一個從未發布過的版本號。請改在機器上自己建置映像檔（[離線機器，或自己建置映像檔](how-to.md#offline-machines-or-build-it-yourself)），或把 `AGENT_IMAGE` 指向一個已發布的版本。
 - **平台不同。**映像檔只有 linux/amd64 和 linux/arm64；`uname -m` 必須是 `x86_64` 或 `aarch64`。
 - **次數限制。**Docker Hub 會限制每個位址的匿名拉取次數。在那台機器上登入一次（`sudo docker login`）、等一段時間，或透過鏡像站拉取並把 `AGENT_IMAGE` 指向它。
-- **連不到 Docker Hub**（沒有網路、防火牆或 DNS 過濾）：用檔案帶過去：在連得到的機器上拉取並 `docker save`，再到這台機器上 `docker load`（[做法](how-to.md#offline-machines-or-build-it-yourself)）。agent 的 `docker run` 就會在本機找到它。在這種機器上，模型的引擎映像檔也要這樣處理：拉取或載入一次，agent 就會使用它。
+- **連不到 Docker Hub**（沒有網路、防火牆或 DNS 過濾）：用檔案帶過去：在連得到的機器上拉取並 `docker save`，再到這台機器上 `docker load`（[做法](how-to.md#offline-machines-or-build-it-yourself)）。agent 的 `docker run` 就會在本機找到它。在這種機器上，模型的引擎映像檔也要這樣處理：[離線機器](how-to.md#offline-machines)。
+
+## replica 失敗：映像檔不在這台機器上
+
+**你會看到：** 部署的 replica 失敗，訊息是 `the image is not on this machine and could not be pulled; on an offline machine, docker load the image (Forgeyard checks it by its recorded ids)`，後面接著 Docker 的錯誤（`lookup ghcr.io … no such host`、逾時、`pull access denied`）。
+
+**原因：** 這台機器上沒有引擎映像檔，用釘住的 digest 和用 tag 都找不到，而且機器連不到 registry。
+
+**做法：** 把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
+
+如果訊息是 `… is loaded but Forgeyard has no recorded ids for this image`，表示映像檔來自自訂 recipe：Forgeyard 無法檢查它載入的副本，請在那個 recipe 裡只用 tag 指定它（不加 `@sha256:…`）。
+
+## replica 失敗：那個 tag 底下載入的是別的映像檔
+
+**你會看到：** `a different image is loaded under ghcr.io/…:<tag> (its ids do not match the recorded ones), so it is not run, and the pinned image could not be pulled`。
+
+**原因：** recipe 的 tag 底下載入了一個映像檔，但不是 recipe 釘住的那個：另一次建置（重用 tag 的舊版引擎、registry 上被移動的 tag）、把別的平台的各層當成這個平台，或在本機修改後重新加上 tag 的映像檔。Forgeyard 絕不會用它取代釘住的映像檔，而是向 registry 要釘住的那個，但這台機器連不到 registry。
+
+**做法：** 載入 recipe 指定的映像檔，照[離線機器](how-to.md#offline-machines)用 digest 拉取；`docker load` 會取代那個 tag。`docker image inspect <tag>` 可以看目前載入的是什麼。
 
 ## Hugging Face 下載很慢
 

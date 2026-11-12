@@ -211,11 +211,11 @@ version and the details are not decided yet.
   custom recipe with only the wanted variant is the way around it).
 - Vulkan on Intel and other GPUs: the agent's inventory reports NVIDIA and AMD cards only, so the
   `vulkan` variant of `llama-cpp` is for AMD.
-- **Import an image** from a file, for machines that cannot reach a registry (seen on a machine
-  whose DNS blocked ghcr.io and Hugging Face). `docker load` on Docker's classic image store keeps an
-  image's tag but not its registry digest, so a recipe image pinned as `tag@sha256:…` is not found
-  there and Docker tries to pull it; the agent could check a loaded tag against the pinned image's
-  config digest instead.
+- **Import an image** from a file, for machines that cannot reach a registry. *In review*
+  (`offline-images`): an image carried over with `docker save` / `docker load` is checked against the
+  ids recorded for the pinned image and used, so the built-in recipes work offline as they are, and
+  each recipe lists the commands. Still to do: uploading an image file through the console to a
+  machine.
 - Tune each recipe's memory overhead from real runs (estimates were 7–39% above actual).
 
 ## Verification still to do
@@ -224,7 +224,8 @@ version and the details are not decided yet.
   inventory through the `amdsmi` library, unified memory and the 96 GiB
   pool, joining, the GPU allowlist, and a llama.cpp Vulkan deployment served through `/v1`. Still to
   confirm:
-  - the built-in `vulkan` variant of `llama-cpp` (b12242) on the Strix Halo;
+  - the built-in `vulkan` variant of `llama-cpp` (b12242) on the Strix Halo, with its image loaded
+    from a file (that machine cannot reach ghcr.io) and checked by its recorded ids;
   - the ROCm images of the `vllm` and `llama-cpp` recipes (both list gfx1151 among their targets;
     `llama-cpp` sends APUs to Vulkan);
   - a discrete card;
