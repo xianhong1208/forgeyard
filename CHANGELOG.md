@@ -220,8 +220,8 @@ generation.
 - `scripts/accept_mm.py`: the real-hardware acceptance of this part, through the API and the official
   SDK, with idempotent cleanup.
 - **Container images on Docker Hub**, for linux/amd64 and linux/arm64: the server
-  (`docker.io/<namespace>/forgeyard`, new `Dockerfile.server`) and the agent
-  (`docker.io/<namespace>/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
+  (`docker.io/tonyhuang1101/forgeyard`, new `Dockerfile.server`) and the agent
+  (`docker.io/tonyhuang1101/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
   `.github/workflows/publish-images.yml`, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only
   `X.Y.Z`), with OCI labels, provenance and an SBOM, then pulls the amd64 images back by digest and
   smoke-tests them. Without the Docker Hub secrets or the namespace it builds and tests both and ends
@@ -281,6 +281,9 @@ generation.
   NVML stays on both. It now carries OCI labels (source, licence, version, revision).
 
 ### Fixed
+- **A machine whose agent disconnected while the server was busy could stay "online"** until the
+  offline timeout: when the connection's handler was cancelled (a server shutting down) before it
+  recorded the machine offline, that step was skipped. It is now shielded from the cancel.
 - **Video on llama.cpp** read 4 frames a second (llama-server's default), so a 6-second 720p clip took
   about 11,500 tokens and overran a 4,096-token context (found on a real CPU machine). The `llama-cpp`
   recipe gets *Video frames per second* (`video_fps`, 1 by default, advanced).

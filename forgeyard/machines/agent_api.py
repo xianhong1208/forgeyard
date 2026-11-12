@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Optional
 
+import anyio
 from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
@@ -259,7 +260,11 @@ async def stream(ws: WebSocket):
     finally:
         conn.fail_pending()
         if hub.detach(conn):
-            await run_in_threadpool(_db_call, _went_away, node_id)
+            # Shielded: when the handler is cancelled (the server shutting down, or a test client
+            # cancelling right after the close) the machine must still be recorded offline, or it
+            # stays "online" until the offline timeout.
+            with anyio.CancelScope(shield=True):
+                await run_in_threadpool(_db_call, _went_away, node_id)
 
 
 async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None:
