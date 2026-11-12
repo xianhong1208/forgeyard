@@ -97,8 +97,8 @@ Every release is checked on real machines, not only in CI. So far:
 | x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies; text to speech with llama.cpp b12242 (Qwen3-TTS 1.7B GGUF in Chinese and English, Chatterbox Turbo), the speech checked by faster-whisper; image generation with stable-diffusion.cpp as a process (Stable Diffusion 1.5 and Z-Image-Turbo GGUF) |
 | Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
 
-Not checked on real hardware yet: the built-in Vulkan variant of `llama-cpp` (b12242), the ROCm images
-of the `vllm` and `llama-cpp` recipes, image generation on GPUs (vLLM-Omni, stable-diffusion.cpp Vulkan and CUDA), discrete AMD cards, and the one-line install on a host with systemd. Reports from other machines are welcome
+Not checked on real hardware yet: the ROCm images
+of the `vllm` and `llama-cpp` recipes, discrete AMD cards, and the one-line install on a host with systemd. Reports from other machines are welcome
 (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Develop
