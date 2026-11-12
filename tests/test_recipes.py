@@ -152,7 +152,7 @@ def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
     runs. Bump with scripts/pin_images.py --write."""
     images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
               if v.runtime == "container"]
-    assert len(images) == 17
+    assert len(images) == 15
     unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
     assert unpinned == []
     # One tag, one digest: the same tag in two recipes (vllm and vllm-pooling) is the same image.

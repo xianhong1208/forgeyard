@@ -264,9 +264,11 @@ def test_fy_tts_001_three_engines_serve_tts():
     assert set(llama.tts.formats) == {"wav", "pcm"} and llama.tts.stream_formats == ["audio"]
     assert kokoro.formats == ["onnx"] and kokoro.tts.cjk is False and kokoro.upstream_model == "repo"
     assert "opus" not in kokoro.tts.formats and kokoro.tts.default_format == "mp3" and kokoro.api_key_env == "API_KEY"
-    # The same speaches images as faster-whisper: one image for speech both ways.
+    # CPU only, with faster-whisper's CPU image: one image for speech both ways. In speaches' CUDA image
+    # Kokoro still ran on the CPU (an A100 run showed no GPU memory) while it reserved the card.
     whisper = b["faster-whisper"]
-    assert [v.image for v in kokoro.variants] == [v.image for v in whisper.variants]
+    assert [v.name for v in kokoro.variants] == ["cpu"]
+    assert kokoro.variants[0].image == next(v.image for v in whisper.variants if v.name == "cpu")
     good = (FIX.parent.parent.parent / "forgeyard" / "recipes" / "speaches-tts.yaml").read_text()
     for bad, why in [(good.replace("default_format: mp3", "default_format: opus"), "default_format"),
                      (good.replace("api: {tts: openai-speech}", "api: {tts: openai-audio}"), "openai-speech"),

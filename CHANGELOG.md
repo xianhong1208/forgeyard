@@ -188,6 +188,9 @@ through the gateway, and the usage units for all of 1.3. Third part: text to spe
   `secret.key`); `images-arm64` builds both images for linux/arm64.
 
 ### Changed
+- `speaches-tts` runs on the CPU only: on a real A100 Kokoro used no GPU memory in speaches' CUDA image
+  (ONNX Runtime stayed on the CPU) while the deployment reserved the card; on a CPU it makes speech about
+  four times faster than it plays.
 
 - **llama.cpp b11977 → b12242** (2026-11-10) in every variant of the `llama-cpp` recipe: the CUDA
   (still CUDA 12.8, driver ≥ 570), ROCm (7.2.1), Vulkan and CPU images, pinned by digest, and the CPU

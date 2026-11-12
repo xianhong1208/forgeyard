@@ -78,7 +78,10 @@ MODELS = {
                        "revision": "0c0e3051f131929182e2c023b9537f8b1c68adfe", "recipe": "vllm-omni-tts",
                        "device": "gpu", "zh": True, "params": {"share": "vram"}},
     "kokoro": {"source": "hf://speaches-ai/Kokoro-82M-v1.0-ONNX", "revision": "dc196c76d64fed9203906231372bcb98135815df",
-               "recipe": "speaches-tts", "zh": False, "params": {}},
+               "recipe": "speaches-tts", "zh": False, "device": "cpu",
+               # speaches sends each sentence as it is made, but Kokoro makes 8 s of speech in under 2 s on
+               # a CPU, so every sentence can arrive at once: information only.
+               "streams": None, "params": {}},
     "chatterbox-turbo-gguf": {"source": "hf://ggml-org/chatterbox-turbo-GGUF",
                               "revision": "66f0393558d0ac1e0337e23a4d15f26e8eca0e12", "file": "chatterbox-turbo-Q8_0.gguf",
                               "mmproj": "mmproj-chatterbox-turbo-F16.gguf", "recipe": "llama-cpp", "zh": False,
@@ -89,7 +92,9 @@ MODELS = {
                             "revision": "ca27d74bc954b73dadab5b71ca265d87fc861a7c",
                             "file": "Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf",
                             "mmproj": "mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf", "recipe": "llama-cpp", "zh": True,
-                            "params": {}},
+                            # llama-server sends the audio in a few large pieces: on a fast machine one
+                            # (measured: 5.32 s / 5.32 s), on a slower one several (5.5 s / 8.0 s).
+                            "streams": None, "params": {}},
 }
 EXT = {"mp3": "mp3", "opus": "ogg", "aac": "aac", "flac": "flac", "wav": "wav", "pcm": "pcm"}
 
@@ -451,8 +456,8 @@ def exercise(c: Client, d: dict, model: str, spec: dict, recipe: dict, args, che
             streamed = first is not None and secs and first < total - 0.25
             check(f"{model}: streamed {fmt} (stream_format audio): first audio before the end", streamed,
                   f"first bytes after {first:.2f} s, all after {total:.2f} s, {secs and round(secs, 2)} s of audio ({how})"
-                  + ("" if streamed or spec.get("streams", True) else "; this model makes the whole utterance first"),
-                  info=not streamed and spec.get("streams", True) is False)
+                  + ("" if streamed or spec.get("streams", True) is True else "; this engine may send the whole utterance at once"),
+                  info=not streamed and spec.get("streams", True) is not True)
             info[f"stream_{fmt}_first_s"] = round(first or 0, 2)
         except openai.APIStatusError as e:
             check(f"{model}: streamed {fmt}", False, f"{e.status_code}: {str(e)[:200]}")

@@ -166,7 +166,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
   | `llama-cpp` | chat（GGUF） | NVIDIA、AMD（Instinct 與 ROCm 映像有編譯的獨立顯卡用 ROCm；APU 與其他 AMD GPU 用 Vulkan，只給 render node）、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` 與 `server-b12242`，行程用 release `b12242` |
   | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
-  | `speaches-tts`（1.3） | 文字轉語音（ONNX：Kokoro、Piper），英文 | NVIDIA、CPU（容器），預設共用 GPU | 同樣的 speaches 映像 |
+  | `speaches-tts`（1.3） | 文字轉語音（ONNX：Kokoro、Piper），英文 | 只用 CPU（容器）：即使在 CUDA 映像檔裡，ONNX Runtime 也是用 CPU 跑 Kokoro | speaches 的 CPU 映像 |
   | `vllm-omni-tts`（1.3） | 文字轉語音（safetensors：Qwen3-TTS） | NVIDIA，單張 GPU，預設共用 | `vllm/vllm-omni:v0.32.0`（CUDA 13.0，driver ≥ 580），`vllm serve <model> --omni` |
 
   `llama-cpp` 在每個 variant 上也提供 `tts`（附 projector 的 TTS GGUF）。
