@@ -3,7 +3,8 @@
 One control plane for the GPUs (and CPUs) you own: NVIDIA, AMD ROCm and CPU-only machines on one
 LAN or VPN. An agent on each machine reports its hardware; you run services and tasks on them, and
 deploy models from recipes behind one OpenAI-compatible gateway at `/v1`, with API keys, limits
-and usage statistics. Vision models read images in chat, fetched by the gateway, never by the engine. Cloud model APIs can sit behind the same gateway, local first, with cost
+and usage statistics. Vision models read images in chat, fetched by the gateway, never by the engine. Speech models
+turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Cloud model APIs can sit behind the same gateway, local first, with cost
 tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
@@ -16,7 +17,8 @@ tracking and monthly budgets.
 > and monthly budgets per key, person and provider are reserved before a request is sent. 1.3 (in
 > progress) adds more kinds of models; first, images in chat on vLLM and llama.cpp (Qwen3-VL and
 > similar), with the catalog showing each model's licence, then llama.cpp b12242 with a built-in
-> Vulkan variant for AMD APUs. See [CHANGELOG.md](CHANGELOG.md) and
+> Vulkan variant for AMD APUs, then text to speech with three engines (vLLM-Omni Qwen3-TTS, llama.cpp
+> TTS GGUFs, speaches Kokoro). See [CHANGELOG.md](CHANGELOG.md) and
 > [ROADMAP.md](ROADMAP.md).
 
 ## The guide
@@ -91,7 +93,7 @@ Every release is checked on real machines, not only in CI. So far:
 |---|---|---|
 | NVIDIA A100 80GB PCIe (an 8-GPU host, with a GPU allowlist) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker), speaches 0.8.3 (faster-whisper); the gateway with the official OpenAI SDK; the agent from its container image |
 | AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io` |
-| x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies |
+| x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies; text to speech with llama.cpp b12242 (Qwen3-TTS 1.7B GGUF in Chinese and English, Chatterbox Turbo), the speech checked by faster-whisper |
 | Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
 
 Not checked on real hardware yet: the built-in Vulkan variant of `llama-cpp` (b12242), the ROCm images
@@ -141,6 +143,7 @@ project.
 | `forgeyard/gateway/pricing.py` | a request's cost from its usage and prices; OpenRouter's list and price matching |
 | `forgeyard/gateway/budgets.py` | the budget ledger: reserve, settle, release, the 80% and 100% alerts, 402 |
 | `forgeyard/gateway/media.py` | images, audio and video in chat: parts rebuilt, media URLs fetched under the egress rules |
+| `forgeyard/gateway/speech.py` | text to speech: request checks, voice cloning refused, what each engine is given, the audio's length |
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
@@ -160,6 +163,7 @@ project.
 | `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](docs/guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
+| `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |
 

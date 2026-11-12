@@ -27,6 +27,7 @@ from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
                           utcnow)
 from forgeyard.gateway import proxy
+from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
 from forgeyard.models import catalog, routes, scheduler
 from forgeyard.models.catalog import Context
@@ -122,7 +123,8 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
     params = normalise_params(recipe, body.params)
     device = "gpu" if params["gpus"] > 0 else "cpu"
     try:
-        est = compute_estimate(m.meta or {}, recipe, params, device=device, gpu_context=scheduler.gpu_context())
+        est = compute_estimate(m.meta or {}, recipe, params, device=device, gpu_context=scheduler.gpu_context(),
+                               task=m.task)
     except EstimateError as e:
         raise fail(422, "cannot_estimate", str(e)) from None
     if body.machine_id is not None and db.get(Node, body.machine_id) is None:
@@ -349,7 +351,8 @@ class TryIn(BaseModel):
 
 
 def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None) -> tuple[int, dict | str]:
-    headers = {"Content-Type": content_type, "Accept": "application/json"}
+    speech = content_type == SPEECH_CTYPE
+    headers = {"Content-Type": "application/json" if speech else content_type, "Accept": "*/*" if speech else "application/json"}
     if secret:
         headers["Authorization"] = f"Bearer {secret}"  # the replica's internal key (M4)
     req = urllib.request.Request(url, data=body, method="POST", headers=headers)
@@ -361,6 +364,10 @@ def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None
         raw, status = e.read(64 * 1024), e.code
     except (urllib.error.URLError, OSError) as e:
         raise fail(502, "replica_unreachable", f"The replica did not answer: {getattr(e, 'reason', e)}") from None
+    if speech and 200 <= status < 300:
+        # Text to speech (1.3): a WAV file, summarised by its length (the audio itself is not returned).
+        ms = wav_ms(raw[:8192], len(raw))
+        return status, {"audio_bytes": len(raw), "audio_ms": ms, "riff": raw[:4] == b"RIFF"}
     text = raw.decode("utf-8", "replace")
     try:
         return status, json.loads(text)
@@ -368,7 +375,10 @@ def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None
         return status, text[:4000]
 
 
-def try_request(api: str, upstream: str, text: Optional[str]) -> tuple[str, bytes, str]:
+SPEECH_CTYPE = "application/json; tts"   # marks the speech test request (sent as plain application/json)
+
+
+def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[str] = None) -> tuple[str, bytes, str]:
     """(path, body, content type) of a small request in the route's protocol."""
     if api == "openai-chat":
         # enable_thinking=False: reasoning models (Qwen3) answer straight away; other templates ignore it.
@@ -392,6 +402,12 @@ def try_request(api: str, upstream: str, text: Optional[str]) -> tuple[str, byte
                   "Content-Type: audio/mpeg\r\n\r\n").encode() + CLIP.read_bytes() + b"\r\n",
                  f"--{boundary}--\r\n".encode()]
         return "/v1/audio/transcriptions", b"".join(parts), f"multipart/form-data; boundary={boundary}"
+    if api == "openai-speech":
+        # WAV: every speech engine makes it, and its header gives the length.
+        body = {"model": upstream, "input": text or "Hello from Forgeyard. This is a short test.", "response_format": "wav"}
+        if voice:
+            body["voice"] = voice
+        return "/v1/audio/speech", json.dumps(body).encode(), SPEECH_CTYPE
     raise fail(422, "unsupported", f"No test request for {api}.")
 
 
@@ -411,6 +427,10 @@ def summarise(api: str, answer) -> str:
             return "; ".join(f"#{r['index']} {r['relevance_score']:.3f}" for r in res)
         if api == "openai-audio":
             return str(answer.get("text", "")).strip()[:1000]
+        if api == "openai-speech":
+            ms = answer.get("audio_ms")
+            return (f"{ms / 1000:.1f} s of audio" if ms else "audio of unknown length") + \
+                f" (WAV, {answer.get('audio_bytes', 0) / 1024:.0f} KiB)"
     except (KeyError, IndexError, TypeError, ValueError):
         pass
     return json.dumps(answer)[:500]
@@ -429,12 +449,15 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     target = next(iter(routes.endpoints(d.workload, ready_only=True)), None)
     if route is None or target is None:
         raise fail(409, "not_ready", "No replica of this deployment is ready yet.")
-    path, payload, ctype = try_request(route.api, upstream, body.input)
+    recipe = catalog.get_recipe(db, d.recipe)
+    voice = recipe.speech.default_voice if recipe is not None and recipe.tts is not None else None
+    path, payload, ctype = try_request(route.api, upstream, body.input, voice)
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)
     return {"status": status, "ok": 200 <= status < 300, "api": route.api, "endpoint": target["url"] + path.lstrip("/"),
-            "request": json.loads(payload) if ctype == "application/json" else {"model": upstream, "file": CLIP.name},
+            "request": json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE)
+            else {"model": upstream, "file": CLIP.name},
             "summary": summarise(route.api, answer) if 200 <= status < 300 else str(answer)[:500],
             "answer": answer if isinstance(answer, dict) else None, "ms": ms}

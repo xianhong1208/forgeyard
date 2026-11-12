@@ -34,8 +34,14 @@ def _hf_error(e: fetch.FetchError, repo: str) -> InspectError:
 
 def config_summary(config: dict) -> dict:
     """The fields the KV-cache estimate needs, from a transformers config.json (multimodal
-    configs keep them in text_config)."""
-    text = config.get("text_config") if isinstance(config.get("text_config"), dict) else config
+    configs keep them in text_config; a speech-only model such as Qwen3-TTS in talker_config, the
+    language model that writes the audio codes; Omni chat models, which also have a talker, are read as
+    before)."""
+    text = config
+    if isinstance(config.get("text_config"), dict):
+        text = config["text_config"]
+    elif isinstance(config.get("talker_config"), dict) and "thinker_config" not in config:
+        text = config["talker_config"]
     heads = int(text.get("num_attention_heads") or 0)
     hidden = int(text.get("hidden_size") or text.get("d_model") or 0)
     head_dim = text.get("head_dim") or (hidden // heads if heads else 0)
@@ -52,6 +58,19 @@ def config_summary(config: dict) -> dict:
         "dtype": str(config.get("torch_dtype") or config.get("dtype") or text.get("torch_dtype") or "bfloat16"),
         "quantization": (config.get("quantization_config") or {}).get("quant_method"),
     }
+
+
+MAX_VOICES = 200
+
+
+def voices_of(config: dict) -> list[str]:
+    """The built-in voices a speech model's config.json names (Qwen3-TTS CustomVoice:
+    talker_config.spk_id), in the order the file lists them; [] when it names none."""
+    talker = config.get("talker_config") if isinstance(config.get("talker_config"), dict) else {}
+    spk = talker.get("spk_id")
+    if not isinstance(spk, dict):
+        return []
+    return [str(k)[:64] for k in spk if isinstance(k, str) and k.strip()][:MAX_VOICES]
 
 
 def license_of(info: dict) -> Optional[str]:
@@ -146,6 +165,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
             config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=4 * 1024**2))
             out["config"] = config_summary(config)
             out["modalities"] = modalities.from_config(config, paths)
+            if voices_of(config):
+                out["voices"] = voices_of(config)
             if modalities.vision_tile_px(config):
                 out["vision_tile_px"] = modalities.vision_tile_px(config)
             shards = [p for p in paths if p.endswith(".safetensors") and "/" not in p]
@@ -156,8 +177,17 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
             out["weights"] = safetensors.merge([safetensors.read_remote(ranged(p)) for p in shards])
         elif fmt == "ctranslate2":
             out["weights_bytes"] = sum(f["size"] for f in files if f["path"] == "model.bin")
+        elif fmt == "onnx":
+            # speaches' Kokoro (model.onnx + voices.bin) and Piper (model.onnx + config.json) models.
+            out["weights_bytes"] = sum(f["size"] for f in files
+                                       if f["path"].lower().endswith((".onnx", ".onnx_data", ".bin")))
+            if "config.json" in paths:   # Piper: the voice's sample rate (its pcm answers say none)
+                config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=1024**2))
+                rate = (config.get("audio") or {}).get("sample_rate") if isinstance(config, dict) else None
+                if isinstance(rate, int) and 8000 <= rate <= 192000:
+                    out["sample_rate"] = rate
         else:
-            raise InspectError("no safetensors, GGUF or CTranslate2 weights in this repository")
+            raise InspectError("no safetensors, GGUF, CTranslate2 or ONNX weights in this repository")
     except fetch.FetchError as e:
         raise _hf_error(e, repo) from None
     except (gguf.GGUFError, safetensors.SafetensorsError, ValueError) as e:
@@ -195,8 +225,8 @@ def inspect_source(src: Source, *, ref: Optional[str], file: Optional[str], endp
     if not sources.local_allowed(src.path, local_dirs):
         raise InspectError(f"{src.path} is not under a directory allowed for local models "
                            f"({', '.join(local_dirs) or 'none configured'})")
-    if fmt not in ("safetensors", "gguf", "ctranslate2"):
-        raise InspectError("a local model needs its format (safetensors, gguf or ctranslate2)")
+    if fmt not in ("safetensors", "gguf", "ctranslate2", "onnx"):
+        raise InspectError("a local model needs its format (safetensors, gguf, ctranslate2 or onnx)")
     if fmt == "gguf" and not file:
         raise InspectError("a local GGUF model needs the file name")
     # The server cannot read the machine's disk: deployments of local models declare their memory.

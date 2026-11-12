@@ -186,7 +186,11 @@ page shows that name, its usage, each replica and a small **Try it** that checks
     recipe it is meant for, about how much it downloads and how much memory one copy needs. Gemma 3
     and Llama are **gated**: they need a Hugging Face token whose account accepted the licence
     (Gemma 4 is not). A **Vision** group (1.3) has Qwen3-VL 2B / 4B / 8B for vLLM and Qwen3-VL 2B / 8B
-    as GGUF with their projector files for llama.cpp. Every entry names its **licence**, and the list
+    as GGUF with their projector files for llama.cpp. A **Text to speech** group (1.3) has Qwen3-TTS
+    0.6B / 1.7B CustomVoice for vLLM-Omni, Qwen3-TTS 1.7B as GGUF and Chatterbox Turbo for llama.cpp,
+    and Kokoro-82M for speaches; speech entries are pinned to a commit, list the languages they
+    speak, and a conversion without a licence of its own names the original it comes from
+    (`license_from`), whose licence `scripts/check_recommended.py` reads. Every entry names its **licence**, and the list
     may hold only licences that allow commercial use (`ALLOWED_LICENSES` in
     forgeyard/models/recommended.py): permissive ones (Apache-2.0, MIT, BSD), OpenRAIL-style ones, and
     model licences whose terms allow it. Gemma's terms (commercial use allowed, a prohibited-use policy
@@ -223,6 +227,12 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   `clip.has_audio_encoder` (vision means images and video in llama.cpp), and downloaded with it.
   Catalog entries from before 1.3 have no such reading: unknown for safetensors (media are passed on
   and the engine answers), text only for GGUF.
+  **Speech models (1.3):** Hugging Face's `text-to-speech` is the `tts` task. Qwen3-TTS's layer counts
+  come from its `talker_config` (the language model that writes the audio codes; Omni chat models keep
+  their own) and its built-in voices from `talker_config.spk_id`; a repository of `model.onnx` files
+  is the `onnx` format (speaches' Kokoro and Piper; the whole repository is downloaded, README included,
+  since speaches reads the card to choose how to run it), with a Piper voice's sample rate from its
+  `config.json`. A TTS model's projector is its audio decoder, so it is stored as taking no media.
 - **Recipes** are YAML ([forgeyard/recipes](../forgeyard/recipes)): tasks, formats, the protocol per
   task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
   NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
@@ -236,7 +246,11 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   (a digest is recommended there too). 1.3 adds to recipes: a `media` block (what the engine takes in
   chat: `inputs` of image, audio, video, and `files`), `advanced: true` on parameters (the deploy form's
   collapsed Advanced section), `optional_args` with `if_model` (`mmproj`, or a medium the model takes)
-  and the `{mmproj_file}` placeholder, and the estimate's `vision_overhead` / `video_overhead`. A
+  and the `{mmproj_file}` placeholder, the estimate's `vision_overhead` / `video_overhead`, a `tts`
+  block for text to speech (the formats the engine makes and its default, how it streams, the path
+  that lists its voices, its default voice, the request fields the gateway fills in for it, whether
+  it can speak Chinese, Japanese and Korean), the estimate's `codec_overhead` and the
+  `{gpu_util_main}` / `{gpu_util_codec}` placeholders for two-stage engines. A
   deployment made before a recipe gained a parameter renders that parameter's default. Built in:
 
   | Recipe | Serves | Runs | Pinned |
@@ -245,7 +259,10 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   | `vllm-pooling` | embeddings, rerank | NVIDIA, AMD, shares a GPU by default | the same images, `--runner pooling` |
   | `llama-cpp` | chat (GGUF) | NVIDIA, AMD (ROCm for Instinct and the discrete cards its image is built for, Vulkan for APUs and every other AMD GPU, with the render node only), CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` and `server-b12242`, release `b12242` for the process |
   | `faster-whisper` | speech to text | NVIDIA, CPU, shares a GPU by default | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
+  | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | CPU (container) only: ONNX Runtime ran Kokoro on the CPU even in the CUDA image | the speaches CPU image |
+  | `vllm-omni-tts` (1.3) | text to speech (safetensors: Qwen3-TTS) | NVIDIA, one GPU, shares it by default | `vllm/vllm-omni:v0.32.0` (CUDA 13.0, driver ≥ 580), `vllm serve <model> --omni` |
 
+  `llama-cpp` also serves `tts` (a TTS GGUF with its projector) on every variant.
 - **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
   bits) + KV cache (2 × layers × KV heads × head size × context × concurrent sequences × bytes) +
   the recipe's engine overhead + the CUDA context (0.4 GiB, measured on an A100); GGUF = the exact
@@ -257,6 +274,13 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   `video_overhead` (1 GiB) when video is on; on llama.cpp the projector file as it is (it is loaded
   whole, onto the GPU by default) plus `vision_overhead` for its buffers (measured on the CPU). With
   images on, the estimate notes that images take context tokens.
+  **Two-stage speech engines (1.3):** vLLM-Omni runs Qwen3-TTS as a talker (a language model, estimated
+  like any safetensors model from its `talker_config`) and an audio decoder (code2wav) on the same
+  card, each a vLLM engine that checks for its own `gpu_memory_utilization` of the card's total. The
+  estimate adds the recipe's `codec_overhead` (4.5 GiB: the decoder stage, measured by vLLM-Omni at
+  3.8 GiB on an A100 40GB, with its CUDA context), and rendering splits the reservation: the decoder
+  gets its part as its own fraction, the talker the rest (`--stage-overrides`). A speaches TTS model is
+  its files plus overhead, like Whisper.
 - **Scheduling**: filter (a recipe variant for the hardware and driver, the runtime, the GPU
   allowlist, enough memory), then score: **binpack** (the tightest card that fits; whole cards stay
   free for big models), and on a tie the machine that already **has the model cached**. Memory is
@@ -392,8 +416,29 @@ page contain these lines whenever the server uses its own CA.
 - **Usage units (1.3, migration 0012).** `usage_daily` has one column per unit of the new model
   kinds: `media_items`, `characters`, `images`, `kilopixels`, `media_ms`, `bytes_in`, `bytes_out`,
   `busy_ms`; default 0, so rows from before keep their meaning. Multimodal chat fills `media_items`;
-  the later 1.3 kinds fill the rest.
-- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank and speech to text in the console, through
+  text to speech `characters` and `media_ms`; the later 1.3 kinds fill the rest.
+- **Text to speech (1.3,** forgeyard/gateway/speech.py**).** `POST /v1/audio/speech` takes OpenAI's
+  request. The gateway checks it before anything is sent (an `input`, OpenAI's formats, `speed`,
+  `stream_format`) and refuses **voice cloning**: any reference-recording field (`ref_audio`,
+  `speaker_ref_b64`, …), a voice given as data or a link, `task_type: "Base"`, and uploading or deleting
+  voices answer 400 `voice_cloning_not_supported` (vLLM-Omni's voice registry has no per-user
+  ownership, and `ref_audio` URLs would make the engine fetch anything). The route is narrowed to the
+  deployments that can take the request: within their *Longest input* (`max_input_chars`; 0 = a
+  quarter of the context for engines that keep the text and the audio codes in one context, else
+  4,096), a format and stream format their recipe lists, and no Chinese, Japanese or Korean for
+  speaches (its releases delete those characters). Each deployment then gets its own body: its
+  default `response_format` when none was asked (so the gateway knows what comes back), the recipe's
+  default voice (or the first the engine lists; voices are asked of a replica and kept 5 minutes) in
+  place of a missing one or an OpenAI name the model lacks, said in `X-Forgeyard-Voice`, and for
+  llama.cpp `lang` from the text's script and `n_predict` (ten frames a character, at least 512, at
+  most the context). The answer streams to the client chunk by chunk (raw audio) or event by event
+  (vLLM-Omni's SSE) and is measured on the way: wav and pcm from the header or the stated rate, flac,
+  mp3, aac and opus from their framing, SSE from the deltas' size. Usage counts the characters and
+  the milliseconds of answered requests, and the key's tpm counts a character as a token, held
+  before sending. Speech never goes to a provider (routes of `openai-speech` take no provider
+  target). `GET /v1/audio/voices?model=` lists a model's voices in one shape (vLLM-Omni's uploaded
+  voices left out) with what it makes.
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text and text to speech (**Speak**: the model's voices and formats, a player) in the console, through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.

@@ -284,6 +284,26 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一段長影片預留記憶體，剩給 KV cache 的就不夠了。調低上下文長度，或再把影片關掉。
 
+## 語音被拒絕，或聽起來不對
+
+**你看到：** `/v1/audio/speech` 回應 400；`code` 說明原因。任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `voice_cloning_not_supported` | 請求帶了參考錄音（`ref_audio`、`speaker_ref_b64` 等）、以音訊或連結當聲音，或 `task_type: "Base"`；或程式試圖上傳聲音 | 使用模型自己的聲音：`GET /v1/audio/voices?model=…` |
+| `input_too_long` | 字元數超過部署的 *Longest input*（vLLM-Omni 與 llama.cpp 預設為上下文的四分之一，即 1,024；speaches 為 4,096） | 把文字按句子或段落拆開，或在 **Advanced** 調高它（上下文也一起調高） |
+| `unsupported_response_format` | 引擎不產生這種格式（llama.cpp 的 mp3 或 opus、speaches 的 opus 或 aac） | 改用它能產生的格式；訊息會列出來 |
+| `stream_format_not_supported` | 對 llama.cpp 或 speaches 用了 `stream_format: sse` | 改用 `audio`，或拿掉它 |
+| `language_not_supported` | 把中文、日文或韓文送給 speaches：它已發布的版本會刪掉這些字 | 改用 Qwen3-TTS 部署 |
+
+**音訊最後被截掉：** llama.cpp 生成到 `n_predict` 個音訊幀就停；請求沒給時，閘道設為每個字元十個（至少 512，最多到上下文長度）。說得比較慢的模型可能需要更多：自己送 `n_predict`，並保持在部署的上下文長度內。
+
+**中文被念成英文，或念得不好：** 在 llama.cpp 上，Qwen3-TTS 沒收到 `lang` 時會說英文。閘道會依中文、日文或韓文字元自動設定；如果文字大多是拉丁字母，請自己送 `"lang": "zh"`。
+
+**聲音不是指定的那一個：** OpenAI 的聲音名稱（`alloy`、`nova` 等）不是模型的聲音；閘道改用模型的預設聲音，並在 `X-Forgeyard-Voice` 標出。請改用模型列出的聲音。
+
+**串流卻到最後才一次送出：** 有些模型要把整句做完才會吐出音訊（llama.cpp 上的 Chatterbox 就是）。Qwen3-TTS 會串流。
+
 ## 費用顯示有請求沒有價格
 
 **你會看到：** **Usage** → **Cost** 把一些請求算在 *Without a price* 底下，並說明上面的費用沒有包含它們。

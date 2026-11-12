@@ -116,10 +116,11 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
 
 1. ✅ **Multimodal chat** (#4): images in chat on vLLM and llama.cpp (projector files), video
    opt-in, the usage units for all of 1.3.
-2. *In review* (#9): llama.cpp bump to a current build (b12242), with a built-in Vulkan variant for AMD
-   APUs and the cards the ROCm image lacks.
-3. Text-to-speech (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp on AMD, speaches
-   for small English voices on CPU and CUDA. Voice cloning stays off.
+2. ✅ **llama.cpp b12242** (#9), with a built-in Vulkan variant for AMD APUs and the cards the ROCm
+   image lacks.
+3. *In review*: **Text-to-speech** (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
+   TTS GGUFs on AMD and the CPU, speaches (Kokoro) for small English voices on CPU and CUDA; voices,
+   streaming, characters and audio length in usage. Voice cloning stays off.
 4. Image generation (`/v1/images/generations`).
 5. Generic passthrough (`/x/<name>/…`), with ready-made workload templates: object detection,
    segmentation, depth (permissively licensed images only).
@@ -152,6 +153,8 @@ The owner's decisions for 1.3 (2026-11-11):
 - **Video in chat** is off by default, a per-deployment parameter; so is the number of images.
 - **Usage columns** for all of 1.3 in one migration, one per unit, default 0.
 - **No cloud for the new content types in 1.3:** requests with media are served locally only.
+- **Text to speech:** three engines (vLLM-Omni Qwen3-TTS on NVIDIA, llama.cpp on AMD, speaches for
+  English Kokoro and Piper voices, labelled English only). **Voice cloning is blocked in 1.3.**
 - **Licences in the catalog**, and the recommended list holds only licences that allow commercial use.
 - **Settings:** every new setting or parameter has a default that works untouched, sits in
   *Advanced* unless a normal user must decide it, and is derived from the model when it can be.

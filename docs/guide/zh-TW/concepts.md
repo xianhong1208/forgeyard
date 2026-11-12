@@ -76,6 +76,22 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - 帶圖片、音訊或影片的請求只留在你自己的部署上，絕不送往雲端供應商。
 - 用量會計算媒體項目數；圖片的 token 包含在提示 token 裡。
 
+## 文字轉語音
+
+語音模型以 `/v1/audio/speech`（OpenAI 的文字轉語音呼叫）回應音訊本身。三種引擎提供這項服務：
+
+| 引擎（配方） | 在哪裡跑 | 模型 | 語言 |
+|---|---|---|---|
+| vLLM-Omni（`vllm-omni-tts`） | NVIDIA GPU | Qwen3-TTS CustomVoice：九種內建聲音，可下風格指示 | 中文（含各地方言）、英文和另外八種語言 |
+| llama.cpp（`llama-cpp`） | AMD GPU 與 APU（Vulkan 或 ROCm）、NVIDIA、CPU | 附 projector 的 TTS GGUF：Qwen3-TTS、Chatterbox | Qwen3-TTS：中文、英文等；Chatterbox：英文 |
+| speaches（`speaches-tts`） | CPU、NVIDIA | Kokoro-82M（51 種聲音）、Piper 聲音 | 英文（及其他拉丁字母語言） |
+
+- 語音模型有自己的**聲音**（Playground 會列出來）。像 `alloy` 這類 OpenAI 聲音名稱會換成模型的預設聲音，回應會標明換成哪一個。
+- **不提供聲音複製**：不接受參考錄音，也不能上傳聲音，只有模型原本就有的聲音能說話。
+- 每個部署一次請求最多接受多少字元（*Longest input*，在 **Advanced** 裡）。預設值剛好是引擎一次說得完的量。
+- 用量會計算說出的**字元數**與**音訊長度**。金鑰的每分鐘 token 數中，一個字元算一個 token。
+- 語音只留在你自己的部署上，絕不送往雲端供應商。
+
 ## API 金鑰、限制與用量
 
 - 程式以 **API 金鑰**（`fyk_…`）呼叫 `/v1`。每個人都在 **API keys** 建立自己的金鑰。金鑰只會顯示一次；伺服器只保留它的雜湊值。

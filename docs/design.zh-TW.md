@@ -137,7 +137,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
     large-v3 turbo），以及 BGE-M3 與它的 reranker。每一項標示 task、建議的配方、大約下載量與一份需要多少記憶體。Gemma 3 與 Llama 是
-    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。**Vision** 群組（1.3）有給 vLLM 的 Qwen3-VL 2B / 4B / 8B，以及給 llama.cpp、附 projector 檔的 Qwen3-VL 2B / 8B GGUF。每一項都寫明**授權**，清單只收允許商業使用的授權（forgeyard/models/recommended.py 的 `ALLOWED_LICENSES`）：寬鬆授權（Apache-2.0、MIT、BSD）、OpenRAIL 類，以及條款允許商業使用的模型授權。Gemma 的條款（允許商業使用、有會延伸到使用者的禁止用途政策，Google 也保留限制違規使用的權利）與 Meta 的 Llama 3.1 / 3.2 社群授權（月活躍使用者 7 億以下可商用，須標示）留在清單上，標為 gated 並顯示授權；禁止商業使用的授權（CC-BY-NC、僅限研究）不能加入。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
+    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。**Vision** 群組（1.3）有給 vLLM 的 Qwen3-VL 2B / 4B / 8B，以及給 llama.cpp、附 projector 檔的 Qwen3-VL 2B / 8B GGUF。**Text to speech** 群組（1.3）有給 vLLM-Omni 的 Qwen3-TTS 0.6B / 1.7B CustomVoice、給 llama.cpp 的 Qwen3-TTS 1.7B GGUF 與 Chatterbox Turbo，以及給 speaches 的 Kokoro-82M；語音項目都固定到某個 commit、列出會說的語言，而本身沒寫授權的轉檔版本會標出它的來源（`license_from`），由 `scripts/check_recommended.py` 讀取來源的授權。每一項都寫明**授權**，清單只收允許商業使用的授權（forgeyard/models/recommended.py 的 `ALLOWED_LICENSES`）：寬鬆授權（Apache-2.0、MIT、BSD）、OpenRAIL 類，以及條款允許商業使用的模型授權。Gemma 的條款（允許商業使用、有會延伸到使用者的禁止用途政策，Google 也保留限制違規使用的權利）與 Meta 的 Llama 3.1 / 3.2 社群授權（月活躍使用者 7 億以下可商用，須標示）留在清單上，標為 gated 並顯示授權；禁止商業使用的授權（CC-BY-NC、僅限研究）不能加入。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
     safetensors 版本（main 分支只有 PyTorch 權重）。`python scripts/check_recommended.py` 會用 Forgeyard 自己的檢視與估算逐項對 Hugging Face 檢查。
   - **Search Hugging Face（搜尋）**：由 server 呼叫 `<HF_ENDPOINT>/api/models`（瀏覽器不會直接連 Hugging Face），可依 task 與格式
     （safetensors、GGUF、CTranslate2）篩選，依下載數排序（搜尋 rerank 時也會查 text classification，因為很多 reranker 被歸在那一類，並把名稱含 "rerank" 的排在前面），顯示下載數、按讚數、最後更新、是否 gated，以及 Hugging Face 有提供時的大小。
@@ -151,13 +151,14 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   header（用 HTTP range 讀）。gated repo 的 token 只用在這次檢視，不保存。admin 可以替模型加上各配方的引擎參數
   （Qwen3-Reranker 需要 vLLM 的 `--hf-overrides`）。
   檢視（1.3）也會讀出**授權**（card 的 `license`，"other" 時用 `license_name`，否則看 `license:` tag）、是否 **gated**，以及**文字以外能接受什麼**：有 `vision_config` 或圖片 token 是圖片，有 `audio_config` 是音訊，有影片 token 或 `video_preprocessor_config.json` 是影片（Omni 模型看 `thinker_config`）。GGUF repo 的 **projector 檔**（`mmproj-*.gguf`）不算模型選項：加入模型時一併選一個（預設 F16，其次 BF16、Q8_0、第一個；或不選），讀它的 `clip.has_vision_encoder` / `clip.has_audio_encoder`（在 llama.cpp 裡視覺代表圖片與影片），並和模型一起下載。1.3 之前加入的目錄項目沒有這些資訊：safetensors 視為未知（媒體照樣轉送，由引擎回應），GGUF 視為只有文字。
+  **語音模型（1.3）：** Hugging Face 的 `text-to-speech` 對應 `tts` task。Qwen3-TTS 的層數來自它的 `talker_config`（寫出音訊編碼的語言模型；Omni 對話模型仍讀原本的設定），內建聲音來自 `talker_config.spk_id`；由 `model.onnx` 組成的 repo 是 `onnx` 格式（speaches 的 Kokoro 與 Piper；整個 repo 都下載，包括 README，因為 speaches 靠 card 決定怎麼執行），Piper 聲音的取樣率讀自它的 `config.json`。TTS 模型的 projector 是它的音訊解碼器，所以存成不接受任何媒體。
 - **配方**是 YAML（[forgeyard/recipes](../forgeyard/recipes)）：task、格式、每個 task 的協定、參數、估算方法、health check，以及依硬體
   （廠商、NVIDIA compute capability 或 AMD gfx target、driver 版本）分的 **variant**；每個 variant 是固定版本的容器映像，或給沒有
   Docker 的 CPU 機器、由 agent 下載並以 SHA-256 檢查的固定版本執行檔。內建的映像以 **digest 釘選**，寫成
   `repo:tag@sha256:…`：agent 拉取並執行的是 digest，registry 上的 tag 被改掉也改變不了實際執行的東西；介面顯示 tag。
   要升級引擎：改 tag，執行 `uv run --no-sync python scripts/pin_images.py --write`（從 Docker Hub 或 GHCR 取得多架構 digest，
   並檢查每個 variant 宣稱的平台都在），再檢查 diff；不加 `--write` 則檢查每個 digest 是否仍對應它的 tag。內建映像少了 digest
-  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，以及估算的 `vision_overhead` / `video_overhead`。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
+  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，估算的 `vision_overhead` / `video_overhead`、文字轉語音用的 `tts` 區塊（引擎能產生的格式與預設格式、串流方式、列出聲音的路徑、預設聲音、gateway 替它補上的請求欄位、能否說中日韓文），以及兩階段引擎用的估算 `codec_overhead` 與 `{gpu_util_main}` / `{gpu_util_codec}` 佔位符。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
 
   | 配方 | 服務 | 執行在 | 固定版本 |
   |---|---|---|---|
@@ -165,12 +166,16 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
   | `llama-cpp` | chat（GGUF） | NVIDIA、AMD（Instinct 與 ROCm 映像有編譯的獨立顯卡用 ROCm；APU 與其他 AMD GPU 用 Vulkan，只給 render node）、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` 與 `server-b12242`，行程用 release `b12242` |
   | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
+  | `speaches-tts`（1.3） | 文字轉語音（ONNX：Kokoro、Piper），英文 | 只用 CPU（容器）：即使在 CUDA 映像檔裡，ONNX Runtime 也是用 CPU 跑 Kokoro | speaches 的 CPU 映像 |
+  | `vllm-omni-tts`（1.3） | 文字轉語音（safetensors：Qwen3-TTS） | NVIDIA，單張 GPU，預設共用 | `vllm/vllm-omni:v0.32.0`（CUDA 13.0，driver ≥ 580），`vllm serve <model> --omni` |
 
+  `llama-cpp` 在每個 variant 上也提供 `tts`（附 projector 的 TTS GGUF）。
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
   （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
   GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
   能讀圖片的模型（1.3）會加上配方的**視覺項**：vLLM 加 `vision_overhead`（1.5 GiB：vLLM 啟動時會用最大的圖片跑一次視覺編碼器並保留 encoder cache，之後才決定 KV cache 大小；視覺權重已含在模型權重裡），開啟影片時再加 `video_overhead`（1 GiB）；llama.cpp 加 projector 檔本身（整個載入，預設放到 GPU）與它的 buffer 用的 `vision_overhead`（在 CPU 上量測）。開啟圖片時，估算會註明圖片也會占用上下文 token。
+  **兩階段語音引擎（1.3）：** vLLM-Omni 把 Qwen3-TTS 跑成 talker（語言模型，依它的 `talker_config` 像一般 safetensors 模型估算）與音訊解碼器（code2wav）兩段，放在同一張卡上，兩段各是一個 vLLM 引擎，各自檢查自己那份卡總量的 `gpu_memory_utilization`。估算加上配方的 `codec_overhead`（4.5 GiB：解碼器那段，vLLM-Omni 在 A100 40GB 上量到 3.8 GiB，再含它的 CUDA context），產生參數時再把保留量拆開：解碼器拿自己那份當它的比例，其餘給 talker（`--stage-overrides`）。speaches 的 TTS 模型和 Whisper 一樣是模型檔加 overhead。
 - **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
   讓整張空著的卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
@@ -248,8 +253,9 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   - 溢出規則把每個媒體項目算成 1,600 token，而不是它的 base64 大小；
   - 用量會計算媒體項目（`media_items`）；圖片的 token 依引擎回報包含在 `prompt_tokens` 裡（vLLM 帶 `--enable-prompt-tokens-details`）。
 - **每個部署的請求大小上限（1.3）。** 部署的 `max_body_mb`（vLLM 與 llama.cpp 為 64 MiB）就是它的上限；沒有這個參數的配方沿用 `GATEWAY_MAX_BODY_MB`。gateway 先讀到所有部署中最大的上限為止（最多每 5 秒從資料庫讀一次），知道模型之後再套用該路由自己的上限，媒體內嵌後再檢查一次（413 `request_too_large`）。
-- **用量單位（1.3，migration 0012）。** `usage_daily` 為新模型類型的每種單位各加一欄：`media_items`、`characters`、`images`、`kilopixels`、`media_ms`、`bytes_in`、`bytes_out`、`busy_ms`；預設 0，所以舊的資料列意義不變。多模態對話會填 `media_items`；其餘由 1.3 後續的類型填入。
-- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
+- **用量單位（1.3，migration 0012）。** `usage_daily` 為新模型類型的每種單位各加一欄：`media_items`、`characters`、`images`、`kilopixels`、`media_ms`、`bytes_in`、`bytes_out`、`busy_ms`；預設 0，所以舊的資料列意義不變。多模態對話會填 `media_items`；文字轉語音填 `characters` 與 `media_ms`；其餘由 1.3 後續的類型填入。
+- **文字轉語音（1.3，** forgeyard/gateway/speech.py**）。** `POST /v1/audio/speech` 接受 OpenAI 的請求格式。gateway 在送出任何東西之前先檢查（要有 `input`、OpenAI 的格式、`speed`、`stream_format`），並拒絕**聲音複製**：任何參考錄音欄位（`ref_audio`、`speaker_ref_b64` 等）、以資料或連結當作聲音、`task_type: "Base"`，以及上傳或刪除聲音，都回應 400 `voice_cloning_not_supported`（vLLM-Omni 的聲音登錄沒有分使用者，而 `ref_audio` 網址會讓引擎去抓任何東西）。路由會縮小到能處理這個請求的部署：在它的 *Longest input*（`max_input_chars`；0 代表文字和音訊編碼放在同一個上下文的引擎取上下文的四分之一，否則 4,096）之內、格式與串流格式在配方列表裡，而且 speaches 不收中日韓文（它已發布的版本會刪掉這些字）。接著每個部署拿到自己的請求內容：沒指定格式時用它的預設 `response_format`（gateway 才知道回來的是什麼）；沒有聲音、或用了模型沒有的 OpenAI 名稱時，改用配方的預設聲音（或引擎列出的第一個；聲音向副本詢問並保留 5 分鐘），並以 `X-Forgeyard-Voice` 標出；llama.cpp 另依文字的書寫系統補上 `lang`，並補上 `n_predict`（每字元十幀，至少 512，最多到上下文長度）。回應一塊一塊（原始音訊）或一個事件一個事件（vLLM-Omni 的 SSE）地轉給用戶端，並在途中量測長度：wav 與 pcm 看檔頭或標明的取樣率，flac、mp3、aac、opus 看各自的框架，SSE 看片段大小。用量計入有回應的請求的字元數與毫秒數，金鑰的 tpm 以一個字元算一個 token，送出前先預留。語音從不送往供應商（`openai-speech` 的路由不能加供應商目標）。`GET /v1/audio/voices?model=` 以一致的格式列出模型的聲音（不含 vLLM-Omni 上傳的聲音）與它能產生的格式。
+- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank、語音轉文字與文字轉語音（**Speak**：模型的聲音與格式，附播放器）；走同一套路由，以登入的使用者身分
   （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。它的雲端設定對 admin 是 `on`，對其他人是
   server 允許的上限；個人的預算適用，沒有 key 的預算。
 - **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；

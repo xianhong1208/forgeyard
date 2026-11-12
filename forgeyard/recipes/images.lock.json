@@ -106,6 +106,21 @@
         }
       }
     },
+    "vllm/vllm-omni:v0.32.0@sha256:f713b909f16cf8c7901f17c3aee3f471cbee5fbde5603b7dbe2631630887d7c2": {
+      "index": "sha256:f713b909f16cf8c7901f17c3aee3f471cbee5fbde5603b7dbe2631630887d7c2",
+      "platforms": {
+        "linux/amd64": {
+          "manifest": "sha256:6b44ee504a0dc3a21eacf72e7dc5da318b7bcc8ed0e349dc928e67278414430c",
+          "config": "sha256:65a97a7c1e5709d8b0a2d96222dbc7f7b3251d5aa299fb985b7ce4d445fa8b94",
+          "content": "sha256:8703cd80fcbd07bb4e5202b18473452428042b891ec43d3591b41f1e8476b6f2"
+        },
+        "linux/arm64": {
+          "manifest": "sha256:6da195b87ca635601559ea11a6dd175758b0fa68cbada3a4529e01f36bc92df1",
+          "config": "sha256:88444dfd7675d77b34b7a88f85c6c78bea29970c6c4a9b7fa42eb89a348f55d9",
+          "content": "sha256:51530e04602118b1f9917cbcf7f014071a4ea991273f3f00053cc5bc198429d0"
+        }
+      }
+    },
     "vllm/vllm-openai-rocm:v0.32.0@sha256:14f6a575e1fb0a580b0f633c09e06f648709d60405b85f6a7ff3f80d49f39905": {
       "index": null,
       "platforms": {

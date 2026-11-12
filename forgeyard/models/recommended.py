@@ -46,15 +46,19 @@ class Entry(BaseModel):
     file: Optional[str] = None
     mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr"]
-    format: Literal["safetensors", "gguf", "ctranslate2"]
+    task: Literal["chat", "embed", "rerank", "asr", "tts"]
+    format: Literal["safetensors", "gguf", "ctranslate2", "onnx"]
     recipe: str
     device: Literal["gpu", "cpu"] = "gpu"
     download_gib: float = Field(gt=0, le=10_000)
     memory_gib: float = Field(gt=0, le=10_000)
     gated: bool = False
     license: str = Field(min_length=1, max_length=64)
+    # When the repository states no licence (a GGUF or ONNX conversion): the original model whose licence
+    # `license` is, checked by scripts/check_recommended.py.
+    license_from: Optional[str] = None
     inputs: list[Literal["image", "audio", "video"]] = Field(default_factory=list)  # besides text
+    languages: list[str] = Field(default_factory=list, max_length=40)   # tts: the languages it speaks
     engine_args: dict[str, list[str]] = Field(default_factory=dict)
     note: str = Field(min_length=1, max_length=200)
 
@@ -104,6 +108,16 @@ def check(data: dict) -> Recommended:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
+        if e.task == "tts" and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
+            # 1.3: speech models are pinned to a commit here, so the voices and the measured memory
+            # stay those of the files that were checked.
+            raise RecommendedError(f"{where}: a text-to-speech entry is pinned to a commit (revision: 40 hex characters)")
+        if e.license_from is not None:
+            try:
+                if sources.parse_source(e.license_from).kind != "hf":
+                    raise sources.SourceError("license_from is an hf:// repository")
+            except sources.SourceError as err:
+                raise RecommendedError(f"{where}: license_from: {err}") from None
         if e.license not in ALLOWED_LICENSES:
             raise RecommendedError(f"{where}: the licence {e.license!r} is not one the recommended list may hold")
         if e.mmproj is not None:

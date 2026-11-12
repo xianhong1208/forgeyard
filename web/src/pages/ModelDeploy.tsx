@@ -196,6 +196,9 @@ export function ModelDeployPage() {
 // The media parameters (1.3) only mean something for a model that takes media: hidden for one that
 // is known to take none of them (a catalog entry from before 1.3 is unknown, so they show).
 export function paramApplies(name: string, model: CatalogModel | undefined): boolean {
+  // Text to speech (1.3): the input cap is for speech models only, and they take no media in chat.
+  if (name === "max_input_chars") return !model || model.task === "tts";
+  if (model?.task === "tts" && ["images", "image_tokens", "videos", "video_fps", "max_body_mb"].includes(name)) return false;
   const m = model?.modalities;
   if (m === null || m === undefined) return true;
   if (name === "images") return m.includes("image") || m.includes("audio");

@@ -39,9 +39,10 @@ def first_variant(name, accel):
 
 
 def test_fy_rec_001_builtins_load_and_are_pinned():
-    """FY-REC-001: four recipes, every image pinned to a version (never latest), engines by SHA-256."""
+    """FY-REC-001: six recipes (1.3 adds the text-to-speech ones), every image pinned to a version (never
+    latest), engines by SHA-256."""
     rs = recipes.builtin_recipes()
-    assert sorted(rs) == ["faster-whisper", "llama-cpp", "vllm", "vllm-pooling"]
+    assert sorted(rs) == ["faster-whisper", "llama-cpp", "speaches-tts", "vllm", "vllm-omni-tts", "vllm-pooling"]
     for r, _ in rs.values():
         assert r.builtin
         for v in r.variants:
@@ -151,7 +152,7 @@ def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
     runs. Bump with scripts/pin_images.py --write."""
     images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
               if v.runtime == "container"]
-    assert len(images) == 13
+    assert len(images) == 15
     unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
     assert unpinned == []
     # One tag, one digest: the same tag in two recipes (vllm and vllm-pooling) is the same image.

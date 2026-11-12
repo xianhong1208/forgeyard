@@ -33,8 +33,9 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "embed": ("feature-extraction", "sentence-similarity"),
     "rerank": ("text-ranking", "text-classification"),
     "asr": ("automatic-speech-recognition",),
+    "tts": ("text-to-speech",),
 }
-FORMATS = ("safetensors", "gguf", "ctranslate2")
+FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx")
 EXPAND = ("downloads", "likes", "lastModified", "gated", "private", "pipeline_tag", "library_name", "tags",
           "safetensors", "gguf")
 _DTYPE_BYTES = {"F64": 8, "I64": 8, "F32": 4, "I32": 4, "BF16": 2, "F16": 2, "I16": 2, "F8_E4M3": 1, "F8_E5M2": 1,
@@ -60,9 +61,9 @@ def make_query(text: str, task: Optional[str], fmt: Optional[str], limit: int) -
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise ValueError("search: plain text only")
     if task not in (None, "", *TASK_TAGS):
-        raise ValueError("task: chat, embed, rerank or asr")
+        raise ValueError("task: chat, embed, rerank, asr or tts")
     if fmt not in (None, "", *FORMATS):
-        raise ValueError("format: safetensors, gguf or ctranslate2")
+        raise ValueError("format: safetensors, gguf, ctranslate2 or onnx")
     if not 1 <= int(limit) <= MAX_LIMIT:
         raise ValueError(f"limit: 1 to {MAX_LIMIT}")
     return Query(text, task or None, fmt or None, int(limit))
@@ -92,6 +93,8 @@ def _format(m: dict) -> str:
         return "safetensors"
     if (m.get("library_name") or "").lower() == "ctranslate2" or "ctranslate2" in tags:
         return "ctranslate2"
+    if (m.get("library_name") or "").lower() == "onnx" or "onnx" in tags:
+        return "onnx"
     return "other"
 
 
