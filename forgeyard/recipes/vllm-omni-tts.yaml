@@ -1,0 +1,85 @@
+# Text to speech with vLLM-Omni on NVIDIA GPUs: Qwen3-TTS (CustomVoice: nine built-in voices, strong
+# in Chinese and English, with optional style instructions), from the official image.
+#
+# Pinned: vLLM-Omni 0.32.0 (2026-10-28), built on the vLLM 0.32.0 Forgeyard pins elsewhere, CUDA 13.0
+# (driver >= 580), compute capability 7.5 and newer (its TORCH_CUDA_ARCH_LIST); the image has no
+# entrypoint, so the recipe runs `vllm serve … --omni`. Docs:
+# https://github.com/vllm-project/vllm-omni/blob/v0.32.0/docs/serving/speech_api.md
+#
+# Qwen3-TTS runs as two stages on one card (vllm_omni/deploy/qwen3_tts.yaml, found from the model's
+# model_type): the talker (a Qwen3 language model writing 12.5 Hz audio codes) and code2wav (the
+# audio decoder). Each stage is a vLLM engine that checks for its own --gpu-memory-utilization share
+# of the card's total memory; the bundled config asks 0.3 each, 48 GB of an 80 GB card. Forgeyard
+# sets both through --stage-overrides from the reservation: the decoder gets codec_overhead (its
+# weights, 0.45 GiB, its buffers and its CUDA context: vLLM-Omni measured 3.8 GiB for this stage on an
+# A100 40GB), the talker the rest (weights, a KV cache for `concurrency` requests of `context` tokens,
+# and the usual vLLM overhead). Its max_model_len and max_num_seqs follow context and concurrency.
+#
+# Answers (serving_speech.py at v0.32.0): wav (default), pcm (16-bit, rate in x-audio-sample-rate),
+# flac, mp3, opus; stream_format audio (raw pcm or wav as it is decoded) and sse (OpenAI's
+# speech.audio.delta / speech.audio.done events, with token usage); without stream_format the whole
+# file. Usage comes in x-vllm-omni-*-tokens headers. `language` defaults to Auto. GET
+# /v1/audio/voices lists the voices.
+#
+# Voice cloning is blocked at the gateway in 1.3: Base checkpoints, ref_audio / ref_text and voice
+# uploads (POST /v1/audio/voices, which has no per-user ownership) never reach the engine, and the
+# agent's key guard keeps everyone else off the replica's port. ref_audio would also fetch any URL,
+# so media fetching is switched off as in the vllm recipe.
+name: vllm-omni-tts
+title: vLLM-Omni (text to speech)
+description: >-
+  Qwen3-TTS on NVIDIA GPUs with vLLM-Omni: built-in voices that speak Chinese (Mandarin and dialects),
+  English and eight more languages, with style instructions. OpenAI-compatible /v1/audio/speech with
+  streaming.
+engine: vllm-omni
+version: "0.32.0"
+tasks: [tts]
+formats: [safetensors]
+api: {tts: openai-speech}
+upstream_model: served_name
+share: vram
+port: 8000
+health: {path: /health, start_period: 1200, interval: 10, timeout: 5, failure_threshold: 3}
+estimate:
+  method: safetensors-kv
+  kv_sequences: concurrency
+  # The talker's activations, CUDA graphs and sampler (as in the vllm recipe).
+  overhead: 2GiB
+  # The code2wav stage: vLLM-Omni's own A100 40GB run measured 3,862 MiB for it (0.6B CustomVoice,
+  # weights 0.45 GiB of that); with its CUDA context and some room.
+  codec_overhead: 4608MiB
+params:
+  context: {type: int, default: 4096, min: 512, max: 32768, label: Context length (tokens),
+            help: "Per request: the text's tokens plus the audio codes (12.5 a second), so 4,096 holds about four
+              minutes of speech."}
+  concurrency: {type: int, default: 4, min: 1, max: 64, label: Concurrent requests,
+                help: Requests spoken at once; the talker's KV cache is sized for this many.}
+  max_input_chars: {type: int, default: 0, min: 0, max: 100000, advanced: true, label: Longest input (characters),
+                    help: "Requests with more text are refused by the gateway (400 input_too_long). 0 = a quarter of the
+                      context length (1,024 at 4,096), which the audio still fits after."}
+args: ["{model_path}", --omni, --served-model-name, "{served_name}", --host, "{host}", --port, "{port}",
+       --stage-overrides,
+       '{"0":{"gpu_memory_utilization":{gpu_util_main},"max_num_seqs":{concurrency},"max_model_len":{context}},"1":{"gpu_memory_utilization":{gpu_util_codec},"max_num_seqs":{concurrency}}}',
+       --allowed-media-domains, forgeyard.invalid]
+tts:
+  formats: [wav, pcm, flac, mp3, opus]
+  default_format: wav
+  stream_formats: [audio, sse]
+  voices: /v1/audio/voices
+  default_voice: vivian
+  pcm_rate: 24000
+env:
+  VLLM_MEDIA_URL_ALLOW_REDIRECTS: "0"
+  HF_HUB_OFFLINE: "1"
+  HF_HUB_CACHE: "{model_hub}"
+  VLLM_NO_USAGE_STATS: "1"
+  DO_NOT_TRACK: "1"
+# The replica's internal key: vLLM-Omni builds its server on vLLM's (build_app), so VLLM_API_KEY guards
+# /v1 as in the vllm recipe; /health stays open.
+api_key_env: VLLM_API_KEY
+variants:
+  - name: cuda
+    when: {vendor: nvidia, compute_capability: ">=7.5", driver: ">=580"}
+    runtime: container
+    image: vllm/vllm-omni:v0.32.0@sha256:f713b909f16cf8c7901f17c3aee3f471cbee5fbde5603b7dbe2631630887d7c2
+    entrypoint: [vllm, serve]

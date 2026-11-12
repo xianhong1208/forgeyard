@@ -37,6 +37,21 @@
 # --media-path is never set, so file:// is refused. --image-max-tokens caps what one image takes: by
 # default Qwen3-VL lets a 5 MB photo become ~4,000 tokens (measured: 125 s on 8 CPU threads, and it
 # nearly filled a 4,096-token context), so images are scaled to at most image_tokens (1,024).
+# Text to speech (1.3; tools/server/server-context.cpp and server-chat.cpp at b12242, from
+# ggml-org/llama.cpp#31763): a TTS GGUF (Qwen3-TTS, Chatterbox, LFM3-Audio, Pocket TTS, Soprano) with
+# its projector (the audio decoder, and the voices of models that have some) answers POST
+# /v1/audio/speech: wav (default) or pcm (16-bit, the rate in the Content-Type), streamed with
+# stream_format audio (a WAV then declares an unknown size); no SSE, mp3 or opus; speed only 1.0;
+# `instructions` ignored. Voices are listed by GET /props ("voices", only for models that have
+# predefined ones); OpenAI voice names are refused by such a model, so the gateway picks the model's own.
+# Two request fields matter that OpenAI does not have, so the gateway sets them when a request leaves
+# them out: `lang` (Qwen3-TTS otherwise speaks English: zh, ja or ko from the text's script) and
+# `n_predict` (the most audio frames; the default 512 is about 41 s at 12.5 Hz: ten frames a character
+# instead, at most the context). The speaker reference fields (speaker_ref, speaker_ref_b64) clone a
+# voice and are refused at the gateway. Known on AMD APUs with Vulkan (ggml-org/llama.cpp#32050,
+# open): Qwen3-TTS gives slightly different audio for the same request and seed with cooperative
+# matrices on; a custom recipe can set GGML_VK_DISABLE_COOPMAT=1 on its vulkan variant.
+#
 # Video: since ggml-org/llama.cpp#31619 (2026-11-03, tools/mtmd/mtmd-helper.cpp) a model with its own
 # video template (Qwen3-VL, LFM3) is sampled at its reference rate and frame size (Qwen3-VL: 2 frames
 # a second, in pairs, with timestamps) and --video-fps applies only to other models. The 6-second
@@ -46,12 +61,12 @@ title: llama.cpp
 description: >-
   GGUF (quantised) models with llama-server: on NVIDIA GPUs, AMD GPUs (ROCm, or Vulkan for APUs and
   other cards) in a container, or on the CPU in a container or as a plain process. OpenAI-compatible
-  API.
+  API, for chat and for text to speech (Qwen3-TTS, Chatterbox and other TTS GGUFs with their projector).
 engine: llama.cpp
 version: b12242
-tasks: [chat]
+tasks: [chat, tts]
 formats: [gguf]
-api: {chat: openai-chat}
+api: {chat: openai-chat, tts: openai-speech}
 upstream_model: served_name
 share: exclusive
 port: 8080
@@ -71,6 +86,11 @@ estimate:
   # context of 8,192 and the 6-second sample clip: peak RSS 4.24 GiB on b12242 (4.15 on b11977)
   # against 3.83 GiB for the same run without video and an estimate of 3.95 GiB without this term.
   video_overhead: 512MiB
+  # Text to speech: llama-server gives every slot its own audio pipeline. Measured on the CPU with
+  # Qwen3-TTS 1.7B Q4_K_M (b12242): 2.5 GiB after loading, 4.6 GiB at the peak of one request with one
+  # slot, 6.4 GiB with two slots used in turn; Chatterbox Turbo takes far less (2.6 GiB in all with two
+  # slots), so its estimate is on the high side.
+  speech_overhead: 2GiB
 params:
   context: {type: int, default: 4096, min: 256, max: 1048576, label: Context length (tokens),
             help: Per request. llama-server gets context x concurrency in one shared KV cache.}
@@ -95,6 +115,9 @@ params:
   max_body_mb: {type: int, default: 64, min: 1, max: 1024, advanced: true, label: Largest request (MiB),
                 help: "Requests larger than this are refused by the gateway (413). Images are sent as base64,
                   a third larger than the files."}
+  max_input_chars: {type: int, default: 0, min: 0, max: 100000, advanced: true, label: Longest input (characters),
+                    help: "Text to speech: requests with more text are refused by the gateway (400 input_too_long). 0 = a
+                      quarter of the context length (1,024 at 4,096), which the audio still fits after."}
 args: [-m, "{model_file}", --alias, "{served_name}", --host, "{host}", --port, "{port}",
        -c, "{kv_tokens}", -np, "{concurrency}", --kv-unified, -ngl, "{gpu_layers}", --fit, "off",
        -t, "{threads}", --no-webui]
@@ -102,6 +125,14 @@ optional_args:
   - if_model: mmproj
     args: [--mmproj, "{mmproj_file}", --image-max-tokens, "{image_tokens}", --video-fps, "{video_fps}"]
 media: {inputs: [image, audio, video], files: false}
+tts:
+  formats: [wav, pcm]
+  default_format: wav
+  stream_formats: [audio]
+  voices: /props
+  language_field: lang
+  frames_field: n_predict
+  pcm_rate: 24000
 # The replica's internal key (M4). llama-server (b11977 to b12242) reads --api-key from LLAMA_API_KEY
 # (common/arg.cpp: .set_env("LLAMA_API_KEY")) and then answers 401 to every path except /health,
 # /v1/health and the web UI's files (tools/server/server-http.cpp: get_public_endpoints).

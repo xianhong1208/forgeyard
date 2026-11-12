@@ -14,7 +14,7 @@ import posixpath
 from forgeyard.db import Accelerator
 from forgeyard.models import modalities
 from forgeyard.models.catalog import Context
-from forgeyard.models.estimate import gpu_memory_utilization
+from forgeyard.models.estimate import CODEC_LABEL, gpu_memory_utilization
 from forgeyard.models.recipes import Variant, render_text
 
 
@@ -46,8 +46,18 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
     if variant.gpu and cards:
         total = min(int(a.vram_total or 0) for a in cards)
         out["gpu_util"] = f"{gpu_memory_utilization(ctx.estimate.per_gpu, total, gpu_context):.3f}"
+        # Two-stage engines (vLLM-Omni TTS): each stage is a vLLM engine on the same card that checks
+        # for its own fraction, so the reservation is split: the audio decoder gets its part of the
+        # estimate, the talker the rest.
+        codec = sum(p.bytes for p in ctx.estimate.parts if p.label == CODEC_LABEL)
+        if codec:
+            out["gpu_util_main"] = f"{gpu_memory_utilization(ctx.estimate.per_gpu - codec, total, gpu_context):.3f}"
+            out["gpu_util_codec"] = f"{gpu_memory_utilization(codec, total, gpu_context):.3f}"
+        else:
+            out["gpu_util_main"] = out["gpu_util"]
+            out["gpu_util_codec"] = "0"
     else:
-        out["gpu_util"] = "0"
+        out["gpu_util"] = out["gpu_util_main"] = out["gpu_util_codec"] = "0"
     return out
 
 

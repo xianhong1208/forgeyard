@@ -3,8 +3,8 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
 
     name: vllm                       a-z, 0-9, '-'; unique
     engine, version, title, description
-    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr
-    formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2
+    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts
+    formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx
     api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
     upstream_model: served_name      what the engine expects in a request's `model` field:
                                      served_name, or repo (the model's Hugging Face id)
@@ -20,6 +20,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
                                      if_model: added only when the model has it (mmproj: a
                                      llama.cpp projector file, {mmproj_file}; image, audio, video:
                                      the model takes that medium)
+    tts: {formats: [wav, pcm], default_format: wav, stream_formats: [audio], voices: /props, ...}
+                                     1.3, text to speech (/v1/audio/speech): what the engine makes and
+                                     how the gateway talks to it (see Speech below)
     media: {inputs: [image, video, audio], files: false}
                                      1.3: what the engine takes in chat besides text; the gateway
                                      sends a model only the media it takes, at most `images`
@@ -50,7 +53,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
         command: /opt/x/bin/server     a program already installed on the machines
 
 Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} {context} {concurrency}
-{kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} {mmproj_file} and any declared param.
+{kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} {mmproj_file} {image_max_pixels}
+{gpu_util_main} {gpu_util_codec} (two-stage engines: the share of each stage, see estimate.codec_overhead)
+and any declared param.
 Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
 mount inside a container, the cache directory for a process).
 """
@@ -69,13 +74,13 @@ from forgeyard.workloads.spec import ENV_KEY_RE, IMAGE_RE, RESERVED_ENV, RESERVE
 BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-TASKS = ("chat", "embed", "rerank", "asr")
-FORMATS = ("safetensors", "gguf", "ctranslate2")
-APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio")
+TASKS = ("chat", "embed", "rerank", "asr", "tts")
+FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx")
+APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech")
 ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
                         "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
-                        "mmproj_file", "image_max_pixels"}
+                        "mmproj_file", "image_max_pixels", "gpu_util_main", "gpu_util_codec"}
 MEDIA_KINDS = ("image", "audio", "video")
 # mmproj: a GGUF projector file; image_pixels: image tokens scale with the resolution (vision_tile_px).
 MODEL_FEATURES = ("mmproj", "image_pixels") + MEDIA_KINDS
@@ -260,8 +265,16 @@ class Estimate(_M):
     # weights are inside the model's own (safetensors) or the mmproj file (GGUF, counted separately).
     vision_overhead: int = 0
     video_overhead: int = 0
+    # 1.3, two-stage speech engines (vLLM-Omni): what the second stage (the audio decoder, code2wav)
+    # takes on the same card, with its own CUDA context. The first stage (the talker) is estimated
+    # like any LLM; {gpu_util_main} and {gpu_util_codec} split the reservation between them.
+    codec_overhead: int = 0
+    # 1.3, text to speech on llama.cpp: each concurrent request (slot) keeps its own audio pipeline (the
+    # code predictor and the decoder's buffers), counted per `concurrency` for tts models.
+    speech_overhead: int = 0
 
-    @field_validator("overhead", "cpu_overhead", "vram", "vision_overhead", "video_overhead", mode="before")
+    @field_validator("overhead", "cpu_overhead", "vram", "vision_overhead", "video_overhead", "codec_overhead",
+                     "speech_overhead", mode="before")
     @classmethod
     def _size(cls, v):
         return None if v is None else (0 if v in (0, "0") else parse_bytes(v))
@@ -287,6 +300,46 @@ class Media(_M):
     files: bool = False
 
 
+SPEECH_FORMATS = ("mp3", "opus", "aac", "flac", "wav", "pcm")
+STREAM_FORMATS = ("audio", "sse")
+
+
+class Speech(_M):
+    """Text to speech (1.3): what the engine answers at /v1/audio/speech, and what the gateway fills in.
+
+        formats: [mp3, flac, wav, pcm]  the response_format values it makes; others get a 400 at the gateway
+        default_format: mp3             sent when a request names none (so the gateway knows what comes back)
+        stream_formats: [audio]         stream_format values it takes: audio (raw bytes as they are made), sse
+        voices: /v1/audio/voices        the GET path that lists its voices (llama.cpp: /props), or none
+        default_voice: af_heart         the voice for requests that name none, or an OpenAI voice the model
+                                        does not have (else the first voice the engine lists)
+        language_field: lang            set from the text's script when a request gives none (Chinese,
+                                        Japanese, Korean): engines that otherwise assume English
+        frames_field: n_predict         the most audio frames, derived from the input's length when a
+                                        request gives none (engines with a small fixed default)
+        cjk: false                      the engine cannot speak Chinese, Japanese or Korean (speaches
+                                        deletes those characters): such input is refused with a 400
+        pcm_rate: 24000                 the sample rate of `pcm` answers that do not say theirs
+    """
+    formats: list[Literal[SPEECH_FORMATS]] = Field(default_factory=lambda: ["wav"], min_length=1)  # type: ignore[valid-type]
+    default_format: Literal[SPEECH_FORMATS] = "wav"  # type: ignore[valid-type]
+    stream_formats: list[Literal[STREAM_FORMATS]] = Field(default_factory=list)  # type: ignore[valid-type]
+    voices: Optional[str] = Field(default=None, max_length=128)
+    default_voice: Optional[str] = Field(default=None, max_length=64)
+    language_field: Optional[Literal["lang", "language"]] = None
+    frames_field: Optional[Literal["n_predict", "max_new_tokens"]] = None
+    cjk: bool = True
+    pcm_rate: int = Field(default=24000, ge=8000, le=192000)
+
+    @model_validator(mode="after")
+    def _shape(self) -> "Speech":
+        if self.default_format not in self.formats:
+            raise ValueError("tts.default_format must be one of tts.formats")
+        if self.voices is not None and not re.fullmatch(r"/[A-Za-z0-9/_.-]{0,127}", self.voices):
+            raise ValueError("tts.voices is a path such as /v1/audio/voices")
+        return self
+
+
 class Recipe(_M):
     name: str
     title: str = Field(max_length=80)
@@ -305,6 +358,7 @@ class Recipe(_M):
     args: list[Annotated[str, Field(max_length=4096)]] = Field(default_factory=list, max_length=128)
     optional_args: list[OptionalArgs] = Field(default_factory=list, max_length=16)
     media: Optional[Media] = None
+    tts: Optional[Speech] = None
     env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
     # Where the engine reads its API key (M4). None: the engine has no key and its port answers
     # anyone who can reach it (the gateway still works).
@@ -362,7 +416,16 @@ class Recipe(_M):
                 raise ValueError(f"api_key_env: {key} is also set in env; Forgeyard sets it per replica")
         if self.estimate.method == "fixed" and not self.estimate.vram:
             raise ValueError("estimate: the fixed method needs vram")
+        if self.tts is not None and "tts" not in self.tasks:
+            raise ValueError("tts: only for recipes that serve the tts task")
+        if "tts" in self.tasks and self.api.get("tts") != "openai-speech":
+            raise ValueError("api: tts is served as openai-speech")
         return self
+
+    @property
+    def speech(self) -> Speech:
+        """Its speech settings (the defaults when it declares none)."""
+        return self.tts or Speech()
 
     def api_for(self, task: str) -> str:
         return self.api[task]

@@ -9,23 +9,28 @@
 #   name          the catalog name it is added as (a-z, 0-9, '.', '_', '-')
 #   title         what people see
 #   source        hf://<org>/<name>
-#   revision      optional: a branch, tag or ref to resolve instead of main
+#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech entries are
+#                 pinned to a commit (their voices and measured memory belong to those files)
 #   file          GGUF only: which file of the repository
 #   group         one of the groups below
-#   task          chat | embed | rerank | asr
-#   format        safetensors | gguf | ctranslate2 (what the repository holds)
+#   task          chat | embed | rerank | asr | tts
+#   format        safetensors | gguf | ctranslate2 | onnx (what the repository holds)
 #   recipe        the recipe suggested for it (it must serve that task and format)
 #   device        optional: cpu to suggest running it on the CPU (the recipe must have a CPU variant)
 #   download_gib  about how much a machine downloads
 #   memory_gib    about what one replica reserves with the recipe's defaults (GPU memory, or RAM on
 #                 the CPU), from Forgeyard's own estimate; the real estimate is shown when adding it
 #   gated         true: Hugging Face only serves it with a token whose account accepted the licence
+#   license_from  optional: hf://<org>/<name> of the original model whose licence `license` is, for a
+#                 conversion whose repository states none (GGUF, ONNX)
 #   license       the licence Hugging Face shows for it (its id: apache-2.0, mit, gemma…). Only
 #                 licences in forgeyard/models/recommended.py ALLOWED_LICENSES may be listed:
 #                 permissive ones, OpenRAIL-style ones, and model licences that allow commercial use
 #   inputs        what it takes in chat besides text: image, audio, video (shown on the list; the
 #                 inspector reads the real answer from the model when it is added)
-#   mmproj        GGUF vision models: the projector file of the repository to use with it
+#   mmproj        GGUF vision models: the projector file of the repository to use with it (and for
+#                 text-to-speech GGUFs, the audio decoder)
+#   languages     tts: the languages it speaks (shown on the list)
 #   engine_args   optional: extra engine arguments per recipe, stored with the catalog entry
 #   note          one line: what it is good for
 
@@ -42,6 +47,9 @@ groups:
   - id: speech
     title: Speech to text
     description: Whisper models converted for faster-whisper, served through speaches.
+  - id: tts
+    title: Text to speech
+    description: Built-in voices for /v1/audio/speech. Qwen3-TTS speaks Chinese (Mandarin and dialects), English and eight more languages on NVIDIA GPUs with vLLM-Omni, or as GGUF with llama.cpp on an AMD APU or the CPU; Kokoro and Chatterbox are small English voices that run on a CPU. No voice cloning.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -442,3 +450,78 @@ models:
     download_gib: 2.1
     memory_gib: 4.3
     note: Multilingual reranker that pairs with BGE-M3.
+
+  # ---------------------------------------------------------------- Text to speech
+  - name: qwen3-tts-0.6b
+    title: Qwen3-TTS 0.6B CustomVoice
+    source: hf://Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+    revision: 85e237c12c027371202489a0ec509ded67b5e4b5
+    license: apache-2.0
+    group: tts
+    task: tts
+    format: safetensors
+    recipe: vllm-omni-tts
+    download_gib: 2.3
+    memory_gib: 10.3
+    languages: [zh, en, ja, ko, de, fr, ru, pt, es, it]
+    note: Nine built-in voices (vivian, ryan, uncle_fu…) with style instructions; Chinese, Mandarin dialects and English. NVIDIA.
+  - name: qwen3-tts-1.7b
+    title: Qwen3-TTS 1.7B CustomVoice
+    source: hf://Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+    revision: 0c0e3051f131929182e2c023b9537f8b1c68adfe
+    license: apache-2.0
+    group: tts
+    task: tts
+    format: safetensors
+    recipe: vllm-omni-tts
+    download_gib: 4.2
+    memory_gib: 12.2
+    languages: [zh, en, ja, ko, de, fr, ru, pt, es, it]
+    note: The larger Qwen3-TTS with the same nine voices; clearer and more expressive. NVIDIA.
+  - name: qwen3-tts-1.7b-gguf
+    title: Qwen3-TTS 1.7B (GGUF, llama.cpp)
+    source: hf://ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF
+    revision: ca27d74bc954b73dadab5b71ca265d87fc861a7c
+    file: Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf
+    license: apache-2.0
+    license_from: hf://Qwen/Qwen3-TTS-12Hz-1.7B-Base
+    group: tts
+    task: tts
+    format: gguf
+    recipe: llama-cpp
+    download_gib: 1.4
+    memory_gib: 7.3
+    languages: [zh, en, ja, ko, de, fr, ru, pt, es, it]
+    note: Chinese and English for llama.cpp on an AMD APU (Vulkan) or the CPU. One voice of its own (no built-in voices; Qwen3-TTS's licence).
+  - name: kokoro-82m
+    title: Kokoro 82M (speaches)
+    source: hf://speaches-ai/Kokoro-82M-v1.0-ONNX
+    revision: dc196c76d64fed9203906231372bcb98135815df
+    license: apache-2.0
+    license_from: hf://hexgrad/Kokoro-82M
+    group: tts
+    task: tts
+    format: onnx
+    recipe: speaches-tts
+    device: cpu
+    download_gib: 0.33
+    memory_gib: 1.33
+    languages: [en]
+    note: Small, natural English voices (af_heart and 50 more) that run in real time on a CPU. English only (Kokoro-82M's licence).
+  - name: chatterbox-turbo-gguf
+    title: Chatterbox Turbo (GGUF, llama.cpp)
+    source: hf://ggml-org/chatterbox-turbo-GGUF
+    revision: 66f0393558d0ac1e0337e23a4d15f26e8eca0e12
+    file: chatterbox-turbo-Q8_0.gguf
+    mmproj: mmproj-chatterbox-turbo-F16.gguf
+    license: mit
+    group: tts
+    task: tts
+    format: gguf
+    recipe: llama-cpp
+    device: cpu
+    download_gib: 0.97
+    memory_gib: 6.3
+    languages: [en]
+    note: An English voice for llama.cpp on the CPU or any GPU; one built-in voice (default).
