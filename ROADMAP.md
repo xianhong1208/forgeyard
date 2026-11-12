@@ -172,11 +172,12 @@ The owner's decisions for 1.3 (2026-11-11):
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
 | **1.8: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
+| **1.9: fine-tuning** | A first-class **single-machine LoRA / QLoRA fine-tune**: pick a base model, upload a dataset, train with sensible defaults and a loss curve, then **deploy the adapter in one click** on vLLM (details below). |
 
 Reinforcement learning, robotics and graph learning are not planned as model types: they are
 training and research workloads, and run as plain tasks.
 
-### Training: to be designed
+### 1.9: training
 
 Fine-tuning already runs today as a one-off task in your own trainer container (Unsloth,
 LLaMA-Factory, axolotl), with only the GPUs it was given. The direction under discussion is a
@@ -191,8 +192,23 @@ first-class **single-machine LoRA / QLoRA fine-tune** flow:
    `--enable-lora`, so one card serves many fine-tuned variants.
 
 Training holds whole GPUs for hours, so on shared machines it needs priorities against serving
-(preemptible jobs, quiet-hours windows). Multi-machine distributed training is much later. The
-version and the details are not decided yet.
+(preemptible jobs, quiet-hours windows). That is why it comes after 1.5 (deployments that free
+their GPUs) and 1.8 (alerts). The details are designed then; multi-machine distributed training is
+much later.
+
+### Larger platforms: Kubernetes and others (to be designed, after 1.9)
+
+Forgeyard runs today on its own server with an agent per machine. For bigger installations:
+
+- **The server on Kubernetes:** a Helm chart for the published server image, with PostgreSQL and
+  the data volume, behind the cluster's ingress.
+- **A cluster as a pool of machines:** instead of an agent on each machine, Forgeyard places replicas
+  as pods on an existing Kubernetes cluster (GPUs through the NVIDIA or AMD device plugins), so a
+  cluster that is already managed joins as it is, next to plain machines with agents.
+- Other schedulers (Slurm, Nomad) are looked at in the same design.
+
+How established projects do this (KServe, GPUStack, others) is researched before the design. The
+version is not decided yet.
 
 ## Later, when there is a need
 
