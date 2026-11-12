@@ -242,7 +242,8 @@ function TryIt({ d }: { d: Deployment }) {
     <section className="panel" aria-labelledby="try-title">
       <h2 id="try-title">Try it</h2>
       <p className="muted small">One small request straight to a ready replica (with its internal key), to check that replica{api_ === "openai-audio" ? ": an 11-second public-domain clip (JFK, 1961) to transcribe"
-        : api_ === "openai-speech" ? ": a short sentence to speak, answered with the length of the audio (try it in the Playground to hear it)" : ""}.</p>
+        : api_ === "openai-speech" ? ": a short sentence to speak, answered with the length of the audio (try it in the Playground to hear it)"
+        : api_ === "openai-images" ? ": one small 256x256 image, answered with its size (try it in the Playground to see it)" : ""}.</p>
       {api_ !== "openai-audio" && (
         <div className="field"><label htmlFor="try-input">{api_ === "rerank" ? "Query" : "Input"}</label>
           <input id="try-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder} maxLength={500} /></div>

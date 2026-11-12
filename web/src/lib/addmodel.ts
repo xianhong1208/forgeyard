@@ -12,6 +12,8 @@ export type RecommendedModel = {
   license: string; inputs: Medium[]; mmproj: string | null;
   // Text to speech (1.3): the languages it speaks; the original model whose licence it is, for a conversion.
   languages?: string[]; license_from?: string | null;
+  // Image models for stable-diffusion.cpp (1.3): the files beside the model file.
+  components?: Record<string, string>;
 };
 
 export type RecommendedResponse = { groups: RecommendedGroup[]; models: RecommendedModel[] };
@@ -38,6 +40,10 @@ export type InspectMeta = {
   mmproj_files?: { path: string; size: number }[];
   config?: { layers: number; kv_heads: number; max_context: number; dtype: string };
   weights?: { params: Record<string, number> }; gguf?: { layers: number; architecture: string; elements: number };
+  // 1.3, image models: the native size and the files beside the model file (stable-diffusion.cpp), or a
+  // diffusers pipeline's components.
+  image?: { size: number; multiple: number; components?: Record<string, string>; single?: boolean };
+  diffusers?: { pipeline: string | null; components: Record<string, { class: string; params: number; dtype: string | null }> };
 };
 
 export type InspectResponse = { meta: InspectMeta; recipes: string[]; suggestion: Suggestion };

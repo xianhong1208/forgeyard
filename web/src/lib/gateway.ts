@@ -8,6 +8,7 @@ export const API_ENDPOINT: Record<string, string> = {
   rerank: "/rerank",
   "openai-audio": "/audio/transcriptions",
   "openai-speech": "/audio/speech",
+  "openai-images": "/images/generations",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -16,6 +17,7 @@ export const API_KIND: Record<string, string> = {
   rerank: "rerank",
   "openai-audio": "speech to text",
   "openai-speech": "text to speech",
+  "openai-images": "images",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -44,6 +46,12 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     return {
       curl: `${curl} ${base}/audio/speech \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "input": "Hello from Forgeyard.", "voice": "alloy", "response_format": "wav"}' \\\n  -o hello.wav`,
       python: `${sdk}${client}\nwith client.audio.speech.with_streaming_response.create(\n    model="${model}", voice="alloy", input="Hello from Forgeyard.", response_format="wav",\n) as response:\n    response.stream_to_file("hello.wav")`,
+    };
+  }
+  if (api === "openai-images") {
+    return {
+      curl: `${curl} ${base}/images/generations \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "prompt": "A lighthouse on a rocky coast at sunset", "size": "1024x1024"}' \\\n  | python3 -c 'import base64, json, sys; open("image.png", "wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'`,
+      python: `import base64\n\n${sdk}${client}\nout = client.images.generate(model="${model}", prompt="A lighthouse on a rocky coast at sunset", size="1024x1024")\nwith open("image.png", "wb") as f:\n    f.write(base64.b64decode(out.data[0].b64_json))`,
     };
   }
   if (api === "openai-audio") {
@@ -166,3 +174,24 @@ export function pcmRate(headers: Headers): number {
   return m ? Number(m[1]) : 24000;
 }
 
+// ------------------------------------------------------------------ image generation (1.3)
+// What an image model's deployments take, from /api/playground/images/options.
+export type ImageOptions = {
+  model: string; max_n: number; max_side: number; default_size: string; multiple: number; formats: string[];
+  max_steps: number; max_prompt_chars: number;
+};
+
+const IMAGE_PRESETS = ["256x256", "512x512", "768x768", "1024x1024", "1024x768", "768x1024", "1280x720", "720x1280",
+  "1536x1024", "1024x1536", "2048x2048"];
+
+// The sizes to offer: the deployment's default first, then the usual ones it takes (within its largest
+// side, sides a multiple of what its model needs).
+export function imageSizes(o: ImageOptions): string[] {
+  const fits = (s: string) => {
+    const [w, h] = s.split("x").map(Number);
+    return w <= o.max_side && h <= o.max_side && w % o.multiple === 0 && h % o.multiple === 0;
+  };
+  return [o.default_size, ...IMAGE_PRESETS.filter((s) => s !== o.default_size && fits(s))];
+}
+
+export const IMAGE_MIME: Record<string, string> = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };

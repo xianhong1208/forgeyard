@@ -537,6 +537,17 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .speak-out audio { width: 100%; max-width: 560px; }
 .speak-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .speak-meta .msg-meta { overflow-wrap: anywhere; }
+/* Image generation (1.3): the options in a row, the images in a grid that wraps on a phone. */
+.img-form { display: grid; gap: 10px; }
+.img-options { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
+.img-options .field { min-width: 0; flex: 1 1 160px; max-width: 240px; }
+.img-options select { width: 100%; }
+.img-out { margin-top: 14px; display: grid; gap: 10px; }
+.img-out .msg-meta { overflow-wrap: anywhere; }
+.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; }
+.img-item { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.img-item img { width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); }
+.img-item figcaption { display: flex; justify-content: flex-end; }
 .ranked { margin: 12px 0 0; padding-left: 22px; display: grid; gap: 6px; }
 .ranked li { padding-left: 4px; }
 .ranked li span:first-child { display: inline-block; min-width: 54px; margin-right: 8px; color: var(--heat-ink); }
