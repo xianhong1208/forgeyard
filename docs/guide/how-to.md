@@ -304,6 +304,54 @@ A machine that already joined keeps its identity if the container gets its state
 Process workloads the old agent started outside the container are not taken over: stop them from
 the UI first.
 
+## Offline machines
+
+A machine that cannot reach the registry (no internet access, or a DNS filter that blocks `ghcr.io`
+or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
+the deployment stay as they are.
+
+1. **Find the image.** On **Models → Catalog and recipes**, open **Machine without registry access:
+   load the image** on the recipe: it lists the image of each container variant with the commands
+   below filled in. A machine gets the first variant whose `when` matches its card
+   ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
+   …) on `vulkan`, for example. A replica on the deployment's page shows the image it runs.
+2. **On a machine that can reach the registry**, pull the image by its digest, give it its tag, and
+   save it. For llama.cpp's Vulkan variant (the page has the commands with its digest):
+
+   ```bash
+   sudo docker pull ghcr.io/ggml-org/llama.cpp@sha256:<digest> && \
+     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 && \
+     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama.cpp-server-vulkan-b12242.tar.gz
+   ```
+
+   Pulled by the digest, the file holds exactly the pinned image; `docker load` keeps the tag, which
+   is how the agent finds it. When the two machines differ (x86_64 and arm64), add `--platform
+   linux/amd64` or `--platform linux/arm64` to `docker pull`.
+3. **Copy the file** to the offline machine (`scp`, a USB disk) and load it there (Podman: `podman
+   load`):
+
+   ```bash
+   gunzip -c llama.cpp-server-vulkan-b12242.tar.gz | sudo docker load
+   ```
+
+4. **Deploy** as usual.
+
+**How Forgeyard checks the loaded image.** Recipes pin images as `tag@sha256:…`, and Docker finds such
+a reference by the digest only. A loaded copy often lacks it: Docker's classic image store keeps the
+tag but drops the registry digest, and its containerd store can give the copy an id of its own. So
+when the digest is missing but the tag is there, the agent compares that image with the ids recorded
+for the pinned image (`forgeyard/recipes/images.lock.json`): the registry's digests (the index, and
+each platform's manifest and config), or, when the id is one of the store's own, its content (the
+layers, platform, entrypoint, command, environment, user, working directory and stop signal). A
+match runs by its local image id, with no pull. Any other image under that tag is never run: the
+agent asks the registry for the pinned image instead. So the built-in recipes work offline as they
+are, with no custom recipe that names an image by tag only.
+
+Ids are recorded for every image of the built-in recipes, and for a custom recipe that names one of
+them exactly. Another image pinned by digest cannot be checked: on an offline machine, name it by its
+tag only in your custom recipe. The check needs an agent from this release or later; an older one
+tries to pull.
+
 ## Run a service or a task
 
 Admins and operators run their own programs on the machines as **workloads**: open **Workloads** →

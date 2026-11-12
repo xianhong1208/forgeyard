@@ -314,5 +314,7 @@ describe("machines page", () => {
     expect(within(offline).getByLabelText("Load command").textContent).toBe("gunzip -c forgeyard-agent.tar.gz | sudo docker load");
     expect(within(offline).getByLabelText("Build command").textContent).toBe(`sudo docker build -f Dockerfile.agent -t ${image} .`);
     expect(offline.textContent).toContain("Docker finds the image locally and does not pull it.");
+    // The engine images go the same way; the guide says how (FY-WEB-170 has the recipe's commands).
+    expect(within(offline).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
   });
 });
