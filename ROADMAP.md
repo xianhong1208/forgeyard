@@ -121,7 +121,9 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
 3. *In review*: **Text-to-speech** (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
    TTS GGUFs on AMD and the CPU, speaches (Kokoro) for small English voices on CPU and CUDA; voices,
    streaming, characters and audio length in usage. Voice cloning stays off.
-4. Image generation (`/v1/images/generations`).
+4. *In review*: **Image generation** (`/v1/images/generations`): vLLM-Omni (diffusers pipelines) on
+   NVIDIA, stable-diffusion.cpp on AMD (Vulkan), CUDA and the CPU; base64 only, caps and a queue per
+   deployment, images, kilopixels and busy time in usage. Edits stay out.
 5. Generic passthrough (`/x/<name>/…`), with ready-made workload templates: object detection,
    segmentation, depth (permissively licensed images only).
 6. Video generation (async `/v1/videos`), the first to move to a later version if time is short.

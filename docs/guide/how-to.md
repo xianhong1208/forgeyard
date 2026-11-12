@@ -467,6 +467,53 @@ speaches), not OpenAI's mp3. `pcm` is 16-bit mono at the rate the answer states
 llama.cpp's cooperative matrices on (ggml-org/llama.cpp#32050). If its speech sounds wrong there, add
 a custom recipe whose vulkan variant sets `GGML_VK_DISABLE_COOPMAT: "1"` in its `env`.
 
+## Generate images
+
+1. **Add an image model.** On **Models → Add a model → Recommended**, the **Images** group has:
+   - Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell for an NVIDIA GPU (vLLM-Omni). About
+     30, 17 and 42 GiB of GPU memory with the default caps; FLUX.1-schnell is gated (accept its terms on
+     Hugging Face and give a token).
+   - Z-Image-Turbo and FLUX.1-schnell as GGUF for stable-diffusion.cpp: an AMD GPU or APU (Vulkan) or
+     any GPU, about 18 and 19 GiB at 1024x1024 (a CPU works too, slowly).
+   - Stable Diffusion 1.5 as GGUF for the CPU: small and old (512x512), to check that images work.
+
+   A model from **Search Hugging Face** works when it is tagged *text-to-image* and is a diffusers
+   repository (vLLM-Omni) or GGUF / safetensors files (stable-diffusion.cpp; choose the model file, and
+   the text encoder and VAE files beside it are found by their names). The catalog shows its licence;
+   check it before you use the images.
+2. **Deploy it** as usual. *Images per request* and *Default size* are on the form; the largest side,
+   steps, queue, timeout and offloading are under **Advanced**. Their defaults work.
+3. **Call it** with the OpenAI SDK:
+
+   ```python
+   import base64
+
+   out = client.images.generate(model="z-image-turbo", prompt="A lighthouse on a rocky coast at sunset",
+                                size="1024x1024", n=1)
+   with open("lighthouse.png", "wb") as f:
+       f.write(base64.b64decode(out.data[0].b64_json))
+   ```
+
+   Steps, a negative prompt and a seed go in `extra_body`:
+   `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`.
+4. **Try it in the Playground:** an image model gets an **Image** tab with a prompt, the sizes the
+   deployment takes and how many images, and a download link under each.
+
+**How long:** seconds per image on an A100; minutes on a CPU. Measured on 16 to 32 cores of a busy
+x86-64 machine: Stable Diffusion 1.5 at 512x512 with 20 steps about 100 s; Z-Image-Turbo (Q4_0) with 8
+steps about 2 minutes at 512x512 and 8.5 minutes at 1024x1024. Raise *Timeout* under **Advanced** for slow
+machines or large sizes.
+
+**The model's own settings** (Z-Image-Turbo needs CFG 1 and 8 steps) live in the catalog entry's
+engine arguments for stable-diffusion.cpp (`--cfg-scale 1 --steps 8`); the recommended entries carry
+them. vLLM-Omni reads them from the model itself.
+
+**On an offline AMD machine:** load the `sd-cpp` recipe's Vulkan image with `docker load` (see
+[Offline machines](#offline-machines)). For the model, deploy it once on a machine that can reach
+Hugging Face, then copy its directory from that machine's model cache
+(`hub/models--<org>--<name>`, with `tar` or `rsync -a`: it uses relative links) into the same place in
+the offline machine's cache. The deployment there finds it cached and downloads nothing.
+
 ## Add a cloud provider
 
 Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure

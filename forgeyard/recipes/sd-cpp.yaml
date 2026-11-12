@@ -53,12 +53,15 @@ estimate:
   method: diffusers
   # Images of a request are made one after another (batch_count), so one image's buffers at a time.
   parallel: false
-  # ggml's compute buffers per megapixel: the denoiser's and the VAE decoder's. Measured on the CPU
-  # (CHANGELOG 1.3): Stable Diffusion 1.5 Q8_0 and Z-Image-Turbo Q8_0.
-  activation_per_mp: 1GiB
-  vae_per_mp: 2GiB
-  overhead: 512MiB
-  cpu_overhead: 512MiB
+  # ggml's compute buffers per megapixel: the denoiser's and the VAE decoder's (sd.cpp decodes in 32
+  # bits). Measured on the CPU (master-1043, peak RSS beyond the loaded weights): Stable Diffusion 1.5
+  # Q8_0 +0.43 / +1.66 / +3.70 GiB at 256, 512 and 768 square, Z-Image-Turbo Q4_0 with its Qwen3-4B and VAE
+  # +1.66 / +6.59 GiB at 512 and 1024 square: linear, about 6.3 GiB a megapixel for both.
+  activation_per_mp: 2GiB
+  vae_per_mp: 4608MiB
+  # Loading takes a little more than the files (Z-Image: 7.90 GiB resident for 7.37 GiB of files).
+  overhead: 768MiB
+  cpu_overhead: 768MiB
 params:
   max_images: {type: int, default: 4, min: 1, max: 16, label: Images per request (most),
                help: "The largest n a request may ask for (the default is 1). They are made one after another."}

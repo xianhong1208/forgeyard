@@ -418,6 +418,11 @@ class Queue:
     def first(self, ticket: int) -> bool:
         return bool(self.waiting) and self.waiting[0] == ticket
 
+    def may_try(self, ticket: Optional[int]) -> bool:
+        """May a request take a free slot now: one not queued only when nobody waits, a queued one only
+        when it is first."""
+        return (ticket is None and not self.waiting) or (ticket is not None and self.first(ticket))
+
     def leave(self, ticket: int) -> None:
         if ticket in self.waiting:
             self.waiting.remove(ticket)
