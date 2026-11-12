@@ -320,7 +320,12 @@ def main() -> int:
             dep_name = f"{PREFIX}{name}".replace(".", "-")[:48]
             body = {"name": dep_name, "model": name, "recipe": recipe, "params": params, "served_name": dep_name,
                     "replicas": 1, "machine_id": m["id"]}
-            est = c.ok("POST", "/api/deployments/estimate", body)
+            # The previous model's card is freed once its agent confirms the stop: wait for it a little.
+            for _ in range(36):
+                est = c.ok("POST", "/api/deployments/estimate", body)
+                if est["placement"]["fits"]:
+                    break
+                time.sleep(5)
             if not est["placement"]["fits"]:
                 raise Fail(f"{dep_name} does not fit on {m['name']}: {est['placement'].get('summary')}")
             placed = est["placement"]["placed"][0]
@@ -361,11 +366,13 @@ def main() -> int:
     return 1 if failed else 0
 
 
-def usage_row(c: Client, model: str) -> dict:
-    c.ok("GET", "/api/usage?everyone=true&group=model")    # writes what is counted in memory first
+def usage_row(c: Client, prefix: str) -> dict:
+    """This run's own key's usage (its row is named "<name> (<prefix>…)"): someone using the same model
+    meanwhile, in the Playground for instance, does not count."""
+    c.ok("GET", "/api/usage?everyone=true&group=key")    # writes what is counted in memory first
     time.sleep(1)
-    rows = {r["id"]: r for r in c.ok("GET", "/api/usage?everyone=true&group=model")["rows"]}
-    return rows.get(model, {})
+    rows = c.ok("GET", "/api/usage?everyone=true&group=key")["rows"]
+    return next((r for r in rows if f"({prefix}" in str(r.get("name"))), {})
 
 
 def exercise(c: Client, d: dict, model: str, spec: dict, recipe: dict, args, check, httpx, openai, report: dict,
@@ -378,7 +385,8 @@ def exercise(c: Client, d: dict, model: str, spec: dict, recipe: dict, args, che
     sdk = openai.OpenAI(base_url=gw, api_key=k["key"], max_retries=0, timeout=900, http_client=http)
     tts = recipe.get("tts") or {}
     formats = tts.get("formats") or ["wav"]
-    before = usage_row(c, model)
+    prefix = (k.get("api_key") or k).get("prefix") or k["key"][:12]
+    before = usage_row(c, prefix)
     spoken = 0
     info = report["deployments"][model]
 
@@ -502,7 +510,7 @@ def exercise(c: Client, d: dict, model: str, spec: dict, recipe: dict, args, che
               f"{s} {text[:80]}")
 
     # ---- usage
-    after = usage_row(c, model)
+    after = usage_row(c, prefix)
     chars = after.get("characters", 0) - before.get("characters", 0)
     ms = after.get("media_ms", 0) - before.get("media_ms", 0)
     check(f"{model}: usage counts the characters spoken", chars == spoken, f"{chars} counted, {spoken} spoken")
