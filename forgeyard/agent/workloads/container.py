@@ -5,6 +5,17 @@ Every container carries labels (`forgeyard.agent`, `forgeyard.replica`, `forgeya
 instead of starting it twice, and removes what nobody wants any more. Containers run with the
 engine's defaults plus `--security-opt no-new-privileges`, never `--privileged`, with only the
 assigned GPUs, and their host ports bound to one address.
+
+An image pinned as `repo:tag@sha256:…` is found by its digest only. Before `run` the agent decides
+what to run (choose_image), so a machine that cannot reach the registry can use a copy loaded with
+`docker load`, which keeps the tag but often not the digest:
+
+    the pinned digest is local                      run it as pinned
+    the tag is local and matches the recorded ids   run that image by its local Id (checked, no pull)
+    the tag is local and does not match             never run it; pull the pinned digest
+    neither                                         pull the pinned digest (`run` does)
+
+A failed pull then says why the image is missing and how to load it (pull_failed_reason).
 """
 
 from __future__ import annotations
@@ -20,6 +31,7 @@ from typing import Callable, Optional
 from forgeyard.agent.workloads import plan
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.runtime import Observation, StartError
+from forgeyard.workloads import images
 from forgeyard.workloads.spec import ContainerRuntime as ContainerSpec, WorkloadSpec
 
 log = logging.getLogger("forgeyard.agent")
@@ -36,6 +48,64 @@ Runner = Callable[..., subprocess.CompletedProcess]
 # even though it works in an interactive shell, and the CLI then gives up before pulling even a
 # public image, which needs no credentials at all.
 CREDENTIAL_HELPER_FAILED = "error getting credentials"
+
+# What choose_image found locally for a pinned image.
+PINNED = "pinned"        # the pinned digest itself
+LOADED = "loaded"        # the tag, matching the recorded ids
+MISMATCH = "mismatch"    # the tag, not matching them
+UNCHECKED = "unchecked"  # the tag, with no recorded ids to check it against
+ABSENT = "absent"        # neither
+
+
+def tag_of(image: str) -> Optional[str]:
+    """'repo:tag@sha256:…' -> 'repo:tag'; None for an image that is not pinned by digest."""
+    ref, at, digest = image.partition("@")
+    return ref if at and digest and ref else None
+
+
+def digest_ref(image: str) -> str:
+    """'repo:tag@sha256:…' -> 'repo@sha256:…', the form both engines keep in RepoDigests."""
+    ref, _, digest = image.partition("@")
+    name = ref.rsplit(":", 1)[0] if ":" in ref.rsplit("/", 1)[-1] else ref
+    return f"{name}@{digest}"
+
+
+def choose_image(image: str, check: Optional[dict], inspect: Callable[[str], Optional[dict]]) -> tuple[str, str]:
+    """(what to pass to `run`, what was found). Only an image whose ids match is ever run in place
+    of the pinned reference; everything else goes to the registry by the pinned digest."""
+    tag = tag_of(image)
+    if tag is None:
+        return image, PINNED  # not pinned by digest: the engine resolves it as it always did
+    if inspect(digest_ref(image)) is not None:
+        return image, PINNED
+    local = inspect(tag)
+    if local is None:
+        return image, ABSENT
+    if not check:
+        return image, UNCHECKED
+    how = images.matches(local, check)
+    local_id = local.get("Id")
+    if how is None or not isinstance(local_id, str) or not local_id:
+        log.warning("A different image is loaded under %s (its ids do not match the recorded ones): not running it; "
+                    "pulling %s instead.", tag, image)
+        return image, MISMATCH
+    log.info("Running %s as the loaded image %s (it matches the recorded ids by %s).", image, local_id[:19], how)
+    return local_id, LOADED
+
+
+def pull_failed_reason(engine: str, image: str, found: str, detail: str) -> str:
+    """Why a pinned image could not be had, and what to do on a machine that cannot reach the registry."""
+    tag = tag_of(image) or image
+    if found == MISMATCH:
+        why = (f"a different image is loaded under {tag} (its ids do not match the recorded ones), so it is not run, "
+               f"and the pinned image could not be pulled: {engine} load the image the recipe names")
+    elif found == UNCHECKED:
+        why = (f"{tag} is loaded but Forgeyard has no recorded ids for this image, so it cannot check it, and the "
+               "pinned image could not be pulled: name the image by tag only in a custom recipe")
+    else:
+        why = (f"the image is not on this machine and could not be pulled; on an offline machine, {engine} load "
+               "the image (Forgeyard checks it by its recorded ids)")
+    return f"{why}. {detail}"[:300]
 
 
 def anonymous_config(src_dir: Optional[str], dest: Path) -> Path:
@@ -198,8 +268,9 @@ class ContainerRuntime:
         devices = render_devices(rec.gpus) if amd else []
         kfd = ["/dev/kfd"] if plan.needs_kfd(rec.gpus) else []
         gids = sorted({os.stat(d).st_gid for d in [*kfd, *devices] if os.path.exists(d)}) if amd else []
+        image, found = choose_image(rt.image, rec.image_ids, self._image)
         argv = plan.container_run_argv(
-            self.engine, name=name, image=rt.image, command=rt.command,
+            self.engine, name=name, image=image, command=rt.command,
             args=plan.substitute(rt.args, {}, extra) if extra else rt.args, env_file=str(env_file),
             labels=self.labels(rec), ports=rec.ports, bind=address, cpu=spec.resources.cpu,
             memory=spec.resources.memory, gpus=rec.gpus, gpu_mode=self._info.get("gpu_mode"),
@@ -220,9 +291,28 @@ class ContainerRuntime:
         finally:
             env_file.unlink(missing_ok=True)
         if r.returncode != 0:
-            raise StartError(f"{Path(self.engine).name} run failed: {(r.stderr or r.stdout).strip()[-300:]}")
+            engine = Path(self.engine).name
+            detail = f"{engine} run failed: {(r.stderr or r.stdout).strip()[-300:]}"
+            if found not in (PINNED, LOADED) and self._image(digest_ref(rt.image)) is None:
+                # Still not here after `run`: the pull itself failed (no network, no DNS, refused).
+                raise StartError(pull_failed_reason(engine, rt.image, found, (r.stderr or r.stdout).strip()[-120:]))
+            raise StartError(detail)
         rec.container = name
         rec.pid = None
+
+    def _image(self, ref: str) -> Optional[dict]:
+        """`image inspect` of a local image (Docker and Podman print a JSON list), or None."""
+        try:
+            r = self._cli("image", "inspect", ref)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if r.returncode != 0:
+            return None
+        try:
+            items = json.loads(r.stdout or "[]")
+        except ValueError:
+            return None
+        return items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
 
     def _pull_anonymously(self, image: str) -> subprocess.CompletedProcess:
         """`docker pull` with a config that has no credential helpers (see anonymous_config)."""
