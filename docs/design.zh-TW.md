@@ -429,8 +429,8 @@ Kong 與 GPUStack 之後決定。
 ## 容器映像檔
 
 兩個映像檔都從這個 repository 建置，在推送版本 tag `vX.Y.Z` 時由 `.github/workflows/publish-images.yml`
-發布到 Docker Hub：`docker.io/<namespace>/forgeyard`（伺服器，`Dockerfile.server`）與
-`docker.io/<namespace>/forgeyard-agent`（`Dockerfile.agent`）。
+發布到 Docker Hub：`docker.io/tonyhuang1101/forgeyard`（伺服器，`Dockerfile.server`）與
+`docker.io/tonyhuang1101/forgeyard-agent`（`Dockerfile.agent`）。
 
 - **名稱只寫在一個地方。**`forgeyard/install/images.py` 存放 Docker Hub 的 namespace（`DOCKERHUB_NAMESPACE`）
   與 repository 名稱。發布的 workflow 從這裡讀取（`scripts/publish_plan.py`），伺服器在 **Add a machine** 產生

@@ -738,8 +738,8 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
 
 Two images, both built from this repository and published on Docker Hub by
 `.github/workflows/publish-images.yml` when a release tag `vX.Y.Z` is pushed:
-`docker.io/<namespace>/forgeyard` (the server, `Dockerfile.server`) and
-`docker.io/<namespace>/forgeyard-agent` (`Dockerfile.agent`).
+`docker.io/tonyhuang1101/forgeyard` (the server, `Dockerfile.server`) and
+`docker.io/tonyhuang1101/forgeyard-agent` (`Dockerfile.agent`).
 
 - **One place for the names.** `forgeyard/install/images.py` holds the Docker Hub namespace
   (`DOCKERHUB_NAMESPACE`) and the repository names. The publish workflow reads them from there
