@@ -241,6 +241,9 @@ page cannot use a signed-in browser against it.
 | `POST /v1/score` | Rerankers (vLLM's score API) | no |
 | `POST /v1/audio/transcriptions` | Speech to text (faster-whisper), as `multipart/form-data` with a `model` field | no |
 | `POST /v1/audio/translations` | Speech to English text, as above | no |
+| `POST /v1/audio/speech` | Text to speech (1.3): OpenAI's request, the audio back as it is made. See [Text to speech](#text-to-speech) | no |
+| `GET /v1/audio/voices?model=<model>` | A speech model's voices, its default voice, the formats it makes, how it streams and its input cap | — |
+| `POST /v1/audio/voices`, `DELETE /v1/audio/voices/{name}` | Uploading or deleting a voice (voice cloning): always 400 `voice_cloning_not_supported` in 1.3 | — |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -252,7 +255,8 @@ What the gateway does with a request:
   key or the provider's key, and passes nothing else of yours on: not your API key, not your other
   headers.
 - `max_tokens` (or `max_completion_tokens`) counts against the key's tokens per minute when the
-  request arrives, and sets the most a request may cost under a budget.
+  request arrives, and sets the most a request may cost under a budget. For text to speech, each
+  character of `input` counts as one token instead (see [Text to speech](#text-to-speech)).
 - A streamed chat or completion gets a final usage chunk (`stream_options.include_usage`) so that
   tokens are counted. If you did not ask for it, the gateway removes it again.
 - The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB), or the model's own *Largest request*
@@ -302,6 +306,45 @@ The deployment parameters, under **Advanced** in the deploy form (recipes `vllm`
 
 A recipe without these parameters gets 4 images or audio clips, no video and `GATEWAY_MAX_BODY_MB`.
 
+### Text to speech
+
+`POST /v1/audio/speech` takes OpenAI's request and answers with the audio itself (not JSON), passed
+through as the engine makes it. Three engines serve it (recipes `vllm-omni-tts`, `llama-cpp` with a
+TTS GGUF, `speaches-tts`); local deployments only, never a cloud provider.
+
+| Field | What the gateway does |
+|---|---|
+| `model` | The speech model's name, as usual |
+| `input` | Required, at most the deployment's *Longest input* (`max_input_chars`; 0 means a quarter of the context length for vLLM-Omni and llama.cpp, 1,024 at their default, and 4,096 for speaches). Longer: 400 `input_too_long` |
+| `voice` | One of the model's voices (`GET /v1/audio/voices`), as a name or `{"id": …}`. OpenAI's names (`alloy`, `nova`, …) that the model does not have, or no voice, get the recipe's default voice or the first the engine lists; the answer names it in `X-Forgeyard-Voice` (`default` when the model has no voices of its own and speaks with its one voice) |
+| `response_format` | `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, of those the engine makes; others 400 `unsupported_response_format`. Left out: the engine's default (vLLM-Omni and llama.cpp `wav`, speaches `mp3`), not OpenAI's `mp3` |
+| `stream_format` | `audio`: raw audio as it is made (a streamed WAV declares an unknown size). `sse`: OpenAI's `speech.audio.delta` / `speech.audio.done` events (vLLM-Omni only). Left out: the whole file. An engine that cannot: 400 `stream_format_not_supported`. `stream: true` means `stream_format: audio` |
+| `speed` | 0.25 to 4, passed on (llama.cpp takes only 1.0, speaches 0.5 to 2 for Kokoro) |
+| `instructions` | Passed on: vLLM-Omni Qwen3-TTS uses it (style and emotion), the others ignore it |
+| `language`, `lang`, `sample_rate`, `seed`, … | Passed on. For llama.cpp the gateway sets `lang` (`zh`, `ja`, `ko`) from the text's script and `n_predict` (ten audio frames a character, at least 512, at most the context) when you leave them out |
+
+**Voice cloning is not available in 1.3.** A reference recording (`ref_audio`, `ref_text`,
+`speaker_ref_b64`, `speaker_embedding`, …), a voice given as audio data or a link, Qwen3-TTS's
+`task_type: "Base"`, and uploading or deleting voices answer 400 `voice_cloning_not_supported`.
+Nothing of it reaches an engine.
+
+What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| `characters` | The input's characters (Unicode code points), counted before sending |
+| `media_ms` | The audio's length in milliseconds, read as it passes: `wav` from its header (or the bytes after it, when streamed), `pcm` from its size and the sample rate the answer states (`x-audio-sample-rate`, or `rate=` in its type; else the voice's own), `flac` from its STREAMINFO, `mp3` and `aac` by counting frames, `opus` from the last Ogg page; SSE from the size of the `pcm` deltas. Nothing for other answers |
+| tokens | Only what the engine reports: vLLM-Omni's `x-vllm-omni-input-tokens` and `-output-tokens`, or the usage of `speech.audio.done` |
+
+**Limits:** rpm as for every request; **tpm counts one token per character of `input`**, held when
+the request arrives (a 15-character request needs 15 tokens of room). Budgets apply to cloud spend
+only, and speech never goes to the cloud. A key's model list applies to speech and to the voice list.
+
+`GET /v1/audio/voices?model=<model>` answers
+`{"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", "formats",
+"default_format", "stream_formats", "max_input_chars"}`, asked of a ready replica and kept for 5
+minutes. Voices uploaded to an engine are never listed.
+
 ### Headers
 
 | Header | Direction | Value |
@@ -311,6 +354,7 @@ A recipe without these parameters gets 4 images or audio clips, no video and `GA
 | `X-Forgeyard-Target` | answer | Who answered: `local:<deployment>#<replica>` or `provider:<provider>/<model>`. Never a key |
 | `X-Forgeyard-Replica` | answer | For a local answer: `<model>#<replica>` |
 | `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
+| `X-Forgeyard-Voice` | answer | Text to speech: the voice the gateway chose because the request named none, or an OpenAI voice the model does not have; `default` when the model has only its own voice |
 | `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
 | `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
 
@@ -329,7 +373,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | Status | `code` | Means | What to do |
 |---|---|---|---|
 | 400 | `invalid_json` | The body is not JSON | Send JSON |
-| 400 | `invalid_request` | No `model`, a body that is not an object, or audio not sent as `multipart/form-data` | Fix the request |
+| 400 | `invalid_request` | No `model`, a body that is not an object, or audio not sent as `multipart/form-data`; for speech, no `input`, a `speed` outside 0.25 to 4, another `stream_format`, or `GET /v1/audio/voices` without `model` | Fix the request |
 | 400 | `wrong_endpoint` | The model is served at another endpoint; the message names it | Use that endpoint |
 | 400 | `context_length_exceeded` | Only on a route with **Spill a prompt that is too long**: the prompt does not fit the local context, and nothing else could take it | Shorten the prompt or lower `max_tokens` |
 | 400 | `invalid_content_part` | A content part that is not an object with a `type`, a type the gateway does not take (`*_embeds`, unknown ones), or a media part without its URL | Use the parts listed under [Images, audio and video in chat](#images-audio-and-video-in-chat) |
@@ -340,6 +384,11 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `too_many_media_items` | More images (or audio clips, or videos) than the deployment's *Images per request* or *Videos per request* | Send fewer, or raise the parameter |
 | 400 | `file_input_not_supported` | A `file` part (PDF) to a model whose recipe does not take files; the gateway does not convert files | Send the pages as images, or the text |
 | 400 | `media_local_only` | A request with media to a model served only by providers | Use a local model |
+| 400 | `input_too_long` | Text to speech: `input` is longer than the deployment's *Longest input* | Split the text, or raise `max_input_chars` |
+| 400 | `unsupported_response_format` | Text to speech: a `response_format` that is not OpenAI's, or that the engine does not make; the message lists what it makes | Ask for one of those |
+| 400 | `stream_format_not_supported` | Text to speech: `stream_format` the engine does not offer (`sse` on llama.cpp or speaches) | Leave it out, or use `audio` |
+| 400 | `language_not_supported` | Text to speech: Chinese, Japanese or Korean text to speaches, which deletes those characters | Use a Qwen3-TTS deployment |
+| 400 | `voice_cloning_not_supported` | Text to speech: a reference recording, a voice given as audio or a link, `task_type: "Base"`, or uploading a voice. Not in 1.3 | Use one of the model's voices |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
@@ -518,6 +567,10 @@ recipe with only the variants you want can.
 | | `vulkan` | any other AMD GPU: APUs (`gfx1151`, `gfx1150`, `gfx1103`, …) and cards the ROCm image lacks. Only the card's render node, no `/dev/kfd` | `…:server-vulkan-b12242` (Mesa RADV) |
 | | `cpu`, `cpu-process` | x86_64 and aarch64 in a container; x86_64 as a process without Docker | `…:server-b12242`; release `b12242`, `llama-b12242-bin-ubuntu-x64.tar.gz`, checked against its SHA-256 |
 | `faster-whisper` | `cuda`, `cuda-12.4`, `cpu` | NVIDIA, CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
+| `speaches-tts` (1.3) | `cuda`, `cuda-12.4`, `cpu` | NVIDIA, CPU (in a container) | the same `ghcr.io/speaches-ai/speaches:0.8.3-*` images |
+| `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
+
+`llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
 Every image is pinned by digest as well (`tag@sha256:…`); the tag is what the pages show.
 

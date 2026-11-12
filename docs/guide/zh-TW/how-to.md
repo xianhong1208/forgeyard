@@ -259,6 +259,31 @@ optional_args:
 media: {inputs: [image, audio, video], files: false}
 ```
 
+## 把文字轉成語音
+
+1. **加入語音模型。** 在 **Models → Add a model → Recommended** 的 **Text to speech** 群組裡有：
+   - 給 NVIDIA GPU 用的 Qwen3-TTS 0.6B 或 1.7B CustomVoice（vLLM-Omni）：中文與英文，九種聲音。大約需要 10 與 12 GiB 的 GPU 記憶體。
+   - 給 llama.cpp 用的 Qwen3-TTS 1.7B GGUF：在 AMD APU 或 CPU 上說中文與英文；它只有自己的一種聲音。
+   - Kokoro 82M（speaches）與 Chatterbox Turbo（llama.cpp）：CPU 就跑得動的小型英文聲音。
+
+   從 **Search Hugging Face** 找到的模型，只要標了 *text-to-speech*、且有配方支援它的格式就能用：safetensors 的 Qwen3-TTS 用 vLLM-Omni，附 projector（`mmproj-*.gguf`）的 TTS GGUF 用 llama.cpp，ONNX 格式的 Kokoro 或 Piper 用 speaches。
+2. **照常部署。** *Longest input* 在 **Advanced** 裡，預設值就能用。
+3. **用 OpenAI SDK 呼叫：**
+
+   ```python
+   with client.audio.speech.with_streaming_response.create(
+       model="qwen3-tts-1-7b", voice="vivian", input="今天天氣很好。", response_format="wav",
+   ) as response:
+       response.stream_to_file("speech.wav")
+   ```
+
+   `GET /v1/audio/voices?model=qwen3-tts-1-7b` 會列出聲音與模型能產生的格式。要一邊產生一邊收音訊，加上 `extra_body={"stream_format": "audio"}`，並使用 `pcm` 或 `wav`。
+4. **在 Playground 試試看：** 語音模型會有一個 **Speak** 區塊，可以選聲音、格式，並附播放器。
+
+**要用哪種格式：** vLLM-Omni 產生 wav、pcm、flac、mp3 與 opus；llama.cpp 產生 wav 與 pcm；speaches 產生 mp3、flac、wav 與 pcm。沒指定 `response_format` 時得到的是引擎的預設（wav，speaches 為 mp3），不是 OpenAI 的 mp3。`pcm` 是 16 位元單聲道，取樣率見回應（`x-audio-sample-rate`，或 `Content-Type` 裡的 `rate=`）。
+
+**在 AMD APU（Vulkan）上：** 開啟 llama.cpp 的 cooperative matrices 時，Qwen3-TTS 對同一個請求可能產生略有不同的音訊（ggml-org/llama.cpp#32050）。如果在那裡聽起來不對，新增一個自訂配方，在它的 vulkan variant 的 `env` 設定 `GGML_VK_DISABLE_COOPMAT: "1"`。
+
 ## 加入雲端供應商
 
 管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
