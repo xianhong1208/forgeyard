@@ -18,7 +18,8 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from forgeyard.db import new_session
-from forgeyard.gateway import keys, media as gmedia, proxy
+from forgeyard.gateway import keys, media as gmedia, proxy, speech
+from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.security import sessions
@@ -75,6 +76,8 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         parsed = proxy.parse_body(body, request.headers.get("content-type", ""), kind)
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
+        if endpoint == speech.ENDPOINT:
+            route = proxy.fit_speech(route, parsed)  # 1.3: checked, voice cloning refused, counted
         # Images, audio and video (1.3): parts rebuilt, the route narrowed to what can take them,
         # media URLs fetched by the gateway, and the size checked again with them inlined.
         media = proxy.scan_media(parsed, endpoint)
@@ -136,6 +139,70 @@ async def translations(request: Request):
     return await _api(request, "audio/translations")
 
 
+@router.post("/audio/speech")
+async def speech_create(request: Request):
+    return await _api(request, "audio/speech")
+
+
+def _speaks_out(sp: Optional[speech.Speaks]) -> dict:
+    """What a client can ask of the deployment besides the voice."""
+    if sp is None:
+        return {}
+    return {"formats": list(sp.formats), "default_format": sp.default_format, "stream_formats": list(sp.stream_formats),
+            "max_input_chars": sp.max_chars}
+
+
+async def voices(model: Optional[str], caller: KeyCaller):
+    """A speech model's voices (1.3), asked of one of its ready replicas (kept a few minutes):
+    {"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", and what it
+    makes: "formats", "default_format", "stream_formats", "max_input_chars"}."""
+    if not model:
+        raise GatewayError(400, "invalid_request", "Say which model: GET /v1/audio/voices?model=<model>.", param="model")
+    route = await run_in_threadpool(_route, model)
+    route = proxy.check_access(caller, route, model, speech.ENDPOINT)
+    groups = [g for tier in route.tiers for g in tier.locals]
+    ready = [(g, t) for g in groups for t in g.replicas]
+    if not ready:
+        known = next((g.speaks.model_voices for g in groups if g.speaks and g.speaks.model_voices), ())
+        if known:
+            sp = next(g.speaks for g in groups if g.speaks)
+            default = sp.default_voice if sp.default_voice in known else known[0]
+            return {"object": "list", "model": model, "voices": [{"id": v, "name": v} for v in known], "default": default,
+                    **_speaks_out(sp)}
+        reason = "; ".join(g.reason for g in groups if g.reason)
+        raise GatewayError(503, "no_ready_replica", f"{model!r} has no ready replica. {reason}".strip())
+    t = balancer.order(f"{route.served_name}#voices", [t for _, t in ready])[0]
+    g = next(gr for gr, tr in ready if tr.uid == t.uid)
+    found = await speech.voices_for(g.deployment_id, g.speaks, proxy.client(), t.url, t.secret)
+    if found is None:
+        raise GatewayError(502, "upstream_error", f"{model!r} did not list its voices.")
+    ids = [v["id"] for v in found]
+    default = g.speaks.default_voice if g.speaks and g.speaks.default_voice in ids else (ids[0] if ids else None)
+    return {"object": "list", "model": model, "voices": found, "default": default, **_speaks_out(g.speaks)}
+
+
+@router.get("/audio/voices")
+async def list_voices(request: Request, model: Optional[str] = None):
+    try:
+        caller = await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+        return await voices(model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@router.post("/audio/voices")
+@router.delete("/audio/voices/{name:path}")
+async def upload_voice(request: Request, name: str = ""):
+    """Uploading or deleting a voice (vLLM-Omni's voice cloning): not in 1.3."""
+    try:
+        await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+    except GatewayError as e:
+        return e.response()
+    return GatewayError(400, "voice_cloning_not_supported", "Voice cloning is not available: voices cannot be "
+                                                            "uploaded. GET /v1/audio/voices?model=<model> lists the "
+                                                            "model's own voices.").response()
+
+
 def _model_out(name: str, created: int) -> dict:
     return {"id": name, "object": "model", "created": created, "owned_by": "forgeyard"}
 
@@ -178,10 +245,24 @@ async def get_model(model: str, request: Request):
 async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
-                                                 "/v1/score and /v1/audio/transcriptions.").response()
+                                                 "/v1/score, /v1/audio/transcriptions, /v1/audio/speech and "
+                                                 "/v1/audio/voices.").response()
 
 
 # ------------------------------------------------------------------ the console's playground
+@console.get("/audio/voices")
+async def playground_voices(request: Request, model: Optional[str] = None):
+    """The playground's voice list for a speech model, as the signed-in user."""
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
+                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+    try:
+        return await voices(model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
 @console.post("/{endpoint:path}")
 async def playground(endpoint: str, request: Request):
     """The playground's requests: the same routing as /v1, as the signed-in user, without an API

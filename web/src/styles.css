@@ -526,6 +526,17 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .chat-settings .check input { accent-color: var(--steel); }
 .play form .field { margin-top: 12px; }
 .play-out { margin-top: 12px; }
+/* Text to speech (1.3): voice, format and streaming on one row; the player and its numbers below. */
+.speak-form { display: grid; gap: 12px; }
+.speak-options { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 16px; }
+.speak-options .field { min-width: 0; flex: 1 1 180px; max-width: 280px; }
+.speak-options select { width: 100%; }
+.speak-stream { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; font-size: 13px; color: var(--ink-2); }
+.speak-stream input { accent-color: var(--steel); }
+.speak-out { margin-top: 14px; display: grid; gap: 8px; }
+.speak-out audio { width: 100%; max-width: 560px; }
+.speak-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.speak-meta .msg-meta { overflow-wrap: anywhere; }
 .ranked { margin: 12px 0 0; padding-left: 22px; display: grid; gap: 6px; }
 .ranked li { padding-left: 4px; }
 .ranked li span:first-child { display: inline-block; min-width: 54px; margin-right: 8px; color: var(--heat-ink); }

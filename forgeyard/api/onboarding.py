@@ -35,7 +35,7 @@ USAGE_SEEN = "onboarding_usage_seen"
 PREFERENCE_KEYS = (HIDDEN, USAGE_SEEN)
 
 # Which kind of request each protocol takes, for the example call.
-EXAMPLE_ORDER = ("openai-chat", "openai-embeddings", "rerank", "openai-audio")
+EXAMPLE_ORDER = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech")
 
 
 def _step(sid: str, title: str, why: str, done: bool, detail: str, *, to: Optional[str], label: Optional[str],

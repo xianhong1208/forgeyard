@@ -40,6 +40,10 @@ cloud provider.
    URLs fetched by the gateway and inlined, and the route narrowed to the deployments that take
    what the request carries (`fit_route`). Such requests never go to a provider. Every deployment
    may also take larger bodies than GATEWAY_MAX_BODY_MB (its `max_body_mb`).
+11. Text to speech (1.3, forgeyard/gateway/speech.py): /v1/audio/speech is checked and counted by the
+   gateway (characters before, audio milliseconds after), voice cloning is refused, each deployment
+   gets its own body (its default format, voice, language and frame cap), and the audio streams
+   through as it is made. Local deployments only.
 """
 
 from __future__ import annotations
@@ -64,7 +68,7 @@ from starlette.responses import Response
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
-from forgeyard.gateway import budgets, egress, media as gmedia, multipart, pricing, quirks
+from forgeyard.gateway import budgets, egress, media as gmedia, multipart, pricing, quirks, speech
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -84,6 +88,7 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "score": ("rerank", "json"),
     "audio/transcriptions": ("openai-audio", "multipart"),
     "audio/translations": ("openai-audio", "multipart"),
+    "audio/speech": ("openai-speech", "json"),
 }
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
 CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets serve in 1.2
@@ -114,6 +119,7 @@ class LocalGroup:
     context: Optional[int] = None         # tokens per request (its `context`)
     running: bool = True                  # False once someone stopped the deployment
     accepts: Optional[modalities.Accepts] = None   # media and body size it takes (1.3)
+    speaks: Optional[speech.Speaks] = None          # text to speech: formats, voices, input cap (1.3)
 
 
 @dataclass
@@ -220,10 +226,12 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
     model = d.model
     accepts = modalities.accepts(found[0], model.meta or {}, model.format, params) \
         if found is not None and model is not None else None
+    speaks = speech.speaks(found[0], params, model.meta if model is not None else None) \
+        if found is not None and "tts" in found[0].tasks else None
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
                       concurrency=_int(params.get("concurrency")), context=_int(params.get("context")),
-                      running=w.desired_state == "running", accepts=accepts)
+                      running=w.desired_state == "running", accepts=accepts, speaks=speaks)
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -285,7 +293,7 @@ def model_names(db: DbSession) -> list[tuple[Route, int]]:
 
 def endpoint_for(api: str) -> str:
     return {"openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", "rerank": "/v1/rerank",
-            "openai-audio": "/v1/audio/transcriptions"}.get(api, "/v1")
+            "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:
@@ -398,6 +406,29 @@ def fit_route(route: Route, parsed: "Parsed", size: int) -> Route:
                                                  f"{most // 1024**2} MiB.")
 
 
+def fit_speech(route: Route, parsed: "Parsed") -> Route:
+    """Text to speech (1.3): check the body (voice cloning refused) and keep the deployments that can
+    take it (input length, format, streaming, script). Raises the most telling error when none can."""
+    if parsed.obj is None:
+        return route
+    ask = speech.check(parsed.obj)
+    parsed.tts = ask
+    parsed.max_tokens = ask.characters   # what the key's tpm holds for it: a character counts as a token
+    text = parsed.obj.get("input") or ""
+    groups = [g for tier in route.tiers for g in tier.locals]
+    why = {g.deployment_id: speech.takes(g.speaks, ask, text) for g in groups}
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if why[g.deployment_id] is None]
+        if locals_:
+            tiers.append(Tier(tier.index, locals_, []))
+    if tiers or not groups:
+        return replace(route, tiers=tiers) if groups else route
+    order = ("input_too_long", "unsupported_response_format", "stream_format_not_supported", "language_not_supported")
+    code = min((c for c in why.values() if c), key=order.index)
+    raise speech.refusal(route.served_name, code, ask, [g.speaks for g in groups if g.speaks is not None])
+
+
 def wants_local_only(request: Request) -> bool:
     return (request.headers.get(LOCAL_ONLY_HEADER) or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -441,6 +472,7 @@ class Parsed:
     parts: Optional[list] = None                   # a multipart body
     boundary: Optional[bytes] = None
     media: Optional[gmedia.Media] = None           # images, audio, video, files (1.3)
+    tts: Optional[speech.Ask] = None               # a text-to-speech request, checked (1.3)
     size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 
@@ -809,6 +841,10 @@ class Job:
         self.hold: Optional[budgets.Hold] = None  # money reserved at the provider it was sent to
         self.budget_blocked: list[str] = []       # budgets that kept it from a provider
         self.budget_target: Optional[tuple] = None  # (target, provider) a budget kept it from, if nothing was sent
+        self.speech_format: Optional[str] = None    # text to speech: the format the engine was asked for (1.3)
+        self.speech_voice: Optional[str] = None     # the voice the gateway chose for it, if any
+        self.speech_rate: Optional[int] = None      # a sample_rate the request asked for
+        self.media_ms: Optional[int] = None         # the audio's length, once it has passed
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -817,7 +853,8 @@ class Job:
         self.settled = True
         u = quirks.read_usage(usage)
         if self.admission is not None:
-            key_limiter.settle(self.admission, u.prompt + u.completion)
+            tts = self.parsed.tts
+            key_limiter.settle(self.admission, tts.characters if tts is not None else u.prompt + u.completion)
         c = self.sent_to
         served = status < 400 or status == CLIENT_CLOSED
         self.cost = pricing.cost_of(u, c.prices if c else None, cloud=c is not None and c.external,
@@ -826,7 +863,7 @@ class Job:
         def count() -> None:
             record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt,
                    u.completion, target=self.target, cached=u.cached, reasoning=u.reasoning,
-                   spilled=self.spilled is not None, cost=self.cost, units=self.units())
+                   spilled=self.spilled is not None, cost=self.cost, units=self.units(served))
 
         hold, self.hold = self.hold, None
         if c is None or not c.external:
@@ -838,9 +875,15 @@ class Job:
         budgets.ledger.settle(hold, key_id=self.caller.key_id if self.caller.source == "api" else 0,
                               user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count)
 
-    def units(self) -> Optional[dict]:
-        """The request's 1.3 usage units: the media items it carried."""
+    def units(self, served: bool = True) -> Optional[dict]:
+        """The request's 1.3 usage units: the media items it carried; for speech that was answered, the
+        characters spoken and the audio's milliseconds."""
         m = self.parsed.media
+        tts = self.parsed.tts
+        if tts is not None:
+            if not served:
+                return None
+            return {"characters": tts.characters, **({"media_ms": self.media_ms} if self.media_ms else {})}
         return {"media_items": m.items} if m is not None and m.items else None
 
     def release(self) -> None:
@@ -876,6 +919,8 @@ class Job:
 
     def headers(self, target: str) -> dict:
         out = {"X-Forgeyard-Target": target}
+        if self.speech_voice:
+            out[speech.VOICE_HEADER] = self.speech_voice
         if self.spilled:
             out["X-Forgeyard-Spilled"] = self.spilled
         if self.budget_blocked:
@@ -956,7 +1001,8 @@ class Job:
         group_of = {t.uid: g for g, t in pairs}
         remaining = balancer.order(f"{route.served_name}#{tier.index}", [t for _, t in pairs])
         caps = {t.uid: group_of[t.uid].concurrency for t in remaining} if can_move_on else {}
-        body_for: dict[str, tuple[bytes, bool]] = {}
+        body_for: dict = {}
+        speech_of = self._speech_of = {}
         last_exc: Optional[Exception] = None
         refused: Optional[Response] = None
         deadline: Optional[float] = None
@@ -978,9 +1024,16 @@ class Job:
             remaining.remove(pick)
             g = group_of[pick.uid]
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
-            if g.upstream_model not in body_for:
-                body_for[g.upstream_model] = upstream_body(parsed, self.endpoint, g.upstream_model)
-            body, strip = body_for[g.upstream_model]
+            if parsed.tts is not None:
+                # Each speech deployment gets its own body: its format, voice, language and frame cap.
+                if g.deployment_id not in body_for:
+                    body_for[g.deployment_id] = await self.speech_body(g, pick)
+                body, strip = body_for[g.deployment_id]
+                self.speech_format, self.speech_voice = speech_of[g.deployment_id]
+            else:
+                if g.upstream_model not in body_for:
+                    body_for[g.upstream_model] = upstream_body(parsed, self.endpoint, g.upstream_model)
+                body, strip = body_for[g.upstream_model]
             ctype = self.request.headers.get("content-type", "application/json") if parsed.parts is not None \
                 else "application/json"
             headers = {"Content-Type": ctype, "Accept": self.request.headers.get("accept") or "*/*",
@@ -1039,6 +1092,22 @@ class Job:
         return Failed("unavailable", GatewayError(502, "upstream_unreachable",
                                                   f"No replica of {route.served_name!r} could be reached "
                                                   f"({type(last_exc).__name__ if last_exc else 'none tried'})."))
+
+    async def speech_body(self, g: LocalGroup, pick: Target) -> tuple[bytes, bool]:
+        """A speech request's body for this deployment; asks a replica for its voices (kept a while)
+        only when the gateway has to choose one."""
+        ask = self.parsed.tts
+        obj = self.parsed.obj or {}
+        names = None
+        if g.speaks is not None and (ask.voice is None or ask.voice.lower() in speech.OPENAI_VOICES):
+            found = await speech.voices_for(g.deployment_id, g.speaks, client(), pick.url, pick.secret)
+            names = [v["id"] for v in found] if found is not None else None
+        out, chosen = speech.body_for(obj, ask, g.speaks, names)
+        out["model"] = g.upstream_model
+        rate = obj.get("sample_rate")
+        self.speech_rate = rate if isinstance(rate, int) and not isinstance(rate, bool) and rate > 0 else None
+        self._speech_of[g.deployment_id] = (out.get("response_format") or ask.format, chosen)
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), False
 
     # -------------------------------------------------------------- providers
     async def cloud(self, tier: Tier, more: bool) -> Union[Response, Failed]:
@@ -1164,16 +1233,41 @@ class Job:
         return await self.serve(response, self.headers(c.label), strip, release=c.key, who=c.provider)
 
     # -------------------------------------------------------------- the answer
+    def audio(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
+        """A speech engine's 200: streamed through, its length measured, usage counted at the end."""
+        fmt = self.speech_format or "wav"
+        meter = speech.Meter(fmt, response.headers.get("content-type", ""), dict(response.headers),
+                             pcm_rate=next((g.speaks.pcm_rate for t in self.route.tiers for g in t.locals
+                                            if g.deployment_id == self.deployment_id and g.speaks), 24000),
+                             asked_rate=self.speech_rate)
+        tokens = {"input_tokens": _int(int(response.headers.get("x-vllm-omni-input-tokens") or 0)),
+                  "output_tokens": _int(int(response.headers.get("x-vllm-omni-output-tokens") or 0))} \
+            if (response.headers.get("x-vllm-omni-input-tokens") or "").isdigit() and \
+            (response.headers.get("x-vllm-omni-output-tokens") or "0").isdigit() else None
+
+        def done(status: int) -> None:
+            balancer.release(release)
+            self.media_ms = meter.ms()
+            self.finish(status, tokens)
+
+        return AudioResponse(response, {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                             meter, done, who=who)
+
     async def serve(self, response: httpx.Response, out_headers: dict, strip: bool, *, release: str,
                     who: str) -> Response:
         is_sse = "text/event-stream" in response.headers.get("content-type", "")
         if is_sse and response.status_code == 200:
             def done(status: int, usage) -> None:
                 balancer.release(release)
+                if self.parsed.tts is not None:
+                    self.media_ms = sse.ms()
                 self.finish(status, usage)
 
             out_headers = {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-            return StreamResponse(response, SSEFilter(strip), out_headers, done, who=who)
+            sse = SpeechSSE(self.speech_rate) if self.parsed.tts is not None else SSEFilter(strip)
+            return StreamResponse(response, sse, out_headers, done, who=who)
+        if self.parsed.tts is not None and response.status_code == 200:
+            return self.audio(response, out_headers, release, who)
         try:
             data = await unless_gone(self.request.receive, response.aread())
         except ClientGone:
@@ -1196,6 +1290,98 @@ class Job:
         return Response(content=data, status_code=response.status_code,
                         headers={**upstream_retry_after(response), **out_headers},
                         media_type=response.headers.get("content-type") or "application/json")
+
+
+class SpeechSSE(SSEFilter):
+    """vLLM-Omni's `stream_format: sse` (OpenAI's speech.audio.* events): passed through as they come;
+    the audio deltas are measured (pcm: their bytes over the sample rate) and the final event's
+    token usage kept."""
+
+    def __init__(self, rate: Optional[int] = None):
+        super().__init__(False)
+        self.bytes = 0
+        self.rate = rate
+        self.channels = 1
+        self.fmt: Optional[str] = None
+
+    def _event(self, event: bytes) -> bytes:
+        if b"speech.audio.delta" in event:
+            data = b"".join(line[5:].lstrip() for line in event.splitlines() if line.startswith(b"data:"))
+            try:
+                obj = json.loads(data)
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict):
+                n, rate, channels, fmt = speech.sse_audio(obj)
+                self.bytes += n
+                self.rate = rate or self.rate
+                self.channels = channels or self.channels
+                self.fmt = fmt or self.fmt
+            self.events += 1
+            return event
+        return super()._event(event)
+
+    def ms(self) -> Optional[int]:
+        if not self.bytes or (self.fmt not in (None, "pcm")):
+            return None
+        return int(self.bytes * 1000 / ((self.rate or 24000) * self.channels * 2))
+
+
+AUDIO_HEADERS = ("x-audio-sample-rate", "x-audio-channels", "x-vllm-omni-input-tokens", "x-vllm-omni-output-tokens",
+                 "x-vllm-omni-total-tokens")
+
+
+class AudioResponse(Response):
+    """A speech engine's audio, passed to the client chunk by chunk as it is made (1.3), measured on
+    the way. Stops the upstream request as soon as the client disconnects."""
+
+    def __init__(self, upstream: httpx.Response, headers: dict, meter: speech.Meter,
+                 done: Callable[[int], None], who: str = "replica"):
+        self.status_code = upstream.status_code
+        self.background = None
+        ctype = upstream.headers.get("content-type") or "application/octet-stream"
+        extra = {k: v for k in AUDIO_HEADERS if (v := upstream.headers.get(k))}
+        self.raw_headers = [(b"content-type", ctype.encode("latin-1"))] + [
+            (k.lower().encode("latin-1"), str(v).encode("latin-1")) for k, v in {**extra, **headers}.items()]
+        self.upstream = upstream
+        self.meter = meter
+        self.done = done
+        self.who = who
+
+    async def __call__(self, scope, receive, send):
+        status = self.upstream.status_code
+        await send({"type": "http.response.start", "status": status, "headers": self.raw_headers})
+
+        async def pump():
+            nonlocal status
+            try:
+                async for chunk in self.upstream.aiter_bytes():
+                    if chunk:
+                        self.meter.feed(chunk)
+                        await send({"type": "http.response.body", "body": chunk, "more_body": True})
+            except httpx.HTTPError as e:
+                status = 502  # the headers are sent: the client sees an audio file that ends early
+                log.warning("Streamed audio from %s broke off: %s", self.who, type(e).__name__)
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+        pumping = asyncio.ensure_future(pump())
+        watching = asyncio.ensure_future(_until_disconnect(receive))
+        try:
+            done, _ = await asyncio.wait({pumping, watching}, return_when=asyncio.FIRST_COMPLETED)
+            if pumping not in done:
+                status = CLIENT_CLOSED
+            else:
+                pumping.result()
+        except OSError:
+            status = CLIENT_CLOSED
+        finally:
+            for t in (pumping, watching):
+                t.cancel()
+            for t in (pumping, watching):
+                with contextlib.suppress(BaseException):
+                    await t
+            await self.upstream.aclose()
+            self.done(status)
 
 
 async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint: str, parsed: Parsed,

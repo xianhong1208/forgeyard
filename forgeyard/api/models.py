@@ -34,7 +34,7 @@ from forgeyard.workloads import images, placement
 router = APIRouter(prefix="/api", tags=["models"])
 
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
-TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text"}
+TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech"}
 
 
 def _engine_args(raw) -> dict:
@@ -84,14 +84,14 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "task_label": TASK_LABEL.get(m.task, m.task), "size_bytes": m.size_bytes, "engine_args": m.engine_args or {},
             "summary": model_summary(m), "recipes": compatible(m, all_recipes), "deployments": deployments,
             "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
-            **media_out(m.meta or {}, m.format)}
+            "voices": list((m.meta or {}).get("voices") or []), **media_out(m.meta or {}, m.format)}
 
 
 def media_out(meta: dict, fmt: str) -> dict:
     """Licence, gated, the media it takes (None: unknown, a catalog entry from before 1.3) and its
     projector file, for the catalog and the inspection preview."""
     mm = meta.get("mmproj") if isinstance(meta.get("mmproj"), dict) else None
-    return {"license": meta.get("license"), "gated": bool(meta.get("gated")),
+    return {"license": meta.get("license"), "license_from": meta.get("license_from"), "gated": bool(meta.get("gated")),
             "modalities": modalities.of_model(meta, fmt),
             "mmproj": {"path": mm.get("path"), "size": mm.get("size")} if mm else None,
             "mmproj_files": meta.get("mmproj_files") or []}
@@ -102,6 +102,7 @@ def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
            "tasks": r.tasks, "formats": r.formats, "api": r.api, "share": r.share, "builtin": r.builtin,
            "estimate": r.estimate.method,
            "media": r.media.model_dump() if r.media is not None else None,
+           "tts": r.tts.model_dump() if r.tts is not None else None,
            "params": {k: p.model_dump(exclude_none=True) for k, p in r.params.items()},
            "devices": sorted({"gpu" if v.gpu else "cpu" for v in r.variants}),
            # image_check: ids are recorded for the image, so a copy loaded with `docker load` is
@@ -205,7 +206,7 @@ def suggest(db: DbSession, meta: dict, task: Optional[str], recipe_name: Optiona
     out: dict = {"recipe": name, "recipes": usable, "device": dev, "devices": (["gpu"] if has_gpu else []) + (["cpu"] if has_cpu else [])}
     try:
         params = normalise_params(recipe, {"gpus": 1 if dev == "gpu" else 0})
-        est = compute_estimate(meta, recipe, params, device=dev, gpu_context=scheduler.gpu_context())
+        est = compute_estimate(meta, recipe, params, device=dev, gpu_context=scheduler.gpu_context(), task=task)
     except EstimateError as e:
         out["error"] = str(e)
         return out
@@ -304,7 +305,21 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     meta = _inspect(db, body)
     task = (body.task or meta.get("task_hint") or "").strip()
     if task not in recipes.TASKS:
-        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank or asr)")
+        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr or tts)")
+    if task == "tts":
+        # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
+        # takes in chat.
+        meta["modalities"] = []
+    if not meta.get("license"):
+        # A conversion without a licence of its own (a GGUF or ONNX repository) from the recommended list:
+        # the original model's licence, saying where it comes from.
+        try:
+            origin = next((e for e in rec.recommended().models if e.source == body.source.strip() and e.license_from
+                           and (e.file or None) == (meta.get("file") or None)), None)
+        except rec.RecommendedError:
+            origin = None
+        if origin is not None:
+            meta["license"], meta["license_from"] = origin.license, origin.license_from
     src = sources.parse_source(body.source)
     m = CatalogModel(name=name, title=(body.title or "").strip() or None, source=str(src), kind=src.kind,
                      ref=meta.get("ref"), revision=meta.get("revision"), file=meta.get("file"),
@@ -336,7 +351,7 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
         changed["title"] = m.title
     if body.task is not None:
         if body.task not in recipes.TASKS:
-            raise fail(422, "bad_task", "task: chat, embed, rerank or asr")
+            raise fail(422, "bad_task", "task: chat, embed, rerank, asr or tts")
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:

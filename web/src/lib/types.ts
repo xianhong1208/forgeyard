@@ -212,7 +212,7 @@ export type WorkloadResponse = { workload: Workload; events: WorkloadEvent[]; se
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
 // ---------------------------------------------------------------- models (M3)
-export type Task = "chat" | "embed" | "rerank" | "asr";
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -232,6 +232,8 @@ export type Recipe = {
   api: Record<string, string>; share: "exclusive" | "vram"; builtin: boolean; estimate: string;
   params: Record<string, RecipeParam>; devices: ("gpu" | "cpu")[]; variants: RecipeVariant[]; yaml?: string;
   media?: { inputs: Medium[]; files: boolean } | null;
+  // 1.3, text to speech: the formats the engine makes, how it streams, its default voice.
+  tts?: { formats: string[]; default_format: string; stream_formats: string[]; voices: string | null; default_voice: string | null; cjk: boolean } | null;
 };
 
 export type CatalogModel = {
@@ -243,7 +245,11 @@ export type CatalogModel = {
   // 1.3: the licence Hugging Face shows, gated, the media it takes (null: unknown, added before 1.3)
   // and a GGUF vision model's projector file.
   license?: string | null; gated?: boolean; modalities?: Medium[] | null;
+  // A conversion without a licence of its own (1.3): the original model whose licence it is.
+  license_from?: string | null;
   mmproj?: { path: string; size: number } | null; mmproj_files?: { path: string; size: number }[];
+  // 1.3, text to speech: the built-in voices its config names (Qwen3-TTS), if any.
+  voices?: string[];
 };
 
 export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };

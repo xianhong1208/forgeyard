@@ -126,6 +126,27 @@ the catalog: from its `config.json`, or, for a GGUF model, from its **projector 
   provider.
 - Usage counts the media items; image tokens are inside the prompt tokens.
 
+## Text to speech
+
+Speech models answer `/v1/audio/speech`, OpenAI's text-to-speech call, with the audio itself. Three
+engines serve them:
+
+| Engine (recipe) | Where | Models | Languages |
+|---|---|---|---|
+| vLLM-Omni (`vllm-omni-tts`) | NVIDIA GPUs | Qwen3-TTS CustomVoice: nine built-in voices, style instructions | Chinese (with Mandarin dialects), English and eight more |
+| llama.cpp (`llama-cpp`) | AMD GPUs and APUs (Vulkan or ROCm), NVIDIA, the CPU | TTS GGUFs with their projector: Qwen3-TTS, Chatterbox | Qwen3-TTS: Chinese, English and more; Chatterbox: English |
+| speaches (`speaches-tts`) | the CPU, NVIDIA | Kokoro-82M (51 voices), Piper voices | English (and other Latin-script languages) |
+
+- A speech model has **voices** of its own (the Playground lists them). OpenAI's voice names such as
+  `alloy` are replaced by the model's default voice, and the answer says which.
+- **Voice cloning is not available**: no reference recordings, no uploaded voices. Only the voices a
+  model was made with speak.
+- Each deployment takes at most so many characters per request (*Longest input*, under
+  **Advanced**). The default fits what the engine can speak in one go.
+- Usage counts the **characters** spoken and the **length of the audio**. For a key's tokens per
+  minute, a character counts as a token.
+- Speech stays on your own deployments; it never goes to a cloud provider.
+
 ## API keys, limits and usage
 
 - Programs call `/v1` with an **API key** (`fyk_…`). Everyone creates their own on **API keys**. A

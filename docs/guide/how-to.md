@@ -430,6 +430,43 @@ optional_args:
 media: {inputs: [image, audio, video], files: false}
 ```
 
+## Turn text into speech
+
+1. **Add a speech model.** On **Models → Add a model → Recommended**, the **Text to speech** group
+   has:
+   - Qwen3-TTS 0.6B or 1.7B CustomVoice for an NVIDIA GPU (vLLM-Omni): Chinese and English, nine
+     voices. About 10 and 12 GiB of GPU memory.
+   - Qwen3-TTS 1.7B as GGUF for llama.cpp: Chinese and English on an AMD APU or the CPU; it has one
+     voice of its own.
+   - Kokoro 82M (speaches) and Chatterbox Turbo (llama.cpp): small English voices for a CPU.
+
+   A model from **Search Hugging Face** works when it is tagged *text-to-speech* and a recipe serves
+   its format: safetensors Qwen3-TTS for vLLM-Omni, a TTS GGUF with its projector (`mmproj-*.gguf`)
+   for llama.cpp, an ONNX Kokoro or Piper repository for speaches.
+2. **Deploy it** as usual. *Longest input* is under **Advanced**; its default works.
+3. **Call it** with the OpenAI SDK:
+
+   ```python
+   with client.audio.speech.with_streaming_response.create(
+       model="qwen3-tts-1-7b", voice="vivian", input="今天天氣很好。", response_format="wav",
+   ) as response:
+       response.stream_to_file("speech.wav")
+   ```
+
+   `GET /v1/audio/voices?model=qwen3-tts-1-7b` lists the voices and the formats the model makes.
+   For audio as it is made, add `extra_body={"stream_format": "audio"}` with `pcm` or `wav`.
+4. **Try it in the Playground:** a speech model gets a **Speak** box with its voices, formats and a
+   player.
+
+**Which format:** vLLM-Omni makes wav, pcm, flac, mp3 and opus; llama.cpp wav and pcm; speaches
+mp3, flac, wav and pcm. Without `response_format` you get the engine's default (wav, or mp3 from
+speaches), not OpenAI's mp3. `pcm` is 16-bit mono at the rate the answer states
+(`x-audio-sample-rate`, or `rate=` in its `Content-Type`).
+
+**On an AMD APU (Vulkan):** Qwen3-TTS can give slightly different audio for the same request with
+llama.cpp's cooperative matrices on (ggml-org/llama.cpp#32050). If its speech sounds wrong there, add
+a custom recipe whose vulkan variant sets `GGML_VK_DISABLE_COOPMAT: "1"` in its `env`.
+
 ## Add a cloud provider
 
 Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
