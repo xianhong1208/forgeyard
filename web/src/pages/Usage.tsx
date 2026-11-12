@@ -41,6 +41,8 @@ export function UsagePage() {
   const max = Math.max(1, ...(data?.rows ?? []).map((r) => r.requests));
   // 1.3: the media column shows once there are images, audio or video in the period.
   const media = (t?.media_items ?? 0) > 0;
+  // Text to speech: characters spoken and the audio's length.
+  const speech = (t?.characters ?? 0) > 0;
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
   const setBy = tab === "cost" ? setCostGroup : setGroup;
   // The last step of the users' Get started list is opening this page.
@@ -92,6 +94,7 @@ export function UsagePage() {
           <div><dt>Errors</dt><dd className={t.errors ? "usage-bad" : ""}>{num(t.errors)}{t.limited > 0 && <span className="muted small"> ({num(t.limited)} limited)</span>}</dd></div>
           <div><dt>Tokens</dt><dd>{num(t.tokens)} <span className="muted small">{num(t.prompt_tokens)} in · {num(t.completion_tokens)} out</span></dd></div>
           {media && <div><dt>Media items</dt><dd>{num(t.media_items)} <span className="muted small">images, audio, video</span></dd></div>}
+          {speech && <div><dt>Speech</dt><dd>{num(t.characters)} <span className="muted small">characters · {audioLength(t.media_ms)} of audio</span></dd></div>}
           <div><dt>Latency p50</dt><dd>{ms(t.latency_p50_ms)}</dd></div>
           <div><dt>Latency p95</dt><dd>{ms(t.latency_p95_ms)}</dd></div>
         </dl>
@@ -112,7 +115,7 @@ export function UsagePage() {
           <div className="table-wrap">
             <table className="table usage-table">
               <thead>
-                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
+                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{speech && <th>Audio</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
               </thead>
               <tbody>
                 {data.rows.map((r: UsageRow) => (
@@ -126,6 +129,8 @@ export function UsagePage() {
                     <td data-label="Tokens in" className="num"><span>{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span></td>
                     <td data-label="Tokens out" className="num">{num(r.completion_tokens)}</td>
                     {media && <td data-label="Media" className="num" title="Images, audio clips and videos sent in chat">{num(r.media_items ?? 0)}</td>}
+                    {speech && <td data-label="Characters" className="num" title="Characters turned into speech">{num(r.characters ?? 0)}</td>}
+                    {speech && <td data-label="Audio" className="num" title="Length of the speech made (where its format says it)">{audioLength(r.media_ms)}</td>}
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
                     <td data-label="p95" className="num">{ms(r.latency_p95_ms)}</td>
@@ -307,4 +312,13 @@ function PersonBudget({ p, admin, onSaved }: { p: BudgetPerson; admin: boolean; 
       )}
     </div>
   );
+}
+
+// Milliseconds of audio as "1 min 05 s" or "12.3 s".
+export function audioLength(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)} s`;
+  const m = Math.floor(s / 60);
+  return `${m} min ${String(Math.round(s - m * 60)).padStart(2, "0")} s`;
 }
