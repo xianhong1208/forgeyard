@@ -1,11 +1,12 @@
-import { IconPhoto, IconPlayerStop, IconSend, IconTrash, IconX } from "@tabler/icons-react";
+import { IconDownload, IconPhoto, IconPlayerStop, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link } from "react-router";
 
 import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
-import { API_KIND, answerError, chatContent, ms, readEvents, readImage, type Attached } from "../lib/gateway";
+import { API_KIND, SPEECH_MIME, answerError, chatContent, ms, pcmRate, pcmToWav, readEvents, readImage, type Attached,
+  type Voice } from "../lib/gateway";
 import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
 import type { RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -87,6 +88,7 @@ export function PlaygroundPage() {
       {route?.api === "openai-embeddings" && <Embeddings key={route.served_name} model={route.served_name} />}
       {route?.api === "rerank" && <Rerank key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-audio" && <Transcribe key={route.served_name} model={route.served_name} />}
+      {route?.api === "openai-speech" && <Speak key={route.served_name} model={route.served_name} />}
     </>
   );
 }
@@ -350,3 +352,154 @@ function Transcribe({ model }: { model: string }) {
     </section>
   );
 }
+
+type VoicesAnswer = { voices: Voice[]; default: string | null; formats?: string[]; default_format?: string; stream_formats?: string[]; max_input_chars?: number };
+
+const SPEAK_SAMPLE = "Forgeyard runs models on your own machines. 歡迎使用 Forgeyard，模型在你自己的機器上執行。";
+
+// Text to speech (1.3): the model's own voices, a format it makes, and the answer in a player. With
+// "Stream", the audio is asked for as it is made (stream_format audio) and the time to the first audio
+// is shown; the player still plays the whole file.
+function Speak({ model }: { model: string }) {
+  const [text, setText] = useState(SPEAK_SAMPLE);
+  const [info, setInfo] = useState<VoicesAnswer | null>(null);
+  const [infoErr, setInfoErr] = useState<string | null>(null);
+  const [voice, setVoice] = useState("");
+  const [format, setFormat] = useState("");
+  const [stream, setStream] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [audio, setAudio] = useState<{ url: string; name: string; meta: string } | null>(null);
+  const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/playground/audio/voices?model=${encodeURIComponent(model)}`, { credentials: "same-origin", headers: { "X-Forgeyard": "1" } });
+        if (res.status === 401) { notifyUnauthorized(); return; }
+        if (!res.ok) { if (live) setInfoErr(await failure(res)); return; }
+        const data = (await res.json()) as VoicesAnswer;
+        if (!live) return;
+        setInfo(data);
+        setVoice(data.default ?? data.voices[0]?.id ?? "");
+        setFormat(data.default_format ?? "");
+      } catch {
+        if (live) setInfoErr("Cannot reach the Forgeyard server.");
+      }
+    })();
+    return () => { live = false; };
+  }, [model]);
+
+  useEffect(() => () => { if (audio) URL.revokeObjectURL(audio.url); }, [audio]);
+
+  const formats = info?.formats ?? ["wav"];
+  const canStream = (info?.stream_formats ?? []).includes("audio") && (format === "pcm" || format === "wav" || format === "mp3");
+  const cap = info?.max_input_chars;
+  const chars = [...text].length;
+
+  const go = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!text.trim() || busy) return;
+    setBusy(true); setErr(null);
+    const ctrl = new AbortController();
+    abort.current = ctrl;
+    const started = performance.now();
+    try {
+      const body: Record<string, unknown> = { model, input: text };
+      if (voice) body.voice = voice;
+      if (format) body.response_format = format;
+      if (stream && canStream) body.stream_format = "audio";
+      const res = await post("audio/speech", body, ctrl.signal);
+      if (!res.ok || !res.body) { setErr(await failure(res)); return; }
+      const reader = res.body.getReader();
+      const parts: Uint8Array[] = [];
+      let first: number | null = null;
+      let size = 0;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value?.length) {
+          if (first === null) first = performance.now();
+          parts.push(value);
+          size += value.length;
+        }
+      }
+      const total = performance.now() - started;
+      let data: Uint8Array<ArrayBuffer> = new Uint8Array(size);
+      let at = 0;
+      for (const p of parts) { data.set(p, at); at += p.length; }
+      const fmt = format || info?.default_format || "wav";
+      if (fmt === "pcm") data = pcmToWav(data, pcmRate(res.headers));
+      const blob = new Blob([data], { type: SPEECH_MIME[fmt] ?? "application/octet-stream" });
+      const used = res.headers.get("X-Forgeyard-Voice");
+      const replica = res.headers.get("X-Forgeyard-Replica");
+      const meta = [replica ? `replica ${replica.split("#")[1]}` : null, used ? `voice ${used}` : voice ? `voice ${voice}` : null,
+        stream && canStream && first !== null ? `first bytes ${ms(first - started)}` : null, `${ms(total)}`,
+        `${(size / 1024).toFixed(0)} KiB ${fmt}`, `${chars} characters`].filter(Boolean).join(" · ");
+      setAudio((cur) => {
+        if (cur) URL.revokeObjectURL(cur.url);
+        return { url: URL.createObjectURL(blob), name: `${model}.${fmt === "pcm" ? "wav" : fmt === "opus" ? "ogg" : fmt}`, meta };
+      });
+    } catch (e2) {
+      if ((e2 as Error).name !== "AbortError") setErr("Cannot reach the Forgeyard server.");
+    } finally {
+      setBusy(false);
+      abort.current = null;
+    }
+  };
+
+  return (
+    <section className="panel play" aria-labelledby="speak-title">
+      <h2 id="speak-title">Speak</h2>
+      {infoErr && <Notice tone="error">{infoErr}</Notice>}
+      <form onSubmit={go} className="speak-form">
+        <div className="field">
+          <label htmlFor="speak-text">Text</label>
+          <textarea id="speak-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{chars.toLocaleString("en-US")}{cap ? ` of at most ${cap.toLocaleString("en-US")}` : ""} characters</p>
+        </div>
+        <div className="speak-options">
+          <div className="field">
+            <label htmlFor="speak-voice">Voice</label>
+            <select id="speak-voice" value={voice} onChange={(e) => setVoice(e.target.value)} disabled={!info}>
+              {info && info.voices.length === 0 && <option value="">The model's own voice</option>}
+              {(info?.voices ?? []).map((v) => (
+                <option key={v.id} value={v.id}>{v.name}{v.language ? ` · ${v.language}` : ""}{v.gender ? ` · ${v.gender}` : ""}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="speak-format">Format</label>
+            <select id="speak-format" value={format} onChange={(e) => setFormat(e.target.value)} disabled={!info}>
+              {formats.map((f) => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <label className="check speak-stream" title={canStream ? "Sends stream_format: audio" : "This model or format does not stream"}>
+            <input type="checkbox" checked={stream && canStream} disabled={!canStream} onChange={(e) => setStream(e.target.checked)} /> Stream
+          </label>
+        </div>
+        <div className="row-gap">
+          {busy ? (
+            <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
+          ) : (
+            <button type="submit" className="btn btn-primary" disabled={!text.trim() || (cap !== undefined && chars > cap)}>
+              <IconSpeakerphone size={16} aria-hidden="true" /> Speak
+            </button>
+          )}
+        </div>
+      </form>
+      {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
+      {audio && (
+        <div className="speak-out" aria-label="Speech">
+          <audio controls src={audio.url} aria-label="The speech" />
+          <div className="speak-meta">
+            <span className="msg-meta">{audio.meta}</span>
+            <a className="btn btn-quiet btn-small" href={audio.url} download={audio.name}><IconDownload size={14} aria-hidden="true" /> Download</a>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+

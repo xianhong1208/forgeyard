@@ -10,6 +10,8 @@ export type RecommendedModel = {
   task: Task; format: string; recipe: string; device: "gpu" | "cpu"; download_gib: number; memory_gib: number;
   gated: boolean; engine_args: Record<string, string[]>; note: string; in_catalog: string | null;
   license: string; inputs: Medium[]; mmproj: string | null;
+  // Text to speech (1.3): the languages it speaks; the original model whose licence it is, for a conversion.
+  languages?: string[]; license_from?: string | null;
 };
 
 export type RecommendedResponse = { groups: RecommendedGroup[]; models: RecommendedModel[] };

@@ -17,7 +17,16 @@ import { useApi } from "../lib/useApi";
 type Mode = "list" | "search" | "source";
 export const SEARCH_DELAY_MS = 500;
 
-const FORMAT_LABEL: Record<string, string> = { safetensors: "safetensors", gguf: "GGUF", ctranslate2: "CTranslate2", other: "other" };
+const FORMAT_LABEL: Record<string, string> = { safetensors: "safetensors", gguf: "GGUF", ctranslate2: "CTranslate2", onnx: "ONNX", other: "other" };
+
+const LANGUAGE: Record<string, string> = { zh: "Chinese", en: "English", ja: "Japanese", ko: "Korean", de: "German", fr: "French",
+  ru: "Russian", pt: "Portuguese", es: "Spanish", it: "Italian" };
+
+// "Chinese, English +8" for a speech model's languages.
+export function languagesText(langs: string[]): string {
+  const named = langs.slice(0, 2).map((l) => LANGUAGE[l] ?? l).join(", ");
+  return langs.length > 2 ? `${named} +${langs.length - 2}` : named;
+}
 
 export function AddModel({ onAdded, empty }: { onAdded: () => void; empty: boolean }) {
   const [open, setOpen] = useState(empty);
@@ -92,7 +101,8 @@ function RecommendedList({ data, error, onPick, chosen }: {
                   <span className="chip">{TASK_LABEL[m.task]}</span>
                   {m.device === "cpu" && <span className="chip"><IconCpu size={11} aria-hidden="true" /> CPU</span>}
                   {m.inputs.length > 0 && <span className="chip chip-tone-run">{mediaText(m.inputs)}</span>}
-                  <span className="chip mono" title="Licence">{m.license}</span>
+                  {m.languages && m.languages.length > 0 && <span className="chip" title="Languages it speaks">{languagesText(m.languages)}</span>}
+                  <span className="chip mono" title={m.license_from ? `Licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : "Licence"}>{m.license}</span>
                 </div>
                 <p className="rec-note small">{m.note}</p>
                 <p className="rec-size small muted">
@@ -173,11 +183,12 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
             <option value="safetensors">safetensors (GPU)</option>
             <option value="gguf">GGUF (CPU or GPU)</option>
             <option value="ctranslate2">CTranslate2 (speech)</option>
+            <option value="onnx">ONNX (Kokoro, Piper voices)</option>
           </select>
         </div>
         <button type="submit" className="btn hub-go" disabled={busy}><IconSearch size={16} aria-hidden="true" /> {busy ? "Searching…" : "Search"}</button>
       </form>
-      <p className="muted small hub-hint">The server asks Hugging Face, most downloaded first. Only models in safetensors, GGUF or CTranslate2 can be served.</p>
+      <p className="muted small hub-hint">The server asks Hugging Face, most downloaded first. Only models in safetensors, GGUF, CTranslate2 or ONNX (speaches voices) can be served.</p>
       {error && (
         <Notice tone={error.offline ? "info" : "error"}>
           {error.text}{" "}
@@ -357,6 +368,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
                 <option value="safetensors">safetensors</option>
                 <option value="gguf">GGUF</option>
                 <option value="ctranslate2">CTranslate2</option>
+                <option value="onnx">ONNX</option>
               </select>
             </div>
             {f.format === "gguf" && (

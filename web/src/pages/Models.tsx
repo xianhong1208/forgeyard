@@ -1,4 +1,4 @@
-import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -22,6 +22,7 @@ const KINDS = [
   { icon: IconVectorBezier2, name: "Embeddings", detail: "vLLM's pooling runner; small, shares a GPU" },
   { icon: IconSortDescending, name: "Rerank", detail: "vLLM's pooling runner; small, shares a GPU" },
   { icon: IconMicrophone, name: "Speech to text", detail: "faster-whisper behind speaches" },
+  { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
 ];
 
 export function ModelsPage() {
@@ -259,7 +260,7 @@ function ModelRow({ m, canManage, canDeploy, reload }: { m: CatalogModel; canMan
       </td>
       <td data-label="Licence" className="small">
         <div className="cell-stack">
-          <span className="mono nowrap">{m.license ?? "—"}</span>
+          <span className="mono nowrap" title={m.license_from ? `The licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : undefined}>{m.license ?? "—"}{m.license_from ? "*" : ""}</span>
           {m.gated && <span className="muted"><IconLock size={11} aria-hidden="true" /> gated</span>}
         </div>
       </td>

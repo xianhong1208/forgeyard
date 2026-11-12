@@ -7,6 +7,7 @@ export const API_ENDPOINT: Record<string, string> = {
   "openai-embeddings": "/embeddings",
   rerank: "/rerank",
   "openai-audio": "/audio/transcriptions",
+  "openai-speech": "/audio/speech",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -14,6 +15,7 @@ export const API_KIND: Record<string, string> = {
   "openai-embeddings": "embeddings",
   rerank: "rerank",
   "openai-audio": "speech to text",
+  "openai-speech": "text to speech",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -36,6 +38,12 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     return {
       curl: `${curl} ${base}/rerank \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "query": "capital of France", "documents": ["Paris is in France.", "Berlin is in Germany."]}'`,
       python: `${trustUrl ? "import ssl\n\n" : ""}import httpx  # rerank is not part of the OpenAI SDK\n\n${caLines}r = httpx.post("${base}/rerank", headers={"Authorization": "Bearer ${key}"},\n               json={"model": "${model}", "query": "capital of France",\n                     "documents": ["Paris is in France.", "Berlin is in Germany."]}${trustUrl ? ",\n               verify=ca" : ""})\nprint(r.json()["results"])`,
+    };
+  }
+  if (api === "openai-speech") {
+    return {
+      curl: `${curl} ${base}/audio/speech \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "input": "Hello from Forgeyard.", "voice": "alloy", "response_format": "wav"}' \\\n  -o hello.wav`,
+      python: `${sdk}${client}\nwith client.audio.speech.with_streaming_response.create(\n    model="${model}", voice="alloy", input="Hello from Forgeyard.", response_format="wav",\n) as response:\n    response.stream_to_file("hello.wav")`,
     };
   }
   if (api === "openai-audio") {
@@ -125,3 +133,36 @@ export function chatContent(text: string, images?: Attached[]): string | { type:
   if (!images?.length) return text;
   return [...(text ? [{ type: "text", text }] : []), ...images.map((i) => ({ type: "image_url", image_url: { url: i.uri } }))];
 }
+
+// ------------------------------------------------------------------ text to speech (1.3)
+export const SPEECH_FORMATS = ["mp3", "opus", "aac", "flac", "wav", "pcm"] as const;
+
+// What an <audio> element plays for each format (pcm has no header: the Playground wraps it in a WAV).
+export const SPEECH_MIME: Record<string, string> = {
+  mp3: "audio/mpeg", opus: "audio/ogg", aac: "audio/aac", flac: "audio/flac", wav: "audio/wav", pcm: "audio/wav",
+};
+
+export type Voice = { id: string; name: string; language?: string; gender?: string };
+
+// 16-bit mono PCM with a WAV header, so a browser can play it.
+export function pcmToWav(pcm: Uint8Array, rate: number, channels = 1): Uint8Array<ArrayBuffer> {
+  const n = pcm.length - (pcm.length % (2 * channels));
+  const out = new Uint8Array(44 + n);
+  const v = new DataView(out.buffer);
+  const text = (at: number, s: string) => { for (let i = 0; i < s.length; i++) out[at + i] = s.charCodeAt(i); };
+  text(0, "RIFF"); v.setUint32(4, 36 + n, true); text(8, "WAVE"); text(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, channels, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2 * channels, true); v.setUint16(32, 2 * channels, true); v.setUint16(34, 16, true);
+  text(36, "data"); v.setUint32(40, n, true);
+  out.set(pcm.subarray(0, n), 44);
+  return out;
+}
+
+// The sample rate of a pcm answer: x-audio-sample-rate (vLLM-Omni), the Content-Type's rate= (llama.cpp), else 24 kHz.
+export function pcmRate(headers: Headers): number {
+  const h = Number(headers.get("x-audio-sample-rate"));
+  if (h > 0) return h;
+  const m = /rate=(\d+)/.exec(headers.get("content-type") ?? "");
+  return m ? Number(m[1]) : 24000;
+}
+
