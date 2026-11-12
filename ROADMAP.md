@@ -1,5 +1,7 @@
 # Roadmap
 
+[繁體中文](ROADMAP.zh-TW.md)
+
 Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10; each line names what
 users get, not how it is built. Versions are minor releases unless a change breaks something.
 
@@ -62,7 +64,7 @@ something the alternatives do not (see below). One pull request before the 1.2 r
 5. **Repository settings:** public; secret scanning, push protection and Dependabot alerts on; a
    ruleset protecting `main` and `dev`.
 
-Where it stands (PR #22):
+Done with 1.2.0 (2026-11-11):
 
 - ✅ 2, 3 and 4. The scan covered every blob and message on every branch, tag and pull request ref,
   plus every issue, pull request, comment, review, release and label: nothing private was found, and
@@ -76,7 +78,8 @@ Where it stands (PR #22):
 
   Still open: the ROCm images of the `vllm` and `llama-cpp` recipes on real hardware, and a
   discrete AMD card. The guide says so.
-- 5 is done when the repository is made public.
+- ✅ 5. The repository is public, with secret scanning, push protection, Dependabot alerts and a
+  ruleset protecting `main` and `dev`.
 
 ## Shipped: 1.2.0 (2026-11-11), cloud model APIs behind the same gateway
 
@@ -118,7 +121,7 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
    opt-in, the usage units for all of 1.3.
 2. ✅ **llama.cpp b12242** (#9), with a built-in Vulkan variant for AMD APUs and the cards the ROCm
    image lacks.
-3. *In review*: **Text-to-speech** (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
+3. ✅ **Text-to-speech** (#11, `/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
    TTS GGUFs on AMD and the CPU, speaches (Kokoro) for small English voices on CPU and CUDA; voices,
    streaming, characters and audio length in usage. Voice cloning stays off.
 4. Image generation (`/v1/images/generations`).
@@ -134,12 +137,7 @@ Also in 1.3, alongside the model types:
   on each page.
 - ✅ **Container images on Docker Hub** (#2): the server and the agent, amd64 and arm64, published by
   a release tag.
-- **Simpler settings** (the owner's decisions on the settings audit): a provider's *outside your
-  network* from its address; one Hugging Face token for the server; one cloud policy for keys;
-  agent defaults like the installer's; deprecations of developer-only settings.
-- **Deployments stay where they ran:** a restarted deployment goes back to its machine when it still
-  fits, a deployment can be moved or pinned in the console, and a replica no agent has picked up says
-  so (an agent too old for the server).
+- **Simpler settings** and **deployments that stay where they ran** moved to 1.3.1 (see *Next*).
 
 The owner's decisions for 1.3 (2026-11-11):
 
@@ -234,8 +232,7 @@ version is not decided yet.
   custom recipe with only the wanted variant is the way around it).
 - Vulkan on Intel and other GPUs: the agent's inventory reports NVIDIA and AMD cards only, so the
   `vulkan` variant of `llama-cpp` is for AMD.
-- **Import an image** from a file, for machines that cannot reach a registry. *In review*
-  (`offline-images`): an image carried over with `docker save` / `docker load` is checked against the
+- **Import an image** from a file, for machines that cannot reach a registry. ✅ (#10): an image carried over with `docker save` / `docker load` is checked against the
   ids recorded for the pinned image and used, so the built-in recipes work offline as they are, and
   each recipe lists the commands. Still to do: uploading an image file through the console to a
   machine.
@@ -245,10 +242,9 @@ version is not decided yet.
 
 - **AMD ROCm on real hardware.** Done on a real Strix Halo (gfx1151, ROCm 7.0.2): the
   inventory through the `amdsmi` library, unified memory and the 96 GiB
-  pool, joining, the GPU allowlist, and a llama.cpp Vulkan deployment served through `/v1`. Still to
-  confirm:
-  - the built-in `vulkan` variant of `llama-cpp` (b12242) on the Strix Halo, with its image loaded
-    from a file (that machine cannot reach ghcr.io) and checked by its recorded ids;
+  pool, joining, the GPU allowlist, and llama.cpp served through `/v1` with the built-in `vulkan` variant (b12242),
+  its image loaded from a file (that machine cannot reach ghcr.io) and checked by its recorded ids.
+  Still to confirm:
   - the ROCm images of the `vllm` and `llama-cpp` recipes (both list gfx1151 among their targets;
     `llama-cpp` sends APUs to Vulkan);
   - a discrete card;

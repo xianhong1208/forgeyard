@@ -9,7 +9,7 @@
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
 > 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3（進行中）加入更多種類的模型；第一步是 vLLM 與 llama.cpp 上的
-> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.md](ROADMAP.md)。
+> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
 
 ## 使用指南
 
@@ -83,7 +83,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 | 沒有 GPU 的 x86-64 | Linux | llama.cpp（Qwen3-1.7B GGUF）同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；llama.cpp b12242 的文字轉語音（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo），並以 faster-whisper 聽寫確認內容 |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
-還沒在真實硬體上檢查的：`llama-cpp` 內建的 Vulkan variant（b12242）、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
+還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
 
 ## 開發
 
