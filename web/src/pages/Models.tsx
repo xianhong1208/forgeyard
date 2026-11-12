@@ -1,4 +1,4 @@
-import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -24,6 +24,7 @@ const KINDS = [
   { icon: IconSortDescending, name: "Rerank", detail: "vLLM's pooling runner; small, shares a GPU" },
   { icon: IconMicrophone, name: "Speech to text", detail: "faster-whisper behind speaches" },
   { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
+  { icon: IconPhotoAi, name: "Images", detail: "diffusers pipelines on vLLM-Omni; stable-diffusion.cpp on AMD (Vulkan) and CPUs" },
 ];
 
 export function ModelsPage() {
