@@ -351,6 +351,11 @@ def main() -> int:
                       f"estimate {dep['estimate']['amount'] / GIB:.2f} GiB", info=used > dep["estimate"]["amount"])
             report["deployments"][dep_name] = info
             exercise(c, d, dep_name, spec, recipes[recipe], args, check, httpx, openai, report, save)
+            if not args.keep:
+                # Free its card before the next model: on a machine with one card (an APU) the next
+                # would not fit while this one holds it.
+                status, _ = c.call("DELETE", f"/api/deployments/{dep['id']}")
+                log(f"done with {dep_name}: deployment removed -> {status}")
     finally:
         if args.keep:
             log("--keep: leaving the deployments running; run again without --keep to remove them")
