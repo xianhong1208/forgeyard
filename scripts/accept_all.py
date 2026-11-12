@@ -32,6 +32,10 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              may not spill, local only (route and header), the cloud maximum, cost, budgets (key,
              person, provider) and their 80% / 100% alerts. Exactly one request reaches the
              provider (CLOUD_PROMPT); everything changed on it is put back
+  tts        text to speech (1.3, scripts/accept_tts.py's checks): Qwen3-TTS 0.6B on vLLM-Omni on the GPU
+             machine and Chatterbox Turbo GGUF on llama.cpp on the CPU machine: the SDK's speech calls,
+             every format, streaming, voices, voice cloning refused, the input cap, usage (characters and
+             audio length), the key guard and, with a speech-to-text model, intelligibility (--tts-asr)
   console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
              and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
 
@@ -352,6 +356,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     ap.add_argument("--timeout", type=float, default=2400, help="seconds a deployment may take to be ready")
     ap.add_argument("--kill-local", action="store_true",
                     help="kill the engine of a CPU replica running on THIS computer to show failover")
+    ap.add_argument("--tts-asr", default="auto", help="the tts group's intelligibility check: auto (a ready "
+                    "speech-to-text deployment, else skipped), a served model, local:<faster-whisper model>, or none")
     ap.add_argument("--shots", help="save the console group's screenshots in this directory")
     ap.add_argument("--chrome", default="/opt/google/chrome/chrome", help="Chrome for the console group")
     ap.add_argument("--install-playwright", action="store_true",
@@ -1844,6 +1850,75 @@ def budgets(run: Run, p: dict, pm: dict, priced: bool, k_on: dict, cloud_name: s
 
 
 # ------------------------------------------------------------------ group: console
+# ------------------------------------------------------------------ group: tts (1.3)
+# Text to speech: one model per machine role, the ones scripts/accept_tts.py knows; that script's checks
+# run on each (the SDK's speech calls, every format, streaming, voices, refusals, usage, the key guard and,
+# with a speech-to-text model on the server or --tts-asr local:<model>, intelligibility).
+TTS_MODELS = (("gpu", "qwen3-tts-0.6b"), ("cpu", "chatterbox-turbo-gguf"))
+
+
+@group("tts", "text to speech: /v1/audio/speech with the official SDK, voices, formats, refusals, usage")
+def group_tts(run: Run) -> None:
+    import types
+
+    import httpx
+    import openai
+
+    sys.path.insert(0, str(HERE))
+    import accept_m3
+    import accept_tts
+
+    accept_m3.TLS = run.tls
+    c = run.admin
+    recipes = {r["name"]: r for r in c.ok("GET", "/api/models")["recipes"]}
+    for role, name in TTS_MODELS:
+        m = run.machine(role)
+        if m is None:
+            run.skip(f"{name}: text to speech", f"no --{role}-machine given")
+            continue
+        m = run.fresh_machine(role)
+        spec = dict(accept_tts.MODELS[name])
+        recipe = spec["recipe"]
+        if recipe not in recipes:
+            run.skip(f"{name}: text to speech", f"the server has no recipe {recipe}")
+            continue
+        if accept_tts.ensure(c, name, spec):
+            run.cleanup.add(f"catalog entry {name}", _remove_model, c, name)
+        params = dict(spec["params"]) | {"gpus": 1 if role == "gpu" else 0}
+        if role == "cpu" and "threads" in recipes[recipe]["params"]:
+            params["threads"] = 8
+        got = deploy(run, f"tts-{role}", {"model": name, "recipe": recipe, "params": params, "device": role}, m)
+        if not got:
+            continue
+        d0 = got["deployment"]
+        holder: dict = {}
+
+        def poll(dep_id=d0["id"]):
+            ready, text, d = deployment_state(run, dep_id)
+            holder["d"] = d
+            return ready, text
+
+        try:
+            run.wait(d0["name"], poll, run.args.timeout, every=5)
+        except Fail as e:
+            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            continue
+        run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
+        d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
+
+        def check(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
+            if skip or info:
+                run.skip(label, ("information: " if info else "") + str(detail))
+            else:
+                run.check(label, ok, detail)
+
+        report = {"deployments": {d["name"]: {}}}
+        args = types.SimpleNamespace(asr=run.args.tts_asr)
+        accept_tts.exercise(c, d, d["name"], spec, recipes[recipe], args, check, httpx, openai, report, None,
+                            key=run.new_key(f"tts-{role}"))
+        run.report.info.setdefault("tts", {})[d["name"]] = report["deployments"][d["name"]]
+
+
 @group("console", "the web console in a browser, as an admin and as a plain user")
 def group_console(run: Run) -> None:
     try:
