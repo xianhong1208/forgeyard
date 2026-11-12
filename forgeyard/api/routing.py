@@ -25,7 +25,7 @@ from forgeyard.models import routes
 
 router = APIRouter(prefix="/api", tags=["routes"])
 
-APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio")
+APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech")
 MAX_TARGETS = 32
 MAX_TIERS = 8
 
