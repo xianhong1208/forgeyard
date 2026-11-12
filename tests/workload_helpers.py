@@ -140,8 +140,23 @@ def find(ref):
             return cid, c
     return None, None
 
+def find_image(ref):
+    """A local image (state["images"]) by Id (with or without sha256:), repo:tag or repo@digest."""
+    bare = ref.removeprefix("sha256:")
+    for img in state.get("images", []):
+        if bare == img["Id"].removeprefix("sha256:") or ref in img.get("RepoTags", []) \
+                or ref in img.get("RepoDigests", []):
+            return img
+    return None
+
 cmd = args[0] if args else ""
-if cmd == "info":
+if cmd == "image" and args[1:2] == ["inspect"]:
+    img = find_image(args[2])
+    if img is None:
+        print("Error response from daemon: No such image: " + args[2], file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps([img]))
+elif cmd == "info":
     print(INFO.read_text() if INFO.exists() else json.dumps({"ServerVersion": "27.0.0-fake",
           "Runtimes": {"runc": {}, "nvidia": {}}, "DefaultRuntime": "runc"}))
 elif cmd == "run":
@@ -163,6 +178,12 @@ elif cmd == "run":
             lk, lv = v.split("=", 1)
             labels[lk] = lv
     image, rest = args[i], args[i + 1:]
+    if state.get("offline") and find_image(image) is None:
+        # an image that is not local, on a machine that cannot resolve the registry
+        print(f"Unable to find image '{image}' locally", file=sys.stderr)
+        print('docker: Error response from daemon: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: '
+              "no such host.", file=sys.stderr)
+        sys.exit(125)
     if image.startswith("fail/"):
         print("Error: pull access denied for " + image, file=sys.stderr)
         sys.exit(125)
@@ -264,6 +285,24 @@ class FakeDocker:
                 if c["name"] == name:
                     c.update(fields)
             f.write_text(json.dumps(data))
+
+    def _update(self, change) -> None:
+        import fcntl
+
+        f = self.root / "state.json"
+        with open(self.root / ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            data = json.loads(f.read_text()) if f.exists() else {"containers": {}}
+            change(data)
+            f.write_text(json.dumps(data))
+
+    def load_image(self, item: dict) -> None:
+        """An image in the local store, as `image inspect` shows it (Id, RepoTags, RepoDigests, ...)."""
+        self._update(lambda data: data.setdefault("images", []).append(item))
+
+    def offline(self) -> None:
+        """No registry: `run` of an image that is not local fails as a failed DNS lookup does."""
+        self._update(lambda data: data.update(offline=True))
 
     def info(self, data: dict) -> None:
         (self.root / "info.json").write_text(json.dumps(data))

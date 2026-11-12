@@ -46,6 +46,7 @@ from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.machines.protocol import PROTOCOL_VERSION
+from forgeyard.workloads import images
 from forgeyard.workloads.spec import WorkloadSpec
 
 log = logging.getLogger("forgeyard.agent")
@@ -144,6 +145,8 @@ class Supervisor:
                     self.keys[r["id"]] = (env or None, str(key["value"]))
                     r["key_env"] = env or None
                     r["guarded"] = True
+            if "image_ids" in r:
+                r = {**r, "image_ids": images.parse_check(r["image_ids"])}
             desired[r["id"]] = r
         self.desired = desired
         self.full_due = True
@@ -293,6 +296,9 @@ class Supervisor:
             if want.get("guarded") and not rec.guarded:
                 rec.guarded = True
                 self._save(rec)
+            if want.get("image_ids") and want["image_ids"] != rec.image_ids:
+                rec.image_ids = want["image_ids"]  # a record from before the server or agent knew them
+                self._save(rec)
             if (self._guarded(rec) and rec.id in self.keys and rec.state in LIVE and rec.ports
                     and not plan.guarded(rec.ports)):
                 # Started by an agent without the guard: its engine listens on the published port
@@ -318,6 +324,7 @@ class Supervisor:
                          spec=want.get("spec") or {}, gpus=list(want.get("gpus") or []))
             rec.key_env = want.get("key_env")
             rec.guarded = bool(want.get("guarded"))
+            rec.image_ids = want.get("image_ids")
             if rec.runtime not in self.runtimes:
                 rec.state, rec.final, rec.reason = "failed", True, f"this agent has no {rec.runtime} runtime"
             elif want.get("model") is not None or want.get("engine") is not None:

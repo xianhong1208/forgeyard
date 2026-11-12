@@ -4,15 +4,16 @@ import { Link, useSearchParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
-import { Notice, PageHeader } from "../components/ui";
+import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
+import { engineCarry } from "../lib/engineImages";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { API_KIND } from "../lib/gateway";
 import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
 import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, targetName, targetWhere, tiers } from "../lib/routing";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RoutesResponse } from "../lib/types";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RecipeVariant, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
@@ -294,7 +295,57 @@ function RecipeCard({ r }: { r: Recipe }) {
           </li>
         ))}
       </ul>
+      <OfflineImages name={r.name} variants={r.variants} />
     </article>
+  );
+}
+
+// The commands that carry a container image to a machine that cannot reach the registry, for the
+// variant picked (one at a time: the recipe card is narrow and the commands are long).
+function OfflineImages({ name, variants }: { name: string; variants: RecipeVariant[] }) {
+  const byImage = new Map<string, { names: string[]; checked: boolean }>();
+  for (const v of variants) {
+    if (v.runtime !== "container" || !v.image) continue;
+    const entry = byImage.get(v.image) ?? { names: [], checked: Boolean(v.image_check) };
+    entry.names.push(v.name);
+    byImage.set(v.image, entry);
+  }
+  const images = [...byImage];
+  const [picked, setPicked] = useState(0);
+  if (images.length === 0) return null;
+  const [image, e] = images[Math.min(picked, images.length - 1)];
+  const carry = engineCarry(image);
+  const what = e.names.join(", ");
+  const id = `offline-${name}`;
+  return (
+    <details className="docker-advanced recipe-offline">
+      <summary className="small">Machine without registry access: load the image</summary>
+      <p className="small">
+        On a machine that can reach the registry, save the image of the variant you need to a file. Copy it over, load it, and
+        deploy as usual. <HelpLink page="how-to" anchor="offline-machines">Offline machines</HelpLink>
+      </p>
+      {images.length > 1 && (
+        <div className="field recipe-offline-pick">
+          <label htmlFor={id}>Variant</label>
+          <select id={id} value={Math.min(picked, images.length - 1)} onChange={(ev) => setPicked(Number(ev.target.value))}>
+            {images.map(([img, x], n) => <option key={img} value={n}>{x.names.join(", ")} · {imageTag(img).split("/").pop()}</option>)}
+          </select>
+        </div>
+      )}
+      <p className="small mono muted recipe-offline-image">{imageTag(image)}</p>
+      <CopyBlock value={carry.save} label={`Save command for ${what}`} />
+      <CopyBox value={carry.load} label={`Load command for ${what}`} />
+      <p className="small muted">
+        {e.checked ? (
+          <>Forgeyard checks the loaded image against the ids recorded for it, so this recipe works offline as it is.</>
+        ) : (
+          <>
+            No ids are recorded for this image, so Forgeyard cannot check a loaded copy: name it by its tag only (without{" "}
+            <code>@sha256:…</code>) in the recipe.
+          </>
+        )}
+      </p>
+    </details>
   );
 }
 

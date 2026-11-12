@@ -113,8 +113,40 @@ helpers. That is enough for every built-in engine image, since they are all publ
 - **No access to Docker Hub** (no internet, a firewall or a DNS filter): carry the image over as a
   file: pull and `docker save` it on a machine that can, then `docker load` it on this one
   ([how](how-to.md#offline-machines-or-build-it-yourself)). The agent's `docker run` then finds it
-  locally. The models' engine images need the same on such a machine: pull or load them once, and
-  the agent uses them.
+  locally. The models' engine images need the same on such a machine:
+  [Offline machines](how-to.md#offline-machines).
+
+## A replica fails: the image is not on this machine
+
+**You see:** a deployment's replica fails with `the image is not on this machine and could not be
+pulled; on an offline machine, docker load the image (Forgeyard checks it by its recorded ids)`,
+followed by Docker's error (`lookup ghcr.io … no such host`, a timeout, `pull access denied`).
+
+**Why:** the engine image is not on the machine, neither by its pinned digest nor by its tag, and the
+machine cannot reach the registry.
+
+**Do:** carry the image over as a file and load it: [Offline machines](how-to.md#offline-machines).
+The recipe's page lists the commands for each of its images. The agent tries again by itself; the
+next start uses the loaded image. If the machine should reach the registry, check its DNS and proxy
+first (`docker pull` of the image there must work).
+
+When the message instead says `… is loaded but Forgeyard has no recorded ids for this image`, the
+image comes from a custom recipe: Forgeyard cannot check a loaded copy of it, so name it by its tag
+only (without `@sha256:…`) in that recipe.
+
+## A replica fails: a different image is loaded under that tag
+
+**You see:** `a different image is loaded under ghcr.io/…:<tag> (its ids do not match the recorded
+ones), so it is not run, and the pinned image could not be pulled`.
+
+**Why:** an image is loaded under the recipe's tag, but it is not the image the recipe pins: another
+build (an older engine under a reused tag, a tag moved on the registry), another platform's layers
+claimed as this one, or an image changed and tagged locally. Forgeyard never runs it in place of the
+pinned image, and asks the registry for the pinned one, which this machine cannot reach.
+
+**Do:** load the image the recipe names, pulled by its digest as in
+[Offline machines](how-to.md#offline-machines); `docker load` replaces the tag. `docker image inspect
+<tag>` shows what is loaded now.
 
 ## Hugging Face downloads are slow
 

@@ -53,7 +53,22 @@ through the gateway, and the usage units for all of 1.3. Third part: text to spe
 - `scripts/accept_tts.py`: the real-hardware acceptance of text to speech with the official SDK
   (Chinese and English, streaming, every format, voices, refusals, usage, the key guard, and an
   intelligibility check through speech to text), and a `tts` group in `scripts/accept_all.py`.
-
+- **Engine images on machines without registry access.** A built-in recipe's image can be carried
+  over as a file (`docker save` on a machine that can pull it, `docker load` on the one that
+  cannot), and the recipe works as it is: no custom recipe naming the image by tag only. Recipes pin
+  images as `tag@sha256:…`, which Docker finds by the digest only, and a loaded copy often lacks it
+  (Docker's classic store drops it; its containerd store can give the copy an id of its own, seen on a
+  real offline AMD APU machine: an id found in no registry). So `scripts/pin_images.py` now also
+  records, in `forgeyard/recipes/images.lock.json`, every id a correct copy can show (the index, each
+  platform's manifest and config digest) and a content id per platform (layers, platform,
+  entrypoint, command, environment, user, working directory, stop signal); its check mode verifies
+  them against the registry. When the pinned digest is not local but the tag is, the agent runs that
+  image by its local id if it matches, never otherwise. A failed pull says the image is not on the
+  machine and how to load it, or that a different image is loaded under the tag. Each recipe on
+  **Models → Catalog and recipes** lists the commands for its images
+  ([Offline machines](docs/guide/how-to.md#offline-machines)). Protocol: agents that list the new
+  `image_ids` feature get the ids beside each replica's spec; older agents get exactly what they got
+  before.
 - **Setup health** for admins: Forgeyard checks its own setup for settings and combinations that
   are broken, risky or useless, from the settings, the database and the agents' reports, and says
   what to do with a link to the fix. About 40 checks, among them: a key that may spend on cloud

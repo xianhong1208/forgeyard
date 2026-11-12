@@ -573,6 +573,10 @@ recipe with only the variants you want can.
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
 Every image is pinned by digest as well (`tag@sha256:…`); the tag is what the pages show.
+`scripts/pin_images.py` records in `forgeyard/recipes/images.lock.json` the ids a correct copy of each
+image can show (index, manifest and config digests, and a content id per platform), so a copy loaded
+with `docker load` on a machine without registry access is checked and used:
+[Offline machines](how-to.md#offline-machines).
 
 A variant's fields: `name`, `when` (`vendor`: `nvidia`, `amd` or `cpu`; `arch`: AMD gfx targets or
 CPU architectures; `compute_capability` and `driver`: comparisons such as `>=8.0`), `runtime`
