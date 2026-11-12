@@ -37,7 +37,12 @@ def test_fy_ags_001_hello_brings_the_machine_online_with_its_inventory(owner):
                                                   15321071616, 9689825280, 7716405248]
         assert gpus[0]["vram_used"] // 2**20 == 77315  # what nvidia-smi showed as memory.used (MiB)
         assert m["accelerators"][-1]["vendor"] == "cpu"
-    assert machine(owner, j["node_id"])["status"] == "offline"  # closing the socket is noticed at once
+    # Closing the socket is noticed at once (well before offline_after): the server handles the close on
+    # its own loop, so allow it a moment to commit before reading the status back.
+    deadline = time.monotonic() + 3
+    while machine(owner, j["node_id"])["status"] != "offline" and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert machine(owner, j["node_id"])["status"] == "offline"
 
 
 def test_fy_ags_002_apu_inventory_keeps_unified_memory(owner):
