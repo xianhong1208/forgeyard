@@ -9,6 +9,12 @@
 - files (faster-whisper, speaches TTS): the model files plus the recipe overhead.
 - two-stage speech engines (vLLM-Omni, 1.3): the talker as above (its config is the talker's), plus
   the recipe's `codec_overhead` for the audio decoder stage on the same card.
+- diffusers (image generation, 1.3): the weights of every component (vLLM-Omni holds a diffusers
+  pipeline in 16 bits whatever its files store; stable-diffusion.cpp the files as they are), plus what
+  making the largest image the deployment allows takes: the recipe's activations per megapixel, for
+  as many images at once as a request may ask (the engine makes them together), and the VAE's decode
+  per megapixel, plus the engine overhead and the CUDA context. With the text encoders offloaded
+  (vLLM-Omni's model offload), only the largest component is on the card at a time.
 - fixed: the recipe's number.
 - A declared `vram` parameter replaces all of it (and is required for local:// models, whose
   files the server cannot read).
@@ -239,6 +245,89 @@ def _files(meta: dict, recipe: Recipe, gpus: int, ctx: int, device: str) -> Esti
     return est
 
 
+DEFAULT_IMAGE_SIDE = 1024
+MAX_IMAGE_SIDE = 4096
+
+
+def image_side(meta: dict) -> int:
+    """The model's native image side in pixels (catalog metadata; 1024 when it is not known)."""
+    side = (meta.get("image") or {}).get("size") if isinstance(meta.get("image"), dict) else None
+    return side if isinstance(side, int) and 64 <= side <= MAX_IMAGE_SIDE else DEFAULT_IMAGE_SIDE
+
+
+def image_caps(meta: dict, params: dict) -> tuple[int, int]:
+    """(the largest side in pixels, the most images per request) a deployment allows: its max_side
+    (0: the model's native side) and max_images."""
+    side = params.get("max_side")
+    side = side if isinstance(side, int) and not isinstance(side, bool) and side > 0 else image_side(meta)
+    n = params.get("max_images")
+    n = n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 1
+    return side, n
+
+
+_16BIT = ("BF16", "F16", "FP16")
+
+
+def _diffusion(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device: str) -> Estimate:
+    side, most = image_caps(meta, params)
+    mp = side * side / 1e6
+    at_once = most if recipe.estimate.parallel else 1
+    est = Estimate("diffusers", device, gpus if device == "gpu" else 0)
+    weights: list[Part] = []
+    d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else None
+    if d and d.get("components"):
+        for name, c in d["components"].items():
+            stored, n = int(c.get("bytes") or 0), int(c.get("params") or 0)
+            dtype = str(c.get("dtype") or "")
+            held = n * 2 if recipe.estimate.cast_16bit and dtype not in _16BIT and n and dtype.startswith("F") \
+                and not dtype.startswith("F8") else stored
+            what = f"{n / 1e9:.2f} B parameters" + (" in 16 bits" if held != stored else f" as stored ({dtype})")
+            weights.append(Part(f"{name} ({c.get('class') or 'component'})", held, what))
+    else:
+        img = meta.get("image") if isinstance(meta.get("image"), dict) else {}
+        sizes = img.get("bytes") if isinstance(img.get("bytes"), dict) else None
+        if sizes:
+            labels = {"model": "Diffusion model" if not img.get("single", True) else "Checkpoint", "vae": "VAE",
+                      "llm": "Text encoder (LLM)", "t5xxl": "Text encoder (T5-XXL)", "clip_l": "CLIP-L",
+                      "clip_g": "CLIP-G"}
+            comps = img.get("components") or {}
+            for role, n in sizes.items():
+                path = meta.get("file") if role == "model" else comps.get(role)
+                weights.append(Part(labels.get(role, role), int(n or 0), f"{path}, as stored"))
+        else:
+            w = int(meta.get("size_bytes") or 0)
+            weights.append(Part("Model files", w, "as stored"))
+    if not any(p.bytes for p in weights):
+        raise EstimateError("the model's files have no known size")
+    offload = params.get("offload") == "model" and device == "gpu" and len(weights) > 1
+    if offload:
+        biggest = max(weights, key=lambda p: p.bytes)
+        rest = sum(p.bytes for p in weights) - biggest.bytes
+        weights = [Part(biggest.label, biggest.bytes, biggest.detail + "; the other components wait in host memory "
+                                                                      "(model offload)")]
+        est.notes.append(f"Model offload: {gib(rest)} of weights stay in host memory and move to the card when used.")
+    est.parts = weights
+    act = int(recipe.estimate.activation_per_mp * mp * at_once)
+    if act:
+        est.parts.append(Part("Image activations", act, f"{at_once} image{'s' if at_once > 1 else ''} at once at up to "
+                                                        f"{side}x{side} ({mp:.2f} MP each, recipe)"))
+    if recipe.estimate.vae_per_mp:
+        est.parts.append(Part("VAE decode", int(recipe.estimate.vae_per_mp * mp), f"one {side}x{side} image at a "
+                                                                                  "time (recipe)"))
+    if device == "cpu":
+        est.parts.append(Part("Engine overhead", recipe.estimate.cpu_overhead, "recipe"))
+        est.ram = sum(p.bytes for p in est.parts)
+    else:
+        est.parts.append(Part("Engine overhead", recipe.estimate.overhead, "allocator, workspaces (recipe)"))
+        est.parts.append(Part("CUDA context", ctx, "per process"))
+        est.per_gpu = sum(p.bytes for p in est.parts)
+        if gpus > 1:
+            est.notes.append("The pipeline runs on one GPU; the others are reserved but idle.")
+    est.notes.append(f"Sized for the deployment's caps: {most} image{'s' if most > 1 else ''} per request, up to "
+                     f"{side}x{side}. Raising them raises this.")
+    return est
+
+
 def estimate(meta: dict, recipe: Recipe, params: dict, *, device: str, gpu_context: int,
              task: Optional[str] = None) -> Estimate:
     """The memory one replica needs on each device. `params` are validated already; `task` is the
@@ -266,6 +355,8 @@ def estimate(meta: dict, recipe: Recipe, params: dict, *, device: str, gpu_conte
         return _gguf(meta, recipe, params, gpus, gpu_context, device, task)
     if method == "files":
         return _files(meta, recipe, gpus, gpu_context, device)
+    if method == "diffusers":
+        return _diffusion(meta, recipe, params, gpus, gpu_context, device)
     est = Estimate("fixed", device, gpus)
     est.parts = [Part("Recipe constant", int(recipe.estimate.vram or 0))]
     if device == "gpu":

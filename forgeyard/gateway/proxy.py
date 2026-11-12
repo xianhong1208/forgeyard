@@ -44,6 +44,10 @@ cloud provider.
    gateway (characters before, audio milliseconds after), voice cloning is refused, each deployment
    gets its own body (its default format, voice, language and frame cap), and the audio streams
    through as it is made. Local deployments only.
+12. Images (1.3, forgeyard/gateway/imagegen.py): /v1/images/generations is checked against each
+   deployment's caps (images per request, largest side, steps), sent with only the fields Forgeyard
+   knows, queued in the gateway while every replica is busy (429 `queue_full` once the queue is full),
+   answered as base64 only, and counted in images, kilopixels and busy milliseconds. Local only.
 """
 
 from __future__ import annotations
@@ -68,7 +72,7 @@ from starlette.responses import Response
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
-from forgeyard.gateway import budgets, egress, media as gmedia, multipart, pricing, quirks, speech
+from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -89,6 +93,7 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "audio/transcriptions": ("openai-audio", "multipart"),
     "audio/translations": ("openai-audio", "multipart"),
     "audio/speech": ("openai-speech", "json"),
+    "images/generations": ("openai-images", "json"),
 }
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
 CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets serve in 1.2
@@ -120,6 +125,7 @@ class LocalGroup:
     running: bool = True                  # False once someone stopped the deployment
     accepts: Optional[modalities.Accepts] = None   # media and body size it takes (1.3)
     speaks: Optional[speech.Speaks] = None          # text to speech: formats, voices, input cap (1.3)
+    draws: Optional[imagegen.Draws] = None          # image generation: caps, default size, queue (1.3)
 
 
 @dataclass
@@ -228,10 +234,13 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
         if found is not None and model is not None else None
     speaks = speech.speaks(found[0], params, model.meta if model is not None else None) \
         if found is not None and "tts" in found[0].tasks else None
+    draws = imagegen.draws(found[0], params, model.meta if model is not None else None) \
+        if found is not None and "image" in found[0].tasks else None
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
-                      concurrency=_int(params.get("concurrency")), context=_int(params.get("context")),
-                      running=w.desired_state == "running", accepts=accepts, speaks=speaks)
+                      concurrency=draws.concurrency if draws else _int(params.get("concurrency")),
+                      context=_int(params.get("context")), running=w.desired_state == "running", accepts=accepts,
+                      speaks=speaks, draws=draws)
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -293,7 +302,8 @@ def model_names(db: DbSession) -> list[tuple[Route, int]]:
 
 def endpoint_for(api: str) -> str:
     return {"openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", "rerank": "/v1/rerank",
-            "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech"}.get(api, "/v1")
+            "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
+            "openai-images": "/v1/images/generations"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:
@@ -429,6 +439,27 @@ def fit_speech(route: Route, parsed: "Parsed") -> Route:
     raise speech.refusal(route.served_name, code, ask, [g.speaks for g in groups if g.speaks is not None])
 
 
+def fit_images(route: Route, parsed: "Parsed") -> Route:
+    """Image generation (1.3): check the body and keep the deployments whose caps it fits (images per
+    request, size, steps, prompt length, format). Raises the most telling error when none can."""
+    if parsed.obj is None:
+        return route
+    ask = imagegen.check(parsed.obj)
+    parsed.image = ask
+    parsed.max_tokens = None             # no tokens: the key's rpm and its other limits apply
+    groups = [g for tier in route.tiers for g in tier.locals]
+    why = {g.deployment_id: imagegen.takes(g.draws, ask) for g in groups}
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if why[g.deployment_id] is None]
+        if locals_:
+            tiers.append(Tier(tier.index, locals_, []))
+    if tiers or not groups:
+        return replace(route, tiers=tiers) if groups else route
+    code = min((c for c in why.values() if c), key=imagegen.ORDER.index)
+    raise imagegen.refusal(route.served_name, code, ask, [g.draws for g in groups if g.draws is not None])
+
+
 def wants_local_only(request: Request) -> bool:
     return (request.headers.get(LOCAL_ONLY_HEADER) or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -473,6 +504,7 @@ class Parsed:
     boundary: Optional[bytes] = None
     media: Optional[gmedia.Media] = None           # images, audio, video, files (1.3)
     tts: Optional[speech.Ask] = None               # a text-to-speech request, checked (1.3)
+    image: Optional[imagegen.Ask] = None           # an image request, checked (1.3)
     size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 
@@ -845,6 +877,12 @@ class Job:
         self.speech_voice: Optional[str] = None     # the voice the gateway chose for it, if any
         self.speech_rate: Optional[int] = None      # a sample_rate the request asked for
         self.media_ms: Optional[int] = None         # the audio's length, once it has passed
+        self.made: Optional[imagegen.Made] = None   # images: what the answer held (1.3)
+        self.busy_ms: int = 0                       # images: the replica's time on it, times its GPUs
+        self.image_draws: Optional[imagegen.Draws] = None
+        self.queue_key = ""
+        self.sent_at = 0.0
+        self._ticket: Optional[int] = None
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -880,6 +918,10 @@ class Job:
         characters spoken and the audio's milliseconds."""
         m = self.parsed.media
         tts = self.parsed.tts
+        if self.parsed.image is not None:
+            if not served or self.made is None or not self.made.images:
+                return None
+            return {"images": self.made.images, "kilopixels": self.made.kilopixels, "busy_ms": self.busy_ms}
         if tts is not None:
             if not served:
                 return None
@@ -1000,14 +1042,63 @@ class Job:
             pairs = fits
         group_of = {t.uid: g for g, t in pairs}
         remaining = balancer.order(f"{route.served_name}#{tier.index}", [t for _, t in pairs])
-        caps = {t.uid: group_of[t.uid].concurrency for t in remaining} if can_move_on else {}
+        image = parsed.image is not None
+        if image:
+            # Image requests (1.3) always keep to each replica's concurrency (1 by default) and wait in
+            # the gateway's queue, in order, for a free one.
+            caps = {t.uid: group_of[t.uid].concurrency or 1 for t in remaining}
+        else:
+            caps = {t.uid: group_of[t.uid].concurrency for t in remaining} if can_move_on else {}
+        self.queue_key = qkey = f"{route.served_name}#{tier.index}"
+        q = imagegen.queue(qkey) if image else None
+        self._ticket = None
+        try:
+            return await self._local(tier, group_of, remaining, caps, q, can_move_on)
+        finally:
+            if q is not None and self._ticket is not None:
+                q.leave(self._ticket)      # it gave up, failed or was sent: never left in the queue
+                self._ticket = None
+
+    async def _local(self, tier: Tier, group_of: dict, remaining: list, caps: dict, q: Optional[imagegen.Queue],
+                     can_move_on: bool) -> Union[Response, Failed]:
+        route, parsed = self.route, self.parsed
+        image = q is not None
+        waited_from = 0.0
         body_for: dict = {}
         speech_of = self._speech_of = {}
         last_exc: Optional[Exception] = None
         refused: Optional[Response] = None
         deadline: Optional[float] = None
         while remaining:
-            pick = next((t for t in remaining if balancer.try_acquire(t.uid, caps.get(t.uid))), None)
+            # An image request tries for a slot only when nobody is waiting before it.
+            may_try = not image or (self._ticket is None and not q.waiting) or \
+                (self._ticket is not None and q.first(self._ticket))
+            pick = next((t for t in remaining if balancer.try_acquire(t.uid, caps.get(t.uid))), None) if may_try else None
+            if pick is None and image:
+                if self._ticket is None:
+                    limit = sum(g.draws.queue for g in tier.locals if g.draws is not None)
+                    self._ticket = q.join(limit)
+                    if self._ticket is None:
+                        slots = sum(caps.get(t.uid) or 1 for t in remaining)
+                        raise GatewayError(429, "queue_full",
+                                           f"Every replica of {route.served_name!r} is busy and {len(q.waiting)} "
+                                           f"request{'s are' if len(q.waiting) != 1 else ' is'} waiting already. "
+                                           "Try again later.",
+                                           retry_after=imagegen.retry_after(self.queue_key, len(q.waiting), slots))
+                    waited_from = time.monotonic()
+                most = max((g.draws.timeout for g in tier.locals if g.draws is not None), default=imagegen.DEFAULT_TIMEOUT)
+                if time.monotonic() - waited_from > most:
+                    raise GatewayError(503, "queue_timeout", f"The request waited {most:g} s for a free replica of "
+                                                             f"{route.served_name!r}. Try again later.",
+                                       retry_after=imagegen.retry_after(self.queue_key, len(q.waiting), 1))
+                try:
+                    await self.pause(0.05)
+                except ClientGone:
+                    return self.gone()
+                continue
+            if pick is not None and self._ticket is not None:
+                q.leave(self._ticket)
+                self._ticket = None
             if pick is None:
                 # Every replica left is at its deployment's concurrency.
                 if deadline is None:
@@ -1024,7 +1115,15 @@ class Job:
             remaining.remove(pick)
             g = group_of[pick.uid]
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
-            if parsed.tts is not None:
+            if parsed.image is not None:
+                # Each image deployment gets its own body: its default size and steps, its request style.
+                if g.deployment_id not in body_for:
+                    obj = imagegen.body_for(parsed.image, g.draws, g.upstream_model)
+                    body_for[g.deployment_id] = (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+                                                 .encode("utf-8"), False)
+                body, strip = body_for[g.deployment_id]
+                self.image_draws = g.draws
+            elif parsed.tts is not None:
                 # Each speech deployment gets its own body: its format, voice, language and frame cap.
                 if g.deployment_id not in body_for:
                     body_for[g.deployment_id] = await self.speech_body(g, pick)
@@ -1041,8 +1140,14 @@ class Job:
             if pick.secret:
                 headers["Authorization"] = f"Bearer {pick.secret}"
             http = client()
+            timeout = httpx.USE_CLIENT_DEFAULT
+            if image and g.draws is not None:   # images take long: the deployment's own read timeout
+                timeout = httpx.Timeout(connect=self.settings.gateway_connect_timeout, read=g.draws.timeout,
+                                        write=60.0, pool=30.0)
             try:
-                req = http.build_request("POST", f"{pick.url}/v1/{self.endpoint}", content=body, headers=headers)
+                req = http.build_request("POST", f"{pick.url}/v1/{self.endpoint}", content=body, headers=headers,
+                                         timeout=timeout)
+                self.sent_at = time.monotonic()
                 response = await unless_gone(self.request.receive, http.send(req, stream=True))
             except ClientGone:
                 balancer.release(pick.uid)
@@ -1056,8 +1161,8 @@ class Job:
                 continue
             except httpx.TimeoutException:
                 balancer.release(pick.uid)
-                raise GatewayError(504, "upstream_timeout", f"The replica did not answer within "
-                                                            f"{self.settings.gateway_read_timeout:g} s.") from None
+                limit = g.draws.timeout if image and g.draws is not None else self.settings.gateway_read_timeout
+                raise GatewayError(504, "upstream_timeout", f"The replica did not answer within {limit:g} s.") from None
             except httpx.HTTPError as e:
                 balancer.release(pick.uid)
                 raise GatewayError(502, "upstream_error", f"The request to the replica failed ({type(e).__name__}).") from None
@@ -1253,8 +1358,39 @@ class Job:
         return AudioResponse(response, {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
                              meter, done, who=who)
 
+    async def images(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
+        """An image engine's answer (1.3): read whole, rewritten in OpenAI's shape, counted."""
+        try:
+            data = await unless_gone(self.request.receive, response.aread())
+        except ClientGone:
+            return self.gone()
+        except httpx.TimeoutException:
+            raise GatewayError(504, "upstream_timeout", f"The images from {who} did not come in time.") from None
+        except httpx.HTTPError as e:
+            raise GatewayError(502, "upstream_error", f"The answer from {who} broke off ({type(e).__name__}).") from None
+        finally:
+            await response.aclose()
+            balancer.release(release)
+        busy = max(0.0, time.monotonic() - self.sent_at)
+        imagegen.note_busy(self.queue_key, busy)
+        d = self.image_draws
+        status = response.status_code
+        if status == 200:
+            out, made = imagegen.answer(data, self.parsed.image, d)
+            if out is None or not made.images:
+                raise GatewayError(502, "upstream_error", f"The answer from {who} holds no images.")
+            self.made = made
+            self.busy_ms = int(busy * 1000) * max(1, d.gpus if d is not None else 1)
+            self.finish(200, None)
+            return Response(content=out, status_code=200, headers=out_headers, media_type="application/json")
+        self.finish(status, None)
+        return Response(content=imagegen.engine_error(status, data), status_code=status,
+                        headers={**upstream_retry_after(response), **out_headers}, media_type="application/json")
+
     async def serve(self, response: httpx.Response, out_headers: dict, strip: bool, *, release: str,
                     who: str) -> Response:
+        if self.parsed.image is not None:
+            return await self.images(response, out_headers, release, who)
         is_sse = "text/event-stream" in response.headers.get("content-type", "")
         if is_sse and response.status_code == 200:
             def done(status: int, usage) -> None:
