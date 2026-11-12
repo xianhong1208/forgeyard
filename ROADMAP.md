@@ -1,5 +1,7 @@
 # Roadmap
 
+[繁體中文](ROADMAP.zh-TW.md)
+
 Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10; each line names what
 users get, not how it is built. Versions are minor releases unless a change breaks something.
 
@@ -62,7 +64,7 @@ something the alternatives do not (see below). One pull request before the 1.2 r
 5. **Repository settings:** public; secret scanning, push protection and Dependabot alerts on; a
    ruleset protecting `main` and `dev`.
 
-Where it stands (PR #22):
+Done with 1.2.0 (2026-11-11):
 
 - ✅ 2, 3 and 4. The scan covered every blob and message on every branch, tag and pull request ref,
   plus every issue, pull request, comment, review, release and label: nothing private was found, and
@@ -76,7 +78,8 @@ Where it stands (PR #22):
 
   Still open: the ROCm images of the `vllm` and `llama-cpp` recipes on real hardware, and a
   discrete AMD card. The guide says so.
-- 5 is done when the repository is made public.
+- ✅ 5. The repository is public, with secret scanning, push protection, Dependabot alerts and a
+  ruleset protecting `main` and `dev`.
 
 ## Shipped: 1.2.0 (2026-11-11), cloud model APIs behind the same gateway
 
@@ -118,7 +121,7 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
    opt-in, the usage units for all of 1.3.
 2. ✅ **llama.cpp b12242** (#9), with a built-in Vulkan variant for AMD APUs and the cards the ROCm
    image lacks.
-3. *In review*: **Text-to-speech** (`/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
+3. ✅ **Text-to-speech** (#11, `/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
    TTS GGUFs on AMD and the CPU, speaches (Kokoro) for small English voices on CPU and CUDA; voices,
    streaming, characters and audio length in usage. Voice cloning stays off.
 4. *In review*: **Image generation** (`/v1/images/generations`): vLLM-Omni (diffusers pipelines) on
@@ -136,12 +139,7 @@ Also in 1.3, alongside the model types:
   on each page.
 - ✅ **Container images on Docker Hub** (#2): the server and the agent, amd64 and arm64, published by
   a release tag.
-- **Simpler settings** (the owner's decisions on the settings audit): a provider's *outside your
-  network* from its address; one Hugging Face token for the server; one cloud policy for keys;
-  agent defaults like the installer's; deprecations of developer-only settings.
-- **Deployments stay where they ran:** a restarted deployment goes back to its machine when it still
-  fits, a deployment can be moved or pinned in the console, and a replica no agent has picked up says
-  so (an agent too old for the server).
+- **Simpler settings** and **deployments that stay where they ran** moved to 1.3.1 (see *Next*).
 
 The owner's decisions for 1.3 (2026-11-11):
 
@@ -166,16 +164,20 @@ The owner's decisions for 1.3 (2026-11-11):
 | Version | What you get |
 |---|---|
 | **1.3: more kinds of models** (in progress, above) | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images and video in chat on vLLM and llama.cpp (Qwen3-VL, Gemma and similar); **text-to-speech** (`/v1/audio/speech`); **image and video generation** (`/v1/images/generations`, async `/v1/videos`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage, with templates for detection, segmentation and depth. That covers 3D, tabular and other tasks without a recipe each. |
-| **1.4: easier to see** | **Charts:** usage and cost over time as line charts on **Usage**, split by key, model, provider or person, with the day, week and month view. **Machines and models, redesigned:** each machine shows what it is at a glance (an icon per kind: NVIDIA, AMD, APU, CPU), and its page lists the models, workloads and memory on it; models are grouped by kind (chat, multimodal, speech, images, embeddings, rerank) with an icon each; the other pages follow the same layout. |
+| **1.3.1: change a deployment, see what it waits for** | **Edit a deployment** (GPU sharing, context, requests at once, the machine) and its replicas restart; a restarted deployment goes back to its previous machine first. **GPU sharing is pointed out:** chat models stay exclusive by default, but when a model needs half a card or less, the deploy page, a refusal ("fits if both share VRAM") and the setup advisor say that sharing would fit. **Progress for every download:** pulling an engine image shows how much has arrived, like a model download does; a pull fails only when it stops making progress, not after a fixed 30 minutes, and a cancelled pull says it was cancelled. A hint when a replica is never picked up by its machine. **Simpler settings:** one cloud-policy choice, one server-wide Hugging Face token, agent defaults that match the installer. |
+| **1.3.2: dependency fix** | The web build's lint tools move off `minimatch` < 11.0.1. |
+| **1.3.3: README** | The READMEs rewritten around what Forgeyard does, how to install it and a quick start; the developer layout moves to `docs/development.md`. |
+| **1.4: easier to see** | **Charts:** usage and cost over time as line charts on **Usage**, split by key, model, provider or person, with the day, week and month view. **Machines and models, redesigned:** each machine shows what it is at a glance (an icon per kind: NVIDIA, AMD, APU, CPU), and its page lists the models, workloads and memory on it; models are grouped by kind (chat, multimodal, speech, images, embeddings, rerank) with an icon each; the other pages follow the same layout. **Download to…:** download a model to chosen machines before deploying it, with progress on the model's and each machine's page; each machine lists the models in its cache and their size, and can remove them. A machine that cannot reach the internet gets the model, and engine images, **relayed** by the server or by another machine that has them, checked by SHA-256, with progress too. **Clearer pages:** a model workload says which deployment created it and links to it; revoked keys leave the budget lists and alerts; the *Routes and cloud* and *Catalog and recipes* tabs are renamed after trying a few names and layouts. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
 | **1.8: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
+| **1.9: fine-tuning** | A first-class **single-machine LoRA / QLoRA fine-tune**: pick a base model, upload a dataset, train with sensible defaults and a loss curve, then **deploy the adapter in one click** on vLLM (details below). |
 
 Reinforcement learning, robotics and graph learning are not planned as model types: they are
 training and research workloads, and run as plain tasks.
 
-### Training: to be designed
+### 1.9: training
 
 Fine-tuning already runs today as a one-off task in your own trainer container (Unsloth,
 LLaMA-Factory, axolotl), with only the GPUs it was given. The direction under discussion is a
@@ -190,8 +192,23 @@ first-class **single-machine LoRA / QLoRA fine-tune** flow:
    `--enable-lora`, so one card serves many fine-tuned variants.
 
 Training holds whole GPUs for hours, so on shared machines it needs priorities against serving
-(preemptible jobs, quiet-hours windows). Multi-machine distributed training is much later. The
-version and the details are not decided yet.
+(preemptible jobs, quiet-hours windows). That is why it comes after 1.5 (deployments that free
+their GPUs) and 1.8 (alerts). The details are designed then; multi-machine distributed training is
+much later.
+
+### Larger platforms: Kubernetes and others (to be designed, after 1.9)
+
+Forgeyard runs today on its own server with an agent per machine. For bigger installations:
+
+- **The server on Kubernetes:** a Helm chart for the published server image, with PostgreSQL and
+  the data volume, behind the cluster's ingress.
+- **A cluster as a pool of machines:** instead of an agent on each machine, Forgeyard places replicas
+  as pods on an existing Kubernetes cluster (GPUs through the NVIDIA or AMD device plugins), so a
+  cluster that is already managed joins as it is, next to plain machines with agents.
+- Other schedulers (Slurm, Nomad) are looked at in the same design.
+
+How established projects do this (KServe, GPUStack, others) is researched before the design. The
+version is not decided yet.
 
 ## Later, when there is a need
 
@@ -206,7 +223,8 @@ version and the details are not decided yet.
 ## Small improvements, picked up along the way
 
 - Download a model's shards in parallel, and support a Hugging Face mirror (on the test host,
-  downloads ran at 3–4 MiB/s).
+  downloads ran at 3–4 MiB/s). Pre-downloading by hand (`hf download` into the agent's
+  cache) works today: the agent reuses files it finds by their SHA-256.
 - Per-process VRAM figures, instead of the change in whole-card usage.
 - A `modelscope://` model source.
 - Answer 404, as for an unknown model, when a key may not use a model, so a restricted key cannot
@@ -216,8 +234,7 @@ version and the details are not decided yet.
   custom recipe with only the wanted variant is the way around it).
 - Vulkan on Intel and other GPUs: the agent's inventory reports NVIDIA and AMD cards only, so the
   `vulkan` variant of `llama-cpp` is for AMD.
-- **Import an image** from a file, for machines that cannot reach a registry. *In review*
-  (`offline-images`): an image carried over with `docker save` / `docker load` is checked against the
+- **Import an image** from a file, for machines that cannot reach a registry. ✅ (#10): an image carried over with `docker save` / `docker load` is checked against the
   ids recorded for the pinned image and used, so the built-in recipes work offline as they are, and
   each recipe lists the commands. Still to do: uploading an image file through the console to a
   machine.
@@ -227,10 +244,9 @@ version and the details are not decided yet.
 
 - **AMD ROCm on real hardware.** Done on a real Strix Halo (gfx1151, ROCm 7.0.2): the
   inventory through the `amdsmi` library, unified memory and the 96 GiB
-  pool, joining, the GPU allowlist, and a llama.cpp Vulkan deployment served through `/v1`. Still to
-  confirm:
-  - the built-in `vulkan` variant of `llama-cpp` (b12242) on the Strix Halo, with its image loaded
-    from a file (that machine cannot reach ghcr.io) and checked by its recorded ids;
+  pool, joining, the GPU allowlist, and llama.cpp served through `/v1` with the built-in `vulkan` variant (b12242),
+  its image loaded from a file (that machine cannot reach ghcr.io) and checked by its recorded ids.
+  Still to confirm:
   - the ROCm images of the `vllm` and `llama-cpp` recipes (both list gfx1151 among their targets;
     `llama-cpp` sends APUs to Vulkan);
   - a discrete card;
