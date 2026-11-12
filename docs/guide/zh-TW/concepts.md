@@ -92,6 +92,23 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - 用量會計算說出的**字元數**與**音訊長度**。金鑰的每分鐘 token 數中，一個字元算一個 token。
 - 語音只留在你自己的部署上，絕不送往雲端供應商。
 
+## 圖片生成
+
+圖片模型以 `/v1/images/generations`（OpenAI 的圖片呼叫）回應，圖片以 base64 傳回。兩種引擎提供這項服務：
+
+| 引擎（配方） | 在哪裡跑 | 模型 |
+|---|---|---|
+| vLLM-Omni（`vllm-omni-image`） | NVIDIA GPU | diffusers pipeline（帶 `model_index.json` 的儲存庫）：Z-Image-Turbo、Stable Diffusion XL、FLUX.1-schnell、Qwen-Image |
+| stable-diffusion.cpp（`sd-cpp`） | AMD GPU 與 APU（Vulkan）、NVIDIA、CPU（行程，不需要 Docker） | GGUF 或單一檔案：Stable Diffusion 1.5 / XL checkpoint，以及在同一個儲存庫裡、旁邊附有文字編碼器與 VAE 的 Z-Image 和 FLUX |
+
+- **只有 base64。** Forgeyard 不保留它產生的圖片，所以給不出網址：`response_format: url` 會被拒絕。請解碼 `data[].b64_json`。
+- **每個部署都有上限，各有能用的預設值：**一次請求最多幾張圖片（4）、最長邊（模型自己的：Stable Diffusion 1.5 為 512，其他為 1024）、最多幾步（50）。記憶體估算依這些上限計算，所以調高上限，估算也會跟著變大。
+- **一次一個，其餘排隊。** 一張圖片在 GPU 上要幾秒，在 CPU 上要幾分鐘。一個副本一次只處理一個請求（*Requests at once*）；其他請求依序在閘道裡等待。佇列滿了，請求會得到 429 並附上 `Retry-After`。
+- **授權。** 目錄會顯示每個模型的授權，以及它是否 gated。推薦清單只收 Apache-2.0 與 OpenRAIL 的模型；FLUX.1-dev、SD-Turbo 與 SD3.5 不在清單上（條款禁止商業使用或限制營收），但可以自己手動加入。
+- **不過濾提示。** Forgeyard 只檢查請求的格式與上限，不檢查它要求畫什麼。
+- 用量會計算**圖片數**、它們的**千像素數**和**忙碌時間**（在 GPU 上即 GPU 時間）。
+- 圖片只留在你自己的部署上，絕不送往雲端供應商。
+
 ## API 金鑰、限制與用量
 
 - 程式以 **API 金鑰**（`fyk_…`）呼叫 `/v1`。每個人都在 **API keys** 建立自己的金鑰。金鑰只會顯示一次；伺服器只保留它的雜湊值。

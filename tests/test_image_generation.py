@@ -28,7 +28,7 @@ from forgeyard.db import Deployment, new_session
 from forgeyard.gateway import imagegen
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.usage import recorder
-from forgeyard.models import recipes, recommended as rec, sources
+from forgeyard.models import recipes, recommended as rec, render, sources
 from forgeyard.models.estimate import estimate
 from tests.cloud_helpers import FakeCloud, add_provider, deployment_id, model_id, set_tiers
 from tests.gateway_helpers import LiveServer, api_client, make_ready, new_key
@@ -77,6 +77,7 @@ class FakeImages:
         self.secret, self.style, self.default, self.hold = secret, style, default, hold
         self.status: Optional[int] = None
         self.error_body: Optional[bytes] = None
+        self.empty = False                  # answer 200 with no images
         self.seen: list[dict] = []
         self.inflight = 0
         self.most = 0
@@ -116,6 +117,8 @@ class FakeImages:
                         time.sleep(engine.hold)
                     if engine.status:
                         return self._send(engine.status, engine.error_body or b'{"error":"engine says no"}')
+                    if engine.empty:
+                        return self._send(200, b'{"created": 1, "data": []}')
                     w, h = engine.default
                     if body.get("size"):
                         w, h = (int(x) for x in body["size"].split("x"))
@@ -320,6 +323,7 @@ def test_fy_igen_004_images_come_back_as_base64_of_the_size_asked(img):
     """FY-IGEN-004: through /v1 each engine answers with images that decode at the size asked, in OpenAI's
     shape (created, data[].b64_json, output_format, size), without the engines' extras; the answer says
     who made it; usage counts the images, their kilopixels and the replica's busy milliseconds."""
+    img.engines["omni"].hold = img.engines["sd"].hold = 0.06
     r = gen(img.api, "omni", n=2, size="768x512")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -335,7 +339,8 @@ def test_fy_igen_004_images_come_back_as_base64_of_the_size_asked(img):
     assert b["size"] == "512x512" and b["n"] == 1
     total = usage_total(img.owner)
     assert total["images"] == 3 and total["kilopixels"] == 2 * round(768 * 512 / 1000) + round(512 * 512 / 1000)
-    assert total["busy_ms"] >= 0 and total["prompt_tokens"] == 0 and total["requests"] == 2
+    # Busy time: the replica's time on each request (at least the engine's 60 ms) times the GPUs it holds.
+    assert total["busy_ms"] >= 120 and total["prompt_tokens"] == 0 and total["requests"] == 2
 
 
 def test_fy_igen_005_caps_per_deployment(img):
@@ -451,7 +456,9 @@ def test_fy_igen_008_the_queue_is_first_come_first_served():
     """FY-IGEN-008: tickets leave in the order they came; a full queue gives none; one that leaves (gave
     up) makes room; Retry-After grows with those ahead."""
     q = imagegen.Queue()
+    assert q.may_try(None)                      # nobody waits: a newcomer takes a free slot
     a, b = q.join(2), q.join(2)
+    assert not q.may_try(None) and q.may_try(a) and not q.may_try(b)   # no jumping the queue
     assert q.join(2) is None and q.first(a) and not q.first(b)
     q.leave(a)
     assert q.first(b) and q.join(2) is not None
@@ -471,8 +478,11 @@ def test_fy_igen_009_engine_errors_in_openais_shape(img):
     r = gen(img.api, "omni")
     assert r.status_code == 500 and "OOM" in err(r)["message"] and err(r)["type"] == "upstream_error"
     img.engines["omni"].status = None
+    img.engines["omni"].empty = True
+    r = gen(img.api, "omni")
+    assert r.status_code == 502 and err(r)["code"] == "upstream_error" and "no images" in err(r)["message"]
     total = usage_total(img.owner)
-    assert total["images"] == 0 and total["errors"] == 2
+    assert total["images"] == 0 and total["errors"] == 3
 
 
 def test_fy_igen_010_keys_allowlists_rpm_and_no_cloud(img, monkeypatch):
@@ -589,7 +599,7 @@ def test_fy_igen_013_the_inspector_reads_image_models():
              "vae": ["diffusers", "AutoencoderKL"], "text_encoder": ["transformers", "CLIPTextModel"],
              "scheduler": ["diffusers", "EulerDiscreteScheduler"], "feature_extractor": [None, None]}
     xl = Repo("acme/xl", "1" * 40, {
-        "model_index.json": json.dumps(index).encode(), "unet/config.json": b'{"sample_size": 128}',
+        "model_index.json": json.dumps(index).encode(), "unet/config.json": b'{"sample_size": 64}',
         "unet/diffusion_pytorch_model.safetensors": st(64), "unet/diffusion_pytorch_model.fp16.safetensors": st(64, "F16"),
         "vae/diffusion_pytorch_model.safetensors": st(8), "text_encoder/model.safetensors": st(16, "F16"),
         "text_encoder/openvino_model.xml": b"<x/>", "scheduler/scheduler_config.json": b"{}",
@@ -605,7 +615,7 @@ def test_fy_igen_013_the_inspector_reads_image_models():
         policy = fetch.Policy(allow_private=True)
         m = inspector.inspect_hf("acme/xl", None, None, endpoint=hf.url, policy=policy)
         assert m["format"] == "diffusers" and m["task_hint"] == "image" and m["modalities"] == []
-        assert m["image"] == {"size": 1024, "multiple": 64} and m["diffusers"]["pipeline"] == "StableDiffusionXLPipeline"
+        assert m["image"] == {"size": 512, "multiple": 64} and m["diffusers"]["pipeline"] == "StableDiffusionXLPipeline"
         comps = m["diffusers"]["components"]
         assert set(comps) == {"unet", "vae", "text_encoder"} and comps["unet"] == {
             "class": "UNet2DConditionModel", "params": 64, "bytes": 256, "dtype": "F32"}
@@ -792,6 +802,10 @@ def test_fy_igen_019_answers_are_read_for_their_size():
     assert json.loads(out) == {"created": 5, "data": [{"b64_json": base64.b64encode(png(64, 64)).decode()}],
                                "output_format": "png", "size": "64x64"}
     assert (made.images, made.kilopixels) == (1, 4)
+    # Counted from the image itself when the engine made another size than asked.
+    other = json.dumps({"data": [{"b64_json": base64.b64encode(png(32, 16)).decode()}]}).encode()
+    out, made = imagegen.answer(other, ask, None)
+    assert (made.kilopixels, json.loads(out)["size"]) == (1, "32x16")
     assert imagegen.answer(b'{"data": []}', ask, None)[1].images == 0
     assert imagegen.answer(b"not json", ask, None) == (None, imagegen.Made())
 
@@ -866,3 +880,72 @@ def test_fy_igen_021_selecting_diffusers_files():
     assert sources.detect_format([f["path"] for f in files]) == "diffusers"
     assert sources.detect_format(["model_index.json", "x.gguf", "unet/a.safetensors"]) == "gguf"
     assert sources.detect_format(["model.safetensors", "config.json"]) == "safetensors"
+
+
+def test_fy_igen_022_the_acceptance_decoder_finds_broken_images():
+    """FY-IGEN-022: scripts/accept_img.py's decoder (no Pillow) accepts a whole PNG and reads its size,
+    and refuses one with a wrong CRC, pixel data short of its size, or no end; a JPEG needs its frame
+    header and end marker."""
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("accept_img", Path(__file__).resolve().parent.parent / "scripts" /
+                                                  "accept_img.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    good = png(40, 30)
+    assert mod.decode_image(good) == (40, 30, "png")
+    bad_crc = bytearray(good)
+    bad_crc[30] ^= 0xFF                      # inside IHDR's data: its CRC no longer matches
+    short = png(40, 29)
+    short = short[:16] + struct.pack(">II", 40, 30) + short[24:]   # says 30 rows, holds 29 (CRC fixed below)
+    ihdr = short[12:29]
+    short = short[:29] + struct.pack(">I", zlib.crc32(ihdr) & 0xFFFFFFFF) + short[33:]
+    for broken, why in [(bytes(bad_crc), "CRC"), (short, "pixel data"), (good[:-12], "IEND"), (b"GIF89a", "not a PNG")]:
+        with pytest.raises(ValueError, match=why):
+            mod.decode_image(broken)
+    sof = b"\xff\xc0" + struct.pack(">HBHH", 17, 8, 240, 320) + b"\0" * 10
+    assert mod.decode_image(b"\xff\xd8" + sof + b"\xff\xd9") == (320, 240, "jpeg")
+    with pytest.raises(ValueError, match="end marker"):
+        mod.decode_image(b"\xff\xd8" + sof)
+
+
+def test_fy_igen_023_the_deployments_caps_come_from_its_recipe_params_and_model():
+    """FY-IGEN-023: the gateway's settings for a deployment: its images per request within the recipe's
+    own most (max_n), its largest side (0: the model's), a default size within that side, its steps,
+    queue and timeout."""
+    from forgeyard.models.recipes import ImageGen
+
+    b = {n: r for n, (r, _) in recipes.builtin_recipes().items()}
+    small = b["sd-cpp"].model_copy(update={"image": ImageGen(request="sd-cpp", max_n=2)})
+    d = imagegen.draws(small, {"max_images": 4, "max_side": 0, "steps": 8, "queue": 3, "timeout": 99}, sd15_meta())
+    assert (d.max_n, d.max_side, d.width, d.height, d.multiple) == (2, 512, 512, 512, 64)
+    assert (d.steps, d.queue, d.timeout, d.request) == (8, 3, 99.0, "sd-cpp")
+    d = imagegen.draws(b["vllm-omni-image"], {"max_images": 3, "max_side": 768, "default_size": "1024x1024"},
+                       zimage_meta())
+    assert (d.max_n, d.max_side, d.width, d.height, d.multiple) == (3, 768, 768, 768, 16)
+    assert render.default_size(zimage_meta(), {"max_side": 512, "default_size": "1024x768"}) == (512, 512)
+    assert render.default_size(zimage_meta(), {"default_size": "1024x768"}) == (1024, 768)
+    assert render.default_size(sd15_meta(), {}) == (512, 512)
+
+
+def test_fy_igen_024_a_newcomer_does_not_jump_the_queue(img):
+    """FY-IGEN-024: while a request waits for a deployment, a new one does not take a slot that comes
+    free first: it queues behind (here behind a waiter that never moves, so it times out with 503
+    queue_timeout and never reaches the engine)."""
+    db = new_session()
+    try:
+        d = db.query(Deployment).filter_by(name="sd").one()
+        d.params = {**d.params, "timeout": 1}
+        db.commit()
+    finally:
+        db.close()
+    q = imagegen.queue("sd#0")
+    ahead = q.join(8)
+    try:
+        r = gen(img.api, "sd")
+        assert r.status_code == 503 and err(r)["code"] == "queue_timeout"
+        assert img.engines["sd"].bodies() == [] and q.waiting == [ahead]
+    finally:
+        q.leave(ahead)
+    assert gen(img.api, "sd").status_code == 200

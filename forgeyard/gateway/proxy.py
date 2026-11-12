@@ -919,7 +919,7 @@ class Job:
         m = self.parsed.media
         tts = self.parsed.tts
         if self.parsed.image is not None:
-            if not served or self.made is None or not self.made.images:
+            if self.made is None:      # set only for an answer that held images
                 return None
             return {"images": self.made.images, "kilopixels": self.made.kilopixels, "busy_ms": self.busy_ms}
         if tts is not None:
@@ -1071,8 +1071,7 @@ class Job:
         deadline: Optional[float] = None
         while remaining:
             # An image request tries for a slot only when nobody is waiting before it.
-            may_try = not image or (self._ticket is None and not q.waiting) or \
-                (self._ticket is not None and q.first(self._ticket))
+            may_try = not image or q.may_try(self._ticket)
             pick = next((t for t in remaining if balancer.try_acquire(t.uid, caps.get(t.uid))), None) if may_try else None
             if pick is None and image:
                 if self._ticket is None:

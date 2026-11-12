@@ -449,6 +449,38 @@ the model lists.
 **Streaming sends everything at the end:** some models make the whole utterance before any audio
 comes out (Chatterbox on llama.cpp does). Qwen3-TTS streams.
 
+## An image request is refused, or slow
+
+**You see:** `/v1/images/generations` answers 400; the `code` says why. Nothing reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `response_format_not_supported` | `response_format: url`. Forgeyard keeps no copies of images, so it has no URL to give | Leave it out (or `b64_json`) and decode `data[].b64_json` |
+| `too_many_images` | `n` over the deployment's *Images per request* | Ask for fewer, or raise it (memory grows with it on vLLM-Omni) |
+| `image_too_large` | A side over *Largest side* (by default the model's own size) | Ask for a smaller size, or raise *Largest side* under **Advanced** |
+| `invalid_size` | Not `WIDTHxHEIGHT`, or sides that are not multiples of 16 (64 for Stable Diffusion's UNet) | Use the size the message suggests |
+| `too_many_steps` | `num_inference_steps` over *Most steps* | Ask for fewer |
+| `invalid_request` | No prompt, or `<sd_cpp_extra_args>` in it | Send a prompt; use `num_inference_steps`, `seed`, `negative_prompt` instead |
+
+**429 `queue_full`:** the deployment is busy and its queue is full. Wait `Retry-After` seconds, add a
+replica, or raise *Queue length*. **503 `queue_timeout`:** a request waited longer than *Timeout*.
+
+**504 `upstream_timeout`:** making the images took longer than the deployment's *Timeout* (600 s for
+vLLM-Omni, 1,800 s for stable-diffusion.cpp). On a CPU, ask for a smaller size, fewer steps or fewer
+images, or raise *Timeout*.
+
+**An `engine_error` about memory:** a vLLM-Omni deployment holds what its largest request needed. If
+a shared card runs out, lower *Images per request* or *Largest side*, or turn on *Offload to host
+memory* (slower) or *VAE tiling* under **Advanced**.
+
+**The image does not look like the model's examples:** stable-diffusion.cpp takes a model's sampling
+settings from the catalog entry's engine arguments (Z-Image-Turbo: `--cfg-scale 1 --steps 8`). A model
+added from search has none: add them to its entry.
+
+**An `sd-cpp` replica does not start on a CPU machine:** its process engine needs glibc 2.39 or newer
+(Ubuntu 24.04, Debian 13) and a 1.3 agent, which unpacks `.zip` engines. An older agent shows "cannot
+unpack .zip engines" in the placement: update it.
+
 ## Cost shows requests without a price
 
 **You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above

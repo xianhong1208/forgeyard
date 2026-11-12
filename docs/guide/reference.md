@@ -244,6 +244,8 @@ page cannot use a signed-in browser against it.
 | `POST /v1/audio/speech` | Text to speech (1.3): OpenAI's request, the audio back as it is made. See [Text to speech](#text-to-speech) | no |
 | `GET /v1/audio/voices?model=<model>` | A speech model's voices, its default voice, the formats it makes, how it streams and its input cap | — |
 | `POST /v1/audio/voices`, `DELETE /v1/audio/voices/{name}` | Uploading or deleting a voice (voice cloning): always 400 `voice_cloning_not_supported` in 1.3 | — |
+| `POST /v1/images/generations` | Image generation (1.3): OpenAI's request, images back as base64 (`b64_json`) only. See [Images](#images) | no |
+| `POST /v1/images/edits`, `POST /v1/images/variations` | Image edits and variations: not offered in 1.3, always 404 `endpoint_not_supported` | — |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -256,7 +258,8 @@ What the gateway does with a request:
   headers.
 - `max_tokens` (or `max_completion_tokens`) counts against the key's tokens per minute when the
   request arrives, and sets the most a request may cost under a budget. For text to speech, each
-  character of `input` counts as one token instead (see [Text to speech](#text-to-speech)).
+  character of `input` counts as one token instead (see [Text to speech](#text-to-speech)); an image
+  request counts no tokens (see [Images](#images)).
 - A streamed chat or completion gets a final usage chunk (`stream_options.include_usage`) so that
   tokens are counted. If you did not ask for it, the gateway removes it again.
 - The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB), or the model's own *Largest request*
@@ -345,6 +348,55 @@ only, and speech never goes to the cloud. A key's model list applies to speech a
 "default_format", "stream_formats", "max_input_chars"}`, asked of a ready replica and kept for 5
 minutes. Voices uploaded to an engine are never listed.
 
+### Images
+
+`POST /v1/images/generations` takes OpenAI's request and answers OpenAI's JSON with the images as
+base64. Two engines serve it (recipes `vllm-omni-image` for diffusers pipelines on NVIDIA,
+`sd-cpp` for stable-diffusion.cpp on AMD with Vulkan, NVIDIA and the CPU); local deployments only,
+never a cloud provider.
+
+| Field | What the gateway does |
+|---|---|
+| `model` | The image model's name, as usual |
+| `prompt` | Required, at most the deployment's *Longest prompt* (`max_prompt_chars`, 4,000). Longer: 400 `prompt_too_long`. Engine settings inside it (`<sd_cpp_extra_args>`) are refused: use the fields below |
+| `n` | 1 to the deployment's *Images per request* (`max_images`, 4 by default); more: 400 `too_many_images`. Left out: 1 |
+| `size` | `WIDTHxHEIGHT`, or `auto` or left out for the deployment's *Default size* (the model's own: 512x512 for Stable Diffusion 1.5, 1024x1024 for SDXL, Z-Image and FLUX). Each side at most *Largest side* (`max_side`, 0 = the model's own); larger: 400 `image_too_large`. Each side a multiple of 16 (diffusion transformers) or 64 (Stable Diffusion's UNet); else 400 `invalid_size` |
+| `response_format` | Left out or `b64_json`. **`url` is refused** with 400 `response_format_not_supported`: Forgeyard keeps no copy of the images it makes, so there is no URL to give. Decode `data[].b64_json` |
+| `output_format` | `png` (the default), `jpeg` or `webp`; others 400 `unsupported_output_format`. `output_compression` (0 to 100) for jpeg and webp |
+| `num_inference_steps` | Denoising steps, at most the deployment's *Most steps* (`max_steps`, 50); more: 400 `too_many_steps`. Left out: the deployment's *Default steps*, else the model's own |
+| `negative_prompt`, `guidance_scale`, `seed` | Passed on: as fields to vLLM-Omni, inside the prompt as stable-diffusion.cpp's `<sd_cpp_extra_args>` (built by the gateway). Without `seed` every request is a new image |
+| `true_cfg_scale` | vLLM-Omni only (Qwen-Image); stable-diffusion.cpp ignores it |
+| `quality`, `style`, `background`, `moderation`, `user` | Accepted and ignored |
+| `stream` | Refused (400 `streaming_not_supported`): the answer comes when the images are made |
+
+Nothing else reaches the engine: fields an engine would take but Forgeyard does not offer (vLLM-Omni's
+`lora` with a path on the server, its `extra_params` and system prompts) are left out.
+
+The answer: `{"created", "data": [{"b64_json"}], "output_format", "size"}`. The engines' own extras
+(stable-diffusion.cpp's `generation_info` with the prompt and settings, vLLM-Omni's stage timings) are
+not passed on. An engine's error comes back in OpenAI's shape with its status and the code
+`engine_error`.
+
+**The queue.** A deployment works on *Requests at once* (`concurrency`, 1) per replica; the others wait
+in the gateway, first come first served, at most *Queue length* (`queue`, 8) of them. One more gets 429
+`queue_full` with `Retry-After` (from how long its requests took lately). A request that waits longer
+than the deployment's *Timeout* gets 503 `queue_timeout`; once a replica has it, the gateway waits up
+to that *Timeout* (`timeout`: 600 s for vLLM-Omni, 1,800 s for stable-diffusion.cpp) for the images,
+then 504 `upstream_timeout`. A client that gives up while waiting leaves the queue; its request never
+reaches the engine.
+
+**No prompt filtering.** The gateway checks the request's shape and the deployment's caps, not what the
+prompt asks for. If a deployment needs a safety filter, put one in front of it.
+
+What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| `images` | The images in the answer |
+| `kilopixels` | Their width x height / 1,000, read from each image's own header (PNG, JPEG, WebP), else the size asked |
+| `busy_ms` | The time the replica worked on the request (from sending it to the last byte of the answer), times the GPUs the deployment holds (1 on a CPU): GPU time |
+| tokens | None. A key's tokens per minute does not apply; its requests per minute does |
+
 ### Headers
 
 | Header | Direction | Value |
@@ -389,6 +441,15 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `stream_format_not_supported` | Text to speech: `stream_format` the engine does not offer (`sse` on llama.cpp or speaches) | Leave it out, or use `audio` |
 | 400 | `language_not_supported` | Text to speech: Chinese, Japanese or Korean text to speaches, which deletes those characters | Use a Qwen3-TTS deployment |
 | 400 | `voice_cloning_not_supported` | Text to speech: a reference recording, a voice given as audio or a link, `task_type: "Base"`, or uploading a voice. Not in 1.3 | Use one of the model's voices |
+| 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
+| 400 | `streaming_not_supported` | Images: `stream: true` | Leave it out |
+| 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
+| 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
+| 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says) | Use a size like the one the message suggests |
+| 400 | `unsupported_output_format` | Images: an `output_format` other than png, jpeg or webp, or one the engine does not make | Ask for png |
+| 400 | `too_many_steps` | Images: `num_inference_steps` over the deployment's *Most steps* | Ask for fewer, or raise `max_steps` |
+| 400 | `prompt_too_long` | Images: `prompt` or `negative_prompt` longer than the deployment's *Longest prompt* | Shorten it, or raise `max_prompt_chars` |
+| 4xx/5xx | `engine_error` | Images: the engine refused or failed the request; its status and message are passed on | Read the message; an out-of-memory error means a smaller size or fewer images |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
@@ -400,11 +461,13 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
 | 404 | `model_not_found` | No such model for this key: it does not exist, or it is cloud-only and the key's cloud setting is not **Allowed**. From `GET /v1/models/{model}`, also a stopped model | Check `GET /v1/models` |
 | 404 | `unknown_endpoint` | The gateway has no such path | Use an endpoint above |
+| 404 | `endpoint_not_supported` | `/v1/images/edits` or `/v1/images/variations`: not offered in 1.3 | Use `/v1/images/generations` |
 | 413 | `request_too_large` | The body (with media URLs fetched and inlined) is larger than the model's *Largest request* or `GATEWAY_MAX_BODY_MB` | Send less or smaller images, or raise the parameter or the setting |
 | 413 | `media_too_large` | A media URL's file is larger than `MEDIA_FETCH_MAX_MB` | Send a smaller file, or raise the setting |
 | 421 | `host_not_allowed` | The server does not answer to the host name in the URL | Use its address, or add the name to `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | Over the key's requests or tokens per minute | Wait `Retry-After` seconds |
 | 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
+| 429 | `queue_full` | Images: every replica is busy and the deployment's queue is full | Wait `Retry-After` seconds |
 | 502 | `upstream_unreachable` | No replica could be connected to | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
 | 502 | `upstream_error` | The connection to the replica or provider broke while the answer was coming | Retry |
 | 502 | `replica_refused_key` | The replica refused the gateway's internal key | Stop and start the deployment |
@@ -417,7 +480,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it | Retry |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
-| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT` | Lower `max_tokens`, or raise the setting |
+| 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |
+| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT`; for images, within the deployment's *Timeout* | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
 | 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
 
 Two more cases:
@@ -569,8 +633,19 @@ recipe with only the variants you want can.
 | `faster-whisper` | `cuda`, `cuda-12.4`, `cpu` | NVIDIA, CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
 | `speaches-tts` (1.3) | `cpu` | CPU (in a container), on any machine | the same `ghcr.io/speaches-ai/speaches:0.8.3-cpu` image as faster-whisper. CPU only: Kokoro and Piper run on ONNX Runtime and make speech faster than it plays there; in the CUDA image Kokoro still used the CPU |
 | `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
+| `vllm-omni-image` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | the same `vllm/vllm-omni:v0.32.0` |
+| `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `465adf3`, CUDA 12.6) |
+| | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
+| | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
+
+stable-diffusion.cpp publishes its images only under tags that move with every build (`master-vulkan`,
+`master-cuda`). The recipe pins the builds that were checked by digest; `scripts/pin_images.py` keeps
+them (it reports that the tag moved on as information) unless it is run with `--move-rolling`. Its later
+Linux releases are built on Ubuntu 26.04 (glibc 2.43), which is why the CPU process is an earlier build;
+its OpenAI API is the same. `sd-server` has no API key: an agent without the key guard (before 1.1) gets
+no `sd-cpp` replica.
 
 Every image is pinned by digest as well (`tag@sha256:…`); the tag is what the pages show.
 `scripts/pin_images.py` records in `forgeyard/recipes/images.lock.json` the ids a correct copy of each

@@ -325,6 +325,36 @@ media: {inputs: [image, audio, video], files: false}
 
 **在 AMD APU（Vulkan）上：** 開啟 llama.cpp 的 cooperative matrices 時，Qwen3-TTS 對同一個請求可能產生略有不同的音訊（ggml-org/llama.cpp#32050）。如果在那裡聽起來不對，新增一個自訂配方，在它的 vulkan variant 的 `env` 設定 `GGML_VK_DISABLE_COOPMAT: "1"`。
 
+## 生成圖片
+
+1. **加入圖片模型。** 在 **Models → Add a model → Recommended** 的 **Images** 群組裡有：
+   - 給 NVIDIA GPU 用的 Z-Image-Turbo、Stable Diffusion XL 與 FLUX.1-schnell（vLLM-Omni）。在預設上限下，大約各需要 30、17 與 42 GiB 的 GPU 記憶體；FLUX.1-schnell 是 gated（要在 Hugging Face 接受它的條款並提供 token）。
+   - 給 stable-diffusion.cpp 用的 GGUF 版 Z-Image-Turbo 與 FLUX.1-schnell：AMD GPU 或 APU（Vulkan），或任何 GPU，1024x1024 時大約 18 與 19 GiB（也能在 CPU 上跑，只是很慢）。
+   - 給 CPU 用的 GGUF 版 Stable Diffusion 1.5：又小又舊（512x512），用來確認圖片生成能用。
+
+   從 **Search Hugging Face** 找到的模型，只要標了 *text-to-image*，而且是 diffusers 儲存庫（vLLM-Omni）或 GGUF / safetensors 檔案（stable-diffusion.cpp；選模型檔，旁邊的文字編碼器與 VAE 檔會依名稱找到）就能用。目錄會顯示它的授權；使用產生的圖片之前請先確認。
+2. **照常部署。** *Images per request* 和 *Default size* 在表單上；最長邊、步數、佇列、逾時和卸載在 **Advanced** 底下。預設值就能用。
+3. **用 OpenAI SDK 呼叫：**
+
+   ```python
+   import base64
+
+   out = client.images.generate(model="z-image-turbo", prompt="A lighthouse on a rocky coast at sunset",
+                                size="1024x1024", n=1)
+   with open("lighthouse.png", "wb") as f:
+       f.write(base64.b64decode(out.data[0].b64_json))
+   ```
+
+   步數、負面提示和 seed 放在 `extra_body`：
+   `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`。
+4. **在 Playground 試試看：** 圖片模型會有一個 **Image** 分頁，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
+
+**要多久：** 在 A100 上每張幾秒；在 CPU 上要幾分鐘。在一台忙碌的 x86-64 機器上用 16 到 32 個核心量測：Stable Diffusion 1.5、512x512、20 步大約 100 秒；Z-Image-Turbo（Q4_0）8 步在 512x512 大約 2 分鐘，1024x1024 大約 8.5 分鐘。機器較慢或尺寸較大時，在 **Advanced** 調高 *Timeout*。
+
+**模型自己的設定**（Z-Image-Turbo 需要 CFG 1 與 8 步）對 stable-diffusion.cpp 來說放在目錄項目的引擎參數裡（`--cfg-scale 1 --steps 8`）；推薦的項目都已經帶上了。vLLM-Omni 則從模型本身讀取。
+
+**在離線的 AMD 機器上：** 用 `docker load` 載入 `sd-cpp` 配方的 Vulkan 映像檔（見[離線機器](#offline-machines)）。模型則先在一台連得到 Hugging Face 的機器上部署一次，再把它在那台機器模型快取裡的目錄（`hub/models--<org>--<name>`，用 `tar` 或 `rsync -a`：裡面用的是相對連結）複製到離線機器快取裡的相同位置。那裡的部署會發現已經快取好，什麼都不用下載。
+
 ## 加入雲端供應商
 
 管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
