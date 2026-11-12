@@ -53,7 +53,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/<namespace>/forgeyard:1.2.0
+  docker.io/tonyhuang1101/forgeyard:1.2.0
 sudo docker logs forgeyard
 ```
 

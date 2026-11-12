@@ -19,8 +19,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# The Docker Hub user or organisation the release images are pushed to, e.g. "forgeyard".
-DOCKERHUB_NAMESPACE = ""
+# The Docker Hub user or organisation the release images are pushed to (the maintainer's account).
+DOCKERHUB_NAMESPACE = "tonyhuang1101"
 
 REGISTRY = "docker.io"
 SERVER_REPOSITORY = "forgeyard"

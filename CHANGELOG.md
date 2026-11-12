@@ -167,8 +167,8 @@ through the gateway, and the usage units for all of 1.3. Third part: text to spe
 - `scripts/accept_mm.py`: the real-hardware acceptance of this part, through the API and the official
   SDK, with idempotent cleanup.
 - **Container images on Docker Hub**, for linux/amd64 and linux/arm64: the server
-  (`docker.io/<namespace>/forgeyard`, new `Dockerfile.server`) and the agent
-  (`docker.io/<namespace>/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
+  (`docker.io/tonyhuang1101/forgeyard`, new `Dockerfile.server`) and the agent
+  (`docker.io/tonyhuang1101/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
   `.github/workflows/publish-images.yml`, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only
   `X.Y.Z`), with OCI labels, provenance and an SBOM, then pulls the amd64 images back by digest and
   smoke-tests them. Without the Docker Hub secrets or the namespace it builds and tests both and ends

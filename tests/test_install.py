@@ -23,7 +23,7 @@ from forgeyard import __version__
 from forgeyard.agent import state
 from forgeyard.agent.inventory import SIMULATION_ENV
 from forgeyard.config import get_settings
-from forgeyard.install import commands, wheel
+from forgeyard.install import commands, images, wheel
 from forgeyard.security import tls
 from tests.conftest import OWNER, SETUP_TOKEN, make_client
 from tests.tls_helpers import LiveTLS, ca_of, free_port, https
@@ -134,12 +134,13 @@ def test_fy_inst_004_a_proxy_that_terminates_tls_counts_and_odd_hosts_are_refuse
             commands.install_script(bad)
 
 
-def test_fy_inst_005_the_machines_page_gets_three_ways_that_pin_the_ca(owner):
+def test_fy_inst_005_the_machines_page_gets_three_ways_that_pin_the_ca(owner, monkeypatch):
     """FY-INST-005: a new join token comes with the one-line install (CA check first, then the
     script, with the token and the pin), the Docker build and run commands for NVIDIA, AMD and
     CPU (host network, the socket, the state volume, the cache at the same path, the pin), a config
     file and the manual commands; all with the same fingerprint."""
     tls.ensure()  # what the first start does (the TestClient does not start a TLS listener)
+    monkeypatch.setattr(images, "DOCKERHUB_NAMESPACE", "")  # a local build (FY-INST-013 covers the published image)
     owner.base_url = "https://localhost"
     r = owner.post("/api/machines/join-tokens")
     assert r.status_code == 201
