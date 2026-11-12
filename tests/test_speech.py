@@ -432,7 +432,9 @@ def test_fy_tts_007_streaming_reaches_the_client_as_it_is_made(tts):
                     first = time.monotonic() - t0
                 got += chunk
         total = time.monotonic() - t0
-        assert got == PCM * 4 and first < 0.8 < 1.1 < total, (first, total)
+        # Three 0.4 s pauses between the chunks: the first must come well before the last (relative, so a slow
+        # CI runner does not matter).
+        assert got == PCM * 4 and total > 1.1 and first < total - 0.7, (first, total)
         assert tts.engines["qwen"].bodies()[-1]["stream_format"] == "audio"
         tts.engines["qwen"].chunks, tts.engines["qwen"].delay = 30, 0.2
         with httpx.stream("POST", f"{live.url}/v1/audio/speech", headers=h, timeout=20,
