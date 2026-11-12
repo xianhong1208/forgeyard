@@ -86,7 +86,7 @@ date the `CHANGELOG.md` section, and open the release pull request into `dev`. A
 `main` follows `dev`, and the annotated tag `vX.Y.Z` goes on that commit.
 
 Pushing the tag runs `.github/workflows/publish-images.yml`, which publishes both images on Docker
-Hub (`docker.io/<namespace>/forgeyard` and `docker.io/<namespace>/forgeyard-agent`) for linux/amd64
+Hub (`docker.io/tonyhuang1101/forgeyard` and `docker.io/tonyhuang1101/forgeyard-agent`) for linux/amd64
 and linux/arm64, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only `X.Y.Z`), with provenance
 and an SBOM. It then pulls the amd64 images back by digest, smoke-tests them and lists the digests
 in the run's summary. It needs:

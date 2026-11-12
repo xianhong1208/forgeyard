@@ -102,7 +102,8 @@ def test_fy_inst_013_the_machines_page_uses_the_published_image(owner, monkeypat
         assert r.status_code == 201
         return r.json()
 
-    j = issued()  # nothing published (the repository's default): today's local build
+    monkeypatch.setattr(images, "DOCKERHUB_NAMESPACE", "")
+    j = issued()  # nothing published (no namespace): a local build
     assert j["agent_image"] == {"reference": f"forgeyard-agent:{__version__}", "published": False,
                                 "local_tag": f"forgeyard-agent:{__version__}"}
 
@@ -357,3 +358,13 @@ def test_fy_pub_005_the_docs_name_the_images_by_the_namespace_in_the_code():
                 assert ref == "docker.io/<namespace>/forgeyard", (f, ref)
             named += "docker.io/<namespace>/forgeyard" in text
     assert named >= 10, named
+
+
+def test_fy_pub_006_the_namespace_is_a_docker_hub_account_name():
+    """FY-PUB-006: DOCKERHUB_NAMESPACE goes into every published image name and every `docker run` the
+    Machines page writes: when set it is a Docker Hub account or organisation name (4 to 30 lower-case
+    letters and digits), so a typo stops here and not at the first release's push."""
+    ns = images.DOCKERHUB_NAMESPACE
+    if ns:
+        assert re.fullmatch(r"[a-z0-9]{4,30}", ns), ns
+        assert images.published_repository(images.AGENT_REPOSITORY) == f"docker.io/{ns}/forgeyard-agent"

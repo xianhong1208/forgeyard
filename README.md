@@ -59,7 +59,7 @@ and linux/arm64):
 
 ```bash
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/<namespace>/forgeyard:1.2.0
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.2.0
 sudo docker logs forgeyard      # the one-time setup token
 ```
 
@@ -77,7 +77,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
   sudo sh -s -- --join fyj_… --ca-fingerprint sha256:3f9a…
 ```
 
-Or one `docker run` of the agent image, `docker.io/<namespace>/forgeyard-agent` at the server's
+Or one `docker run` of the agent image, `docker.io/tonyhuang1101/forgeyard-agent` at the server's
 version (the **Docker** tab writes the command), or a checkout with `/etc/forgeyard/agent.toml`. Then deploy a model on **Models** and call it at
 `https://192.168.1.20:7860/v1` with an API key and any OpenAI client.
 
