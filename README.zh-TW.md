@@ -69,7 +69,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 
 也可以用 agent 映像檔跑一個 `docker run`，映像檔是伺服器版本的 `docker.io/tonyhuang1101/forgeyard-agent`
 （**Docker** 分頁會產生指令），或在 Forgeyard 目錄裡搭配 `/etc/forgeyard/agent.toml` 執行。接著在 **Models** 部署模型，用 API 金鑰和任何 OpenAI
-用戶端呼叫 `https://192.168.1.20:7860/v1`。
+用戶端呼叫 `https://192.168.1.20:7860/v1`。之後可以用 **Edit** 修改它的 GPU 共用、上下文長度、並行數、副本數和機器；多個副本會一次重新啟動一個，模型會持續回應。
 
 **從 1.0 升級：** 執行 `uv sync`，重新啟動伺服器，再到每台用一般 HTTP 加入的機器上執行一次 `agent trust` 指令；見
 [docs/https-and-trust.md](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。

@@ -1,5 +1,5 @@
 import { bytes } from "./machines";
-import type { CatalogModel, Medium, Recipe, Replica, Task } from "./types";
+import type { CatalogModel, Deployment, Medium, Recipe, Replica, Task } from "./types";
 
 export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video" };
 
@@ -99,4 +99,51 @@ export function deployBody(f: DeployForm, recipe: Recipe | undefined): Record<st
   if (f.machine) body.machine_id = Number(f.machine);
   if (f.token.trim()) body.hf_token = f.token.trim();
   return body;
+}
+
+// 1.3.1: changing a deployment. The form starts from what it runs with now.
+export type EditForm = {
+  device: "gpu" | "cpu";
+  gpus: string;
+  share: "exclusive" | "vram";
+  replicas: string;
+  machine: string;   // "" = automatic, else the id of the machine it is pinned to
+  vram: string;
+  extraArgs: string;
+  params: Record<string, string>;
+};
+
+function sizeText(n: number): string {
+  const g = n / 1024 ** 3;
+  return Number.isInteger(g) ? `${g}Gi` : String(n);
+}
+
+export function editForm(d: Deployment, recipe: Recipe): EditForm {
+  const p = d.params;
+  const params: Record<string, string> = recipeDefaults(recipe);
+  for (const k of Object.keys(recipe.params)) if (p[k] !== undefined && p[k] !== null) params[k] = String(p[k]);
+  const gpus = Number(p.gpus ?? 1);
+  return {
+    device: gpus === 0 ? "cpu" : "gpu", gpus: String(gpus || 1), share: p.share === "vram" ? "vram" : "exclusive",
+    replicas: String(d.workload.replica_list.length || d.workload.spec.replicas || 1),
+    machine: d.workload.spec.machine_id ? String(d.workload.spec.machine_id) : "",
+    vram: typeof p.vram === "number" ? sizeText(p.vram) : "", extraArgs: Array.isArray(p.extra_args) ? p.extra_args.join("\n") : "",
+    params,
+  };
+}
+
+// The PATCH body: every parameter (the server compares), null to go back to a default.
+export function editBody(f: EditForm, recipe: Recipe): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  for (const [k, def] of Object.entries(recipe.params)) {
+    const v = f.params[k];
+    if (v === undefined || v === "") continue;
+    p[k] = def.type === "int" || def.type === "float" ? Number(v) : v;
+  }
+  p.gpus = f.device === "cpu" ? 0 : Number(f.gpus || "1");
+  p.share = f.share;
+  p.vram = f.vram.trim() || null;
+  const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
+  p.extra_args = extra.length ? extra : null;
+  return { params: p, replicas: Number(f.replicas || "1"), machine_id: f.machine ? Number(f.machine) : null };
 }

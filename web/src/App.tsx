@@ -10,6 +10,7 @@ import { ApiKeysPage } from "./pages/ApiKeys";
 import { AuditPage } from "./pages/Audit";
 import { LoginPage } from "./pages/Login";
 import { DeploymentDetailPage } from "./pages/DeploymentDetail";
+import { DeploymentEditPage } from "./pages/DeploymentEdit";
 import { GetStartedPage, HomePage } from "./pages/GetStarted";
 import { GuidePage, GuideRedirect } from "./pages/Guide";
 import { MachinesPage } from "./pages/Machines";
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/models/deploy" element={<ModelDeployPage />} />
         <Route path="/models/deployments/:id" element={<DeploymentDetailPage />} />
+        <Route path="/models/deployments/:id/edit" element={<DeploymentEditPage />} />
         <Route path="/models/routes/:id" element={<RouteDetailPage />} />
         <Route path="/providers" element={<AdminOnly><ProvidersPage /></AdminOnly>} />
         <Route path="/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />

@@ -186,7 +186,7 @@ function DeploymentCard({ d }: { d: Deployment }) {
               <span className="rep-ports">{ep && <a className="mono" href={ep.url} target="_blank" rel="noreferrer">{ep.url.replace(/^http:\/\//, "").replace(/\/$/, "")}</a>}</span>
               {frac !== null ? (
                 <span className="rep-reason"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {downloadText(r)}</span>
-              ) : r.reason && <span className="rep-reason">{r.reason}</span>}
+              ) : r.not_picked_up ? <span className="rep-reason rep-stuck">{r.not_picked_up}</span> : r.reason && <span className="rep-reason">{r.reason}</span>}
             </li>
           );
         })}

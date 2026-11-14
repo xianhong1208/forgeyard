@@ -1,4 +1,4 @@
-import { IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -13,7 +13,7 @@ import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib } from "../l
 import type { Deployment, DeploymentResponse, LiveCard, TryResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
-import { Output } from "./WorkloadDetail";
+import { NotPickedUpNotice, Output } from "./WorkloadDetail";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
 export function DeploymentDetailPage() {
@@ -60,6 +60,7 @@ export function DeploymentDetailPage() {
         lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
         actions={d && w && canManage && (
           <>
+            <Link to={`/models/deployments/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
             {w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             ) : (
@@ -72,11 +73,16 @@ export function DeploymentDetailPage() {
       <AdvisorBanner pages={[`deployment:${id}`]} />
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      {w && <NotPickedUpNotice w={w} />}
       {d && w && (
         <>
           <div className="wl-status">
             <span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
             <span>{w.ready} of {w.replicas} ready</span>
+            {d.rollout && <span className="chip chip-tone-wait" title="An edit restarts the replicas one at a time: the next one once the one before it is ready.">
+              updating: {d.rollout.updated} of {d.rollout.total} on the new settings</span>}
+            <span className="small">{d.pinned ? <>Pinned to <span className="mono">{d.pinned.name ?? `machine ${d.pinned.id}`}</span></> : <span className="muted">Machine: automatic</span>}</span>
+            {d.estimate.device === "gpu" && <span className="small">{d.params.share === "vram" ? "Shares VRAM" : <span className="muted">Exclusive GPU</span>}</span>}
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
           </div>
           <Gateway d={d} />
@@ -98,7 +104,7 @@ export function DeploymentDetailPage() {
                               <span className="bar bar-dl"><span style={{ width: `${Math.round(frac * 100)}%` }} /></span>
                               <span className="small">{downloadText(r)} ({Math.round(frac * 100)}%)</span>
                             </div>
-                          ) : r.reason && <div className="cell-reason">{r.reason}</div>}
+                          ) : r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
                         </td>
                         <td data-label="Machine">{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}</td>
                         <td data-label="Device" className="mono">{r.gpus.length ? `GPU ${gpuLabel(r)}` : r.machine ? "CPU" : "—"}</td>

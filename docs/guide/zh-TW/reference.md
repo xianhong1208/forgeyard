@@ -619,6 +619,40 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面（公開在 `/x/` 的工作負載）是 `127.0.0.1`，否則是 agent 自己的位址。
 
+## 透過 API 修改部署
+
+`PATCH /api/deployments/{id}`，限管理員和操作員，使用主控台的登入工作階段（和 **Edit** 頁面送出的請求相同；寫入請求還要帶 `X-Forgeyard: 1` 標頭）。沒有送的欄位維持原值。
+
+| 欄位 | 值 |
+|---|---|
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）和 `extra_args`（清單）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `replicas` | 1 到 16 |
+| `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
+| `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
+| `dry_run` | `true`：只檢查。回應內容相同，但沒有 `deployment`，也不會儲存任何東西 |
+
+模型、recipe、名稱和對外的模型名稱都不能改（422）。回應：
+
+| 欄位 | 內容 |
+|---|---|
+| `estimate` | 新的估算 |
+| `placement` | 每個副本會放在哪裡，和部署時一樣；`previous` 標示留在原機器上的副本；獨占的模型只需要它那張卡一半以下的記憶體時，會有 `share_hint` |
+| `changes` | 每個會改變的參數、`replicas` 和 `machine_id`：`{name: {before, after}}`；沒有任何改變時是 `{}` |
+| `restart` | `rolling`（一次一個副本）、`all`（唯一的副本重新啟動）、`none`，或 `on_start`（已停止：啟動時才套用） |
+| `restart_text` | 用一句話說明同一件事 |
+| `deployment` | 儲存後的部署（dry run 時沒有） |
+
+| 狀態 | `code` | 什麼時候 |
+|---|---|---|
+| 409 | `does_not_fit` | 部署正在執行，而新設定目前哪裡都放不下；`machines` 會像部署時一樣逐台說明原因。不會儲存任何東西 |
+| 409 | `recipe_gone` | 它的 recipe 已經不存在 |
+| 422 | `invalid_params` | 有不認得的參數，或超出範圍 |
+| 422 | `cannot_estimate` | 無法為這個模型估算新參數 |
+| 404 | `not_found`、`machine_not_found` | 沒有這個部署，或沒有 `machine_id` 指定的機器 |
+| 403 | | 不是管理員或操作員 |
+
+每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)）。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。
@@ -649,6 +683,7 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
+| `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |
 | `cloud-model-unpriced` | 錯誤 | 已經有預算存在時，某條路由的雲端模型沒有輸入或輸出價格：它的請求會回應 402 `budget_unpriced` |

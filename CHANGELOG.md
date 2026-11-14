@@ -6,6 +6,41 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Change a deployment** (#26): **Edit** on a deployment's page, and `PATCH /api/deployments/{id}`
+  for admins and operators. GPU sharing, GPUs per replica, context length, concurrency and the
+  recipe's other parameters, the memory override, extra engine arguments, the number of replicas and
+  the machine (*Automatic*, or *Pinned to* one machine) can be changed; the model, recipe and names
+  stay. The new estimate and placement are checked before saving, with the same refusals as a deploy
+  (409 `does_not_fit` unless `wait`), and `dry_run` shows the estimate, where each replica would go,
+  what changes and what restarts without saving. Saving restarts the replicas on the new settings:
+  several replicas one at a time (the next once the one before it is ready, so the model keeps
+  answering; the page shows *updating: 1 of 2 on the new settings*), a single replica stopped and
+  started again; changing only the number of replicas, or unpinning, restarts nothing. A stopped
+  deployment is only saved. Audited as `deployment.changed`. A replica restarting on its own card
+  counts its own memory there as free, so a bigger context that fits once it stops is accepted.
+- **GPU sharing is pointed out when it would fit** (#27); chat recipes stay **Exclusive** by default.
+  The deploy and edit pages say *This model needs X of a Y card; with Share VRAM the rest can hold
+  other models. They will share compute.* when an exclusive model needs half its card or less, with a
+  **Use Share VRAM** button; a refusal caused by exclusive cards when the memory is there says *fits if
+  both share VRAM* and names the replica holding the card (`share_fits` per machine in the API); and
+  Setup health has a note, `deployment-could-share`, for a running exclusive replica that reserves
+  less than half of a card of 24 GiB or more.
+- **A replica that no agent picks up says so** (#29): placed on a connected machine whose agent has
+  not reported it for 2 minutes (after the placement or the agent's last connection), the deployment,
+  workload and Models pages say *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
+  update the agent*, or, for an agent of the server's version, to restart it and look at its log
+  (`not_picked_up` per replica in the API).
+
+### Changed
+
+- **A restarted replica goes back to the machine it ran on** (#26) when that machine still takes it,
+  instead of the best fit elsewhere: after **Stop** then **Start**, after an edit, and for plain
+  workloads too. A stopped, unpinned deployment no longer restarts on a machine that cannot reach its
+  model while its old machine has room. The server keeps this in memory; a replica still waiting when
+  the server restarts is placed by the usual rules.
+
 ## [1.3.0] — 2026-11-14
 
 More kinds of models behind the same gateway: images, audio and video in chat; text to speech at

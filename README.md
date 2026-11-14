@@ -83,7 +83,9 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 
 Or one `docker run` of the agent image, `docker.io/tonyhuang1101/forgeyard-agent` at the server's
 version (the **Docker** tab writes the command), or a checkout with `/etc/forgeyard/agent.toml`. Then deploy a model on **Models** and call it at
-`https://192.168.1.20:7860/v1` with an API key and any OpenAI client.
+`https://192.168.1.20:7860/v1` with an API key and any OpenAI client. Its GPU sharing, context,
+concurrency, replicas and machine can be changed later with **Edit**; several replicas restart one at a
+time, so the model keeps answering.
 
 **Upgrading from 1.0:** `uv sync`, restart the server, then run the one-time `agent trust`
 command on every machine that joined over plain HTTP; see

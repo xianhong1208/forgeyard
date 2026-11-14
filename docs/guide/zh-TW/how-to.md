@@ -499,6 +499,27 @@ media: {inputs: [image, audio, video], files: false}
 
 費用怎麼算、預算如何預留金額、用完之後會怎樣：請見[費用與價格](cloud-providers.md#cost-and-prices)和[預算](cloud-providers.md#budgets)。
 
+## 修改部署
+
+在部署的頁面選擇 **Edit**（管理員和操作員）。可以修改：
+
+- **GPU sharing**：*Exclusive* 讓每張卡只給一個副本；*Share VRAM* 只保留估算的記憶體量，卡上其餘的空間可以放其他模型，彼此共用算力（[GPU 共用](concepts.md#gpu-sharing)）；
+- **GPUs per replica**、**Context length**、**Concurrent requests** 和 recipe 的其他參數、記憶體覆寫值，以及額外的引擎參數；
+- **Replicas**：增加的副本會直接加上，不影響正在執行的；減少時移除編號最大的；
+- **Machine**：*Automatic*（由 Forgeyard 選擇），或 *Pinned to* 某一台機器。固定到另一台機器時，副本會搬過去；改回 *Automatic* 則什麼都不會搬。
+
+模型、recipe 和名稱不能改：要改就部署一個新的。儲存之前，頁面會顯示新的估算、每個副本會放在哪裡，以及儲存後會發生什麼事。放不下的修改會像部署一樣被拒絕（[部署放不下](troubleshooting.md#a-deployment-does-not-fit)）。已停止的部署只會儲存設定：下次啟動時才套用。
+
+儲存後，副本會以新設定重新啟動：
+
+- **多個副本**一次重新啟動一個：前一個以新設定就緒之後，才換下一個，所以模型會持續回應。全部完成之前，頁面會顯示 *updating: 1 of 2 on the new settings*；
+- **只有一個副本**時，它會停止再啟動：新的就緒之前，模型不會回應。要避免這樣，可以在同一次修改裡把 **Replicas** 調成 2：新副本會先啟動，舊的再重新啟動，之後再調回來即可；
+- 只改副本數量，或改回 *Automatic*，不會重新啟動任何東西。
+
+重新啟動的副本（修改之後，或先 **Stop** 再 **Start**）只要原本那台機器還放得下，就會回到原本的機器，而不是改放到別處最剛好的地方：那台機器已經有模型和引擎了。如果那台機器沒有空間了，或已離線，副本就放到放得下的地方。伺服器把這件事記在記憶體裡：伺服器重新啟動時還在等空間的副本，會照一般規則放置。
+
+用程式修改：`PATCH /api/deployments/{id}`（[參考](reference.md#change-a-deployment-through-the-api)）。
+
 ## 在共用機器上限制 GPU
 
 1. 開啟 **Machines**，找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。

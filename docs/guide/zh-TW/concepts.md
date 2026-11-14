@@ -29,6 +29,21 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - 記憶體以卡片當下回報的**可用**量為準，所以別人正在用的記憶體會被扣除，另外再保留一段安全餘裕（512 MiB）。
 - 行程只會在 `CUDA_VISIBLE_DEVICES`（NVIDIA）或 `ROCR_VISIBLE_DEVICES`（AMD）裡拿到自己那幾張卡的 ID；容器也只會被傳入自己的卡。正在使用中的卡不能從清單中移除。
 
+## GPU 共用
+
+每個 GPU 部署不是 **Exclusive** 就是 **Share VRAM**：
+
+- **Exclusive** 是對話 recipe 的預設：每個副本拿到整張卡，Forgeyard 不會在上面放其他東西。模型可以用到整張卡的算力。
+- **Share VRAM** 是嵌入、重排序和語音轉文字的預設：副本只保留估算的記憶體量，其他共用的副本可以放進卡上其餘的空間（vLLM 也會被告知只用那麼多）。同一張卡上的副本共用算力，所以負載高時每個都會回應得慢一些。
+
+獨占的副本和共用的副本絕不會用同一張卡：兩邊都必須共用。Forgeyard 會在共用有幫助時提醒：
+
+- 獨占的模型只需要它那張卡一半以下的記憶體時，部署和修改頁面會說明（*This model needs 14.38 GiB of an 80.00 GiB card; with Share VRAM the rest can hold other models*）；
+- 記憶體其實夠、只是被獨占擋住時，拒絕訊息會寫 *fits if both share VRAM*，並說出佔著那張卡的副本；
+- **Setup health** 會為保留不到 24 GiB 以上卡片一半記憶體、正在執行的獨占副本提供一則說明（`deployment-could-share`）。
+
+要在部署上修改，用 **Edit**：[修改部署](how-to.md#change-a-deployment)。
+
 ## 工作負載
 
 **工作負載**是要在你的機器上執行的東西：

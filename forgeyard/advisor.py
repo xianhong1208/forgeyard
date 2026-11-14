@@ -59,6 +59,9 @@ MIB = 1024**2
 OUTSIDE_USE_MIN = GIB
 # A card with a running replica and less free than this (or VRAM_HEADROOM_MIB, if larger) left.
 MARGIN_MIN = 256 * MIB
+# A running exclusive replica that reserves less than half of a card at least this big is pointed at
+# Share VRAM (1.3.1): the rest of the card could hold other models.
+LARGE_CARD = 24 * GIB
 OFFLINE_GRACE = timedelta(minutes=5)
 WAITING_AFTER = timedelta(minutes=15)
 CACHE_FREE_MIN = 0.10
@@ -564,6 +567,35 @@ def deployments_waiting(ctx: Context) -> Iterator[Finding]:
                           + " Free memory, allow more GPUs, or lower its context or concurrency.",
                           f"/models/deployments/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
                           pages=("models", f"deployment:{d.id}"))
+
+
+@check
+def exclusive_could_share(ctx: Context) -> Iterator[Finding]:
+    """V30 (1.3.1): a running exclusive replica reserves under half of a large card."""
+    for d in ctx.deployments:
+        w = d.workload
+        if w is None or w.desired_state != "running" or (d.params or {}).get("share") != "exclusive":
+            continue
+        found = None
+        for r in sorted(w.replicas, key=lambda r: r.ordinal):
+            if r.node is None or not r.gpus or not r.vram or r.final or r.state not in ("healthy", "running"):
+                continue
+            for g in r.gpus:
+                a = next((x for x in r.node.accelerators if x.key == g.get("key")), None)
+                if a is not None and a.vram_total and a.vram_total >= LARGE_CARD and r.vram * 2 < a.vram_total:
+                    found = (r, a)
+                    break
+            if found:
+                break
+        if found is None:
+            continue
+        r, a = found
+        yield Finding("deployment-could-share", "info", f"{d.name} keeps a whole GPU for {_size(r.vram)}",
+                      f"Replica {r.ordinal} of {d.name} reserves {_size(r.vram)} of the {_size(a.vram_total)} of GPU "
+                      f"#{a.index} on {r.node.name}, and keeps the card to itself (exclusive). With Share VRAM the "
+                      "rest of the card can hold other models; they then share its compute. Change it with Edit on "
+                      "the deployment (its replicas restart).", f"/models/deployments/{d.id}/edit",
+                      "Change the deployment", scope=f"deployment:{d.id}", pages=("models", f"deployment:{d.id}"))
 
 
 # llama.cpp's short and long spellings of the flags Forgeyard sets.
