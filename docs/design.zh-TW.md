@@ -319,7 +319,16 @@ workload 執行，並**公開**在 gateway 後面的 **`https://<server>:7860/x/
 - **1.3 不做：** WebSocket 與 gRPC（需要端到端的 HTTP/2 trailer）、瀏覽器介面（需要自己的主機名稱與 `*.x.<server>` 萬用憑證）、
   超過上限的本文串流轉送、上游回報的單位、非同步工作 API、雲端溢出。
 
-真機檢查：`scripts/accept_x.py`。
+**現成範本**（`forgeyard/workloads/templates.py`、`GET /api/workloads/templates`）：物件偵測（RT-DETRv2 R18）、影像分割（SAM 2.1
+Hiera tiny）與深度估計（Depth Anything V2 Small），全部 Apache-2.0（不用 AGPL-3.0 的 Ultralytics YOLO；不用 CC-BY-NC 的 Depth
+Anything Base 或 Large）。沒有官方映像檔能以固定版本、可離線的方式為這些模型提供 HTTP API（Triton 需要模型倉庫，映像檔帶有 NVIDIA
+的容器授權；TorchServe 已封存；Hugging Face 的 inference toolkit 啟動時才下載模型），所以 Forgeyard 自己提供一個小型 server：
+`images/vision`（transformers 上的 FastAPI），三種任務共用一個映像檔（`--task`），模型以固定 revision 包在裡面，相依套件以雜湊值固定，
+base 以 digest 固定，以無特權使用者執行。每次發布時推送 `forgeyard-vision:X.Y.Z`（CPU，amd64 與 arm64）與 `X.Y.Z-cuda`（torch cu130，
+amd64）；CI 會建置 CPU 版本，並在沒有網路的情況下對每個任務做 smoke test。範本就是一般的 workload 規格（CUDA 版本以記憶體共用一張
+NVIDIA 卡，或 CPU 版本），並開啟 `gateway.expose`；console 用它填好新增 workload 的表單。離線時用 `docker save` / `docker load` 搬 tag。
+
+真機檢查：`scripts/accept_x.py`（`--templates`）。
 
 ## 雲端供應商與分層路由（1.2）
 

@@ -7,7 +7,7 @@ and usage statistics. Vision models read images in chat, fetched by the gateway,
 turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Image
 models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs). Any other
 service (detection, segmentation, a Triton or FastAPI model) can be exposed at `/x/<name>/…` behind the same keys, limits
-and usage. Cloud model APIs can sit behind the same gateway, local first, with cost
+and usage, and ready-made templates start object detection, segmentation and depth APIs in one step. Cloud model APIs can sit behind the same gateway, local first, with cost
 tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
@@ -200,6 +200,7 @@ project.
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
+| `images/vision/` | the vision server behind the workload templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
 | `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

@@ -489,6 +489,20 @@ local_dirs = ["/data/models"]
 
 已經開始的回應如果中斷，狀態碼就無法再改：連線會在本文完整之前關閉，所以用戶端絕不會把被截斷的本文當成完整的。
 
+## 工作負載範本
+
+範本執行伺服器版本的 `docker.io/tonyhuang1101/forgeyard-vision`：tag `X.Y.Z`（CPU，linux/amd64 與 linux/arm64）或 `X.Y.Z-cuda`（CUDA 13.0 的 torch，linux/amd64，NVIDIA 驅動 580 或更新）。它由儲存庫裡的 `images/vision` 建置，相依套件以雜湊值固定，模型以固定的 revision 包在裡面，並以無特權的使用者執行。`GET /api/workloads/templates` 會列出範本，以及每個範本產生的工作負載規格。
+
+| 端點 | 接受 | 回傳 |
+|---|---|---|
+| `GET /` | | `task`、`model`、`revision`、`licence`、`device`（`cpu` 或 `cuda`）、`endpoint` |
+| `GET /health` | | 模型載入後回 200 |
+| `POST /v1/detect` | `image`；`threshold`（0.5）、`max_detections`（100） | `detections`：`label`、`score`、`box` `[x0, y0, x1, y1]`（像素） |
+| `POST /v1/segment` | `image`；`points` `[[x, y], …]` 加上 `labels`（1 在裡面，0 在外面），或 `box` `[x0, y0, x1, y1]`；`multimask`（true） | `masks`：`score`、`area`、`box`、`png`（1 位元 PNG，base64），最好的在前 |
+| `POST /v1/depth` | `image` | `depth_png`（16 位元 PNG，base64，和圖片同樣大小，越近越亮）、`min`、`max`：相對深度，不是公尺 |
+
+圖片以 multipart 檔案欄位 `image` 送出（其他欄位當表單欄位，可以是 JSON 值），或以 JSON 本文 `{"image": "<base64 或 data: URI>", …}` 送出；PNG、JPEG 或 WebP，最多 20 MiB、4000 萬像素。每個回應也都有 `model`、`revision`、`width`、`height` 和 `ms`。伺服器的錯誤是 `{"error": {"message", "code"}}`，狀態碼 400（`invalid_image`、`missing_image`、`missing_prompt`、`invalid_option`、`invalid_json`）或 413（`image_too_large`）；經過 `/x/` 時會原樣轉送。
+
 ## 工作負載的環境變數
 
 工作負載的副本從空的環境開始，只拿到它的規格宣告的變數，再加上：

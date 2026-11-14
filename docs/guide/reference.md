@@ -569,6 +569,28 @@ Errors from the gateway have the same shape as at `/v1`. An answer from the work
 An answer that breaks off after it started cannot change its status: the connection is closed before
 the body is complete, so a client never takes a cut-off body for a whole one.
 
+## Workload templates
+
+The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
+`X.Y.Z` (CPU, linux/amd64 and linux/arm64) or `X.Y.Z-cuda` (torch with CUDA 13.0, linux/amd64, NVIDIA
+driver 580 or newer). Built from `images/vision` in the repository, the dependencies pinned with hashes
+and the models baked in at their revisions; it runs as an unprivileged user. `GET /api/workloads/templates`
+lists the templates with the workload spec each one makes.
+
+| Endpoint | Takes | Returns |
+|---|---|---|
+| `GET /` | | `task`, `model`, `revision`, `licence`, `device` (`cpu` or `cuda`), `endpoint` |
+| `GET /health` | | 200 once the model is loaded |
+| `POST /v1/detect` | `image`; `threshold` (0.5), `max_detections` (100) | `detections`: `label`, `score`, `box` `[x0, y0, x1, y1]` in pixels |
+| `POST /v1/segment` | `image`; `points` `[[x, y], …]` with `labels` (1 inside, 0 outside), or `box` `[x0, y0, x1, y1]`; `multimask` (true) | `masks`: `score`, `area`, `box`, `png` (a 1-bit PNG, base64), best first |
+| `POST /v1/depth` | `image` | `depth_png` (a 16-bit PNG, base64, the image's size, nearer is brighter), `min`, `max`: relative depth, not metres |
+
+An image is a multipart file field `image` (other fields as form fields, JSON values allowed) or a JSON
+body `{"image": "<base64 or a data: URI>", …}`; PNG, JPEG or WebP, at most 20 MiB and 40 megapixels.
+Every answer also has `model`, `revision`, `width`, `height` and `ms`. The server's errors are
+`{"error": {"message", "code"}}` with 400 (`invalid_image`, `missing_image`, `missing_prompt`,
+`invalid_option`, `invalid_json`) or 413 (`image_too_large`); through `/x/` they are passed on as they are.
+
 ## Workload environment
 
 A workload's replica starts with an empty environment. It gets only what its spec declares, plus:
