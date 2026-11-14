@@ -432,6 +432,36 @@ def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[st
     raise fail(422, "unsupported", f"No test request for {api}.")
 
 
+def _try_videos(target: dict, replica) -> dict:
+    """Video models (1.3): a video takes minutes, so the check asks the replica's video API for its job list
+    (with its internal key) instead of making one; the Playground's Video panel makes one."""
+    import time
+
+    url = target["url"].rstrip("/") + "/v1/videos"
+    headers = {"Accept": "application/json"}
+    if replica is not None and replica.secret:
+        headers["Authorization"] = f"Bearer {replica.secret}"
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TRY_TIMEOUT) as resp:
+            raw, status = resp.read(256 * 1024), resp.status
+    except urllib.error.HTTPError as e:
+        raw, status = e.read(64 * 1024), e.code
+    except (urllib.error.URLError, OSError) as e:
+        raise fail(502, "replica_unreachable", f"The replica did not answer: {getattr(e, 'reason', e)}") from None
+    ms = int((time.monotonic() - started) * 1000)
+    try:
+        answer = json.loads(raw)
+    except ValueError:
+        answer = raw[:4000].decode("utf-8", "replace")
+    ok = 200 <= status < 300
+    n = len(answer.get("data") or []) if ok and isinstance(answer, dict) else 0
+    summary = (f"The replica's video API answers ({n} job{'s' if n != 1 else ''} on it). A video takes minutes: make "
+               "one in the Playground.") if ok else str(answer)[:500]
+    return {"status": status, "ok": ok, "api": "openai-videos", "endpoint": url, "request": {"method": "GET"},
+            "summary": summary, "answer": {"jobs": n} if ok else None, "ms": ms}
+
+
 def summarise(api: str, answer) -> str:
     if not isinstance(answer, dict):
         return str(answer)[:500]
@@ -478,8 +508,10 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     voice = recipe.speech.default_voice if recipe is not None and recipe.tts is not None else None
     draws = imagegen.draws(recipe, d.params or {}, d.model.meta if d.model is not None else None) \
         if recipe is not None and "image" in recipe.tasks else None
-    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws)
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
+    if route.api == "openai-videos":
+        return _try_videos(target, replica)
+    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)

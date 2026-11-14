@@ -37,7 +37,7 @@ from forgeyard.api import (
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import get_engine, new_session
-from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy
+from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy, videojobs
 from forgeyard.gateway.usage import recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
@@ -86,11 +86,12 @@ async def lifespan(_app: FastAPI):
     usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
     alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(get_settings().usage_flush_seconds))
+    videos = asyncio.create_task(videojobs.run_forever())  # follows /v1/videos jobs, expires their results (1.3)
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        for task in (sweeper, usage_writer, renewer, alerts):
+        for task in (sweeper, usage_writer, renewer, alerts, videos):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

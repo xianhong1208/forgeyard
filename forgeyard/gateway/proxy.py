@@ -48,6 +48,9 @@ cloud provider.
    deployment's caps (images per request, largest side, steps), sent with only the fields Forgeyard
    knows, queued in the gateway while every replica is busy (429 `queue_full` once the queue is full),
    answered as base64 only, and counted in images, kilopixels and busy milliseconds. Local only.
+13. Videos (1.3, forgeyard/gateway/videogen.py and videojobs.py): /v1/videos is asynchronous: a job is
+   checked against each deployment's caps, sent to one replica, which holds it, and its status and
+   MP4 are relayed from that replica; it does not go through forward(). Local only.
 """
 
 from __future__ import annotations
@@ -72,7 +75,7 @@ from starlette.responses import Response
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
-from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech
+from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech, videogen
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -94,6 +97,7 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "audio/translations": ("openai-audio", "multipart"),
     "audio/speech": ("openai-speech", "json"),
     "images/generations": ("openai-images", "json"),
+    "videos": ("openai-videos", "video"),   # asynchronous jobs (forgeyard/gateway/videojobs.py), not forward()
 }
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
 CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets serve in 1.2
@@ -126,6 +130,7 @@ class LocalGroup:
     accepts: Optional[modalities.Accepts] = None   # media and body size it takes (1.3)
     speaks: Optional[speech.Speaks] = None          # text to speech: formats, voices, input cap (1.3)
     draws: Optional[imagegen.Draws] = None          # image generation: caps, default size, queue (1.3)
+    films: Optional[videogen.Films] = None          # video generation: caps, default size and length (1.3)
 
 
 @dataclass
@@ -236,11 +241,13 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
         if found is not None and "tts" in found[0].tasks else None
     draws = imagegen.draws(found[0], params, model.meta if model is not None else None) \
         if found is not None and "image" in found[0].tasks else None
+    films = videogen.films(found[0], params, model.meta if model is not None else None) \
+        if found is not None and "video" in found[0].tasks else None
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
                       concurrency=draws.concurrency if draws else _int(params.get("concurrency")),
                       context=_int(params.get("context")), running=w.desired_state == "running", accepts=accepts,
-                      speaks=speaks, draws=draws)
+                      speaks=speaks, draws=draws, films=films)
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -303,7 +310,7 @@ def model_names(db: DbSession) -> list[tuple[Route, int]]:
 def endpoint_for(api: str) -> str:
     return {"openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", "rerank": "/v1/rerank",
             "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
-            "openai-images": "/v1/images/generations"}.get(api, "/v1")
+            "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:

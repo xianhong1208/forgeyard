@@ -603,6 +603,55 @@ class ServerSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+
+class VideoJob(Base):
+    """A video being made (1.3, /v1/videos): asked through the gateway, made by one replica, which holds
+    the job and its file (vLLM-Omni keeps both on the replica). The gateway relays its status and its
+    content from that replica; a replica that is gone or restarted takes its jobs with it, and the job
+    then reports `failed` (or, made already, its content is gone). Results expire after the
+    deployment's `keep_minutes` and are deleted on the replica; the row goes a week later.
+
+    Who may see it: the API key that asked (source "api", key_id) or, from the Playground, the person
+    (source "console", user_id). `public_id` is the opaque id clients use; another key's id answers 404.
+    The prompt is not stored."""
+
+    __tablename__ = "video_jobs"
+    __table_args__ = (Index("ix_video_jobs_owner", "source", "key_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(40), unique=True)       # video_<32 hex>, random
+    source: Mapped[str] = mapped_column(String(8))                        # api | console
+    key_id: Mapped[int] = mapped_column(Integer, default=0)               # 0: the console
+    user_id: Mapped[int] = mapped_column(Integer, default=0)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    model: Mapped[str] = mapped_column(String(128))                       # the served name asked for
+    deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="SET NULL"),
+                                                         nullable=True, index=True)
+    replica_uid: Mapped[str] = mapped_column(String(32))                  # the replica that holds it
+    replica_epoch: Mapped[str] = mapped_column(String(32))                # its generation:restarts then
+    upstream_id: Mapped[str] = mapped_column(String(128))                 # the engine's own job id
+    status: Mapped[str] = mapped_column(String(16), index=True)           # queued | in_progress | completed | failed
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    size: Mapped[str] = mapped_column(String(16))                         # WIDTHxHEIGHT asked
+    seconds: Mapped[int] = mapped_column(Integer)                         # seconds asked
+    frames: Mapped[int] = mapped_column(Integer)                          # frames asked of the engine
+    fps: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # what was made, once made
+    gpus: Mapped[int] = mapped_column(Integer, default=1)
+    error_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A job at work past this is stopped and reported failed (the deployment's timeout when asked).
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    keep_s: Mapped[int] = mapped_column(Integer)                          # how long a result is kept, when asked
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Its file is gone from the replica: expired and deleted there, or lost with the replica.
+    removed: Mapped[bool] = mapped_column(Boolean, default=False)
+    counted: Mapped[bool] = mapped_column(Boolean, default=False)         # its usage is recorded
+
+
 _engine = None
 _SessionLocal = None
 

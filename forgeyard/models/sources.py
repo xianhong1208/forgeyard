@@ -417,6 +417,7 @@ TASK_FROM_PIPELINE = {
     "automatic-speech-recognition": "asr",
     "text-to-speech": "tts",
     "text-to-image": "image",
+    "text-to-video": "video",
 }
 
 

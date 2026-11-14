@@ -46,7 +46,7 @@ class Entry(BaseModel):
     file: Optional[str] = None
     mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr", "tts", "image"]
+    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video"]
     format: Literal["safetensors", "gguf", "ctranslate2", "onnx", "diffusers"]
     recipe: str
     device: Literal["gpu", "cpu"] = "gpu"
@@ -111,11 +111,11 @@ def check(data: dict) -> Recommended:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
-        if e.task in ("tts", "image") and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
-            # 1.3: speech and image models are pinned to a commit here, so the voices, the component files
-            # and the measured memory stay those of the files that were checked.
-            raise RecommendedError(f"{where}: a {'text-to-speech' if e.task == 'tts' else 'image'} entry is pinned to "
-                                   "a commit (revision: 40 hex characters)")
+        if e.task in ("tts", "image", "video") and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
+            # 1.3: speech, image and video models are pinned to a commit here, so the voices, the component
+            # files and the measured memory stay those of the files that were checked.
+            what = {"tts": "text-to-speech", "image": "image", "video": "video"}[e.task]
+            raise RecommendedError(f"{where}: a {what} entry is pinned to a commit (revision: 40 hex characters)")
         if e.components:
             if e.task != "image" or e.format not in ("gguf", "safetensors"):
                 raise RecommendedError(f"{where}: only an image model's GGUF or safetensors entry names components")

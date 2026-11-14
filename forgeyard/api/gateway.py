@@ -8,6 +8,10 @@ The console's playground (`/api/playground/…`) goes through the same code with
 user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Vision tab
 (1.3, `/api/playground/vision/…`) reaches exposed vision workloads the way /x/ does
 (forgeyard/gateway/vision.py).
+
+Videos (1.3, /v1/videos) are jobs (forgeyard/gateway/videojobs.py): POST answers at once, GET polls,
+GET …/content fetches the MP4, DELETE cancels or deletes. The Playground's `/api/playground/videos…`
+are the same, for the signed-in person's own jobs.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from forgeyard.db import new_session
-from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech, vision
+from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs, vision
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -166,6 +170,66 @@ async def images_edit(request: Request):
                                                        "(yet): it serves /v1/images/generations.").response()
 
 
+# ------------------------------------------------------------------ videos (1.3)
+async def _caller(request: Request) -> KeyCaller:
+    return await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+
+
+@router.post("/videos")
+async def videos_create(request: Request):
+    """A video job (OpenAI's Videos API): JSON or multipart (prompt, model, seconds, size)."""
+    try:
+        caller = await _caller(request)
+    except GatewayError as e:
+        return e.response()
+    return await videojobs.submit(request, caller)
+
+
+@router.get("/videos")
+async def videos_list(request: Request, limit: Optional[str] = None, after: Optional[str] = None,
+                      order: Optional[str] = None):
+    try:
+        return await videojobs.listing(await _caller(request), limit, after, order)
+    except GatewayError as e:
+        return e.response()
+
+
+@router.get("/videos/{video_id}")
+async def videos_get(video_id: str, request: Request):
+    try:
+        return await videojobs.retrieve(video_id, await _caller(request))
+    except GatewayError as e:
+        return e.response()
+
+
+@router.get("/videos/{video_id}/content")
+async def videos_content(video_id: str, request: Request):
+    try:
+        return await videojobs.content(video_id, await _caller(request), request)
+    except GatewayError as e:
+        return e.response()
+
+
+@router.delete("/videos/{video_id}")
+async def videos_delete(video_id: str, request: Request):
+    try:
+        return await videojobs.remove(video_id, await _caller(request))
+    except GatewayError as e:
+        return e.response()
+
+
+@router.post("/videos/{video_id}/remix")
+@router.post("/videos/sync")
+async def videos_other(request: Request, video_id: str = ""):
+    """Remixing a video (OpenAI's) and vLLM-Omni's synchronous videos: not offered."""
+    try:
+        await _caller(request)
+    except GatewayError as e:
+        return e.response()
+    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway makes videos as jobs only: POST /v1/videos, "
+                                                       "then poll GET /v1/videos/{id}. Remixing is not offered.").response()
+
+
 def _speaks_out(sp: Optional[speech.Speaks]) -> dict:
     """What a client can ask of the deployment besides the voice."""
     if sp is None:
@@ -268,7 +332,7 @@ async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
                                                  "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
-                                                 "/v1/audio/voices and /v1/images/generations.").response()
+                                                 "/v1/audio/voices, /v1/images/generations and /v1/videos.").response()
 
 
 # ------------------------------------------------------------------ the console's playground
@@ -297,6 +361,94 @@ async def playground_image_options(request: Request, model: Optional[str] = None
                                         "message": "Sign in to continue.", "reason": reason}}, status_code=401)
     try:
         return await run_in_threadpool(image_options, model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+def video_options(model: Optional[str], caller: KeyCaller) -> dict:
+    """What a video model's deployments take (1.3), for the Playground's Video panel: sizes (the default, the
+    largest side, the multiple), lengths (the default, the longest), frames per second, the longest prompt,
+    how long results are kept (over every deployment of the route: what at least one takes)."""
+    if not model:
+        raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
+    route = proxy.check_access(caller, _route(model), model, videogen.ENDPOINT)
+    fs = [g.films for tier in route.tiers for g in tier.locals if g.films is not None]
+    if not fs:
+        raise GatewayError(503, "no_target", f"{model!r} has no video deployment.")
+    first = fs[0]
+    return {"model": model, "default_size": f"{first.width}x{first.height}", "max_side": max(f.max_side for f in fs),
+            "max_pixels": max(f.max_pixels for f in fs), "multiple": min(f.multiple for f in fs),
+            "seconds": first.seconds, "max_seconds": max(f.max_seconds for f in fs), "fps": first.fps,
+            "max_steps": max(f.max_steps for f in fs), "max_prompt_chars": max(f.max_prompt for f in fs),
+            "keep_minutes": max(f.keep for f in fs) // 60}
+
+
+async def _console(request: Request):
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    return caller, (None if caller is not None else _not_signed_in(reason))
+
+
+@console.get("/videos/options")
+async def playground_video_options(request: Request, model: Optional[str] = None):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await run_in_threadpool(video_options, model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.post("/videos")
+async def playground_videos_create(request: Request):
+    """A video job as the signed-in person (1.3): the /v1/videos rules, counted as "console"."""
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    return await videojobs.submit(request, caller)
+
+
+@console.get("/videos")
+async def playground_videos_list(request: Request, limit: Optional[str] = None, after: Optional[str] = None,
+                                 order: Optional[str] = None):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.listing(caller, limit, after, order)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.get("/videos/{video_id}")
+async def playground_videos_get(video_id: str, request: Request):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.retrieve(video_id, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.get("/videos/{video_id}/content")
+async def playground_videos_content(video_id: str, request: Request):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.content(video_id, caller, request)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.delete("/videos/{video_id}")
+async def playground_videos_delete(video_id: str, request: Request):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.remove(video_id, caller)
     except GatewayError as e:
         return e.response()
 
