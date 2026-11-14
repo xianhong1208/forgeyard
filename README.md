@@ -100,7 +100,7 @@ Every release is checked on real machines, not only in CI. So far:
 Not checked on real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes, discrete AMD
 cards, and the one-line install on a host
 with systemd. Image generation on NVIDIA is checked with vLLM-Omni (Stable Diffusion XL and Z-Image-Turbo on the A100)
-and with stable-diffusion.cpp's CUDA build (Z-Image-Turbo GGUF on the A100). Reports from other machines are welcome (see
+and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Turbo GGUF on the A100). Reports from other machines are welcome (see
 [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ### Models tested
@@ -125,7 +125,7 @@ and with stable-diffusion.cpp's CUDA build (Z-Image-Turbo GGUF on the A100). Rep
 | Kokoro 82M | speaches (`speaches-tts`) | CPU |
 | **Image generation** | | |
 | Stable Diffusion XL base 1.0, Z-Image-Turbo | vLLM-Omni (`vllm-omni-image`) | NVIDIA A100 |
-| Stable Diffusion 1.5 GGUF | stable-diffusion.cpp (`sd-cpp`, CPU process) | CPU |
+| Stable Diffusion 1.5 GGUF | stable-diffusion.cpp (`sd-cpp`) | CPU (process); NVIDIA A100 (CUDA) |
 | Z-Image-Turbo GGUF | stable-diffusion.cpp (`sd-cpp`) | CPU (process); AMD Strix Halo (Vulkan); NVIDIA A100 (CUDA) |
 | **Cloud** | | |
 | Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
