@@ -217,6 +217,10 @@ class Workload(Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 1.3: exposed behind the gateway at /x/<name> (forgeyard/gateway/passthrough.py). Kept beside the
+    # spec, never in it (agents validate the spec with extra="forbid"), and changeable while it runs.
+    # NULL: not exposed.
+    gateway: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     replicas: Mapped[list["Replica"]] = relationship(
         back_populates="workload", cascade="all, delete-orphan", order_by="Replica.ordinal"
@@ -497,6 +501,11 @@ class ApiKey(Base):
     # (forgeyard/gateway/budgets.py); NULL: no budget. Its owner may set it unless an admin did.
     budget_micros: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     budget_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Which exposed workloads (/x/<name>, 1.3) this key may call: none (every key from before 1.3),
+    # listed (the names in workload_list) or all.
+    workloads: Mapped[str] = mapped_column(String(8), default="none", server_default="none")
+    workload_list: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    workloads_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

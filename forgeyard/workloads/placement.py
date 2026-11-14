@@ -36,6 +36,7 @@ from datetime import timedelta
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, Workload, as_utc, utcnow
 from forgeyard.machines.protocol import FEATURE_WORKLOADS
+from forgeyard.workloads import expose
 from forgeyard.workloads.spec import WorkloadSpec
 
 _lock = threading.Lock()
@@ -151,12 +152,15 @@ def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[i
     return None
 
 
-def runtime_problem(node: Node, spec: WorkloadSpec) -> Optional[str]:
-    """Why this machine can never run this workload as it is, or None."""
+def runtime_problem(node: Node, spec: WorkloadSpec, exposed: bool = False) -> Optional[str]:
+    """Why this machine can never run this workload as it is, or None. `exposed`: the workload is
+    exposed at /x/ (1.3) and needs an agent whose key guard fronts plain workloads."""
     if node.revoked_at is not None or node.status == "revoked":
         return "revoked"
     if FEATURE_WORKLOADS not in (node.features or []):
         return "its agent does not run workloads yet (update it to this Forgeyard version)"
+    if exposed and not expose.can_guard(node):
+        return expose.guard_problem(node)
     info = (node.runtime_info or {}).get(spec.runtime_type) or {}
     if not info.get("ok"):
         why = info.get("reason") or "not available"
@@ -217,10 +221,10 @@ def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
     return None, f"needs {want.count} free {label}GPU{'s' if want.count > 1 else ''}, {best} free of the allowed ({allowed_text})"
 
 
-def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = None
+def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = None, exposed: bool = False
         ) -> tuple[Optional[list[Accelerator]], Optional[str]]:
     """The GPUs to give one replica of `spec` on `node` (possibly none), or why it does not fit."""
-    problem = runtime_problem(node, spec)
+    problem = runtime_problem(node, spec, exposed)
     if problem:
         return None, problem
     used = usage(db, node.id, exclude, node=node)
@@ -281,15 +285,18 @@ def place_pending(db: DbSession) -> set[int]:
                     changed.add(placed)
                 continue
             spec = WorkloadSpec.model_validate(r.workload.spec)
+            exposed = expose.of(r.workload) is not None
             reasons = []
             nodes = _candidates(db, spec)
             for node in nodes:
-                gpus, why = fit(db, node, spec)
+                gpus, why = fit(db, node, spec, exposed=exposed)
                 if gpus is None:
                     reasons.append(f"{node.name}: {why}")
                     continue
                 r.node_id = node.id
                 r.gpus = [gpu_ref(a) for a in gpus]
+                if exposed:
+                    expose.give_key(r)  # the gateway's way in, through the agent's key guard
                 r.state = "pending"
                 r.reason = None if node.status == "online" else f"waiting for {node.name} to come online"
                 r.updated_at = utcnow()

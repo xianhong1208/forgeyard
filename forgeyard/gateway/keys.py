@@ -14,6 +14,10 @@ network: off (never; every key from before 1.2), fallback (only when a route spi
 tier) or on (cloud-only models too). Admins set the value a new key gets and the most a user may
 give their own key; as with limits, a value an admin sets on someone else's key is locked for its
 owner. The console's playground uses the most a user may give a key (admins: on).
+
+The `workloads` setting of a key (1.3) says which workloads exposed at /x/<name> it may call: none
+(every key from before 1.3, and the default for new ones), listed (the names in its list) or all.
+Its owner may set it; an admin's value on someone else's key is locked for its owner.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ PREFIX_CHARS = 12          # "fyk_" + 8: what lists show
 LIMITS_KEY = "gateway_limits"
 CLOUD_KEY = "gateway_cloud"
 CLOUD_LEVELS = ("off", "fallback", "on")
+WORKLOAD_LEVELS = ("none", "listed", "all")
 LAST_USED_EVERY = timedelta(seconds=60)  # last_used_at is written at most this often per key
 
 
@@ -146,6 +151,19 @@ def console_cloud(db: DbSession, user: User) -> str:
     return "on" if user.role == "admin" else get_cloud(db)["max"]
 
 
+# ------------------------------------------------------------------ workloads (/x/, 1.3)
+def workloads_level(value) -> str:
+    return value if value in WORKLOAD_LEVELS else "none"
+
+
+def may_call(level: str, names: Optional[list], workload: str) -> bool:
+    """May a key with this setting call the exposed workload `workload`?"""
+    level = workloads_level(level)
+    if level == "all":
+        return True
+    return level == "listed" and workload in (names or [])
+
+
 # ------------------------------------------------------------------ authentication
 @dataclass
 class KeyCaller:
@@ -162,6 +180,8 @@ class KeyCaller:
     cloud: str = "off"                # off | fallback | on
     budget_micros: Optional[int] = None       # the key's monthly cloud budget (None: none)
     user_budget_micros: Optional[int] = None  # its person's
+    workloads: str = "none"           # none | listed | all: exposed workloads at /x/ (1.3)
+    workload_list: Optional[list] = None
 
 
 def bearer(header: Optional[str]) -> Optional[str]:
@@ -203,4 +223,6 @@ def authenticate(db: DbSession, authorization: Optional[str], *, now: Optional[d
                      rpm=effective(key.rpm, limits["default_rpm"], limits["max_rpm"]),
                      tpm=effective(key.tpm, limits["default_tpm"], limits["max_tpm"]),
                      cloud=effective_cloud(key, user, get_cloud(db)["max"]),
-                     budget_micros=key.budget_micros, user_budget_micros=user.budget_micros)
+                     budget_micros=key.budget_micros, user_budget_micros=user.budget_micros,
+                     workloads=workloads_level(key.workloads),
+                     workload_list=list(key.workload_list) if key.workload_list is not None else None)

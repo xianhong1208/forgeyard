@@ -31,6 +31,10 @@ method; everything else gets 401 from the guard and never reaches the engine.
   gives up, its disconnect stops the engine.
 - **The key** is compared in constant time (hmac.compare_digest). It lives in the agent's memory only.
 
+**Exposed workloads (1.3, /x/<name>):** the same guard fronts a plain service the gateway exposes, with
+`strip_auth`: the internal key is checked and then **removed**, so the program never sees it (the
+gateway passes no client credentials either). Everything else is the same.
+
 The guard lives in the agent. While the agent is down, the published port is closed and the
 replica is unreachable from outside; the engine keeps running and a restarted agent puts a guard in
 front of it again (the safe direction).
@@ -92,8 +96,9 @@ class Guard:
     def __init__(self, *, listen: tuple[str, int], upstream: tuple[str, int], key: Optional[str], name: str = "",
                  head_timeout: float = HEAD_TIMEOUT, idle_timeout: float = IDLE_TIMEOUT,
                  body_timeout: float = BODY_TIMEOUT, connect_timeout: float = CONNECT_TIMEOUT,
-                 write_timeout: float = WRITE_TIMEOUT):
+                 write_timeout: float = WRITE_TIMEOUT, strip_auth: bool = False):
         self.listen = listen
+        self.strip_auth = strip_auth  # an exposed workload's guard: the key is removed after the check
         self.upstream = upstream
         self.name = name
         self._key = key.encode() if key else None
@@ -246,7 +251,10 @@ class Guard:
         try:
             if conn.they_are_waiting_for_100_continue:
                 await self._write(writer, conn.send(h11.InformationalResponse(status_code=100, headers=[])))
-            headers = _relayed(req.headers) + [(b"connection", b"close")]
+            headers = _relayed(req.headers)
+            if self.strip_auth:
+                headers = [(n, v) for n, v in headers if n != b"authorization"]
+            headers.append((b"connection", b"close"))
             await self._write(up_writer, up.send(h11.Request(method=req.method, target=req.target, headers=headers)))
             upload = asyncio.ensure_future(self._upload(conn, reader, up, up_writer))
             download = asyncio.ensure_future(self._download(conn, writer, up, up_reader))
