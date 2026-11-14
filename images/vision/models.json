@@ -1,0 +1,26 @@
+{
+  "detect": {
+    "repo": "PekingU/rtdetr_v2_r18vd",
+    "revision": "5650961749fa93567c0d46fc7f43ea4f9e914107",
+    "licence": "apache-2.0",
+    "dir": "rtdetr_v2_r18vd",
+    "files": ["config.json", "model.safetensors", "preprocessor_config.json"],
+    "about": "RT-DETRv2 (ResNet-18), real-time object detection, the 80 COCO classes"
+  },
+  "segment": {
+    "repo": "facebook/sam2.1-hiera-tiny",
+    "revision": "de431c4043854a71d8101e17995dfe596bf101a5",
+    "licence": "apache-2.0",
+    "dir": "sam2.1-hiera-tiny",
+    "files": ["config.json", "model.safetensors", "preprocessor_config.json", "processor_config.json"],
+    "about": "SAM 2.1 (Hiera tiny): a mask for what a point or a box shows"
+  },
+  "depth": {
+    "repo": "depth-anything/Depth-Anything-V2-Small-hf",
+    "revision": "5426e4f0f36572d16453bbda7a8389317b1bef99",
+    "licence": "apache-2.0",
+    "dir": "depth-anything-v2-small",
+    "files": ["config.json", "model.safetensors", "preprocessor_config.json"],
+    "about": "Depth Anything V2 Small: relative depth from one image (Base and Large are CC-BY-NC, not used)"
+  }
+}

@@ -443,6 +443,49 @@ Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of t
 workload is restarted. What passes and what is removed is in the
 [reference](reference.md#the-passthrough-x).
 
+## Start a workload from a template
+
+**Workloads** → **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
+vision server image and is exposed at `/x/<name>` straight away:
+
+| Template | Model (licence) | Call |
+|---|---|---|
+| **Object detection** | RT-DETRv2 ResNet-18, `PekingU/rtdetr_v2_r18vd` (Apache-2.0) | `POST /x/detector/v1/detect`: boxes, labels and scores |
+| **Segmentation** | SAM 2.1 Hiera tiny, `facebook/sam2.1-hiera-tiny` (Apache-2.0) | `POST /x/segmenter/v1/segment` with a point or a box: masks |
+| **Depth estimation** | Depth Anything V2 Small, `depth-anything/Depth-Anything-V2-Small-hf` (Apache-2.0) | `POST /x/depth/v1/depth`: a 16-bit depth PNG |
+
+1. Choose **On an NVIDIA GPU** (the image's CUDA build, one card shared by memory, 3 GiB) or **On the
+   CPU** (the CPU build, no GPU). The form opens filled in: the image, the task, the port, the health
+   check and **Expose at** `/x/<name>`. Change anything, for example the name or the machine, then
+   **Create and start**.
+2. Allow an API key to call it (**API keys** → the key's **Workloads at /x/**).
+3. Send an image as a multipart file `image` (or JSON `{"image": "<base64>"}`):
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
+```
+
+Only permissively licensed models are offered: not Ultralytics YOLOv8 or YOLO11 (AGPL-3.0), and only the
+Small Depth Anything V2 (Base and Large are CC-BY-NC-4.0). The models are inside the image, at pinned
+revisions, so a template needs no network once its image is on the machine. For a machine that cannot
+reach Docker Hub, copy the image (the CUDA build needs NVIDIA driver 580 or newer; without a usable GPU
+it runs on the CPU):
+
+```bash
+docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda
+docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda | gzip > forgeyard-vision.tar.gz
+# on the machine without the network:
+gunzip -c forgeyard-vision.tar.gz | sudo docker load
+```
+
+On AMD machines use **On the CPU**: the image has no ROCm build. What each endpoint takes and returns
+is in the [reference](reference.md#workload-templates).
+
 ## Send images to a model
 
 1. **Add a model that reads images.** On **Models → Add a model → Recommended**, the **Vision** group

@@ -1,0 +1,10 @@
+# The vision server's dependencies. requirements-cpu.txt and requirements-cuda.txt are compiled from this
+# (with hashes) by `sh compile.sh`; torch and torchvision come from PyTorch's own index for each variant.
+torch==2.14.1
+torchvision==0.29.1
+transformers==5.23.0
+huggingface_hub==2.4.0
+fastapi==0.162.7
+uvicorn==0.54.0
+pillow==13.0.0
+python-multipart==0.0.33

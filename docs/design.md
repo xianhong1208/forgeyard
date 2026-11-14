@@ -571,7 +571,20 @@ and `forgeyard/workloads/expose.py`.
   host names, a wildcard `*.x.<server>` certificate), bodies above the limit streamed through,
   units reported by the upstream, async job APIs, cloud spill.
 
-Real-hardware check: `scripts/accept_x.py`.
+**Ready-made templates** (`forgeyard/workloads/templates.py`, `GET /api/workloads/templates`): object
+detection (RT-DETRv2 R18), segmentation (SAM 2.1 Hiera tiny) and depth (Depth Anything V2 Small), all
+Apache-2.0 (no Ultralytics YOLO, AGPL-3.0; no Depth Anything Base or Large, CC-BY-NC). No official image
+serves these with an HTTP API in a pinned, offline-capable way (Triton needs a model repository and
+its images carry NVIDIA's container licence; TorchServe is archived; Hugging Face's inference toolkit
+downloads the model at start), so Forgeyard ships its own small server: `images/vision` (FastAPI on
+transformers), one image for the three tasks (`--task`), the models baked in at pinned revisions, the
+dependencies pinned with hashes, the base by digest, an unprivileged user. Published with each release
+as `forgeyard-vision:X.Y.Z` (CPU, amd64 and arm64) and `X.Y.Z-cuda` (torch cu130, amd64); CI builds the
+CPU one and smoke-tests every task without the network. A template is a normal workload spec (the
+CUDA build on one NVIDIA card shared by memory, or the CPU build) with `gateway.expose` on; the
+console fills the new-workload form with it. Offline: `docker save` / `docker load` of the tag.
+
+Real-hardware check: `scripts/accept_x.py` (`--templates`).
 
 ## Cloud providers and tiered routes (1.2)
 
