@@ -313,6 +313,40 @@ ${PORT}
 
 關掉 **Expose** 會立刻關閉 `/x/<name>`；守門員會一直留在副本前面，直到工作負載重新啟動。哪些東西會通過、哪些會被拿掉，請見[參考資料](reference.md#the-passthrough-x)。
 
+## 從範本開始一個工作負載
+
+**Workloads** → **Start from a template** 提供現成的視覺 API。每個範本都執行 Forgeyard 自己的 vision server 映像檔，並且直接公開在 `/x/<name>`：
+
+| 範本 | 模型（授權） | 呼叫 |
+|---|---|---|
+| **Object detection** | RT-DETRv2 ResNet-18，`PekingU/rtdetr_v2_r18vd`（Apache-2.0） | `POST /x/detector/v1/detect`：框、標籤與分數 |
+| **Segmentation** | SAM 2.1 Hiera tiny，`facebook/sam2.1-hiera-tiny`（Apache-2.0） | `POST /x/segmenter/v1/segment`，給一個點或一個框：遮罩 |
+| **Depth estimation** | Depth Anything V2 Small，`depth-anything/Depth-Anything-V2-Small-hf`（Apache-2.0） | `POST /x/depth/v1/depth`：16 位元的深度 PNG |
+
+1. 選 **On an NVIDIA GPU**（映像檔的 CUDA 版本，以記憶體共用一張卡，3 GiB）或 **On the CPU**（CPU 版本，不用 GPU）。表單會開好並填好：映像檔、任務、連接埠、健康檢查，以及 **Expose at** `/x/<name>`。可以改任何東西，例如名稱或機器，再按 **Create and start**。
+2. 讓 API 金鑰可以呼叫它（**API keys** → 金鑰的 **Workloads at /x/**）。
+3. 以 multipart 檔案欄位 `image` 送出圖片（或 JSON `{"image": "<base64>"}`）：
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
+```
+
+只提供寬鬆授權的模型：不用 Ultralytics YOLOv8 或 YOLO11（AGPL-3.0），Depth Anything V2 也只用 Small（Base 和 Large 是 CC-BY-NC-4.0）。模型以固定的 revision 包在映像檔裡，所以映像檔到了機器上之後，範本就不需要網路。連不到 Docker Hub 的機器，請把映像檔複製過去（CUDA 版本需要 NVIDIA 驅動 580 或更新；沒有可用的 GPU 時會改用 CPU）：
+
+```bash
+docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda
+docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda | gzip > forgeyard-vision.tar.gz
+# on the machine without the network:
+gunzip -c forgeyard-vision.tar.gz | sudo docker load
+```
+
+AMD 機器請用 **On the CPU**：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#workload-templates)。
+
 ## 把圖片送給模型
 
 1. **加入能讀圖片的模型。** 在 **Models → Add a model → Recommended** 的 **Vision** 群組裡，有給 vLLM 用的 Qwen3-VL 2B、4B 和 8B，以及給 llama.cpp（CPU 或 AMD APU）用、附 projector 檔的 Qwen3-VL GGUF。只要目錄項目標示 *Images* 的模型都可以：目錄會從模型的 `config.json` 讀出來。GGUF 儲存庫還要選它的 **Projector** 檔（有 F16 就預設選它；選 *None* 就只能處理文字）。

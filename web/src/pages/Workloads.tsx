@@ -1,10 +1,11 @@
-import { IconBox, IconPlayerPlay, IconPlus } from "@tabler/icons-react";
+import { IconBox, IconPlayerPlay, IconPlus, IconTemplate } from "@tabler/icons-react";
 import { useEffect } from "react";
 import { Link } from "react-router";
 
+import { HelpLink } from "../components/HelpLink";
 import { Notice, PageHeader } from "../components/ui";
 import { when, exact } from "../lib/format";
-import type { Replica, Workload, WorkloadsResponse } from "../lib/types";
+import type { Replica, Workload, WorkloadsResponse, WorkloadTemplate } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, portUrl, runtimeSummary, stateLabel } from "../lib/workloads";
 
@@ -43,6 +44,7 @@ export function WorkloadsPage() {
         )}
       />
       {error && <Notice tone="error">{error}</Notice>}
+      {canManage && <Templates />}
       {list && list.length === 0 && (
         <section className="empty">
           <div className="empty-art empty-art-lanes" aria-hidden="true">
@@ -146,5 +148,37 @@ function ReplicaLine({ r }: { r: Replica }) {
       </span>
       {r.reason && <span className="rep-reason">{r.reason}</span>}
     </li>
+  );
+}
+
+// Ready-made templates (1.3): vision services exposed at /x/<name>, on the CPU or an NVIDIA GPU.
+function Templates() {
+  const { data } = useApi<{ templates: WorkloadTemplate[] }>("/workloads/templates");
+  if (!data?.templates?.length) return null;
+  return (
+    <section className="panel tpl-panel" aria-labelledby="tpl-title">
+      <div className="panel-head">
+        <h2 id="tpl-title"><IconTemplate size={18} stroke={1.7} aria-hidden="true" /> Start from a template</h2>
+        <HelpLink page="how-to" anchor="start-a-workload-from-a-template">What they are</HelpLink>
+      </div>
+      <p className="muted small">A vision API on Forgeyard's own image, exposed at <code>/x/&lt;name&gt;</code> for API keys you allow.
+        Permissively licensed models only; the model is in the image, so it also runs without the network.</p>
+      <ul className="tpl-list">
+        {data.templates.map((t) => (
+          <li key={t.id} className="tpl" aria-label={`Template ${t.title}`}>
+            <div className="tpl-head">
+              <span className="strong">{t.title}</span>
+              <span className="chip mono" title="The model's licence">{t.licence}</span>
+            </div>
+            <p className="small">{t.summary}</p>
+            <p className="small muted"><a href={t.model_url} target="_blank" rel="noreferrer" className="mono">{t.model}</a> · <code>POST /x/{t.name}{t.endpoint}</code></p>
+            <div className="row-gap">
+              <Link className="btn btn-small" to={`/workloads/new?template=${t.id}&gpu=1`}>On an NVIDIA GPU</Link>
+              <Link className="btn btn-quiet btn-small" to={`/workloads/new?template=${t.id}`}>On the CPU</Link>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

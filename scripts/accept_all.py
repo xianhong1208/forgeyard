@@ -45,7 +45,8 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              process on the CPU machine and in a container on the GPU machine: keys (none, listed), the path
              as sent and refused paths, credentials and forwarded headers replaced, the forced sandbox,
              redirects, streaming, a client that hangs up, the body limit, rpm, concurrency, the read
-             timeout, the replica's port behind the key guard, usage (bytes, busy time), turning it off
+             timeout, the replica's port behind the key guard, usage (bytes, busy time), turning it off; with
+             --x-templates, the ready-made templates on the GPU machine (an image in, boxes, masks, depth out)
   console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
              and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
 
@@ -370,6 +371,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                     "speech-to-text deployment, else skipped), a served model, local:<faster-whisper model>, or none")
     ap.add_argument("--img-vision", default="auto", help="the img group's check of what an image shows: auto (a "
                     "ready chat model that reads images, else skipped), a served model, or none")
+    ap.add_argument("--x-templates", default="", help="the passthrough group also deploys these workload templates "
+                    "(object-detection,segmentation,depth or all) on the GPU machine's NVIDIA card (a multi-GB image "
+                    "pull the first time)")
     ap.add_argument("--shots", help="save the console group's screenshots in this directory")
     ap.add_argument("--chrome", default="/opt/google/chrome/chrome", help="Chrome for the console group")
     ap.add_argument("--install-playwright", action="store_true",
@@ -2043,6 +2047,37 @@ def group_passthrough(run: Run) -> None:
 
         out = accept_x.exercise(c, run.args.server, w, run.check, new_key)
         run.report.info.setdefault("passthrough", {})[w["name"]] = out.get("usage")
+    wanted = names_list(run.args.x_templates)
+    if not wanted:
+        run.skip("workload templates", "not asked for (--x-templates)")
+        return
+    m = run.fresh_machine("gpu")
+    if m is None or not ((m.get("runtime_info") or {}).get("container") or {}).get("ok"):
+        run.skip("workload templates", "no --gpu-machine with a container engine")
+        return
+    ts = {t["id"]: t for t in c.ok("GET", "/api/workloads/templates")["templates"]}
+    wanted = list(ts) if wanted == ["all"] else wanted
+    image, image_name = accept_x.photo(None)
+    key = run.new_key("x-templates", workloads="all")["key"]
+
+    def tcheck(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
+        if skip or info:
+            run.skip(label, ("information: " if info else "") + str(detail))
+        else:
+            run.check(label, ok, detail)
+
+    for tid in wanted:
+        if tid not in ts:
+            run.check(f"template {tid}", False, f"the server has no such template ({', '.join(ts)})")
+            continue
+        w = workload(run, dict(ts[tid]["specs"]["cuda"], name=run.name(f"x-{tid}"), machine_id=m["id"]))
+        try:
+            w = wait_status(run, w["id"], ("running", "failed"), run.args.timeout)
+        except Fail as e:
+            run.check(f"{w['name']}: ready", False, str(e))
+            continue
+        if run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running", replicas_text(w)):
+            accept_x.exercise_template(c, run.args.server, w, ts[tid], tcheck, key, True, image, image_name)
 
 
 @group("console", "the web console in a browser, as an admin and as a plain user")

@@ -57,6 +57,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 管理員和操作員可以在建立工作負載時公開它，或之後在它的頁面上公開。請見[在 /x/ 公開工作負載](how-to.md#expose-a-workload-at-x)。
 
+三個**範本**用這種方式一步就啟動最常見的視覺 API（物件偵測、影像分割、深度估計），使用 Forgeyard 自己的映像檔，而且只用寬鬆授權的模型。請見[從範本開始一個工作負載](how-to.md#start-a-workload-from-a-template)。
+
 ## 模型、recipe 與估算
 
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。

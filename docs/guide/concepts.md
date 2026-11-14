@@ -91,6 +91,10 @@ models, a FastAPI or BentoML service.
 Admins and operators expose a workload, when they create it or later on its page. See
 [Expose a workload at /x/](how-to.md#expose-a-workload-at-x).
 
+Three **templates** start the most common vision APIs this way in one step (object detection,
+segmentation, depth), on Forgeyard's own image with permissively licensed models only. See
+[Start a workload from a template](how-to.md#start-a-workload-from-a-template).
+
 ## Models, recipes and estimates
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
