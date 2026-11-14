@@ -222,6 +222,8 @@ local_dirs = ["/data/models"]
 | `POST /v1/audio/speech` | 文字轉語音（1.3）：OpenAI 的請求格式，音訊一邊產生一邊傳回。見[文字轉語音](#text-to-speech) | 否 |
 | `GET /v1/audio/voices?model=<model>` | 語音模型的聲音、預設聲音、它能產生的格式、串流方式與輸入上限 | — |
 | `POST /v1/audio/voices`、`DELETE /v1/audio/voices/{name}` | 上傳或刪除聲音（聲音複製）：1.3 一律回應 400 `voice_cloning_not_supported` | — |
+| `POST /v1/images/generations` | 圖片生成（1.3）：OpenAI 的請求格式，圖片只以 base64（`b64_json`）傳回。見[圖片生成](#images) | 否 |
+| `POST /v1/images/edits`、`POST /v1/images/variations` | 圖片編輯與變體：1.3 不提供，一律回應 404 `endpoint_not_supported` | — |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
 
@@ -229,7 +231,7 @@ local_dirs = ["/data/models"]
 
 - 從請求內容讀取 `model`，把請求送到這個模型的路由。模型在另一個端點提供時（例如把嵌入模型送到 `/v1/chat/completions`），回 400 `wrong_endpoint`。
 - 把 `model` 換成副本或供應商預期的名稱，加上副本的內部金鑰或供應商的金鑰，你的其他東西一概不轉送：不轉送你的 API 金鑰，也不轉送你的其他標頭。
-- `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。文字轉語音則改成 `input` 的每個字元算一個 token（見[文字轉語音](#text-to-speech)）。
+- `max_tokens`（或 `max_completion_tokens`）在請求到達時計入金鑰的每分鐘 token 數，也決定預算下這個請求最多可能花多少錢。文字轉語音則改成 `input` 的每個字元算一個 token（見[文字轉語音](#text-to-speech)）；圖片請求不計任何 token（見[圖片生成](#images)）。
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
 - 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
 - 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
@@ -294,6 +296,41 @@ local_dirs = ["/data/models"]
 `{"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", "formats",
 "default_format", "stream_formats", "max_input_chars"}`，向一個就緒的副本詢問，保留 5 分鐘。上傳到引擎的聲音一律不列出。
 
+### 圖片生成
+
+`POST /v1/images/generations` 接受 OpenAI 的請求，回應 OpenAI 的 JSON，圖片以 base64 傳回。兩種引擎提供這項服務（配方 `vllm-omni-image` 在 NVIDIA 上跑 diffusers pipeline，`sd-cpp` 在 AMD（Vulkan）和 CPU 上跑 stable-diffusion.cpp，不支援 NVIDIA：#43）；只由本機部署提供，絕不送往雲端供應商。
+
+| 欄位 | 閘道怎麼處理 |
+|---|---|
+| `model` | 圖片模型的名稱，和平常一樣 |
+| `prompt` | 必填，最多為部署的 *Longest prompt*（`max_prompt_chars`，4,000）。超過時回應 400 `prompt_too_long`。提示裡的引擎設定（`<sd_cpp_extra_args>`）會被拒絕：請改用下面的欄位 |
+| `n` | 1 到部署的 *Images per request*（`max_images`，預設 4）；超過時回應 400 `too_many_images`。沒指定時為 1 |
+| `size` | `WIDTHxHEIGHT`；`auto` 或沒指定時用部署的 *Default size*（模型自己的：Stable Diffusion 1.5 為 512x512，SDXL、Z-Image 與 FLUX 為 1024x1024）。每一邊最多 *Largest side*（`max_side`，0 = 模型自己的）；超過時回應 400 `image_too_large`。每一邊必須是 16 的倍數（diffusion transformer）或 64 的倍數（Stable Diffusion 的 UNet）；否則回應 400 `invalid_size` |
+| `response_format` | 不指定或 `b64_json`。**`url` 會被拒絕**，回應 400 `response_format_not_supported`：Forgeyard 不保留它產生的圖片，所以沒有網址可給。請解碼 `data[].b64_json` |
+| `output_format` | `png`（預設）、`jpeg` 或 `webp`；其他回應 400 `unsupported_output_format`。jpeg 與 webp 可用 `output_compression`（0 到 100） |
+| `num_inference_steps` | 去噪步數，最多為部署的 *Most steps*（`max_steps`，50）；超過時回應 400 `too_many_steps`。沒指定時用部署的 *Default steps*，否則用模型自己的 |
+| `negative_prompt`、`guidance_scale`、`seed` | 轉送：對 vLLM-Omni 以欄位轉送，對 stable-diffusion.cpp 則放進提示裡的 `<sd_cpp_extra_args>`（由閘道產生）。沒有 `seed` 時，每個請求都是一張新圖片 |
+| `true_cfg_scale` | 只有 vLLM-Omni（Qwen-Image）使用；stable-diffusion.cpp 忽略它 |
+| `quality`、`style`、`background`、`moderation`、`user` | 接受但忽略 |
+| `stream` | 拒絕（400 `streaming_not_supported`）：圖片做好才會回應 |
+
+其他東西都不會送到引擎：引擎會接受、但 Forgeyard 不提供的欄位（vLLM-Omni 的 `lora`，它帶的是伺服器上的路徑；它的 `extra_params` 與系統提示）都會被拿掉。
+
+回應：`{"created", "data": [{"b64_json"}], "output_format", "size"}`。引擎自己附加的內容（stable-diffusion.cpp 帶著提示與設定的 `generation_info`、vLLM-Omni 的各階段耗時）不會轉送。引擎的錯誤會以 OpenAI 的格式傳回，帶著它的狀態碼和 `engine_error` 這個 code。
+
+**佇列。** 部署的每個副本同時處理 *Requests at once*（`concurrency`，1）個請求；其他請求在閘道裡等待，先到先處理，最多 *Queue length*（`queue`，8）個。再多一個就回應 429 `queue_full` 並附上 `Retry-After`（依它最近的請求花了多久計算）。等待超過部署 *Timeout* 的請求回應 503 `queue_timeout`；副本接手之後，閘道最多等待這個 *Timeout*（`timeout`：vLLM-Omni 為 600 秒，stable-diffusion.cpp 為 1,800 秒）取得圖片，之後回應 504 `upstream_timeout`。在等待中放棄的用戶端會離開佇列；它的請求絕不會送到引擎。
+
+**不過濾提示。** 閘道只檢查請求的格式與部署的上限，不檢查提示要求畫什麼。如果部署需要安全過濾，請在它前面加一層。
+
+每個有回應的請求會計入（`GET /api/usage` 與 **Usage** 頁面）：
+
+| 單位 | 怎麼算 |
+|---|---|
+| `images` | 回應裡的圖片數 |
+| `kilopixels` | 寬 x 高 / 1,000，從每張圖片自己的檔頭讀出（PNG、JPEG、WebP），否則用請求的尺寸 |
+| `busy_ms` | 副本處理這個請求的時間（從送出到收到回應的最後一個位元組），乘以部署占用的 GPU 數（CPU 上為 1）：也就是 GPU 時間 |
+| tokens | 不計。金鑰的每分鐘 token 數不適用；每分鐘請求數照樣適用 |
+
 ### 標頭
 
 | 標頭 | 方向 | 值 |
@@ -336,6 +373,15 @@ local_dirs = ["/data/models"]
 | 400 | `stream_format_not_supported` | 文字轉語音：引擎不提供這種 `stream_format`（llama.cpp 或 speaches 的 `sse`） | 拿掉它，或用 `audio` |
 | 400 | `language_not_supported` | 文字轉語音：把中文、日文或韓文送給 speaches，它會把這些字刪掉 | 改用 Qwen3-TTS 部署 |
 | 400 | `voice_cloning_not_supported` | 文字轉語音：帶了參考錄音、以音訊或連結當聲音、`task_type: "Base"`，或上傳聲音。1.3 不提供 | 使用模型自己的聲音 |
+| 400 | `response_format_not_supported` | 圖片：`response_format: url`。圖片只以 base64 傳回 | 拿掉它，或要求 `b64_json` |
+| 400 | `streaming_not_supported` | 圖片：`stream: true` | 拿掉它 |
+| 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request* | 少要幾張，或調高 `max_images` |
+| 400 | `image_too_large` | 圖片：某一邊超過部署的 *Largest side* | 要小一點的尺寸，或調高 `max_side` |
+| 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明） | 使用類似訊息建議的尺寸 |
+| 400 | `unsupported_output_format` | 圖片：`output_format` 不是 png、jpeg 或 webp，或是引擎不產生的格式 | 改要 png |
+| 400 | `too_many_steps` | 圖片：`num_inference_steps` 超過部署的 *Most steps* | 少一點步數，或調高 `max_steps` |
+| 400 | `prompt_too_long` | 圖片：`prompt` 或 `negative_prompt` 超過部署的 *Longest prompt* | 縮短它，或調高 `max_prompt_chars` |
+| 4xx/5xx | `engine_error` | 圖片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
@@ -347,11 +393,13 @@ local_dirs = ["/data/models"]
 | 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
 | 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **Allowed**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
 | 404 | `unknown_endpoint` | 閘道沒有這個路徑 | 使用上面列出的端點 |
+| 404 | `endpoint_not_supported` | `/v1/images/edits` 或 `/v1/images/variations`：1.3 不提供 | 改用 `/v1/images/generations` |
 | 413 | `request_too_large` | 請求內容（媒體網址下載並內嵌後）大於模型的 *Largest request* 或 `GATEWAY_MAX_BODY_MB` | 送少一點或縮小圖片，或調高參數或設定 |
 | 413 | `media_too_large` | 媒體網址的檔案大於 `MEDIA_FETCH_MAX_MB` | 送小一點的檔案，或調高設定 |
 | 421 | `host_not_allowed` | 伺服器不回應網址裡的主機名稱 | 使用它的位址，或把名稱加進 `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | 超過金鑰每分鐘的請求數或 token 數 | 等待 `Retry-After` 秒 |
 | 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
+| 429 | `queue_full` | 圖片：每個副本都在忙，部署的佇列也滿了 | 等待 `Retry-After` 秒 |
 | 502 | `upstream_unreachable` | 連不上任何副本 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
 | 502 | `upstream_error` | 回應傳送到一半時，和副本或供應商的連線斷了 | 重試 |
 | 502 | `replica_refused_key` | 副本拒絕了閘道的內部金鑰 | 停止再啟動部署 |
@@ -364,7 +412,8 @@ local_dirs = ["/data/models"]
 | 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它 | 重試 |
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
-| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段） | 降低 `max_tokens`，或調高設定 |
+| 503 | `queue_timeout` | 圖片：請求等待空出副本的時間超過部署的 *Timeout* | 稍後重試，或加一個副本 |
+| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段）；圖片則是在部署的 *Timeout* 內 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
 | 504 | `provider_timeout` | 供應商沒有及時回應（`PROVIDER_READ_TIMEOUT`，或供應商自己的逾時設定） | 稍後重試 |
 
 另外兩種情況：
@@ -494,8 +543,13 @@ local_dirs = ["/data/models"]
 | `faster-whisper` | `cuda`、`cuda-12.4`、`cpu` | NVIDIA、CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
 | `speaches-tts`（1.3） | `cpu` | CPU（容器），任何機器都可以 | 與 faster-whisper 相同的 `ghcr.io/speaches-ai/speaches:0.8.3-cpu` 映像檔。只用 CPU：Kokoro 和 Piper 跑在 ONNX Runtime 上，用 CPU 產生語音的速度就比播放還快；在 CUDA 映像檔裡 Kokoro 其實也是用 CPU 跑 |
 | `vllm-omni-tts`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | `vllm/vllm-omni:v0.32.0`（CUDA 13.0） |
+| `vllm-omni-image`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | 同樣的 `vllm/vllm-omni:v0.32.0` |
+| `sd-cpp`（1.3） | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `ghcr.io/leejet/stable-diffusion.cpp:master-vulkan`（build `32d516c`，Mesa RADV） |
+| | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
+
+stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`）發布映像檔。配方用 digest 釘住檢查過的那個 build；`scripts/pin_images.py` 會保留它（tag 已經移動只會當成資訊回報），除非執行時加上 `--move-rolling`。它之後的 Linux release 是在 Ubuntu 26.04（glibc 2.43）上建置的，所以 CPU 行程用的是較早的 build；它的 OpenAI API 是一樣的。`sd-server` 沒有 API 金鑰：沒有金鑰守門的 agent（1.1 之前）不會分到 `sd-cpp` 副本。沒有 NVIDIA variant（[#43](https://github.com/xianhong1208/forgeyard/issues/43)）：官方的 CUDA 映像檔在 A100 上跑 Z-Image-Turbo 會當掉，所以 NVIDIA 顯示卡用 `vllm-omni-image` 產生圖片；在只有 NVIDIA 的機器上用 GPU 部署 GGUF 圖片模型會被拒絕（*no allowed GPU that sd-cpp supports*），選 **Runs on** → **CPU only** 則會在 CPU 上執行。
 
 每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
 `scripts/pin_images.py` 會在 `forgeyard/recipes/images.lock.json` 記錄每個映像檔的正確副本可能顯示的 id（index、manifest 和 config 的 digest，以及每個平台的內容 id），所以在連不到 registry 的機器上用 `docker load` 載入的副本會被檢查並使用：[離線機器](how-to.md#offline-machines)。

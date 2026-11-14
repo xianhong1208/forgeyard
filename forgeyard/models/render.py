@@ -14,8 +14,8 @@ import posixpath
 from forgeyard.db import Accelerator
 from forgeyard.models import modalities
 from forgeyard.models.catalog import Context
-from forgeyard.models.estimate import CODEC_LABEL, gpu_memory_utilization
-from forgeyard.models.recipes import Variant, render_text
+from forgeyard.models.estimate import CODEC_LABEL, GIB, gpu_memory_utilization, image_caps, image_side
+from forgeyard.models.recipes import IMAGE_COMPONENTS, Variant, render_text
 
 
 def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context: int) -> dict:
@@ -43,6 +43,13 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
     # The largest image in pixels for an image-token cap, where tokens grow with the resolution.
     tile = int(meta.get("vision_tile_px") or 0)
     out["image_max_pixels"] = int(out.get("image_tokens") or 0) * tile * tile
+    # Image generation (1.3): the default size, the largest image in pixels, the component files.
+    out["width"], out["height"] = default_size(meta, p)
+    side, _ = image_caps(meta, p)
+    out["max_pixels"] = side * side
+    comps = image_components(meta)
+    for c in IMAGE_COMPONENTS:
+        out[f"{c}_file"] = f"${{MODEL_PATH}}/{comps[c]}" if c in comps else ""
     if variant.gpu and cards:
         total = min(int(a.vram_total or 0) for a in cards)
         out["gpu_util"] = f"{gpu_memory_utilization(ctx.estimate.per_gpu, total, gpu_context):.3f}"
@@ -56,9 +63,32 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
         else:
             out["gpu_util_main"] = out["gpu_util"]
             out["gpu_util_codec"] = "0"
+        # What an engine with its own memory budget (stable-diffusion.cpp's --max-vram) may use: the
+        # reservation less the CUDA context, in GiB.
+        out["gpu_budget_gib"] = f"{max(0.5, (ctx.estimate.per_gpu - gpu_context) / GIB):.1f}"
     else:
         out["gpu_util"] = out["gpu_util_main"] = out["gpu_util_codec"] = "0"
+        out["gpu_budget_gib"] = "0"
     return out
+
+
+def default_size(meta: dict, params: dict) -> tuple[int, int]:
+    """An image deployment's default size (its default_size parameter; auto: the model's native square,
+    within the deployment's largest side)."""
+    side, _ = image_caps(meta, params)
+    text = str(params.get("default_size") or "auto")
+    if "x" in text:
+        w, _, h = text.partition("x")
+        if w.isdigit() and h.isdigit() and int(w) > 0 and int(h) > 0:
+            return min(int(w), side), min(int(h), side)
+    n = min(image_side(meta), side)
+    return n, n
+
+
+def image_components(meta: dict) -> dict:
+    img = (meta or {}).get("image")
+    comps = img.get("components") if isinstance(img, dict) else None
+    return {k: v for k, v in (comps or {}).items() if k in IMAGE_COMPONENTS and isinstance(v, str)}
 
 
 def mmproj_path(meta: dict) -> str:
@@ -73,6 +103,12 @@ def model_has(ctx: Context, feature: str) -> bool:
         return bool(mmproj_path(meta))
     if feature == "image_pixels":
         return bool(meta.get("vision_tile_px")) and "image" in (modalities.of_model(meta, ctx.model.format) or [])
+    if feature in ("image_single", "image_split"):
+        img = meta.get("image") if isinstance(meta.get("image"), dict) else {}
+        single = bool(img.get("single", True))
+        return single if feature == "image_single" else not single
+    if feature in IMAGE_COMPONENTS:
+        return feature in image_components(meta)
     return feature in (modalities.of_model(meta, ctx.model.format) or [])
 
 

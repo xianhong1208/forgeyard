@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, utcnow
-from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
+from forgeyard.machines.protocol import FEATURE_ENGINE_ZIP, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
 from forgeyard.models import render, sources
 from forgeyard.models.catalog import Context, context_for, deployment_of, model_block
 from forgeyard.models.estimate import EstimateError, gib
@@ -96,6 +96,9 @@ def _cached(node: Node, ctx: Context) -> bool:
 
 
 def _runtime_problem(node: Node, variant: Variant) -> Optional[str]:
+    if variant.engine is not None and variant.engine.url.lower().endswith(".zip") \
+            and FEATURE_ENGINE_ZIP not in (node.features or []):
+        return "its agent cannot unpack .zip engines (update the agent)"
     info = (node.runtime_info or {}).get(variant.runtime) or {}
     if not info.get("ok"):
         return f"no {variant.runtime} runtime ({info.get('reason') or 'not available'})"
@@ -120,6 +123,11 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
     feats = node.features or []
     if FEATURE_WORKLOADS not in feats or FEATURE_MODELS not in feats:
         v.reason = "its agent does not serve models (update it and start it with --model-cache)"
+        return v
+    if ctx.recipe.builtin and not ctx.recipe.api_key_env and FEATURE_REPLICA_GUARD not in feats:
+        # 1.3: an engine with no API key of its own (stable-diffusion.cpp) is closed only by the agent's
+        # key guard; without one, its port would answer anyone who can reach it.
+        v.reason = f"{ctx.recipe.engine} has no API key of its own and the agent has no key guard (update the agent)"
         return v
     used = placement.usage(db, node.id, exclude, node=node)
     cards = _merge(used.cards, extra or {})

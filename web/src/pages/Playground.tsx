@@ -1,12 +1,12 @@
-import { IconDownload, IconPhoto, IconPlayerStop, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
+import { IconDownload, IconPhoto, IconPhotoAi, IconPlayerStop, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Link } from "react-router";
 
 import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
-import { API_KIND, SPEECH_MIME, answerError, chatContent, ms, pcmRate, pcmToWav, readEvents, readImage, type Attached,
-  type Voice } from "../lib/gateway";
+import { API_KIND, IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
+  type Attached, type ImageOptions, type Voice } from "../lib/gateway";
 import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
 import type { RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -89,6 +89,7 @@ export function PlaygroundPage() {
       {route?.api === "rerank" && <Rerank key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-audio" && <Transcribe key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-speech" && <Speak key={route.served_name} model={route.served_name} />}
+      {route?.api === "openai-images" && <Imagine key={route.served_name} model={route.served_name} />}
     </>
   );
 }
@@ -503,3 +504,140 @@ function Speak({ model }: { model: string }) {
   );
 }
 
+const IMAGE_SAMPLE = "A lighthouse on a rocky coast at sunset, warm light, oil painting";
+
+type Made = { url: string; name: string };
+
+function b64Blob(b64: string, mime: string): Blob {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+// Image generation (1.3): a prompt, a size the deployment takes and how many; the images come back as
+// base64 and are shown with a download link each. Requests wait in the gateway's queue while the model
+// is busy, so a long wait is normal on a CPU.
+function Imagine({ model }: { model: string }) {
+  const [prompt, setPrompt] = useState(IMAGE_SAMPLE);
+  const [opts, setOpts] = useState<ImageOptions | null>(null);
+  const [optsErr, setOptsErr] = useState<string | null>(null);
+  const [size, setSize] = useState("");
+  const [n, setN] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [made, setMade] = useState<{ images: Made[]; meta: string } | null>(null);
+  const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/playground/images/options?model=${encodeURIComponent(model)}`, { credentials: "same-origin", headers: { "X-Forgeyard": "1" } });
+        if (res.status === 401) { notifyUnauthorized(); return; }
+        if (!res.ok) { if (live) setOptsErr(await failure(res)); return; }
+        const data = (await res.json()) as ImageOptions;
+        if (!live) return;
+        setOpts(data);
+        setSize(data.default_size);
+      } catch {
+        if (live) setOptsErr("Cannot reach the Forgeyard server.");
+      }
+    })();
+    return () => { live = false; };
+  }, [model]);
+
+  useEffect(() => () => { made?.images.forEach((i) => URL.revokeObjectURL(i.url)); }, [made]);
+
+  const sizes = opts ? imageSizes(opts) : [];
+  const counts = Array.from({ length: Math.min(opts?.max_n ?? 1, 8) }, (_, i) => i + 1);
+  const cap = opts?.max_prompt_chars;
+  const chars = prompt.length;
+
+  const go = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim() || busy) return;
+    setBusy(true); setErr(null);
+    const ctrl = new AbortController();
+    abort.current = ctrl;
+    const started = performance.now();
+    try {
+      const res = await post("images/generations", { model, prompt, n, size: size || undefined }, ctrl.signal);
+      if (!res.ok) { setErr(await failure(res)); return; }
+      const data = await res.json();
+      const fmt: string = data.output_format ?? "png";
+      const mime = IMAGE_MIME[fmt] ?? "image/png";
+      const images: Made[] = (data.data ?? []).filter((d: { b64_json?: string }) => d.b64_json).map((d: { b64_json: string }, i: number) => ({
+        url: URL.createObjectURL(b64Blob(d.b64_json, mime)), name: `${model}-${i + 1}.${fmt === "jpeg" ? "jpg" : fmt}`,
+      }));
+      const replica = res.headers.get("X-Forgeyard-Replica");
+      const meta = [replica ? `replica ${replica.split("#")[1]}` : null, `${images.length} image${images.length === 1 ? "" : "s"}`,
+        data.size ?? null, fmt.toUpperCase(), ms(performance.now() - started)].filter(Boolean).join(" · ");
+      setMade((cur) => {
+        cur?.images.forEach((i) => URL.revokeObjectURL(i.url));
+        return { images, meta };
+      });
+    } catch (e2) {
+      if ((e2 as Error).name !== "AbortError") setErr("Cannot reach the Forgeyard server.");
+    } finally {
+      setBusy(false);
+      abort.current = null;
+    }
+  };
+
+  return (
+    <section className="panel play" aria-labelledby="img-title">
+      <h2 id="img-title">Image</h2>
+      {optsErr && <Notice tone="error">{optsErr}</Notice>}
+      <form onSubmit={go} className="img-form">
+        <div className="field">
+          <label htmlFor="img-prompt">Prompt</label>
+          <textarea id="img-prompt" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{chars.toLocaleString("en-US")}{cap ? ` of at most ${cap.toLocaleString("en-US")}` : ""} characters</p>
+        </div>
+        <div className="img-options">
+          <div className="field">
+            <label htmlFor="img-size">Size</label>
+            <select id="img-size" value={size} onChange={(e) => setSize(e.target.value)} disabled={!opts}>
+              {sizes.map((s) => <option key={s} value={s}>{s}{s === opts?.default_size ? " (default)" : ""}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="img-n">Images</label>
+            <select id="img-n" value={n} onChange={(e) => setN(Number(e.target.value))} disabled={!opts}>
+              {counts.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="row-gap">
+          {busy ? (
+            <>
+              <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
+              <span className="muted small" role="status">Making {n === 1 ? "the image" : `${n} images`}… this takes a while, longer on a CPU or when others are waiting.</span>
+            </>
+          ) : (
+            <button type="submit" className="btn btn-primary" disabled={!opts || !prompt.trim() || (cap !== undefined && chars > cap)}>
+              <IconPhotoAi size={16} aria-hidden="true" /> Generate
+            </button>
+          )}
+        </div>
+      </form>
+      {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
+      {made && (
+        <div className="img-out" aria-label="Generated images">
+          <span className="msg-meta">{made.meta}</span>
+          <div className="img-grid">
+            {made.images.map((i, k) => (
+              <figure key={i.url} className="img-item">
+                <img src={i.url} alt={`Image ${k + 1} for: ${prompt.slice(0, 80)}`} />
+                <figcaption>
+                  <a className="btn btn-quiet btn-small" href={i.url} download={i.name}><IconDownload size={14} aria-hidden="true" /> Download</a>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

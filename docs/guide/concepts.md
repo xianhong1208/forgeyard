@@ -147,6 +147,33 @@ engines serve them:
   minute, a character counts as a token.
 - Speech stays on your own deployments; it never goes to a cloud provider.
 
+## Images
+
+Image models answer `/v1/images/generations`, OpenAI's image call, with the images as base64. Two
+engines serve them:
+
+| Engine (recipe) | Where | Models |
+|---|---|---|
+| vLLM-Omni (`vllm-omni-image`) | NVIDIA GPUs | diffusers pipelines (a repository with `model_index.json`): Z-Image-Turbo, Stable Diffusion XL, FLUX.1-schnell, Qwen-Image |
+| stable-diffusion.cpp (`sd-cpp`) | AMD GPUs and APUs (Vulkan), the CPU (a process, no Docker); not NVIDIA ([#43](https://github.com/xianhong1208/forgeyard/issues/43)) | GGUF or single files: Stable Diffusion 1.5 / XL checkpoints, Z-Image and FLUX with their text encoder and VAE beside them in the same repository |
+
+- **Base64 only.** Forgeyard keeps no copy of the images it makes, so it cannot hand out a URL:
+  `response_format: url` is refused. Decode `data[].b64_json`.
+- **Caps per deployment, each with a working default:** the most images per request (4), the largest
+  side (the model's own: 512 for Stable Diffusion 1.5, 1024 for the others), the most steps (50). The
+  memory estimate is sized for them, so raising a cap raises the estimate.
+- **One at a time, then a queue.** An image takes seconds on a GPU and minutes on a CPU. A replica
+  works on one request at a time (*Requests at once*); the others wait in the gateway, in order. When
+  the queue is full, a request gets 429 with `Retry-After`.
+- **Licences.** The catalog shows each model's licence and whether it is gated. The recommended list
+  holds only Apache-2.0 and OpenRAIL models; FLUX.1-dev, SD-Turbo and SD3.5 are not on it (non-commercial
+  or revenue-limited terms), though they can be added by hand. OpenRAIL models (SDXL, SD 1.5) may be used
+  commercially, but their licence forbids some uses: their cards mark the licence and link to it, as they
+  do for Gemma and Llama.
+- **No prompt filtering.** Forgeyard checks a request's shape and caps, not what it asks for.
+- Usage counts the **images**, their **kilopixels** and the **busy time** (GPU time on a GPU).
+- Images stay on your own deployments; they never go to a cloud provider.
+
 ## API keys, limits and usage
 
 - Programs call `/v1` with an **API key** (`fyk_…`). Everyone creates their own on **API keys**. A

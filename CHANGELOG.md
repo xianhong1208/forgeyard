@@ -7,9 +7,65 @@ version until 1.0.
 ## [Unreleased]
 
 1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
-through the gateway, and the usage units for all of 1.3. Third part: text to speech.
+through the gateway, and the usage units for all of 1.3. Third part: text to speech. Fourth part: image
+generation.
 
 ### Added
+
+- **Image generation** at `POST /v1/images/generations`, OpenAI's request shape, images back as base64
+  only, with two engines:
+  - **`vllm-omni-image`** (new recipe): diffusers pipelines (Z-Image-Turbo, Stable Diffusion XL,
+    FLUX.1-schnell, Qwen-Image) on NVIDIA with the same `vllm/vllm-omni:v0.32.0` image as text to speech,
+    the pixel cap repeated in the engine (`--max-generated-image-size`), VAE slicing, optional model
+    offload and VAE tiling.
+  - **`sd-cpp`** (new recipe): stable-diffusion.cpp's `sd-server` on AMD GPUs and APUs (Vulkan, the
+    render node only) and the CPU as a process without Docker. Its image is published only under a
+    rolling tag and is pinned by digest (`master-vulkan` at build 32d516c); the CPU process is release
+    `master-1043-3be2378` (later Linux releases need glibc 2.43). **No CUDA image** (#43): on an A100
+    the official `master-cuda` image ran Z-Image-Turbo GGUF at about 45 s a step and crashed at
+    1024x1024 (`unspecified launch failure`), so NVIDIA cards make images with `vllm-omni-image`, and a
+    GGUF image model on a GPU of an NVIDIA-only machine is refused with the reason.
+    A single checkpoint runs with `-m`, a model with separate text encoders and VAE with
+    `--diffusion-model`, `--llm` / `--t5xxl` / `--clip_l` and `--vae`; a random seed per request; with
+    Vulkan `--max-vram` from the reservation.
+- **`response_format: url` is refused** (400 `response_format_not_supported`): Forgeyard keeps no copy
+  of the images it makes. `stream` is refused too (`streaming_not_supported`).
+- **Caps per deployment**, each with a working default: *Images per request* (`max_images`, 4), *Default
+  size* (the model's own), and under Advanced *Largest side* (`max_side`, the model's own), *Default
+  steps*, *Most steps* (`max_steps`, 50), *Longest prompt* (4,000), *Requests at once*, *Queue length*
+  (8), *Timeout* (600 s for vLLM-Omni, 1,800 s for stable-diffusion.cpp), *Offload to host memory* and
+  *VAE tiling*. Over a cap: 400 `too_many_images`, `image_too_large`, `invalid_size`, `too_many_steps`,
+  `prompt_too_long`, `unsupported_output_format`.
+- **A queue per deployment in the gateway:** image requests wait for a free replica in order; with the
+  queue full, 429 `queue_full` with `Retry-After`; a request that waits longer than the deployment's
+  timeout, 503 `queue_timeout`. Image requests get the deployment's own read timeout.
+- Only fields Forgeyard knows reach the engine (`negative_prompt`, `num_inference_steps`,
+  `guidance_scale`, `seed`, as fields for vLLM-Omni and as `<sd_cpp_extra_args>` for sd-server, which
+  clients may not send themselves); vLLM-Omni's `lora` path, `extra_params` and system prompts never do.
+  The answer keeps OpenAI's shape without the engines' extras; engine errors come back as
+  `engine_error`. `/v1/images/edits` and `/v1/images/variations` answer 404 `endpoint_not_supported`.
+- **Usage** counts `images`, their `kilopixels` (read from each image's header) and `busy_ms` (the
+  replica's time × the GPUs it holds), shown on **Usage**. No tokens; local only (the new
+  `openai-images` routes take no provider); no prompt filtering.
+- **Catalog:** the new `image` task (Hugging Face's `text-to-image`) and `diffusers` format; the
+  inspector reads a pipeline's components from model_index.json and their safetensors headers, and a
+  GGUF / safetensors repository for stable-diffusion.cpp with its text encoder and VAE files found by
+  name (or named, `components`). Estimate method `diffusers`: the components (in 16 bits for vLLM-Omni),
+  activations for the caps, one VAE decode; model offload.
+- **Recommended models:** an *Images* group with Z-Image-Turbo, Stable Diffusion XL base 1.0 and
+  FLUX.1-schnell (gated) for vLLM-Omni, Z-Image-Turbo Q8_0 and FLUX.1-schnell Q4_0 GGUF for
+  stable-diffusion.cpp, and Stable Diffusion 1.5 Q8_0 GGUF for the CPU; Apache-2.0 and OpenRAIL
+  licences only, pinned to commits.
+- **Playground: Image**, for image models: a prompt, the sizes the deployment takes, how many, and the
+  images with a download link each. A deployment's **Try it** makes one 256x256 image and shows its size.
+- The agent unpacks `.zip` engine releases (feature `engine_zip`); a `.zip` engine goes only to agents
+  that list it, and an engine without an API key of its own (`sd-cpp`) only to agents with the key guard.
+- `scripts/pin_images.py` keeps an image pinned on a rolling tag (it reports the move as information)
+  unless `--move-rolling`.
+- `scripts/accept_img.py`: the real-hardware acceptance of image generation with the official SDK
+  (images that decode at the size asked, checked without Pillow; n; the caps; url refused; the queue;
+  usage; the key guard; what the image shows, through a chat model that reads images), and an `img`
+  group in `scripts/accept_all.py`.
 
 - **Text to speech** at `POST /v1/audio/speech`, OpenAI's request shape, with three engines:
   - **`vllm-omni-tts`** (new recipe): Qwen3-TTS CustomVoice on NVIDIA with vLLM-Omni 0.32.0
@@ -186,6 +242,10 @@ through the gateway, and the usage units for all of 1.3. Third part: text to spe
   `scripts/server_image_smoke.sh` (first start and setup through the API, HTTPS from the volume's
   CA, the health check, then a new container on the same volume keeps the owner, the CA and
   `secret.key`); `images-arm64` builds both images for linux/arm64.
+
+- **Licences with terms are marked on the recommended list.** OpenRAIL (SDXL, SD 1.5), Gemma and Llama
+  cards show the licence in a warning colour, say what it asks, and link to it (the original model's
+  page for a conversion). Apache-2.0, MIT and BSD models are unchanged.
 
 ### Changed
 - `speaches-tts` runs on the CPU only: on a real A100 Kokoro used no GPU memory in speaches' CUDA image

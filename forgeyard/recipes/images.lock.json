@@ -61,6 +61,16 @@
         }
       }
     },
+    "ghcr.io/leejet/stable-diffusion.cpp:master-vulkan@sha256:7911e3788c6c7570e1ec4d89c535cfe6f2e990a21474449e71e8ac291b8b6be0": {
+      "index": "sha256:7911e3788c6c7570e1ec4d89c535cfe6f2e990a21474449e71e8ac291b8b6be0",
+      "platforms": {
+        "linux/amd64": {
+          "manifest": "sha256:94a6384d6096fd3d7baceed9e434633954a7771d4d97923442116a29e5d8f94f",
+          "config": "sha256:2acd19578113c8e83d1d8926cacecc33ac86d6b90a86fdd49f3f0495eda79c56",
+          "content": "sha256:38a45859ad6eb85519955bb8100ebdf8df150759a13187f5e915e1329e684a57"
+        }
+      }
+    },
     "ghcr.io/speaches-ai/speaches:0.8.3-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8": {
       "index": "sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8",
       "platforms": {

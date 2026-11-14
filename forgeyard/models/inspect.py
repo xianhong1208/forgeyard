@@ -88,10 +88,100 @@ def license_of(info: dict) -> Optional[str]:
     return lic.strip().lower()[:64] if isinstance(lic, str) and lic.strip() else None
 
 
+MAX_COMPONENT_SHARDS = 64
+VAE_SCALE = 8
+
+
+def _check_components(given: dict, files: list[dict]) -> dict:
+    """Component files named by the caller (an image model for stable-diffusion.cpp): known roles,
+    files of the repository."""
+    paths = {f["path"] for f in files}
+    out = {}
+    for role, path in (given or {}).items():
+        if role not in recipes_components():
+            raise InspectError(f"components: {role!r} is not one of {', '.join(recipes_components())}")
+        if path in (None, "", "none"):
+            continue
+        if not isinstance(path, str) or path not in paths:
+            raise InspectError(f"components.{role}: {path} is not a file of this repository")
+        out[role] = path
+    return out
+
+
+def recipes_components() -> tuple:
+    from forgeyard.models.recipes import IMAGE_COMPONENTS
+
+    return IMAGE_COMPONENTS
+
+
+def _image_files(out: dict, files: list[dict], fmt: str, file: Optional[str], components: Optional[dict]) -> None:
+    """An image model for stable-diffusion.cpp (1.3): one checkpoint with everything in it (Stable
+    Diffusion 1.x / 2.x / XL: `-m`), or a diffusion model with its text encoder(s) and VAE beside it in
+    the same repository (Z-Image, FLUX: `--diffusion-model`, `--llm` or `--t5xxl` / `--clip_l`, `--vae`).
+    Read from the file names only: the sizes are what the estimate needs."""
+    choices = sources.image_file_choices(files, fmt)
+    out["gguf_files" if fmt == "gguf" else "image_files"] = choices
+    chosen = file or (choices[0]["path"] if len(choices) == 1 else sources.default_gguf(choices))
+    if chosen is None:
+        raise InspectError("this repository has several model files: choose one")
+    if chosen not in {c["path"] for c in choices}:
+        raise InspectError(f"{chosen} is not one of its model files")
+    comps = _check_components(components, files) if components is not None else sources.image_components(files, chosen)
+    side, multiple = sources.image_size_guess(chosen)
+    split = any(r in comps for r in ("llm", "t5xxl", "clip_l", "clip_g"))
+    if split:
+        side, multiple = max(side, 1024), 16
+    out["file"] = chosen
+    out["task_hint"] = "image"
+    out["modalities"] = []
+    out["image"] = {"size": side, "multiple": multiple, "components": comps, "single": not split}
+
+
+def _diffusers(out: dict, files: list[dict], url, ranged, token: Optional[str], policy: fetch.Policy) -> None:
+    """A diffusers pipeline (1.3, vLLM-Omni): model_index.json says which components it loads; each
+    one's safetensors headers give its parameters (the estimate counts them in 16 bits, as the engine
+    holds them), and the UNet's or transformer's config its native size."""
+    index = json.loads(fetch.get_bytes(url("model_index.json"), policy, headers=_auth(token), limit=1024**2))
+    if not isinstance(index, dict):
+        raise InspectError("model_index.json is not an object")
+    names = sources.diffusers_components(index)
+    selected = sources.select_diffusers(files, names)
+    comps: dict = {}
+    for name in names:
+        shards = [f["path"] for f in selected if f["path"].startswith(name + "/") and f["path"].endswith(".safetensors")]
+        if not shards:
+            continue
+        if len(shards) > MAX_COMPONENT_SHARDS:
+            raise InspectError(f"{name}: more than {MAX_COMPONENT_SHARDS} safetensors files")
+        w = safetensors.merge([safetensors.read_remote(ranged(p)) for p in shards])
+        params = sum(w["params"].values())
+        dtype = max(w["params"], key=w["params"].get) if w["params"] else None
+        comps[name] = {"class": str(index[name][1])[:64], "params": params, "bytes": w["bytes"], "dtype": dtype}
+    if not comps:
+        raise InspectError("model_index.json names no component with safetensors weights")
+    side, multiple = 1024, 16
+    if "unet" in comps:
+        multiple = 64
+        try:
+            cfg = json.loads(fetch.get_bytes(url("unet/config.json"), policy, headers=_auth(token), limit=1024**2))
+            sample = cfg.get("sample_size") if isinstance(cfg, dict) else None
+            if isinstance(sample, int) and 16 <= sample <= 512:
+                side = sample * VAE_SCALE
+        except (fetch.FetchError, ValueError):
+            side = 512
+    out["diffusers"] = {"pipeline": str(index.get("_class_name") or "")[:64] or None, "components": comps}
+    out["image"] = {"size": side, "multiple": multiple}
+    out["modalities"] = []
+    out["files"] = selected
+
+
 def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: str, policy: fetch.Policy,
-               token: Optional[str] = None, mmproj: Optional[str] = None) -> dict:
+               token: Optional[str] = None, mmproj: Optional[str] = None, task: Optional[str] = None,
+               components: Optional[dict] = None) -> dict:
     """`mmproj` (GGUF only): the projector file to use; None picks one when the repository has
-    any, "none" uses none."""
+    any, "none" uses none. `task` (1.3): "image" reads a GGUF or safetensors repository as an image
+    model for stable-diffusion.cpp (its file and the `components` beside it: found by name when not
+    given)."""
     ref = (ref or "main").strip()
     if not (sources.REVISION_RE.match(ref) or sources.REF_RE.match(ref)) or ".." in ref:
         raise InspectError("revision: a branch, tag or commit")
@@ -138,8 +228,15 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
     def ranged(path: str):
         return lambda a, b: fetch.get_range(url(path), policy, a, b, headers=_auth(token))
 
+    image = (task or out["task_hint"]) == "image"
+    if fmt == "diffusers":
+        out["task_hint"] = "image"
     try:
-        if fmt == "gguf":
+        if fmt == "diffusers":
+            _diffusers(out, files, url, ranged, token, policy)
+        elif image and fmt in ("gguf", "safetensors"):
+            _image_files(out, files, fmt, file, components)
+        elif fmt == "gguf":
             choices = sources.gguf_choices(files)
             out["gguf_files"] = choices
             chosen = file or sources.default_gguf(choices)
@@ -187,15 +284,26 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
                 if isinstance(rate, int) and 8000 <= rate <= 192000:
                     out["sample_rate"] = rate
         else:
-            raise InspectError("no safetensors, GGUF, CTranslate2 or ONNX weights in this repository")
+            raise InspectError("no safetensors, GGUF, CTranslate2, ONNX or diffusers weights in this repository")
     except fetch.FetchError as e:
         raise _hf_error(e, repo) from None
     except (gguf.GGUFError, safetensors.SafetensorsError, ValueError) as e:
         raise InspectError(str(e)) from None
-    selected = sources.select_files(files, fmt, out.get("file"), (out.get("mmproj") or {}).get("path"))
+    if fmt == "diffusers":
+        selected = out["files"]
+    elif "image" in out:
+        selected = sources.select_files(files, fmt, out["file"], components=out["image"]["components"])
+    else:
+        selected = sources.select_files(files, fmt, out.get("file"), (out.get("mmproj") or {}).get("path"))
     out["files"] = selected
     out["size_bytes"] = sum(f["size"] for f in selected)
-    if fmt == "safetensors" and out["weights"]["bytes"] == 0:
+    if "image" in out and fmt != "diffusers":
+        # What each part weighs, for the estimate: the model file (all parts of a split GGUF) and each component.
+        by_path = {f["path"]: f["size"] for f in selected}
+        comps = out["image"]["components"]
+        out["image"]["bytes"] = {"model": sum(v for k, v in by_path.items() if k not in comps.values()),
+                                 **{r: by_path.get(p, 0) for r, p in comps.items()}}
+    if fmt == "safetensors" and "weights" in out and out["weights"]["bytes"] == 0:
         out["weights"]["bytes"] = sum(f["size"] for f in selected if f["path"].endswith(".safetensors"))
     return out
 
@@ -217,16 +325,18 @@ def inspect_url(url: str, *, policy: fetch.Policy) -> dict:
 
 def inspect_source(src: Source, *, ref: Optional[str], file: Optional[str], endpoint: str, policy: fetch.Policy,
                    url_policy: fetch.Policy, local_dirs: list[str], token: Optional[str] = None,
-                   fmt: Optional[str] = None, size_bytes: Optional[int] = None, mmproj: Optional[str] = None) -> dict:
+                   fmt: Optional[str] = None, size_bytes: Optional[int] = None, mmproj: Optional[str] = None,
+                   task: Optional[str] = None, components: Optional[dict] = None) -> dict:
     if src.kind == "hf":
-        return inspect_hf(src.repo, ref, file, endpoint=endpoint, policy=policy, token=token, mmproj=mmproj)
+        return inspect_hf(src.repo, ref, file, endpoint=endpoint, policy=policy, token=token, mmproj=mmproj,
+                          task=task, components=components)
     if src.kind == "url":
         return inspect_url(src.url, policy=url_policy)
     if not sources.local_allowed(src.path, local_dirs):
         raise InspectError(f"{src.path} is not under a directory allowed for local models "
                            f"({', '.join(local_dirs) or 'none configured'})")
-    if fmt not in ("safetensors", "gguf", "ctranslate2", "onnx"):
-        raise InspectError("a local model needs its format (safetensors, gguf, ctranslate2 or onnx)")
+    if fmt not in ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers"):
+        raise InspectError("a local model needs its format (safetensors, gguf, ctranslate2, onnx or diffusers)")
     if fmt == "gguf" and not file:
         raise InspectError("a local GGUF model needs the file name")
     # The server cannot read the machine's disk: deployments of local models declare their memory.

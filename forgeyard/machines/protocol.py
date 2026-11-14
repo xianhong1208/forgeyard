@@ -87,6 +87,9 @@ FEATURE_REPLICA_GUARD = "replica_guard"
 # The agent checks a loaded image's tag against the recorded ids of a pinned image (workloads/images.py)
 # before it runs it without a pull. Only agents that list it are sent the ids.
 FEATURE_IMAGE_IDS = "image_ids"
+# 1.3: the agent unpacks process engines published as .zip archives (stable-diffusion.cpp's releases),
+# not only .tar.gz. A process variant whose engine is a .zip goes only to agents that list it.
+FEATURE_ENGINE_ZIP = "engine_zip"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS)
 RUNTIMES = ("process", "container")
 

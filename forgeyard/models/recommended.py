@@ -46,8 +46,8 @@ class Entry(BaseModel):
     file: Optional[str] = None
     mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr", "tts"]
-    format: Literal["safetensors", "gguf", "ctranslate2", "onnx"]
+    task: Literal["chat", "embed", "rerank", "asr", "tts", "image"]
+    format: Literal["safetensors", "gguf", "ctranslate2", "onnx", "diffusers"]
     recipe: str
     device: Literal["gpu", "cpu"] = "gpu"
     download_gib: float = Field(gt=0, le=10_000)
@@ -59,6 +59,8 @@ class Entry(BaseModel):
     license_from: Optional[str] = None
     inputs: list[Literal["image", "audio", "video"]] = Field(default_factory=list)  # besides text
     languages: list[str] = Field(default_factory=list, max_length=40)   # tts: the languages it speaks
+    # image models for stable-diffusion.cpp (1.3): the component files beside `file`, by role
+    components: dict[str, str] = Field(default_factory=dict)
     engine_args: dict[str, list[str]] = Field(default_factory=dict)
     note: str = Field(min_length=1, max_length=200)
 
@@ -101,17 +103,30 @@ def check(data: dict) -> Recommended:
             raise RecommendedError(f"{where}: revision is a branch, tag, ref or commit")
         if e.group not in groups:
             raise RecommendedError(f"{where}: no group {e.group!r}")
-        if (e.format == "gguf") != bool(e.file):
-            raise RecommendedError(f"{where}: a GGUF entry names its file, and only a GGUF entry does")
+        if (e.format == "gguf" or (e.task == "image" and e.format == "safetensors")) != bool(e.file):
+            raise RecommendedError(f"{where}: a GGUF entry (or an image model's safetensors) names its file, and only "
+                                   "those do")
         if e.file:
             try:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
-        if e.task == "tts" and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
-            # 1.3: speech models are pinned to a commit here, so the voices and the measured memory
-            # stay those of the files that were checked.
-            raise RecommendedError(f"{where}: a text-to-speech entry is pinned to a commit (revision: 40 hex characters)")
+        if e.task in ("tts", "image") and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
+            # 1.3: speech and image models are pinned to a commit here, so the voices, the component files
+            # and the measured memory stay those of the files that were checked.
+            raise RecommendedError(f"{where}: a {'text-to-speech' if e.task == 'tts' else 'image'} entry is pinned to "
+                                   "a commit (revision: 40 hex characters)")
+        if e.components:
+            if e.task != "image" or e.format not in ("gguf", "safetensors"):
+                raise RecommendedError(f"{where}: only an image model's GGUF or safetensors entry names components")
+            for role, path in e.components.items():
+                if role not in recipes.IMAGE_COMPONENTS:
+                    raise RecommendedError(f"{where}: components: {role!r} is not one of "
+                                           f"{', '.join(recipes.IMAGE_COMPONENTS)}")
+                try:
+                    sources.safe_relpath(path)
+                except sources.SourceError as err:
+                    raise RecommendedError(f"{where}: components.{role}: {err}") from None
         if e.license_from is not None:
             try:
                 if sources.parse_source(e.license_from).kind != "hf":
