@@ -135,7 +135,12 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
    Forgeyard's own vision image: object detection (RT-DETRv2), segmentation (SAM 2.1), depth (Depth
    Anything V2 Small), Apache-2.0 only, and a **Vision** tab in the Playground to try them (#47): boxes
    with a score slider, a mask from a click or a box, a depth map beside the photo.
-6. Video generation (async `/v1/videos`), the first to move to a later version if time is short.
+6. *In review*: **Video generation** (async `/v1/videos`, #24): OpenAI's Videos API as jobs on
+   vLLM-Omni (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B) on NVIDIA, each job kept on the replica that makes it
+   (a job whose replica restarts or goes reports failed), results that expire, caps on length, size and
+   jobs per deployment and per key, video length and GPU time in usage, and a **Video** panel in the
+   Playground. Text to video only; image-to-video and video on AMD and the CPU (stable-diffusion.cpp)
+   come later.
 
 Also in 1.3, alongside the model types:
 

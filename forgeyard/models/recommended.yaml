@@ -9,11 +9,11 @@
 #   name          the catalog name it is added as (a-z, 0-9, '.', '_', '-')
 #   title         what people see
 #   source        hf://<org>/<name>
-#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech and image
-#                 entries are pinned to a commit (their voices, files and measured memory belong to it)
+#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech, image and
+#                 video entries are pinned to a commit (their voices, files and measured memory belong to it)
 #   file          GGUF (and image models' safetensors files) only: which file of the repository
 #   group         one of the groups below
-#   task          chat | embed | rerank | asr | tts | image
+#   task          chat | embed | rerank | asr | tts | image | video
 #   format        safetensors | gguf | ctranslate2 | onnx | diffusers (what the repository holds)
 #   recipe        the recipe suggested for it (it must serve that task and format)
 #   device        optional: cpu to suggest running it on the CPU (the recipe must have a CPU variant)
@@ -55,6 +55,9 @@ groups:
   - id: images
     title: Images (text to image)
     description: Models for /v1/images/generations. Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell on NVIDIA GPUs with vLLM-Omni; GGUF versions for stable-diffusion.cpp on AMD (Vulkan) or NVIDIA (CUDA), and Stable Diffusion 1.5 small enough for a CPU. Apache-2.0 and OpenRAIL licences only.
+  - id: video
+    title: Video (text to video)
+    description: Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p and needs more memory. Apache-2.0.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -616,3 +619,28 @@ models:
     memory_gib: 4.1
     engine_args: {sd-cpp: [--steps, "20", --cfg-scale, "7"]}
     note: Small and old (512x512), but it runs on a CPU without a GPU. A check that images work, not for quality.
+  # ---------------------------------------------------------------- video (1.3)
+  - name: wan2.1-t2v-1.3b
+    title: Wan2.1 T2V 1.3B (vLLM-Omni)
+    source: hf://Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    revision: 0fad780a534b6463e45facd96134c9f345acfa5b
+    license: apache-2.0
+    group: video
+    task: video
+    format: diffusers
+    recipe: vllm-omni-video
+    download_gib: 26.9
+    memory_gib: 21.6
+    note: Text to video at 832x480 and 16 fps, 5 s clips; small enough for one shared card. NVIDIA.
+  - name: wan2.2-ti2v-5b
+    title: Wan2.2 TI2V 5B (vLLM-Omni)
+    source: hf://Wan-AI/Wan2.2-TI2V-5B-Diffusers
+    revision: b8fff7315c768468a5333511427288870b2e9635
+    license: apache-2.0
+    group: video
+    task: video
+    format: diffusers
+    recipe: vllm-omni-video
+    download_gib: 31.9
+    memory_gib: 32.8
+    note: Text to video at 1280x704 and 24 fps; better than 1.3B, about 33 GiB on the card (not yet measured). NVIDIA.

@@ -5,7 +5,8 @@ LAN or VPN. An agent on each machine reports its hardware; you run services and 
 deploy models from recipes behind one OpenAI-compatible gateway at `/v1`, with API keys, limits
 and usage statistics. Vision models read images in chat, fetched by the gateway, never by the engine. Speech models
 turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Image
-models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs). Any other
+models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs), and video
+models make MP4 videos at `/v1/videos` as asynchronous jobs (Wan on vLLM-Omni, NVIDIA). Any other
 service (detection, segmentation, a Triton or FastAPI model) can be exposed at `/x/<name>/…` behind the same keys, limits
 and usage, and ready-made templates start object detection, segmentation and depth APIs in one step, to try in the
 Playground's Vision tab. Cloud model APIs can sit behind the same gateway, local first, with cost
@@ -23,7 +24,8 @@ tracking and monthly budgets.
 > similar), with the catalog showing each model's licence, then llama.cpp b12242 with a built-in
 > Vulkan variant for AMD APUs, then text to speech with three engines (vLLM-Omni Qwen3-TTS, llama.cpp
 > TTS GGUFs, speaches Kokoro), then image generation (vLLM-Omni, stable-diffusion.cpp), then the generic
-> passthrough: any service workload's HTTP API behind the gateway at `/x/<name>`. See [CHANGELOG.md](CHANGELOG.md) and
+> passthrough: any service workload's HTTP API behind the gateway at `/x/<name>`, then video generation:
+> OpenAI's Videos API as jobs on vLLM-Omni (Wan2.1 and Wan2.2). See [CHANGELOG.md](CHANGELOG.md) and
 > [ROADMAP.md](ROADMAP.md).
 
 ## The guide
@@ -102,8 +104,9 @@ Every release is checked on real machines, not only in CI. So far:
 | Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
 
 Not checked on real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes, discrete AMD
-cards, and the one-line install on a host
-with systemd. Image generation on NVIDIA is checked with vLLM-Omni (Stable Diffusion XL and Z-Image-Turbo on the A100)
+cards, the one-line install on a host
+with systemd, and video generation with vLLM-Omni (`vllm-omni-video`; checked so far through the real gateway
+with a stand-in engine). Image generation on NVIDIA is checked with vLLM-Omni (Stable Diffusion XL and Z-Image-Turbo on the A100)
 and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Turbo GGUF on the A100). Reports from other machines are welcome (see
 [CONTRIBUTING.md](CONTRIBUTING.md)).
 
@@ -179,6 +182,7 @@ project.
 | `forgeyard/gateway/media.py` | images, audio and video in chat: parts rebuilt, media URLs fetched under the egress rules |
 | `forgeyard/gateway/speech.py` | text to speech: request checks, voice cloning refused, what each engine is given, the audio's length |
 | `forgeyard/gateway/imagegen.py` | image generation: request checks, per-deployment caps, what each engine is given, the queue, the answer and its size |
+| `forgeyard/gateway/videogen.py`, `videojobs.py` | video generation: request checks, per-deployment caps, the job object; the jobs on their replica, the sweeper, expiry, content and usage |
 | `forgeyard/gateway/passthrough.py` | the generic passthrough at `/x/<name>`: paths refused, headers dropped and forced, the answer as raw bytes, limits, usage |
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |

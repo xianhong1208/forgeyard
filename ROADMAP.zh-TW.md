@@ -103,7 +103,9 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
    用量記錄位元組與忙碌時間。並附上使用 Forgeyard 自己 vision 映像檔的現成工作負載範本：物件偵測（RT-DETRv2）、影像分割（SAM 2.1）、
    深度估計（Depth Anything V2 Small），只用 Apache-2.0，並在 Playground 加上試用它們的 **Vision** 分頁（#47）：
    框加上分數滑桿、點一下或拖一個框得到遮罩、照片旁的深度圖。
-6. 影片生成（非同步的 `/v1/videos`），時間不夠時第一個延到之後的版本。
+6. *審查中*：**影片生成**（非同步的 `/v1/videos`，#24）：OpenAI 的 Videos API，以工作在 NVIDIA 上的 vLLM-Omni（Wan2.1-T2V-1.3B、Wan2.2-TI2V-5B）執行，
+   每個工作留在製作它的副本上（副本重新啟動或不在時工作回報失敗），結果會過期，長度、尺寸以及每個部署與每把金鑰的工作數都有上限，
+   用量記錄影片長度與 GPU 時間，並在 Playground 加上 **Video** 面板。只支援文字轉影片；圖片轉影片，以及 AMD 與 CPU 上的影片（stable-diffusion.cpp）留待之後。
 
 1.3 也會一併處理，與模型類型並行：
 

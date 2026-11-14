@@ -235,7 +235,7 @@ export type WorkloadResponse = {
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
 // ---------------------------------------------------------------- models (M3)
-export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image";
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -259,6 +259,8 @@ export type Recipe = {
   tts?: { formats: string[]; default_format: string; stream_formats: string[]; voices: string | null; default_voice: string | null; cjk: boolean } | null;
   // 1.3, image generation: how the gateway sends the request, the formats it makes, its most images.
   image?: { request: "fields" | "sd-cpp"; output_formats: string[]; max_n: number } | null;
+  // 1.3, video generation: how the gateway asks the engine, and the frame counts it makes (k x step + 1).
+  video?: { request: "vllm-omni"; frames_step: number } | null;
 };
 
 export type CatalogModel = {
@@ -277,6 +279,13 @@ export type CatalogModel = {
   voices?: string[];
   // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
   image?: ImageModel | null;
+  // 1.3, video models: the native size and frame rate, and the pipeline's components.
+  video?: VideoModel | null;
+};
+
+export type VideoModel = {
+  size: [number, number] | null; multiple: number | null; fps: number | null; pipeline: string | null;
+  parts: Record<string, { class: string | null; params: number | null }>;
 };
 
 export type ImageModel = {

@@ -29,6 +29,12 @@ export function imageFacts(img: NonNullable<InspectMeta["image"]>, d?: InspectMe
   return [`${img.size}x${img.size}`, ...parts].join(" · ");
 }
 
+// A video pipeline's own size and frame rate, and its components (1.3).
+export function videoFacts(v: NonNullable<InspectMeta["video"]>, d?: InspectMeta["diffusers"]): string {
+  const parts = d ? Object.entries(d.components).map(([k, c]) => `${k} ${(c.params / 1e9).toFixed(2)} B`) : [];
+  return [`${v.size[0]}x${v.size[1]} at ${v.fps} fps`, ...parts].join(" · ");
+}
+
 const LANGUAGE: Record<string, string> = { zh: "Chinese", en: "English", ja: "Japanese", ko: "Korean", de: "German", fr: "French",
   ru: "Russian", pt: "Portuguese", es: "Spanish", it: "Italian" };
 
@@ -409,6 +415,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
           {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
           {meta.modalities !== undefined && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
           {meta.license !== undefined && <div className="fact"><dt>Licence</dt><dd className="mono small">{meta.license ?? "not stated"}{meta.gated ? " · gated" : ""}</dd></div>}
+          {meta.video && <div className="fact"><dt>Pipeline</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{videoFacts(meta.video, meta.diffusers)}</dd></div>}
           {meta.image && <div className="fact"><dt>{meta.diffusers ? "Pipeline" : "Image model"}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{imageFacts(meta.image, meta.diffusers)}</dd></div>}
           {meta.config && <div className="fact"><dt>Shape</dt><dd>{meta.config.layers} layers, {meta.config.kv_heads} KV heads, up to {meta.config.max_context.toLocaleString("en-US")} tokens, {meta.config.dtype}</dd></div>}
         </dl>

@@ -47,6 +47,11 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
     out["width"], out["height"] = default_size(meta, p)
     side, _ = image_caps(meta, p)
     out["max_pixels"] = side * side
+    # Video generation (1.3): how long the engine keeps a finished video on its own (a safety net behind
+    # the gateway's expiry, which deletes each one when it expires): keep_minutes and an hour.
+    keep = p.get("keep_minutes", out.get("keep_minutes"))
+    keep = keep if isinstance(keep, int) and not isinstance(keep, bool) and keep > 0 else 1440
+    out["keep_seconds"] = str(keep * 60 + 3600)
     comps = image_components(meta)
     for c in IMAGE_COMPONENTS:
         out[f"{c}_file"] = f"${{MODEL_PATH}}/{comps[c]}" if c in comps else ""

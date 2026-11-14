@@ -137,10 +137,42 @@ def _image_files(out: dict, files: list[dict], fmt: str, file: Optional[str], co
     out["image"] = {"size": side, "multiple": multiple, "components": comps, "single": not split}
 
 
+# Text-to-video pipelines (1.3, vLLM-Omni's /v1/videos): their model_index.json class. Image-to-video ones
+# (WanImageToVideoPipeline) need an image with every request, which the gateway does not send in 1.3.
+VIDEO_PIPELINES = ("WanPipeline",)
+
+
+def is_video_pipeline(name: Optional[str]) -> bool:
+    n = str(name or "")
+    return n in VIDEO_PIPELINES or (n.endswith("VideoPipeline") and "ImageToVideo" not in n and "VideoToVideo" not in n)
+
+
+def _video_native(index: dict, url, token: Optional[str], policy: fetch.Policy) -> dict:
+    """A video pipeline's own size, frame rate and the multiple its sizes take (1.3). Wan's VAE packs
+    8 x 8 pixels (16 x 16 for Wan2.2's, `scale_factor_spatial`) and its transformer 2 x 2 of those into
+    a token: Wan2.1 makes 832x480 at 16 fps, sizes a multiple of 16; Wan2.2-TI2V-5B (expand_timesteps)
+    1280x704 at 24 fps, a multiple of 32."""
+    spatial, patch = 8, 2
+    try:
+        vae = json.loads(fetch.get_bytes(url("vae/config.json"), policy, headers=_auth(token), limit=1024**2))
+        if isinstance(vae, dict) and isinstance(vae.get("scale_factor_spatial"), int) and 1 <= vae["scale_factor_spatial"] <= 64:
+            spatial = vae["scale_factor_spatial"]
+        tr = json.loads(fetch.get_bytes(url("transformer/config.json"), policy, headers=_auth(token), limit=1024**2))
+        ps = tr.get("patch_size") if isinstance(tr, dict) else None
+        if isinstance(ps, list) and len(ps) == 3 and all(isinstance(x, int) and 1 <= x <= 8 for x in ps):
+            patch = ps[1]
+    except (fetch.FetchError, ValueError):
+        pass
+    wan22 = bool(index.get("expand_timesteps")) or spatial == 16
+    size, fps = ([1280, 704], 24) if wan22 else ([832, 480], 16)
+    return {"size": size, "multiple": spatial * patch, "fps": fps}
+
+
 def _diffusers(out: dict, files: list[dict], url, ranged, token: Optional[str], policy: fetch.Policy) -> None:
     """A diffusers pipeline (1.3, vLLM-Omni): model_index.json says which components it loads; each
     one's safetensors headers give its parameters (the estimate counts them in 16 bits, as the engine
-    holds them), and the UNet's or transformer's config its native size."""
+    holds them), and the UNet's or transformer's config its native size. A text-to-video pipeline
+    (WanPipeline) is a video model: its native size, frame rate and size multiple instead."""
     index = json.loads(fetch.get_bytes(url("model_index.json"), policy, headers=_auth(token), limit=1024**2))
     if not isinstance(index, dict):
         raise InspectError("model_index.json is not an object")
@@ -159,6 +191,14 @@ def _diffusers(out: dict, files: list[dict], url, ranged, token: Optional[str], 
         comps[name] = {"class": str(index[name][1])[:64], "params": params, "bytes": w["bytes"], "dtype": dtype}
     if not comps:
         raise InspectError("model_index.json names no component with safetensors weights")
+    pipeline = str(index.get("_class_name") or "")[:64] or None
+    if is_video_pipeline(pipeline):
+        out["diffusers"] = {"pipeline": pipeline, "components": comps}
+        out["video"] = _video_native(index, url, token, policy)
+        out["task_hint"] = "video"
+        out["modalities"] = []
+        out["files"] = selected
+        return
     side, multiple = 1024, 16
     if "unet" in comps:
         multiple = 64

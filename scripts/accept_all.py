@@ -41,6 +41,11 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              images.generate, images that decode at the size asked, n, the caps, url refused, the queue,
              usage (images, kilopixels, busy time), the key guard and, with a chat model that reads images,
              what the image shows (--img-vision)
+  video      video generation (1.3, scripts/accept_video.py's checks): Wan2.1-T2V-1.3B on vLLM-Omni on the GPU
+             machine: the SDK's videos.create, polling to completed, the MP4 fetched through the gateway and read
+             (size, frames, length), the caps, image-to-video refused, another key's 404, the per-key job cap,
+             deleting a job at work, usage (media_ms, busy time), expiry (--video-no-expiry skips its wait),
+             the key guard, and a job failing when its deployment is stopped under it
   passthrough  workloads at /x/<name> (1.3, scripts/accept_x.py's checks): a small HTTP app exposed as a
              process on the CPU machine and in a container on the GPU machine: keys (none, listed), the path
              as sent and refused paths, credentials and forwarded headers replaced, the forced sandbox,
@@ -371,6 +376,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                     "speech-to-text deployment, else skipped), a served model, local:<faster-whisper model>, or none")
     ap.add_argument("--img-vision", default="auto", help="the img group's check of what an image shows: auto (a "
                     "ready chat model that reads images, else skipped), a served model, or none")
+    ap.add_argument("--video-steps", type=int, help="the video group's num_inference_steps (default: the model's "
+                    "own); fewer is faster")
+    ap.add_argument("--video-no-expiry", action="store_true", help="the video group skips its expiry check (a wait of "
+                    "about two minutes)")
     ap.add_argument("--x-templates", default="", help="the passthrough group also deploys these workload templates "
                     "(object-detection,segmentation,depth or all) on the GPU machine's NVIDIA card (a multi-GB image "
                     "pull the first time)")
@@ -2003,6 +2012,72 @@ def group_img(run: Run) -> None:
         accept_img.exercise(c, d, d["name"], spec, side, args, check, httpx, openai, report, None,
                             key=run.new_key(f"img-{role}"))
         run.report.info.setdefault("img", {})[d["name"]] = report["deployments"][d["name"]]
+
+
+# ------------------------------------------------------------------ group: video (1.3)
+# Video generation: Wan2.1-T2V-1.3B on the GPU machine with scripts/accept_video.py's checks (a job made,
+# followed and fetched as a real MP4, the refusals, the per-key cap, deleting, usage, expiry), and last a
+# job whose deployment is stopped under it.
+VIDEO_MODELS = (("gpu", "wan2.1-t2v-1.3b"),)
+
+
+@group("video", "video generation: /v1/videos jobs with the official SDK, the MP4, caps, expiry, a lost replica")
+def group_video(run: Run) -> None:
+    import types
+
+    import httpx
+    import openai
+
+    sys.path.insert(0, str(HERE))
+    import accept_m3
+    import accept_video
+
+    accept_m3.TLS = run.tls
+    c = run.admin
+    recipes = {r["name"]: r for r in c.ok("GET", "/api/models")["recipes"]}
+    for role, name in VIDEO_MODELS:
+        m = run.machine(role)
+        if m is None:
+            run.skip(f"{name}: video", f"no --{role}-machine given")
+            continue
+        m = run.fresh_machine(role)
+        spec = dict(accept_video.MODELS[name])
+        if spec["recipe"] not in recipes:
+            run.skip(f"{name}: video", f"the server has no recipe {spec['recipe']}")
+            continue
+        if accept_video.ensure(c, name, spec):
+            run.cleanup.add(f"catalog entry {name}", _remove_model, c, name)
+        params = dict(spec["params"]) | {"gpus": 1, "max_seconds": 5, "seconds": 5, "keep_minutes": 2}
+        got = deploy(run, f"video-{role}", {"model": name, "recipe": spec["recipe"], "params": params, "device": role}, m)
+        if not got:
+            continue
+        d0 = got["deployment"]
+
+        def poll(dep_id=d0["id"]):
+            ready, text, _ = deployment_state(run, dep_id)
+            return ready, text
+
+        try:
+            run.wait(d0["name"], poll, run.args.timeout, every=5)
+        except Fail as e:
+            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            continue
+        run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
+        d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
+
+        def check(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
+            if skip or info:
+                run.skip(label, ("information: " if info else "") + str(detail))
+            else:
+                run.check(label, ok, detail)
+
+        report = {"deployments": {d["name"]: {}}}
+        args = types.SimpleNamespace(seconds=5, steps=run.args.video_steps, no_expiry=run.args.video_no_expiry,
+                                     job_timeout=1800)
+        accept_video.exercise(c, d, d["name"], spec, spec["size"], args, check, httpx, openai, report, None,
+                              key=run.new_key(f"video-{role}"))
+        accept_video.restart_check(c, d, d["name"], spec["size"], args, check, httpx, openai)
+        run.report.info.setdefault("video", {})[d["name"]] = report["deployments"][d["name"]]
 
 
 # ------------------------------------------------------------------ group: passthrough (1.3)

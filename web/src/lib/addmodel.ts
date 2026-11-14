@@ -44,6 +44,8 @@ export type InspectMeta = {
   // diffusers pipeline's components.
   image?: { size: number; multiple: number; components?: Record<string, string>; single?: boolean };
   diffusers?: { pipeline: string | null; components: Record<string, { class: string; params: number; dtype: string | null }> };
+  // 1.3, video models: the pipeline's own size, frame rate and the multiple its sizes take.
+  video?: { size: [number, number]; multiple: number; fps: number };
 };
 
 export type InspectResponse = { meta: InspectMeta; recipes: string[]; suggestion: Suggestion };

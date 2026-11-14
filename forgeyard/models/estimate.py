@@ -15,6 +15,9 @@
   as many images at once as a request may ask (the engine makes them together), and the VAE's decode
   per megapixel, plus the engine overhead and the CUDA context. With the text encoders offloaded
   (vLLM-Omni's model offload), only the largest component is on the card at a time.
+  Video models (1.3) are sized for the longest video at the largest size the deployment allows:
+  the denoiser's activations per thousand tokens (tokens = latent frames x patches per frame), and the
+  VAE's decode of one frame at that size (it decodes a few frames at a time), instead of per image.
 - fixed: the recipe's number.
 - A declared `vram` parameter replaces all of it (and is required for local:// models, whose
   files the server cannot read).
@@ -267,6 +270,82 @@ def image_caps(meta: dict, params: dict) -> tuple[int, int]:
 
 _16BIT = ("BF16", "F16", "FP16")
 
+# Video models (1.3): what a diffusers video pipeline makes natively, when the catalog does not say.
+DEFAULT_VIDEO = {"size": [832, 480], "multiple": 16, "fps": 16}
+MAX_VIDEO_SIDE = 2048
+
+
+@dataclass(frozen=True)
+class VideoShape:
+    """A video deployment's sizes (1.3), from its model and parameters: the default size and length, the
+    largest frame (its long side `max_side`, at most `max_pixels`) and the longest video, the frames
+    per second, and what the longest, largest video is in frames, latent frames and tokens."""
+
+    width: int
+    height: int
+    multiple: int
+    max_side: int
+    max_pixels: int
+    max_w: int
+    max_h: int
+    fps: int
+    seconds: int
+    max_seconds: int
+    step: int
+    frames: int
+    latent_frames: int
+    tokens: int
+
+
+def _pos(v, default: int, low: int = 1) -> int:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= low else default
+
+
+def frames_for(seconds: int, fps: int, step: int) -> int:
+    """The frames an engine that makes k x step + 1 of them makes for `seconds` at `fps` (Wan: 5 s at
+    16 fps is 81 frames)."""
+    n = max(1, seconds * fps)
+    return n // step * step + 1 if step > 1 else n
+
+
+def video_native(meta: dict) -> dict:
+    v = meta.get("video") if isinstance(meta.get("video"), dict) else {}
+    size = v.get("size")
+    ok = isinstance(size, list) and len(size) == 2 and all(isinstance(x, int) and 64 <= x <= MAX_VIDEO_SIDE for x in size)
+    return {"size": list(size) if ok else list(DEFAULT_VIDEO["size"]),
+            "multiple": _pos(v.get("multiple"), DEFAULT_VIDEO["multiple"]),
+            "fps": _pos(v.get("fps"), DEFAULT_VIDEO["fps"])}
+
+
+def video_shape(meta: dict, params: dict, step: int = 4) -> VideoShape:
+    nat = video_native(meta)
+    m = nat["multiple"]
+    nw, nh = nat["size"]
+    side = _pos(params.get("max_side"), 0, 0) or max(nw, nh)
+    side = max(m, side // m * m)
+    # The default size: the parameter's, else the model's own, within the largest side.
+    text = str(params.get("default_size") or "auto")
+    w, h = nw, nh
+    if "x" in text:
+        a, _, b = text.partition("x")
+        if a.isdigit() and b.isdigit() and int(a) > 0 and int(b) > 0:
+            w, h = int(a), int(b)
+    if max(w, h) > side:
+        scale = side / max(w, h)
+        w, h = int(w * scale), int(h * scale)
+    w, h = max(m, w // m * m), max(m, h // m * m)
+    # The largest frame: the default's shape scaled so its long side is the largest side.
+    scale = side / max(w, h)
+    mw, mh = max(m, int(w * scale) // m * m), max(m, int(h * scale) // m * m)
+    fps = _pos(params.get("fps"), 0, 0) or nat["fps"]
+    most = _pos(params.get("max_seconds"), 5)
+    secs = min(_pos(params.get("seconds"), most), most)
+    frames = frames_for(most, fps, step)
+    latent = (frames - 1) // step + 1 if step > 1 else frames
+    tokens = latent * (mw // m) * (mh // m)
+    return VideoShape(width=w, height=h, multiple=m, max_side=side, max_pixels=mw * mh, max_w=mw, max_h=mh, fps=fps,
+                      seconds=secs, max_seconds=most, step=step, frames=frames, latent_frames=latent, tokens=tokens)
+
 
 def _diffusion(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device: str) -> Estimate:
     side, most = image_caps(meta, params)
@@ -307,6 +386,8 @@ def _diffusion(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, de
                                                                       "(model offload)")]
         est.notes.append(f"Model offload: {gib(rest)} of weights stay in host memory and move to the card when used.")
     est.parts = weights
+    if "video" in recipe.tasks:
+        return _video_rest(est, meta, recipe, params, gpus, ctx, device)
     act = int(recipe.estimate.activation_per_mp * mp * at_once)
     if act:
         est.parts.append(Part("Image activations", act, f"{at_once} image{'s' if at_once > 1 else ''} at once at up to "
@@ -325,6 +406,33 @@ def _diffusion(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, de
             est.notes.append("The pipeline runs on one GPU; the others are reserved but idle.")
     est.notes.append(f"Sized for the deployment's caps: {most} image{'s' if most > 1 else ''} per request, up to "
                      f"{side}x{side}. Raising them raises this.")
+    return est
+
+
+def _video_rest(est: Estimate, meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device: str) -> Estimate:
+    """A video pipeline (1.3): its weights are in `est`; adds what the longest video at the largest size
+    takes while it is made and decoded."""
+    vs = video_shape(meta, params, recipe.videogen.frames_step)
+    act = int(recipe.estimate.activation_per_ktoken * vs.tokens / 1000)
+    if act:
+        est.parts.append(Part("Video activations", act, f"{vs.max_seconds} s at {vs.fps} fps ({vs.frames} frames, "
+                                                        f"{vs.latent_frames} latent) at up to {vs.max_w}x{vs.max_h}: "
+                                                        f"{vs.tokens:,} tokens (recipe)"))
+    mp = vs.max_pixels / 1e6
+    if recipe.estimate.vae_per_mp:
+        est.parts.append(Part("VAE decode", int(recipe.estimate.vae_per_mp * mp), f"frames of {vs.max_w}x{vs.max_h}, a "
+                                                                                  "few at a time (recipe)"))
+    if device == "cpu":
+        est.parts.append(Part("Engine overhead", recipe.estimate.cpu_overhead, "recipe"))
+        est.ram = sum(p.bytes for p in est.parts)
+    else:
+        est.parts.append(Part("Engine overhead", recipe.estimate.overhead, "allocator, workspaces (recipe)"))
+        est.parts.append(Part("CUDA context", ctx, "per process"))
+        est.per_gpu = sum(p.bytes for p in est.parts)
+        if gpus > 1:
+            est.notes.append("The pipeline runs on one GPU; the others are reserved but idle.")
+    est.notes.append(f"Sized for the deployment's caps: videos of up to {vs.max_seconds} s at up to "
+                     f"{vs.max_w}x{vs.max_h}. Raising them raises this.")
     return est
 
 

@@ -48,7 +48,11 @@ export function UsagePage() {
   const images = (t?.images ?? 0) > 0;
   // Workloads at /x/ (1.3): request and answer bodies, and the time replicas spent on them.
   const traffic = (t?.bytes_in ?? 0) + (t?.bytes_out ?? 0) > 0;
-  const busy = images || traffic;
+  // Video (1.3): the length made (media_ms on rows without characters spoken) and the GPU time.
+  const video = (data?.rows ?? []).some((r) => (r.media_ms ?? 0) > 0 && !(r.characters ?? 0));
+  const length = speech || video;
+  const lengthLabel = speech && video ? "Audio / video" : video ? "Video" : "Audio";
+  const busy = images || traffic || video;
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
   const setBy = tab === "cost" ? setCostGroup : setGroup;
   // The last step of the users' Get started list is opening this page.
@@ -101,6 +105,7 @@ export function UsagePage() {
           <div><dt>Tokens</dt><dd>{num(t.tokens)} <span className="muted small">{num(t.prompt_tokens)} in · {num(t.completion_tokens)} out</span></dd></div>
           {media && <div><dt>Media items</dt><dd>{num(t.media_items)} <span className="muted small">images, audio, video</span></dd></div>}
           {speech && <div><dt>Speech</dt><dd>{num(t.characters)} <span className="muted small">characters · {audioLength(t.media_ms)} of audio</span></dd></div>}
+          {video && <div><dt>Video</dt><dd>{audioLength(t.media_ms)} <span className="muted small">made{speech ? " (with the audio)" : ""} · {busyTime(t.busy_ms)} busy</span></dd></div>}
           {images && <div><dt>Images</dt><dd>{num(t.images)} <span className="muted small">{megapixels(t.kilopixels)} · {busyTime(t.busy_ms)} busy</span></dd></div>}
           {traffic && <div><dt>Workload traffic</dt><dd>{bytes(t.bytes_in)} <span className="muted small">in · {bytes(t.bytes_out)} out</span></dd></div>}
           <div><dt>Latency p50</dt><dd>{ms(t.latency_p50_ms)}</dd></div>
@@ -123,7 +128,7 @@ export function UsagePage() {
           <div className="table-wrap">
             <table className="table usage-table">
               <thead>
-                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{speech && <th>Audio</th>}{images && <th>Images</th>}{traffic && <th>Bytes in / out</th>}{busy && <th>Busy</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
+                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{length && <th>{lengthLabel}</th>}{images && <th>Images</th>}{traffic && <th>Bytes in / out</th>}{busy && <th>Busy</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
               </thead>
               <tbody>
                 {data.rows.map((r: UsageRow) => (
@@ -138,10 +143,10 @@ export function UsagePage() {
                     <td data-label="Tokens out" className="num">{num(r.completion_tokens)}</td>
                     {media && <td data-label="Media" className="num" title="Images, audio clips and videos sent in chat">{num(r.media_items ?? 0)}</td>}
                     {speech && <td data-label="Characters" className="num" title="Characters turned into speech">{num(r.characters ?? 0)}</td>}
-                    {speech && <td data-label="Audio" className="num" title="Length of the speech made (where its format says it)">{audioLength(r.media_ms)}</td>}
+                    {length && <td data-label={lengthLabel} className="num" title="Length of the speech or video made (speech: where its format says it)">{audioLength(r.media_ms)}</td>}
                     {images && <td data-label="Images" className="num" title="Images made, and their megapixels">{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</td>}
                     {traffic && <td data-label="Bytes" className="num" title="Request and answer bodies of workloads at /x/">{r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—"}</td>}
-                    {busy && <td data-label="Busy" className="num" title="Time replicas worked on these requests (images: times the GPUs each holds)">{busyTime(r.busy_ms)}</td>}
+                    {busy && <td data-label="Busy" className="num" title="Time replicas worked on these requests (images and videos: times the GPUs each holds)">{busyTime(r.busy_ms)}</td>}
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
                     <td data-label="p95" className="num">{ms(r.latency_p95_ms)}</td>

@@ -1,0 +1,116 @@
+# Video generation with vLLM-Omni on NVIDIA GPUs: diffusers video pipelines (a repository with
+# model_index.json) such as Wan2.1-T2V-1.3B and Wan2.2-TI2V-5B, behind OpenAI's Videos API
+# (/v1/videos): asynchronous jobs, polled, the MP4 fetched when made. Docs:
+# https://github.com/vllm-project/vllm-omni/blob/v0.32.0/docs/serving/videos_api.md
+#
+# Pinned: vLLM-Omni 0.32.0, the image the vllm-omni-image and vllm-omni-tts recipes already use (CUDA
+# 13.0, driver >= 580, compute capability 7.5 and newer). `vllm serve <model directory> --omni` reads
+# model_index.json; WanPipeline (both Wan models) runs as vLLM-Omni's Wan22Pipeline.
+#
+# Jobs (vllm_omni/entrypoints/openai/api_server.py and video/generation/helpers.py at v0.32.0):
+# - POST /v1/videos takes multipart/form-data only and answers the job at once (id video_gen_<hex>,
+#   status queued); the engine works on it in the background, one at a time per replica (its
+#   diffusion scheduler queues the rest). GET /v1/videos/{id} answers its status (queued,
+#   in_progress, completed; a failed job answers its error's HTTP status with the job as the body);
+#   progress is 0 until it is done (100). GET /v1/videos/{id}/content is the MP4 (a FileResponse);
+#   DELETE /v1/videos/{id} aborts a job at work (bounded, 2 s) or deletes the file of one made.
+# - The jobs live in the engine's memory (VIDEO_STORE) and the files under
+#   VLLM_OMNI_SERVER_STORAGE__PATH: here a directory inside the container's own file system, so each
+#   replica has its own and it goes when the container is removed (a stop, a restart, a move). A
+#   restarted replica therefore knows none of its jobs: the gateway reports them failed.
+# - FILE_TTL is the engine's own sweep of old files, a safety net behind the gateway's expiry (which
+#   deletes each video on the replica when it expires): the deployment's keep_minutes and an hour.
+#
+# Requests: the gateway sends only prompt, model, size, num_frames, fps, num_inference_steps,
+# guidance_scale, negative_prompt and seed. It never sends input_reference / image_reference /
+# video_reference / audio_reference (uploads and URLs the engine would read), lora, extra_params,
+# frame interpolation paths or the other extensions. Frames are seconds x fps rounded to 4k + 1, the
+# frame counts Wan makes; fps is the model's own (16 for Wan2.1, 24 for Wan2.2) unless set here.
+#
+# Memory: as for images, a diffusion pipeline holds its components in bfloat16 (float32 files are
+# cast) and allocates while it works; nothing reserves a fixed share of the card. The estimate is sized
+# for the deployment's caps: the weights, the denoiser's activations for the longest video at the
+# largest size (tokens = latent frames x (width / 16) x (height / 16) for Wan2.1; / 32 for Wan2.2-5B),
+# and the VAE's decode of one frame at the largest size, plus overhead. Offload (--enable-cpu-offload)
+# keeps only the component at work on the card (the text encoder alone is 11 GB in bfloat16).
+name: vllm-omni-video
+title: vLLM-Omni (video)
+description: >-
+  Text to video on NVIDIA GPUs with vLLM-Omni: diffusers pipelines such as Wan2.1-T2V-1.3B and
+  Wan2.2-TI2V-5B, behind OpenAI's /v1/videos (asynchronous jobs, MP4 files).
+engine: vllm-omni
+version: "0.32.0"
+tasks: [video]
+formats: [diffusers]
+api: {video: openai-videos}
+upstream_model: served_name
+share: vram
+port: 8000
+health: {path: /health, start_period: 1800, interval: 10, timeout: 5, failure_threshold: 3}
+estimate:
+  method: diffusers
+  cast_16bit: true
+  # The transformer's activations per thousand tokens of the longest, largest video (with classifier-free
+  # guidance's second pass), and the VAE's decode per megapixel of one frame. To be calibrated on the
+  # A100 at acceptance (scripts/accept_video.py reports the card's memory).
+  activation_per_ktoken: 96MiB
+  vae_per_mp: 8GiB
+  overhead: 1536MiB
+params:
+  default_size: {type: choice, default: auto, choices: [auto, 832x480, 480x832, 1280x720, 720x1280, 1280x704, 704x1280,
+                                                         1024x576, 576x1024],
+                 label: Default size, help: "The size of requests that give none. auto: the model's own (832x480 for
+                   Wan2.1-1.3B, 1280x704 for Wan2.2-5B)."}
+  seconds: {type: int, default: 5, min: 1, max: 30, label: Default length (seconds),
+            help: The length of requests that give no seconds.}
+  max_seconds: {type: int, default: 5, min: 1, max: 30, label: Longest video (seconds),
+                help: "Requests asking for more seconds are refused (400). Memory and time grow with this."}
+  max_side: {type: int, default: 0, min: 0, max: 2048, advanced: true, label: Largest side (pixels),
+             help: "The widest or tallest video a request may ask for, and no more pixels than the default size
+               scaled to it. 0: the model's own size."}
+  fps: {type: int, default: 0, min: 0, max: 60, advanced: true, label: Frames per second,
+        help: "0: the model's own (16 for Wan2.1, 24 for Wan2.2). More frames per second means more frames to
+          make for the same seconds."}
+  steps: {type: int, default: 0, min: 0, max: 200, advanced: true, label: Default steps,
+          help: "Denoising steps for requests that give no num_inference_steps. 0: the model's own default."}
+  max_steps: {type: int, default: 50, min: 1, max: 200, advanced: true, label: Most steps,
+              help: Requests asking for more num_inference_steps are refused (400).}
+  queue: {type: int, default: 8, min: 1, max: 256, advanced: true, label: Jobs at once (most),
+          help: "Videos waiting or being made on this deployment; one more gets 429 with Retry-After."}
+  jobs_per_key: {type: int, default: 2, min: 1, max: 64, advanced: true, label: Jobs per key (most),
+                 help: "Videos one API key (or one person in the Playground) may have waiting or being made here at
+                   once; one more gets 429 with Retry-After."}
+  keep_minutes: {type: int, default: 1440, min: 1, max: 10080, advanced: true, label: Keep results (minutes),
+                 help: "How long a finished video can be fetched; then it is deleted on the replica (1440: a
+                   day)."}
+  timeout: {type: int, default: 3600, min: 60, max: 86400, advanced: true, label: Longest job (seconds),
+            help: A job not finished this long after it was asked is stopped and reported failed.}
+  max_prompt_chars: {type: int, default: 2000, min: 1, max: 32000, advanced: true, label: Longest prompt (characters),
+                     help: Longer prompts are refused (400 prompt_too_long).}
+  offload: {type: choice, default: none, choices: [none, model], advanced: true, label: Offload to host memory,
+            help: "model: only the component at work (text encoder, transformer, VAE) is on the card, the rest waits in
+              host memory. Less GPU memory, slower videos."}
+args: ["{model_path}", --omni, --served-model-name, "{served_name}", --host, "{host}", --port, "{port}",
+       --allowed-media-domains, forgeyard.invalid]
+optional_args:
+  - if: {offload: model}
+    args: [--enable-cpu-offload]
+video:
+  request: vllm-omni
+  frames_step: 4
+env:
+  VLLM_OMNI_SERVER_STORAGE__PATH: /tmp/forgeyard-videos
+  VLLM_OMNI_SERVER_STORAGE__FILE_TTL: "{keep_seconds}"
+  VLLM_MEDIA_URL_ALLOW_REDIRECTS: "0"
+  HF_HUB_OFFLINE: "1"
+  HF_HUB_CACHE: "{model_hub}"
+  VLLM_NO_USAGE_STATS: "1"
+  DO_NOT_TRACK: "1"
+# The replica's internal key: as in vllm-omni-image (vLLM's VLLM_API_KEY guards /v1; /health stays open).
+api_key_env: VLLM_API_KEY
+variants:
+  - name: cuda
+    when: {vendor: nvidia, compute_capability: ">=7.5", driver: ">=580"}
+    runtime: container
+    image: vllm/vllm-omni:v0.32.0@sha256:f713b909f16cf8c7901f17c3aee3f471cbee5fbde5603b7dbe2631630887d7c2
+    entrypoint: [vllm, serve]
