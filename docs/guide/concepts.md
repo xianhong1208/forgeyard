@@ -47,6 +47,28 @@ card outside the list is never given to anything Forgeyard runs.
 - A process gets only its cards' IDs in `CUDA_VISIBLE_DEVICES` (NVIDIA) or `ROCR_VISIBLE_DEVICES`
   (AMD); a container gets only its cards passed in. A card in use cannot be taken off the list.
 
+## GPU sharing
+
+Every GPU deployment is **Exclusive** or **Share VRAM**:
+
+- **Exclusive**, the default for chat recipes: each replica gets whole cards, and nothing else
+  Forgeyard runs goes on them. The model has all of the card's compute.
+- **Share VRAM**, the default for embeddings, rerankers and speech to text: a replica reserves its
+  estimate, and other sharing replicas fit in the rest of the card (vLLM is told to use only that
+  much). Replicas on one card share its compute, so under load each answers more slowly.
+
+An exclusive replica and a sharing one never use the same card: both must share. Forgeyard points out
+when sharing would help:
+
+- the deploy and edit pages say so when an exclusive model needs half its card or less (*This model
+  needs 14.38 GiB of an 80.00 GiB card; with Share VRAM the rest can hold other models*);
+- a refusal says *fits if both share VRAM* and names the replica holding the card, when the memory is
+  there and only exclusivity is in the way;
+- **Setup health** notes (`deployment-could-share`) a running exclusive replica that reserves less than
+  half of a card of 24 GiB or more.
+
+Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
+
 ## Workloads
 
 A **workload** is something to run on your machines:

@@ -197,6 +197,7 @@ line says why it was not chosen:
 | `no allowed GPU that vllm supports` | no card on the GPU allowlist, or no recipe variant for that card and driver |
 | `needs 14.38 GiB per GPU; available: #0 12.07 GiB, … (2.31 GiB short)` | the best card misses that much free memory |
 | `needs 1 GPU it can have; in use: #1 (qwen)` | the cards are taken by replicas that do not share |
+| `…; fits if both share VRAM: #1 has 60.00 GiB available, held by qwen` | the memory is there, but the card is held exclusively: turn on **Share VRAM** on both ([GPU sharing](concepts.md#gpu-sharing)) |
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | a CPU model, and not enough free RAM |
 | `no container runtime (…)` | the recipe needs Docker or Podman, which the machine does not have |
 | `its agent does not serve models` | the agent has no model cache (`[models] cache` in its settings) |
@@ -209,7 +210,12 @@ until room appears (the API's `"wait": true`).
 ## A replica stays pending
 
 **You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
-is online, and the replica stays **pending** with no reason: nothing is downloaded or started.
+is online, and the replica stays **pending**: nothing is downloaded or started. After 2 minutes the
+deployment and workload pages say *Replica #0 was never picked up*, with the machine, its agent's
+version and what to do, for example *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
+update the agent (the server is 1.3.1)*. An agent gets its work list within a second of a placement
+(or of connecting) and answers every list with the state of each replica, so two minutes of silence
+from a connected agent is not a slow start.
 
 **Why:** the machine's agent is not acting on its work list. Agents up to 1.2.0 kept the number of the
 last work list they received across connections, and a server restarted since then numbered its
@@ -217,9 +223,13 @@ lists from 1 again: the agent took them all for old ones and dropped them withou
 from 1.3.0 numbers them so that this cannot happen, also for those older agents; an agent from
 1.3.0 starts a new count on every connection and logs any list it drops.
 
+It also happens with an agent that lacks something the replica needs and drops it, or one that is
+stuck.
+
 **Do:** run the server's own version on the agent ([upgrades](how-to.md#upgrade-the-server-and-the-agents)); until then,
 restarting the agent (`sudo systemctl restart forgeyard-agent`, or `docker restart forgeyard-agent`)
-makes it take its work at once. **Setup health** flags agents older than the server, and replicas
+makes it take its work at once. When the agent already runs the server's version, the message says
+to restart it and look at its log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`). **Setup health** flags agents older than the server, and replicas
 that waited for a machine for more than 15 minutes.
 
 ## Errors from /v1: 401, 403, 429, 503

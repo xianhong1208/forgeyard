@@ -742,6 +742,46 @@ environment values, `${PORT}` and `${PORT_<NAME>}` become the port. In a process
 `${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard
 (a workload exposed at `/x/`), else the agent's address.
 
+## Change a deployment through the API
+
+`PATCH /api/deployments/{id}`, for admins and operators, with a console session (the same requests
+the **Edit** page makes; writes also send the `X-Forgeyard: 1` header). A field left out keeps its
+value.
+
+| Field | Value |
+|---|---|
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`) and `extra_args` (a list). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `replicas` | 1 to 16 |
+| `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
+| `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
+| `dry_run` | `true`: only check. The answer is the same, without `deployment`, and nothing is saved |
+
+The model, the recipe, the name and the served name cannot be changed (422). The answer:
+
+| Field | What it is |
+|---|---|
+| `estimate` | The new estimate |
+| `placement` | Where each replica would go, as for a deploy; `previous` marks a replica that stays on its machine, and `share_hint` is set when an exclusive model needs half its card or less |
+| `changes` | `{name: {before, after}}` for each parameter, `replicas` and `machine_id` that changes; `{}` when nothing does |
+| `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, or `on_start` (stopped: the settings apply when it starts) |
+| `restart_text` | The same in a sentence |
+| `deployment` | The deployment after saving (not on a dry run) |
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `does_not_fit` | The deployment runs and the new settings fit nowhere now; `machines` says why for each machine, as for a deploy. Nothing is saved |
+| 409 | `recipe_gone` | Its recipe no longer exists |
+| 422 | `invalid_params` | A parameter is unknown or out of its range |
+| 422 | `cannot_estimate` | The new parameters cannot be estimated for this model |
+| 404 | `not_found`, `machine_not_found` | No such deployment, or no such machine for `machine_id` |
+| 403 | | Not an admin or an operator |
+
+Each saved change is audited as `deployment.changed`, with the changes and the restart. `GET
+/api/deployments/{id}` also gives `pinned` (the machine chosen, or `null`), `rollout` (while replicas
+restart: `{generation, updated, total, next}`) and, per replica, `not_picked_up`: set when the replica
+was placed on a connected machine whose agent has not reported it for 2 minutes
+([A replica stays pending](troubleshooting.md#a-replica-stays-pending)).
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
@@ -776,6 +816,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
+| `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
 | `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
 | `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
 | `cloud-model-unpriced` | error | A route's cloud model has no input or output price while any budget exists: its requests answer 402 `budget_unpriced` |

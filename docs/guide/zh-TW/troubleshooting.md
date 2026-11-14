@@ -136,6 +136,7 @@ sudo forgeyard agent config
 | `no allowed GPU that vllm supports` | GPU 允許清單上沒有任何卡，或沒有適合那張卡和驅動程式的 recipe（配方）變體 |
 | `needs 14.38 GiB per GPU; available: #0 12.07 GiB, … (2.31 GiB short)` | 最適合的那張卡可用記憶體還差這麼多 |
 | `needs 1 GPU it can have; in use: #1 (qwen)` | 卡都被不共用的副本佔走了 |
+| `…; fits if both share VRAM: #1 has 60.00 GiB available, held by qwen` | 記憶體夠，但那張卡被獨占：兩邊都打開 **Share VRAM**（[GPU 共用](concepts.md#gpu-sharing)） |
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | 這是 CPU 模型，而可用的 RAM 不夠 |
 | `no container runtime (…)` | recipe 需要 Docker 或 Podman，但這台機器沒有 |
 | `its agent does not serve models` | 這個 agent 沒有設定模型快取（設定裡的 `[models] cache`） |
@@ -145,11 +146,13 @@ sudo forgeyard agent config
 
 ## 副本一直停在 pending
 
-**你會看到：**部署或 workload 已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**，沒有任何原因：沒有下載、也沒有啟動。
+**你會看到：**部署或 workload 已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**：沒有下載、也沒有啟動。2 分鐘後，部署和 workload 頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
 
 **原因：**那台機器的 agent 沒有處理它的工作清單。1.2.0 以前的 agent 會跨連線記住最後收到的工作清單編號，而之後重新啟動過的伺服器又從 1 開始編號：agent 把這些清單全當成舊的，默默丟掉。1.3.0 起的伺服器編號方式不會再這樣，連舊版 agent 也一樣；1.3.0 起的 agent 每次連線都重新計數，丟掉清單時也會留下紀錄。
 
-**怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
+缺少副本需要的功能而把它丟掉的 agent，或卡住的 agent，也會這樣。
+
+**怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。agent 已經是伺服器的版本時，訊息會請你重新啟動它並查看它的紀錄（`journalctl -u forgeyard-agent`，或 `docker logs forgeyard-agent`）。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
 
 ## 來自 /v1 的錯誤：401、403、429、503
 
