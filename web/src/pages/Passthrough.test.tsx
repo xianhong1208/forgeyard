@@ -7,7 +7,7 @@ import App from "../App";
 import { AuthProvider } from "../auth";
 import { buildGateway, gatewayForm, keyWorkloads, xCurl } from "../lib/passthrough";
 import machinesFixture from "../test/machines.json";
-import type { ApiKey, KeysResponse, Workload, WorkloadGateway } from "../lib/types";
+import type { ApiKey, KeysResponse, Workload, WorkloadGateway, WorkloadTemplate } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 type Reply = { status: number; body: unknown };
@@ -202,5 +202,58 @@ describe("a key's workloads setting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Limits" }));
     fireEvent.click(screen.getByRole("button", { name: /Unlock workloads/ }));
     await waitFor(() => expect(patches).toEqual([{ workloads: "none", workload_list: null }, { workloads: null }]));
+  });
+});
+
+const spec = (gpu: boolean): Record<string, unknown> => ({
+  name: "detector", kind: "service",
+  runtime: { type: "container", image: `docker.io/tonyhuang1101/forgeyard-vision:1.2.0${gpu ? "-cuda" : ""}`, args: ["--task", "detect"] },
+  ports: [{ name: "http", port: 8000 }], health: { type: "http", port: "http", path: "/health", interval: 5, start_period: 300 },
+  restart: "always", resources: gpu ? { gpus: { count: 1, vendor: "nvidia", share: "vram", vram: "3Gi" } } : {},
+  gateway: { expose: true },
+});
+
+const tpl: WorkloadTemplate = {
+  id: "object-detection", title: "Object detection", task: "detect", name: "detector", summary: "RT-DETRv2: boxes and labels.",
+  model: "PekingU/rtdetr_v2_r18vd", revision: "5650961749fa93567c0d46fc7f43ea4f9e914107", licence: "apache-2.0",
+  code_licence: "Apache-2.0", model_url: "https://huggingface.co/PekingU/rtdetr_v2_r18vd", endpoint: "/v1/detect",
+  example: "-F image=@street.jpg", answer: "{}",
+  images: { cpu: "docker.io/tonyhuang1101/forgeyard-vision:1.2.0", cuda: "docker.io/tonyhuang1101/forgeyard-vision:1.2.0-cuda" },
+  specs: { cpu: spec(false), cuda: spec(true) },
+};
+
+describe("ready-made templates", () => {
+  it("FY-WEB-187 the Workloads page offers each template with its licence, on a GPU or the CPU", async () => {
+    server((url) => {
+      if (url === "/api/workloads/templates") return { status: 200, body: { templates: [tpl] } };
+      if (url === "/api/workloads") return { status: 200, body: { workloads: [], server_time: "x", can_manage: true } };
+    });
+    mount("/workloads");
+    const card = await screen.findByRole("listitem", { name: "Template Object detection" });
+    expect(within(card).getByText("apache-2.0")).toBeTruthy();
+    expect(within(card).getByRole("link", { name: "PekingU/rtdetr_v2_r18vd" }).getAttribute("href")).toBe("https://huggingface.co/PekingU/rtdetr_v2_r18vd");
+    expect(within(card).getByRole("link", { name: "On an NVIDIA GPU" }).getAttribute("href")).toBe("/workloads/new?template=object-detection&gpu=1");
+    expect(within(card).getByRole("link", { name: "On the CPU" }).getAttribute("href")).toBe("/workloads/new?template=object-detection");
+  });
+
+  it("FY-WEB-188 a template fills the form (image, task, shared GPU, port, health, exposed) and posts its spec", async () => {
+    const posted: unknown[] = [];
+    server((url, init) => {
+      if (url === "/api/workloads/templates") return { status: 200, body: { templates: [tpl] } };
+      if (url === "/api/machines") return { status: 200, body: machinesFixture };
+      if (url === "/api/workloads" && init?.method === "POST") {
+        posted.push(JSON.parse(String(init.body)));
+        return { status: 201, body: { workload: detector, events: [] } };
+      }
+      if (url.startsWith("/api/workloads/9")) return { status: 200, body: { workload: detector, events: [], server_time: "x", can_manage: true } };
+    });
+    mount("/workloads/new?template=object-detection&gpu=1");
+    expect(await screen.findByText(/From the template/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("Image") as HTMLInputElement).value).toBe("docker.io/tonyhuang1101/forgeyard-vision:1.2.0-cuda"));
+    expect((screen.getByLabelText("Share the card (memory)") as HTMLInputElement).value).toBe("3Gi");
+    expect(screen.getByRole("checkbox", { name: /Expose at/ })).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("button", { name: "Create and start" }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ ...spec(true), replicas: 1 });
   });
 });
