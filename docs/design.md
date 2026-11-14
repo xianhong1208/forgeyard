@@ -486,7 +486,7 @@ page contain these lines whenever the server uses its own CA.
   deployment holds). Engine errors come back in OpenAI's shape (`engine_error`). No tokens, no cloud,
   no prompt filtering. `/v1/images/edits` and `/variations` are 404 `endpoint_not_supported` (vLLM-Omni's
   edit route fetches any URL it is given; a later version).
-- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each) in the console, through
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each) in the console, and a **Vision** tab for exposed vision workloads (boxes, a mask from a click or a box, a depth map; the `/x/` rules through the console's own routes, 1.3), through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.

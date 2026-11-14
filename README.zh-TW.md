@@ -1,7 +1,7 @@
 # Forgeyard
 
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器。每台機器上的 agent
-回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp）。其他任何服務（偵測、分割、Triton 或 FastAPI 模型）都能公開在 `/x/<name>/…`，使用同樣的金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
+回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp）。其他任何服務（偵測、分割、Triton 或 FastAPI 模型）都能公開在 `/x/<name>/…`，使用同樣的金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API，並能在 Playground 的 Vision 分頁試用。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
 
 [English](README.md)
 
@@ -142,7 +142,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/db.py`, `forgeyard/migrations/` | 資料庫模型；Alembic migration，啟動時執行 |
 | `forgeyard/api/` | HTTP API：`auth`（初始設定、登入、工作階段、連結）、`users`、`audit_log`、`machines`、`workloads`、`onboarding`（Get started）、`tls`（下載 CA）、`install`（`/install.sh` 與 wheel）、`guide` |
 | `forgeyard/api/models.py`, `deployments.py` | 模型目錄、recipe、來源；部署、估算、試用 |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground；API 金鑰、它的限制、雲端設定與預算，以及用量 |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground（它的 Vision 分頁經過 `forgeyard/gateway/vision.py`）；API 金鑰、它的限制、雲端設定與預算，以及用量 |
 | `forgeyard/api/providers.py` | 雲端供應商與它的模型：新增、測試、匯入、手動價格、複製 |
 | `forgeyard/api/routing.py` | 路由與它分層的目標 |
 | `forgeyard/api/prices.py` | 從 OpenRouter 更新價格：預覽與套用 |

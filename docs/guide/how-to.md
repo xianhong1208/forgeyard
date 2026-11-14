@@ -484,7 +484,33 @@ gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
 
 On AMD machines use **On the CPU**: the image has no ROCm build. What each endpoint takes and returns
-is in the [reference](reference.md#workload-templates).
+is in the [reference](reference.md#workload-templates). To try one without an API key, see
+[Try a vision workload in the Playground](#try-a-vision-workload-in-the-playground).
+
+## Try a vision workload in the Playground
+
+**Playground → Vision** sends a picture to an exposed vision workload (one started from a
+[template](#start-a-workload-from-a-template), or any exposed service started with `--task detect`,
+`--task segment` or `--task depth`), as you, without an API key. Everyone signed in may use it; the
+requests follow the workload's limits and count as `console` under `x:<name>` in **Usage**.
+
+1. Pick the **Workload**: each is listed with its task and model. With none exposed yet, the tab says
+   so; admins and operators get a link to **Start from a template**.
+2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB, or the
+   workload's **Largest request** if that is smaller).
+3. Then, by task:
+   - **Object detection:** **Detect objects** draws a box with the label and score of everything the
+     model found; **Score at least** hides the weaker ones without asking again.
+   - **Segmentation:** click a point on something, or drag a box around it. The best mask is laid over
+     the picture; the buttons above it switch between the masks the model offers. Click or drag again
+     for another.
+   - **Depth estimation:** **Estimate depth** shows the depth map beside the photo, brighter or warmer
+     where it is nearer, in **Colour** or **Grey**. The depth is relative, not metres.
+
+Under the result: which replica answered, the picture's size and the time the model and the whole request
+took. A busy, stopped or too-small workload is said in plain words; nothing reaches `/x/` with your
+console sign-in, which takes API keys only. The routes are in the
+[reference](reference.md#from-the-playground).
 
 ## Send images to a model
 

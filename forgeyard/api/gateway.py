@@ -5,7 +5,9 @@ web page cannot use a signed-in browser against it; for the same reason the cons
 does not apply (clients are not browsers). The host check (421) does. No CORS headers are sent.
 
 The console's playground (`/api/playground/…`) goes through the same code with the signed-in
-user, under the console's own rules (cookie + CSRF), counted as "console" in usage.
+user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Vision tab
+(1.3, `/api/playground/vision/…`) reaches exposed vision workloads the way /x/ does
+(forgeyard/gateway/vision.py).
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from forgeyard.db import new_session
-from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech
+from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech, vision
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -310,6 +312,37 @@ async def playground_voices(request: Request, model: Optional[str] = None):
         return await voices(model, caller)
     except GatewayError as e:
         return e.response()
+
+
+def _not_signed_in(reason: Optional[str]) -> JSONResponse:
+    return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
+                                    "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+
+
+def _vision_options() -> dict:
+    db = new_session()
+    try:
+        return vision.options(db)
+    finally:
+        db.close()
+
+
+@console.get("/vision/options")
+async def playground_vision_options(request: Request):
+    """The exposed vision workloads (1.3), for the Playground's Vision tab."""
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return _not_signed_in(reason)
+    return await run_in_threadpool(_vision_options)
+
+
+@console.post("/vision/{workload}/{task}")
+async def playground_vision(workload: str, task: str, request: Request):
+    """An image to an exposed vision workload's /v1/<task> (1.3), as the signed-in user: the /x/ rules."""
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return _not_signed_in(reason)
+    return await vision.handle(request, workload, task, caller)
 
 
 @console.post("/{endpoint:path}")
