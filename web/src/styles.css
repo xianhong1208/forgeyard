@@ -418,6 +418,18 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .verdicts li.nope .mono.strong { color: var(--ink-2); }
 .verdict-reason { margin-top: 2px; color: var(--ink-2); overflow-wrap: anywhere; }
 .notice .verdicts { margin-top: 6px; }
+/* 1.3.1: GPU sharing would fit */
+.share-hint { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+  margin-top: 12px; padding: 10px 14px; border: 1px solid #c7d9eb; border-radius: var(--radius); background: var(--info-soft);
+  color: #1e3f5e; font-size: 13.5px; }
+.share-hint p { margin: 0; flex: 1 1 28ch; min-width: 0; }
+.share-fits { margin-top: 3px; color: #1e3f5e; }
+.stuck-list { margin: 4px 0 0; padding-left: 18px; }
+.cell-stuck { margin-top: 4px; font-size: 12.5px; color: #8a1a12; max-width: 46ch; overflow-wrap: anywhere; }
+.edit-plan { margin: 0 0 10px; font-size: 13.5px; }
+.edit-changes { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.edit-changes li { overflow-wrap: anywhere; }
+.rep-stuck { color: #8a1a12; }
 .notice .verdicts li { border-top-color: #f2c4c0; }
 
 .bar-dl { width: 120px; display: inline-block; vertical-align: middle; }
