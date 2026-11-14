@@ -8,9 +8,34 @@ version until 1.0.
 
 1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
 through the gateway, and the usage units for all of 1.3. Third part: text to speech. Fourth part: image
-generation.
+generation. Fifth part: the generic passthrough at `/x/<name>`.
 
 ### Added
+
+- **Generic passthrough at `/x/<name>/…`** (#23): a service workload's own HTTP API behind the gateway,
+  for programs with an API key, any method, the prefix stripped and the query kept.
+  - **Exposing** a workload (Workloads → New workload → *Gateway*, or later on its page): admins and
+    operators; audited. Settings beside the spec, changeable while it runs, the limits collapsed:
+    port, read timeout (600 s), largest request (32 MiB), requests at once per replica and per key.
+  - **Behind the agent's key guard**, like a model replica: the program on loopback (`${BIND_ADDRESS}`
+    in a process's arguments), the guard on the published port, which checks the gateway's internal
+    key and **removes** it; health checks never carry it either. Agents announce `workload_guard`;
+    an exposed workload is placed only on them. Every port of an exposed workload is guarded.
+  - **A key's new *Workloads* setting**: *None* (the default, and every existing key, migration
+    `0013_passthrough`), *Listed workloads* or *Every exposed workload*; an admin's value on someone
+    else's key is locked, like the cloud setting. 403 `workloads_not_allowed`, 404
+    `workload_not_found`.
+  - **APIs, not web pages:** `Content-Security-Policy: sandbox`, `nosniff`, `DENY`, `no-store`, CORP and
+    `no-referrer` forced on every answer; `Set-Cookie`, `Access-Control-*`, HSTS, `Clear-Site-Data`,
+    `Alt-Svc` and `X-Forgeyard-*` dropped; client credentials and forwarded headers replaced by fresh
+    `X-Forwarded-*`, `X-Forwarded-Prefix` and `X-Request-Id`; `Location` rewritten under the prefix,
+    redirects never followed. Dot segments and encoded separators are refused (400 `invalid_path`), not
+    normalised. Answers stream as raw bytes. No WebSockets, gRPC or cloud spill in 1.3.
+  - **Limits:** the key's requests per minute, 429 `workload_busy` and `key_busy` with `Retry-After`,
+    413 `request_too_large`, 504 `upstream_timeout`; a client that goes away closes the upstream request.
+  - **Usage** as the model `x:<name>`: requests, errors, bytes in and out and busy time (new columns on
+    **Usage**), latency.
+  - `scripts/accept_x.py` (also the `passthrough` group of `accept_all.py`) checks it on real machines.
 
 - **Image generation** at `POST /v1/images/generations`, OpenAI's request shape, images back as base64
   only, with two engines:

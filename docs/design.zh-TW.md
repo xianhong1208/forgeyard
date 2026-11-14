@@ -280,9 +280,46 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
     就重新打開 guard。能在那台機器上執行程式的人（包括跑在那裡的 Forgeyard workload）連得到 loopback port；在那裡，引擎自己的 key
     仍然守著它的 `/v1` 路徑。
   - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
-    （把部署停止再啟動）。一般 workload（不是模型）沒有 guard。
+    （把部署停止再啟動）。一般 workload（不是模型）只有公開在 `/x/` 時才有 guard（見下）。
 
 真機檢查：`scripts/accept_m4.py`。
+
+### 在 /x/ 的 workload（1.3，通用直通）
+
+不是對話、嵌入、語音或圖片模型的東西（偵測、分割、深度估計、Triton 或 KServe 模型、FastAPI 或 BentoML 服務），以 service
+workload 執行，並**公開**在 gateway 後面的 **`https://<server>:7860/x/<name>/…`**，使用和 `/v1` 相同的 API key、限制與用量。研究與
+決策記錄在 issue #23；程式碼在 `forgeyard/gateway/passthrough.py` 與 `forgeyard/workloads/expose.py`。
+
+- **設定：** workload 的 `gateway`（`expose`、`port`、`read_timeout` 600 秒、`max_body_mb` 32、每個 replica 的 `concurrency`、
+  每把 key 的 `key_concurrency`），放在 spec 旁邊、絕不放進 spec（agent 用 `extra="forbid"` 驗證 spec），執行中也能修改。由管理員
+  與 operator 設定，並寫入稽核紀錄（`workload.gateway_changed`）。
+- **在 key guard 後面：** 公開的 replica 在放置時拿到內部 key，只送給列出 `workload_guard` 的 agent，格式是
+  `replica_key {env: null, strip: true}`；其他 agent 不會被放置（並說明原因）。程式聽在 loopback（行程參數裡的
+  `${BIND_ADDRESS}`；容器發布在 loopback），guard 佔住對外 port，檢查 key 後**把它拿掉**，agent 的 health check 也絕不帶它。公開
+  執行中的 workload 時，已放置的 replica 會拿到 key，由 agent 重新啟動到 guard 後面。關掉公開會立刻關閉 `/x/`；guard 會留到
+  workload 重新啟動為止（安全的方向）。
+- **Key：** `api_keys.workloads` = `none`（預設；1.3 之前的每把 key，migration `0013_passthrough`）| `listed`（`workload_list`）|
+  `all`；管理員設定別人的 key 時對擁有者鎖定，和雲端設定一樣。`none` 的 key 拿到 403 `workloads_not_allowed`；不能呼叫的 workload
+  回 404 `workload_not_found`，和不存在的一樣。
+- **請求：** 只接受 `Authorization: Bearer fyk_…`。路徑從原始請求路徑讀取；`.` 路徑段、編碼過的 `.`、`/` 或 `\`、反斜線、控制字元
+  與非 ASCII 位元組一律拒絕（400 `invalid_path`），絕不正規化（httpx 會摺疊 `..`，程式卻會解碼 `%2e%2e`）。前綴拿掉，查詢字串保留。
+  hop-by-hop、`Authorization`、`Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP` 與 `X-Forgeyard-*` 拿掉；重新設定
+  `X-Forwarded-For/-Proto/-Host`、`X-Forwarded-Prefix` 與 `X-Request-Id`。本文最多讀 `max_body_mb`（413），所以連不到的 replica
+  可以跳過、改試下一個。
+- **回應：** 原始位元組（`aiter_raw`，壓縮的本文保留 `Content-Encoding` 與 `Content-Length`），一到就轉送。`Set-Cookie`、
+  `Access-Control-*`、HSTS、`Clear-Site-Data`、`Alt-Svc`、`Service-Worker-Allowed`、回報類標頭與 `X-Forgeyard-*` 拿掉，並**強制**
+  `Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'`、`nosniff`、`DENY`、`no-store`、
+  `Cross-Origin-Resource-Policy: same-origin` 與 `Referrer-Policy: no-referrer`：從 `/x/` 送出的 HTML 或 script 跑在不透明的
+  origin，絕不是 console 的 origin（console 的 CSRF 檢查是自訂標頭加同源，同源的 script 會通過）。不跟隨轉址；指向 workload 的
+  `Location` / `Content-Location` 改寫到 `/x/<name>` 底下。guard 自己的拒絕（它的 realm）變成 502 `replica_refused_key`；程式自己的
+  401 照樣轉送。中途斷掉的串流會讓連線在未完成時結束。
+- **限制：** key 的 rpm（沒有 tpm）、每個 replica 的同時請求數（429 `workload_busy`）與每把 key 的同時請求數（429 `key_busy`），
+  `Retry-After: 1`；連線逾時 `GATEWAY_CONNECT_TIMEOUT`，之後每次讀取 `read_timeout`（504）。client 離開會關掉往上游的請求。
+- **用量：** `usage_daily` 裡的模型 `x:<name>`，含 `bytes_in`、`bytes_out` 與 `busy_ms`（migration 0012 的欄位）、請求數、錯誤與延遲。
+- **1.3 不做：** WebSocket 與 gRPC（需要端到端的 HTTP/2 trailer）、瀏覽器介面（需要自己的主機名稱與 `*.x.<server>` 萬用憑證）、
+  超過上限的本文串流轉送、上游回報的單位、非同步工作 API、雲端溢出。
+
+真機檢查：`scripts/accept_x.py`。
 
 ## 雲端供應商與分層路由（1.2）
 

@@ -269,6 +269,50 @@ agent；舊版 agent 會試著去拉。
 
 隔離方式簡述：行程以無特權的工作負載帳號執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[工作負載](concepts.md#workloads)。
 
+## 在 /x/ 公開工作負載
+
+透過閘道、帶著 API 金鑰呼叫服務自己的 HTTP API。由管理員和操作員設定。
+
+1. **服務監聽 loopback。** 在 agent 的金鑰守門員後面，行程必須監聽 `127.0.0.1`：在它的參數裡用 `${BIND_ADDRESS}` 和 `${PORT}`，它們會變成 `127.0.0.1` 和它的連接埠。容器照常監聽它自己的連接埠（agent 會把它發布在 loopback 上）。監聽其他位址的行程會被停止，所以它永遠不會繞過守門員被連到。
+2. **公開它。** 在 **New workload** 的 **Gateway** 底下勾選 **Expose at** `/x/<name>`；或在執行中工作負載的頁面上，**Gateway** → **Expose** → **Save**：它的副本會在守門員後面重新啟動。**Limits and timeouts**（預設收合）裡有 **Port**（預設：第一個）、**Read timeout (s)**（600）、**Largest request (MiB)**（32）、**Requests at once per replica** 和 **Requests at once per key**（預設不限）。
+3. **讓金鑰可以呼叫。** 在 **API keys** 頁面，金鑰的 **Workloads at /x/**：*Listed workloads*（勾選它）或 *Every exposed workload*。新金鑰是 *None*。
+4. **呼叫它。** 工作負載的頁面會顯示它的位址和一個 `curl` 呼叫。前綴會被拿掉：`/x/detector/v1/detect` 到服務那邊是 `/v1/detect`。
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F image=@street.jpg
+```
+
+會產生連結或轉址的服務，可以讀 `X-Forwarded-Prefix`（`/x/<name>`），或設定它的 root path。例如以行程方式用 `python3 -m uvicorn` 執行的 FastAPI 服務，**Environment** 加上變數 `ROOT_PATH=/x/echo`：
+
+```python
+# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
+# root_path makes the docs and redirects use the public prefix.
+import os
+from fastapi import FastAPI, Request
+
+app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
+
+@app.post("/v1/echo")
+async def echo(request: Request):
+    return {"bytes": len(await request.body())}
+```
+
+**Arguments** 填：
+
+```text
+-m
+uvicorn
+app:app
+--host
+${BIND_ADDRESS}
+--port
+${PORT}
+```
+
+關掉 **Expose** 會立刻關閉 `/x/<name>`；守門員會一直留在副本前面，直到工作負載重新啟動。哪些東西會通過、哪些會被拿掉，請見[參考資料](reference.md#the-passthrough-x)。
+
 ## 把圖片送給模型
 
 1. **加入能讀圖片的模型。** 在 **Models → Add a model → Recommended** 的 **Vision** 群組裡，有給 vLLM 用的 Qwen3-VL 2B、4B 和 8B，以及給 llama.cpp（CPU 或 AMD APU）用、附 projector 檔的 Qwen3-VL GGUF。只要目錄項目標示 *Images* 的模型都可以：目錄會從模型的 `config.json` 讀出來。GGUF 儲存庫還要選它的 **Projector** 檔（有 F16 就預設選它；選 *None* 就只能處理文字）。
@@ -632,6 +676,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `models` | 部署小模型並等它們就緒：每台 CPU 機器上的 Qwen3-1.7B GGUF；GPU 機器上的對話、embedding、rerank 和語音模型（估算放不下的會跳過）；部署頁面上的估算；**Try it** |
 | `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；Playground；用量 |
 | `cloud` | 給了 `--cloud-provider` 才會執行：外溢到雲端、設為 **Never** 的金鑰、只用本地、雲端上限、費用，以及預算和它的警示 |
+| `passthrough` | 一個公開在 `/x/` 的小型 HTTP 程式：在 CPU 機器上以行程執行，在 GPU 機器上以容器執行。金鑰（none、listed）、照原樣轉送的路徑、被拒絕的路徑、被替換的憑證與轉發標頭、強制的沙箱、轉址、串流、本文上限、rpm、同時請求數、讀取逾時、副本連接埠前的金鑰守門員、用量 |
 | `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
 
 用 `--only gateway,cloud` 或 `--skip console` 選擇要跑的組別；即使沒選 `models`，`gateway` 和 `cloud` 也會部署它們需要的模型。全部沒有失敗時結束代碼是 0，有檢查失敗時是 1，無法開始執行時是 2。
