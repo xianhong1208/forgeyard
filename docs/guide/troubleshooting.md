@@ -498,6 +498,40 @@ added from search has none: add them to its entry.
 (Ubuntu 24.04, Debian 13) and a 1.3 agent, which unpacks `.zip` engines. An older agent shows "cannot
 unpack .zip engines" in the placement: update it.
 
+## A video fails, or is refused
+
+**You see:** `POST /v1/videos` answers 400; the `code` says why. Nothing reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `video_too_long` | `seconds` over the deployment's *Longest video* | Ask for fewer seconds, or raise it (memory grows with it) |
+| `video_too_large` | A side over *Largest side*, or more pixels a frame than the default size scaled to it | Ask for the model's own size (832x480 for Wan2.1), or raise *Largest side* |
+| `invalid_size` | Not `WIDTHxHEIGHT`, or sides that are not multiples of 16 (32 for Wan2.2-5B) | Use the size the message suggests |
+| `input_reference_not_supported` | An image or video reference: only text to video in 1.3 | Describe it in the prompt |
+| `too_many_steps`, `prompt_too_long` | Over *Most steps* or *Longest prompt* | Ask for fewer, or shorten the prompt |
+
+**429 `too_many_jobs`:** your key (or you, in the Playground) already has *Jobs per key* videos waiting
+or being made on that deployment. **429 `queue_full`:** the deployment holds *Jobs at once*. Wait
+`Retry-After` seconds, or delete a job you no longer need.
+
+**It stays `queued`:** a replica makes one video at a time; the others wait on it. Each takes minutes.
+Add a replica, or ask for shorter or smaller videos.
+
+**It reports `failed`:** `error.code` says why.
+
+| `error.code` | Why | Do |
+|---|---|---|
+| `replica_restarted`, `video_lost` | The replica's engine restarted, and its jobs (kept in its memory) went with it | Ask again; look at the deployment's events for why it restarted |
+| `replica_gone` | The replica was stopped, moved or deleted | Ask again once the deployment is running |
+| `timed_out` | Not done within the deployment's *Longest job* | Ask for a shorter or smaller video, or raise *Longest job* |
+| `generation_failed` | The engine failed the video; its message is in `error.message` | Read it; an out-of-memory error: see below |
+
+**410 `video_expired`:** the video was older than *Keep results* and was deleted. **410
+`video_lost`:** its replica restarted or was stopped after it was made. Ask for it again either way.
+
+**Out of GPU memory on a shared card:** lower *Longest video* or *Largest side*, or turn on *Offload to
+host memory* under **Advanced** (the text encoder alone is 11 GB; slower videos).
+
 ## Cost shows requests without a price
 
 **You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above

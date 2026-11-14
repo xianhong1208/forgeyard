@@ -190,7 +190,8 @@ page shows that name, its usage, each replica and a small **Try it** that checks
     0.6B / 1.7B CustomVoice for vLLM-Omni, Qwen3-TTS 1.7B as GGUF and Chatterbox Turbo for llama.cpp,
     and Kokoro-82M for speaches; speech entries are pinned to a commit, list the languages they
     speak, and a conversion without a licence of its own names the original it comes from
-    (`license_from`), whose licence `scripts/check_recommended.py` reads. An **Images** group (1.3) has
+    (`license_from`), whose licence `scripts/check_recommended.py` reads. A **Video** group (1.3) has Wan2.1-T2V-1.3B (pinned to the commit used for
+    the A100 acceptance) and Wan2.2-TI2V-5B for vLLM-Omni, pinned to a commit. An **Images** group (1.3) has
     Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell for vLLM-Omni, Z-Image-Turbo and FLUX.1-schnell
     as GGUF with their text encoders and VAE for stable-diffusion.cpp, and Stable Diffusion 1.5 GGUF for
     the CPU; image entries are pinned to a commit, and a GGUF entry names its `components`. FLUX.1-dev,
@@ -247,6 +248,13 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   by name or named by the caller (`components`: `vae`, `llm`, `t5xxl`, `clip_l`, `clip_g`), the files
   beside it; with a text encoder among them the model is split (`--diffusion-model`), else a single
   checkpoint (`-m`); the native size comes from the name (Stable Diffusion 1.x 512) or is 1024.
+  **Video models (1.3):** Hugging Face's `text-to-video` is the `video` task. A diffusers repository whose
+  `model_index.json` names a text-to-video pipeline (`WanPipeline`, or a `…VideoPipeline` that is not
+  image-to-video) is a video model: its components are read as for images, and its native size, frame
+  rate and size multiple come from its VAE and transformer configs: the VAE packs 8 × 8 pixels (16 × 16
+  for Wan2.2's, `scale_factor_spatial`) and the transformer 2 × 2 of those into a token, so Wan2.1 makes
+  832x480 at 16 fps in multiples of 16, and Wan2.2-TI2V-5B (`expand_timesteps`) 1280x704 at 24 fps in
+  multiples of 32.
 - **Recipes** are YAML ([forgeyard/recipes](../forgeyard/recipes)): tasks, formats, the protocol per
   task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
   NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
@@ -276,6 +284,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | CPU (container) only: ONNX Runtime ran Kokoro on the CPU even in the CUDA image | the speaches CPU image |
   | `vllm-omni-tts` (1.3) | text to speech (safetensors: Qwen3-TTS) | NVIDIA, one GPU, shares it by default | `vllm/vllm-omni:v0.32.0` (CUDA 13.0, driver ≥ 580), `vllm serve <model> --omni` |
   | `vllm-omni-image` (1.3) | images (diffusers pipelines) | NVIDIA, one GPU, shares it by default | the same `vllm/vllm-omni:v0.32.0` |
+  | `vllm-omni-video` (1.3) | video (diffusers text-to-video pipelines: Wan) | NVIDIA, one GPU, shares it by default | the same `vllm/vllm-omni:v0.32.0` |
   | `sd-cpp` (1.3) | images (GGUF, single files) | NVIDIA (CUDA), AMD (Vulkan, render node only), CPU (process) | `ghcr.io/leejet/stable-diffusion.cpp:master-{cuda,vulkan}` by digest (rolling tags; the first CUDA pin crashed on an A100 and was replaced, #43), release `master-1043-3be2378` (.zip, glibc 2.39) for the process |
 
   `llama-cpp` also serves `tts` (a TTS GGUF with its projector) on every variant.
@@ -308,6 +317,14 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   bound the memory. stable-diffusion.cpp gets `--max-vram` from the reservation. Measured on the CPU
   (stable-diffusion.cpp): Stable Diffusion 1.5 and Z-Image-Turbo both grow linearly with the image,
   about 6.3 GiB per megapixel beyond their weights (its VAE decodes in 32 bits).
+  **Video (1.3, method `diffusers`, a recipe with the `video` task):** the components' weights in 16
+  bits, plus the longest, largest video the deployment allows: `activation_per_ktoken` (96 MiB) ×
+  thousands of tokens, where tokens = latent frames × (W / 16) × (H / 16) for Wan2.1 (/ 32 for
+  Wan2.2-5B) and latent frames = (frames − 1) / 4 + 1 (5 s of 832x480 at 16 fps: 81 frames, 21 latent,
+  32,760 tokens), plus `vae_per_mp` (8 GiB) × one frame's megapixels (Wan's VAE decodes a few frames at
+  a time), the overhead (1.5 GiB) and the CUDA context: about 21.6 GiB for Wan2.1-1.3B and 32.8 GiB for
+  Wan2.2-TI2V-5B with the defaults. The activation and VAE terms are first estimates, to be calibrated
+  on the A100 (`scripts/accept_video.py` reads the card's memory).
 - **Scheduling**: filter (a recipe variant for the hardware and driver, the runtime, the GPU
   allowlist, enough memory), then score: **binpack** (the tightest card that fits; whole cards stay
   free for big models), and on a tie the machine that already **has the model cached**. Memory is
@@ -443,8 +460,8 @@ page contain these lines whenever the server uses its own CA.
 - **Usage units (1.3, migration 0012).** `usage_daily` has one column per unit of the new model
   kinds: `media_items`, `characters`, `images`, `kilopixels`, `media_ms`, `bytes_in`, `bytes_out`,
   `busy_ms`; default 0, so rows from before keep their meaning. Multimodal chat fills `media_items`;
-  text to speech `characters` and `media_ms`; images `images`, `kilopixels` and `busy_ms`; the later
-  1.3 kinds fill the rest.
+  text to speech `characters` and `media_ms`; images `images`, `kilopixels` and `busy_ms`; videos
+  `media_ms` and `busy_ms`; workloads at /x/ `bytes_in`, `bytes_out` and `busy_ms`.
 - **Text to speech (1.3,** forgeyard/gateway/speech.py**).** `POST /v1/audio/speech` takes OpenAI's
   request. The gateway checks it before anything is sent (an `input`, OpenAI's formats, `speed`,
   `stream_format`) and refuses **voice cloning**: any reference-recording field (`ref_audio`,
@@ -486,7 +503,62 @@ page contain these lines whenever the server uses its own CA.
   deployment holds). Engine errors come back in OpenAI's shape (`engine_error`). No tokens, no cloud,
   no prompt filtering. `/v1/images/edits` and `/variations` are 404 `endpoint_not_supported` (vLLM-Omni's
   edit route fetches any URL it is given; a later version).
-- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each) in the console, and a **Vision** tab for exposed vision workloads (boxes, a mask from a click or a box, a depth map; the `/x/` rules through the console's own routes, 1.3), through
+- **Videos (1.3,** forgeyard/gateway/videogen.py, videojobs.py**).** `POST /v1/videos` takes OpenAI's
+  Videos request (JSON, multipart as OpenAI's SDK sends it, or a URL-encoded form) and answers at once
+  with a **job**: video takes minutes, and every video API (OpenAI's, Replicate's, fal's, Veo's) is
+  asynchronous. Checks and caps work as for images (*Longest video* 5 s, *Largest side* the model's
+  own and no more pixels a frame than the default size scaled to it, sizes a multiple of 16, or 32 for
+  Wan2.2-5B, *Most steps* 50, *Longest prompt* 2,000; `video_too_long`, `video_too_large`,
+  `invalid_size`, `too_many_steps`, `prompt_too_long`); `input_reference` and vLLM-Omni's other
+  references are refused (`input_reference_not_supported`: text to video only in 1.3, and the engine
+  would read uploads and fetch URLs). The engine gets multipart with only the prompt, its model name,
+  the size, the frames (seconds × the deployment's frame rate, rounded to the 4k + 1 Wan makes: 5 s at
+  16 fps is 81) and the frame rate, plus steps, guidance, seed and a negative prompt; never `lora`,
+  `extra_params` or frame interpolation paths.
+  - **Job-to-replica affinity.** vLLM-Omni keeps a job in its memory (its `VIDEO_STORE`) and the file on
+    its own disk (`VLLM_OMNI_SERVER_STORAGE__PATH`, here inside the container, so a stopped, restarted
+    or moved replica takes its files with it). So a job belongs to one replica for its whole life: the
+    gateway sends it to the ready replica with the fewest jobs (a replica that cannot be reached, or
+    answers 429 or 503, is passed over) and asks that replica, and only that one, for its status, its
+    content and its deletion. The engine makes one video at a time and queues the rest itself.
+  - **The jobs table** (`video_jobs`, migration 0014, a new table) holds who asked (the key, or the
+    person in the Playground), the deployment, the replica's uid and its generation and restarts then,
+    the engine's job id, the status and progress, the size, seconds, frames and frame rate asked, the
+    timestamps (created, started, completed, the deadline from the deployment's `timeout`, and
+    `expires_at` from its `keep_minutes`), the error, and whether its file was removed and its usage
+    counted. Clients see Forgeyard's own id (`video_` + 128 random bits); another key's id is 404 like
+    a missing one. The prompt is not stored.
+  - **The sweeper** (a task of the server, every 3 s) asks the replica of each job at work for its
+    status (a client's GET of a job at work asks too, at most every 2 s): queued, in progress (when it
+    starts), completed (its length, from the engine), failed (the engine's error). A replica that is
+    gone (stopped, placed again: a new generation; deleted) or restarted (its restarts changed), or that
+    answers 404 for the job, fails it with `replica_gone`, `replica_restarted` or `video_lost`; a
+    replica that cannot be reached is asked again until the job's deadline, when the job is cancelled
+    there and failed `timed_out`. Since the jobs are in the database and the replicas keep working, a
+    restarted server picks them up. Results past `expires_at` are deleted on their replica and marked
+    removed (content: 410); rows go a week after that. The engine's own `FILE_TTL` sweep (the deployment's
+    `keep_minutes` and an hour) is the safety net behind it.
+  - **Caps on jobs.** Admission is one step under a lock: a deployment's jobs waiting or being made at
+    most `queue` (8), one key's (or person's) at most `jobs_per_key` (2); one more is 429 `queue_full`
+    or `too_many_jobs` with a Retry-After from how long its videos took lately. The key's rpm counts
+    the jobs asked for, not polls, lists or downloads.
+  - **Content** is streamed from the replica as it comes (`aiter_raw`), as `video/mp4`, with `Range`
+    passed on so a browser can seek; a job not made yet is 409 `video_not_ready`, a failed one 409
+    `video_failed`, an expired one 410 `video_expired`, one whose replica went 410 `video_lost`.
+    `variant=thumbnail`/`spritesheet` is 400 `variant_not_supported`. DELETE cancels or deletes on the
+    replica (best effort: a replica that is gone took it already) and removes the row.
+  - **Usage**: one request per job, recorded when it ends (whoever sees the end first records it, once):
+    a made video counts `media_ms` (its length) and `busy_ms` (from when it was seen in progress to the
+    end, × the GPUs the deployment holds); a failed one is an error and nothing else; one deleted while
+    at work is 499. A refused request is counted when refused. No tokens, no cloud.
+  - **Not `/v1/videos/sync`.** vLLM-Omni's synchronous route holds a connection for minutes, and any
+    proxy or client timeout on the way breaks it; it answers 404 `endpoint_not_supported`, as does
+    OpenAI's remix.
+  - **Not stable-diffusion.cpp video.** Its native `/sdcpp/v1/vid_gen` is also asynchronous, but it makes
+    WebM, animated WebP or MJPG AVI (no MP4) and returns the whole video as base64 inside the job's JSON,
+    held in the engine's memory: it does not fit the same job model (one MP4 file per job, fetched and
+    streamed with Range). Video on AMD and the CPU comes later.
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each), videos (**Video**: a prompt, the sizes and lengths the deployment takes, the job followed until it is made, then played in the page with a download link, and the person's earlier videos) in the console, and a **Vision** tab for exposed vision workloads (boxes, a mask from a click or a box, a depth map; the `/x/` rules through the console's own routes, 1.3), through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.

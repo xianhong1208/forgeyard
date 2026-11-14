@@ -8,10 +8,55 @@ version until 1.0.
 
 1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
 through the gateway, and the usage units for all of 1.3. Third part: text to speech. Fourth part: image
-generation. Fifth part: the generic passthrough at `/x/<name>`.
+generation. Fifth part: the generic passthrough at `/x/<name>`. Sixth part: video generation at
+`/v1/videos`.
 
 ### Added
 
+- **Video generation at `/v1/videos`** (#24), OpenAI's Videos API as asynchronous jobs: `POST /v1/videos`
+  (JSON, multipart as OpenAI's SDK sends it, or a URL-encoded form: `prompt`, `model`, `seconds`, `size`,
+  and `num_inference_steps`, `guidance_scale`, `seed`, `negative_prompt`) answers at once with a job;
+  `GET /v1/videos/{id}` polls it (`queued`, `in_progress`, `completed`, `failed`); `GET
+  /v1/videos/{id}/content` streams the MP4 (`Range` passed on); `GET /v1/videos` lists the key's own
+  jobs; `DELETE /v1/videos/{id}` cancels or deletes. `input_reference` and the other image-to-video
+  references are refused (400 `input_reference_not_supported`); thumbnails, `/v1/videos/sync` and remix
+  are not offered.
+  - **`vllm-omni-video`** (new recipe): diffusers text-to-video pipelines (Wan2.1-T2V-1.3B,
+    Wan2.2-TI2V-5B) on NVIDIA with the same `vllm/vllm-omni:v0.32.0` image; the engine keeps its videos
+    inside the replica's container, with its own sweep (`FILE_TTL`) behind the gateway's expiry. Frames
+    are seconds x the model's frame rate rounded to 4k + 1 (5 s at 16 fps is 81).
+  - **Jobs stay on the replica that makes them:** a new table `video_jobs` (migration `0014_video_jobs`;
+    no existing row changes) holds the key or person, the deployment, the replica, the engine's job id,
+    the status, the size and seconds asked, the timestamps, the expiry and the error; the gateway relays
+    status, content and deletion from that replica only, and a server-side sweeper follows the jobs at
+    work every few seconds. A job whose replica restarts or goes reports `failed` with the reason
+    (`replica_restarted`, `replica_gone`, `video_lost`); a finished video's content then answers 410.
+    Jobs survive a server restart. Ids are Forgeyard's own and random; another key's id answers 404.
+    The prompt is not stored.
+  - **Caps per deployment**, each with a working default: *Default size* (the model's own), *Default
+    length* and *Longest video* (5 s), and under Advanced *Largest side*, *Frames per second*, steps,
+    *Jobs at once* (8), *Jobs per key* (2; 429 `queue_full` / `too_many_jobs` with `Retry-After`),
+    *Keep results* (1,440 minutes; then deleted on the replica, 410 `video_expired`), *Longest job*
+    (3,600 s, `timed_out`), *Longest prompt* and *Offload to host memory*.
+  - **Usage:** one request per job, recorded when it ends: the video's length in `media_ms` and the GPU
+    time in `busy_ms`; a failed job counts as an error only; one deleted while at work as 499. No cloud.
+  - **Memory estimate** for video: the weights in 16 bits, the activations per thousand tokens of the
+    longest, largest video (latent frames x patches per frame) and one frame's VAE decode; first
+    estimates (about 21.6 GiB for Wan2.1-1.3B, 32.8 GiB for Wan2.2-5B), to be calibrated on the A100.
+  - **Catalog:** Hugging Face's `text-to-video` is the new `video` task; a diffusers repository naming
+    `WanPipeline` is read as a video model with its own size, frame rate and size multiple. A **Video**
+    group in the recommended list: Wan2.1-T2V-1.3B (pinned to `0fad780`) and Wan2.2-TI2V-5B, Apache-2.0.
+  - **Playground → Video:** a prompt, the sizes and lengths the deployment takes, the job followed until
+    it is made, the video played in the page with a download link, and the person's earlier videos;
+    through `/api/playground/videos…` with the console's sign-in and CSRF rule, counted as console. A
+    deployment's **Try it** asks a replica's video API for its jobs instead of making a video. **Usage**
+    shows the video length.
+  - `scripts/accept_video.py` (also the `video` group of `accept_all.py`) checks it on a real machine with
+    the official SDK: a video made, followed and fetched as a real MP4 (its boxes read: size, frames,
+    length), the caps, another key's 404, the per-key cap, deleting, usage, expiry, and a job failing
+    when its deployment is stopped under it.
+  - Video with stable-diffusion.cpp (AMD, CPU) is not in 1.3: its jobs return WebM, WebP or AVI inside
+    the job's JSON, not an MP4 file. No agent change: agents of 1.3 serve it as they are.
 - **Generic passthrough at `/x/<name>/…`** (#23): a service workload's own HTTP API behind the gateway,
   for programs with an API key, any method, the prefix stripped and the query kept.
   - **Exposing** a workload (Workloads → New workload → *Gateway*, or later on its page): admins and
