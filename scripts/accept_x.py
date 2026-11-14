@@ -262,7 +262,12 @@ def exercise(c: Client, base: str, w: dict, check: Callable, new_key: Callable[[
           and hdrs.get("x-request-id") == h.get("x-request-id"),
           f"x-forwarded-for {hdrs.get('x-forwarded-for')}, prefix {hdrs.get('x-forwarded-prefix')}, request id "
           f"{h.get('x-request-id')}")
-    check(f"{t}: the program runs as the workload account", seen.get("uid") not in (None, 0), f"uid {seen.get('uid')}")
+    if name.endswith("-process"):
+        # The agent runs process workloads as its unprivileged workload account; a container runs as its
+        # image's user (python:3.13-slim is root inside its own container), so that is only reported.
+        check(f"{t}: the program runs as the workload account", seen.get("uid") not in (None, 0), f"uid {seen.get('uid')}")
+    else:
+        check(f"{t}: the program's user (the image's own)", True, f"uid {seen.get('uid')}", info=True)
 
     # 4. the answer
     forced = {k: h.get(k) for k in FORCED}
@@ -595,8 +600,9 @@ def main() -> int:
             cleanup(c)
     failed = [x for x in report["checks"] if not x["ok"] and not x["info"]]
     passed = sum(1 for x in report["checks"] if x["ok"] and not x["info"])
-    skipped = sum(1 for x in report["checks"] if x["info"])
-    log(f"{passed} passed, {len(failed)} failed, {skipped} skipped")
+    skipped = sum(1 for x in report["checks"] if x["skip"])
+    infos = sum(1 for x in report["checks"] if x["info"] and not x["skip"])
+    log(f"{passed} passed, {len(failed)} failed, {skipped} skipped" + (f", {infos} for information" if infos else ""))
     if args.out:
         Path(args.out).write_text(json.dumps(report, indent=2, default=str))
     return 1 if failed else 0
