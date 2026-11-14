@@ -20,11 +20,18 @@ M3 adds VRAM (forgeyard.models.scheduler builds on this for model deployments):
 
 Placement holds a process-wide lock, so two requests (or the background sweep) never give the
 same card, or the same memory, to two replicas.
+
+1.3.1: a replica that is restarted (started again, or restarted by an edit of its deployment) goes
+back to the machine it ran on when that machine still takes it, instead of the best fit elsewhere
+(`prefer`). And an edit restarts the replicas of a running workload one at a time (`roll`): the next
+old one restarts once every replica on the new settings is ready.
 """
 
 from __future__ import annotations
 
 import threading
+import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -91,6 +98,9 @@ class Usage:
     gpu_keys: dict[str, str] = field(default_factory=dict)  # key -> workload name
     cards: dict[str, list[Hold]] = field(default_factory=dict)
     ram: list[Hold] = field(default_factory=list)
+    # Memory of released replicas (see usage) that the agent's numbers still show in use, per card
+    # key (the CPU row's key for RAM): it is free once they stop.
+    credit: dict[str, int] = field(default_factory=dict)
 
 
 def replica_spec(r: Replica) -> dict:
@@ -105,13 +115,21 @@ def _pending(r: Replica, reported_at) -> bool:
     return reported is None or reported < as_utc(r.ready_at) + SETTLE
 
 
-def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Optional[Node] = None) -> Usage:
+def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Optional[Node] = None,
+          release: Collection[int] = ()) -> Usage:
+    """What the replicas on this machine hold. `release`: replicas about to restart (an edit of
+    their deployment). They hold nothing, and what they use now is credited back on their cards."""
     u = Usage()
     node = node or db.get(Node, node_id)
     seen = {a.key: a.updated_at for a in node.accelerators} if node is not None else {}
     cpu_key = next((a.key for a in node.accelerators if a.vendor == "cpu"), None) if node is not None else None
     for r in holding(db, node_id):
         if r.id == exclude:
+            continue
+        if r.id in release:
+            for key in [g["key"] for g in r.gpus or []] or ([cpu_key] if r.vram and cpu_key else []):
+                if r.vram and not _pending(r, seen.get(key)):
+                    u.credit[key] = u.credit.get(key, 0) + r.vram
             continue
         spec = replica_spec(r)
         res = spec.get("resources") or {}
@@ -133,19 +151,20 @@ def headroom() -> int:
     return max(0, get_settings().vram_headroom_mib) * 1024**2
 
 
-def available(a: Accelerator, holds: list[Hold]) -> int:
+def available(a: Accelerator, holds: list[Hold], credit: int = 0) -> int:
     """Memory Forgeyard may still promise on this card (or the RAM of the CPU row): what the agent
-    reported free, minus reservations not yet in that number, minus the headroom."""
+    reported free, minus reservations not yet in that number, minus the headroom (plus `credit`:
+    memory of replicas that are about to stop)."""
     pending = sum(h.vram or 0 for h in holds if h.pending)
-    return int(a.vram_free or 0) - pending - headroom()
+    return int(a.vram_free or 0) + credit - pending - headroom()
 
 
-def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[int]) -> Optional[str]:
+def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[int], credit: int = 0) -> Optional[str]:
     """Why this card cannot take a replica wanting `vram` bytes with this sharing, or None."""
     if holds and (share == "exclusive" or any(h.share != "vram" for h in holds)):
         return f"GPU #{a.index} is in use by {holds[0].workload}"
     if vram:
-        free = available(a, holds)
+        free = available(a, holds, credit)
         if free < vram:
             return (f"GPU #{a.index} has {_size(max(0, free))} available, needs {_size(vram)} "
                     f"({_size(vram - free)} short)")
@@ -257,6 +276,67 @@ def gpu_ref(a: Accelerator, *, kfd: bool = True) -> dict:
     return ref
 
 
+# ------------------------------------------------------------------ restarts (1.3.1)
+# Where a replica that is being restarted ran: {replica id: machine id}. Placement tries that machine
+# first and forgets the entry once the replica is placed. Kept in memory: after a server restart a
+# replica still waiting is placed by the usual rules.
+_previous: dict[int, int] = {}
+
+
+def remember(r: Replica) -> None:
+    """Note the replica's machine before it is reset for a restart."""
+    if r.node_id is not None:
+        if len(_previous) > 10_000:
+            _previous.clear()
+        _previous[r.id] = r.node_id
+
+
+def previous(replica_id: int) -> Optional[int]:
+    return _previous.get(replica_id)
+
+
+def forget(replica_id: int) -> None:
+    _previous.pop(replica_id, None)
+
+
+def roll(db: DbSession) -> tuple[dict[int, tuple[int, dict[str, int]]], set[int]]:
+    """Rolling restart: in every running workload with replicas older than its generation (its
+    deployment was edited), restart the oldest-numbered old replica once every replica already on the
+    new generation is ready, one at a time (replicas that ended for good were restarted by the edit
+    itself). Returns, per restarted replica, its machine and the memory
+    it still uses there (credited to its own placement in the same pass), and the machines to poke."""
+    from forgeyard.workloads.state import event, is_ready, reset_replica
+
+    credits: dict[int, tuple[int, dict[str, int]]] = {}
+    changed: set[int] = set()
+    rows = db.scalars(select(Workload).join(Replica, Replica.workload_id == Workload.id)
+                      .where(Workload.desired_state == "running", Replica.generation < Workload.generation,
+                             Replica.final.is_(False))
+                      .options(selectinload(Workload.replicas)).distinct().order_by(Workload.id)).all()
+    for w in rows:
+        if any(not is_ready(r) for r in w.replicas if r.generation == w.generation):
+            continue  # the replica restarted last is not ready yet (or failed): wait
+        old = sorted((r for r in w.replicas if r.generation < w.generation and not r.final), key=lambda r: r.ordinal)
+        if not old:
+            continue
+        r = old[0]
+        node_id = r.node_id
+        if node_id is not None:
+            credits[r.id] = (node_id, usage(db, node_id, release={r.id}).credit)
+            changed.add(node_id)
+        remember(r)
+        reset_replica(r, w.generation)
+        # A new id, so the agent sees a new replica: it stops the old one and starts this one with its
+        # new internal key. With the same id and a new generation, an agent (1.3.0) takes the new key,
+        # then drops it when it removes the old generation, and the new one waits for a key forever.
+        r.uid = uuid.uuid4().hex
+        left = len(old) - 1
+        event(db, w, "restarting", f"Replica {r.ordinal} restarts with the new settings"
+                                   + (f"; {left} more after it, one at a time." if left else "."), r.ordinal)
+    db.flush()
+    return credits, changed
+
+
 def _candidates(db: DbSession, spec: WorkloadSpec) -> list[Node]:
     q = select(Node).options(selectinload(Node.accelerators))
     if spec.machine_id is not None:
@@ -272,6 +352,7 @@ def place_pending(db: DbSession) -> set[int]:
 
     changed: set[int] = set()
     with _lock:
+        credits, changed = roll(db)
         rows = db.scalars(
             select(Replica).join(Workload).where(Replica.node_id.is_(None), Replica.final.is_(False),
                                                  Workload.desired_state == "running")
@@ -280,7 +361,7 @@ def place_pending(db: DbSession) -> set[int]:
             if r.workload.runtime == "model":
                 from forgeyard.models import scheduler
 
-                placed = scheduler.place_replica(db, r)
+                placed = scheduler.place_replica(db, r, credit=credits.get(r.id))
                 if placed is not None:
                     changed.add(placed)
                 continue
@@ -288,6 +369,8 @@ def place_pending(db: DbSession) -> set[int]:
             exposed = expose.of(r.workload) is not None
             reasons = []
             nodes = _candidates(db, spec)
+            before = previous(r.id)
+            nodes.sort(key=lambda n: n.id != before)  # where it ran last, if it still fits there
             for node in nodes:
                 gpus, why = fit(db, node, spec, exposed=exposed)
                 if gpus is None:
@@ -300,8 +383,10 @@ def place_pending(db: DbSession) -> set[int]:
                 r.state = "pending"
                 r.reason = None if node.status == "online" else f"waiting for {node.name} to come online"
                 r.updated_at = utcnow()
+                forget(r.id)
                 cards = f" with GPU {_cards(a.index for a in gpus)}" if gpus else ""
-                event(db, r.workload, "placed", f"Replica {r.ordinal} placed on {node.name}{cards}.", r.ordinal)
+                again = " again, where it ran before," if node.id == before else ""
+                event(db, r.workload, "placed", f"Replica {r.ordinal} placed{again} on {node.name}{cards}.", r.ordinal)
                 changed.add(node.id)
                 db.flush()
                 break
