@@ -598,7 +598,12 @@ class Run:
     def name(self, what: str) -> str:
         return f"accept-{self.tag}-{what}"
 
-    def check(self, name: str, ok, detail="") -> bool:
+    def check(self, name: str, ok, detail="", info: bool = False, skip: bool = False) -> bool:
+        """Record a check. info=True / skip=True record it as SKIP (information, or not run): the per-feature
+        scripts' exercise() functions call their check that way."""
+        if skip or info:
+            self.skip(name, ("information: " if info else "") + str(detail))
+            return True
         c = self.report.add(self.current, name, PASS if ok else FAIL, detail)
         log(f"{c.status}  {name}" + (f"  ({c.detail[:200]})" if c.detail else ""))
         return bool(ok)
@@ -1886,11 +1891,11 @@ TTS_MODELS = (("gpu", "qwen3-tts-0.6b"), ("cpu", "chatterbox-turbo-gguf"))
 def group_tts(run: Run) -> None:
     import types
 
-    import httpx
     import openai
 
     sys.path.insert(0, str(HERE))
     import accept_m3
+    httpx = accept_m3.sdk_httpx()
     import accept_tts
 
     accept_m3.TLS = run.tls
@@ -1955,12 +1960,12 @@ IMG_MODELS = (("gpu", "z-image-turbo"), ("cpu", "sd-1.5-gguf"))
 def group_img(run: Run) -> None:
     import types
 
-    import httpx
     import openai
 
     sys.path.insert(0, str(HERE))
     import accept_img
     import accept_m3
+    httpx = accept_m3.sdk_httpx()
 
     accept_m3.TLS = run.tls
     c = run.admin
@@ -2025,11 +2030,11 @@ VIDEO_MODELS = (("gpu", "wan2.1-t2v-1.3b"),)
 def group_video(run: Run) -> None:
     import types
 
-    import httpx
     import openai
 
     sys.path.insert(0, str(HERE))
     import accept_m3
+    httpx = accept_m3.sdk_httpx()
     import accept_video
 
     accept_m3.TLS = run.tls

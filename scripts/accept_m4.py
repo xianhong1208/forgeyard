@@ -195,7 +195,7 @@ def main() -> int:
     args = ap.parse_args()
     ensure_sdk(Path(args.venv))
     accept_m3.use_cacert(args.cacert)
-    import httpx
+    httpx = accept_m3.sdk_httpx()
     import openai
 
     def sdk_client(key: str) -> "openai.OpenAI":

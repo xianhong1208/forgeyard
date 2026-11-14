@@ -187,7 +187,7 @@ def main() -> int:
         raise Fail(f"unknown model(s) {unknown}; known: {', '.join(MODELS)}")
     ensure_sdk(Path(args.venv))
     accept_m3.use_cacert(args.cacert)
-    import httpx
+    httpx = accept_m3.sdk_httpx()
     import openai
 
     password = os.environ.get("FORGEYARD_PASSWORD") or getpass.getpass(f"Password for {args.user}: ")
