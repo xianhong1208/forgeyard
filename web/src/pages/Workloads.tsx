@@ -113,6 +113,7 @@ function WorkloadCard({ w }: { w: Workload }) {
           <span className={`chip chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
           <span className="chip">{w.kind}</span>
           <span className="chip">{w.runtime}</span>
+          {w.gateway?.exposed && <span className="chip chip-tone-run mono" title="Exposed behind the gateway">{w.gateway.path}</span>}
           {w.kind === "service" && <span className="muted small">{w.ready}/{w.replicas} ready</span>}
         </div>
         <span className="muted small" title={exact(w.created_at)}>

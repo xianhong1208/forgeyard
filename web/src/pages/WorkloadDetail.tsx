@@ -2,13 +2,16 @@ import { IconArrowLeft, IconPlayerPause, IconPlayerPlay, IconPlayerStop, IconTra
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { Notice, PageHeader } from "../components/ui";
+import { HelpLink } from "../components/HelpLink";
+import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
+import { buildGateway, gatewayForm, xCurl, xUrl, type GatewayForm } from "../lib/passthrough";
 import type { LogsResponse, Replica, Workload, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, duration, gpuLabel, portUrl, stateLabel } from "../lib/workloads";
+import { GatewayPanel } from "./WorkloadNew";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
 export const LOGS_POLL_MS = 2000;
@@ -88,11 +91,15 @@ export function WorkloadDetailPage() {
                   <tr><th>#</th><th>State</th><th>Machine</th><th>GPUs</th><th>Address</th><th>Process</th><th>Runs</th><th>Since</th></tr>
                 </thead>
                 <tbody>
-                  {w.replica_list.map((r) => <ReplicaRow key={r.ordinal} r={r} w={w} />)}
+                  {w.replica_list.map((r) => <ReplicaRow key={r.ordinal} r={r} w={w} guarded={!!w.gateway?.guarded.includes(r.ordinal)} />)}
                 </tbody>
               </table>
             </div>
           </section>
+          {w.kind === "service" && w.gateway && (
+            <Gateway w={w} base={data.gateway_base ?? window.location.origin} trustUrl={data.trust_url} canManage={canManage}
+              onSaved={(text) => { setMessage({ tone: "ok", text }); reload(); }} onError={(text) => setMessage({ tone: "error", text })} />
+          )}
           {canManage && <Output w={w} />}
           <div className="columns">
             <Spec w={w} />
@@ -114,7 +121,7 @@ export function WorkloadDetailPage() {
   );
 }
 
-function ReplicaRow({ r, w }: { r: Replica; w: Workload }) {
+function ReplicaRow({ r, w, guarded }: { r: Replica; w: Workload; guarded: boolean }) {
   const tone = STATE_TONE[r.state];
   const health = w.spec.health;
   return (
@@ -136,8 +143,9 @@ function ReplicaRow({ r, w }: { r: Replica; w: Workload }) {
           const url = portUrl(p, health?.type === "tcp" && health.port === p.name ? "tcp" : "http");
           return (
             <div key={p.name} className="mono small">
-              {url && r.state !== "stopped" && url.startsWith("http") ? <a href={url} target="_blank" rel="noreferrer">{url}</a> : url ?? p.name}
+              {url && r.state !== "stopped" && url.startsWith("http") && !guarded ? <a href={url} target="_blank" rel="noreferrer">{url}</a> : url ?? p.name}
               {p.port ? <span className="muted"> → {p.port}</span> : null}
+              {guarded && <span className="muted"> · key guard</span>}
             </div>
           );
         })}
@@ -254,6 +262,77 @@ function Spec({ w }: { w: Workload }) {
         <ul className="env-list mono">
           {env.map(([k, v]) => <li key={k}><span>{k}</span>=<span className="muted">{v}</span></li>)}
         </ul>
+      )}
+    </section>
+  );
+}
+
+// Exposed at /x/<name> (1.3): the address, a curl call, the limits, and (for operators) the setting.
+function Gateway({ w, base, trustUrl, canManage, onSaved, onError }: {
+  w: Workload; base: string; trustUrl?: string | null; canManage: boolean; onSaved: (text: string) => void; onError: (text: string) => void;
+}) {
+  const gw = w.gateway!;
+  const [editing, setEditing] = useState(false);
+  const [g, setG] = useState<GatewayForm>(() => gatewayForm(gw));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api(`/workloads/${w.id}/gateway`, { method: "PUT", body: buildGateway(g) });
+      setEditing(false);
+      onSaved(g.expose ? `${w.name} is exposed at ${gw.path}.` : `${w.name} is no longer exposed at ${gw.path}.`);
+    } catch (e) {
+      onError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const limits = [
+    `port ${gw.port_name ?? "—"}`, `read timeout ${gw.read_timeout} s`, `requests up to ${gw.max_body_mb} MiB`,
+    gw.concurrency ? `${gw.concurrency} at once per replica` : "no limit per replica",
+    gw.key_concurrency ? `${gw.key_concurrency} at once per key` : "no limit per key",
+  ];
+  return (
+    <section className="panel gw-panel" aria-labelledby="gateway-title">
+      <div className="panel-head">
+        <h2 id="gateway-title">Gateway</h2>
+        <div className="row-gap">
+          <HelpLink page="how-to" anchor="expose-a-workload-at-x">How do I call it?</HelpLink>
+          {canManage && !editing && (
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => { setG(gatewayForm(gw)); setEditing(true); }}>
+              {gw.exposed ? "Change" : "Expose"}
+            </button>
+          )}
+        </div>
+      </div>
+      {gw.exposed ? (
+        <>
+          <p className="small">Exposed to API keys whose Workloads setting allows <code>{w.name}</code>. Answers are sandboxed: an API, not a web page.</p>
+          <CopyBox value={xUrl(base, w.name)} label={`Address of ${w.name}`} />
+          <p className="muted small gw-limits">{limits.join(" · ")}</p>
+          {gw.unguarded.length > 0 && (
+            <Notice tone="error">
+              Replica{gw.unguarded.length > 1 ? "s" : ""} {gw.unguarded.map((n) => `#${n}`).join(", ")} {gw.unguarded.length > 1 ? "are" : "is"} not
+              behind the agent's key guard yet, so the gateway does not send {gw.unguarded.length > 1 ? "them" : "it"} requests. Update
+              the agent, or stop and start the workload.
+            </Notice>
+          )}
+          <CopyBlock value={xCurl(base, w.name, trustUrl)} label={`curl call to ${w.name}`} />
+        </>
+      ) : (
+        <p className="muted small">Not exposed. Its ports answer whoever can reach the machine; expose it to call its HTTP API through the gateway with an API key.</p>
+      )}
+      {editing && (
+        <div className="gw-edit">
+          <GatewayPanel g={g} setG={setG} name={w.name} ports={w.spec.ports.map((p) => p.name)} heading={false} />
+          {g.expose && !gw.exposed && w.desired_state === "running" && (
+            <p className="field-hint">Its running replicas restart behind the agent's key guard.</p>
+          )}
+          <div className="row-gap">
+            <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</button>
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </div>
       )}
     </section>
   );
