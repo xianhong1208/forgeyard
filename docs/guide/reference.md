@@ -352,7 +352,7 @@ minutes. Voices uploaded to an engine are never listed.
 
 `POST /v1/images/generations` takes OpenAI's request and answers OpenAI's JSON with the images as
 base64. Two engines serve it (recipes `vllm-omni-image` for diffusers pipelines on NVIDIA,
-`sd-cpp` for stable-diffusion.cpp on AMD with Vulkan and the CPU, not NVIDIA: #43); local deployments only,
+`sd-cpp` for stable-diffusion.cpp on AMD with Vulkan, NVIDIA and the CPU); local deployments only,
 never a cloud provider.
 
 | Field | What the gateway does |
@@ -710,19 +710,19 @@ recipe with only the variants you want can.
 | `speaches-tts` (1.3) | `cpu` | CPU (in a container), on any machine | the same `ghcr.io/speaches-ai/speaches:0.8.3-cpu` image as faster-whisper. CPU only: Kokoro and Piper run on ONNX Runtime and make speech faster than it plays there; in the CUDA image Kokoro still used the CPU |
 | `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
 | `vllm-omni-image` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | the same `vllm/vllm-omni:v0.32.0` |
-| `sd-cpp` (1.3) | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `ghcr.io/leejet/stable-diffusion.cpp:master-vulkan` (build `32d516c`, Mesa RADV) |
+| `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
+| | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
-stable-diffusion.cpp publishes its images only under tags that move with every build (`master-vulkan`).
-The recipe pins the build that was checked by digest; `scripts/pin_images.py` keeps it (it reports that the tag moved on as information) unless it is run with `--move-rolling`. Its later
+stable-diffusion.cpp publishes its images only under tags that move with every build (`master-vulkan`,
+`master-cuda`). The recipe pins the builds that were checked by digest; `scripts/pin_images.py` keeps
+them (it reports that the tag moved on as information) unless it is run with `--move-rolling`. Its later
 Linux releases are built on Ubuntu 26.04 (glibc 2.43), which is why the CPU process is an earlier build;
 its OpenAI API is the same. `sd-server` has no API key: an agent without the key guard (before 1.1) gets
-no `sd-cpp` replica. There is no NVIDIA variant ([#43](https://github.com/xianhong1208/forgeyard/issues/43)):
-the official CUDA image crashed with Z-Image-Turbo on an A100, so NVIDIA cards make images with
-`vllm-omni-image`, and a GGUF image model deployed on a GPU of an NVIDIA-only machine is refused (*no
-allowed GPU that sd-cpp supports*); with **Runs on** → **CPU only** it runs on the CPU.
+no `sd-cpp` replica. The first CUDA pin (build `465adf3`) crashed with Z-Image-Turbo on an A100
+([#43](https://github.com/xianhong1208/forgeyard/issues/43)); build `3bad892` replaced it.
 
 Every image is pinned by digest as well (`tag@sha256:…`); the tag is what the pages show.
 `scripts/pin_images.py` records in `forgeyard/recipes/images.lock.json` the ids a correct copy of each
