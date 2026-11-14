@@ -66,7 +66,7 @@ def main(names: list[str]) -> int:
         if lic != e.license:
             problems.append(f"the licence is {lic}, the file says {e.license}")
         # A speech model's projector is its decoder (and voice encoder), not media it takes in chat.
-        if e.task not in ("tts", "image") and sorted(meta.get("modalities") or []) != sorted(e.inputs):
+        if e.task not in ("tts", "image", "video") and sorted(meta.get("modalities") or []) != sorted(e.inputs):
             problems.append(f"it takes {meta.get('modalities')}, the file says {e.inputs}")
         recipe = builtin[e.recipe]
         params = {k: p.default for k, p in recipe.params.items()} | {"gpus": 0 if e.device == "cpu" else 1,
