@@ -1,9 +1,14 @@
 """Model deployments: a catalog model + a recipe + parameters, expanded into a service workload
 (placed by the model scheduler) and a gateway route (served at /v1 by the gateway, M4).
 
-Admins and operators estimate, create, stop, start and delete deployments; everyone signed in
-sees them and can send a short test request ("try it") to a ready replica, and use them through
-the gateway with an API key or the playground.
+Admins and operators estimate, create, change (1.3.1), stop, start and delete deployments; everyone
+signed in sees them and can send a short test request ("try it") to a ready replica, and use them
+through the gateway with an API key or the playground.
+
+Changing a deployment (PATCH, 1.3.1) checks the new estimate and placement like a deploy, saves, and
+restarts the replicas on the new settings: one at a time when there are several (the next one once the
+restarted one is ready), so the model keeps answering; a single replica is stopped and started again.
+Each replica goes back to the machine it ran on when that machine still takes it.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
@@ -173,6 +178,25 @@ def _endpoints(w: Workload) -> list[dict]:
     return out
 
 
+def _pinned(db: DbSession, w: Workload) -> Optional[dict]:
+    """The machine a person chose for the deployment (pinned), or None (Forgeyard chooses)."""
+    machine_id = (w.spec or {}).get("machine_id")
+    if machine_id is None:
+        return None
+    node = db.get(Node, machine_id)
+    return {"id": machine_id, "name": node.name if node is not None else None}
+
+
+def _rollout(w: Workload) -> Optional[dict]:
+    """While an edit restarts the replicas: how many run the new settings."""
+    live = [r for r in w.replicas if not r.final]
+    old = [r for r in live if r.generation < w.generation]
+    if not old or w.desired_state != "running":
+        return None
+    return {"generation": w.generation, "updated": len(live) - len(old), "total": len(live),
+            "next": min(r.ordinal for r in old)}
+
+
 def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool = False) -> dict:
     w = d.workload
     route = routes.own_route(db, d.id)
@@ -188,6 +212,8 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
         if route else None,
         "endpoints": _endpoints(w),
         "workload": workload_out(w, caller),
+        "pinned": _pinned(db, w),
+        "rollout": _rollout(w),
     }
     if detail:
         from forgeyard.api.keys import deployment_usage
@@ -327,6 +353,135 @@ def start_deployment(dep_id: int, caller: Caller = Depends(require_operator), db
     db.commit()
     db.expire_all()
     return {"deployment": deployment_out(db, _get(db, dep_id), caller)}
+
+
+# ------------------------------------------------------------------ change (1.3.1)
+COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
+
+
+class DeploymentEdit(BaseModel):
+    """What a change may set. A field left out keeps its value; in `params`, only the names sent
+    change, and a name sent as null goes back to the recipe's default (`vram`: back to the estimate).
+    The model, the recipe, the name and the served name stay: deploy a new one to change them."""
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, Any] = Field(default_factory=dict)
+    replicas: Optional[int] = Field(default=None, ge=1, le=16)
+    # Sent as null: Forgeyard chooses (automatic). Sent as an id: pinned to that machine.
+    machine_id: Optional[int] = Field(default=None, ge=1)
+    # Save even though it does not fit now: the restarted replicas wait for room.
+    wait: bool = False
+    # Only check: the estimate, where it would go and what would restart. Nothing is saved.
+    dry_run: bool = False
+
+
+def _restart_mode(running: bool, restart: bool, replicas: int) -> str:
+    if not running:
+        return "on_start"
+    if not restart:
+        return "none"
+    return "rolling" if replicas > 1 else "all"
+
+
+RESTART_TEXT = {
+    "none": "Nothing restarts.",
+    "on_start": "It is stopped: the new settings apply when it is started.",
+    "rolling": "The replicas restart one at a time; each waits until the one before it is ready.",
+    "all": "Its replica restarts: the model does not answer until the new one is ready.",
+}
+
+
+@router.patch("/deployments/{dep_id}")
+def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(require_operator),
+                    db: DbSession = Depends(get_db)):
+    """Change GPU sharing, context, concurrency and the other recipe parameters, the number of
+    replicas and the machine (pinned or automatic). Checked like a deploy before anything is saved."""
+    d = _get(db, dep_id)
+    w = d.workload
+    recipe = catalog.get_recipe(db, d.recipe)
+    if recipe is None:
+        raise fail(409, "recipe_gone", f"Its recipe {d.recipe} no longer exists, so it cannot be changed. "
+                                       "Deploy the model again with another recipe.")
+    known = set(recipe.params) | set(COMMON_PARAMS)
+    params = {k: v for k, v in (d.params or {}).items() if k in known}  # names an updated recipe dropped
+    for k, v in body.params.items():
+        if v is None:
+            params.pop(k, None)
+        else:
+            params[k] = v
+    spec = dict(w.spec or {})
+    machine_id = body.machine_id if "machine_id" in body.model_fields_set else spec.get("machine_id")
+    replicas = body.replicas if body.replicas is not None else len(w.replicas)
+    ctx, _, m = build_context(db, DeploymentIn(name=d.name, model=d.model.name, recipe=d.recipe, params=params,
+                                               replicas=replicas, machine_id=machine_id))
+    ctx.deployment = d
+    running = w.desired_state == "running"
+    live = [r for r in w.replicas if not r.final]
+    params_changed = ctx.params != (d.params or {})
+    moved = machine_id is not None and any(r.node_id is not None and r.node_id != machine_id for r in live)
+    restart = running and (params_changed or moved)
+    mode = _restart_mode(running, restart, replicas)
+    changes: dict[str, dict] = {}
+    for k in sorted(set(ctx.params) | set(d.params or {})):
+        if (d.params or {}).get(k) != ctx.params.get(k):
+            changes[k] = {"before": (d.params or {}).get(k), "after": ctx.params.get(k)}
+    if replicas != len(w.replicas):
+        changes["replicas"] = {"before": len(w.replicas), "after": replicas}
+    if machine_id != spec.get("machine_id"):
+        changes["machine_id"] = {"before": spec.get("machine_id"), "after": machine_id}
+    with placement._lock:
+        plan = scheduler.preview(db, ctx, release={r.id for r in w.replicas},
+                                 prefer={r.ordinal: r.node_id for r in w.replicas if r.node_id is not None})
+    out = {"estimate": ctx.estimate.as_dict(), "placement": plan, "params": ctx.params, "changes": changes,
+           "restart": mode, "restart_text": RESTART_TEXT[mode]}
+    if body.dry_run:
+        return out
+    if running and (restart or replicas > len(w.replicas)) and not plan["fits"] and not body.wait:
+        raise fail(409, "does_not_fit", plan["summary"], machines=plan["machines"], estimate=ctx.estimate.as_dict())
+    if not changes:
+        return {**out, "deployment": deployment_out(db, d, caller)}
+    nodes: set[int] = set()
+    if params_changed:
+        d.params = ctx.params
+        d.estimate = ctx.estimate.as_dict()
+    spec["replicas"], spec["machine_id"] = replicas, machine_id
+    w.spec = spec
+    w.updated_at = utcnow()
+    if restart:
+        w.generation += 1
+        for r in w.replicas:
+            if r.final:  # ended for good: nothing to wait for, it starts again on the new settings now
+                placement.remember(r)
+                wstate.reset_replica(r, w.generation)
+    ordered = sorted(w.replicas, key=lambda r: r.ordinal)
+    for r in ordered[replicas:]:
+        if r.node_id is not None and not r.final:
+            nodes.add(r.node_id)  # its agent stops it: it is no longer desired
+        placement.forget(r.id)
+        w.replicas.remove(r)  # delete-orphan: the row goes
+    for i in range(len(ordered), replicas):
+        w.replicas.append(Replica(ordinal=i, generation=w.generation, state="pending" if running else "stopped",
+                                  gpus=[], ports=[]))
+    def shown(k: str, value) -> str:
+        if k == "machine_id":
+            node = db.get(Node, value) if value is not None else None
+            return "automatic" if value is None else (node.name if node is not None else f"machine {value}")
+        return str(value)
+
+    said = ", ".join(f"{'machine' if k == 'machine_id' else k} {shown(k, v['before'])} → {shown(k, v['after'])}"
+                     for k, v in changes.items() if k != "extra_args")
+    if "extra_args" in changes:
+        said = ", ".join(x for x in (said, "extra engine arguments") if x)
+    wstate.event(db, w, "changed", f"Changed by {caller.user.username}: {said}. {RESTART_TEXT[mode]}")
+    audit.record(db, "deployment.changed", actor=caller.user, target=d.name, ip=caller.ip, deployment_id=d.id,
+                 workload_id=w.id, changes=changes, restart=mode, estimate=ctx.estimate.amount, model=m.name)
+    db.commit()
+    proxy.forget_ceiling()  # max_body_mb may have changed
+    for node_id in nodes:
+        hub.poke(node_id)
+    placement.place_and_poke(db)  # the first restart (placement.roll), and new replicas
+    db.expire_all()
+    return {**out, "deployment": deployment_out(db, _get(db, dep_id), caller)}
 
 
 @router.delete("/deployments/{dep_id}")

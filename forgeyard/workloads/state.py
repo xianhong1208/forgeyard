@@ -9,13 +9,15 @@ two sides out of step: the next `desired` converges again.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, utcnow
+from forgeyard import __version__
+from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, as_utc, utcnow
 from forgeyard.machines.messages import StatusIn
 from forgeyard.machines.protocol import (FEATURE_IMAGE_IDS, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS,
                                          PROTOCOL_VERSION)
@@ -205,6 +207,12 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
     return desired_changed
 
 
+def is_ready(r: Replica) -> bool:
+    """Healthy, or running when it has no health check."""
+    health = (r.spec or r.workload.spec or {}).get("health")
+    return r.state == "healthy" or (r.state == "running" and not health)
+
+
 # ------------------------------------------------------------------ changes from people
 def reset_replica(r: Replica, generation: int) -> None:
     r.generation = generation
@@ -265,6 +273,48 @@ def unplace_node(db: DbSession, node_id: int, why: str) -> list[Workload]:
         touched.append(w)
     db.flush()
     return touched
+
+
+# 1.3.1: a replica placed on a connected machine whose agent has not reported it for this long is shown
+# as not picked up. An agent gets its work list within a second of a placement (or of connecting) and
+# answers every list with the state of each replica on it, so two minutes of silence is not a slow start.
+NOT_PICKED_UP_AFTER = timedelta(minutes=2)
+
+
+def _version(v: Optional[str]) -> tuple[int, ...]:
+    m = re.match(r"\d+(?:\.\d+)*", (v or "").strip().lstrip("v"))
+    return tuple(int(x) for x in m.group(0).split(".")) if m else ()
+
+
+def not_picked_up(r: Replica, now: datetime, connected: Callable[[int], bool]) -> Optional[str]:
+    """Why a replica placed on a machine has not started: its agent, connected, never said a word
+    about it (an agent too old for this server, one that drops its work list, a stuck agent). None
+    when the replica is not in that situation."""
+    from forgeyard.machines.protocol import PROTOCOL_VERSION
+
+    node = r.node
+    if node is None or r.final or r.state != "pending" or r.started_at is not None or r.download is not None:
+        return None
+    if r.workload.desired_state != "running":
+        return None
+    if r.reason and r.reason != f"waiting for {node.name} to come online":
+        return None  # its agent (or the scheduler) said why
+    if not connected(node.id):
+        return None  # offline: the machine's own state says so
+    since = as_utc(r.updated_at)
+    if node.connected_at is not None and as_utc(node.connected_at) > since:
+        since = as_utc(node.connected_at)
+    waited = now - since
+    if waited < NOT_PICKED_UP_AFTER:
+        return None
+    minutes = int(waited.total_seconds() // 60)
+    text = (f"{node.name}'s agent ({node.agent_version or 'unknown version'}) has not taken this replica for "
+            f"{minutes} minute{'s' if minutes != 1 else ''}")
+    theirs = _version(node.agent_version)
+    old_protocol = node.protocol is not None and node.protocol < PROTOCOL_VERSION
+    if old_protocol or not theirs or theirs < _version(__version__):
+        return text + f"; update the agent (the server is {__version__})"
+    return text + f"; restart the agent on {node.name} and look at its log"
 
 
 def summary(w: Workload) -> dict:

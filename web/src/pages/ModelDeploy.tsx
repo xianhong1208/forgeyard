@@ -8,7 +8,7 @@ import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, type DeployForm } from "../lib/models";
-import type { CatalogModel, CatalogResponse, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam } from "../lib/types";
+import type { CatalogModel, CatalogResponse, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 export const ESTIMATE_DELAY_MS = 400;
@@ -153,6 +153,9 @@ export function ModelDeployPage() {
                     {usable.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.status}</option>)}
                   </select></div>
               </div>
+              {view.device === "gpu" && (f.share || recipe.share) === "exclusive" && est?.placement.share_hint && (
+                <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
+              )}
               <details className="spec-preview" style={{ marginTop: 14 }}>
                 <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, token</summary>
                 <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
@@ -207,7 +210,17 @@ export function paramApplies(name: string, model: CatalogModel | undefined): boo
   return true;
 }
 
-function ParamField({ name, p, value, onChange }: { name: string; p: RecipeParam; value: string | undefined; onChange: (k: string, v: string) => void }) {
+// 1.3.1: an exclusive model that needs half its card or less: say that sharing would leave room.
+export function ShareHintNotice({ hint, onShare }: { hint: ShareHint; onShare: () => void }) {
+  return (
+    <div className="share-hint" role="note" aria-label="GPU sharing hint">
+      <p>{hint.text}{hint.machine && hint.gpu !== null ? <span className="muted"> ({hint.machine} GPU #{hint.gpu})</span> : null}</p>
+      <button type="button" className="btn btn-quiet" onClick={onShare}>Use Share VRAM</button>
+    </div>
+  );
+}
+
+export function ParamField({ name, p, value, onChange }: { name: string; p: RecipeParam; value: string | undefined; onChange: (k: string, v: string) => void }) {
   return (
     <div className="field">
       <label htmlFor={`d-p-${name}`}>{p.label ?? name}</label>
@@ -223,7 +236,7 @@ function ParamField({ name, p, value, onChange }: { name: string; p: RecipeParam
   );
 }
 
-function EstimatePanel({ est, error, pending }: { est: EstimateResponse | null; error: string | null; pending: boolean }) {
+export function EstimatePanel({ est, error, pending }: { est: { estimate: Estimate; placement: Placement } | null; error: string | null; pending: boolean }) {
   if (error) return <section className="panel"><h2>Estimate</h2><Notice tone="error">{error}</Notice></section>;
   if (!est) return <section className="panel"><h2>Estimate</h2><p className="muted small">{pending ? "Estimating…" : "Choose a model and a recipe."}</p></section>;
   const e = est.estimate;
@@ -247,7 +260,7 @@ function EstimatePanel({ est, error, pending }: { est: EstimateResponse | null; 
   );
 }
 
-function PlacementView({ p }: { p: Placement }) {
+export function PlacementView({ p }: { p: Placement }) {
   return (
     <div className="placement">
       <h3 className="sub">Where it would go</h3>
@@ -257,7 +270,7 @@ function PlacementView({ p }: { p: Placement }) {
             <li key={x.replica}><IconCheck size={15} aria-hidden="true" className="ok-ic" />
               <span>Replica {x.replica}: <strong>{x.machine}</strong> {x.gpus.length ? `GPU ${x.gpus.map((g) => `#${g}`).join(", ")}` : "CPU"} · {x.variant}{x.runtime === "process" ? " (process)" : ""}
                 {x.gpu_memory_utilization && <> · <span className="mono">--gpu-memory-utilization {x.gpu_memory_utilization}</span></>}
-                {x.cached && <> · model cached there</>}{!x.online && <> · waits for it to come online</>}</span></li>
+                {x.previous && <> · where it runs now</>}{x.cached && <> · model cached there</>}{!x.online && <> · waits for it to come online</>}</span></li>
           ))}
         </ul>
       ) : (
@@ -268,7 +281,7 @@ function PlacementView({ p }: { p: Placement }) {
   );
 }
 
-function Verdicts({ list }: { list: MachineVerdict[] }) {
+export function Verdicts({ list }: { list: MachineVerdict[] }) {
   return (
     <ul className="verdicts">
       {list.map((m) => (
@@ -276,6 +289,15 @@ function Verdicts({ list }: { list: MachineVerdict[] }) {
           <span className="mono strong">{m.name}</span>{m.status !== "online" && <span className="muted small"> ({m.status})</span>}
           {m.short_by ? <span className="chip chip-tone-bad">{gib(m.short_by)} short</span> : m.fits ? <span className="chip chip-tone-ok">fits</span> : null}
           <div className="small verdict-reason">{m.reason || (m.fits ? `${m.variant} · ${(m.cards ?? []).map((c) => `${c.index === null ? "RAM" : `#${c.index}`} ${gib(c.available)} available`).join(", ")}` : "")}</div>
+          {m.share_fits && (
+            <div className="small share-fits">
+              {m.share_fits.both
+                ? <>To use it: turn on <strong>Share VRAM</strong> here, and on {m.share_fits.exclusive.join(", ")} (Edit on its page).</>
+                : m.share_fits.exclusive.length
+                  ? <>To use it: turn on <strong>Share VRAM</strong> on {m.share_fits.exclusive.join(", ")} (Edit on its page).</>
+                  : <>To use it: turn on <strong>Share VRAM</strong> here.</>}
+            </div>
+          )}
         </li>
       ))}
     </ul>

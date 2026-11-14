@@ -720,6 +720,43 @@ Admins, once providers are in use:
 How cost is worked out, how a budget reserves money and what happens when it runs out:
 [Cost and prices](cloud-providers.md#cost-and-prices) and [Budgets](cloud-providers.md#budgets).
 
+## Change a deployment
+
+On the deployment's page, choose **Edit** (admins and operators). You can change:
+
+- **GPU sharing**: *Exclusive* keeps each card to one replica; *Share VRAM* reserves only the
+  estimate, so other models fit in the rest of the card, sharing its compute
+  ([GPU sharing](concepts.md#gpu-sharing));
+- **GPUs per replica**, **Context length**, **Concurrent requests** and the recipe's other
+  parameters, the memory override and the extra engine arguments;
+- **Replicas**: more are added without touching the running ones; fewer remove the
+  highest-numbered ones;
+- **Machine**: *Automatic* (Forgeyard chooses) or *Pinned to* one machine. Pinning it to another
+  machine moves its replicas there; going back to *Automatic* moves nothing.
+
+The model, the recipe and the names stay: deploy a new one to change them. Before you save, the page
+shows the new estimate, where each replica would go and what saving does. A change that does not fit
+is refused like a deploy ([A deployment does not fit](troubleshooting.md#a-deployment-does-not-fit)).
+A stopped deployment is only saved: the new settings apply when it starts.
+
+Saving restarts the replicas on the new settings:
+
+- **several replicas** restart one at a time: the next one only once the one before it is ready on
+  the new settings, so the model keeps answering. The page shows *updating: 1 of 2 on the new
+  settings* until all are done;
+- **one replica** stops and starts again: the model does not answer until the new one is ready. To
+  avoid that, raise **Replicas** to 2 in the same change: the new replica starts first, then the old
+  one restarts, and you can lower it again afterwards;
+- changing only the number of replicas, or going back to *Automatic*, restarts nothing.
+
+A replica that restarts (after an edit, or **Stop** then **Start**) goes back to the machine it ran on
+when that machine still takes it, rather than the best fit elsewhere: that machine already has the
+model and the engine. When it no longer has room, or is offline, the replica goes where it fits. The
+server keeps this in memory: a replica still waiting for room when the server restarts is placed by
+the usual rules.
+
+From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, find the machine, choose **Change GPU access**.

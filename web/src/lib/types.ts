@@ -166,6 +166,8 @@ export type Replica = {
   } | null;
   ready_at?: string | null;
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
+  // 1.3.1: placed on a connected machine whose agent has not taken it for two minutes: why, and what to do.
+  not_picked_up?: string | null;
 };
 
 export type ContainerRuntimeSpec = { type: "container"; image: string; command: string[] | null; args: string[] };
@@ -310,11 +312,18 @@ export type MachineVerdict = {
   machine_id: number; name: string; status: string; fits: boolean; reason: string; short_by: number | null;
   cards: { index: number | null; available: number; total: number | null; shared_with: string[] }[];
   variant?: string; runtime?: string; image?: string | null; gpus?: number[]; cached?: boolean; leftover?: number;
+  // 1.3.1: exclusive cards are in the way, but the memory is there if they are shared.
+  share_fits?: { gpus: number[]; holders: string[]; exclusive: string[]; both: boolean };
 };
 
-export type PlacedReplica = { replica: number; machine: string; machine_id: number; variant: string; runtime: string; image: string | null; gpus: number[]; cached: boolean; leftover: number; online: boolean; gpu_memory_utilization?: string };
+export type PlacedReplica = { replica: number; machine: string; machine_id: number; variant: string; runtime: string; image: string | null; gpus: number[]; cached: boolean; leftover: number; online: boolean; gpu_memory_utilization?: string;
+  // 1.3.1 (a change): it goes back to the machine it runs on now.
+  previous?: boolean };
 
-export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: MachineVerdict[]; summary?: string; failed_replica?: number };
+// 1.3.1: an exclusive GPU deployment that needs half its card or less could share it.
+export type ShareHint = { need: number; card_total: number; card_model: string | null; machine: string | null; gpu: number | null; text: string };
+
+export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: MachineVerdict[]; summary?: string; failed_replica?: number; share_hint?: ShareHint | null };
 
 export type EstimateResponse = { estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string };
 
@@ -336,6 +345,18 @@ export type Deployment = {
   // 1.2: the deployment's own route with its tiers, and other routes it is a target of.
   routing?: RouteInfo | null; also_in?: string[];
   usage?: { days: number; total: UsageRow; by_day: UsageRow[] };
+  // 1.3.1: the machine a person chose (null: Forgeyard chooses), and an edit's restarts in progress.
+  pinned?: { id: number; name: string | null } | null;
+  rollout?: { generation: number; updated: number; total: number; next: number } | null;
+};
+
+export type RestartMode = "none" | "on_start" | "rolling" | "all";
+
+// PATCH /api/deployments/{id} (1.3.1); dry_run answers the same without `deployment`.
+export type EditResponse = {
+  estimate: Estimate; placement: Placement; params: Record<string, unknown>;
+  changes: Record<string, { before: unknown; after: unknown }>; restart: RestartMode; restart_text: string;
+  deployment?: Deployment;
 };
 
 export type DeploymentsResponse = { deployments: Deployment[]; server_time: string; can_manage: boolean };
