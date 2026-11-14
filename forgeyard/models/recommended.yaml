@@ -54,7 +54,7 @@ groups:
     description: Built-in voices for /v1/audio/speech. Qwen3-TTS speaks Chinese (Mandarin and dialects), English and eight more languages on NVIDIA GPUs with vLLM-Omni, or as GGUF with llama.cpp on an AMD APU or the CPU; Kokoro and Chatterbox are small English voices that run on a CPU. No voice cloning.
   - id: images
     title: Images (text to image)
-    description: Models for /v1/images/generations. Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell on NVIDIA GPUs with vLLM-Omni; GGUF versions for stable-diffusion.cpp on an AMD GPU or APU (Vulkan), and Stable Diffusion 1.5 small enough for a CPU. Apache-2.0 and OpenRAIL licences only.
+    description: Models for /v1/images/generations. Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell on NVIDIA GPUs with vLLM-Omni; GGUF versions for stable-diffusion.cpp on AMD (Vulkan) or NVIDIA (CUDA), and Stable Diffusion 1.5 small enough for a CPU. Apache-2.0 and OpenRAIL licences only.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -585,7 +585,7 @@ models:
     download_gib: 10.2
     memory_gib: 18.2
     engine_args: {sd-cpp: [--cfg-scale, "1", --steps, "8"]}
-    note: Z-Image-Turbo for an AMD GPU or APU (Vulkan) or the CPU; model, Qwen3-4B text encoder and VAE in one repository.
+    note: Z-Image-Turbo for an AMD GPU or APU (Vulkan), an NVIDIA GPU (CUDA) or the CPU; model, Qwen3-4B text encoder and VAE in one repository.
   - name: flux.1-schnell-gguf
     title: FLUX.1 schnell Q4_0 (GGUF, stable-diffusion.cpp)
     source: hf://second-state/FLUX.1-schnell-GGUF
@@ -600,7 +600,7 @@ models:
     download_gib: 11.9
     memory_gib: 19.5
     engine_args: {sd-cpp: [--cfg-scale, "1", --steps, "4"]}
-    note: FLUX.1 schnell in 4 steps for an AMD GPU or APU (Vulkan) or the CPU; T5-XXL, CLIP-L and VAE in the same repository.
+    note: FLUX.1 schnell in 4 steps for an AMD GPU or APU (Vulkan), an NVIDIA GPU (CUDA) or the CPU; T5-XXL, CLIP-L and VAE in the same repository.
   - name: sd-1.5-gguf
     title: Stable Diffusion 1.5 Q8_0 (GGUF, CPU)
     source: hf://second-state/stable-diffusion-v1-5-GGUF
