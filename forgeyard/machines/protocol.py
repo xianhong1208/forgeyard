@@ -41,6 +41,11 @@ cannot reach the registry: a desired replica whose image is in forgeyard/recipes
 carries `image_ids` ({ids, content}: the digests and content ids a correct copy can show), next to
 `spec` and never inside it, which older agents validate with extra="forbid". They get no such key.
 
+An agent that lists "workload_guard" (1.3) also guards plain service workloads exposed at /x/<name>:
+their desired replica carries `replica_key` with `env` null and `strip` true, and its guard removes
+the internal key before a request reaches the program. Exposed workloads are placed only on such
+agents.
+
 Workloads extend version 1 compatibly instead of bumping it. Each side lists its `features` (the
 agent in hello, the server in welcome), and `desired` / `status` / `logs` flow only when both list
 "workloads". An M1 agent (no features) keeps working with this server and is never sent work; an
@@ -90,6 +95,9 @@ FEATURE_IMAGE_IDS = "image_ids"
 # 1.3: the agent unpacks process engines published as .zip archives (stable-diffusion.cpp's releases),
 # not only .tar.gz. A process variant whose engine is a .zip goes only to agents that list it.
 FEATURE_ENGINE_ZIP = "engine_zip"
+# 1.3: the agent's guard also fronts exposed workloads (/x/<name>) and strips the internal key from
+# what it passes on (`replica_key.strip`). Exposed workloads are placed only on agents that list it.
+FEATURE_WORKLOAD_GUARD = "workload_guard"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS)
 RUNTIMES = ("process", "container")
 

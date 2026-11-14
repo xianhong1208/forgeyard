@@ -26,6 +26,7 @@ from forgeyard.api import (
     machines,
     models,
     onboarding,
+    passthrough,
     prices,
     providers,
     routing,
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(tls_api.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
+    app.include_router(passthrough.router)
     app.include_router(agent_api.router)
     app.include_router(install.router)
     app.include_router(guide.router)
