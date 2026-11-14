@@ -7,7 +7,8 @@ and usage statistics. Vision models read images in chat, fetched by the gateway,
 turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Image
 models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs). Any other
 service (detection, segmentation, a Triton or FastAPI model) can be exposed at `/x/<name>/…` behind the same keys, limits
-and usage, and ready-made templates start object detection, segmentation and depth APIs in one step. Cloud model APIs can sit behind the same gateway, local first, with cost
+and usage, and ready-made templates start object detection, segmentation and depth APIs in one step, to try in the
+Playground's Vision tab. Cloud model APIs can sit behind the same gateway, local first, with cost
 tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
@@ -164,7 +165,7 @@ project.
 | `forgeyard/db.py`, `forgeyard/migrations/` | the database models; Alembic migrations, run on start |
 | `forgeyard/api/` | the HTTP API: `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads`, `onboarding` (Get started), `tls` (the CA download), `install` (`/install.sh` and the wheel), `guide` |
 | `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground; API keys, their limits, cloud setting and budget, and usage |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground (its Vision tab through `forgeyard/gateway/vision.py`); API keys, their limits, cloud setting and budget, and usage |
 | `forgeyard/api/providers.py` | cloud providers and their models: add, test, import, prices by hand, clone |
 | `forgeyard/api/routing.py` | routes and their tiers of targets |
 | `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |

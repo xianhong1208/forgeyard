@@ -1,6 +1,6 @@
 import { IconDownload, IconPhoto, IconPhotoAi, IconPlayerStop, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
@@ -10,6 +10,7 @@ import { API_KIND, IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes
 import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
 import type { RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { Vision } from "./PlaygroundVision";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean; images?: Attached[] };
 
@@ -46,11 +47,21 @@ export function PlaygroundPage() {
   const ready = (r: (typeof routes)[number]) => r.endpoints.length > 0 || r.kind === "cloud";
   const model = picked || fallback?.served_name || "";
   const route = routes.find((r) => r.served_name === model);
+  // Two tabs (1.3): deployed models, and exposed vision workloads (?tab=vision).
+  const [search, setSearch] = useSearchParams();
+  const tab = search.get("tab") === "vision" ? "vision" : "models";
 
   return (
     <>
       <PageHeader index="04 · Playground" title="Playground"
-        lead="Try a deployed model through the gateway, as yourself: the same routing and limits of the replicas as an API key, without creating one. Requests count as “console” in Usage." />
+        lead="Try a deployed model or an exposed vision workload through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “console” in Usage." />
+      <div className="tabs" role="tablist" aria-label="Playground">
+        <button type="button" role="tab" aria-selected={tab === "models"} className={tab === "models" ? "on" : ""}
+          onClick={() => setSearch({})}>Models</button>
+        <button type="button" role="tab" aria-selected={tab === "vision"} className={tab === "vision" ? "on" : ""}
+          onClick={() => setSearch({ tab: "vision" })}>Vision</button>
+      </div>
+      {tab === "vision" ? <Vision canCreate={canDeploy} /> : <>
       {error && <Notice tone="error">{error}</Notice>}
       {data && routes.length === 0 && (
         <section className="panel play-empty">
@@ -90,6 +101,7 @@ export function PlaygroundPage() {
       {route?.api === "openai-audio" && <Transcribe key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-speech" && <Speak key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-images" && <Imagine key={route.served_name} model={route.served_name} />}
+      </>}
     </>
   );
 }

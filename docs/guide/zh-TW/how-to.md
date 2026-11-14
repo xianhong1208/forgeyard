@@ -345,7 +345,20 @@ docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda | gzip > forgeya
 gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
 
-AMD 機器請用 **On the CPU**：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#workload-templates)。
+AMD 機器請用 **On the CPU**：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#workload-templates)。不用 API 金鑰就想試試看，請見[在 Playground 試用視覺工作負載](#try-a-vision-workload-in-the-playground)。
+
+## 在 Playground 試用視覺工作負載
+
+**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給公開的視覺工作負載（從[範本](#start-a-workload-from-a-template)啟動的，或任何以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務）。任何已登入的人都可以使用；請求依照工作負載的限制，並在 **Usage** 裡以 `console` 記在 `x:<name>` 底下。
+
+1. 選 **Workload**：每一個都標出它的任務和模型。還沒有公開的工作負載時，分頁會這樣說明；管理員和操作員會看到 **Start from a template** 的連結。
+2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB；工作負載的 **Largest request** 比較小時以它為準）。
+3. 接著依任務而定：
+   - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。
+   - **Segmentation：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
+   - **Depth estimation：** 按 **Estimate depth**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **Colour** 或 **Grey**。深度是相對的，不是公尺。
+
+結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。工作負載忙碌、停止或限制太小時，會用白話說明；你的 console 登入不會送到 `/x/`，那裡只接受 API 金鑰。路由請見[參考資料](reference.md#from-the-playground)。
 
 ## 把圖片送給模型
 

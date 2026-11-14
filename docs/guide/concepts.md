@@ -133,7 +133,8 @@ next one if a replica does not answer. Replicas cannot be used around it: each h
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
 The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
-streaming, and images for models that read them), embeddings, rerank and speech to text. Its requests count as `console` in Usage, and its
+streaming, and images for models that read them), embeddings, rerank and speech to text. Its **Vision**
+tab sends a picture to an exposed vision workload (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
 cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
 
 ## Images, audio and video in chat
