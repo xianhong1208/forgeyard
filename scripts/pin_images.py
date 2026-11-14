@@ -20,7 +20,7 @@ To bump an engine: change the tag in the recipe (keep or drop the old @sha256:â€
 review the diff, run the tests.
 
 Rolling tags (1.3): some projects publish images only under a tag that moves with every build
-(stable-diffusion.cpp's master-vulkan, master-cuda). Their pin is the build that was checked: the
+(stable-diffusion.cpp's master-vulkan). Their pin is the build that was checked: the
 check mode reports that the tag has moved on as information (the pinned digest must still be served),
 and --write keeps the pinned digest. To move one on, drop its @sha256:â€¦ (or pass --move-rolling). The digest is the multi-architecture index (or the single manifest
 when the tag has no index), checked to contain linux/amd64, and linux/arm64 where the variant

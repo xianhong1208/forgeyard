@@ -276,7 +276,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | CPU (container) only: ONNX Runtime ran Kokoro on the CPU even in the CUDA image | the speaches CPU image |
   | `vllm-omni-tts` (1.3) | text to speech (safetensors: Qwen3-TTS) | NVIDIA, one GPU, shares it by default | `vllm/vllm-omni:v0.32.0` (CUDA 13.0, driver ≥ 580), `vllm serve <model> --omni` |
   | `vllm-omni-image` (1.3) | images (diffusers pipelines) | NVIDIA, one GPU, shares it by default | the same `vllm/vllm-omni:v0.32.0` |
-  | `sd-cpp` (1.3) | images (GGUF, single files) | NVIDIA (CUDA), AMD (Vulkan, render node only), CPU (process) | `ghcr.io/leejet/stable-diffusion.cpp:master-{cuda,vulkan}` by digest (rolling tags), release `master-1043-3be2378` (.zip, glibc 2.39) for the process |
+  | `sd-cpp` (1.3) | images (GGUF, single files) | AMD (Vulkan, render node only), CPU (process); not NVIDIA: the CUDA image crashed on an A100 (#43) | `ghcr.io/leejet/stable-diffusion.cpp:master-vulkan` by digest (a rolling tag), release `master-1043-3be2378` (.zip, glibc 2.39) for the process |
 
   `llama-cpp` also serves `tts` (a TTS GGUF with its projector) on every variant.
 - **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
@@ -305,7 +305,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   context. With *Offload to host memory* only the largest component counts. vLLM-Omni's diffusion
   pipelines read `--gpu-memory-utilization` only in their paged mode, so nothing reserves a fixed share:
   the caps, enforced by the gateway and repeated in the engine (`--max-generated-image-size`), are what
-  bound the memory. stable-diffusion.cpp gets `--max-vram` from the reservation. Measured on the CPU
+  bound the memory. stable-diffusion.cpp (Vulkan) gets `--max-vram` from the reservation. Measured on the CPU
   (stable-diffusion.cpp): Stable Diffusion 1.5 and Z-Image-Turbo both grow linearly with the image,
   about 6.3 GiB per megapixel beyond their weights (its VAE decodes in 32 bits).
 - **Scheduling**: filter (a recipe variant for the hardware and driver, the runtime, the GPU

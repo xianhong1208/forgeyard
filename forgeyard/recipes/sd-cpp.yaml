@@ -1,11 +1,10 @@
 # Image generation with stable-diffusion.cpp's sd-server (ggml, MIT): AMD GPUs and APUs with Vulkan,
-# NVIDIA GPUs with CUDA, and plain CPUs as a process that needs no Docker. Behind OpenAI's
-# /v1/images/generations. https://github.com/leejet/stable-diffusion.cpp (examples/server/api.md)
+# and plain CPUs as a process that needs no Docker. Behind OpenAI's /v1/images/generations.
+# https://github.com/leejet/stable-diffusion.cpp (examples/server/api.md)
 #
 # Pinned:
-# - the official images, which are rolling tags (master-vulkan, master-cuda), pinned by digest:
-#   master-vulkan was built from 32d516c (master-1088, 2026-11-10; Ubuntu 24.04, Mesa's RADV, 0.2 GB
-#   compressed), master-cuda from 465adf3 (master-1086; CUDA 12.6, so driver >= 560; 1.9 GB);
+# - the official Vulkan image, a rolling tag (master-vulkan), pinned by digest: built from 32d516c
+#   (master-1088, 2026-11-10; Ubuntu 24.04, Mesa's RADV, 0.2 GB compressed);
 # - the CPU process variant: the master-1043-3be2378 release (2026-11-02), the last whose Linux build
 #   is made on Ubuntu 24.04: later ones are built on Ubuntu 26.04 and need glibc 2.43, which Ubuntu
 #   24.04 (2.39) and Debian 13 (2.41) do not have. Its OpenAI API is the same as the images' (api.md
@@ -13,6 +12,9 @@
 #   unpack (the engine_zip feature).
 # There is no official CPU image, and ROCm builds exist only as release archives (built against ROCm
 # 10.1): AMD cards use Vulkan, which needs only the card's render node (amd_kfd: false).
+# No CUDA variant (#43): on an A100 the official master-cuda image ran Z-Image-Turbo at about 45 s a
+# step and crashed at 1024x1024 (CUDA error: unspecified launch failure); NVIDIA cards make images
+# with vllm-omni-image.
 #
 # Models: one checkpoint with everything in it (Stable Diffusion 1.x / 2.x / XL as .safetensors or
 # GGUF: -m), or a diffusion model with its text encoder(s) and VAE as separate files of the same
@@ -31,15 +33,15 @@
 # gateway off its port, its native and WebUI APIs included (model loading, file listings), and the
 # health check asks GET /v1/models, which answers once the model is loaded (it loads before it
 # listens; --eager-load puts every weight in place then rather than at the first request). -s -1:
-# a random seed per request unless one is asked (sd-server's default is always 42). On a GPU,
+# a random seed per request unless one is asked (sd-server's default is always 42). With Vulkan,
 # --max-vram keeps its weights and buffers within the deployment's reservation: what does not fit
 # waits in host memory instead of taking someone else's.
 name: sd-cpp
 title: stable-diffusion.cpp
 description: >-
-  Text to image with stable-diffusion.cpp: AMD GPUs and APUs (Vulkan) and NVIDIA GPUs in a container,
-  or the CPU as a plain process. GGUF and single-file models (Stable Diffusion 1.5 / XL, Z-Image,
-  FLUX.1), behind OpenAI's /v1/images/generations.
+  Text to image with stable-diffusion.cpp: AMD GPUs and APUs (Vulkan) in a container, or the CPU as a
+  plain process (NVIDIA cards use vLLM-Omni). GGUF and single-file models (Stable Diffusion 1.5 / XL,
+  Z-Image, FLUX.1), behind OpenAI's /v1/images/generations.
 engine: stable-diffusion.cpp
 version: master-1088
 tasks: [image]
@@ -116,13 +118,6 @@ image:
   output_formats: [png, jpeg, webp]
   max_n: 16
 variants:
-  - name: cuda
-    when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=560"}
-    runtime: container
-    image: ghcr.io/leejet/stable-diffusion.cpp:master-cuda@sha256:07285a1cc755377ba096f528a42ac852a036012b699723fa9e0cb388473be8d1
-    entrypoint: [/sd-server]
-    args: [--listen-ip, "{host}", --listen-port, "{port}", --model-dir, "{model_path}", -t, "{threads}",
-           -W, "{width}", -H, "{height}", -s, "-1", --eager-load, --max-vram, "{gpu_budget_gib}"]
   - name: vulkan
     when: {vendor: amd}
     runtime: container

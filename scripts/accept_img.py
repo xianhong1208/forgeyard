@@ -33,7 +33,7 @@ Models it knows (--only):
   z-image-turbo, sdxl-base-1.0, flux.1-schnell   diffusers pipelines on vLLM-Omni (NVIDIA); FLUX.1-schnell is
                                                  gated: HF_TOKEN must be a token that accepted its terms
   z-image-turbo-gguf, flux.1-schnell-gguf        GGUF with their text encoders and VAE on stable-diffusion.cpp
-                                                 (Vulkan on AMD, CUDA on NVIDIA; --device cpu for the CPU)
+                                                 (Vulkan on AMD; --device cpu for the CPU; no CUDA, #43)
   sd-1.5-gguf                                    Stable Diffusion 1.5 GGUF on stable-diffusion.cpp, on the CPU
 GGUF models run with --recipe (default sd-cpp; a custom one, such as one with a locally loaded image,
 must keep the sd-cpp recipe's `image:` block) on --device (cpu or gpu).

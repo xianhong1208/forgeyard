@@ -329,7 +329,7 @@ media: {inputs: [image, audio, video], files: false}
 
 1. **加入圖片模型。** 在 **Models → Add a model → Recommended** 的 **Images** 群組裡有：
    - 給 NVIDIA GPU 用的 Z-Image-Turbo、Stable Diffusion XL 與 FLUX.1-schnell（vLLM-Omni）。在預設上限下，大約各需要 30、17 與 42 GiB 的 GPU 記憶體；FLUX.1-schnell 是 gated（要在 Hugging Face 接受它的條款並提供 token）。
-   - 給 stable-diffusion.cpp 用的 GGUF 版 Z-Image-Turbo 與 FLUX.1-schnell：AMD GPU 或 APU（Vulkan），或任何 GPU，1024x1024 時大約 18 與 19 GiB（也能在 CPU 上跑，只是很慢）。
+   - 給 stable-diffusion.cpp 用的 GGUF 版 Z-Image-Turbo 與 FLUX.1-schnell：AMD GPU 或 APU（Vulkan），1024x1024 時大約 18 與 19 GiB，或是 CPU（很慢）。不能用在 NVIDIA 上：那裡請用 vLLM-Omni 的版本（[#43](https://github.com/xianhong1208/forgeyard/issues/43)）。
    - 給 CPU 用的 GGUF 版 Stable Diffusion 1.5：又小又舊（512x512），用來確認圖片生成能用。
 
    從 **Search Hugging Face** 找到的模型，只要標了 *text-to-image*，而且是 diffusers 儲存庫（vLLM-Omni）或 GGUF / safetensors 檔案（stable-diffusion.cpp；選模型檔，旁邊的文字編碼器與 VAE 檔會依名稱找到）就能用。目錄會顯示它的授權；使用產生的圖片之前請先確認。
