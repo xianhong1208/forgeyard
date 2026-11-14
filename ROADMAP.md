@@ -112,10 +112,10 @@ Two pull requests (the second in two parts):
 Later, if Claude users need it: an Anthropic `/v1/messages` passthrough, which keeps prompt caching
 and thinking.
 
-## In progress: 1.3, more kinds of models
+## Shipped: 1.3.0 (2026-11-14), more kinds of models
 
-Planned as one pull request per kind, each complete (recipe, estimate, gateway, usage, Playground,
-docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
+One pull request (or a few) per kind, each complete (recipe, estimate, gateway, usage, Playground,
+docs, tests). Each was accepted on real hardware.
 
 1. ✅ **Multimodal chat** (#4): images in chat on vLLM and llama.cpp (projector files), video
    opt-in, the usage units for all of 1.3.
@@ -124,32 +124,32 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
 3. ✅ **Text-to-speech** (#11, `/v1/audio/speech`): vLLM-Omni (Qwen3-TTS) on NVIDIA, llama.cpp
    TTS GGUFs on AMD and the CPU, speaches (Kokoro) for small English voices on CPU and CUDA; voices,
    streaming, characters and audio length in usage. Voice cloning stays off.
-4. *In review*: **Image generation** (`/v1/images/generations`): vLLM-Omni (diffusers pipelines) on
+4. ✅ **Image generation** (#13, #44, `/v1/images/generations`): vLLM-Omni (diffusers pipelines) on
    NVIDIA, stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA, a newer build after the first one
    crashed on an A100, #43) and the CPU; base64 only, caps and a queue per deployment, images,
    kilopixels and busy time in usage. Edits stay out.
-5. *In review*: **Generic passthrough** (`/x/<name>/…`, #23): any service workload's HTTP API behind
+5. ✅ **Generic passthrough** (`/x/<name>/…`, #45): any service workload's HTTP API behind
    the gateway, through the agent's key guard (which strips the key), for keys whose new *Workloads*
    setting allows it (none by default, also for existing keys); APIs only (a forced CSP sandbox), no
-   WebSockets or gRPC; bytes and busy time in usage. With ready-made workload templates on
+   WebSockets or gRPC; bytes and busy time in usage. With ready-made workload templates (#46) on
    Forgeyard's own vision image: object detection (RT-DETRv2), segmentation (SAM 2.1), depth (Depth
-   Anything V2 Small), Apache-2.0 only, and a **Vision** tab in the Playground to try them (#47): boxes
+   Anything V2 Small), Apache-2.0 only, and a **Vision** tab in the Playground to try them (#49): boxes
    with a score slider, a mask from a click or a box, a depth map beside the photo.
-6. *In review*: **Video generation** (async `/v1/videos`, #24): OpenAI's Videos API as jobs on
+6. ✅ **Video generation** (async `/v1/videos`, #50): OpenAI's Videos API as jobs on
    vLLM-Omni (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B) on NVIDIA, each job kept on the replica that makes it
    (a job whose replica restarts or goes reports failed), results that expire, caps on length, size and
    jobs per deployment and per key, video length and GPU time in usage, and a **Video** panel in the
    Playground. Text to video only; image-to-video and video on AMD and the CPU (stable-diffusion.cpp)
    come later.
 
-Also in 1.3, alongside the model types:
+Also in 1.3.0, alongside the model types:
 
 - ✅ **Full regression run** on real machines, `scripts/accept_all.py` (#1), before every merge and
   release.
 - ✅ **Setup health** (#3): checks for risky or useless settings, on Get started, in the top bar and
   on each page.
-- ✅ **Container images on Docker Hub** (#2): the server and the agent, amd64 and arm64, published by
-  a release tag.
+- ✅ **Container images on Docker Hub** (#2, #12): the server and the agent, amd64 and arm64,
+  published by a release tag.
 - **Simpler settings** and **deployments that stay where they ran** moved to 1.3.1 (see *Next*).
 
 The owner's decisions for 1.3 (2026-11-11):
@@ -174,7 +174,6 @@ The owner's decisions for 1.3 (2026-11-11):
 
 | Version | What you get |
 |---|---|
-| **1.3: more kinds of models** (in progress, above) | First-class support (a recipe, a memory estimate, an OpenAI-compatible API, keys, limits and usage) for: **multimodal chat**, i.e. images and video in chat on vLLM and llama.cpp (Qwen3-VL, Gemma and similar); **text-to-speech** (`/v1/audio/speech`); **image and video generation** (`/v1/images/generations`, async `/v1/videos`). Plus a **generic passthrough**: any workload's HTTP service behind the gateway at `/x/<name>/…`, guarded by API keys and limits and counted in usage, with templates for detection, segmentation and depth. That covers 3D, tabular and other tasks without a recipe each. |
 | **1.3.1: change a deployment, see what it waits for** | **Edit a deployment** (GPU sharing, context, requests at once, the machine) and its replicas restart; a restarted deployment goes back to its previous machine first. **GPU sharing is pointed out:** chat models stay exclusive by default, but when a model needs half a card or less, the deploy page, a refusal ("fits if both share VRAM") and the setup advisor say that sharing would fit. **Progress for every download:** pulling an engine image shows how much has arrived, like a model download does; a pull fails only when it stops making progress, not after a fixed 30 minutes, and a cancelled pull says it was cancelled. A hint when a replica is never picked up by its machine. **Simpler settings:** one cloud-policy choice, one server-wide Hugging Face token, agent defaults that match the installer. |
 | **1.3.2: dependency fix** | The web build's lint tools move off `minimatch` < 11.0.1. |
 | **1.3.3: README** | The READMEs rewritten around what Forgeyard does, how to install it and a quick start; the developer layout moves to `docs/development.md`. |
@@ -267,3 +266,5 @@ version is not decided yet.
   container without systemd or Docker (the install with a stand-in `systemctl`, the image in CI on a
   runner without GPUs). On a real host, confirm the service (`KillMode=process`: workloads survive
   `systemctl restart forgeyard-agent`), `--gpus all` in the image, and AMD with ROCm mounted.
+- **Wan2.2-TI2V-5B video** (`vllm-omni-video`, about 33 GiB) on an NVIDIA GPU. Wan2.1-T2V-1.3B passed on
+  an A100: 25 checks, 832x480 for 5 s in 136 s, 20.75 GiB measured against an estimate of 21.62 GiB.
