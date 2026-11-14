@@ -125,9 +125,9 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
    TTS GGUFs on AMD and the CPU, speaches (Kokoro) for small English voices on CPU and CUDA; voices,
    streaming, characters and audio length in usage. Voice cloning stays off.
 4. *In review*: **Image generation** (`/v1/images/generations`): vLLM-Omni (diffusers pipelines) on
-   NVIDIA, stable-diffusion.cpp on AMD (Vulkan) and the CPU (no CUDA image: it crashed on an A100,
-   #43); base64 only, caps and a queue per deployment, images, kilopixels and busy time in usage. Edits
-   stay out.
+   NVIDIA, stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA, a newer build after the first one
+   crashed on an A100, #43) and the CPU; base64 only, caps and a queue per deployment, images,
+   kilopixels and busy time in usage. Edits stay out.
 5. *In review*: **Generic passthrough** (`/x/<name>/…`, #23): any service workload's HTTP API behind
    the gateway, through the agent's key guard (which strips the key), for keys whose new *Workloads*
    setting allows it (none by default, also for existing keys); APIs only (a forced CSP sandbox), no
