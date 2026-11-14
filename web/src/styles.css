@@ -548,6 +548,33 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .img-item { margin: 0; display: grid; gap: 6px; min-width: 0; }
 .img-item img { width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); }
 .img-item figcaption { display: flex; justify-content: flex-end; }
+/* The Playground's Video panel (1.3): a job followed until it is made, then played in the page. */
+.vid-lead { margin: 6px 0 0; max-width: 75ch; }
+.vid-frames { align-self: center; margin: 0 0 8px; }
+.vid-job { margin-top: 14px; display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-2); }
+.vid-job p { margin: 0; overflow-wrap: anywhere; }
+.vid-job-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.vid-bar { height: 8px; }
+.vid-bar > span { background: var(--heat); transition: width 0.4s ease; }
+.vid-bar-busy > span { width: 30%; animation: vid-slide 1.6s ease-in-out infinite; }
+@keyframes vid-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .vid-bar-busy > span { animation: none; width: 100%; opacity: 0.5; } }
+.vid-chip.vid-completed { background: var(--ok-soft); border-color: #bfe0cc; color: var(--ok); }
+.vid-chip.vid-failed { background: var(--bad-soft); border-color: #f2c4bf; color: var(--bad); }
+.vid-chip.vid-in_progress { background: var(--heat-soft); border-color: #f3d6a4; color: var(--heat-ink); }
+.vid-out { margin: 14px 0 0; display: grid; gap: 8px; min-width: 0; }
+.vid-out video { width: 100%; max-width: 832px; height: auto; max-height: 70vh; object-fit: contain;
+  border-radius: var(--radius); border: 1px solid var(--line); background: #000; }
+.vid-out figcaption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.vid-out .msg-meta { overflow-wrap: anywhere; }
+.vid-mine { margin-top: 18px; }
+.vid-mine h3 { margin: 0 0 6px; }
+.vid-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vid-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px; border-radius: var(--radius);
+  border: 1px solid transparent; }
+.vid-list li.on { border-color: var(--line); background: var(--surface-2); }
+.vid-list-actions { margin-left: auto; display: flex; gap: 4px; }
 /* Vision (1.3): a drop zone, then the picture with boxes, a mask or its depth map laid over or beside it.
    Overlays are positioned in percent of the picture, so they scale with it on any screen. */
 .vision { display: grid; gap: 12px; }

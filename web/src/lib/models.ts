@@ -1,12 +1,12 @@
 import { bytes } from "./machines";
 import type { CatalogModel, Medium, Recipe, Replica, Task } from "./types";
 
-export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images" };
+export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video" };
 
 export const API_LABEL: Record<string, string> = {
   "openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", rerank: "/v1/rerank",
   "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
-  "openai-images": "/v1/images/generations",
+  "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
 };
 
 export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };
