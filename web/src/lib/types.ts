@@ -205,6 +205,13 @@ export type Workload = {
   gateway?: WorkloadGateway | null;
 };
 
+export type WorkloadTemplate = {
+  id: string; title: string; task: string; name: string; summary: string; model: string; revision: string;
+  licence: string; code_licence: string; model_url: string; endpoint: string; example: string; answer: string;
+  images: { cpu: string; cuda: string };
+  specs: { cpu: Record<string, unknown>; cuda: Record<string, unknown> };
+};
+
 export type WorkloadGatewaySettings = {
   expose: boolean; port: string | null; read_timeout: number; max_body_mb: number;
   concurrency: number | null; key_concurrency: number | null;

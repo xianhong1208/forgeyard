@@ -1,15 +1,15 @@
 import { IconMinus, IconPlus } from "@tabler/icons-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { VENDOR_NAME } from "../lib/machines";
 import { buildGateway, gatewayForm, type GatewayForm } from "../lib/passthrough";
-import type { Machine, MachinesResponse, WorkloadResponse } from "../lib/types";
+import type { Machine, MachinesResponse, WorkloadResponse, WorkloadTemplate } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { allowedCards, allowlistSummary, buildSpec, canRunWorkloads, emptyForm, gpuCards, type WorkloadForm } from "../lib/workloads";
+import { allowedCards, allowlistSummary, buildSpec, canRunWorkloads, emptyForm, formFromSpec, gpuCards, type WorkloadForm } from "../lib/workloads";
 
 function Segmented<T extends string>({ label, value, options, onChange }: {
   label: string; value: T; options: { value: T; label: string; hint?: string }[]; onChange: (v: T) => void;
@@ -64,6 +64,20 @@ export function WorkloadNewPage() {
   const { data: machines } = useApi<MachinesResponse>("/machines");
   const [f, setF] = useState<WorkloadForm>(emptyForm);
   const [g, setG] = useState<GatewayForm>(() => gatewayForm());
+  // A ready-made template (1.3): /workloads/new?template=<id>&gpu=1 fills the form; everything stays editable.
+  const [params] = useSearchParams();
+  const templateId = params.get("template");
+  const onGpu = params.get("gpu") === "1";
+  const { data: templates } = useApi<{ templates: WorkloadTemplate[] }>(templateId ? "/workloads/templates" : null);
+  const template = templates?.templates?.find((t) => t.id === templateId) ?? null;
+  // Filled once per template (React's "adjust state when a prop changes", not an effect).
+  const [applied, setApplied] = useState<string | null>(null);
+  const wanted = template ? `${template.id}:${onGpu}` : null;
+  if (template && wanted !== applied) {
+    setApplied(wanted);
+    setF(formFromSpec(onGpu ? template.specs.cuda : template.specs.cpu));
+    setG({ ...gatewayForm(), expose: true });
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof WorkloadForm>(k: K, v: WorkloadForm[K]) => setF((cur) => ({ ...cur, [k]: v }));
@@ -104,6 +118,14 @@ export function WorkloadNewPage() {
     <>
       <PageHeader index="02 · Workloads" title="New workload"
         lead="A container or a process, on a machine you pick or the first online machine with room. It starts as soon as it is placed." />
+      {template && (
+        <div className="tpl-from" role="status">
+          <span>From the template <strong>{template.title}</strong>{onGpu ? " on an NVIDIA GPU" : " on the CPU"}:</span>{" "}
+          <a href={template.model_url} target="_blank" rel="noreferrer" className="mono">{template.model}</a>{" "}
+          <span className="chip mono" title="The model's licence">{template.licence}</span>{" "}
+          <span className="muted small">serving code {template.code_licence}. Change anything before you start it.</span>
+        </div>
+      )}
       <form className="wl-form" onSubmit={submit} aria-label="New workload">
         <section className="panel">
           <h2>What</h2>
@@ -175,6 +197,8 @@ export function WorkloadNewPage() {
                   <option value="amd">AMD</option>
                 </select>
               </div>
+              <Input label="Share the card (memory)" value={f.vram} onChange={(v) => set("vram", v)} placeholder="the card to itself"
+                hint="For example 3Gi: shares the card with others, reserving this much. Empty: the whole card." />
             </div>
           )}
           {f.gpuMode === "indices" && chosen && (

@@ -1073,3 +1073,9 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .key-workloads-more[open] summary { margin-bottom: 6px; }
 .limits-form .key-workloads { grid-column: 1 / -1; margin: 0; }
 .limits-form .key-workloads .field-hint:empty { display: none; }
+.tpl-from { margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); font-size: 13.5px; overflow-wrap: anywhere; }
+.tpl-panel h2 { display: flex; align-items: center; gap: 8px; }
+.tpl-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.tpl { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); display: grid; gap: 6px; align-content: start; min-width: 0; }
+.tpl p { margin: 0; overflow-wrap: anywhere; }
+.tpl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
