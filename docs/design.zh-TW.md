@@ -170,7 +170,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   | `speaches-tts`（1.3） | 文字轉語音（ONNX：Kokoro、Piper），英文 | 只用 CPU（容器）：即使在 CUDA 映像檔裡，ONNX Runtime 也是用 CPU 跑 Kokoro | speaches 的 CPU 映像 |
   | `vllm-omni-tts`（1.3） | 文字轉語音（safetensors：Qwen3-TTS） | NVIDIA，單張 GPU，預設共用 | `vllm/vllm-omni:v0.32.0`（CUDA 13.0，driver ≥ 580），`vllm serve <model> --omni` |
   | `vllm-omni-image`（1.3） | 圖片（diffusers pipeline） | NVIDIA，單張 GPU，預設共用 | 同樣的 `vllm/vllm-omni:v0.32.0` |
-  | `sd-cpp`（1.3） | 圖片（GGUF、單一檔案） | NVIDIA（CUDA）、AMD（Vulkan，只給 render node）、CPU（行程） | 以 digest 固定的 `ghcr.io/leejet/stable-diffusion.cpp:master-{cuda,vulkan}`（tag 會持續移動），行程用 release `master-1043-3be2378`（.zip，glibc 2.39） |
+  | `sd-cpp`（1.3） | 圖片（GGUF、單一檔案） | AMD（Vulkan，只給 render node）、CPU（行程）；不支援 NVIDIA：CUDA 映像檔在 A100 上會當掉（#43） | 以 digest 固定的 `ghcr.io/leejet/stable-diffusion.cpp:master-vulkan`（tag 會持續移動），行程用 release `master-1043-3be2378`（.zip，glibc 2.39） |
 
   `llama-cpp` 在每個 variant 上也提供 `tts`（附 projector 的 TTS GGUF）。
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
@@ -179,7 +179,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
   能讀圖片的模型（1.3）會加上配方的**視覺項**：vLLM 加 `vision_overhead`（1.5 GiB：vLLM 啟動時會用最大的圖片跑一次視覺編碼器並保留 encoder cache，之後才決定 KV cache 大小；視覺權重已含在模型權重裡），開啟影片時再加 `video_overhead`（1 GiB）；llama.cpp 加 projector 檔本身（整個載入，預設放到 GPU）與它的 buffer 用的 `vision_overhead`（在 CPU 上量測）。開啟圖片時，估算會註明圖片也會占用上下文 token。
   **兩階段語音引擎（1.3）：** vLLM-Omni 把 Qwen3-TTS 跑成 talker（語言模型，依它的 `talker_config` 像一般 safetensors 模型估算）與音訊解碼器（code2wav）兩段，放在同一張卡上，兩段各是一個 vLLM 引擎，各自檢查自己那份卡總量的 `gpu_memory_utilization`。估算加上配方的 `codec_overhead`（4.5 GiB：解碼器那段，vLLM-Omni 在 A100 40GB 上量到 3.8 GiB，再含它的 CUDA context），產生參數時再把保留量拆開：解碼器拿自己那份當它的比例，其餘給 talker（`--stage-overrides`）。speaches 的 TTS 模型和 Whisper 一樣是模型檔加 overhead。
-  **圖片（1.3，method `diffusers`）：** 每個元件的權重（vLLM-Omni 以 16 bit 載入 pipeline，所以 float32 檔案算一半；stable-diffusion.cpp 照檔案原本的格式載入），加上部署允許的最大請求所需的量：引擎一次一起產生請求中所有圖片時（vLLM-Omni）為 `activation_per_mp` × *Largest side* 下的百萬像素 × *Images per request*，一張接一張產生時（stable-diffusion.cpp）則 × 1；再加一次 `vae_per_mp` × 百萬像素、overhead 與 CUDA context。開啟 *Offload to host memory* 時只算最大的元件。vLLM-Omni 的 diffusion pipeline 只有在 paged 模式才讀 `--gpu-memory-utilization`，所以沒有任何東西保留固定的比例：限制記憶體的是上限，由 gateway 強制執行，也在引擎重複設定（`--max-generated-image-size`）。stable-diffusion.cpp 依保留量拿到 `--max-vram`。在 CPU 上量測（stable-diffusion.cpp）：Stable Diffusion 1.5 與 Z-Image-Turbo 都隨圖片大小線性成長，權重之外每百萬像素約 6.3 GiB（它的 VAE 以 32 bit 解碼）。
+  **圖片（1.3，method `diffusers`）：** 每個元件的權重（vLLM-Omni 以 16 bit 載入 pipeline，所以 float32 檔案算一半；stable-diffusion.cpp 照檔案原本的格式載入），加上部署允許的最大請求所需的量：引擎一次一起產生請求中所有圖片時（vLLM-Omni）為 `activation_per_mp` × *Largest side* 下的百萬像素 × *Images per request*，一張接一張產生時（stable-diffusion.cpp）則 × 1；再加一次 `vae_per_mp` × 百萬像素、overhead 與 CUDA context。開啟 *Offload to host memory* 時只算最大的元件。vLLM-Omni 的 diffusion pipeline 只有在 paged 模式才讀 `--gpu-memory-utilization`，所以沒有任何東西保留固定的比例：限制記憶體的是上限，由 gateway 強制執行，也在引擎重複設定（`--max-generated-image-size`）。stable-diffusion.cpp（Vulkan）依保留量拿到 `--max-vram`。在 CPU 上量測（stable-diffusion.cpp）：Stable Diffusion 1.5 與 Z-Image-Turbo 都隨圖片大小線性成長，權重之外每百萬像素約 6.3 GiB（它的 VAE 以 32 bit 解碼）。
 - **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
   讓整張空著的卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，

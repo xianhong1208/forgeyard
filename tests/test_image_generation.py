@@ -30,6 +30,7 @@ from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.usage import recorder
 from forgeyard.models import recipes, recommended as rec, render, sources
 from forgeyard.models.estimate import estimate
+from forgeyard.models.recipes import variant_matches
 from tests.cloud_helpers import FakeCloud, add_provider, deployment_id, model_id, set_tiers
 from tests.gateway_helpers import LiveServer, api_client, make_ready, new_key
 from tests.model_helpers import add_catalog
@@ -232,18 +233,26 @@ def usage_total(owner) -> dict:
 
 # ------------------------------------------------------------------ recipes
 def test_fy_igen_001_two_engines_serve_images():
-    """FY-IGEN-001: vllm-omni-image (NVIDIA, diffusers) and sd-cpp (Vulkan for AMD, CUDA, a CPU process
-    from a .zip release) serve the image task as openai-images; the image settings are checked when a
-    recipe is read."""
+    """FY-IGEN-001: vllm-omni-image (NVIDIA, diffusers) and sd-cpp (Vulkan for AMD, a CPU process from a
+    .zip release, and no NVIDIA variant: its CUDA image crashed on an A100, #43) serve the image task as
+    openai-images, so an NVIDIA card is offered vllm-omni-image and an AMD one sd-cpp; the image
+    settings are checked when a recipe is read."""
     b = {n: r for n, (r, _) in recipes.builtin_recipes().items()}
     omni, sd = b["vllm-omni-image"], b["sd-cpp"]
     assert omni.api == {"image": "openai-images"} and omni.formats == ["diffusers"] and omni.estimate.method == "diffusers"
     assert omni.image.request == "fields" and omni.estimate.cast_16bit and omni.estimate.parallel
     assert omni.variants[0].image == b["vllm-omni-tts"].variants[0].image and omni.api_key_env == "VLLM_API_KEY"
     assert sd.image.request == "sd-cpp" and set(sd.formats) == {"gguf", "safetensors"} and not sd.estimate.parallel
-    assert [v.name for v in sd.variants] == ["cuda", "vulkan", "cpu-process"]
+    assert [v.name for v in sd.variants] == ["vulkan", "cpu-process"]
     assert sd.variant("vulkan").amd_kfd is False and sd.variant("vulkan").when.vendor == "amd"
-    assert sd.variant("cuda").image.startswith("ghcr.io/leejet/stable-diffusion.cpp:master-cuda@sha256:")
+    assert sd.variant("vulkan").image.startswith("ghcr.io/leejet/stable-diffusion.cpp:master-vulkan@sha256:")
+    assert [v.name for v in sd.variants if v.when.vendor == "nvidia"] == [] and sd.variant("cuda") is None
+    a100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
+    apu = {"vendor": "amd", "arch": "gfx1151", "driver": "7.0.2"}
+    offered = {name: [v.name for v in r.variants if variant_matches(v, a100) is None]
+               for name, r in b.items() if "image" in r.tasks}
+    assert offered == {"vllm-omni-image": ["cuda"], "sd-cpp": []}
+    assert [v.name for v in sd.variants if variant_matches(v, apu) is None] == ["vulkan"]
     cpu = sd.variant("cpu-process")
     assert cpu.engine.url.endswith("-bin-Linux-Ubuntu-24.04-x86_64.zip") and cpu.engine.binary == "sd-server"
     assert sd.api_key_env is None and sd.health.path == "/v1/models"
@@ -520,8 +529,9 @@ def test_fy_igen_010_keys_allowlists_rpm_and_no_cloud(img, monkeypatch):
 def test_fy_igen_011_rendering(img):
     """FY-IGEN-011: vLLM-Omni runs `vllm serve <model> --omni` with the pixel cap of the deployment and VAE
     slicing; sd-server a single checkpoint with -m and a split model with --diffusion-model, --llm and
-    --vae, its default size, a random seed, the catalog's sampling settings, and on a GPU --max-vram
-    within the reservation; the options' flags follow the parameters."""
+    --vae, its default size, a random seed, the catalog's sampling settings, and on an AMD GPU (Vulkan)
+    --max-vram within the reservation; the options' flags follow the parameters. A GGUF on NVIDIA-only
+    machines is refused with the reason (sd-cpp has no CUDA variant, #43); with no GPU it runs on the CPU."""
     spec = replica_row("omni").spec
     args = spec["runtime"]["args"]
     assert spec["runtime"]["command"] == ["vllm", "serve"] and args[:2] == ["${MODEL_PATH}", "--omni"]
@@ -534,12 +544,20 @@ def test_fy_igen_011_rendering(img):
     assert a[a.index("-W") + 1] == "512" and a[a.index("-H") + 1] == "512" and a[a.index("-s") + 1] == "-1"
     assert a[a.index("--listen-ip") + 1] == "${BIND_ADDRESS}" and a[a.index("--listen-port") + 1] == "${PORT}"
     assert a[-4:] == ["--steps", "20", "--cfg-scale", "7"] and sd["resources"]["cpu"] == 2.0
-    dep = deploy(img.owner, "zg", "z-gguf", "sd-cpp", params={"offload": "model", "vae_tiling": "on",
-                                                               "default_size": "768x768"}, wait=True)
+    params = {"offload": "model", "vae_tiling": "on", "default_size": "768x768"}
+    # Both machines here are 8x A100: no card sd-cpp supports, so a GPU deployment is refused with why.
+    refused = deploy(img.owner, "zg", "z-gguf", "sd-cpp", params=params, status=409)["detail"]
+    assert refused["code"] == "does_not_fit"
+    assert {m["name"]: m["reason"] for m in refused["machines"]} == {
+        "a100": "no allowed GPU that sd-cpp supports", "cpu-a": "no allowed GPU that sd-cpp supports"}
+    apu = make_node("strix", "amd-gfx1151-apu", features=FEATURES)
+    dep = deploy(img.owner, "zg", "z-gguf", "sd-cpp", params=params, wait=True)
     assert dep["deployment"]["recipe"] == "sd-cpp"
-    z = replica_row("zg").spec
+    row = replica_row("zg")
+    z = row.spec
     a = z["runtime"]["args"]
-    assert z["runtime"]["image"].startswith("ghcr.io/leejet/stable-diffusion.cpp:master-cuda@sha256:")
+    assert row.node_id == apu and [(g["vendor"], g["kfd"]) for g in row.gpus] == [("amd", False)]
+    assert z["runtime"]["image"] == recipes.builtin_recipes()["sd-cpp"][0].variant("vulkan").image
     assert z["runtime"]["command"] == ["/sd-server"] and "-m" not in a
     assert a[a.index("--diffusion-model") + 1] == "${MODEL_FILE}"
     assert a[a.index("--llm") + 1] == "${MODEL_PATH}/qwen_3_4b-Q8_0.gguf"
@@ -822,7 +840,7 @@ def test_fy_igen_020_rolling_tags_stay_pinned(tmp_path, capsys):
     pin = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pin)
     assert pin.rolling("ghcr.io/leejet/stable-diffusion.cpp:master-vulkan")
-    assert pin.rolling("ghcr.io/leejet/stable-diffusion.cpp:master-cuda")
+    assert pin.rolling("ghcr.io/leejet/stable-diffusion.cpp:master-vulkan@sha256:" + "0" * 64)
     assert not pin.rolling("ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242")
     assert not pin.rolling("vllm/vllm-omni:v0.32.0") and pin.rolling("acme/x:latest")
 
