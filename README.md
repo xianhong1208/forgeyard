@@ -4,7 +4,8 @@ One control plane for the GPUs (and CPUs) you own: NVIDIA, AMD ROCm and CPU-only
 LAN or VPN. An agent on each machine reports its hardware; you run services and tasks on them, and
 deploy models from recipes behind one OpenAI-compatible gateway at `/v1`, with API keys, limits
 and usage statistics. Vision models read images in chat, fetched by the gateway, never by the engine. Speech models
-turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Cloud model APIs can sit behind the same gateway, local first, with cost
+turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Image
+models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs). Cloud model APIs can sit behind the same gateway, local first, with cost
 tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
@@ -18,7 +19,7 @@ tracking and monthly budgets.
 > progress) adds more kinds of models; first, images in chat on vLLM and llama.cpp (Qwen3-VL and
 > similar), with the catalog showing each model's licence, then llama.cpp b12242 with a built-in
 > Vulkan variant for AMD APUs, then text to speech with three engines (vLLM-Omni Qwen3-TTS, llama.cpp
-> TTS GGUFs, speaches Kokoro). See [CHANGELOG.md](CHANGELOG.md) and
+> TTS GGUFs, speaches Kokoro), then image generation (vLLM-Omni, stable-diffusion.cpp). See [CHANGELOG.md](CHANGELOG.md) and
 > [ROADMAP.md](ROADMAP.md).
 
 ## The guide
@@ -91,14 +92,43 @@ Every release is checked on real machines, not only in CI. So far:
 
 | Hardware | Software | What ran |
 |---|---|---|
-| NVIDIA A100 80GB PCIe (an 8-GPU host, with a GPU allowlist) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker), speaches 0.8.3 (faster-whisper); the gateway with the official OpenAI SDK; the agent from its container image |
-| AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io` |
-| x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies; text to speech with llama.cpp b12242 (Qwen3-TTS 1.7B GGUF in Chinese and English, Chatterbox Turbo), the speech checked by faster-whisper |
+| NVIDIA A100 80GB PCIe (an 8-GPU host, with a GPU allowlist) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker, images and video in chat with Qwen3-VL-2B, audio in chat with Gemma 4 12B), speaches 0.8.3 (faster-whisper), vLLM-Omni (Qwen3-TTS text to speech, Stable Diffusion XL image generation); the gateway with the official OpenAI SDK; the agent from its container image |
+| AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io`; on the same build, images, audio and video in chat (Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF) and text to speech (Qwen3-TTS 1.7B and Chatterbox Turbo GGUF); image generation with stable-diffusion.cpp's Vulkan build (Z-Image-Turbo GGUF), its image loaded from a file |
+| x86-64 without a GPU | Linux | llama.cpp (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies; images, audio and video in chat with llama.cpp (Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF); text to speech with llama.cpp b12242 (Qwen3-TTS 1.7B GGUF in Chinese and English, Chatterbox Turbo) and speaches (Kokoro 82M), the speech checked by faster-whisper; image generation with stable-diffusion.cpp as a process (Stable Diffusion 1.5 and Z-Image-Turbo GGUF) |
 | Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
 
-Not checked on real hardware yet: the ROCm images
-of the `vllm` and `llama-cpp` recipes, discrete AMD cards, and the one-line install on a host with systemd. Reports from other machines are welcome
-(see [CONTRIBUTING.md](CONTRIBUTING.md)).
+Not checked on real hardware yet: the ROCm images of the `vllm` and `llama-cpp` recipes, discrete AMD
+cards, and the one-line install on a host
+with systemd. Image generation on NVIDIA is checked with vLLM-Omni (Stable Diffusion XL and Z-Image-Turbo on the A100);
+stable-diffusion.cpp offers no CUDA image there ([#43](https://github.com/xianhong1208/forgeyard/issues/43)). Reports from other machines are welcome (see
+[CONTRIBUTING.md](CONTRIBUTING.md)).
+
+### Models tested
+
+| Model | Engine (recipe) | Hardware |
+|---|---|---|
+| **Chat** | | |
+| Qwen3-4B | vLLM 0.32 (`vllm`) | NVIDIA A100 |
+| Qwen3-1.7B GGUF | llama.cpp (`llama-cpp`) | CPU; AMD Strix Halo (Vulkan) |
+| **Multimodal chat** | | |
+| Qwen3-VL-2B Instruct: image, video | vLLM (`vllm`) | NVIDIA A100 |
+| Gemma 4 12B: audio | vLLM (`vllm`) | NVIDIA A100 |
+| Qwen3-VL-2B GGUF: image, video | llama.cpp (`llama-cpp`) | CPU; AMD Strix Halo (Vulkan) |
+| Qwen2.5-Omni-3B GGUF: image, audio, video | llama.cpp (`llama-cpp`) | CPU; AMD Strix Halo (Vulkan) |
+| **Embeddings and rerank** | | |
+| Qwen3-Embedding-0.6B, Qwen3-Reranker-0.6B | vLLM pooling (`vllm-pooling`) | NVIDIA A100 |
+| **Speech to text** | | |
+| faster-whisper small | speaches 0.8.3 (`faster-whisper`) | NVIDIA A100 |
+| **Text to speech** | | |
+| Qwen3-TTS 12Hz 0.6B and 1.7B CustomVoice | vLLM-Omni (`vllm-omni-tts`) | NVIDIA A100 |
+| Qwen3-TTS 12Hz 1.7B GGUF, Chatterbox Turbo GGUF | llama.cpp (`llama-cpp`) | CPU; AMD Strix Halo (Vulkan) |
+| Kokoro 82M | speaches (`speaches-tts`) | CPU |
+| **Image generation** | | |
+| Stable Diffusion XL base 1.0, Z-Image-Turbo | vLLM-Omni (`vllm-omni-image`) | NVIDIA A100 |
+| Stable Diffusion 1.5 GGUF | stable-diffusion.cpp (`sd-cpp`, CPU process) | CPU |
+| Z-Image-Turbo GGUF | stable-diffusion.cpp (`sd-cpp`) | CPU (process); AMD Strix Halo (Vulkan) |
+| **Cloud** | | |
+| Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
 
 ## Develop
 
@@ -144,6 +174,7 @@ project.
 | `forgeyard/gateway/budgets.py` | the budget ledger: reserve, settle, release, the 80% and 100% alerts, 402 |
 | `forgeyard/gateway/media.py` | images, audio and video in chat: parts rebuilt, media URLs fetched under the egress rules |
 | `forgeyard/gateway/speech.py` | text to speech: request checks, voice cloning refused, what each engine is given, the audio's length |
+| `forgeyard/gateway/imagegen.py` | image generation: request checks, per-deployment caps, what each engine is given, the queue, the answer and its size |
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
@@ -164,6 +195,7 @@ project.
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
+| `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |
 

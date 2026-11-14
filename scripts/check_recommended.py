@@ -41,7 +41,8 @@ def main(names: list[str]) -> int:
         try:
             meta = inspector.inspect_hf(repo, e.revision, e.file, endpoint=ENDPOINT, policy=policy, token=token,
                                         mmproj=e.mmproj if e.format == "gguf" and e.mmproj else
-                                        ("none" if e.format == "gguf" else None))
+                                        ("none" if e.format == "gguf" else None), task=e.task,
+                                        components=dict(e.components) if e.components else None)
         except inspector.InspectError as err:
             if e.gated and not token and "gated" in str(err):
                 info = json.loads(fetch.get_bytes(f"{ENDPOINT}/api/models/{repo}", policy))
@@ -65,7 +66,7 @@ def main(names: list[str]) -> int:
         if lic != e.license:
             problems.append(f"the licence is {lic}, the file says {e.license}")
         # A speech model's projector is its decoder (and voice encoder), not media it takes in chat.
-        if e.task != "tts" and sorted(meta.get("modalities") or []) != sorted(e.inputs):
+        if e.task not in ("tts", "image") and sorted(meta.get("modalities") or []) != sorted(e.inputs):
             problems.append(f"it takes {meta.get('modalities')}, the file says {e.inputs}")
         recipe = builtin[e.recipe]
         params = {k: p.default for k, p in recipe.params.items()} | {"gpus": 0 if e.device == "cpu" else 1,

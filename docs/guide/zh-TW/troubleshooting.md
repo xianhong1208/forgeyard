@@ -304,6 +304,29 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 **串流卻到最後才一次送出：** 有些模型要把整句做完才會吐出音訊（llama.cpp 上的 Chatterbox 就是）。Qwen3-TTS 會串流。
 
+## 圖片請求被拒絕，或很慢
+
+**你看到：** `/v1/images/generations` 回應 400；`code` 說明原因。任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `response_format_not_supported` | `response_format: url`。Forgeyard 不保留圖片，所以沒有網址可給 | 拿掉它（或用 `b64_json`），並解碼 `data[].b64_json` |
+| `too_many_images` | `n` 超過部署的 *Images per request* | 少要幾張，或調高它（在 vLLM-Omni 上記憶體會跟著變大） |
+| `image_too_large` | 某一邊超過 *Largest side*（預設是模型自己的尺寸） | 要小一點的尺寸，或在 **Advanced** 調高 *Largest side* |
+| `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Stable Diffusion 的 UNet 為 64） | 使用訊息建議的尺寸 |
+| `too_many_steps` | `num_inference_steps` 超過 *Most steps* | 少一點步數 |
+| `invalid_request` | 沒有提示，或提示裡有 `<sd_cpp_extra_args>` | 送出提示；改用 `num_inference_steps`、`seed`、`negative_prompt` |
+
+**429 `queue_full`：** 部署忙碌中，佇列也滿了。等待 `Retry-After` 秒、加一個副本，或調高 *Queue length*。**503 `queue_timeout`：** 請求等待的時間超過了 *Timeout*。
+
+**504 `upstream_timeout`：** 產生圖片花的時間超過部署的 *Timeout*（vLLM-Omni 為 600 秒，stable-diffusion.cpp 為 1,800 秒）。在 CPU 上，請要小一點的尺寸、少一點步數或少幾張圖片，或調高 *Timeout*。
+
+**關於記憶體的 `engine_error`：** vLLM-Omni 部署會一直占著它最大的請求所需要的記憶體。如果共用的卡記憶體不夠，調低 *Images per request* 或 *Largest side*，或在 **Advanced** 開啟 *Offload to host memory*（較慢）或 *VAE tiling*。
+
+**圖片看起來不像模型的範例：** stable-diffusion.cpp 的取樣設定來自目錄項目的引擎參數（Z-Image-Turbo：`--cfg-scale 1 --steps 8`）。從搜尋加入的模型沒有這些設定：請加到它的項目裡。
+
+**`sd-cpp` 副本在 CPU 機器上無法啟動：** 它的行程引擎需要 glibc 2.39 以上（Ubuntu 24.04、Debian 13），以及能解開 `.zip` 引擎的 1.3 版 agent。舊版 agent 會在配置結果裡顯示 "cannot unpack .zip engines"：請更新它。
+
 ## 費用顯示有請求沒有價格
 
 **你會看到：** **Usage** → **Cost** 把一些請求算在 *Without a price* 底下，並說明上面的費用沒有包含它們。

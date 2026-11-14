@@ -43,6 +43,8 @@ export function UsagePage() {
   const media = (t?.media_items ?? 0) > 0;
   // Text to speech: characters spoken and the audio's length.
   const speech = (t?.characters ?? 0) > 0;
+  // Images: how many, their megapixels and the time replicas spent making them (GPU time on a GPU).
+  const images = (t?.images ?? 0) > 0;
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
   const setBy = tab === "cost" ? setCostGroup : setGroup;
   // The last step of the users' Get started list is opening this page.
@@ -95,6 +97,7 @@ export function UsagePage() {
           <div><dt>Tokens</dt><dd>{num(t.tokens)} <span className="muted small">{num(t.prompt_tokens)} in · {num(t.completion_tokens)} out</span></dd></div>
           {media && <div><dt>Media items</dt><dd>{num(t.media_items)} <span className="muted small">images, audio, video</span></dd></div>}
           {speech && <div><dt>Speech</dt><dd>{num(t.characters)} <span className="muted small">characters · {audioLength(t.media_ms)} of audio</span></dd></div>}
+          {images && <div><dt>Images</dt><dd>{num(t.images)} <span className="muted small">{megapixels(t.kilopixels)} · {busyTime(t.busy_ms)} busy</span></dd></div>}
           <div><dt>Latency p50</dt><dd>{ms(t.latency_p50_ms)}</dd></div>
           <div><dt>Latency p95</dt><dd>{ms(t.latency_p95_ms)}</dd></div>
         </dl>
@@ -115,7 +118,7 @@ export function UsagePage() {
           <div className="table-wrap">
             <table className="table usage-table">
               <thead>
-                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{speech && <th>Audio</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
+                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{speech && <th>Audio</th>}{images && <th>Images</th>}{images && <th>Busy</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
               </thead>
               <tbody>
                 {data.rows.map((r: UsageRow) => (
@@ -131,6 +134,8 @@ export function UsagePage() {
                     {media && <td data-label="Media" className="num" title="Images, audio clips and videos sent in chat">{num(r.media_items ?? 0)}</td>}
                     {speech && <td data-label="Characters" className="num" title="Characters turned into speech">{num(r.characters ?? 0)}</td>}
                     {speech && <td data-label="Audio" className="num" title="Length of the speech made (where its format says it)">{audioLength(r.media_ms)}</td>}
+                    {images && <td data-label="Images" className="num" title="Images made, and their megapixels">{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</td>}
+                    {images && <td data-label="Busy" className="num" title="Time replicas worked on these images, times the GPUs each holds">{busyTime(r.busy_ms)}</td>}
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
                     <td data-label="p95" className="num">{ms(r.latency_p95_ms)}</td>
@@ -312,6 +317,21 @@ function PersonBudget({ p, admin, onSaved }: { p: BudgetPerson; admin: boolean; 
       )}
     </div>
   );
+}
+
+// Kilopixels as megapixels: "12.6 MP".
+export function megapixels(kp: number | null | undefined): string {
+  if (!kp) return "0 MP";
+  return `${(kp / 1000).toLocaleString("en-US", { maximumFractionDigits: kp < 10000 ? 2 : 1 })} MP`;
+}
+
+// Busy milliseconds (GPU time on a GPU) as "2 h 05 min", "3 min 05 s" or "12.3 s".
+export function busyTime(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  const s = ms / 1000;
+  if (s < 3600) return audioLength(ms);
+  const h = Math.floor(s / 3600);
+  return `${h} h ${String(Math.round((s - h * 3600) / 60)).padStart(2, "0")} min`;
 }
 
 // Milliseconds of audio as "1 min 05 s" or "12.3 s".

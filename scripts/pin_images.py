@@ -17,7 +17,12 @@ It is a separate, generated file rather than a field per variant so the recipes 
 and so the same pinned reference in two recipes (or in a custom one) has one entry.
 
 To bump an engine: change the tag in the recipe (keep or drop the old @sha256:…), run with --write,
-review the diff, run the tests. The digest is the multi-architecture index (or the single manifest
+review the diff, run the tests.
+
+Rolling tags (1.3): some projects publish images only under a tag that moves with every build
+(stable-diffusion.cpp's master-vulkan). Their pin is the build that was checked: the
+check mode reports that the tag has moved on as information (the pinned digest must still be served),
+and --write keeps the pinned digest. To move one on, drop its @sha256:… (or pass --move-rolling). The digest is the multi-architecture index (or the single manifest
 when the tag has no index), checked to contain linux/amd64, and linux/arm64 where the variant
 claims aarch64. Only anonymous pulls are used: Docker Hub and GHCR both allow them for public images.
 Every manifest and config is checked against the digest it was asked for.
@@ -118,6 +123,14 @@ class Registry:
         return json.loads(r.content)
 
 
+ROLLING_TAG = re.compile(r"^(master|main|latest|nightly|edge)(-[a-z0-9-]+)?$")
+
+
+def rolling(image: str) -> bool:
+    """A tag that moves with every build (master-vulkan), as opposed to a release tag (b12242, v0.32.0)."""
+    return bool(ROLLING_TAG.match(split_image(image)[2]))
+
+
 def resolve(reg: Registry, image: str) -> str:
     """The digest the image's tag points at on the registry now."""
     registry, repo, tag, _ = split_image(image)
@@ -178,6 +191,8 @@ def main(argv: list[str] | None = None, *, client: httpx.Client | None = None, r
          lock: Path = LOCK) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--write", action="store_true", help="rewrite the recipes and the lock from the registry now")
+    parser.add_argument("--move-rolling", action="store_true", help="with --write: also move images pinned on a "
+                                                                   "rolling tag (master-vulkan) to its current build")
     args = parser.parse_args(argv)
     problems = 0
     recorded = read_lock(lock)
@@ -198,7 +213,12 @@ def main(argv: list[str] | None = None, *, client: httpx.Client | None = None, r
                 ref, _, pinned = image.partition("@")
                 digest = resolve(reg, ref)
                 state = "ok" if pinned == digest else ("unpinned" if not pinned else "MOVED")
-                if state != "ok" and not args.write:
+                keep = bool(pinned) and state == "MOVED" and rolling(ref) and not args.move_rolling
+                if keep:
+                    # The tag has moved on; the pin is the build that was checked, and stays.
+                    state = f"ok (rolling tag, now at {digest}; the pin stays)"
+                    digest = pinned
+                if not state.startswith("ok") and not args.write:
                     problems += 1
                 use = f"{ref}@{digest}" if args.write or not pinned else image
                 out.append(f"{m.group('lead')}{use}")

@@ -1,0 +1,135 @@
+# Image generation with stable-diffusion.cpp's sd-server (ggml, MIT): AMD GPUs and APUs with Vulkan,
+# and plain CPUs as a process that needs no Docker. Behind OpenAI's /v1/images/generations.
+# https://github.com/leejet/stable-diffusion.cpp (examples/server/api.md)
+#
+# Pinned:
+# - the official Vulkan image, a rolling tag (master-vulkan), pinned by digest: built from 32d516c
+#   (master-1088, 2026-11-10; Ubuntu 24.04, Mesa's RADV, 0.2 GB compressed);
+# - the CPU process variant: the master-1043-3be2378 release (2026-11-02), the last whose Linux build
+#   is made on Ubuntu 24.04: later ones are built on Ubuntu 26.04 and need glibc 2.43, which Ubuntu
+#   24.04 (2.39) and Debian 13 (2.41) do not have. Its OpenAI API is the same as the images' (api.md
+#   differs only in the native API's job progress). It is a .zip, which agents of 1.3 and later
+#   unpack (the engine_zip feature).
+# There is no official CPU image, and ROCm builds exist only as release archives (built against ROCm
+# 10.1): AMD cards use Vulkan, which needs only the card's render node (amd_kfd: false).
+# No CUDA variant (#43): on an A100 the official master-cuda image ran Z-Image-Turbo at about 45 s a
+# step and crashed at 1024x1024 (CUDA error: unspecified launch failure); NVIDIA cards make images
+# with vllm-omni-image.
+#
+# Models: one checkpoint with everything in it (Stable Diffusion 1.x / 2.x / XL as .safetensors or
+# GGUF: -m), or a diffusion model with its text encoder(s) and VAE as separate files of the same
+# repository (Z-Image: --llm; FLUX.1: --t5xxl and --clip_l; and --vae), recognised by their names when
+# the model is added. A model's own sampling settings (Z-Image-Turbo: --cfg-scale 1 --steps 8) go in
+# the catalog entry's engine arguments; the recommended entries carry them.
+#
+# Requests (examples/server/routes_openai.cpp at 3be2378): prompt, n (images made one after another),
+# size WxH, output_format png / jpeg / webp and output_compression; everything else rides in the
+# prompt as <sd_cpp_extra_args>{json}</sd_cpp_extra_args>, which the gateway builds from
+# negative_prompt, num_inference_steps, guidance_scale and seed, and refuses from clients (it could ask
+# for any size, hires passes or LoRA files around the deployment's caps). The answer's
+# generation_info (the prompt and settings) is not passed on. /v1/images/edits is not offered in 1.3.
+#
+# sd-server has no API key and no health path: the agent's key guard is what keeps everyone but the
+# gateway off its port, its native and WebUI APIs included (model loading, file listings), and the
+# health check asks GET /v1/models, which answers once the model is loaded (it loads before it
+# listens; --eager-load puts every weight in place then rather than at the first request). -s -1:
+# a random seed per request unless one is asked (sd-server's default is always 42). With Vulkan,
+# --max-vram keeps its weights and buffers within the deployment's reservation: what does not fit
+# waits in host memory instead of taking someone else's.
+name: sd-cpp
+title: stable-diffusion.cpp
+description: >-
+  Text to image with stable-diffusion.cpp: AMD GPUs and APUs (Vulkan) in a container, or the CPU as a
+  plain process (NVIDIA cards use vLLM-Omni). GGUF and single-file models (Stable Diffusion 1.5 / XL,
+  Z-Image, FLUX.1), behind OpenAI's /v1/images/generations.
+engine: stable-diffusion.cpp
+version: master-1088
+tasks: [image]
+formats: [gguf, safetensors]
+api: {image: openai-images}
+upstream_model: served_name
+share: exclusive
+port: 8080
+health: {path: /v1/models, start_period: 900, interval: 10, timeout: 5, failure_threshold: 3}
+estimate:
+  method: diffusers
+  # Images of a request are made one after another (batch_count), so one image's buffers at a time.
+  parallel: false
+  # ggml's compute buffers per megapixel: the denoiser's and the VAE decoder's (sd.cpp decodes in 32
+  # bits). Measured on the CPU (master-1043, peak RSS beyond the loaded weights): Stable Diffusion 1.5
+  # Q8_0 +0.43 / +1.66 / +3.70 GiB at 256, 512 and 768 square, Z-Image-Turbo Q4_0 with its Qwen3-4B and VAE
+  # +1.66 / +6.59 GiB at 512 and 1024 square: linear, about 6.3 GiB a megapixel for both.
+  activation_per_mp: 2GiB
+  vae_per_mp: 4608MiB
+  # Loading takes a little more than the files (Z-Image: 7.90 GiB resident for 7.37 GiB of files).
+  overhead: 768MiB
+  cpu_overhead: 768MiB
+params:
+  max_images: {type: int, default: 4, min: 1, max: 16, label: Images per request (most),
+               help: "The largest n a request may ask for (the default is 1). They are made one after another."}
+  default_size: {type: choice, default: auto, choices: [auto, 256x256, 512x512, 768x768, 1024x1024, 1024x768, 768x1024,
+                                                         1280x720, 720x1280],
+                 label: Default size, help: "The size of requests that give none. auto: the model's own (512x512 for
+                   Stable Diffusion 1.5, 1024x1024 for SDXL, Z-Image and FLUX)."}
+  threads: {type: int, default: 8, min: 1, max: 1024, label: CPU threads,
+            help: The cores it uses (and reserves on the CPU). Image models are slow on a CPU.}
+  max_side: {type: int, default: 0, min: 0, max: 4096, advanced: true, label: Largest side (pixels),
+             help: "The widest or tallest image a request may ask for. 0: the model's own size."}
+  steps: {type: int, default: 0, min: 0, max: 200, advanced: true, label: Default steps,
+          help: "Steps for requests that give no num_inference_steps. 0: the catalog entry's (--steps), else 20."}
+  max_steps: {type: int, default: 50, min: 1, max: 200, advanced: true, label: Most steps,
+              help: Requests asking for more num_inference_steps are refused (400).}
+  concurrency: {type: int, default: 1, min: 1, max: 1, advanced: true, label: Requests at once,
+                help: sd-server makes one image at a time; the others wait in the gateway's queue.}
+  queue: {type: int, default: 8, min: 0, max: 256, advanced: true, label: Queue length,
+          help: "Requests that may wait for a busy replica; one more gets 429 with Retry-After."}
+  timeout: {type: int, default: 1800, min: 30, max: 7200, advanced: true, label: Timeout (seconds),
+            help: How long the gateway waits for the images once a replica has the request (CPUs are slow).}
+  max_prompt_chars: {type: int, default: 4000, min: 1, max: 32000, advanced: true, label: Longest prompt (characters),
+                     help: Longer prompts are refused (400 prompt_too_long).}
+  offload: {type: choice, default: none, choices: [none, model], advanced: true, label: Offload to host memory,
+            help: "model: weights wait in host memory and move to the GPU when used (--offload-to-cpu). Less GPU memory,
+              slower requests."}
+  vae_tiling: {type: choice, default: "off", choices: ["off", "on"], advanced: true, label: VAE tiling,
+               help: "Decodes the image in tiles: less memory for large images, sometimes faint seams."}
+args: [--listen-ip, "{host}", --listen-port, "{port}", --model-dir, "{model_path}", -t, "{threads}",
+       -W, "{width}", -H, "{height}", -s, "-1", --eager-load]
+optional_args:
+  - if_model: image_single
+    args: [-m, "{model_file}"]
+  - if_model: image_split
+    args: [--diffusion-model, "{model_file}"]
+  - if_model: vae
+    args: [--vae, "{vae_file}"]
+  - if_model: llm
+    args: [--llm, "{llm_file}"]
+  - if_model: t5xxl
+    args: [--t5xxl, "{t5xxl_file}"]
+  - if_model: clip_l
+    args: [--clip_l, "{clip_l_file}"]
+  - if_model: clip_g
+    args: [--clip_g, "{clip_g_file}"]
+  - if: {offload: model}
+    args: [--offload-to-cpu]
+  - if: {vae_tiling: "on"}
+    args: [--vae-tiling]
+image:
+  request: sd-cpp
+  output_formats: [png, jpeg, webp]
+  max_n: 16
+variants:
+  - name: vulkan
+    when: {vendor: amd}
+    runtime: container
+    amd_kfd: false
+    image: ghcr.io/leejet/stable-diffusion.cpp:master-vulkan@sha256:7911e3788c6c7570e1ec4d89c535cfe6f2e990a21474449e71e8ac291b8b6be0
+    entrypoint: [/sd-server]
+    args: [--listen-ip, "{host}", --listen-port, "{port}", --model-dir, "{model_path}", -t, "{threads}",
+           -W, "{width}", -H, "{height}", -s, "-1", --eager-load, --max-vram, "{gpu_budget_gib}"]
+  - name: cpu-process
+    when: {vendor: cpu, arch: [x86_64]}
+    runtime: process
+    engine:
+      url: https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1043-3be2378/sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip
+      sha256: 01e1c773c1bc2a6276952f6dbd13294e58b7255c659b4a770086934c4e8fad3a
+      binary: sd-server

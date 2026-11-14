@@ -212,7 +212,7 @@ export type WorkloadResponse = { workload: Workload; events: WorkloadEvent[]; se
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
 // ---------------------------------------------------------------- models (M3)
-export type Task = "chat" | "embed" | "rerank" | "asr" | "tts";
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -234,6 +234,8 @@ export type Recipe = {
   media?: { inputs: Medium[]; files: boolean } | null;
   // 1.3, text to speech: the formats the engine makes, how it streams, its default voice.
   tts?: { formats: string[]; default_format: string; stream_formats: string[]; voices: string | null; default_voice: string | null; cjk: boolean } | null;
+  // 1.3, image generation: how the gateway sends the request, the formats it makes, its most images.
+  image?: { request: "fields" | "sd-cpp"; output_formats: string[]; max_n: number } | null;
 };
 
 export type CatalogModel = {
@@ -250,6 +252,13 @@ export type CatalogModel = {
   mmproj?: { path: string; size: number } | null; mmproj_files?: { path: string; size: number }[];
   // 1.3, text to speech: the built-in voices its config names (Qwen3-TTS), if any.
   voices?: string[];
+  // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
+  image?: ImageModel | null;
+};
+
+export type ImageModel = {
+  size: number | null; multiple: number | null; single: boolean | null; components: Record<string, string>;
+  pipeline: string | null; parts: Record<string, { class: string | null; params: number | null }>;
 };
 
 export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };

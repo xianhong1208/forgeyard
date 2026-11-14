@@ -234,7 +234,8 @@ def test_fy_dep_007_custom_recipes(owner):
     assert owner.put("/api/recipes/my-whisper", json={"yaml": text.replace("name: my-whisper", "name: other")}).status_code == 422
     assert owner.delete("/api/recipes/vllm").status_code == 409
     names = [x["name"] for x in owner.get("/api/recipes").json()["recipes"]]
-    assert names == ["faster-whisper", "llama-cpp", "speaches-tts", "vllm", "vllm-omni-tts", "vllm-pooling", "my-whisper"]
+    assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vllm", "vllm-omni-image", "vllm-omni-tts",
+                     "vllm-pooling", "my-whisper"]
     seed_catalog()
     make_node("a100", allowlist=[4], features=MODELS)
     deploy(owner, "asr", "faster-whisper-small", "my-whisper")

@@ -6,18 +6,28 @@ import { Notice } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import {
   compact, deployLink, emptyPick, fitsLine, nameFor, pickFromList, pickFromSearch,
-  type InspectResponse, type Pick, type RecommendedModel, type RecommendedResponse, type SearchResponse, type Suggestion,
+  type InspectMeta, type InspectResponse, type Pick, type RecommendedModel, type RecommendedResponse, type SearchResponse, type Suggestion,
 } from "../lib/addmodel";
 import { when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { TASK_LABEL, gib, mediaText } from "../lib/models";
 import type { Task } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { licencePage, licenceTerms } from "../lib/licences";
 
 type Mode = "list" | "search" | "source";
 export const SEARCH_DELAY_MS = 500;
 
-const FORMAT_LABEL: Record<string, string> = { safetensors: "safetensors", gguf: "GGUF", ctranslate2: "CTranslate2", onnx: "ONNX", other: "other" };
+const FORMAT_LABEL: Record<string, string> = { safetensors: "safetensors", gguf: "GGUF", ctranslate2: "CTranslate2", onnx: "ONNX", diffusers: "diffusers", other: "other" };
+
+// What each file beside an image model's main file is (stable-diffusion.cpp).
+const COMPONENT_LABEL: Record<string, string> = { vae: "VAE", llm: "text encoder", t5xxl: "T5-XXL", clip_l: "CLIP-L", clip_g: "CLIP-G" };
+
+export function imageFacts(img: NonNullable<InspectMeta["image"]>, d?: InspectMeta["diffusers"]): string {
+  const parts = d ? Object.entries(d.components).map(([k, c]) => `${k} ${(c.params / 1e9).toFixed(2)} B`)
+    : Object.entries(img.components ?? {}).map(([k, p]) => `${COMPONENT_LABEL[k] ?? k} ${p}`);
+  return [`${img.size}x${img.size}`, ...parts].join(" · ");
+}
 
 const LANGUAGE: Record<string, string> = { zh: "Chinese", en: "English", ja: "Japanese", ko: "Korean", de: "German", fr: "French",
   ru: "Russian", pt: "Portuguese", es: "Spanish", it: "Italian" };
@@ -102,12 +112,18 @@ function RecommendedList({ data, error, onPick, chosen }: {
                   {m.device === "cpu" && <span className="chip"><IconCpu size={11} aria-hidden="true" /> CPU</span>}
                   {m.inputs.length > 0 && <span className="chip chip-tone-run">{mediaText(m.inputs)}</span>}
                   {m.languages && m.languages.length > 0 && <span className="chip" title="Languages it speaks">{languagesText(m.languages)}</span>}
-                  <span className="chip mono" title={m.license_from ? `Licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : "Licence"}>{m.license}</span>
+                  <span className={`chip mono${licenceTerms(m.license) ? " chip-tone-run" : ""}`} title={m.license_from ? `Licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : "Licence"}>{m.license}</span>
                 </div>
                 <p className="rec-note small">{m.note}</p>
                 <p className="rec-size small muted">
                   About {m.download_gib} GiB to download; one copy needs about {m.memory_gib} GiB of {m.device === "cpu" ? "RAM" : "GPU memory"}.
                 </p>
+                {licenceTerms(m.license) && (
+                  <p className="rec-terms small">
+                    {licenceTerms(m.license)}{" "}
+                    {licencePage(m.source, m.license_from) && <a href={licencePage(m.source, m.license_from)!} target="_blank" rel="noreferrer">The licence</a>}
+                  </p>
+                )}
                 {m.gated && (
                   <p className="rec-gated small"><IconLock size={13} aria-hidden="true" /> Needs a Hugging Face token and accepting the licence on Hugging Face.</p>
                 )}
@@ -184,6 +200,7 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
             <option value="gguf">GGUF (CPU or GPU)</option>
             <option value="ctranslate2">CTranslate2 (speech)</option>
             <option value="onnx">ONNX (Kokoro, Piper voices)</option>
+            <option value="diffusers">diffusers (images)</option>
           </select>
         </div>
         <button type="submit" className="btn hub-go" disabled={busy}><IconSearch size={16} aria-hidden="true" /> {busy ? "Searching…" : "Search"}</button>
@@ -322,6 +339,8 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
       const body: Record<string, unknown> = { source: f.source, revision: f.revision || undefined, file: f.file || undefined, mmproj: f.mmproj || undefined,
         token: f.token.trim() || undefined, name: f.name.trim(), title: f.title.trim() || undefined, task: f.task || undefined,
         format: f.format || undefined };
+      // An image model's files beside the main one: what the inspection found (or the recommended list named).
+      if (f.task === "image" && res?.meta.image?.components) body.components = res.meta.image.components;
       if (Object.keys(f.engine_args).length) body.engine_args = f.engine_args;
       const r = await api<{ model: { name: string } }>("/models", { method: "POST", body });
       onAdded(r.model.name, res?.suggestion ?? null);
@@ -334,7 +353,8 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
 
   const meta = res?.meta;
   const s = res?.suggestion;
-  const params = meta?.weights ? Object.values(meta.weights.params).reduce((a, b) => a + b, 0) : meta?.gguf?.elements;
+  const params = meta?.weights ? Object.values(meta.weights.params).reduce((a, b) => a + b, 0)
+    : meta?.diffusers ? Object.values(meta.diffusers.components).reduce((a, c) => a + c.params, 0) : meta?.gguf?.elements;
   const label = f.title || f.source.replace(/^hf:\/\//, "");
   return (
     <form className="review" onSubmit={add} aria-label={`Add ${label}`}>
@@ -369,6 +389,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
                 <option value="gguf">GGUF</option>
                 <option value="ctranslate2">CTranslate2</option>
                 <option value="onnx">ONNX</option>
+                <option value="diffusers">diffusers</option>
               </select>
             </div>
             {f.format === "gguf" && (
@@ -388,6 +409,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
           {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
           {meta.modalities !== undefined && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
           {meta.license !== undefined && <div className="fact"><dt>Licence</dt><dd className="mono small">{meta.license ?? "not stated"}{meta.gated ? " · gated" : ""}</dd></div>}
+          {meta.image && <div className="fact"><dt>{meta.diffusers ? "Pipeline" : "Image model"}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{imageFacts(meta.image, meta.diffusers)}</dd></div>}
           {meta.config && <div className="fact"><dt>Shape</dt><dd>{meta.config.layers} layers, {meta.config.kv_heads} KV heads, up to {meta.config.max_context.toLocaleString("en-US")} tokens, {meta.config.dtype}</dd></div>}
         </dl>
       )}

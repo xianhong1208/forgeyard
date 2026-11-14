@@ -190,7 +190,11 @@ page shows that name, its usage, each replica and a small **Try it** that checks
     0.6B / 1.7B CustomVoice for vLLM-Omni, Qwen3-TTS 1.7B as GGUF and Chatterbox Turbo for llama.cpp,
     and Kokoro-82M for speaches; speech entries are pinned to a commit, list the languages they
     speak, and a conversion without a licence of its own names the original it comes from
-    (`license_from`), whose licence `scripts/check_recommended.py` reads. Every entry names its **licence**, and the list
+    (`license_from`), whose licence `scripts/check_recommended.py` reads. An **Images** group (1.3) has
+    Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell for vLLM-Omni, Z-Image-Turbo and FLUX.1-schnell
+    as GGUF with their text encoders and VAE for stable-diffusion.cpp, and Stable Diffusion 1.5 GGUF for
+    the CPU; image entries are pinned to a commit, and a GGUF entry names its `components`. FLUX.1-dev,
+    SD-Turbo, SDXL-Turbo and SD3.5 are left out by licence. Every entry names its **licence**, and the list
     may hold only licences that allow commercial use (`ALLOWED_LICENSES` in
     forgeyard/models/recommended.py): permissive ones (Apache-2.0, MIT, BSD), OpenRAIL-style ones, and
     model licences whose terms allow it. Gemma's terms (commercial use allowed, a prohibited-use policy
@@ -233,6 +237,16 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   is the `onnx` format (speaches' Kokoro and Piper; the whole repository is downloaded, README included,
   since speaches reads the card to choose how to run it), with a Piper voice's sample rate from its
   `config.json`. A TTS model's projector is its audio decoder, so it is stored as taking no media.
+  **Image models (1.3):** Hugging Face's `text-to-image` is the `image` task. A repository with
+  `model_index.json` is the new `diffusers` format: its components (the entries that are a
+  `[library, class]` pair) are read from their safetensors headers (parameters, bytes, dtype), the
+  download is model_index.json and the components' directories with one set of weights each (the plain
+  files when fp16 variants sit beside them; nothing from the top level, where single-file checkpoints
+  would double it), and a UNet's `sample_size` gives the native size (else 1024). A GGUF or safetensors
+  repository read for the `image` task is a model for stable-diffusion.cpp: the chosen file and, found
+  by name or named by the caller (`components`: `vae`, `llm`, `t5xxl`, `clip_l`, `clip_g`), the files
+  beside it; with a text encoder among them the model is split (`--diffusion-model`), else a single
+  checkpoint (`-m`); the native size comes from the name (Stable Diffusion 1.x 512) or is 1024.
 - **Recipes** are YAML ([forgeyard/recipes](../forgeyard/recipes)): tasks, formats, the protocol per
   task, parameters, the estimate method, a health check, and **variants** per hardware (vendor,
   NVIDIA compute capability or AMD gfx target, driver version), each a pinned container image or,
@@ -261,6 +275,8 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   | `faster-whisper` | speech to text | NVIDIA, CPU, shares a GPU by default | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
   | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | CPU (container) only: ONNX Runtime ran Kokoro on the CPU even in the CUDA image | the speaches CPU image |
   | `vllm-omni-tts` (1.3) | text to speech (safetensors: Qwen3-TTS) | NVIDIA, one GPU, shares it by default | `vllm/vllm-omni:v0.32.0` (CUDA 13.0, driver ≥ 580), `vllm serve <model> --omni` |
+  | `vllm-omni-image` (1.3) | images (diffusers pipelines) | NVIDIA, one GPU, shares it by default | the same `vllm/vllm-omni:v0.32.0` |
+  | `sd-cpp` (1.3) | images (GGUF, single files) | AMD (Vulkan, render node only), CPU (process); not NVIDIA: the CUDA image crashed on an A100 (#43) | `ghcr.io/leejet/stable-diffusion.cpp:master-vulkan` by digest (a rolling tag), release `master-1043-3be2378` (.zip, glibc 2.39) for the process |
 
   `llama-cpp` also serves `tts` (a TTS GGUF with its projector) on every variant.
 - **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
@@ -281,6 +297,17 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   3.8 GiB on an A100 40GB, with its CUDA context), and rendering splits the reservation: the decoder
   gets its part as its own fraction, the talker the rest (`--stage-overrides`). A speaches TTS model is
   its files plus overhead, like Whisper.
+  **Images (1.3, method `diffusers`):** the weights of every component (vLLM-Omni holds a pipeline in
+  16 bits, so a float32 file counts half; stable-diffusion.cpp holds the files as stored), plus what the
+  largest request the deployment allows takes: `activation_per_mp` × megapixels at *Largest side* ×
+  *Images per request* when the engine makes a request's images together (vLLM-Omni) or × 1 when one
+  after another (stable-diffusion.cpp), `vae_per_mp` × megapixels once, the overhead and the CUDA
+  context. With *Offload to host memory* only the largest component counts. vLLM-Omni's diffusion
+  pipelines read `--gpu-memory-utilization` only in their paged mode, so nothing reserves a fixed share:
+  the caps, enforced by the gateway and repeated in the engine (`--max-generated-image-size`), are what
+  bound the memory. stable-diffusion.cpp (Vulkan) gets `--max-vram` from the reservation. Measured on the CPU
+  (stable-diffusion.cpp): Stable Diffusion 1.5 and Z-Image-Turbo both grow linearly with the image,
+  about 6.3 GiB per megapixel beyond their weights (its VAE decodes in 32 bits).
 - **Scheduling**: filter (a recipe variant for the hardware and driver, the runtime, the GPU
   allowlist, enough memory), then score: **binpack** (the tightest card that fits; whole cards stay
   free for big models), and on a tie the machine that already **has the model cached**. Memory is
@@ -416,7 +443,8 @@ page contain these lines whenever the server uses its own CA.
 - **Usage units (1.3, migration 0012).** `usage_daily` has one column per unit of the new model
   kinds: `media_items`, `characters`, `images`, `kilopixels`, `media_ms`, `bytes_in`, `bytes_out`,
   `busy_ms`; default 0, so rows from before keep their meaning. Multimodal chat fills `media_items`;
-  text to speech `characters` and `media_ms`; the later 1.3 kinds fill the rest.
+  text to speech `characters` and `media_ms`; images `images`, `kilopixels` and `busy_ms`; the later
+  1.3 kinds fill the rest.
 - **Text to speech (1.3,** forgeyard/gateway/speech.py**).** `POST /v1/audio/speech` takes OpenAI's
   request. The gateway checks it before anything is sent (an `input`, OpenAI's formats, `speed`,
   `stream_format`) and refuses **voice cloning**: any reference-recording field (`ref_audio`,
@@ -438,7 +466,27 @@ page contain these lines whenever the server uses its own CA.
   before sending. Speech never goes to a provider (routes of `openai-speech` take no provider
   target). `GET /v1/audio/voices?model=` lists a model's voices in one shape (vLLM-Omni's uploaded
   voices left out) with what it makes.
-- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text and text to speech (**Speak**: the model's voices and formats, a player) in the console, through
+- **Images (1.3,** forgeyard/gateway/imagegen.py**).** `POST /v1/images/generations` takes OpenAI's
+  request and answers with base64 only: `response_format: url` is 400 `response_format_not_supported`
+  (no images are kept, so there is no URL), and so is `stream`. Each deployment has caps with working
+  defaults (*Images per request* 4, *Largest side* the model's own, *Most steps* 50, *Longest prompt*
+  4,000); the route is narrowed to the deployments a request fits, else the most telling 400
+  (`too_many_images`, `image_too_large`, `invalid_size` for a side that is not a multiple of 16, or 64
+  for a UNet, `too_many_steps`, `prompt_too_long`). The engine gets only fields Forgeyard knows: for
+  vLLM-Omni as fields with `response_format: b64_json` (its `lora` would load a path on the server);
+  for sd-server inside the prompt as one `<sd_cpp_extra_args>` block the gateway builds (escaped, one
+  line), which clients may not send themselves. A size left out is the deployment's default, always
+  sent. **The queue:** a replica takes `concurrency` image requests (1); the rest wait in the gateway
+  in order (tickets per route and tier, only the first may take a free slot), at most `queue` (8); one
+  more is 429 `queue_full` with a Retry-After from a moving average of how long requests took; a
+  request that waits longer than the deployment's `timeout` is 503 `queue_timeout`; one whose client
+  goes away leaves the queue and never reaches the engine. The engine's answer is read whole, its
+  extras dropped (sd-server's `generation_info`, vLLM-Omni's stage timings) and each image's size read
+  from its header: usage counts `images`, `kilopixels` and `busy_ms` (the replica's time × the GPUs the
+  deployment holds). Engine errors come back in OpenAI's shape (`engine_error`). No tokens, no cloud,
+  no prompt filtering. `/v1/images/edits` and `/variations` are 404 `endpoint_not_supported` (vLLM-Omni's
+  edit route fetches any URL it is given; a later version).
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each) in the console, through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.

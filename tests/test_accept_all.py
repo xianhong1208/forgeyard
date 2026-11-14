@@ -15,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "accept_all.py"
-ORDER = ["server", "machines", "workloads", "models", "gateway", "cloud", "tts", "console"]
+ORDER = ["server", "machines", "workloads", "models", "gateway", "cloud", "tts", "img", "console"]
 
 
 @pytest.fixture(scope="module")
@@ -29,11 +29,11 @@ def acc():
 
 
 def test_fy_acc_001_groups_in_order_and_their_needs(acc):
-    """FY-ACC-001: the eight groups run in this order (1.3 adds tts); gateway and cloud need the models
-    group, tts deploys its own."""
+    """FY-ACC-001: the nine groups run in this order (1.3 adds tts and img); gateway and cloud need the
+    models group, tts and img deploy their own."""
     assert list(acc.GROUPS) == ORDER
     assert acc.GROUPS["gateway"].needs == ("models",) and acc.GROUPS["cloud"].needs == ("models",)
-    assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "workloads", "models", "tts", "console"))
+    assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "workloads", "models", "tts", "img", "console"))
 
 
 def test_fy_acc_002_arguments(acc):
@@ -48,6 +48,7 @@ def test_fy_acc_002_arguments(acc):
                                                                  ("cloud", "")]
     assert acc.parse_args(["--skip", "console,cloud"]).plan == [(g, "") for g in ORDER if g not in ("console", "cloud")]
     assert acc.parse_args(["--only", "tts"]).plan == [("tts", "")] and a.tts_asr == "auto"
+    assert acc.parse_args(["--only", "img"]).plan == [("img", "")] and a.img_vision == "auto"
     both = acc.parse_args(["--gpu-machine", "a", "--cpu-machine", "a", "--second-cpu-machine", "b"])
     assert (both.gpu_machine, both.cpu_machine, both.second_cpu_machine) == ("a", "a", "b")  # one machine, two roles
     for bad in (["--only", "server", "--skip", "console"], ["--only", "nonsense"], ["--skip", ",".join(ORDER)],
@@ -65,7 +66,7 @@ def test_fy_acc_003_plan_keeps_what_a_chosen_group_needs(acc):
     needs = {"gateway": ("models",), "cloud": ("models",)}
     plan = acc.plan_groups([], ["models", "console"], ORDER, needs)
     assert plan == [("server", ""), ("machines", ""), ("workloads", ""), ("models", "needed by gateway"),
-                    ("gateway", ""), ("cloud", ""), ("tts", "")]
+                    ("gateway", ""), ("cloud", ""), ("tts", ""), ("img", "")]
     assert acc.plan_groups(["cloud", "gateway"], [], ORDER, needs) == [
         ("models", "needed by gateway"), ("gateway", ""), ("cloud", "")]
     with pytest.raises(ValueError, match="unknown group 'x'"):

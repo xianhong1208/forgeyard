@@ -202,7 +202,11 @@ describe("add a model", () => {
     expect(screen.getByText("In the catalog as qwen-cpu")).toBeTruthy();
     const gemma = screen.getByText("Gemma 3 4B").closest("li")!;
     expect(within(gemma).getByText(/Needs a Hugging Face token and accepting the licence/)).toBeTruthy();
+    // a licence with terms says so and links the licence; a permissive one does not (FY-WEB-174)
+    expect(within(gemma).getByText(/Gemma terms: commercial use is allowed/)).toBeTruthy();
+    expect(within(gemma).getByRole("link", { name: "The licence" }).getAttribute("href")).toBe("https://huggingface.co/google/gemma-3-4b-it");
     const rr = screen.getByText("Qwen3 Reranker 0.6B").closest("li")!;
+    expect(within(rr).queryByRole("link", { name: "The licence" })).toBeNull();
     await act(async () => fireEvent.click(within(rr).getByRole("button", { name: "Choose" })));
     expect(await screen.findByText("Fits now on a100 (GPU #4).")).toBeTruthy();
     expect(screen.getByText("3.38 GiB")).toBeTruthy();
