@@ -6,6 +6,7 @@ import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { VENDOR_NAME } from "../lib/machines";
+import { buildGateway, gatewayForm, type GatewayForm } from "../lib/passthrough";
 import type { Machine, MachinesResponse, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { allowedCards, allowlistSummary, buildSpec, canRunWorkloads, emptyForm, gpuCards, type WorkloadForm } from "../lib/workloads";
@@ -62,6 +63,7 @@ export function WorkloadNewPage() {
   const navigate = useNavigate();
   const { data: machines } = useApi<MachinesResponse>("/machines");
   const [f, setF] = useState<WorkloadForm>(emptyForm);
+  const [g, setG] = useState<GatewayForm>(() => gatewayForm());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof WorkloadForm>(k: K, v: WorkloadForm[K]) => setF((cur) => ({ ...cur, [k]: v }));
@@ -78,13 +80,15 @@ export function WorkloadNewPage() {
   const usable = (machines?.machines ?? []).filter((m) => m.status !== "revoked");
   const chosen: Machine | undefined = usable.find((m) => String(m.id) === f.machine);
   const spec = buildSpec(f);
+  const exposing = f.kind === "service" && g.expose;
+  const body = exposing ? { ...spec, gateway: buildGateway(g) } : spec;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const r = await api<WorkloadResponse>("/workloads", { method: "POST", body: spec });
+      const r = await api<WorkloadResponse>("/workloads", { method: "POST", body });
       navigate(`/workloads/${r.workload.id}`);
     } catch (err) {
       setError(errorText(err));
@@ -269,7 +273,11 @@ export function WorkloadNewPage() {
               </select>
             </div>
           </section>
-        ) : (
+        ) : null}
+
+        {f.kind === "service" && <GatewayPanel g={g} setG={setG} name={f.name.trim()} ports={f.ports.map((p) => p.name.trim()).filter(Boolean)} />}
+
+        {f.kind === "task" && (
           <section className="panel">
             <h2>Limits and retries</h2>
             <div className="grid-3">
@@ -287,7 +295,7 @@ export function WorkloadNewPage() {
         <div className="form-foot">
           <details className="spec-preview">
             <summary>Spec that will be sent</summary>
-            <pre className="mono" aria-label="Spec JSON">{JSON.stringify(spec, null, 2)}</pre>
+            <pre className="mono" aria-label="Spec JSON">{JSON.stringify(body, null, 2)}</pre>
           </details>
           <div className="row-gap">
             <button className="btn btn-primary" disabled={busy}>{busy ? "Creating…" : "Create and start"}</button>
@@ -297,4 +305,49 @@ export function WorkloadNewPage() {
       </form>
     </>
   );
+}
+
+// Exposing the service behind the gateway at /x/<name> (1.3): off by default; the limits are collapsed.
+export function GatewayPanel({ g, setG, name, ports, heading = true }: {
+  g: GatewayForm; setG: (g: GatewayForm) => void; name: string; ports: string[]; heading?: boolean;
+}) {
+  const set = <K extends keyof GatewayForm>(k: K, v: GatewayForm[K]) => setG({ ...g, [k]: v });
+  const path = `/x/${name || "<name>"}`;
+  const inner = (
+    <>
+      {heading && <h2 id="gw-title">Gateway</h2>}
+      <label className="card-pick gw-expose">
+        <input type="checkbox" checked={g.expose} onChange={(e) => set("expose", e.target.checked)} />
+        <span>
+          <span className="strong">Expose at <code>{path}</code></span>
+          <span className="muted small">Programs call the service's HTTP API through the gateway with an API key whose
+            Workloads setting allows it. Its ports then answer only the gateway (the agent's key guard).</span>
+        </span>
+      </label>
+      {g.expose && (
+        <details className="gw-advanced">
+          <summary>Limits and timeouts</summary>
+          <div className="grid-3">
+            <div className="field">
+              <label htmlFor="gw-port">Port</label>
+              <select id="gw-port" value={g.port} onChange={(e) => set("port", e.target.value)}>
+                <option value="">The first ({ports[0] ?? "none"})</option>
+                {ports.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <Input label="Read timeout (s)" id="gw-read-timeout" value={g.readTimeout} onChange={(v) => set("readTimeout", v)} inputMode="numeric"
+              hint="Longest wait for each piece of an answer." />
+            <Input label="Largest request (MiB)" id="gw-max-body" value={g.maxBodyMb} onChange={(v) => set("maxBodyMb", v)} inputMode="numeric"
+              hint="413 above it." />
+            <Input label="Requests at once per replica" id="gw-concurrency" value={g.concurrency} onChange={(v) => set("concurrency", v)}
+              inputMode="numeric" placeholder="no limit" hint="429 when every replica is full." />
+            <Input label="Requests at once per key" id="gw-key-concurrency" value={g.keyConcurrency} onChange={(v) => set("keyConcurrency", v)}
+              inputMode="numeric" placeholder="no limit" />
+          </div>
+          <p className="field-hint">APIs only: answers are sandboxed (no cookies, no scripts), WebSockets and gRPC are not passed on.</p>
+        </details>
+      )}
+    </>
+  );
+  return heading ? <section className="panel" aria-labelledby="gw-title">{inner}</section> : <div className="gw-form">{inner}</div>;
 }

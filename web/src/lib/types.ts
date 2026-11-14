@@ -201,13 +201,29 @@ export type Workload = {
   replicas: number;
   replica_list: Replica[];
   deployment_id?: number | null;
+  // 1.3: exposed behind the gateway at /x/<name> (null for a model deployment's workload).
+  gateway?: WorkloadGateway | null;
+};
+
+export type WorkloadGatewaySettings = {
+  expose: boolean; port: string | null; read_timeout: number; max_body_mb: number;
+  concurrency: number | null; key_concurrency: number | null;
+};
+
+export type WorkloadGateway = WorkloadGatewaySettings & {
+  exposed: boolean; path: string; port_name: string | null;
+  guarded: number[];     // replicas behind the agent's key guard
+  unguarded: number[];   // placed replicas that are not (an agent too old, or not restarted yet)
 };
 
 export type WorkloadEvent = { at: string; kind: string; replica: number | null; message: string };
 
 export type WorkloadsResponse = { workloads: Workload[]; server_time: string; can_manage: boolean };
 
-export type WorkloadResponse = { workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
+export type WorkloadResponse = {
+  workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean;
+  gateway_base?: string; trust_url?: string | null;
+};
 
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
@@ -324,11 +340,17 @@ export type ApiKey = {
   user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };
   // Monthly cloud budget (1.2) and this month's spend; budget_locked_by: an admin set it on someone else's key.
   budget?: Budget; budget_locked_by?: string | null;
+  // Exposed workloads at /x/ (1.3): none (the default), listed (workload_list) or all.
+  workloads?: WorkloadAccess; workload_list?: string[] | null; workloads_locked_by?: string | null;
 };
+
+export type WorkloadAccess = "none" | "listed" | "all";
+export type WorkloadChoice = { name: string; exposed: boolean; path: string };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
   models: { name: string; api: string; kind?: RouteKind }[];
+  workloads?: WorkloadChoice[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
   month?: string; resets_at?: string; person_budget?: Budget;
 };
