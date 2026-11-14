@@ -36,6 +36,17 @@ generation. Fifth part: the generic passthrough at `/x/<name>`.
   - **Usage** as the model `x:<name>`: requests, errors, bytes in and out and busy time (new columns on
     **Usage**), latency.
   - `scripts/accept_x.py` (also the `passthrough` group of `accept_all.py`) checks it on real machines.
+- **Ready-made workload templates** (#23): **Workloads → Start from a template** fills the new-workload
+  form, exposed at `/x/<name>`, on an NVIDIA GPU (shared by memory) or the CPU:
+  - *Object detection*: RT-DETRv2 ResNet-18 (`POST /v1/detect`, boxes);
+  - *Segmentation*: SAM 2.1 Hiera tiny (`POST /v1/segment` with a point or a box, masks);
+  - *Depth estimation*: Depth Anything V2 Small (`POST /v1/depth`, a 16-bit depth PNG).
+  All Apache-2.0, shown with each template (no Ultralytics YOLO, AGPL-3.0; no Depth Anything Base or
+  Large, CC-BY-NC). They run Forgeyard's own **vision server image** (`images/vision`): the models baked
+  in at pinned revisions, dependencies pinned with hashes, an unprivileged user; published with each
+  release as `forgeyard-vision:X.Y.Z` (CPU, amd64 and arm64) and `X.Y.Z-cuda` (amd64, NVIDIA driver
+  580+), built and smoke-tested in CI. `GET /api/workloads/templates`. `accept_x.py --templates` (and
+  `accept_all.py --x-templates`) check them on a real machine: an image in, boxes, masks and depth out.
 
 - **Image generation** at `POST /v1/images/generations`, OpenAI's request shape, images back as base64
   only, with two engines:
