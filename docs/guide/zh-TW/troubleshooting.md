@@ -204,6 +204,15 @@ sudo forgeyard agent config
 
 更多內容請見[雲端供應商](cloud-providers.md#troubleshooting)。
 
+## 來自 /x/ 的錯誤
+
+- **403 `workloads_not_allowed`：** 金鑰的 **Workloads at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
+- **404 `workload_not_found`：** 名稱打錯、工作負載沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他工作負載。
+- **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或工作負載是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動工作負載。
+- **副本因「listens beyond loopback」被停止：** 在金鑰守門員後面，行程必須監聽 `127.0.0.1`。在它的參數裡用 `${BIND_ADDRESS}`，不要用 `0.0.0.0`。
+- **頁面、它的連結或轉址不對：** 前綴會被拿掉，所以服務看到的是 `/`。把它的 root path 設成 `/x/<name>`（FastAPI 的 `root_path`、`--root-path`、`GRADIO_ROOT_PATH`），或讀 `X-Forwarded-Prefix`。瀏覽器介面在 `/x/` 無法使用：回應會被放進沙箱。
+- **WebSocket 或 gRPC 用戶端失敗：** 1.3 兩者都不轉送。請用一般的 HTTP，串流請用 SSE。
+
 ## 程式不信任憑證
 
 **你會看到：** 呼叫 `/v1` 的程式失敗，訊息是 `certificate verify failed`、`self-signed certificate in certificate chain`、`unable to get local issuer certificate` 或 `SELF_SIGNED_CERT_IN_CHAIN`。同一個位址在已經信任 CA 的瀏覽器裡卻正常。

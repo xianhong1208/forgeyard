@@ -99,6 +99,9 @@ class Supervisor:
         self.keys: dict[str, tuple[Optional[str], str]] = {}
         self.guards: dict[str, list[Guard]] = {}
         self.guard_errors: dict[str, str] = {}
+        # 1.3: replicas of workloads exposed at /x/ (`replica_key.strip`): their guard removes the internal
+        # key before a request reaches the program, and their health checks never carry it.
+        self.strip: set[str] = set()
         self.cancels: dict[str, threading.Event] = {}
         self.stopping: set[str] = set()
         self.cache_dirty = models is not None
@@ -145,6 +148,10 @@ class Supervisor:
                     self.keys[r["id"]] = (env or None, str(key["value"]))
                     r["key_env"] = env or None
                     r["guarded"] = True
+                    if key.get("strip") is True and not env:
+                        self.strip.add(r["id"])
+                    else:
+                        self.strip.discard(r["id"])
             if "image_ids" in r:
                 r = {**r, "image_ids": images.parse_check(r["image_ids"])}
             desired[r["id"]] = r
@@ -620,6 +627,7 @@ class Supervisor:
             self.stopping.discard(rec.id)
             self.tokens.pop(rec.id, None)
             self.keys.pop(rec.id, None)
+            self.strip.discard(rec.id)
 
     async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
@@ -680,7 +688,8 @@ class Supervisor:
 
     async def _probe(self, rec: Record, h: dict, host: str, port: int) -> None:
         args = (h.get("type", "http"), host, port, h.get("path") or "/", float(h.get("timeout") or 3))
-        key = self.keys.get(rec.id) if self._guarded(rec) else None
+        # An exposed workload's program never sees the internal key, not even from its health check.
+        key = self.keys.get(rec.id) if self._guarded(rec) and rec.id not in self.strip else None
         if key is not None:  # speaches guards /health too; vLLM and llama.cpp ignore it there
             err = await asyncio.to_thread(self.prober, *args, headers={"Authorization": f"Bearer {key[1]}"})
         else:
@@ -726,6 +735,7 @@ class Supervisor:
             for g in guards:
                 if not g.has_key(key[1] if key else None):
                     g.set_key(key[1] if key else None)
+                g.strip_auth = rec.id in self.strip
             return None
         opened: list[Guard] = []
         for p in rec.ports:
@@ -733,7 +743,7 @@ class Supervisor:
                 continue
             g = Guard(listen=(p.get("address") or self.address, int(p["host_port"])),
                       upstream=(plan.LOOPBACK, int(p["internal"])), key=key[1] if key else None,
-                      name=f"{rec.workload} #{rec.ordinal}")
+                      name=f"{rec.workload} #{rec.ordinal}", strip_auth=rec.id in self.strip)
             try:
                 await g.start()
             except OSError as e:

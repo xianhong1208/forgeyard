@@ -386,6 +386,63 @@ Isolation, in short: a process runs as the unprivileged workload account with on
 visible; a container gets only its cards, never `--privileged`. See
 [Workloads](concepts.md#workloads).
 
+## Expose a workload at /x/
+
+Call a service's own HTTP API through the gateway, with an API key. Admins and operators do this.
+
+1. **The service listens on loopback.** Behind the agent's key guard a process must listen on
+   `127.0.0.1`: give it `${BIND_ADDRESS}` and `${PORT}` in its arguments, which become `127.0.0.1`
+   and its port. A container listens on its own port as usual (the agent publishes it on loopback).
+   A process that listens on another address is stopped, so it is never reachable around the guard.
+2. **Expose it.** In **New workload**, tick **Expose at** `/x/<name>` under **Gateway**; or, on a
+   running workload's page, **Gateway** → **Expose** → **Save**: its replicas restart behind the
+   guard. **Limits and timeouts** (collapsed) holds the **Port** (default: the first),
+   **Read timeout (s)** (600), **Largest request (MiB)** (32), **Requests at once per replica** and
+   **Requests at once per key** (no limit by default).
+3. **Give a key access.** On **API keys**, a key's **Workloads at /x/**: *Listed workloads* (tick
+   it) or *Every exposed workload*. New keys have *None*.
+4. **Call it.** The workload's page shows its address and a `curl` call. The prefix is stripped:
+   `/x/detector/v1/detect` reaches the service as `/v1/detect`.
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F image=@street.jpg
+```
+
+A service that builds links or redirects can read `X-Forwarded-Prefix` (`/x/<name>`), or set its root
+path. For example, a FastAPI service run with `python3 -m uvicorn` as a process, with the
+**Environment** variable `ROOT_PATH=/x/echo`:
+
+```python
+# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
+# root_path makes the docs and redirects use the public prefix.
+import os
+from fastapi import FastAPI, Request
+
+app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
+
+@app.post("/v1/echo")
+async def echo(request: Request):
+    return {"bytes": len(await request.body())}
+```
+
+and these **Arguments**:
+
+```text
+-m
+uvicorn
+app:app
+--host
+${BIND_ADDRESS}
+--port
+${PORT}
+```
+
+Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of the replicas until the
+workload is restarted. What passes and what is removed is in the
+[reference](reference.md#the-passthrough-x).
+
 ## Send images to a model
 
 1. **Add a model that reads images.** On **Models → Add a model → Recommended**, the **Vision** group
@@ -869,6 +926,7 @@ saying so. The groups, in the order they run:
 | `models` | deploys small models and waits for them: Qwen3-1.7B GGUF on each CPU machine; a chat, an embedding, a rerank and a speech model on the GPU machine (each skipped if its estimate does not fit); the estimate on the deployment page; **Try it** |
 | `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
 | `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
+| `passthrough` | a small HTTP app exposed at `/x/`: as a process on the CPU machine, in a container on the GPU machine. Keys (none, listed), the path as sent, refused paths, credentials and forwarded headers replaced, the forced sandbox, redirects, streaming, the body limit, rpm, concurrency, the read timeout, the replica's port behind the key guard, usage |
 | `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
 
 `--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
