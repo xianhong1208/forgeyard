@@ -183,7 +183,12 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         if st.final and not r.final and not stopping:
             r.final = True
             desired_changed = True
-        progress_only = before[0] == r.state and st.download is not None and (before[1] or "").startswith("downloading")
+        progress_only = (before[0] == r.state and st.download is not None
+                         and (before[1] or "").startswith(("downloading", "pulling the image")))
+        if (r.workload.desired_state == "stopped" and r.reason
+                and r.reason.startswith("cancelled: the ") and r.reason.endswith(" was removed")):
+            # The agent only sees that the replica is no longer wanted; here it was stopped, not removed.
+            r.reason = r.reason.removesuffix(" was removed") + " was stopped"
         if before != (r.state, r.reason, r.exit_code) and not progress_only:
             event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: "
                   f"{describe(r.state, r.reason, r.exit_code, r.pid)}", r.ordinal)

@@ -96,6 +96,9 @@ class FakeHF:
         self.rate = rate  # bytes per response, to make downloads slow (cancel tests)
         self.requests: list[dict] = []
         self.fail_after: Optional[int] = None  # cut a body after this many bytes once
+        self.stall_after: Optional[int] = None  # send this many bytes of a body, then nothing (a stalled CDN)
+        self.stalled = threading.Event()  # set when a body stalls; the stall ends at close()
+        self._closing = threading.Event()
         hf = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -151,6 +154,18 @@ class FakeHF:
                     status = 206
                 else:
                     body, headers, status = data, {}, 200
+                if hf.stall_after is not None and len(body) > hf.stall_after:
+                    self.send_response(status)
+                    for k, v in headers.items():
+                        self.send_header(k, v)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body[:hf.stall_after])
+                    self.wfile.flush()
+                    hf.stalled.set()
+                    hf._closing.wait(60)
+                    self.close_connection = True
+                    return
                 if hf.fail_after is not None and len(body) > hf.fail_after:
                     cut, hf.fail_after = hf.fail_after, None
                     self.send_response(status)
@@ -186,6 +201,7 @@ class FakeHF:
         self.thread.start()
 
     def close(self):
+        self._closing.set()
         self.server.shutdown()
         self.server.server_close()
 

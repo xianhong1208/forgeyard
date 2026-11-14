@@ -12,7 +12,8 @@ agent -> server
 
   status     (M2) replica states: after every desired, and whenever one changes. `full` lists
              every replica the agent knows. (M3) a replica may carry `download` progress, and the
-             message `model_cache` (free space, the cached models) when that changed
+             message `model_cache` (free space, the cached models) when that changed. (1.3.1) an
+             image pull is reported as a `download` with phase "image" (see "pull_progress")
   logs       (M2) answer to a logs_request: the last lines of a replica's output
 
 server -> agent
@@ -98,7 +99,12 @@ FEATURE_ENGINE_ZIP = "engine_zip"
 # 1.3: the agent's guard also fronts exposed workloads (/x/<name>) and strips the internal key from
 # what it passes on (`replica_key.strip`). Exposed workloads are placed only on agents that list it.
 FEATURE_WORKLOAD_GUARD = "workload_guard"
-SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS)
+# 1.3.1: the server shows image pull progress. Listed by the server only: an agent then reports a pull
+# like a download (`download.phase` "image", with `layers` / `layers_done` and `unpacking`, and the
+# reason "pulling the image: …"). To an older server, which records every new reason as an event, the
+# agent says only "pulling the image".
+FEATURE_PULL_PROGRESS = "pull_progress"
+SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS)
 RUNTIMES = ("process", "container")
 
 # What the agent reports per replica. Server-only states: "stopping" (asked, not confirmed yet).

@@ -98,6 +98,12 @@ def _choice(options: tuple[str, ...]) -> Callable[[str], str]:
     return check
 
 
+def _stall_minutes(v: int) -> int:
+    if not 1 <= v <= 1440:
+        raise ValueError(f"wants a number of minutes from 1 to 1440, got {v}")
+    return v
+
+
 def _log_mb(v: int) -> int:
     if not 1 <= v <= 10240:
         raise ValueError(f"wants a number of MB from 1 to 10240, got {v}")
@@ -164,6 +170,10 @@ SETTINGS: tuple[Setting, ...] = (
             "host), rlimit (no systemd, e.g. in a container), or auto.", _choice(LIMITS)),
     Setting("workloads.log_max_mb", "log_max_mb", "FORGEYARD_LOG_MAX_MB", "int", 10, "--log-max-mb",
             "Output kept per replica, in MB.", _log_mb),
+    Setting("workloads.pull_stall_minutes", "pull_stall_minutes", "FORGEYARD_PULL_STALL_MINUTES", "int", 5,
+            "--pull-stall-minutes",
+            "An image pull fails when no new bytes arrive for this many minutes (three times as long while "
+            "it unpacks). A slow pull that keeps moving is never stopped.", _stall_minutes),
     Setting("models.cache", "model_cache", "FORGEYARD_MODEL_CACHE", "str", None, "--model-cache",
             "Where models and engines are downloaded and kept. Without it this machine serves no models. "
             "In the Docker image it must be the same path inside and outside the container.", None,

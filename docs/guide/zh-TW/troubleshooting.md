@@ -59,7 +59,7 @@ sudo forgeyard agent config
 
 **原因：** 你的 Docker 設定指定了一個憑據輔助程式（`~/.docker/config.json` 裡的 `credsStore`），而它在 agent 執行的環境裡無法運作：例如沒有登入工作階段的桌面鑰匙圈，或 agent 的容器裡沒有這個輔助程式。
 
-**Forgeyard 會怎麼處理：** 拉取映像檔以這種方式失敗時，agent 會不使用輔助程式，以匿名方式再拉一次。所有內建的引擎映像檔都是公開的，所以這樣就夠了。
+**Forgeyard 會怎麼處理：** agent 透過 Docker 的 socket 上的 API 拉取引擎映像檔，這不需要輔助程式。當它必須改用 `docker` CLI（沒有 socket，或 registry 需要你的憑據），而拉取以這種方式失敗時，agent 會不使用輔助程式，以匿名方式再拉一次。所有內建的引擎映像檔都是公開的，所以這樣就夠了。
 
 **做法：** 如果還是失敗（私有映像檔，或機器無法連上網路）：
 
@@ -86,7 +86,7 @@ sudo forgeyard agent config
 
 **你會看到：** 部署的 replica 失敗，訊息是 `the image is not on this machine and could not be pulled; on an offline machine, docker load the image (Forgeyard checks it by its recorded ids)`，後面接著 Docker 的錯誤（`lookup ghcr.io … no such host`、逾時、`pull access denied`）。
 
-**原因：** 這台機器上沒有引擎映像檔，用釘住的 digest 和用 tag 都找不到，而且機器連不到 registry。
+**原因：** 這台機器上沒有引擎映像檔，用釘住的 digest 和用 tag 都找不到，而且機器連不到 registry。如果拉取已經開始過，訊息也會說它停在哪裡：`at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`。
 
 **做法：** 把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
 
@@ -99,6 +99,28 @@ sudo forgeyard agent config
 **原因：** recipe 的 tag 底下載入了一個映像檔，但不是 recipe 釘住的那個：另一次建置（重用 tag 的舊版引擎、registry 上被移動的 tag）、把別的平台的各層當成這個平台，或在本機修改後重新加上 tag 的映像檔。Forgeyard 絕不會用它取代釘住的映像檔，而是向 registry 要釘住的那個，但這台機器連不到 registry。
 
 **做法：** 載入 recipe 指定的映像檔，照[離線機器](how-to.md#offline-machines)用 digest 拉取；`docker load` 會取代那個 tag。`docker image inspect <tag>` 可以看目前載入的是什麼。
+
+## 拉取映像檔很慢，或失敗並顯示 "made no progress"
+
+**你會看到：** 副本長時間顯示 `pulling the image: 0.80 of 1.90 GiB (42%)`（或 `3 of 7 layers`、`unpacking`），或失敗並顯示 `the image pull made no progress for 5 minutes (at layer …)`。
+
+**原因：** 啟動容器之前，agent 會自己拉取引擎映像檔，並逐層回報已經收到多少。引擎映像檔很大（vLLM 的有好幾 GB），所以在低於 1 MB/s 的網路上，拉取要花一小時以上。只有在**連續 5 分鐘沒有收到新的位元組**時（解開各層時是 15 分鐘），拉取才會失敗：持續有進度的慢速拉取，不管多久都不會被中止。總量一開始可能會變大：Docker 要等某一層開始下載才知道它的大小，在所有大小都知道之前，頁面顯示的是層數而不是百分比。
+
+**做法：**
+
+- 等待：失敗或卡住的拉取會再試，而 Docker 會保留已經完成的層；
+- 如果網路會長時間卡住，在那台機器上把上限調高：`FORGEYARD_PULL_STALL_MINUTES=15`（或在 `agent.toml` 的 `[workloads]` 底下設定 `pull_stall_minutes = 15`），然後重新啟動 agent；
+- 或自己在那台機器上拉取一次（`sudo docker pull <image>`，recipe 的頁面有列出映像檔），或用檔案帶過去：[離線機器](how-to.md#offline-machines)。已經在本機的映像檔不會再被拉取。
+
+進度需要 Docker（或 Podman）的 API socket：agent 的容器會掛載 `/var/run/docker.sock`。沒有它時，agent 改用 CLI 拉取，只能回報層數，沒有位元組數。`forgeyard agent runtimes` 會說它用的是哪一種（`image pulls through the engine API`）。
+
+## 副本顯示 "cancelled: the deployment was removed"
+
+**你會看到：** 在 agent 的紀錄裡，或副本最後的狀態說明裡，出現 `cancelled: the deployment was removed`（`… was stopped`、`… was changed`）。
+
+**原因：** 那個副本還在下載模型或拉取映像檔時，部署被刪除、停止或修改了。agent 會立刻結束下載或拉取並釋放模型，所以同一個模型的另一個部署可以從磁碟上已有的部分接著開始。機器和映像檔都沒有問題；這不是離線機器的 "could not be pulled"。
+
+**做法：** 不需要處理。要繼續的話再部署一次：模型下載會從中斷的地方接著下載。
 
 ## Hugging Face 下載很慢
 

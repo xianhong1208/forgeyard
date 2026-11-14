@@ -158,7 +158,12 @@ export type Replica = {
   updated_at: string;
   // Model deployments (M3).
   vram?: number | null;
-  download?: { phase: "model" | "engine"; done: number; total: number; file?: string } | null;
+  // An image pull (1.3.1) is reported the same way: phase "image", with its layers; total 0 while
+  // some layer's size is not known yet.
+  download?: {
+    phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
+    layers?: number; layers_done?: number; unpacking?: boolean;
+  } | null;
   ready_at?: string | null;
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
 };

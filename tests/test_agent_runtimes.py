@@ -409,7 +409,8 @@ def test_fy_rt_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_pa
     """FY-RT-022: the image is not local and the CLI's credential helper fails under the agent
     (seen on a real host: `docker run` gave "error getting credentials" for a public ghcr.io
     image). The agent pulls it again with the helpers left out of a copy of the config, keeping
-    the rest, then starts the container: one replica, running."""
+    the rest, then starts the container: one replica, running. Since 1.3.1 the agent pulls before
+    `run`, so it is the first pull that fails, and `run` is called once, on the local image."""
     home = tmp_path / "home"
     (home / ".docker" / "contexts").mkdir(parents=True)
     (home / ".docker" / "config.json").write_text(json.dumps(
@@ -424,8 +425,8 @@ def test_fy_rt_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_pa
 
     assert rec.state == "running" and rec.container == "fy-box-feedface0123"
     pulls = [c for c in fake.calls() if c and c[0] == "pull"]
-    assert pulls == [["pull", "credfail/llama.cpp:server"]]
-    assert len(fake.state()) == 1  # the failed first attempt left nothing behind
+    assert pulls == [["pull", "credfail/llama.cpp:server"]] * 2  # with the helpers, then without
+    assert len(fake.runs()) == 1 and len(fake.state()) == 1
     conf = json.loads((tmp_path / "state" / "docker-anonymous" / "config.json").read_text())
     assert "credsStore" not in conf and "credHelpers" not in conf
     assert conf["currentContext"] == "default" and conf["auths"] == {"registry.example": {"auth": "dG9rZW4="}}
@@ -434,14 +435,14 @@ def test_fy_rt_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_pa
 
 def test_fy_rt_023_other_start_failures_are_not_retried_as_a_pull(tmp_path):
     """FY-RT-023: only the credential-helper failure triggers the anonymous pull; a real refusal
-    (pull access denied, a bad name) is reported as it was, without a pull."""
+    (pull access denied, a bad name) is reported as it was, without a second, anonymous pull."""
     fake = FakeDocker(tmp_path / "bin")
     rt = _ctr(tmp_path, fake)
 
     rec = _start_one(tmp_path, rt, container(image="fail/private:1"))
 
     assert rec.state in ("backoff", "failed") and "pull access denied" in (rec.reason or "")
-    assert not [c for c in fake.calls() if c and c[0] == "pull"]
+    assert fake.pulls() == [["pull", "fail/private:1"]] and fake.runs() == []
 
 
 def test_fy_rt_024_anonymous_config_without_a_config_file(tmp_path):
@@ -510,7 +511,7 @@ def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
     assert rec.state == "running"
     runs = fake.runs()
     assert runs and all(pinned in r for r in runs)
-    assert [c for c in fake.calls() if c and c[0] == "pull"] == [["pull", pinned]]
+    assert [c for c in fake.calls() if c and c[0] == "pull"] == [["pull", pinned]] * 2
 
 
 def test_fy_rt_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_files():

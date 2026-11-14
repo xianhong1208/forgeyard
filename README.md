@@ -24,6 +24,10 @@ tracking and monthly budgets.
 > generation as jobs, plus any service workload's HTTP API at `/x/<name>` with ready-made vision
 > templates; llama.cpp gains a built-in Vulkan variant for AMD APUs, and the server and agent images
 > are on Docker Hub. See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
+>
+> Coming in 1.3.1: a replica shows how far its engine image's pull has got, like a model download,
+> and a pull fails only when it stops making progress; deleting a deployment stops its download or
+> pull at once.
 
 ## The guide
 

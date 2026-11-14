@@ -36,6 +36,15 @@ def _wipe(url: str) -> None:
     engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def no_real_engine_socket(monkeypatch):
+    """No test ever pulls through a real Docker or Podman socket on the machine running the tests:
+    the container runtime finds none (it pulls with the fake CLI), unless a test hands it one."""
+    from forgeyard.agent.workloads import container
+
+    monkeypatch.setattr(container, "engine_socket", lambda *a, **k: None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def no_processes_left_behind():
     """Safety net for the whole run: before it, leftovers of runs that are gone are killed and

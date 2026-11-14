@@ -207,16 +207,36 @@ elif cmd == "run":
     save()
     print(cid)
 elif cmd == "pull":
-    import os
+    # As `docker pull` without a terminal prints it: one line per layer step, no byte counts.
+    import os, time
+    image = args[-1]
     conf = os.environ.get("DOCKER_CONFIG")
     cfg = json.loads((Path(conf) / "config.json").read_text()) if conf else {"credsStore": "broken"}
-    if "credsStore" in cfg or "credHelpers" in cfg:
+    if image.startswith("credfail/") and ("credsStore" in cfg or "credHelpers" in cfg):
         print("Error response from daemon: error getting credentials - err: exit status 255, out: ``",
               file=sys.stderr)
         sys.exit(1)
-    state.setdefault("pulled", []).append(args[-1])
+    if state.get("offline"):
+        print('Error response from daemon: Get "https://ghcr.io/v2/": dial tcp: lookup ghcr.io: no such host',
+              file=sys.stderr)
+        sys.exit(1)
+    if image.startswith("fail/"):
+        print("Error response from daemon: pull access denied for " + image + ", repository does not exist or "
+              "may require 'docker login'", file=sys.stderr)
+        sys.exit(1)
+    script = state.get("pull_script") or [["a1b2c3d4e5f6: Pulling fs layer", 0], ["a1b2c3d4e5f6: Pull complete", 0]]
+    state.setdefault("pulled", []).append(image)
+    ref, at, digest = image.partition("@")
+    name = ref.rsplit(":", 1)[0] if ":" in ref.rsplit("/", 1)[-1] else ref
+    state.setdefault("images", []).append({"Id": "sha256:" + uuid.uuid4().hex * 2, "RepoTags": [] if at else [image],
+                                           "RepoDigests": [name + "@" + digest] if at else []})
     save()
-    print("Status: Downloaded newer image for " + args[-1])
+    fcntl.flock(_lock, fcntl.LOCK_UN)  # a slow pull must not hold up the other calls
+    print(ref.rsplit(":", 1)[-1] + ": Pulling from " + name, flush=True)
+    for line, delay in script:
+        time.sleep(delay)
+        print(line, flush=True)
+    print("Status: Downloaded newer image for " + image, flush=True)
 elif cmd == "inspect":
     if args[1] == "--format":
         cid, c = find(args[3])
@@ -299,6 +319,13 @@ class FakeDocker:
     def load_image(self, item: dict) -> None:
         """An image in the local store, as `image inspect` shows it (Id, RepoTags, RepoDigests, ...)."""
         self._update(lambda data: data.setdefault("images", []).append(item))
+
+    def pull_script(self, lines: list) -> None:
+        """What the next pulls print, as [line, seconds to wait before it]: slow, or stalled, pulls."""
+        self._update(lambda data: data.update(pull_script=lines))
+
+    def pulls(self) -> list[list[str]]:
+        return [c for c in self.calls() if c and c[0] == "pull"]
 
     def offline(self) -> None:
         """No registry: `run` of an image that is not local fails as a failed DNS lookup does."""

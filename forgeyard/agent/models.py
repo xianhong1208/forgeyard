@@ -7,8 +7,10 @@ machine and shared by every replica there.
   public addresses only unless `--allow-private-model-hosts`). They resume (HTTP Range), retry,
   check the free disk space first, and verify every file: SHA-256 for large (LFS) files, the git
   blob id for small ones, the published SHA-256 for engines. Nothing unverified is ever used.
-- **Progress** is reported per replica (bytes done of the total), and a download is cancelled as
-  soon as nobody wants it any more.
+- **Progress** is reported per replica: the bytes of that model really on disk (finished files and
+  partial ones) of the total, never above it. A download is cancelled as soon as nobody wants it any
+  more: the cancel ends a read that is waiting on the network, a retry's pause, a checksum and a wait
+  for another replica's download of the same model, and releases the model's lock.
 - **Read-only**: finished files are mode 0444 and directories 0755; containers get the model's
   directory mounted read-only, and nothing else of the host.
 - A Hugging Face token arrives with the desired state, is used for these requests only and is
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import http.client
 import json
 import logging
 import os
@@ -34,12 +37,14 @@ from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import quote
 
+from forgeyard.agent.watchdog import Watchdog
 from forgeyard.models import fetch, sources
 
 log = logging.getLogger("forgeyard.agent")
 
 CHUNK = 1024 * 1024
 RETRIES = 5
+LOCK_POLL = 0.2
 DISK_MARGIN = 1024**3
 MANIFEST_DIR = ".forgeyard"
 
@@ -132,10 +137,16 @@ def validate_model(model: dict, local_dirs: list[str]) -> dict:
     return out
 
 
-def git_blob_id(path: Path) -> str:
+def _check(cancel: Optional[threading.Event]) -> None:
+    if cancel is not None and cancel.is_set():
+        raise Cancelled("cancelled")
+
+
+def git_blob_id(path: Path, cancel: Optional[threading.Event] = None) -> str:
     h = hashlib.sha1(f"blob {path.stat().st_size}\0".encode())
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(CHUNK), b""):
+            _check(cancel)
             h.update(chunk)
     return h.hexdigest()
 
@@ -195,17 +206,30 @@ class ModelCache:
 
     # ------------------------------------------------------------------ locking
     @contextmanager
-    def _locked(self, key: str):
+    def _locked(self, key: str, cancel: Optional[threading.Event] = None):
+        """The model's lock, for this agent's threads and for another agent sharing this cache
+        directory. Waiting for it ends when `cancel` is set (a replica nobody wants any more must not
+        stay queued behind another one's download)."""
         with self._guard:
             lock = self._locks.setdefault(key, threading.Lock())
-        with lock:
+        while not lock.acquire(timeout=LOCK_POLL):
+            _check(cancel)
+        try:
             path = self.root / ".locks" / (hashlib.sha256(key.encode()).hexdigest()[:24] + ".lock")
             with open(path, "w") as fh:
-                fcntl.flock(fh, fcntl.LOCK_EX)  # another agent sharing this cache directory
+                while True:
+                    try:
+                        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        _check(cancel)
+                        time.sleep(LOCK_POLL)
                 try:
                     yield
                 finally:
                     fcntl.flock(fh, fcntl.LOCK_UN)
+        finally:
+            lock.release()
 
     def busy(self, key: str) -> bool:
         with self._guard:
@@ -249,11 +273,11 @@ class ModelCache:
 
     def _fetch(self, url: str, dest: Path, size: int, *, headers: dict, progress: Progress, phase: str,
                base: int, total: int, label: str, cancel: threading.Event, sha256: Optional[str] = None) -> None:
-        """Download url into dest (resuming a partial file), reporting base+done of total."""
+        """Download url into dest (resuming a partial file), reporting base+done of total (never more
+        than total). A cancel ends the transfer at once, even a read waiting on a stalled connection."""
         attempt = 0
         while True:
-            if cancel.is_set():
-                raise Cancelled("cancelled")
+            _check(cancel)
             have = dest.stat().st_size if dest.exists() else 0
             if size and have > size:
                 dest.unlink()
@@ -264,7 +288,7 @@ class ModelCache:
             if have:
                 h["Range"] = f"bytes={have}-"
             try:
-                with fetch.open_url(url, self.policy(), headers=h) as resp:
+                with fetch.open_url(url, self.policy(), headers=h) as resp, Watchdog(resp.abort, cancel):
                     if resp.status == 416 and size and have >= size:
                         return
                     if resp.status >= 400:
@@ -283,9 +307,9 @@ class ModelCache:
                         done = have
                         last = 0.0
                         while True:
-                            if cancel.is_set():
-                                raise Cancelled("cancelled")
+                            _check(cancel)
                             chunk = resp.read1(CHUNK)
+                            _check(cancel)  # an aborted read ends like the end of the body
                             if not chunk:
                                 break
                             out.write(chunk)
@@ -293,35 +317,38 @@ class ModelCache:
                             now = time.monotonic()
                             if now - last >= 0.5:
                                 last = now
-                                progress(phase, base + done, total, label)
+                                progress(phase, min(base + done, total) if total else base + done, total, label)
                 if size and dest.stat().st_size != size:
                     raise fetch.FetchError(f"incomplete ({dest.stat().st_size} of {size} bytes)")
                 return
-            except (fetch.FetchError, OSError) as e:
+            except (fetch.FetchError, OSError, http.client.HTTPException) as e:
+                _check(cancel)  # the cancel itself broke the connection
                 if isinstance(e, fetch.BlockedAddress):
                     raise CacheError(f"{label}: {e}") from None
                 attempt += 1
                 if attempt > RETRIES:
                     raise CacheError(f"{label}: download failed: {e}") from None
                 log.warning("Download of %s failed (%s); retrying (%d of %d).", label, e, attempt, RETRIES)
-                time.sleep(min(30, 2 ** attempt))
+                if cancel.wait(min(30, 2 ** attempt)):
+                    raise Cancelled("cancelled")
 
     @staticmethod
-    def _sha256(path: Path) -> str:
+    def _sha256(path: Path, cancel: Optional[threading.Event] = None) -> str:
         h = hashlib.sha256()
         with path.open("rb") as fh:
             for chunk in iter(lambda: fh.read(CHUNK), b""):
+                _check(cancel)  # a large file takes many seconds: a cancel must not wait for it
                 h.update(chunk)
         return h.hexdigest()
 
-    def _verify(self, part: Path, f: dict, label: str) -> None:
+    def _verify(self, part: Path, f: dict, label: str, cancel: Optional[threading.Event] = None) -> None:
         if f.get("sha256"):
-            got = self._sha256(part)
+            got = self._sha256(part, cancel)
             if got != f["sha256"]:
                 part.unlink(missing_ok=True)
                 raise CacheError(f"{label}: SHA-256 mismatch (got {got[:12]}…, expected {f['sha256'][:12]}…)")
         elif f.get("oid"):
-            got = git_blob_id(part)
+            got = git_blob_id(part, cancel)
             if got != f["oid"]:
                 part.unlink(missing_ok=True)
                 raise CacheError(f"{label}: content does not match its git blob id")
@@ -341,7 +368,7 @@ class ModelCache:
                 raise CacheError(f"{p / model['file']} does not exist on this machine")
             return self.paths(model)
         key = sources.cache_key(model)
-        with self._locked(key):
+        with self._locked(key, cancel):
             if not self.is_cached(model):
                 if model["kind"] == "hf":
                     self._download_hf(model, token, progress, cancel)
@@ -364,9 +391,19 @@ class ModelCache:
         self._check_space(sum(f["size"] for f in missing) - partial)
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         ep = model["endpoint"].rstrip("/")
-        done = total - sum(f["size"] for f in missing)
-        progress("model", done, total, None)
-        for f in files:
+
+        def on_disk(f: dict) -> int:
+            """The bytes of one file that are on disk now: all of a finished file, the partial part of
+            one being fetched (a part longer than the file is thrown away before it is resumed)."""
+            blob_id = f["sha256"] or f["oid"] or ""
+            if (blobs / blob_id).is_file():
+                return f["size"]
+            part = self.root / ".partial" / f"{blob_id}.part"
+            have = part.stat().st_size if blob_id and part.is_file() else 0
+            return have if have <= f["size"] else 0
+
+        progress("model", min(sum(on_disk(f) for f in files), total), total, None)
+        for i, f in enumerate(files):
             blob_id = f["sha256"] or f["oid"]
             if not blob_id:
                 raise CacheError(f"{f['path']}: no checksum to verify it against")
@@ -374,13 +411,15 @@ class ModelCache:
             if not blob.is_file():
                 part = self.root / ".partial" / f"{blob_id}.part"
                 url = f"{ep}/{model['repo']}/resolve/{model['revision']}/{quote(f['path'])}"
-                self._fetch(url, part, f["size"], headers=headers, progress=progress, phase="model", base=done,
+                # What the other files have on disk, plus what this one has (the fetch counts it from
+                # its own partial file): each byte once, so a resumed download never passes 100%.
+                others = sum(on_disk(g) for j, g in enumerate(files) if j != i)
+                self._fetch(url, part, f["size"], headers=headers, progress=progress, phase="model", base=others,
                             total=total, label=f["path"], cancel=cancel)
-                self._verify(part, f, f["path"])
+                self._verify(part, f, f["path"], cancel)
                 os.chmod(part, 0o444)
                 os.replace(part, blob)
-            done += f["size"]
-            progress("model", done, total, f["path"])
+            progress("model", min(sum(on_disk(g) for g in files), total), total, f["path"])
             link = snap / f["path"]
             link.parent.mkdir(parents=True, exist_ok=True)
             target = os.path.relpath(blob, link.parent)
@@ -445,13 +484,13 @@ class ModelCache:
         if self.error:
             raise CacheError(self.error)
         final = self.root / "engines" / f"{name}-{sha[:16]}"
-        with self._locked(f"engine:{sha}"):
+        with self._locked(f"engine:{sha}", cancel):
             if not (final / binary).is_file():
                 part = self.root / ".partial" / f"engine-{sha}.part"
                 self._check_space(512 * 1024**2)
                 self._fetch(url, part, 0, headers={}, progress=progress, phase="engine", base=0, total=0,
                             label=posixpath.basename(url), cancel=cancel)
-                got = self._sha256(part)
+                got = self._sha256(part, cancel)
                 if got != sha:
                     part.unlink(missing_ok=True)
                     raise CacheError(f"engine archive SHA-256 mismatch (got {got[:12]}…)")
