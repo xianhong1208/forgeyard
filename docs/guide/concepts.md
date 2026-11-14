@@ -68,6 +68,29 @@ Isolation, in short:
 Only admins and operators create workloads, because whoever can create one can run code on the
 machines. Model deployments are workloads too; most people only deploy models.
 
+## Workloads at /x/
+
+A service workload can be **exposed** behind the gateway: programs then call its own HTTP API at
+`https://<server>:7860/x/<name>/…` with an API key, as they call models at `/v1`. Use it for what is
+not a chat, embedding, speech or image model: object detection, segmentation, depth, Triton or KServe
+models, a FastAPI or BentoML service.
+
+- **Behind the key guard.** An exposed workload runs behind the agent's key guard, like a model
+  replica: the program listens on loopback, the guard holds the published port, and only the gateway
+  gets through. The guard removes the gateway's internal key before the request reaches the program.
+  Every port of the workload is guarded, not only the exposed one.
+- **Keys opt in.** A key's **Workloads** setting says which exposed workloads it may call: *None*
+  (the default, and every key from before 1.3), *Listed workloads* or *Every exposed workload*.
+- **APIs, not web pages.** Answers are sandboxed (`Content-Security-Policy: sandbox`), cookies and
+  CORS headers are removed, and redirects are rewritten under `/x/<name>`. A browser UI (Gradio,
+  Jupyter) does not work at `/x/`. WebSockets and gRPC are not passed on in 1.3, and nothing spills
+  to the cloud.
+- **Counted.** Requests, errors, bytes in and out, busy time and latency go to **Usage** as the
+  model `x:<name>`; the key's requests per minute apply.
+
+Admins and operators expose a workload, when they create it or later on its page. See
+[Expose a workload at /x/](how-to.md#expose-a-workload-at-x).
+
 ## Models, recipes and estimates
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**

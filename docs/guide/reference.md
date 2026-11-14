@@ -495,6 +495,80 @@ Two more cases:
   it with one last event, an error with the code `upstream_stream_broken`:
   `data: {"error": {…, "code": "upstream_stream_broken"}}`.
 
+## The passthrough (/x/)
+
+Programs call an exposed workload at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
+whose **Workloads** setting allows it. Like `/v1`, it takes `Authorization: Bearer fyk_…` only: no
+cookies, no key in the query string, no CORS headers.
+
+### Paths and methods
+
+| What | Rule |
+|---|---|
+| Methods | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| Prefix | `/x/<name>` is removed: `/x/<name>/a/b?c=1` reaches the workload as `/a/b?c=1`, and `/x/<name>` alone as `/` |
+| Path | Passed on byte for byte, as it came. Refused with 400 `invalid_path`, never normalised: `.` or `..` segments, an encoded `.`, `/` or `\` (`%2e`, `%2f`, `%5c`), a backslash, control characters (raw or encoded) and non-ASCII bytes |
+| Query | Passed on as it came |
+| Not passed on | WebSockets (`Upgrade` is removed), gRPC, HTTP/2 to the workload |
+
+### Request and answer headers
+
+| Header | Direction | What happens |
+|---|---|---|
+| `Authorization` | request | Your API key is checked and removed; the workload gets the replica's internal key, which the agent's key guard checks and removes |
+| `Cookie`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard-*` | request | Removed |
+| `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` | request | Set fresh: the client's address, `https` or `http`, and the host it called |
+| `X-Forwarded-Prefix` | request | `/x/<name>` |
+| `X-Request-Id` | both | A new id per request, sent to the workload and back to the client |
+| Hop-by-hop headers (`Connection` and what it names, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Expect`, `Proxy-*`) | both | Removed |
+| `Set-Cookie`, `Access-Control-*`, `Strict-Transport-Security`, `Clear-Site-Data`, `Alt-Svc`, `Service-Worker-Allowed`, `Report-To`, `NEL`, `Date`, `Server` | answer | Removed (the server sends its own `Date` and `Server`) |
+| `Content-Security-Policy` | answer | Always `sandbox; default-src 'none'; frame-ancestors 'none'` |
+| `X-Content-Type-Options`, `X-Frame-Options`, `Cache-Control`, `Cross-Origin-Resource-Policy`, `Referrer-Policy` | answer | Always `nosniff`, `DENY`, `no-store`, `same-origin` and `no-referrer` |
+| `Location`, `Content-Location` | answer | A path, or an address of the workload itself, is rewritten under `/x/<name>`; other sites and relative references stay. Redirects are never followed |
+| `X-Forgeyard-Target` | answer | `workload:<name>#<replica>` |
+| `Content-Encoding`, `Content-Length` and the rest | answer | Passed on: the body is relayed as raw bytes as it arrives (compressed bodies stay compressed; SSE and chunked answers stream) |
+
+### Limits and timeouts
+
+| Limit | Default | Set on |
+|---|---|---|
+| Largest request body | 32 MiB (413 `request_too_large` above) | the workload: **Largest request (MiB)**, 1 to 1,024 |
+| Wait for each piece of the answer | 600 s (504 `upstream_timeout` before the first byte) | the workload: **Read timeout (s)**, 1 to 3,600 |
+| Connecting to a replica | `GATEWAY_CONNECT_TIMEOUT` (5 s); a replica that cannot be reached is skipped for the next one | the server |
+| Requests at once per replica | no limit (429 `workload_busy` when every replica is full) | the workload |
+| Requests at once per key | no limit (429 `key_busy`) | the workload |
+| Requests per minute | the key's own limit (429 `rate_limit_exceeded`); tokens per minute do not apply | the key |
+
+Every 429 carries `Retry-After`. A client that goes away closes the request to the workload at once.
+
+**Usage** counts each request under the model `x:<name>`: requests, errors (an answer's own 5xx too),
+limited requests, bytes in (request bodies) and out (answer bodies as sent), busy time (from sending
+the request until the answer ended) and latency.
+
+### Errors at /x/
+
+Errors from the gateway have the same shape as at `/v1`. An answer from the workload itself, also a
+401 or a 5xx, is passed on as it is.
+
+| Status | `code` | Means | What to do |
+|---|---|---|---|
+| 400 | `invalid_path` | The path has a dot segment, an encoded `.`, `/` or `\`, a backslash, a control character or non-ASCII bytes | Send the path without them |
+| 401 | `missing_api_key`, `invalid_api_key`, `revoked_api_key`, `expired_api_key`, `account_disabled` | As at `/v1` | As at `/v1` |
+| 403 | `workloads_not_allowed` | The key's **Workloads** setting is *None* | Change the key's setting |
+| 404 | `workload_not_found` | No such exposed workload for this key: it does not exist, is not exposed, or is not on the key's list | Check the name and the key's list |
+| 413 | `request_too_large` | The body is larger than the workload's **Largest request** | Send less, or raise the limit |
+| 429 | `rate_limit_exceeded` | Over the key's requests per minute | Wait `Retry-After` seconds |
+| 429 | `workload_busy` | Every replica has as many requests in flight as **Requests at once per replica** | Wait `Retry-After` seconds, or add replicas |
+| 429 | `key_busy` | The key has as many requests in flight to this workload as **Requests at once per key** | Wait for one to finish |
+| 502 | `upstream_unreachable` | No replica could be connected to (its program is down or restarting) | Check the workload's output |
+| 502 | `upstream_error` | The request to the replica failed | Retry |
+| 502 | `replica_refused_key` | The replica's key guard refused the gateway's internal key | Stop and start the workload |
+| 503 | `no_ready_replica` | The workload is stopped, or no replica is ready, or a replica is not behind the key guard yet; the message says which | Start it, wait, or update the agent |
+| 504 | `upstream_timeout` | No answer within the workload's **Read timeout** | Raise the timeout, or check the workload |
+
+An answer that breaks off after it started cannot change its status: the connection is closed before
+the body is complete, so a client never takes a cut-off body for a whole one.
+
 ## Workload environment
 
 A workload's replica starts with an empty environment. It gets only what its spec declares, plus:
@@ -511,7 +585,9 @@ A workload's replica starts with an empty environment. It gets only what its spe
 
 A spec that sets a GPU variable (also `HIP_VISIBLE_DEVICES` and `GPU_DEVICE_ORDINAL`), `PORT`, or
 any name that starts with `FORGEYARD_` or `PORT_` is refused. In a process's arguments and in
-environment values, `${PORT}` and `${PORT_<NAME>}` become the port.
+environment values, `${PORT}` and `${PORT_<NAME>}` become the port. In a process's arguments,
+`${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard
+(a workload exposed at `/x/`), else the agent's address.
 
 ## Setup health checks
 

@@ -128,8 +128,11 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
    NVIDIA, stable-diffusion.cpp on AMD (Vulkan) and the CPU (no CUDA image: it crashed on an A100,
    #43); base64 only, caps and a queue per deployment, images, kilopixels and busy time in usage. Edits
    stay out.
-5. Generic passthrough (`/x/<name>/…`), with ready-made workload templates: object detection,
-   segmentation, depth (permissively licensed images only).
+5. *In review*: **Generic passthrough** (`/x/<name>/…`, #23): any service workload's HTTP API behind
+   the gateway, through the agent's key guard (which strips the key), for keys whose new *Workloads*
+   setting allows it (none by default, also for existing keys); APIs only (a forced CSP sandbox), no
+   WebSockets or gRPC; bytes and busy time in usage. Then ready-made workload templates: object
+   detection, segmentation, depth (permissively licensed images only).
 6. Video generation (async `/v1/videos`), the first to move to a later version if time is short.
 
 Also in 1.3, alongside the model types:

@@ -304,6 +304,23 @@ provider answered.
 
 More in [Cloud providers](cloud-providers.md#troubleshooting).
 
+## Errors from /x/
+
+- **403 `workloads_not_allowed`:** the key's **Workloads at /x/** is *None*, the default. Change it
+  on **API keys**.
+- **404 `workload_not_found`:** the name is wrong, the workload is not exposed (its page, **Gateway**),
+  or the key lists other workloads.
+- **503 `no_ready_replica` and "runs without the agent's key guard":** the replica's agent is older
+  than 1.3, or the workload was exposed while running and has not restarted behind the guard yet.
+  Update the agent, or stop and start the workload.
+- **The replica stops with "listens beyond loopback":** behind the key guard a process must listen on
+  `127.0.0.1`. Use `${BIND_ADDRESS}` in its arguments instead of `0.0.0.0`.
+- **A page, its links or its redirects are wrong:** the prefix is stripped, so the service sees `/`.
+  Set its root path to `/x/<name>` (FastAPI `root_path`, `--root-path`, `GRADIO_ROOT_PATH`), or read
+  `X-Forwarded-Prefix`. A browser UI does not work at `/x/`: answers are sandboxed.
+- **A WebSocket or gRPC client fails:** neither is passed on in 1.3. Use plain HTTP, or SSE for a
+  stream.
+
 ## A program does not trust the certificate
 
 **You see:** a program that calls `/v1` fails with `certificate verify failed`,
