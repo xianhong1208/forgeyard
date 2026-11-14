@@ -252,3 +252,43 @@ def test_fy_acc_012_the_guide_explains_it_in_both_languages():
     zh = (ROOT / "docs" / "guide" / "zh-TW" / "how-to.md").read_text()
     assert "## Check a server end to end" in en and "scripts/accept_all.py" in en
     assert "scripts/accept_all.py" in zh
+
+
+def test_fy_acc_014_the_scripts_check_with_info_and_skip(acc):
+    """FY-ACC-014: the per-feature scripts' exercise() functions call the check they are given with info=True
+    or skip=True (accept_x's container user, the templates' timings); Run.check takes both and records them
+    as SKIP with the reason, never as a pass or a failure, so a group handed run.check does not stop."""
+    args = acc.parse_args(["--server", "https://127.0.0.1:9"])
+    run = acc.Run(args, None)
+
+    def g(r):
+        assert r.check("ok", True, "fine") is True
+        r.check("uid", True, "uid 0", info=True)
+        r.check("not here", False, "no container engine", skip=True)
+        assert r.check("bad", False, "broken") is False
+
+    run.run_group(acc.Group("x", "X", g), "")
+    got = [(c.name, c.status, c.detail) for c in run.report.checks]
+    assert got == [("ok", "PASS", "fine"), ("uid", "SKIP", "information: uid 0"),
+                   ("not here", "SKIP", "no container engine"), ("bad", "FAIL", "broken")]
+
+
+def test_fy_acc_015_the_http_library_is_the_one_the_sdk_is_built_on(monkeypatch):
+    """FY-ACC-015: openai 3.51 moved from httpx to httpx2, and a fresh --venv installs the newest SDK: the
+    scripts take the HTTP library from the SDK's own client class (accept_m3.sdk_httpx), so the client they
+    build is one the SDK accepts, with either library."""
+    import types
+
+    sys.path.insert(0, str(SCRIPT.parent))
+    import accept_m3
+
+    for root in ("httpx2", "httpx"):
+        lib = types.ModuleType(root)
+        base = type("Client", (), {"__module__": f"{root}._client"})
+        lib.Client = base
+        sdk = types.ModuleType("openai")
+        sdk.DefaultHttpxClient = type("DefaultHttpxClient", (base,), {"__module__": "openai._base_client"})
+        monkeypatch.setitem(sys.modules, root, lib)
+        monkeypatch.setitem(sys.modules, "openai", sdk)
+        assert accept_m3.sdk_httpx() is lib, root
+

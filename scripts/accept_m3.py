@@ -106,6 +106,22 @@ class Client:
         return data
 
 
+def sdk_httpx():
+    """The HTTP library the installed openai SDK is built on: httpx up to openai 3.50, httpx2 from 3.51.
+    A client made with it can be handed to the SDK (http_client=) and used on its own."""
+    import importlib
+
+    import openai
+
+    for base in openai.DefaultHttpxClient.__mro__:
+        root = base.__module__.split(".")[0]
+        if root in ("httpx", "httpx2"):
+            return importlib.import_module(root)
+    import httpx
+
+    return httpx
+
+
 def log(msg: str) -> None:
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
