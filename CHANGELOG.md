@@ -47,6 +47,20 @@ generation. Fifth part: the generic passthrough at `/x/<name>`.
   release as `forgeyard-vision:X.Y.Z` (CPU, amd64 and arm64) and `X.Y.Z-cuda` (amd64, NVIDIA driver
   580+), built and smoke-tested in CI. `GET /api/workloads/templates`. `accept_x.py --templates` (and
   `accept_all.py --x-templates`) check them on a real machine: an image in, boxes, masks and depth out.
+- **Playground → Vision** (#47): try an exposed vision workload from the console, as yourself, without an
+  API key. Pick a workload (its task and model), drop or choose a picture (PNG, JPEG or WebP, up to the
+  workload's limit), then: **detection** draws boxes with label and score, with a score slider;
+  **segmentation** takes a click (a point) or a dragged box and lays the mask over the picture, with the
+  other masks a button away; **depth** shows the depth map beside the photo, in colour or grey. With no
+  exposed vision workload, the tab says how to start one from a template. Errors in plain words.
+  - Through the console's own routes, `GET /api/playground/vision/options` and
+    `POST /api/playground/vision/<name>/<task>`: the console's sign-in and CSRF rule, anyone signed in;
+    only exposed workloads started with `--task detect|segment|depth`, and only their `/v1/<task>` (404
+    `workload_not_found`, `unknown_task`). The request then follows the `/x/` rules: key guard, header
+    rules, body limit, concurrency, timeouts, usage under `x:<name>` as *console*. `/x/` still takes API
+    keys only.
+  - At `/x/` too: `key_concurrency` is counted per person for the Playground (it has no key), and the
+    console's `X-Forgeyard` header is removed like `X-Forgeyard-*`.
 
 - **Image generation** at `POST /v1/images/generations`, OpenAI's request shape, images back as base64
   only, with two engines:

@@ -440,7 +440,7 @@ local_dirs = ["/data/models"]
 | 標頭 | 方向 | 會怎樣 |
 |---|---|---|
 | `Authorization` | 請求 | 檢查你的 API 金鑰後拿掉；工作負載收到的是副本的內部金鑰，由 agent 的金鑰守門員檢查後拿掉 |
-| `Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP`、`X-Forgeyard-*` | 請求 | 拿掉 |
+| `Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP`、`X-Forgeyard`、`X-Forgeyard-*` | 請求 | 拿掉 |
 | `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host` | 請求 | 重新設定：用戶端的位址、`https` 或 `http`，以及它呼叫的主機 |
 | `X-Forwarded-Prefix` | 請求 | `/x/<name>` |
 | `X-Request-Id` | 雙向 | 每個請求一個新 id，送給工作負載，也回給用戶端 |
@@ -460,7 +460,7 @@ local_dirs = ["/data/models"]
 | 等回應每一段的時間 | 600 秒（第一個位元組之前逾時回 504 `upstream_timeout`） | 工作負載：**Read timeout (s)**，1 到 3,600 |
 | 連到副本 | `GATEWAY_CONNECT_TIMEOUT`（5 秒）；連不到的副本會跳過，改試下一個 | 伺服器 |
 | 每個副本同時處理的請求 | 不限（每個副本都滿了時回 429 `workload_busy`） | 工作負載 |
-| 每把金鑰同時進行的請求 | 不限（429 `key_busy`） | 工作負載 |
+| 每把金鑰同時進行的請求 | 不限（429 `key_busy`）；在 Playground 裡以每個人計算 | 工作負載 |
 | 每分鐘請求數 | 金鑰自己的限制（429 `rate_limit_exceeded`）；每分鐘 token 數不適用 | 金鑰 |
 
 每個 429 都帶 `Retry-After`。用戶端離開時，到工作負載的請求會立刻關閉。
@@ -488,6 +488,17 @@ local_dirs = ["/data/models"]
 | 504 | `upstream_timeout` | 在工作負載的 **Read timeout** 內沒有回應 | 調高逾時，或檢查工作負載 |
 
 已經開始的回應如果中斷，狀態碼就無法再改：連線會在本文完整之前關閉，所以用戶端絕不會把被截斷的本文當成完整的。
+
+### 從 Playground 呼叫
+
+console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的視覺工作負載，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺工作負載是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#workload-templates)都是這樣。
+
+| 路由 | 做什麼 |
+|---|---|
+| `GET /api/playground/vision/options` | `workloads`：每個公開視覺工作負載的 `name`、`workload_id`、`task`、`title`、`model`、`licence`、`endpoint`、`path`、`ready`（在金鑰守門員後面的副本數）、`reason`（為什麼沒有就緒的副本）、`max_body_mb`；`tasks`：範本的任務 |
+| `POST /api/playground/vision/<name>/<task>` | 把本文（圖片，multipart）送到工作負載自己的 `POST /v1/<task>`，不會送到別處：沒有其他路徑、方法或查詢字串 |
+
+之後請求依照上面 `/x/` 的規則：同樣的副本和金鑰守門員、請求與回應標頭（cookie 絕不會送到工作負載）、工作負載的 **Largest request**、**Requests at once per replica** 和 **Requests at once per key**（以每個人計算）、它的逾時，以及同樣的錯誤。任務和工作負載的不同，或工作負載不是公開的視覺工作負載，回 404 `workload_not_found`；視覺伺服器沒有的任務回 404 `unknown_task`。用量記在 `x:<name>` 底下，來源是 *console*，算在登入的人身上。
 
 ## 工作負載範本
 

@@ -548,6 +548,54 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .img-item { margin: 0; display: grid; gap: 6px; min-width: 0; }
 .img-item img { width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); }
 .img-item figcaption { display: flex; justify-content: flex-end; }
+/* Vision (1.3): a drop zone, then the picture with boxes, a mask or its depth map laid over or beside it.
+   Overlays are positioned in percent of the picture, so they scale with it on any screen. */
+.vision { display: grid; gap: 12px; }
+.vision h2 { display: inline-flex; align-items: center; gap: 8px; }
+.vis-about { margin: 0; max-width: 90ch; overflow-wrap: anywhere; }
+.vis-kinds { margin: 4px 0 14px; padding-left: 20px; display: grid; gap: 4px; }
+.vis-drop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 18px 16px; border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius); background: var(--surface-2); color: var(--ink-2); min-width: 0; }
+.vis-drop.has-image { padding: 10px 14px; }
+.vis-drop.on { border-color: var(--heat); background: var(--heat-soft); }
+.vis-drop > span { min-width: 0; overflow-wrap: anywhere; }
+.vis-name { overflow-wrap: anywhere; }
+.vis-actions { align-items: center; }
+.vis-threshold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; color: var(--ink-2); }
+.vis-threshold label { font-weight: 600; }
+.vis-threshold input[type="range"] { flex: 1 1 200px; max-width: 360px; accent-color: var(--steel); }
+.vis-stage { position: relative; display: inline-block; justify-self: start; max-width: 100%; line-height: 0; border-radius: var(--radius);
+  border: 1px solid var(--line); overflow: hidden; background: var(--surface-2); }
+.vis-stage img { display: block; max-width: 100%; max-height: 72vh; width: auto; height: auto; user-select: none; -webkit-user-drag: none; }
+.vis-pick { cursor: crosshair; touch-action: none; }
+.vis-pick.busy { cursor: progress; }
+.vis-overlay { position: absolute; inset: 0; pointer-events: none; line-height: normal; }
+.vis-box { position: absolute; box-sizing: border-box; border: 2px solid var(--heat); border-radius: 2px; }
+.vis-tag { position: absolute; left: -2px; bottom: 100%; padding: 1px 6px; border-radius: 3px 3px 3px 0; color: #10161c; font-family: var(--mono);
+  font-size: 11px; font-weight: 600; white-space: nowrap; }
+.vis-tag.inside { bottom: auto; top: 0; left: 0; border-radius: 0 0 3px 0; }
+.vis-mask { position: absolute; inset: 0; background: rgba(240, 160, 32, 0.55); mask-mode: luminance; mask-size: 100% 100%; mask-repeat: no-repeat; }
+.vis-mask-box { border: 1px dashed rgba(255, 255, 255, 0.9); box-shadow: 0 0 0 1px rgba(18, 26, 34, 0.6); }
+.vis-prompt { border: 2px dashed #ffffff; box-shadow: 0 0 0 1px rgba(18, 26, 34, 0.7); }
+.vis-point { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--heat);
+  border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(18, 26, 34, 0.7); }
+.vis-masks { flex-wrap: wrap; }
+.vis-defs { position: absolute; width: 0; height: 0; }
+.vis-pair { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); max-width: 720px; }
+.vis-pair.two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); max-width: none; }
+.vis-fig { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.vis-fig img { width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); }
+.vis-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.vis-ramp { flex: 1 1 120px; max-width: 220px; height: 10px; border-radius: 3px; border: 1px solid var(--line); }
+.vis-meta { overflow-wrap: anywhere; }
+.vis-bar .field { flex: 1 1 320px; max-width: 520px; min-width: 0; }
+.vis-bar select { width: 100%; }
+.vis-found { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.vis-found li { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.vis-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+@media (max-width: 600px) {
+  .vis-tag { font-size: 9.5px; padding: 0 4px; }
+}
 .ranked { margin: 12px 0 0; padding-left: 22px; display: grid; gap: 6px; }
 .ranked li { padding-left: 4px; }
 .ranked li span:first-child { display: inline-block; min-width: 54px; margin-right: 8px; color: var(--heat-ink); }
