@@ -155,7 +155,7 @@ engines serve them:
 | Engine (recipe) | Where | Models |
 |---|---|---|
 | vLLM-Omni (`vllm-omni-image`) | NVIDIA GPUs | diffusers pipelines (a repository with `model_index.json`): Z-Image-Turbo, Stable Diffusion XL, FLUX.1-schnell, Qwen-Image |
-| stable-diffusion.cpp (`sd-cpp`) | AMD GPUs and APUs (Vulkan), the CPU (a process, no Docker); not NVIDIA ([#43](https://github.com/xianhong1208/forgeyard/issues/43)) | GGUF or single files: Stable Diffusion 1.5 / XL checkpoints, Z-Image and FLUX with their text encoder and VAE beside them in the same repository |
+| stable-diffusion.cpp (`sd-cpp`) | AMD GPUs and APUs (Vulkan), NVIDIA (CUDA), the CPU (a process, no Docker) | GGUF or single files: Stable Diffusion 1.5 / XL checkpoints, Z-Image and FLUX with their text encoder and VAE beside them in the same repository |
 
 - **Base64 only.** Forgeyard keeps no copy of the images it makes, so it cannot hand out a URL:
   `response_format: url` is refused. Decode `data[].b64_json`.

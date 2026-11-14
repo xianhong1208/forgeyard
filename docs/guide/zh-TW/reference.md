@@ -298,7 +298,7 @@ local_dirs = ["/data/models"]
 
 ### 圖片生成
 
-`POST /v1/images/generations` 接受 OpenAI 的請求，回應 OpenAI 的 JSON，圖片以 base64 傳回。兩種引擎提供這項服務（配方 `vllm-omni-image` 在 NVIDIA 上跑 diffusers pipeline，`sd-cpp` 在 AMD（Vulkan）和 CPU 上跑 stable-diffusion.cpp，不支援 NVIDIA：#43）；只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/images/generations` 接受 OpenAI 的請求，回應 OpenAI 的 JSON，圖片以 base64 傳回。兩種引擎提供這項服務（配方 `vllm-omni-image` 在 NVIDIA 上跑 diffusers pipeline，`sd-cpp` 在 AMD（Vulkan）、NVIDIA 和 CPU 上跑 stable-diffusion.cpp）；只由本機部署提供，絕不送往雲端供應商。
 
 | 欄位 | 閘道怎麼處理 |
 |---|---|
@@ -544,12 +544,13 @@ local_dirs = ["/data/models"]
 | `speaches-tts`（1.3） | `cpu` | CPU（容器），任何機器都可以 | 與 faster-whisper 相同的 `ghcr.io/speaches-ai/speaches:0.8.3-cpu` 映像檔。只用 CPU：Kokoro 和 Piper 跑在 ONNX Runtime 上，用 CPU 產生語音的速度就比播放還快；在 CUDA 映像檔裡 Kokoro 其實也是用 CPU 跑 |
 | `vllm-omni-tts`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | `vllm/vllm-omni:v0.32.0`（CUDA 13.0） |
 | `vllm-omni-image`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | 同樣的 `vllm/vllm-omni:v0.32.0` |
-| `sd-cpp`（1.3） | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `ghcr.io/leejet/stable-diffusion.cpp:master-vulkan`（build `32d516c`，Mesa RADV） |
+| `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
+| | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
-stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`）發布映像檔。配方用 digest 釘住檢查過的那個 build；`scripts/pin_images.py` 會保留它（tag 已經移動只會當成資訊回報），除非執行時加上 `--move-rolling`。它之後的 Linux release 是在 Ubuntu 26.04（glibc 2.43）上建置的，所以 CPU 行程用的是較早的 build；它的 OpenAI API 是一樣的。`sd-server` 沒有 API 金鑰：沒有金鑰守門的 agent（1.1 之前）不會分到 `sd-cpp` 副本。沒有 NVIDIA variant（[#43](https://github.com/xianhong1208/forgeyard/issues/43)）：官方的 CUDA 映像檔在 A100 上跑 Z-Image-Turbo 會當掉，所以 NVIDIA 顯示卡用 `vllm-omni-image` 產生圖片；在只有 NVIDIA 的機器上用 GPU 部署 GGUF 圖片模型會被拒絕（*no allowed GPU that sd-cpp supports*），選 **Runs on** → **CPU only** 則會在 CPU 上執行。
+stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`master-cuda`）發布映像檔。配方用 digest 釘住檢查過的那些 build；`scripts/pin_images.py` 會保留它們（tag 已經移動只會當成資訊回報），除非執行時加上 `--move-rolling`。它之後的 Linux release 是在 Ubuntu 26.04（glibc 2.43）上建置的，所以 CPU 行程用的是較早的 build；它的 OpenAI API 是一樣的。`sd-server` 沒有 API 金鑰：沒有金鑰守門的 agent（1.1 之前）不會分到 `sd-cpp` 副本。第一個釘選的 CUDA build（`465adf3`）在 A100 上跑 Z-Image-Turbo 會當掉（[#43](https://github.com/xianhong1208/forgeyard/issues/43)），已換成 build `3bad892`。
 
 每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
 `scripts/pin_images.py` 會在 `forgeyard/recipes/images.lock.json` 記錄每個映像檔的正確副本可能顯示的 id（index、manifest 和 config 的 digest，以及每個平台的內容 id），所以在連不到 registry 的機器上用 `docker load` 載入的副本會被檢查並使用：[離線機器](how-to.md#offline-machines)。
