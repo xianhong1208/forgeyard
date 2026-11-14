@@ -1,7 +1,7 @@
 # Forgeyard
 
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器。每台機器上的 agent
-回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp）。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
+回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp）。其他任何服務（偵測、分割、Triton 或 FastAPI 模型）都能公開在 `/x/<name>/…`，使用同樣的金鑰、限制與用量。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
 
 [English](README.md)
 
@@ -9,7 +9,7 @@
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
 > 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3（進行中）加入更多種類的模型；第一步是 vLLM 與 llama.cpp 上的
-> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）；然後是圖片生成（vLLM-Omni、stable-diffusion.cpp）。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
+> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）；然後是圖片生成（vLLM-Omni、stable-diffusion.cpp）；接著是通用直通：任何服務型工作負載的 HTTP API 都能放在閘道後面的 `/x/<name>`。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
 
 ## 使用指南
 
@@ -156,6 +156,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/media.py` | 對話中的圖片、音訊與影片：重建內容區塊、依 egress 規則下載媒體網址 |
 | `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種引擎拿到什麼、音訊長度 |
 | `forgeyard/gateway/imagegen.py` | 圖片生成：檢查請求、每個部署的上限、每種引擎拿到什麼、佇列、回應與圖片尺寸 |
+| `forgeyard/gateway/passthrough.py` | `/x/<name>` 的通用直通：拒絕哪些路徑、拿掉與強制哪些標頭、以原始位元組轉送回應、限制與用量 |
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
@@ -177,6 +178,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
 | `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
+| `scripts/accept_x.py` | `/x/` 直通在真實硬體上的驗收（也是 `accept_all.py` 的 `passthrough` 群組） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |
 

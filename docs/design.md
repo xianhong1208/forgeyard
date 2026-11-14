@@ -517,9 +517,61 @@ page contain these lines whenever the server uses its own CA.
     its `/v1` routes.
   - Replicas started by an older agent are restarted behind a guard once the new agent has their key
     (same published port); those from before M4 have no key until they are placed again (stop and
-    start the deployment). Plain workloads (not models) are not guarded.
+    start the deployment). Plain workloads (not models) are guarded only when they are exposed at
+    `/x/` (below).
 
 Real-hardware check: `scripts/accept_m4.py`.
+
+### Workloads at /x/ (1.3, generic passthrough)
+
+Anything that is not a chat, embedding, speech or image model (detection, segmentation, depth, a
+Triton or KServe model, a FastAPI or BentoML service) runs as a service workload and is **exposed**
+behind the gateway at **`https://<server>:7860/x/<name>/…`**, with the same API keys, limits and usage
+as `/v1`. The research and the choices are in issue #23; the code is `forgeyard/gateway/passthrough.py`
+and `forgeyard/workloads/expose.py`.
+
+- **Setting:** a workload's `gateway` (`expose`, `port`, `read_timeout` 600 s, `max_body_mb` 32,
+  `concurrency` per replica, `key_concurrency` per key), kept beside the spec, never in it (agents
+  validate the spec with `extra="forbid"`), and changeable while it runs. Admins and operators set it;
+  it is audited (`workload.gateway_changed`).
+- **Behind the key guard:** an exposed replica gets an internal key at placement, sent as
+  `replica_key {env: null, strip: true}` only to agents listing `workload_guard`; elsewhere it is not
+  placed (reason given). The program listens on loopback (`${BIND_ADDRESS}` in a process's arguments;
+  a container is published on loopback), the guard holds the published port and **removes the key**
+  after checking it, and the agent's health checks never carry it. Exposing a running workload gives
+  its placed replicas a key, and their agents restart them behind the guard. Turning exposure off
+  closes `/x/` at once; the guard stays until the workload restarts (the safe direction).
+- **Keys:** `api_keys.workloads` = `none` (default; every key from before 1.3, migration
+  `0013_passthrough`) | `listed` (`workload_list`) | `all`, locked for the owner when an admin sets it
+  on someone else's key, like the cloud setting. A key with `none` gets 403 `workloads_not_allowed`; a
+  workload it may not call is 404 `workload_not_found`, the same as one that does not exist.
+- **Requests:** `Authorization: Bearer fyk_…` only. The path is read from the raw request path; dot
+  segments, encoded `.`, `/` or `\`, backslashes, control characters and non-ASCII bytes are refused
+  (400 `invalid_path`), never normalised (httpx folds `..` while the program would decode `%2e%2e`).
+  The prefix is stripped and the query kept. Hop-by-hop, `Authorization`, `Cookie`, `Forwarded`,
+  `X-Forwarded-*`, `X-Real-IP` and `X-Forgeyard-*` are dropped; fresh `X-Forwarded-For/-Proto/-Host`,
+  `X-Forwarded-Prefix` and `X-Request-Id` are set. The body is read up to `max_body_mb` (413), so a
+  replica that cannot be connected to is skipped for the next.
+- **Answers:** raw bytes (`aiter_raw`, so compressed bodies keep their `Content-Encoding` and
+  `Content-Length`), streamed as they come. `Set-Cookie`, `Access-Control-*`, HSTS, `Clear-Site-Data`,
+  `Alt-Svc`, `Service-Worker-Allowed`, reporting headers and `X-Forgeyard-*` are dropped, and
+  `Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'`, `nosniff`, `DENY`,
+  `no-store`, `Cross-Origin-Resource-Policy: same-origin` and `Referrer-Policy: no-referrer` are
+  **forced**: HTML or script served from `/x/` runs in an opaque origin, never as the console's (the
+  console's CSRF check is a custom header plus same-origin, which same-origin script would pass).
+  Redirects are not followed; `Location` / `Content-Location` on the workload are rewritten under
+  `/x/<name>`. The guard's own refusal (its realm) becomes 502 `replica_refused_key`; the program's own
+  401 passes. A stream that breaks off ends the connection unfinished.
+- **Limits:** the key's rpm (no tpm), per-replica concurrency (429 `workload_busy`) and per-key
+  concurrency (429 `key_busy`), `Retry-After: 1`; connect timeout `GATEWAY_CONNECT_TIMEOUT`, then
+  `read_timeout` per read (504). A client that goes away closes the upstream request.
+- **Usage:** model `x:<name>` in `usage_daily`, with `bytes_in`, `bytes_out` and `busy_ms` (columns
+  from migration 0012), requests, errors and latency.
+- **Not in 1.3:** WebSockets and gRPC (HTTP/2 trailers end to end), browser UIs (they need their own
+  host names, a wildcard `*.x.<server>` certificate), bodies above the limit streamed through,
+  units reported by the upstream, async job APIs, cloud spill.
+
+Real-hardware check: `scripts/accept_x.py`.
 
 ## Cloud providers and tiered routes (1.2)
 

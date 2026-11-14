@@ -41,6 +41,11 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              images.generate, images that decode at the size asked, n, the caps, url refused, the queue,
              usage (images, kilopixels, busy time), the key guard and, with a chat model that reads images,
              what the image shows (--img-vision)
+  passthrough  workloads at /x/<name> (1.3, scripts/accept_x.py's checks): a small HTTP app exposed as a
+             process on the CPU machine and in a container on the GPU machine: keys (none, listed), the path
+             as sent and refused paths, credentials and forwarded headers replaced, the forced sandbox,
+             redirects, streaming, a client that hangs up, the body limit, rpm, concurrency, the read
+             timeout, the replica's port behind the key guard, usage (bytes, busy time), turning it off
   console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
              and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
 
@@ -1994,6 +1999,50 @@ def group_img(run: Run) -> None:
         accept_img.exercise(c, d, d["name"], spec, side, args, check, httpx, openai, report, None,
                             key=run.new_key(f"img-{role}"))
         run.report.info.setdefault("img", {})[d["name"]] = report["deployments"][d["name"]]
+
+
+# ------------------------------------------------------------------ group: passthrough (1.3)
+# Workloads at /x/<name>: scripts/accept_x.py's app and checks, as a process on the CPU machine and in a
+# container on the GPU machine (when it has a container engine).
+X_ROLES = (("cpu", "process"), ("gpu", "container"))
+
+
+@group("passthrough", "workloads at /x/<name>: keys, paths, headers, streaming, limits, the key guard, usage")
+def group_passthrough(run: Run) -> None:
+    sys.path.insert(0, str(HERE))
+    import accept_m3
+    import accept_x
+
+    accept_m3.TLS = run.tls
+    c = run.admin
+    for role, kind in X_ROLES:
+        m = run.machine(role)
+        if m is None:
+            run.skip(f"/x/ {kind} workload", f"no --{role}-machine given")
+            continue
+        m = run.fresh_machine(role)
+        if "workload_guard" not in (m.get("features") or []):
+            run.skip(f"{m['name']}: /x/ {kind} workload", "its agent does not list workload_guard (older than 1.3)")
+            continue
+        if not ((m.get("runtime_info") or {}).get(kind) or {}).get("ok"):
+            run.skip(f"{m['name']}: /x/ {kind} workload", f"no {kind} runtime there")
+            continue
+        w = workload(run, accept_x.spec_for(kind, run.name(f"x-{kind}"), m))
+        t0 = time.monotonic()
+        try:
+            w = wait_status(run, w["id"], ("running", "failed"), run.args.timeout)
+        except Fail as e:
+            run.check(f"{w['name']}: ready on {m['name']}", False, str(e))
+            continue
+        if not run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running",
+                         f"{replicas_text(w)} after {fmt_seconds(time.monotonic() - t0)}"):
+            continue
+
+        def new_key(what: str, body: dict, kind=kind) -> str:
+            return run.new_key(f"x-{kind}-{what}", **body)["key"]
+
+        out = accept_x.exercise(c, run.args.server, w, run.check, new_key)
+        run.report.info.setdefault("passthrough", {})[w["name"]] = out.get("usage")
 
 
 @group("console", "the web console in a browser, as an admin and as a plain user")

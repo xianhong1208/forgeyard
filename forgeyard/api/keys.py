@@ -16,6 +16,10 @@ else's key is locked; null unlocks it and sets the server's default again.
 And for a key's monthly cloud budget (`budget_micros`, micro-USD; forgeyard/gateway/budgets.py): its
 owner may set or remove it; an admin's value on someone else's key is locked; null removes it (no
 budget) and unlocks it.
+
+And for a key's `workloads` setting (1.3): which workloads exposed at /x/<name> it may call, none (the
+default, and every key from before 1.3), listed (the names in `workload_list`) or all. Its owner may
+set it; an admin's value on someone else's key is locked; null unlocks it and sets none again.
 """
 
 from __future__ import annotations
@@ -31,16 +35,18 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
 from forgeyard.api.tls import trust_page
-from forgeyard.db import ApiKey, Deployment, GatewayRoute, as_utc, get_db, utcnow
+from forgeyard.db import ApiKey, Deployment, GatewayRoute, Workload, as_utc, get_db, utcnow
 from forgeyard.models import routes as mroutes
 from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
+from forgeyard.workloads import expose as wexpose
 
 router = APIRouter(prefix="/api", tags=["keys"])
 
 MAX_MODELS = 64
 MAX_LIMIT = 100_000_000
 Cloud = Literal["off", "fallback", "on"]
+Workloads = Literal["none", "listed", "all"]
 MAX_BUDGET = 10**15        # micro-USD: a billion dollars
 
 
@@ -55,6 +61,9 @@ class KeyIn(BaseModel):
     cloud: Optional[Cloud] = None
     # Monthly cloud budget in micro-USD; None: no budget.
     budget_micros: Optional[int] = Field(default=None, ge=0, le=MAX_BUDGET)
+    # Exposed workloads (/x/, 1.3); None: none. `workload_list` with "listed" only.
+    workloads: Optional[Workloads] = None
+    workload_list: Optional[list[str]] = Field(default=None, max_length=MAX_MODELS)
 
 
 class KeyPatchIn(BaseModel):
@@ -64,6 +73,8 @@ class KeyPatchIn(BaseModel):
     tpm: Optional[int] = Field(default=None, ge=1, le=MAX_LIMIT)
     cloud: Optional[Cloud] = None
     budget_micros: Optional[int] = Field(default=None, ge=0, le=MAX_BUDGET)
+    workloads: Optional[Workloads] = None
+    workload_list: Optional[list[str]] = Field(default=None, max_length=MAX_MODELS)
 
 
 class CloudIn(BaseModel):
@@ -94,9 +105,12 @@ def key_status(k: ApiKey) -> str:
 
 
 LIMIT_NAMES = {"rpm": "requests-per-minute", "tpm": "tokens-per-minute", "cloud": "cloud",
-               "budget_micros": "monthly budget"}
+               "budget_micros": "monthly budget", "workloads": "workloads"}
 # A value an admin may lock on someone else's key -> the column that says who locked it.
-LOCKS = {"rpm": "rpm_locked_by", "tpm": "tpm_locked_by", "cloud": "cloud_locked_by", "budget_micros": "budget_locked_by"}
+LOCKS = {"rpm": "rpm_locked_by", "tpm": "tpm_locked_by", "cloud": "cloud_locked_by", "budget_micros": "budget_locked_by",
+         "workloads": "workloads_locked_by"}
+# Sent with `workloads` and locked with it: the names of a "listed" key.
+WITH_WORKLOADS = "workload_list"
 
 
 def budget_out(budget: Optional[int], spent: int, reserved: int) -> dict:
@@ -121,6 +135,8 @@ def key_out(k: ApiKey, limits: dict, spend: Optional[gbudgets.Spend] = None, *, 
         "user": {"id": k.user_id, "username": k.user.username if k.user else None},
         "this_minute": {"requests": requests, "tokens": tokens},
         "budget_locked_by": k.budget_locked_by,
+        "workloads": gkeys.workloads_level(k.workloads), "workload_list": k.workload_list,
+        "workloads_locked_by": k.workloads_locked_by,
         "budget": budget_out(k.budget_micros, spend.spent.get(("key", k.id), 0), spend.held.get(("key", k.id), 0)),
     }
 
@@ -136,6 +152,30 @@ def _models(db: DbSession, names: Optional[list[str]]) -> Optional[list[str]]:
     if unknown:
         raise fail(422, "unknown_model", f"No deployment serves {unknown[0]!r}.")
     return clean
+
+
+def _workloads(db: DbSession, level: Optional[str], names: Optional[list[str]]) -> tuple[str, Optional[list[str]]]:
+    """A key's workloads setting, checked: (level, the names for "listed", else None)."""
+    level = gkeys.workloads_level(level)
+    if level != "listed":
+        if names:
+            raise fail(422, "workload_list_unused", "List workloads only with the setting 'listed'.")
+        return level, None
+    clean = sorted({n.strip() for n in names or [] if n and n.strip()})
+    if not clean:
+        raise fail(422, "no_workloads", "Choose at least one workload, or allow none or all of them.")
+    known = set(db.scalars(select(Workload.name).where(Workload.name.in_(clean), Workload.runtime != "model")).all())
+    unknown = [n for n in clean if n not in known]
+    if unknown:
+        raise fail(422, "unknown_workload", f"No workload is named {unknown[0]!r}.")
+    return level, clean
+
+
+def workload_choices(db: DbSession) -> list[dict]:
+    """The service workloads a key's list can name, and whether each is exposed now."""
+    rows = db.scalars(select(Workload).where(Workload.runtime != "model", Workload.kind == "service")
+                      .order_by(Workload.name)).all()
+    return [{"name": w.name, "exposed": wexpose.of(w) is not None, "path": wexpose.url_path(w.name)} for w in rows]
 
 
 def _get(db: DbSession, key_id: str, caller: Caller) -> ApiKey:
@@ -177,7 +217,8 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
             "person_budget": budget_out(me.budget_micros, spend.spent.get(("person", me.id), 0),
                                         spend.held.get(("person", me.id), 0)),
             "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
-            "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows]}
+            "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows],
+            "workloads": workload_choices(db)}
 
 
 @router.post("/keys", status_code=201)
@@ -187,15 +228,17 @@ def create_key(body: KeyIn, request: Request, caller: Caller = Depends(current),
     _check_own(caller, caller.user.id, limits, body.rpm, body.tpm, body.cloud, cloud_settings["max"])
     models = _models(db, body.models)
     cloud = body.cloud or cloud_settings["default"]
+    workloads, workload_list = _workloads(db, body.workloads, body.workload_list)
     raw, prefix, digest = gkeys.new_key()
     k = ApiKey(user_id=caller.user.id, name=body.name.strip(), prefix=prefix, hash=digest, models=models,
-               rpm=body.rpm, tpm=body.tpm, cloud=cloud, budget_micros=body.budget_micros,
+               rpm=body.rpm, tpm=body.tpm, cloud=cloud, budget_micros=body.budget_micros, workloads=workloads,
+               workload_list=workload_list,
                expires_at=utcnow() + timedelta(days=body.expires_in_days) if body.expires_in_days else None)
     db.add(k)
     db.flush()
     audit.record(db, "api_key.created", actor=caller.user, target=k.name, ip=caller.ip, key=k.public_id,
                  prefix=prefix, models=models, rpm=body.rpm, tpm=body.tpm, cloud=cloud,
-                 budget_micros=body.budget_micros, expires_at=k.expires_at.isoformat()
+                 budget_micros=body.budget_micros, workloads=workloads, workload_list=workload_list, expires_at=k.expires_at.isoformat()
                  if k.expires_at else None)
     db.commit()
     db.refresh(k)
@@ -209,26 +252,37 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
     k = _get(db, key_id, caller)
     own = k.user_id == caller.user.id
     fields = body.model_fields_set
-    if not own and fields - set(LOCKS):
-        raise fail(403, "forbidden", "On someone else's key an admin changes only the limits, the cloud setting and "
-                                     "the budget.")
+    if not own and fields - set(LOCKS) - {WITH_WORKLOADS}:
+        raise fail(403, "forbidden", "On someone else's key an admin changes only the limits, the cloud setting, "
+                                     "the budget and the workloads setting.")
     if k.revoked_at is not None:
         raise fail(409, "revoked", "This key was revoked.")
     limits = gkeys.get_limits(db)
     admin = caller.user.role == "admin"
-    fields_ = ("name", "models", *LOCKS, *LOCKS.values())
+    fields_ = ("name", "models", *LOCKS, WITH_WORKLOADS, *LOCKS.values())
     before = {f: getattr(k, f) for f in fields_}
     cloud_settings = gkeys.get_cloud(db)
-    new = {name: getattr(body, name) for name in LOCKS if name in fields}
+    new = {name: getattr(body, name) for name in LOCKS if name in fields and name != "workloads"}
     if "cloud" in new and new["cloud"] is None and not admin:
         new["cloud"] = cloud_settings["default"]  # "the default", for a user
+    if "workloads" in fields or WITH_WORKLOADS in fields:
+        # One setting: the level and, for "listed", its names. null (an admin's) unlocks it: none again.
+        level = body.workloads if "workloads" in fields else k.workloads
+        names = body.workload_list if WITH_WORKLOADS in fields else (k.workload_list if level == "listed" else None)
+        wanted = _workloads(db, level, names)
+        if wanted != (gkeys.workloads_level(k.workloads), k.workload_list) or (admin and "workloads" in fields):
+            new["workloads"] = wanted if not ("workloads" in fields and body.workloads is None) else ("none", None)
     if not admin:
         # Only values that change count: a form that sends a locked value back unchanged is fine.
-        new = {name: v for name, v in new.items() if v != getattr(k, name)}
+        def now(name: str):
+            return (gkeys.workloads_level(k.workloads), k.workload_list) if name == "workloads" else getattr(k, name)
+
+        new = {name: v for name, v in new.items() if v != now(name)}
         for name in new:
             by = getattr(k, LOCKS[name])
             if by:
-                what = {"cloud": "cloud setting", "budget_micros": "monthly budget"}.get(name, f"{LIMIT_NAMES[name]} limit")
+                what = {"cloud": "cloud setting", "budget_micros": "monthly budget",
+                        "workloads": "workloads setting"}.get(name, f"{LIMIT_NAMES[name]} limit")
                 raise fail(403, "limit_locked", f"An admin ({by}) set this key's {what}; only an admin can change "
                                                 "it. You can still revoke the key.")
     _check_own(caller, k.user_id, limits, new.get("rpm"), new.get("tpm"), new.get("cloud"), cloud_settings["max"])
@@ -237,8 +291,12 @@ def change_key(key_id: str, body: KeyPatchIn, caller: Caller = Depends(current),
     if "models" in fields:
         k.models = _models(db, body.models)
     for name, value in new.items():
-        # A key always has a cloud setting: clearing it means the server's default for new keys.
-        setattr(k, name, cloud_settings["default"] if name == "cloud" and value is None else value)
+        if name == "workloads":
+            k.workloads, k.workload_list = value
+            value = None if "workloads" in fields and body.workloads is None else value
+        else:
+            # A key always has a cloud setting: clearing it means the server's default for new keys.
+            setattr(k, name, cloud_settings["default"] if name == "cloud" and value is None else value)
         if admin:
             # On someone else's key an admin's value is locked for its owner; clearing it unlocks.
             # On their own key there is nobody to lock it against.

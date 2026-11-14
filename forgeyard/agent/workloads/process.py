@@ -284,7 +284,10 @@ class ProcessRuntime:
         exe = command if "/" in command else shutil.which(command, path=env.get("PATH", plan.BASIC_PATH))
         if not exe or not os.path.isfile(exe):
             raise StartError(f"command not found: {rt.command}")
-        args = plan.substitute(rt.args, env, extra)
+        # 1.3: ${BIND_ADDRESS} in a plain process's arguments too: loopback behind the key guard (a workload
+        # exposed at /x/), else the agent's own address. (Its environment values stay as declared.)
+        bind_value = {"BIND_ADDRESS": plan.LOOPBACK if plan.guarded(rec.ports) else address}
+        args = plan.substitute(rt.args, env, extra if extra is not None else bind_value)
         exit_file = home / EXIT_FILE
         exit_file.unlink(missing_ok=True)
         cwd = rt.workdir or str(home)

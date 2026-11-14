@@ -1,5 +1,10 @@
 """Workloads: everyone signed in can look; admins and operators create, stop, start and delete.
 
+A service workload can be exposed behind the gateway at /x/<name> (1.3, forgeyard/workloads/expose.py):
+`gateway` beside the spec when it is created, or PUT /api/workloads/{id}/gateway at any time. Exposing
+a running workload restarts its replicas behind the agent's key guard; turning it off closes /x/ at
+once (the guard stays until the workload is restarted). Both are audited.
+
 Creating a workload runs code on a machine, so it is limited to the roles trusted with that.
 People with the `user` role see workloads and their status, but not environment values or
 logs (either may hold secrets).
@@ -7,19 +12,19 @@ logs (either may hold secrets).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
-from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_operator
+from forgeyard.api.deps import Caller, can_run_workloads, current, fail, public_base, require_operator
 from forgeyard.db import Node, Replica, Workload, WorkloadEvent, get_db, utcnow
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import FEATURE_WORKLOADS, PROTOCOL_VERSION
-from forgeyard.workloads import placement, state as wstate
+from forgeyard.workloads import expose, placement, state as wstate
 from forgeyard.workloads.spec import WorkloadSpec, env_masked
 
 router = APIRouter(prefix="/api/workloads", tags=["workloads"])
@@ -37,6 +42,22 @@ def _validation_message(e: ValidationError) -> tuple[str, list[dict]]:
     first = errors[0] if errors else {"field": "", "message": "invalid"}
     text = f"{first['field']}: {first['message']}" if first["field"] else first["message"]
     return text, errors
+
+
+def parse_gateway(spec: dict, body: Any) -> expose.Exposure:
+    if body is None:
+        return expose.Exposure()
+    if not isinstance(body, dict):
+        raise fail(422, "invalid_gateway", "gateway: send an object such as {\"expose\": true}.")
+    try:
+        value = expose.Exposure.model_validate(body)
+    except ValidationError as e:
+        text, errors = _validation_message(e)
+        raise fail(422, "invalid_gateway", f"gateway.{text}", errors=errors) from None
+    problem = expose.check(spec, value)
+    if problem:
+        raise fail(422, "cannot_expose", f"gateway: {problem}.")
+    return value
 
 
 def parse_spec(body: Any) -> WorkloadSpec:
@@ -66,6 +87,19 @@ def replica_out(r: Replica) -> dict:
     }
 
 
+def gateway_out(w: Workload) -> Optional[dict]:
+    """How the workload is exposed at /x/ (None for a model deployment's workload)."""
+    if w.runtime == "model":
+        return None
+    value = expose.settings_of(w)
+    exposed = expose.of(w) is not None
+    guarded = [r.ordinal for r in w.replicas if r.secret and expose.can_guard(r.node)]
+    unguarded = [r.ordinal for r in w.replicas if r.node is not None and not r.final and exposed
+                 and not (r.secret and expose.can_guard(r.node))]
+    return {**value.model_dump(), "exposed": exposed, "path": expose.url_path(w.name),
+            "port_name": expose.port_name(w, value), "guarded": guarded, "unguarded": unguarded}
+
+
 def workload_out(w: Workload, caller: Caller, *, detail: bool = False) -> dict:
     spec = dict(w.spec)
     if not can_run_workloads(caller.user):
@@ -74,7 +108,7 @@ def workload_out(w: Workload, caller: Caller, *, detail: bool = False) -> dict:
         "id": w.id, "name": w.name, "kind": w.kind, "runtime": w.runtime, "desired_state": w.desired_state,
         "generation": w.generation, "created_by": w.created_by, "created_at": w.created_at,
         "updated_at": w.updated_at, "spec": spec, **wstate.summary(w),
-        "replica_list": [replica_out(r) for r in w.replicas],
+        "replica_list": [replica_out(r) for r in w.replicas], "gateway": gateway_out(w),
     }
     if w.runtime == "model":
         from sqlalchemy.orm import object_session
@@ -115,6 +149,7 @@ def list_workloads(caller: Caller = Depends(current), db: DbSession = Depends(ge
 
 @router.post("", status_code=201)
 def create_workload(body: Any = Body(...), caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+    gateway_in = body.pop("gateway", None) if isinstance(body, dict) else None
     spec = parse_spec(body)
     if spec.runtime_type == "model":
         raise fail(422, "invalid_spec", "runtime: model workloads are created as deployments (/api/deployments)")
@@ -124,14 +159,17 @@ def create_workload(body: Any = Body(...), caller: Caller = Depends(require_oper
         node = db.scalar(select(Node).where(Node.id == spec.machine_id).options(selectinload(Node.accelerators)))
         if node is None:
             raise fail(404, "machine_not_found", "No such machine.")
-        problem = placement.runtime_problem(node, spec)
+    data = spec.model_dump(mode="json")
+    gateway = parse_gateway(data, gateway_in) if spec.runtime_type != "model" else expose.Exposure()
+    if spec.machine_id is not None:
+        problem = placement.runtime_problem(node, spec, gateway.expose)
         if problem is None and spec.resources.gpus.indices is not None:
             _, problem = placement.choose_gpus(node, spec, {})  # cards that do not exist or are not allowed
         if problem:
             raise fail(422, "cannot_place", f"{node.name} cannot run this: {problem}.")
-    data = spec.model_dump(mode="json")
     w = Workload(name=spec.name, kind=spec.kind, runtime=spec.runtime_type, spec=data, desired_state="running",
-                 generation=1, owner_id=caller.user.id, created_by=caller.user.username)
+                 generation=1, owner_id=caller.user.id, created_by=caller.user.username,
+                 gateway=gateway.model_dump() if gateway.expose else None)
     db.add(w)
     db.flush()
     for i in range(spec.replicas):
@@ -140,7 +178,8 @@ def create_workload(body: Any = Body(...), caller: Caller = Depends(require_oper
     gpus = spec.resources.gpus
     audit.record(db, "workload.created", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id,
                  kind=w.kind, runtime=w.runtime, machine_id=spec.machine_id, replicas=spec.replicas,
-                 gpus=gpus.indices if gpus.indices is not None else gpus.count or 0)
+                 gpus=gpus.indices if gpus.indices is not None else gpus.count or 0,
+                 exposed=expose.url_path(w.name) if gateway.expose else None)
     db.commit()
     placement.place_and_poke(db)
     db.expire_all()
@@ -149,10 +188,46 @@ def create_workload(body: Any = Body(...), caller: Caller = Depends(require_oper
 
 
 @router.get("/{workload_id}")
-def get_workload(workload_id: int, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+def get_workload(workload_id: int, request: Request, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+    from forgeyard.api.tls import trust_page
+
     w = _get(db, workload_id)
     return {"workload": workload_out(w, caller), "events": _events(db, w), "server_time": utcnow(),
-            "can_manage": can_run_workloads(caller.user)}
+            "can_manage": can_run_workloads(caller.user), "gateway_base": public_base(request),
+            "trust_url": trust_page(request)}
+
+
+@router.put("/{workload_id}/gateway")
+def set_gateway(workload_id: int, body: Any = Body(...), caller: Caller = Depends(require_operator),
+                db: DbSession = Depends(get_db)):
+    """Expose the workload at /x/<name> (or stop exposing it), and its limits. A running workload that
+    becomes exposed gets an internal key per replica: its agent restarts it behind the key guard."""
+    w = _get(db, workload_id)
+    if w.runtime == "model":
+        raise fail(422, "cannot_expose", "A model deployment is served at /v1, not /x/.")
+    value = parse_gateway(w.spec, body)
+    before = expose.settings_of(w).model_dump()
+    was = expose.of(w) is not None
+    w.gateway = value.model_dump() if value.expose or w.gateway else None
+    w.updated_at = utcnow()
+    nodes: set[int] = set()
+    if value.expose and not was:
+        for r in w.replicas:
+            if r.node_id is not None and not r.final and expose.can_guard(r.node):
+                expose.give_key(r)  # the agent restarts it behind its key guard
+                nodes.add(r.node_id)
+        wstate.event(db, w, "exposed", f"Exposed at {expose.url_path(w.name)} by {caller.user.username}.")
+    elif was and not value.expose:
+        wstate.event(db, w, "unexposed", f"No longer exposed at {expose.url_path(w.name)} (by {caller.user.username}); "
+                                         "its key guard stays until it is restarted.")
+    after = value.model_dump()
+    if before != after:
+        audit.record(db, "workload.gateway_changed", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id,
+                     before=before, after=after)
+    db.commit()
+    _poke(nodes)
+    db.expire_all()
+    return {"workload": workload_out(_get(db, workload_id), caller)}
 
 
 @router.post("/{workload_id}/stop")

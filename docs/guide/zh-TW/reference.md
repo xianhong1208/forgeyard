@@ -421,6 +421,74 @@ local_dirs = ["/data/models"]
 - **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
 - **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
 
+## 直通（/x/）
+
+程式以 **Workloads** 設定允許的 API 金鑰，在 `https://<server>:7860/x/<name>/<path>?<query>` 呼叫公開的工作負載。和 `/v1` 一樣只接受 `Authorization: Bearer fyk_…`：不接受 cookie、不接受放在查詢字串裡的金鑰、不送 CORS 標頭。
+
+### 路徑與方法
+
+| 項目 | 規則 |
+|---|---|
+| 方法 | `GET`、`HEAD`、`POST`、`PUT`、`PATCH`、`DELETE`、`OPTIONS` |
+| 前綴 | `/x/<name>` 會被拿掉：`/x/<name>/a/b?c=1` 到工作負載那邊是 `/a/b?c=1`，只有 `/x/<name>` 則是 `/` |
+| 路徑 | 原封不動、逐位元組轉送。以下情況回 400 `invalid_path` 拒絕，絕不正規化：`.` 或 `..` 路徑段、編碼過的 `.`、`/` 或 `\`（`%2e`、`%2f`、`%5c`）、反斜線、控制字元（原始或編碼過的）以及非 ASCII 位元組 |
+| 查詢字串 | 原封不動轉送 |
+| 不轉送 | WebSocket（`Upgrade` 會被拿掉）、gRPC、到工作負載的 HTTP/2 |
+
+### 請求與回應標頭
+
+| 標頭 | 方向 | 會怎樣 |
+|---|---|---|
+| `Authorization` | 請求 | 檢查你的 API 金鑰後拿掉；工作負載收到的是副本的內部金鑰，由 agent 的金鑰守門員檢查後拿掉 |
+| `Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP`、`X-Forgeyard-*` | 請求 | 拿掉 |
+| `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host` | 請求 | 重新設定：用戶端的位址、`https` 或 `http`，以及它呼叫的主機 |
+| `X-Forwarded-Prefix` | 請求 | `/x/<name>` |
+| `X-Request-Id` | 雙向 | 每個請求一個新 id，送給工作負載，也回給用戶端 |
+| 逐跳標頭（`Connection` 和它列出的標頭、`Keep-Alive`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`、`Expect`、`Proxy-*`） | 雙向 | 拿掉 |
+| `Set-Cookie`、`Access-Control-*`、`Strict-Transport-Security`、`Clear-Site-Data`、`Alt-Svc`、`Service-Worker-Allowed`、`Report-To`、`NEL`、`Date`、`Server` | 回應 | 拿掉（伺服器會送它自己的 `Date` 和 `Server`） |
+| `Content-Security-Policy` | 回應 | 一律是 `sandbox; default-src 'none'; frame-ancestors 'none'` |
+| `X-Content-Type-Options`、`X-Frame-Options`、`Cache-Control`、`Cross-Origin-Resource-Policy`、`Referrer-Policy` | 回應 | 一律是 `nosniff`、`DENY`、`no-store`、`same-origin` 和 `no-referrer` |
+| `Location`、`Content-Location` | 回應 | 路徑，或指向工作負載自己的位址，會改寫到 `/x/<name>` 底下；其他網站和相對參照不變。絕不跟隨轉址 |
+| `X-Forgeyard-Target` | 回應 | `workload:<name>#<replica>` |
+| `Content-Encoding`、`Content-Length` 和其他標頭 | 回應 | 照樣轉送：本文以原始位元組、一到就轉送（壓縮的本文維持壓縮；SSE 和 chunked 回應會串流） |
+
+### 限制與逾時
+
+| 限制 | 預設值 | 在哪裡設定 |
+|---|---|---|
+| 最大請求本文 | 32 MiB（超過回 413 `request_too_large`） | 工作負載：**Largest request (MiB)**，1 到 1,024 |
+| 等回應每一段的時間 | 600 秒（第一個位元組之前逾時回 504 `upstream_timeout`） | 工作負載：**Read timeout (s)**，1 到 3,600 |
+| 連到副本 | `GATEWAY_CONNECT_TIMEOUT`（5 秒）；連不到的副本會跳過，改試下一個 | 伺服器 |
+| 每個副本同時處理的請求 | 不限（每個副本都滿了時回 429 `workload_busy`） | 工作負載 |
+| 每把金鑰同時進行的請求 | 不限（429 `key_busy`） | 工作負載 |
+| 每分鐘請求數 | 金鑰自己的限制（429 `rate_limit_exceeded`）；每分鐘 token 數不適用 | 金鑰 |
+
+每個 429 都帶 `Retry-After`。用戶端離開時，到工作負載的請求會立刻關閉。
+
+**Usage** 把每個請求記在模型 `x:<name>` 底下：請求數、錯誤（包括回應本身的 5xx）、被限制的請求、送進的位元組（請求本文）和送出的位元組（實際送出的回應本文）、忙碌時間（從送出請求到回應結束）和延遲。
+
+### /x/ 的錯誤
+
+閘道產生的錯誤和 `/v1` 的格式相同。工作負載本身的回應，包括 401 或 5xx，會原樣轉送。
+
+| 狀態碼 | `code` | 意思 | 怎麼處理 |
+|---|---|---|---|
+| 400 | `invalid_path` | 路徑有 `.` 路徑段、編碼過的 `.`、`/` 或 `\`、反斜線、控制字元或非 ASCII 位元組 | 不要送這些 |
+| 401 | `missing_api_key`、`invalid_api_key`、`revoked_api_key`、`expired_api_key`、`account_disabled` | 和 `/v1` 相同 | 和 `/v1` 相同 |
+| 403 | `workloads_not_allowed` | 金鑰的 **Workloads** 設定是 *None* | 修改金鑰的設定 |
+| 404 | `workload_not_found` | 對這把金鑰來說沒有這個公開的工作負載：不存在、沒有公開，或不在金鑰的清單裡 | 檢查名稱和金鑰的清單 |
+| 413 | `request_too_large` | 本文超過工作負載的 **Largest request** | 少送一點，或調高限制 |
+| 429 | `rate_limit_exceeded` | 超過金鑰的每分鐘請求數 | 等 `Retry-After` 秒 |
+| 429 | `workload_busy` | 每個副本進行中的請求都達到 **Requests at once per replica** | 等 `Retry-After` 秒，或增加副本 |
+| 429 | `key_busy` | 這把金鑰對這個工作負載進行中的請求達到 **Requests at once per key** | 等其中一個完成 |
+| 502 | `upstream_unreachable` | 連不到任何副本（它的程式停了或正在重啟） | 看工作負載的輸出 |
+| 502 | `upstream_error` | 送到副本的請求失敗 | 重試 |
+| 502 | `replica_refused_key` | 副本的金鑰守門員拒絕了閘道的內部金鑰 | 停止再啟動工作負載 |
+| 503 | `no_ready_replica` | 工作負載已停止、沒有副本就緒，或有副本還不在金鑰守門員後面；訊息會說是哪一種 | 啟動它、等一下，或更新 agent |
+| 504 | `upstream_timeout` | 在工作負載的 **Read timeout** 內沒有回應 | 調高逾時，或檢查工作負載 |
+
+已經開始的回應如果中斷，狀態碼就無法再改：連線會在本文完整之前關閉，所以用戶端絕不會把被截斷的本文當成完整的。
+
 ## 工作負載的環境變數
 
 工作負載的副本從空的環境開始，只拿到它的規格宣告的變數，再加上：
@@ -435,7 +503,7 @@ local_dirs = ["/data/models"]
 | `ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES` | AMD：只有它自己的卡 |
 | `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及工作負載帳號 |
 
-規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。
+規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面（公開在 `/x/` 的工作負載）是 `127.0.0.1`，否則是 agent 自己的位址。
 
 ## Setup health 檢查
 

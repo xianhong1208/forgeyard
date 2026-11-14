@@ -5,7 +5,9 @@ LAN or VPN. An agent on each machine reports its hardware; you run services and 
 deploy models from recipes behind one OpenAI-compatible gateway at `/v1`, with API keys, limits
 and usage statistics. Vision models read images in chat, fetched by the gateway, never by the engine. Speech models
 turn text into speech at `/v1/audio/speech` (Qwen3-TTS in Chinese and English, small English voices on a CPU). Image
-models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs). Cloud model APIs can sit behind the same gateway, local first, with cost
+models make images at `/v1/images/generations` (vLLM-Omni on NVIDIA, stable-diffusion.cpp on AMD and CPUs). Any other
+service (detection, segmentation, a Triton or FastAPI model) can be exposed at `/x/<name>/…` behind the same keys, limits
+and usage. Cloud model APIs can sit behind the same gateway, local first, with cost
 tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
@@ -19,7 +21,8 @@ tracking and monthly budgets.
 > progress) adds more kinds of models; first, images in chat on vLLM and llama.cpp (Qwen3-VL and
 > similar), with the catalog showing each model's licence, then llama.cpp b12242 with a built-in
 > Vulkan variant for AMD APUs, then text to speech with three engines (vLLM-Omni Qwen3-TTS, llama.cpp
-> TTS GGUFs, speaches Kokoro), then image generation (vLLM-Omni, stable-diffusion.cpp). See [CHANGELOG.md](CHANGELOG.md) and
+> TTS GGUFs, speaches Kokoro), then image generation (vLLM-Omni, stable-diffusion.cpp), then the generic
+> passthrough: any service workload's HTTP API behind the gateway at `/x/<name>`. See [CHANGELOG.md](CHANGELOG.md) and
 > [ROADMAP.md](ROADMAP.md).
 
 ## The guide
@@ -175,6 +178,7 @@ project.
 | `forgeyard/gateway/media.py` | images, audio and video in chat: parts rebuilt, media URLs fetched under the egress rules |
 | `forgeyard/gateway/speech.py` | text to speech: request checks, voice cloning refused, what each engine is given, the audio's length |
 | `forgeyard/gateway/imagegen.py` | image generation: request checks, per-deployment caps, what each engine is given, the queue, the answer and its size |
+| `forgeyard/gateway/passthrough.py` | the generic passthrough at `/x/<name>`: paths refused, headers dropped and forced, the answer as raw bytes, limits, usage |
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
@@ -196,6 +200,7 @@ project.
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
+| `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |
 

@@ -668,6 +668,7 @@ def client() -> httpx.AsyncClient:
             timeout=httpx.Timeout(connect=s.gateway_connect_timeout, read=s.gateway_read_timeout, write=60.0, pool=30.0),
             limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
             trust_env=False,          # replicas are on the LAN: never through a proxy from the environment
+            cookies=egress.no_cookies(),  # shared by every request: a cookie one upstream set is never kept
             follow_redirects=False)
         _clients[id(loop)] = (loop, c)
         entry = (loop, c)

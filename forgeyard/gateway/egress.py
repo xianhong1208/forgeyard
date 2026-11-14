@@ -21,6 +21,7 @@ client for replicas on the LAN.
 from __future__ import annotations
 
 import asyncio
+import http.cookiejar
 import ipaddress
 import socket
 import ssl
@@ -196,6 +197,13 @@ def _ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+def no_cookies() -> http.cookiejar.CookieJar:
+    """A cookie jar that keeps nothing. The gateway's HTTP clients are shared by every request: a cookie
+    one upstream set (a replica, a workload at /x/, a provider) must never ride along on someone
+    else's next request."""
+    return http.cookiejar.CookieJar(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+
+
 def client() -> httpx.AsyncClient:
     loop = asyncio.get_running_loop()
     entry = _clients.get(id(loop))
@@ -208,6 +216,7 @@ def client() -> httpx.AsyncClient:
             verify=_ssl_context(),
             trust_env=False,           # never HTTPS_PROXY & co. from the environment
             proxy=s.egress_proxy.strip() or None,
+            cookies=no_cookies(),      # nothing a provider sets is kept for the next request
             follow_redirects=False)    # a key is never sent on to a redirect target
         _clients[id(loop)] = (loop, c)
         entry = (loop, c)

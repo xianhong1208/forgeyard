@@ -31,6 +31,7 @@ from forgeyard.machines.protocol import (
     FEATURE_MODELS,
     FEATURE_REPLICA_GUARD,
     FEATURE_REPLICA_KEYS,
+    FEATURE_WORKLOAD_GUARD,
     FEATURE_WORKLOADS,
     JOIN_PATH,
     PROTOCOL_VERSION,
@@ -148,7 +149,7 @@ class Agent:
                "inventory": {"accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}
         if self.supervisor is not None:
             msg["features"] = [FEATURE_WORKLOADS, FEATURE_REPLICA_KEYS, FEATURE_REPLICA_GUARD, FEATURE_IMAGE_IDS,
-                               FEATURE_ENGINE_ZIP]
+                               FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD]
             msg["runtimes"] = self.supervisor.available()
             msg["runtime_info"] = self.supervisor.runtime_info()
             cache = self.supervisor.model_cache_info()

@@ -154,9 +154,9 @@ def container_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict],
 
 
 def substitute(args: list[str], env: dict[str, str], extra: Optional[dict[str, str]] = None) -> list[str]:
-    """${PORT} and ${PORT_<NAME>} in arguments become the assigned ports, and for model replicas
-    ${MODEL_PATH}, ${MODEL_FILE}, ${MODEL_HUB} and ${BIND_ADDRESS} the model's paths and the bind
-    address; nothing else is expanded."""
+    """${PORT} and ${PORT_<NAME>} in arguments become the assigned ports, ${BIND_ADDRESS} the address
+    to listen on (127.0.0.1 behind the key guard), and for model replicas ${MODEL_PATH}, ${MODEL_FILE}
+    and ${MODEL_HUB} the model's paths; nothing else is expanded."""
     values = {**env, **(extra or {})}
     return [_PORT_REF.sub(lambda m: values.get(m.group(1), m.group(0)), a) for a in args]
 

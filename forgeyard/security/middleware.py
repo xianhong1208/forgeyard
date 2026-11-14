@@ -11,8 +11,8 @@
 4. Security headers on every answer; Strict-Transport-Security only with your own certificate
    (see hsts()).
 
-The gateway (`/v1/*`, M4) gets only the host check: it takes API keys, never cookies, so a
-cross-site page cannot use a browser's credentials there.
+The gateway (`/v1/*`, M4, and the passthrough `/x/*`, 1.3) gets only the host check: it takes API keys,
+never cookies, so a cross-site page cannot use a browser's credentials there.
 
 GuardMiddleware only sees HTTP requests; WebSocketHostGuard applies the same host check to
 WebSocket handshakes (the agent stream), answering 421 before anything else runs.
@@ -88,6 +88,11 @@ def same_origin(request: Request) -> bool:
     return f"{parts.scheme}://{parts.netloc.lower()}" in ours
 
 
+def is_gateway(path: str) -> bool:
+    """The gateway's paths: /v1 (models) and /x (exposed workloads, 1.3)."""
+    return path in ("/v1", "/x") or path.startswith(("/v1/", "/x/"))
+
+
 def _error(status: int, code: str, message: str, headers: dict | None = None) -> JSONResponse:
     return JSONResponse({"detail": {"code": code, "message": message}}, status_code=status, headers=headers)
 
@@ -111,7 +116,7 @@ class GuardMiddleware:
         path = scope.get("path", "")
         if not host_allowed(request.headers.get("host", "")):
             message = "This server does not answer to that host name."
-            if path == "/v1" or path.startswith("/v1/"):  # the gateway answers in OpenAI's error shape
+            if is_gateway(path):  # the gateway answers in OpenAI's error shape
                 answer = JSONResponse({"error": {"message": message, "type": "invalid_request_error", "param": None,
                                                  "code": "host_not_allowed"}}, status_code=421)
             else:
@@ -131,7 +136,7 @@ class GuardMiddleware:
                 return
         extra = [(b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"same-origin"),
                  (b"x-frame-options", b"DENY")]
-        if is_api or path.startswith("/v1/") or path == "/v1":
+        if is_api or is_gateway(path):
             extra.append((b"cache-control", b"no-store"))
         if scope.get("scheme") == "https" and hsts():
             extra.append((b"strict-transport-security", HSTS_VALUE))
