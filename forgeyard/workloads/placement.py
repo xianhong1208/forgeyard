@@ -309,10 +309,12 @@ def roll(db: DbSession) -> tuple[dict[int, tuple[int, dict[str, int]]], set[int]
 
     credits: dict[int, tuple[int, dict[str, int]]] = {}
     changed: set[int] = set()
-    rows = db.scalars(select(Workload).join(Replica, Replica.workload_id == Workload.id)
-                      .where(Workload.desired_state == "running", Replica.generation < Workload.generation,
-                             Replica.final.is_(False))
-                      .options(selectinload(Workload.replicas)).distinct().order_by(Workload.id)).all()
+    # The ids first: PostgreSQL cannot compare the JSON columns a DISTINCT over whole rows would need.
+    ids = db.scalars(select(Replica.workload_id).join(Workload, Replica.workload_id == Workload.id)
+                     .where(Workload.desired_state == "running", Replica.generation < Workload.generation,
+                            Replica.final.is_(False)).distinct()).all()
+    rows = db.scalars(select(Workload).where(Workload.id.in_(ids)).options(selectinload(Workload.replicas))
+                      .order_by(Workload.id)).all() if ids else []
     for w in rows:
         if any(not is_ready(r) for r in w.replicas if r.generation == w.generation):
             continue  # the replica restarted last is not ready yet (or failed): wait
