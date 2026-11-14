@@ -86,32 +86,32 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
 
 之後，如果 Claude 的使用者需要：Anthropic `/v1/messages` 直通，保留 prompt caching 與 thinking。
 
-## 進行中：1.3，更多種類的模型
+## 已發布：1.3.0（2026-11-14），更多種類的模型
 
-規劃為每種模型一個 pull request，每一個都完整（配方、估算、閘道、用量、Playground、文件、測試），並在真實硬體上驗收：✅ 表示已
-合併進 `dev`。
+每種模型一個（或幾個）pull request，每一個都完整（配方、估算、閘道、用量、Playground、文件、測試）。除了影片生成，每一項都在真實
+硬體上驗收過（見「尚待驗證」）。
 
 1. ✅ **多模態對話**（#4）：vLLM 與 llama.cpp 上的對話圖片（projector 檔），影片需自行開啟，以及整個 1.3 的用量單位。
 2. ✅ **llama.cpp b12242**（#9），內建 Vulkan variant，給 AMD APU 以及 ROCm 映像檔沒有支援的顯示卡使用。
 3. ✅ **文字轉語音**（#11，`/v1/audio/speech`）：NVIDIA 上的 vLLM-Omni（Qwen3-TTS）、AMD 與 CPU 上的 llama.cpp TTS GGUF，以及
    CPU 與 CUDA 上給小型英文聲音用的 speaches（Kokoro）；聲音、串流，以及用量中的字元數與音訊長度。聲音複製維持關閉。
-4. *審查中*：**圖片生成**（`/v1/images/generations`）：NVIDIA 上的 vLLM-Omni（diffusers pipeline），AMD（Vulkan）、NVIDIA
+4. ✅ **圖片生成**（#13、#44，`/v1/images/generations`）：NVIDIA 上的 vLLM-Omni（diffusers pipeline），AMD（Vulkan）、NVIDIA
    （CUDA；第一個 CUDA build 在 A100 上會當掉，已換成較新的 build，#43）與 CPU 上的 stable-diffusion.cpp；只回傳 base64，每個部署有上限與佇列，
    用量記錄圖片數、千像素與忙碌時間。不提供編輯。
-5. *審查中*：**通用直通**（`/x/<name>/…`，#23）：任何服務型工作負載的 HTTP API 都能放在閘道後面，經過 agent 的金鑰守門員（它會拿掉金鑰），
+5. ✅ **通用直通**（`/x/<name>/…`，#45）：任何服務型工作負載的 HTTP API 都能放在閘道後面，經過 agent 的金鑰守門員（它會拿掉金鑰），
    給新的 *Workloads* 設定允許的金鑰使用（預設不允許，既有的金鑰也一樣）；只提供 API（強制 CSP 沙箱），不支援 WebSocket 與 gRPC；
-   用量記錄位元組與忙碌時間。並附上使用 Forgeyard 自己 vision 映像檔的現成工作負載範本：物件偵測（RT-DETRv2）、影像分割（SAM 2.1）、
-   深度估計（Depth Anything V2 Small），只用 Apache-2.0，並在 Playground 加上試用它們的 **Vision** 分頁（#47）：
+   用量記錄位元組與忙碌時間。並附上使用 Forgeyard 自己 vision 映像檔的現成工作負載範本（#46）：物件偵測（RT-DETRv2）、影像分割（SAM 2.1）、
+   深度估計（Depth Anything V2 Small），只用 Apache-2.0，並在 Playground 加上試用它們的 **Vision** 分頁（#49）：
    框加上分數滑桿、點一下或拖一個框得到遮罩、照片旁的深度圖。
-6. *審查中*：**影片生成**（非同步的 `/v1/videos`，#24）：OpenAI 的 Videos API，以工作在 NVIDIA 上的 vLLM-Omni（Wan2.1-T2V-1.3B、Wan2.2-TI2V-5B）執行，
+6. ✅ **影片生成**（非同步的 `/v1/videos`，#50）：OpenAI 的 Videos API，以工作在 NVIDIA 上的 vLLM-Omni（Wan2.1-T2V-1.3B、Wan2.2-TI2V-5B）執行，
    每個工作留在製作它的副本上（副本重新啟動或不在時工作回報失敗），結果會過期，長度、尺寸以及每個部署與每把金鑰的工作數都有上限，
    用量記錄影片長度與 GPU 時間，並在 Playground 加上 **Video** 面板。只支援文字轉影片；圖片轉影片，以及 AMD 與 CPU 上的影片（stable-diffusion.cpp）留待之後。
 
-1.3 也會一併處理，與模型類型並行：
+1.3.0 也一併完成，與模型類型並行：
 
 - ✅ **完整回歸驗收**，在真實機器上執行 `scripts/accept_all.py`（#1），每次合併與發布前都跑。
 - ✅ **設定健康檢查**（Setup health，#3）：找出有風險或沒有作用的設定，顯示在 **Get started**、頂端列與每個頁面上。
-- ✅ **Docker Hub 上的容器映像檔**（#2）：伺服器與 agent，amd64 與 arm64，推送 release tag 時發布。
+- ✅ **Docker Hub 上的容器映像檔**（#2、#12）：伺服器與 agent，amd64 與 arm64，推送 release tag 時發布。
 - **更簡單的設定**與**部署留在原本執行的地方**移到 1.3.1（見「接下來」）。
 
 專案擁有者對 1.3 的決定（2026-11-11）：
@@ -133,7 +133,6 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
 
 | 版本 | 你會得到什麼 |
 |---|---|
-| **1.3：更多種類的模型**（進行中，見上方） | 完整支援（配方、記憶體估算、OpenAI 相容 API、金鑰、限制與用量）：**多模態對話**，也就是 vLLM 與 llama.cpp 上對話中的圖片與影片（Qwen3-VL、Gemma 等）；**文字轉語音**（`/v1/audio/speech`）；**圖片與影片生成**（`/v1/images/generations`、非同步的 `/v1/videos`）。另外還有**通用直通**：任何工作負載的 HTTP 服務都能放在閘道後面的 `/x/<name>/…`，受 API 金鑰與限制保護並計入用量，並附偵測、分割與深度估計的範本。這樣 3D、表格資料與其他任務就不需要各自的配方。 |
 | **1.3.1：修改部署，看見它在等什麼** | **編輯部署**（GPU 共用、上下文長度、同時處理的請求數、機器），它的副本會重新啟動；重新啟動的部署會先回到它之前的機器。**點出 GPU 共用：** 對話模型預設仍然獨占，但當模型只需要半張卡或更少時，部署頁面、拒絕訊息（「共用 VRAM 就放得下」）與設定顧問會說明共用就放得下。**每個下載都有進度：** 拉取引擎映像檔時會顯示已經收到多少，就像模型下載一樣；拉取只有在停止進展時才失敗，而不是固定 30 分鐘後就失敗，被取消的拉取也會說明它是被取消的。副本一直沒被它的機器接手時會有提示。**更簡單的設定：** 一個雲端政策選項、一個伺服器共用的 Hugging Face 權杖、與安裝程式一致的 agent 預設值。 |
 | **1.3.2：相依套件修正** | 網頁建置用的 lint 工具不再使用 `minimatch` < 11.0.1。 |
 | **1.3.3：README** | 以 Forgeyard 做什麼、如何安裝與快速入門為主軸重寫 README；給開發者看的程式結構移到 `docs/development.md`。 |
@@ -206,3 +205,5 @@ Forgeyard 目前執行在自己的伺服器上，每台機器一個 agent。針�
 - **在 systemd 主機上的單行安裝，以及在真實 GPU 上的 agent 映像檔。** 兩者都只在沒有 systemd 或 Docker 的容器裡跑過（安裝用替身
   `systemctl`，映像檔則在沒有 GPU 的 CI runner 上）。在真實主機上要確認：服務（`KillMode=process`：工作負載在
   `systemctl restart forgeyard-agent` 之後仍繼續執行）、映像檔中的 `--gpus all`，以及掛載了 ROCm 的 AMD。
+- **用 vLLM-Omni 生成影片**（`vllm-omni-video`）。目前只透過真實的閘道搭配替身引擎檢查過；要在 NVIDIA GPU 上確認 Wan2.1 與 Wan2.2，
+  並用那次執行校正記憶體估算。

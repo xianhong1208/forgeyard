@@ -6,10 +6,15 @@ version until 1.0.
 
 ## [Unreleased]
 
-1.3, "more kinds of models", in progress. First part: images (and, opt-in, video and audio) in chat
-through the gateway, and the usage units for all of 1.3. Third part: text to speech. Fourth part: image
-generation. Fifth part: the generic passthrough at `/x/<name>`. Sixth part: video generation at
-`/v1/videos`.
+## [1.3.0] — 2026-11-14
+
+More kinds of models behind the same gateway: images, audio and video in chat; text to speech at
+`/v1/audio/speech`; image generation at `/v1/images/generations`; video generation as jobs at
+`/v1/videos`; and any service workload's own HTTP API at `/x/<name>`, with ready-made object
+detection, segmentation and depth templates to try in the Playground's Vision tab. Also llama.cpp
+b12242 with a built-in Vulkan variant for AMD APUs, built-in recipes on machines without registry
+access, setup health checks, the server and agent images on Docker Hub, and `accept_all.py`, a full
+regression run on real machines.
 
 ### Added
 
@@ -298,8 +303,8 @@ generation. Fifth part: the generic passthrough at `/x/<name>`. Sixth part: vide
   buffers.
 - **Usage units for the whole of 1.3** (migration 0012): `media_items`, `characters`, `images`,
   `kilopixels`, `media_ms`, `bytes_in`, `bytes_out` and `busy_ms` per usage row, 0 on rows from
-  before, in `GET /api/usage`. This release fills `media_items`; **Usage** shows a Media column once
-  there are any.
+  before, in `GET /api/usage`. Chat fills `media_items` (**Usage** shows a Media column once there are
+  any); speech, images, video and the passthrough fill the others.
 - **llama.cpp on AMD GPUs through Vulkan, built in.** The `llama-cpp` recipe gains a `vulkan` variant
   (the official `server-vulkan` image, 0.3 GB, Mesa's RADV driver). AMD cards now get, in order:
   `rocm` for the Instinct cards (`gfx908`, `gfx90a`, `gfx942`, which have no Vulkan) and the discrete
@@ -316,7 +321,7 @@ generation. Fifth part: the generic passthrough at `/x/<name>`. Sixth part: vide
 - **Playground:** attach images in the chat tab (sent as `data:` URIs) and see them in the transcript.
 - Recipe parameters can be **advanced** (the deploy form's collapsed Advanced section), and a
   deployment made before a recipe gained a parameter renders its default.
-- `scripts/accept_mm.py`: the real-hardware acceptance of this part, through the API and the official
+- `scripts/accept_mm.py`: the real-hardware acceptance of media in chat, through the API and the official
   SDK, with idempotent cleanup.
 - **Container images on Docker Hub**, for linux/amd64 and linux/arm64: the server
   (`docker.io/tonyhuang1101/forgeyard`, new `Dockerfile.server`) and the agent
@@ -352,7 +357,7 @@ generation. Fifth part: the generic passthrough at `/x/<name>`. Sixth part: vide
   (still CUDA 12.8, driver ≥ 570), ROCm (7.2.1), Vulkan and CPU images, pinned by digest, and the CPU
   release archive, pinned by its SHA-256. b12242 is the first build with published images after
   llama-server gained the OpenAI-compatible `/v1/audio/speech` endpoint (ggml-org/llama.cpp#31763, in
-  b12238), which text-to-speech will use. Every flag Forgeyard passes is unchanged (checked against
+  b12238), which text to speech uses. Every flag Forgeyard passes is unchanged (checked against
   `llama-server --help` of the release). Measured on the CPU process variant (8 threads), b11977
   against b12242: Qwen3-1.7B Q4_K_M generates at the same speed within the noise of a shared machine
   (44.1 and 42.8 tokens/s in one round, 40.8 and 40.7 in the other); Qwen3-VL 2B reads an image by

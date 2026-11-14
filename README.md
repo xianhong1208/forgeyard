@@ -14,19 +14,16 @@ tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
 
-> **Status: 1.2.0.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on real machines). 1.1
+> **Status: 1.3.0.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on real machines). 1.1
 > added a first-run checklist and recommended models, HTTPS out of the box, a one-line agent install,
-> an agent container image and this guide. 1.2 puts cloud providers behind the same gateway, local
+> an agent container image and this guide. 1.2 put cloud providers behind the same gateway, local
 > first: a model spills to OpenAI, Anthropic, Gemini, Azure or OpenRouter when its replicas are busy
 > or down, only for keys allowed to send data out; each cloud request's cost is counted in US dollars,
-> and monthly budgets per key, person and provider are reserved before a request is sent. 1.3 (in
-> progress) adds more kinds of models; first, images in chat on vLLM and llama.cpp (Qwen3-VL and
-> similar), with the catalog showing each model's licence, then llama.cpp b12242 with a built-in
-> Vulkan variant for AMD APUs, then text to speech with three engines (vLLM-Omni Qwen3-TTS, llama.cpp
-> TTS GGUFs, speaches Kokoro), then image generation (vLLM-Omni, stable-diffusion.cpp), then the generic
-> passthrough: any service workload's HTTP API behind the gateway at `/x/<name>`, then video generation:
-> OpenAI's Videos API as jobs on vLLM-Omni (Wan2.1 and Wan2.2). See [CHANGELOG.md](CHANGELOG.md) and
-> [ROADMAP.md](ROADMAP.md).
+> and monthly budgets per key, person and provider are reserved before a request is sent. 1.3 adds
+> more kinds of models: images, audio and video in chat, text to speech, image generation and video
+> generation as jobs, plus any service workload's HTTP API at `/x/<name>` with ready-made vision
+> templates; llama.cpp gains a built-in Vulkan variant for AMD APUs, and the server and agent images
+> are on Docker Hub. See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
 
 ## The guide
 
@@ -66,7 +63,7 @@ and linux/arm64):
 
 ```bash
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.2.0
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.0
 sudo docker logs forgeyard      # the one-time setup token
 ```
 
