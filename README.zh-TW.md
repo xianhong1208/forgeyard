@@ -1,7 +1,7 @@
 # Forgeyard
 
 一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器。每台機器上的 agent
-回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp）。其他任何服務（偵測、分割、Triton 或 FastAPI 模型）都能公開在 `/x/<name>/…`，使用同樣的金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API，並能在 Playground 的 Vision 分頁試用。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
+回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp），影片模型在 `/v1/videos` 以非同步工作產生 MP4 影片（NVIDIA 上 vLLM-Omni 的 Wan）。其他任何服務（偵測、分割、Triton 或 FastAPI 模型）都能公開在 `/x/<name>/…`，使用同樣的金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API，並能在 Playground 的 Vision 分頁試用。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
 
 [English](README.md)
 
@@ -9,7 +9,7 @@
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
 > 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3（進行中）加入更多種類的模型；第一步是 vLLM 與 llama.cpp 上的
-> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）；然後是圖片生成（vLLM-Omni、stable-diffusion.cpp）；接著是通用直通：任何服務型工作負載的 HTTP API 都能放在閘道後面的 `/x/<name>`。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
+> 對話圖片（Qwen3-VL 等），目錄也會顯示每個模型的授權；接著是 llama.cpp b12242，內建給 AMD APU 用的 Vulkan variant；再來是文字轉語音，三種引擎（vLLM-Omni 的 Qwen3-TTS、llama.cpp 的 TTS GGUF、speaches 的 Kokoro）；然後是圖片生成（vLLM-Omni、stable-diffusion.cpp）；接著是通用直通：任何服務型工作負載的 HTTP API 都能放在閘道後面的 `/x/<name>`；然後是影片生成：OpenAI 的 Videos API，以工作在 vLLM-Omni 上執行（Wan2.1 與 Wan2.2）。見 [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
 
 ## 使用指南
 
@@ -83,7 +83,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 | 沒有 GPU 的 x86-64 | Linux | llama.cpp（Qwen3-1.7B GGUF）同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp b12242（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以程序方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
-還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
+還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，在有 systemd 的主機上用單行指令安裝，以及 vLLM-Omni 的影片生成（`vllm-omni-video`；目前只用替身引擎經過真正的閘道檢查過）。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
 
 ### 實測過的模型
 
@@ -156,6 +156,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/media.py` | 對話中的圖片、音訊與影片：重建內容區塊、依 egress 規則下載媒體網址 |
 | `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種引擎拿到什麼、音訊長度 |
 | `forgeyard/gateway/imagegen.py` | 圖片生成：檢查請求、每個部署的上限、每種引擎拿到什麼、佇列、回應與圖片尺寸 |
+| `forgeyard/gateway/videogen.py`、`videojobs.py` | 影片生成：檢查請求、每個部署的上限、工作物件；工作留在它的副本上、清掃器、過期、內容與用量 |
 | `forgeyard/gateway/passthrough.py` | `/x/<name>` 的通用直通：拒絕哪些路徑、拿掉與強制哪些標頭、以原始位元組轉送回應、限制與用量 |
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |

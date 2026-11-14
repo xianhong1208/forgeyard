@@ -202,6 +202,33 @@ engines serve them:
 - Usage counts the **images**, their **kilopixels** and the **busy time** (GPU time on a GPU).
 - Images stay on your own deployments; they never go to a cloud provider.
 
+## Video
+
+Video models answer `/v1/videos`, OpenAI's Videos API. A video takes minutes, so it is a **job**: the
+request answers at once with the job (`queued`), you poll it until it is `completed` (or `failed`), then
+fetch the MP4. One engine serves it: vLLM-Omni (recipe `vllm-omni-video`) on NVIDIA GPUs, with Wan
+text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
+
+- **A job lives on one replica.** The gateway sends it to the ready replica with the fewest jobs, and
+  asks that replica, and only that one, for its status and its file. The engine keeps its jobs in
+  memory and its files on its own disk.
+- **A replica that goes takes its jobs with it.** When the replica is stopped, moved or deleted, or its
+  engine restarts, its jobs report `failed` with the reason (`replica_gone`, `replica_restarted`,
+  `video_lost`): ask again. A finished video whose replica went answers 410 for its content.
+- **Jobs survive a server restart.** They are in the server's database and the replicas keep working;
+  the server picks them up again.
+- **Results expire.** A finished video can be fetched for the deployment's *Keep results* (1,440
+  minutes, a day); then it is deleted on the replica and its content answers 410. The engine also
+  sweeps its own old files an hour after that, in case a deletion was missed.
+- **Caps per deployment, each with a working default:** the longest video (5 s), the largest size (the
+  model's own: 832x480 for Wan2.1, 1280x704 for Wan2.2), jobs waiting or being made (8), of those one
+  key's (2), and the longest a job may take (an hour). The memory estimate is sized for the longest,
+  largest video.
+- **Text to video only** in 1.3: image-to-video references are refused.
+- **The prompt is not kept**, and a key sees only its own jobs.
+- Usage counts **one request per video**, its **length** and the **busy time** (GPU time).
+- Videos stay on your own deployments; they never go to a cloud provider.
+
 ## API keys, limits and usage
 
 - Programs call `/v1` with an **API key** (`fyk_…`). Everyone creates their own on **API keys**. A

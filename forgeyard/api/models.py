@@ -35,7 +35,7 @@ router = APIRouter(prefix="/api", tags=["models"])
 
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
 TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
-              "image": "Images"}
+              "image": "Images", "video": "Video"}
 
 
 def _engine_args(raw) -> dict:
@@ -86,6 +86,7 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "summary": model_summary(m), "recipes": compatible(m, all_recipes), "deployments": deployments,
             "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
             "voices": list((m.meta or {}).get("voices") or []), "image": image_out(m.meta or {}),
+            "video": video_out(m.meta or {}),
             **media_out(m.meta or {}, m.format)}
 
 
@@ -99,6 +100,16 @@ def image_out(meta: dict) -> Optional[dict]:
     return {"size": img.get("size"), "multiple": img.get("multiple"), "single": img.get("single"),
             "components": dict(img.get("components") or {}), "pipeline": d.get("pipeline"),
             "parts": {k: {"class": v.get("class"), "params": v.get("params")} for k, v in (d.get("components") or {}).items()}}
+
+
+def video_out(meta: dict) -> Optional[dict]:
+    """A video model's own size, frame rate and the multiple its sizes take (1.3), and its pipeline's parts."""
+    v = meta.get("video") if isinstance(meta.get("video"), dict) else None
+    if v is None:
+        return None
+    d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
+    return {"size": v.get("size"), "multiple": v.get("multiple"), "fps": v.get("fps"), "pipeline": d.get("pipeline"),
+            "parts": {k: {"class": c.get("class"), "params": c.get("params")} for k, c in (d.get("components") or {}).items()}}
 
 
 def media_out(meta: dict, fmt: str) -> dict:
@@ -338,12 +349,17 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     meta = _inspect(db, body)
     task = (body.task or meta.get("task_hint") or "").strip()
     if task not in recipes.TASKS:
-        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr, tts or image)")
+        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr, tts, image or video)")
     if task == "image" and "image" not in meta and meta.get("kind") != "local":
         raise fail(422, "not_an_image_model", "This repository is not one Forgeyard can make images with: a diffusers "
                                               "pipeline (model_index.json) or GGUF / safetensors files for "
                                               "stable-diffusion.cpp.")
-    if task in ("tts", "image"):
+    if task == "video" and "video" not in meta and meta.get("kind") != "local":
+        raise fail(422, "not_a_video_model", "This repository is not one Forgeyard can make videos with: a diffusers "
+                                             "text-to-video pipeline (model_index.json naming WanPipeline).")
+    if task == "image" and "video" in meta:
+        raise fail(422, "not_an_image_model", "This repository is a video pipeline: add it as a video model.")
+    if task in ("tts", "image", "video"):
         # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
         # takes in chat.
         meta["modalities"] = []
@@ -388,7 +404,7 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
         changed["title"] = m.title
     if body.task is not None:
         if body.task not in recipes.TASKS:
-            raise fail(422, "bad_task", "task: chat, embed, rerank, asr, tts or image")
+            raise fail(422, "bad_task", "task: chat, embed, rerank, asr, tts, image or video")
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:

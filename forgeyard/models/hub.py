@@ -35,6 +35,7 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "asr": ("automatic-speech-recognition",),
     "tts": ("text-to-speech",),
     "image": ("text-to-image",),
+    "video": ("text-to-video",),
 }
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 EXPAND = ("downloads", "likes", "lastModified", "gated", "private", "pipeline_tag", "library_name", "tags",
@@ -62,7 +63,7 @@ def make_query(text: str, task: Optional[str], fmt: Optional[str], limit: int) -
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise ValueError("search: plain text only")
     if task not in (None, "", *TASK_TAGS):
-        raise ValueError("task: chat, embed, rerank, asr, tts or image")
+        raise ValueError("task: chat, embed, rerank, asr, tts, image or video")
     if fmt not in (None, "", *FORMATS):
         raise ValueError("format: safetensors, gguf, ctranslate2, onnx or diffusers")
     if not 1 <= int(limit) <= MAX_LIMIT:

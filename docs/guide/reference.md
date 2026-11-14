@@ -246,6 +246,12 @@ page cannot use a signed-in browser against it.
 | `POST /v1/audio/voices`, `DELETE /v1/audio/voices/{name}` | Uploading or deleting a voice (voice cloning): always 400 `voice_cloning_not_supported` in 1.3 | — |
 | `POST /v1/images/generations` | Image generation (1.3): OpenAI's request, images back as base64 (`b64_json`) only. See [Images](#images) | no |
 | `POST /v1/images/edits`, `POST /v1/images/variations` | Image edits and variations: not offered in 1.3, always 404 `endpoint_not_supported` | — |
+| `POST /v1/videos` | Video generation (1.3): asks for a video, answers at once with the job. JSON, `multipart/form-data` (what OpenAI's SDK sends) or a URL-encoded form. See [Video](#video) | no |
+| `GET /v1/videos` | The key's own videos, newest first: `limit` (1 to 100, 20), `after` (the last id seen), `order` (`desc` or `asc`) | — |
+| `GET /v1/videos/{id}` | One video job: its status and progress | — |
+| `GET /v1/videos/{id}/content` | The finished video, `video/mp4`, streamed from the replica that made it. `variant=video` only; `Range` requests answer 206 | — |
+| `DELETE /v1/videos/{id}` | Cancels a job at work, or deletes a finished video, on its replica | — |
+| `POST /v1/videos/sync`, `POST /v1/videos/{id}/remix` | Not offered: always 404 `endpoint_not_supported` | — |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -397,6 +403,101 @@ What is counted, per request that was answered (in `GET /api/usage` and on **Usa
 | `busy_ms` | The time the replica worked on the request (from sending it to the last byte of the answer), times the GPUs the deployment holds (1 on a CPU): GPU time |
 | tokens | None. A key's tokens per minute does not apply; its requests per minute does |
 
+### Video
+
+`POST /v1/videos` takes OpenAI's Videos request and answers at once with a **job**; the video is made on
+one replica, which keeps it. Poll `GET /v1/videos/{id}` until `status` is `completed` or `failed`, then
+fetch `GET /v1/videos/{id}/content`. One engine serves it (recipe `vllm-omni-video`, vLLM-Omni on
+NVIDIA); local deployments only, never a cloud provider.
+
+| Field | What the gateway does |
+|---|---|
+| `model` | The video model's name, as usual |
+| `prompt` | Required, at most the deployment's *Longest prompt* (`max_prompt_chars`, 2,000). Longer: 400 `prompt_too_long` |
+| `seconds` | A whole number of seconds, as a number or a string (`"5"`), 1 to the deployment's *Longest video* (`max_seconds`, 5); more: 400 `video_too_long`. Left out: *Default length* (`seconds`, 5). Frames are seconds x the frame rate, rounded to the counts the model makes (Wan: 4k + 1, so 5 s at 16 fps is 81 frames) |
+| `size` | `WIDTHxHEIGHT`, or left out for *Default size* (the model's own: 832x480 for Wan2.1, 1280x704 for Wan2.2). Each side at most *Largest side* (`max_side`, 0 = the model's own long side), and no more pixels a frame than the default size scaled to that side; larger: 400 `video_too_large`. Sides are multiples of 16 (32 for Wan2.2-5B); else 400 `invalid_size` |
+| `num_inference_steps` | Denoising steps, at most *Most steps* (`max_steps`, 50); more: 400 `too_many_steps`. Left out: *Default steps*, else the model's own |
+| `negative_prompt`, `guidance_scale`, `seed` | Passed on |
+| `input_reference` (and vLLM-Omni's `image_reference`, `video_reference`, `audio_reference`) | Refused with 400 `input_reference_not_supported`: text to video only in 1.3 |
+| `quality`, `user` | Accepted and ignored |
+
+Nothing else reaches the engine: the gateway sends only the prompt, the model, the size, the frames,
+the frame rate and the fields above (never vLLM-Omni's `lora`, `extra_params` or frame interpolation
+paths).
+
+**The job** has OpenAI's shape: `{"id", "object": "video", "model", "status", "progress", "created_at",
+"completed_at", "expires_at", "size", "seconds", "quality", "remixed_from_video_id", "error"}`.
+
+- `id` is Forgeyard's own (`video_` and 32 random hex digits), never the engine's. Another key's id
+  answers 404 `video_not_found`, exactly as an id that does not exist.
+- `status` is `queued`, `in_progress`, `completed` or `failed`. `progress` is what the engine reports:
+  vLLM-Omni says 0 until the video is made, then 100.
+- `seconds` is a string, as in OpenAI's API. `expires_at` is set once the job ends: the deployment's
+  *Keep results* later.
+- `error` (`{"code", "message"}`) once `failed`:
+
+| `error.code` | Means |
+|---|---|
+| `generation_failed` | The engine failed the video; its message follows |
+| `timed_out` | Not done within the deployment's *Longest job* (`timeout`); the gateway cancelled it on the replica |
+| `replica_restarted` | The replica's engine restarted: its jobs (kept in its memory) went with it |
+| `replica_gone` | The replica was stopped, placed again or deleted |
+| `video_lost` | The replica no longer knows the job (its engine restarted) |
+
+The prompt is not stored. A job's row stays a week after its result expired, then goes.
+
+**Content.** `GET /v1/videos/{id}/content` streams the MP4 from the replica that made it, as
+`video/mp4` with `Content-Disposition: inline`. `variant=thumbnail` and `variant=spritesheet` answer 400
+`variant_not_supported` (the engine makes the video only). A job not made yet answers 409
+`video_not_ready`, a failed one 409 `video_failed`, an expired one 410 `video_expired`, and one whose
+replica restarted or was stopped since 410 `video_lost`.
+
+**Deleting.** `DELETE /v1/videos/{id}` cancels a job at work on its replica, or deletes a finished
+video there, and removes the job: `{"id", "object": "video.deleted", "deleted": true}`.
+
+**Jobs at once.** A replica makes one video at a time; the others wait on it. The gateway sends a job
+to the ready replica with the fewest jobs. A deployment takes at most *Jobs at once* (`queue`, 8)
+waiting or being made, and of those *Jobs per key* (`jobs_per_key`, 2) from one key (or one person in
+the Playground). One more gets 429 `queue_full` or `too_many_jobs` with `Retry-After` (from how long
+its videos took lately). The key's requests per minute count each job asked for; polls, lists and
+downloads do not.
+
+**Expiry.** A result can be fetched for *Keep results* (`keep_minutes`, 1,440); then the server deletes it
+on the replica. The engine also deletes its own files an hour after that (`VLLM_OMNI_SERVER_STORAGE__FILE_TTL`),
+and keeps them inside the replica's container, so a stopped or restarted replica leaves none behind.
+
+The deployment parameters (recipe `vllm-omni-video`):
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `default_size` (*Default size*) | `auto` | The size of requests that give none; `auto` is the model's own |
+| `seconds` (*Default length*) | `5` | The length of requests that give none |
+| `max_seconds` (*Longest video*) | `5` | Longer requests: 400. The memory estimate is sized for it |
+| `max_side` (*Largest side*, Advanced) | `0` | The widest or tallest video, in pixels; 0 is the model's own |
+| `fps` (*Frames per second*, Advanced) | `0` | 0 is the model's own (16 for Wan2.1, 24 for Wan2.2) |
+| `steps`, `max_steps` (Advanced) | `0`, `50` | Default steps (0: the model's own) and the most a request may ask |
+| `queue` (*Jobs at once*, Advanced) | `8` | Jobs waiting or being made on the deployment |
+| `jobs_per_key` (*Jobs per key*, Advanced) | `2` | Of those, one key's or one person's |
+| `keep_minutes` (*Keep results*, Advanced) | `1440` | How long a finished video can be fetched |
+| `timeout` (*Longest job*, Advanced) | `3600` | Seconds from asking; a job still at work then is cancelled and failed |
+| `max_prompt_chars` (*Longest prompt*, Advanced) | `2000` | Longer prompts: 400 |
+| `offload` (*Offload to host memory*, Advanced) | `none` | `model`: only the component at work on the card (`--enable-cpu-offload`); slower |
+
+What is counted, **once per job, when it ends** (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| requests | One per job. A finished one counts as answered; a failed one as an error and nothing else; one deleted while at work as 499 (not an error). A refused request (400, 404, 429) is counted when it is refused |
+| `media_ms` | The video's length in milliseconds, as the engine reports it (else frames / frames per second) |
+| `busy_ms` | From when the job was seen in progress until it was done, times the GPUs the deployment holds: GPU time |
+| tokens | None |
+
+The Playground's **Video** panel uses `/api/playground/videos` (`POST`, `GET`), `GET
+/api/playground/videos/options?model=<model>`, `GET` and `DELETE /api/playground/videos/{id}` and `GET
+/api/playground/videos/{id}/content`: the same rules, as the signed-in person (the session cookie and
+the console's `X-Forgeyard: 1` header), for that person's own jobs, counted as console. The jobs are kept
+in the server's database (table `video_jobs`, migration `0014`).
+
 ### Headers
 
 | Header | Direction | Value |
@@ -445,11 +546,15 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `streaming_not_supported` | Images: `stream: true` | Leave it out |
 | 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
 | 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
-| 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says) | Use a size like the one the message suggests |
+| 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
 | 400 | `unsupported_output_format` | Images: an `output_format` other than png, jpeg or webp, or one the engine does not make | Ask for png |
-| 400 | `too_many_steps` | Images: `num_inference_steps` over the deployment's *Most steps* | Ask for fewer, or raise `max_steps` |
-| 400 | `prompt_too_long` | Images: `prompt` or `negative_prompt` longer than the deployment's *Longest prompt* | Shorten it, or raise `max_prompt_chars` |
-| 4xx/5xx | `engine_error` | Images: the engine refused or failed the request; its status and message are passed on | Read the message; an out-of-memory error means a smaller size or fewer images |
+| 400 | `too_many_steps` | Images and videos: `num_inference_steps` over the deployment's *Most steps* | Ask for fewer, or raise `max_steps` |
+| 400 | `prompt_too_long` | Images and videos: `prompt` or `negative_prompt` longer than the deployment's *Longest prompt* | Shorten it, or raise `max_prompt_chars` |
+| 400 | `video_too_long` | Videos: `seconds` over the deployment's *Longest video* | Ask for fewer seconds, or raise `max_seconds` |
+| 400 | `video_too_large` | Videos: a side over *Largest side*, or more pixels a frame than the default size scaled to it | Ask for a smaller size, or raise `max_side` |
+| 400 | `input_reference_not_supported` | Videos: `input_reference` (or `image_reference`, `video_reference`, `audio_reference`): text to video only in 1.3 | Describe it in the prompt |
+| 400 | `variant_not_supported` | Videos: `variant=thumbnail` or `spritesheet`; the engine makes the video only | Ask for `variant=video` |
+| 4xx/5xx | `engine_error` | Images and videos: the engine refused or failed the request; its status and message are passed on | Read the message; an out-of-memory error means a smaller size or fewer images |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
@@ -461,13 +566,19 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
 | 404 | `model_not_found` | No such model for this key: it does not exist, or it is cloud-only and the key's cloud setting is not **Allowed**. From `GET /v1/models/{model}`, also a stopped model | Check `GET /v1/models` |
 | 404 | `unknown_endpoint` | The gateway has no such path | Use an endpoint above |
-| 404 | `endpoint_not_supported` | `/v1/images/edits` or `/v1/images/variations`: not offered in 1.3 | Use `/v1/images/generations` |
+| 404 | `endpoint_not_supported` | `/v1/images/edits`, `/v1/images/variations`, `/v1/videos/sync` or `/v1/videos/{id}/remix`: not offered in 1.3 | Use `/v1/images/generations`, or a job at `/v1/videos` |
+| 404 | `video_not_found` | Videos: no such video for this key (another key's id answers the same) | Check `GET /v1/videos` |
+| 409 | `video_not_ready` | Videos: the content of a job still `queued` or `in_progress` | Poll until it is `completed` |
+| 409 | `video_failed` | Videos: the content of a failed job | Read the job's `error`, and ask again |
+| 410 | `video_expired` | Videos: the result is older than the deployment's *Keep results* and was deleted | Ask for it again |
+| 410 | `video_lost` | Videos: the replica that made it restarted or was stopped, and its files went with it | Ask for it again |
 | 413 | `request_too_large` | The body (with media URLs fetched and inlined) is larger than the model's *Largest request* or `GATEWAY_MAX_BODY_MB` | Send less or smaller images, or raise the parameter or the setting |
 | 413 | `media_too_large` | A media URL's file is larger than `MEDIA_FETCH_MAX_MB` | Send a smaller file, or raise the setting |
 | 421 | `host_not_allowed` | The server does not answer to the host name in the URL | Use its address, or add the name to `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | Over the key's requests or tokens per minute | Wait `Retry-After` seconds |
 | 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
-| 429 | `queue_full` | Images: every replica is busy and the deployment's queue is full | Wait `Retry-After` seconds |
+| 429 | `queue_full` | Images: every replica is busy and the deployment's queue is full. Videos: the deployment holds *Jobs at once* | Wait `Retry-After` seconds |
+| 429 | `too_many_jobs` | Videos: this key (or person) already has *Jobs per key* videos waiting or being made on the deployment | Wait `Retry-After` seconds, or delete one |
 | 502 | `upstream_unreachable` | No replica could be connected to | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
 | 502 | `upstream_error` | The connection to the replica or provider broke while the answer was coming | Retry |
 | 502 | `replica_refused_key` | The replica refused the gateway's internal key | Stop and start the deployment |
@@ -481,7 +592,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
 | 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |
-| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT`; for images, within the deployment's *Timeout* | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
+| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT`; for images, within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
 | 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
 
 Two more cases:
@@ -752,6 +863,7 @@ recipe with only the variants you want can.
 | `speaches-tts` (1.3) | `cpu` | CPU (in a container), on any machine | the same `ghcr.io/speaches-ai/speaches:0.8.3-cpu` image as faster-whisper. CPU only: Kokoro and Piper run on ONNX Runtime and make speech faster than it plays there; in the CUDA image Kokoro still used the CPU |
 | `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
 | `vllm-omni-image` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | the same `vllm/vllm-omni:v0.32.0` |
+| `vllm-omni-video` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | the same `vllm/vllm-omni:v0.32.0` |
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
@@ -778,6 +890,10 @@ CPU architectures; `compute_capability` and `driver`: comparisons such as `>=8.0
 `binary`: a release the agent downloads) or `command` (an installed program) for a process, `args`
 and `env` to replace the recipe's, and `amd_kfd` (AMD containers; `true` by default: `/dev/kfd` and
 the card's render node; `false`: the render node only, for engines that use only Vulkan).
+
+A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
+`frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
+`openai-videos`, and its `{keep_seconds}` placeholder is the deployment's `keep_minutes` and an hour.
 
 ## Container images
 

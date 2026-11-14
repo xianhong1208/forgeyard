@@ -23,7 +23,7 @@ function fromTarget(t: RouteTarget): Draft {
   };
 }
 
-const APIS = ["openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images"];
+const APIS = ["openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images", "openai-videos"];
 
 export function RouteDetailPage() {
   const { id } = useParams();

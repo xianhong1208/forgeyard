@@ -9,6 +9,7 @@ export const API_ENDPOINT: Record<string, string> = {
   "openai-audio": "/audio/transcriptions",
   "openai-speech": "/audio/speech",
   "openai-images": "/images/generations",
+  "openai-videos": "/videos",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -18,6 +19,7 @@ export const API_KIND: Record<string, string> = {
   "openai-audio": "speech to text",
   "openai-speech": "text to speech",
   "openai-images": "images",
+  "openai-videos": "video",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -52,6 +54,13 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     return {
       curl: `${curl} ${base}/images/generations \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "prompt": "A lighthouse on a rocky coast at sunset", "size": "1024x1024"}' \\\n  | python3 -c 'import base64, json, sys; open("image.png", "wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'`,
       python: `import base64\n\n${sdk}${client}\nout = client.images.generate(model="${model}", prompt="A lighthouse on a rocky coast at sunset", size="1024x1024")\nwith open("image.png", "wb") as f:\n    f.write(base64.b64decode(out.data[0].b64_json))`,
+    };
+  }
+  if (api === "openai-videos") {
+    // A video is a job: ask for it, poll until it is made, then fetch the MP4.
+    return {
+      curl: `${curl} ${base}/videos \\\n  -H "Authorization: Bearer ${key}" \\\n  -F model=${model} -F prompt="A red kite over a green hill" -F seconds=5\n# then poll ${base}/videos/<id> until "status" is "completed", and:\n${curl} ${base}/videos/<id>/content -H "Authorization: Bearer ${key}" -o video.mp4`,
+      python: `import time\n\n${sdk}${client}\nvideo = client.videos.create(model="${model}", prompt="A red kite over a green hill", seconds="5")\nwhile video.status in ("queued", "in_progress"):\n    time.sleep(5)\n    video = client.videos.retrieve(video.id)\nif video.status == "completed":\n    client.videos.download_content(video.id).write_to_file("video.mp4")\nelse:\n    print(video.error)`,
     };
   }
   if (api === "openai-audio") {
@@ -195,3 +204,42 @@ export function imageSizes(o: ImageOptions): string[] {
 }
 
 export const IMAGE_MIME: Record<string, string> = { png: "image/png", jpeg: "image/jpeg", webp: "image/webp" };
+
+// ------------------------------------------------------------------ video generation (1.3)
+// What a video model's deployments take, from /api/playground/videos/options.
+export type VideoOptions = {
+  model: string; default_size: string; max_side: number; max_pixels: number; multiple: number; seconds: number;
+  max_seconds: number; fps: number; max_steps: number; max_prompt_chars: number; keep_minutes: number;
+};
+
+// A video job as OpenAI's Videos API answers it.
+export type Video = {
+  id: string; object: "video"; model: string; status: "queued" | "in_progress" | "completed" | "failed"; progress: number;
+  created_at: number; completed_at: number | null; expires_at: number | null; size: string; seconds: string;
+  error: { code: string; message: string } | null;
+};
+
+const VIDEO_PRESETS = ["832x480", "480x832", "640x480", "480x640", "624x624", "1280x720", "720x1280", "1280x704", "704x1280",
+  "1024x576", "576x1024"];
+
+// The sizes to offer: the deployment's default first, then the usual ones it takes (within its largest side and
+// its pixels per frame, sides a multiple of what its model needs).
+export function videoSizes(o: VideoOptions): string[] {
+  const fits = (s: string) => {
+    const [w, h] = s.split("x").map(Number);
+    return Math.max(w, h) <= o.max_side && w * h <= o.max_pixels && w % o.multiple === 0 && h % o.multiple === 0;
+  };
+  return [o.default_size, ...VIDEO_PRESETS.filter((s) => s !== o.default_size && fits(s))];
+}
+
+// "4 s (65 frames at 16 fps)": what a length makes on a model that makes k x 4 + 1 frames.
+export function videoFrames(seconds: number, fps: number, step = 4): number {
+  const n = Math.max(1, seconds * fps);
+  return step > 1 ? Math.floor(n / step) * step + 1 : n;
+}
+
+// "1 min 05 s" for an elapsed time in seconds.
+export function elapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+}

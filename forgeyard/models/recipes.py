@@ -3,7 +3,7 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
 
     name: vllm                       a-z, 0-9, '-'; unique
     engine, version, title, description
-    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image
+    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image, video
     formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx,
                                      diffusers (a repository with model_index.json)
     api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
@@ -27,6 +27,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     image: {request: fields, output_formats: [png, jpeg, webp], max_n: 10}
                                      1.3, image generation (/v1/images/generations): how the gateway
                                      sends the request's extras (see ImageGen below)
+    video: {request: vllm-omni, frames_step: 4}
+                                     1.3, video generation (/v1/videos, asynchronous jobs): how the
+                                     gateway asks the engine for a video (see VideoGen below)
     media: {inputs: [image, video, audio], files: false}
                                      1.3: what the engine takes in chat besides text; the gateway
                                      sends a model only the media it takes, at most `images`
@@ -61,6 +64,7 @@ Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} 
 {kv_tokens} {gpus} {gpu_util} {gpu_layers} {threads} {dtype} {repo} {mmproj_file} {image_max_pixels}
 {gpu_util_main} {gpu_util_codec} (two-stage engines: the share of each stage, see estimate.codec_overhead)
 {width} {height} {max_pixels} (image models: the deployment's default size and its largest image in pixels)
+{keep_seconds} (video models: how long the engine keeps a finished video, the deployment's keep_minutes and an hour)
 {vae_file} {llm_file} {clip_l_file} {clip_g_file} {t5xxl_file} (image models made of separate files: the
 component's path) {gpu_budget_gib} (the reservation in GiB, less the CUDA context) and any declared param.
 Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
@@ -81,14 +85,15 @@ from forgeyard.workloads.spec import ENV_KEY_RE, IMAGE_RE, RESERVED_ENV, RESERVE
 BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-TASKS = ("chat", "embed", "rerank", "asr", "tts", "image")
+TASKS = ("chat", "embed", "rerank", "asr", "tts", "image", "video")
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
-APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images")
+APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images",
+        "openai-videos")
 ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed", "diffusers")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
                         "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
                         "mmproj_file", "image_max_pixels", "gpu_util_main", "gpu_util_codec", "width", "height",
-                        "max_pixels", "gpu_budget_gib"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
+                        "max_pixels", "gpu_budget_gib", "keep_seconds"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
 MEDIA_KINDS = ("image", "audio", "video")
 # mmproj: a GGUF projector file; image_pixels: image tokens scale with the resolution (vision_tile_px).
 # Image models (1.3): image_single (one checkpoint file with everything: -m), image_split (a diffusion
@@ -292,9 +297,13 @@ class Estimate(_M):
     # Weights the engine holds in 16 bits whatever the file stores (vLLM-Omni casts float32 to bfloat16);
     # False: the files' own size (stable-diffusion.cpp keeps a GGUF's quantisation).
     cast_16bit: bool = False
+    # 1.3, video generation (method diffusers): the denoiser's activations per thousand tokens of the
+    # longest, largest video the deployment allows (tokens = latent frames x the frame's patches); the
+    # VAE's decode is `vae_per_mp` per megapixel of one frame (it decodes a few frames at a time).
+    activation_per_ktoken: int = 0
 
     @field_validator("overhead", "cpu_overhead", "vram", "vision_overhead", "video_overhead", "codec_overhead",
-                     "speech_overhead", "activation_per_mp", "vae_per_mp", mode="before")
+                     "speech_overhead", "activation_per_mp", "vae_per_mp", "activation_per_ktoken", mode="before")
     @classmethod
     def _size(cls, v):
         return None if v is None else (0 if v in (0, "0") else parse_bytes(v))
@@ -378,6 +387,20 @@ class ImageGen(_M):
     max_n: int = Field(default=10, ge=1, le=64)
 
 
+class VideoGen(_M):
+    """Video generation (1.3): how the gateway asks the engine for a video at /v1/videos.
+
+        request: vllm-omni              vLLM-Omni's asynchronous jobs: POST /v1/videos (multipart) answers
+                                        a job id; GET /v1/videos/{id} its status; GET …/content the MP4;
+                                        DELETE /v1/videos/{id} cancels it or deletes its file
+        frames_step: 4                  the engine makes k x frames_step + 1 frames (Wan's VAE packs four
+                                        frames into one latent frame): the gateway rounds seconds x fps to
+                                        that, so what is made and counted is known
+    """
+    request: Literal["vllm-omni"] = "vllm-omni"
+    frames_step: int = Field(default=4, ge=1, le=16)
+
+
 class Recipe(_M):
     name: str
     title: str = Field(max_length=80)
@@ -398,6 +421,7 @@ class Recipe(_M):
     media: Optional[Media] = None
     tts: Optional[Speech] = None
     image: Optional[ImageGen] = None
+    video: Optional[VideoGen] = None
     env: dict[str, Annotated[str, Field(max_length=1024)]] = Field(default_factory=dict, max_length=32)
     # Where the engine reads its API key (M4). None: the engine has no key and its port answers
     # anyone who can reach it (the gateway still works).
@@ -465,12 +489,25 @@ class Recipe(_M):
             raise ValueError("api: image is served as openai-images")
         if "image" in self.tasks and self.estimate.method not in ("diffusers", "fixed"):
             raise ValueError("estimate: an image recipe uses the diffusers (or fixed) method")
+        if self.video is not None and "video" not in self.tasks:
+            raise ValueError("video: only for recipes that serve the video task")
+        if "video" in self.tasks and self.api.get("video") != "openai-videos":
+            raise ValueError("api: video is served as openai-videos")
+        if "video" in self.tasks and self.estimate.method not in ("diffusers", "fixed"):
+            raise ValueError("estimate: a video recipe uses the diffusers (or fixed) method")
+        if "video" in self.tasks and len(self.tasks) > 1:
+            raise ValueError("tasks: a video recipe serves only the video task (its jobs have their own API)")
         return self
 
     @property
     def imagegen(self) -> ImageGen:
         """Its image settings (the defaults when it declares none)."""
         return self.image or ImageGen()
+
+    @property
+    def videogen(self) -> VideoGen:
+        """Its video settings (the defaults when it declares none)."""
+        return self.video or VideoGen()
 
     @property
     def speech(self) -> Speech:
