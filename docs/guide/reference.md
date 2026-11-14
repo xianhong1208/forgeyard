@@ -516,7 +516,7 @@ cookies, no key in the query string, no CORS headers.
 | Header | Direction | What happens |
 |---|---|---|
 | `Authorization` | request | Your API key is checked and removed; the workload gets the replica's internal key, which the agent's key guard checks and removes |
-| `Cookie`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard-*` | request | Removed |
+| `Cookie`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard`, `X-Forgeyard-*` | request | Removed |
 | `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` | request | Set fresh: the client's address, `https` or `http`, and the host it called |
 | `X-Forwarded-Prefix` | request | `/x/<name>` |
 | `X-Request-Id` | both | A new id per request, sent to the workload and back to the client |
@@ -536,7 +536,7 @@ cookies, no key in the query string, no CORS headers.
 | Wait for each piece of the answer | 600 s (504 `upstream_timeout` before the first byte) | the workload: **Read timeout (s)**, 1 to 3,600 |
 | Connecting to a replica | `GATEWAY_CONNECT_TIMEOUT` (5 s); a replica that cannot be reached is skipped for the next one | the server |
 | Requests at once per replica | no limit (429 `workload_busy` when every replica is full) | the workload |
-| Requests at once per key | no limit (429 `key_busy`) | the workload |
+| Requests at once per key | no limit (429 `key_busy`); in the Playground, per person | the workload |
 | Requests per minute | the key's own limit (429 `rate_limit_exceeded`); tokens per minute do not apply | the key |
 
 Every 429 carries `Retry-After`. A client that goes away closes the request to the workload at once.
@@ -568,6 +568,26 @@ Errors from the gateway have the same shape as at `/v1`. An answer from the work
 
 An answer that breaks off after it started cannot change its status: the connection is closed before
 the body is complete, so a client never takes a cut-off body for a whole one.
+
+### From the Playground
+
+The console's **Playground → Vision** tab calls exposed vision workloads through routes of its own,
+never through `/x/`: they take the console's sign-in (its cookie, and on `POST` the `X-Forgeyard: 1`
+header from the console's own origin), and `/x/` keeps taking API keys only. Anyone signed in may use
+them. A vision workload is an exposed service started with `--task detect`, `--task segment` or
+`--task depth`, as every [template](#workload-templates) is.
+
+| Route | What it does |
+|---|---|
+| `GET /api/playground/vision/options` | `workloads`: each exposed vision workload's `name`, `workload_id`, `task`, `title`, `model`, `licence`, `endpoint`, `path`, `ready` (replicas behind the key guard), `reason` (why none is ready), `max_body_mb`; `tasks`: the templates' tasks |
+| `POST /api/playground/vision/<name>/<task>` | The body (the image, as multipart) to the workload's own `POST /v1/<task>`, nothing else: no other path, method or query |
+
+The request then follows the `/x/` rules above: the same replicas and key guard, request and answer
+headers (the cookie never reaches the workload), the workload's **Largest request**, **Requests at
+once per replica** and **Requests at once per key** (counted per person), its timeouts, and the same
+errors. Another task than the workload's, or a workload that is not an exposed vision workload, is 404
+`workload_not_found`; a task the vision server does not have is 404 `unknown_task`. Usage is counted
+under `x:<name>` as *console*, for the person signed in.
 
 ## Workload templates
 

@@ -14,7 +14,7 @@ gateway passes the request to one of the workload's ready replicas as `/<path>?<
    refused with 400 `invalid_path`, not normalised: what the gateway checks is what the program gets.
    The query string is passed on as it came.
 3. **Request headers:** hop-by-hop headers and the ones `Connection` names, `Authorization`, `Cookie`,
-   `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP` and `X-Forgeyard-*` are dropped; fresh
+   `Host`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard` and `X-Forgeyard-*` are dropped; fresh
    `X-Forwarded-For`, `-Proto`, `-Host`, `X-Forwarded-Prefix: /x/<name>` and `X-Request-Id` are added,
    and the replica's internal key, which the agent's guard checks and removes. Everything else (the
    content type, `Accept`, `Accept-Encoding`, the app's own headers) passes unchanged.
@@ -36,7 +36,7 @@ gateway passes the request to one of the workload's ready replicas as `/<path>?<
    the upstream request at once.
 7. **Limits:** the key's requests per minute (429 `rate_limit_exceeded`; tokens per minute do not
    apply), at most `concurrency` requests at once per replica (429 `workload_busy` when every replica
-   is full) and `key_concurrency` per key (429 `key_busy`), with `Retry-After`.
+   is full) and `key_concurrency` per key (per person in the Playground; 429 `key_busy`), with `Retry-After`.
 8. **Usage:** one row per day, key and workload, as the model `x:<name>`: requests, errors, latency,
    bytes in (request bodies) and out (answer bodies, as sent), and busy milliseconds (from sending the
    request until the answer ended).
@@ -88,7 +88,8 @@ METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-connection", "proxy-authorization", "proxy-authenticate", "te",
               "trailer", "transfer-encoding", "upgrade", "expect"}
-DROP_REQUEST = HOP_BY_HOP | {"authorization", "cookie", "host", "content-length", "forwarded", "x-real-ip"}
+# `X-Forgeyard` is the console's CSRF header (the Playground's Vision tab sends it).
+DROP_REQUEST = HOP_BY_HOP | {"authorization", "cookie", "host", "content-length", "forwarded", "x-real-ip", "x-forgeyard"}
 DROP_REQUEST_PREFIXES = ("x-forwarded-", "x-forgeyard-")
 FORCED = (
     ("content-security-policy", "sandbox; default-src 'none'; frame-ancestors 'none'"),
@@ -432,13 +433,15 @@ async def handle(request: Request) -> Response:
     except GatewayError as e:
         return forced_error(e, ids)
     try:
-        return await _forward(request, caller, route, path, query, started, request_id)
+        return await forward(request, caller, route, path, query, started, request_id)
     except GatewayError as e:
         return forced_error(e, ids)
 
 
-async def _forward(request: Request, caller: KeyCaller, route: XRoute, path: bytes, query: bytes, started: float,
-                   request_id: str) -> Response:
+async def forward(request: Request, caller: KeyCaller, route: XRoute, path: bytes, query: bytes, started: float,
+                  request_id: str) -> Response:
+    """The checked request to one of the workload's replicas: body limit, rpm (API keys), concurrency, usage.
+    Also the Playground's Vision tab (forgeyard/gateway/vision.py), as the signed-in person."""
     s = route.settings
     name = route.name
     try:
@@ -459,12 +462,14 @@ async def _forward(request: Request, caller: KeyCaller, route: XRoute, path: byt
             raise GatewayError(429, "rate_limit_exceeded", f"This API key may send {verdict.limit} requests per "
                                                            f"minute; try again in {verdict.retry_after} s.",
                                retry_after=verdict.retry_after)
-    slot = ("x", name, caller.source, caller.key_id)
+    # key_concurrency: per API key, and per person in the console's playground (which has no key).
+    slot = ("x", name, caller.source, caller.key_id if caller.source == "api" else caller.user_id)
     if not in_flight.enter(slot, s.key_concurrency):
         record(caller, name, 429, started, limited=True)
-        raise GatewayError(429, "key_busy", f"This API key already has {s.key_concurrency} request"
-                                            f"{'s' if s.key_concurrency != 1 else ''} in flight to {name!r}, the most "
-                                            "it may have at once.", retry_after=1)
+        plural = "s" if s.key_concurrency != 1 else ""
+        who = "This API key already has" if caller.source == "api" else "You already have"
+        raise GatewayError(429, "key_busy", f"{who} {s.key_concurrency} request{plural} in flight to {name!r}, the "
+                                            "most allowed at once.", retry_after=1)
     handed_over = False
     try:
         response = await _send(request, caller, route, path, query, body, started, request_id, slot)

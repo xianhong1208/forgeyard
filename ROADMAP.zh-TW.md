@@ -101,7 +101,8 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
 5. *審查中*：**通用直通**（`/x/<name>/…`，#23）：任何服務型工作負載的 HTTP API 都能放在閘道後面，經過 agent 的金鑰守門員（它會拿掉金鑰），
    給新的 *Workloads* 設定允許的金鑰使用（預設不允許，既有的金鑰也一樣）；只提供 API（強制 CSP 沙箱），不支援 WebSocket 與 gRPC；
    用量記錄位元組與忙碌時間。並附上使用 Forgeyard 自己 vision 映像檔的現成工作負載範本：物件偵測（RT-DETRv2）、影像分割（SAM 2.1）、
-   深度估計（Depth Anything V2 Small），只用 Apache-2.0。
+   深度估計（Depth Anything V2 Small），只用 Apache-2.0，並在 Playground 加上試用它們的 **Vision** 分頁（#47）：
+   框加上分數滑桿、點一下或拖一個框得到遮罩、照片旁的深度圖。
 6. 影片生成（非同步的 `/v1/videos`），時間不夠時第一個延到之後的版本。
 
 1.3 也會一併處理，與模型類型並行：

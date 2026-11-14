@@ -133,7 +133,8 @@ docs, tests) and accepted on real hardware: ✅ means merged into `dev`.
    setting allows it (none by default, also for existing keys); APIs only (a forced CSP sandbox), no
    WebSockets or gRPC; bytes and busy time in usage. With ready-made workload templates on
    Forgeyard's own vision image: object detection (RT-DETRv2), segmentation (SAM 2.1), depth (Depth
-   Anything V2 Small), Apache-2.0 only.
+   Anything V2 Small), Apache-2.0 only, and a **Vision** tab in the Playground to try them (#47): boxes
+   with a score slider, a mask from a click or a box, a depth map beside the photo.
 6. Video generation (async `/v1/videos`), the first to move to a later version if time is short.
 
 Also in 1.3, alongside the model types:
