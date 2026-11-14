@@ -808,3 +808,89 @@ def test_fy_x_027_a_cookie_one_upstream_sets_never_reaches_the_next_request(xw):
         return out
 
     assert asyncio.run(jars()) == ([], [])
+
+
+# ------------------------------------------------------------------ ready-made templates (5b)
+def test_fy_x_028_templates_make_valid_exposed_container_workloads():
+    """FY-X-028: each template makes a valid service spec: Forgeyard's vision image (the server's version;
+    the CUDA build on one NVIDIA card shared by memory, else the CPU build without a GPU), its task, port
+    8000, an HTTP health check with time to load, and exposed at /x/."""
+    from forgeyard import __version__
+    from forgeyard.workloads import templates
+    from forgeyard.workloads.spec import WorkloadSpec
+
+    assert [t.id for t in templates.TEMPLATES] == ["object-detection", "segmentation", "depth"]
+    for t in templates.TEMPLATES:
+        for gpu in (False, True):
+            body = templates.spec(t, gpu=gpu)
+            assert body.pop("gateway") == {"expose": True}
+            s = WorkloadSpec.model_validate(body)
+            assert s.kind == "service" and s.runtime.type == "container" and s.runtime.args == ["--task", t.task]
+            assert s.runtime.image == f"docker.io/tonyhuang1101/forgeyard-vision:{__version__}{'-cuda' if gpu else ''}"
+            assert [(p.name, p.port) for p in s.ports] == [("http", 8000)]
+            assert s.health.path == "/health" and s.health.start_period >= 120
+            g = s.resources.gpus
+            assert (g.count, g.vendor, g.share, g.vram) == ((1, "nvidia", "vram", 3 * 1024**3) if gpu else (None, None, "exclusive", None))
+    assert templates.image("cpu", "9.9.9") == "docker.io/tonyhuang1101/forgeyard-vision:9.9.9"
+
+
+def test_fy_x_029_templates_use_permissive_licences_and_the_images_pins():
+    """FY-X-029: every template's model and code are permissively licensed (no Ultralytics YOLO, which is
+    AGPL-3.0; Depth Anything V2 Small, not Base or Large, which are CC-BY-NC), and the models and revisions
+    are the ones the image bakes in (images/vision/models.json)."""
+    from forgeyard.workloads import templates
+
+    pinned = templates.models_file()
+    assert pinned is not None
+    for t in templates.TEMPLATES:
+        assert t.licence in templates.PERMISSIVE and t.code_licence.lower() in templates.PERMISSIVE
+        assert "yolo" not in t.model.lower() and "ultralytics" not in t.model.lower()
+        m = pinned[t.task]
+        assert (m["repo"], m["revision"], m["licence"]) == (t.model, t.revision, t.licence)
+        assert len(t.revision) == 40
+    assert templates.BY_ID["depth"].model.endswith("V2-Small-hf")
+
+
+def test_fy_x_030_the_templates_api_and_creating_one(owner):
+    """FY-X-030: GET /api/workloads/templates lists them with both images and specs; posting a template's
+    spec creates an exposed workload, placed on a machine whose agent guards it and runs containers."""
+    node = make_node("gpu-a", "nvidia-rtx4090x2", features=GUARDED)
+    r = owner.get("/api/workloads/templates")
+    assert r.status_code == 200
+    ts = {t["id"]: t for t in r.json()["templates"]}
+    assert set(ts) == {"object-detection", "segmentation", "depth"}
+    assert ts["depth"]["licence"] == "apache-2.0" and ts["depth"]["images"]["cuda"].endswith("-cuda")
+    w = owner.post("/api/workloads", json={**ts["object-detection"]["specs"]["cuda"], "machine_id": node}).json()["workload"]
+    assert w["gateway"]["exposed"] is True and w["gateway"]["path"] == "/x/detector"
+    rep = w["replica_list"][0]
+    assert rep["machine"]["id"] == node and len(rep["gpus"]) == 1 and rep["gpus"][0]["vendor"] == "nvidia"
+
+
+def test_fy_x_031_the_vision_image_is_built_in_ci_and_published_with_a_release():
+    """FY-X-031: a release publishes the vision image under the release's tags (CPU, amd64 and arm64) and the
+    same tags with -cuda (amd64); CI builds the CPU image and smoke-tests every task; the Dockerfile pins its
+    base by digest and its dependencies with hashes, bakes the models in, and runs as an unprivileged user."""
+    import importlib.util
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("publish_plan_x", root / "scripts" / "publish_plan.py")
+    plan = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(plan)
+    full = plan.plan("1.3.0", "forgeyard", "tag", "v1.3.0", True)
+    assert full["vision_tags"].split(",") == [f"docker.io/forgeyard/forgeyard-vision:{t}" for t in ("1.3.0", "1.3", "latest")]
+    assert full["vision_cuda_tags"].split(",")[0] == "docker.io/forgeyard/forgeyard-vision:1.3.0-cuda"
+    pub = yaml.safe_load((root / ".github" / "workflows" / "publish-images.yml").read_text())
+    steps = {s.get("id"): s for s in pub["jobs"]["vision"]["steps"] if s.get("id")}
+    assert steps["vision"]["with"]["tags"] == "${{ steps.plan.outputs.vision_tags }}"
+    assert steps["vision_cuda"]["with"]["platforms"] == "linux/amd64" and "VARIANT=cuda" in steps["vision_cuda"]["with"]["build-args"]
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+    assert "images/vision/smoke.sh forgeyard-vision:ci" in ci and "images/vision/Dockerfile" in ci
+    df = (root / "images" / "vision" / "Dockerfile").read_text()
+    assert "@sha256:" in df and "--require-hashes" in df and "download.py /models" in df and "USER 10001" in df
+    for variant in ("cpu", "cuda"):
+        req = (root / "images" / "vision" / f"requirements-{variant}.txt").read_text()
+        assert f"torch==2.14.1+{'cpu' if variant == 'cpu' else 'cu130'}" in req and "--hash=sha256:" in req
+        assert "ultralytics" not in req

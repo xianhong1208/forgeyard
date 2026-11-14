@@ -205,3 +205,93 @@ jobs:
               echo "- agent: \`${AGENT_TAGS//,/\` \`}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The workload templates' vision server (images/vision, 1.3): the CPU build for linux/amd64 and
+  # linux/arm64, the CUDA build (torch +cu130) for linux/amd64, pushed with the same plan as the two images
+  # above; the CPU build is smoke-tested (each task answers a real request without the network).
+  vision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: What to publish
+        id: plan
+        env:
+          HAVE_SECRETS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+        run: |
+          python3 scripts/publish_plan.py | tee -a "$GITHUB_OUTPUT"
+
+      - name: Room for the CUDA build
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to Docker Hub
+        if: steps.plan.outputs.push == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build (and push) the vision image, CPU
+        id: vision
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/vision
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ steps.plan.outputs.push == 'true' }}
+          tags: ${{ steps.plan.outputs.vision_tags }}
+          build-args: |
+            VARIANT=cpu
+            VERSION=${{ steps.plan.outputs.version }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Build (and push) the vision image, CUDA
+        id: vision_cuda
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/vision
+          platforms: linux/amd64
+          push: ${{ steps.plan.outputs.push == 'true' }}
+          tags: ${{ steps.plan.outputs.vision_cuda_tags }}
+          build-args: |
+            VARIANT=cuda
+            VERSION=${{ steps.plan.outputs.version }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Smoke test the CPU build (amd64)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: images/vision
+          platforms: linux/amd64
+          load: true
+          tags: forgeyard-vision:publish-check
+          build-args: |
+            VARIANT=cpu
+            VERSION=${{ steps.plan.outputs.version }}
+      - run: images/vision/smoke.sh forgeyard-vision:publish-check
+
+      - name: Digests
+        if: always() && steps.vision.outcome == 'success' && steps.vision_cuda.outcome == 'success'
+        env:
+          PUSHED: ${{ steps.plan.outputs.push }}
+          CPU: ${{ steps.vision.outputs.digest }}
+          CUDA: ${{ steps.vision_cuda.outputs.digest }}
+          REPO: ${{ steps.plan.outputs.vision_repository }}
+        run: |
+          {
+            echo "### Vision image (workload templates)"
+            echo
+            echo "pushed: $PUSHED"
+            echo
+            echo "- CPU: \`$REPO@$CPU\`"
+            echo "- CUDA: \`$REPO@$CUDA\`"
+          } >> "$GITHUB_STEP_SUMMARY"

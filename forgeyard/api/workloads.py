@@ -139,6 +139,15 @@ def _poke(nodes) -> None:
         hub.poke(node_id)
 
 
+@router.get("/templates")
+def list_templates(_: Caller = Depends(current)):
+    """The ready-made workload templates (1.3): each with its image (CPU and CUDA builds), its model and
+    licence, and the workload spec it makes (POST it to /api/workloads)."""
+    from forgeyard.workloads import templates
+
+    return {"templates": templates.listing()}
+
+
 @router.get("")
 def list_workloads(caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     rows = db.scalars(select(Workload).options(selectinload(Workload.replicas).selectinload(Replica.node))

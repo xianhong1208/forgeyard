@@ -27,6 +27,16 @@ each exposed at /x/accept-x-<kind> and checked:
   9. usage: the run's key shows requests, bytes in and out and busy time under x:<name>;
  10. turning Expose off: 404 at once.
 
+With --templates (object-detection,segmentation,depth), the ready-made templates too, from the server's own
+template specs (Forgeyard's vision image; --gpu: the CUDA build on one NVIDIA card, else the CPU build),
+named accept-x-<template>:
+
+  - ready behind the guard; GET / names the model, its licence and the device (cuda with --gpu);
+  - detection: the COCO validation photo 000000039769 (two cats on a sofa; --image to use another, or
+    a generated one when it cannot be downloaded) finds both cats; segmentation: a box around a square of a
+    generated image gives that square's mask; depth: a 16-bit PNG of the photo's size;
+  - a request that is not an image is 400; usage counts the requests and their bytes; the timings.
+
 then removes what it created (workloads, keys) and prints a report (also JSON with --out). Everything is
 named accept-x-*, and leftovers of an earlier run are removed first, so it can be run again.
 
@@ -49,6 +59,11 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
+import uuid
+import base64
+import struct
+import zlib
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -361,6 +376,139 @@ def exercise(c: Client, base: str, w: dict, check: Callable, new_key: Callable[[
     return out
 
 
+# ------------------------------------------------------------------ the templates (5b)
+COCO_CATS = "http://images.cocodataset.org/val2017/000000039769.jpg"   # CC BY 4.0, two cats and two remotes
+
+
+def square_png(w: int = 256, h: int = 192) -> bytes:
+    """Grey, a red square at (40, 40)-(120, 120) and a blue rectangle: the segmentation check's image."""
+    def px(x, y):
+        if 40 <= x < 120 and 40 <= y < 120:
+            return b"\xd0\x20\x20"
+        if 150 <= x < 220 and 60 <= y < 160:
+            return b"\x20\x40\xd0"
+        return b"\x80\x80\x80"
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    rows = b"".join(b"\x00" + b"".join(px(x, y) for x in range(w)) for y in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+
+
+def png_size(data: bytes) -> tuple[int, int, int]:
+    """(width, height, bit depth) from a PNG's header."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    w, h, depth = struct.unpack(">IIB", data[16:25])
+    return w, h, depth
+
+
+def jpeg_size(data: bytes) -> tuple[int, int]:
+    i = 2
+    while i < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in (0xC0, 0xC1, 0xC2):
+            h, w = struct.unpack(">HH", data[i + 5:i + 9])
+            return w, h
+        i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
+    raise ValueError("no JPEG size")
+
+
+def multipart(fields: dict, image: bytes, filename: str) -> tuple[bytes, str]:
+    b = uuid.uuid4().hex
+    parts = [f"--{b}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode() for k, v in fields.items()]
+    parts.append(f"--{b}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\n"
+                 "Content-Type: application/octet-stream\r\n\r\n".encode() + image + b"\r\n")
+    return b"".join(parts) + f"--{b}--\r\n".encode(), f"multipart/form-data; boundary={b}"
+
+
+def photo(path: Optional[str]) -> tuple[Optional[bytes], str]:
+    if path:
+        return Path(path).read_bytes(), Path(path).name
+    try:
+        with urllib.request.urlopen(COCO_CATS, timeout=20) as r:
+            return r.read(), "coco-000000039769.jpg"
+    except OSError as e:
+        log(f"  the COCO photo could not be downloaded ({e}); the detection check uses the generated image")
+        return None, ""
+
+
+def exercise_template(c, base: str, w: dict, t: dict, check: Callable, key: str, gpu: bool,
+                      image: Optional[bytes], image_name: str) -> dict:
+    x = f"/x/{w['name']}"
+    tn = f"{t['id']} ({'GPU' if gpu else 'CPU'})"
+    out: dict = {}
+    s, _, data = request(base, "GET", f"{x}/", key=key)
+    about = body_json(data)
+    check(f"{tn}: the vision server names its model, licence and device",
+          s == 200 and about.get("model") == t["model"] and about.get("licence") == t["licence"]
+          and about.get("device") == ("cuda" if gpu else "cpu"),
+          f"{about.get('model')} {about.get('licence')} on {about.get('device')}, loaded in {about.get('loaded_s')} s")
+    task = t["task"]
+    if task == "detect":
+        img, name = (image, image_name) if image else (square_png(), "squares.png")
+        body, ctype = multipart({"threshold": "0.5"}, img, name)
+        times = []
+        for _ in range(3):
+            t0 = time.monotonic()
+            s, _, data = request(base, "POST", f"{x}/v1/detect", key=key, body=body, headers={"Content-Type": ctype},
+                                 timeout=300)
+            times.append(time.monotonic() - t0)
+        d = body_json(data)
+        cats = [o for o in d.get("detections", []) if o["label"] == "cat" and o["score"] > 0.8]
+        if image:
+            check(f"{tn}: an image in, boxes out ({image_name}: two cats)", s == 200 and len(cats) == 2,
+                  f"{s}: {[(o['label'], o['score']) for o in d.get('detections', [])][:6]}")
+        else:
+            check(f"{tn}: an image in, a list of boxes out", s == 200 and isinstance(d.get("detections"), list), f"{s}")
+        out["seconds"] = [round(v, 2) for v in times]
+    elif task == "segment":
+        body, ctype = multipart({"box": "[40, 40, 120, 120]"}, square_png(), "squares.png")
+        t0 = time.monotonic()
+        s, _, data = request(base, "POST", f"{x}/v1/segment", key=key, body=body, headers={"Content-Type": ctype}, timeout=300)
+        out["seconds"] = [round(time.monotonic() - t0, 2)]
+        best = (body_json(data).get("masks") or [{}])[0]
+        mask = base64.b64decode(best.get("png", "")) if best.get("png") else b""
+        check(f"{tn}: a box around a square gives that square's mask", s == 200 and 5500 <= best.get("area", 0) <= 7300
+              and best.get("box") and abs(best["box"][0] - 40) <= 4 and abs(best["box"][2] - 120) <= 4
+              and mask[:8] == b"\x89PNG\r\n\x1a\n", f"{s}: area {best.get('area')}, box {best.get('box')}, score {best.get('score')}")
+        body, ctype = multipart({}, square_png(), "squares.png")
+        s, _, data = request(base, "POST", f"{x}/v1/segment", key=key, body=body, headers={"Content-Type": ctype})
+        check(f"{tn}: without a point or a box it says so (400)", s == 400 and (body_json(data).get("error") or {}).get("code")
+              == "missing_prompt", f"{s}")
+    else:
+        img, name = (image, image_name) if image else (square_png(), "squares.png")
+        body, ctype = multipart({}, img, name)
+        t0 = time.monotonic()
+        s, _, data = request(base, "POST", f"{x}/v1/depth", key=key, body=body, headers={"Content-Type": ctype}, timeout=300)
+        out["seconds"] = [round(time.monotonic() - t0, 2)]
+        d = body_json(data)
+        try:
+            size = png_size(base64.b64decode(d.get("depth_png", "")))
+            want = jpeg_size(img) if img[:2] == b"\xff\xd8" else png_size(img)[:2]
+        except (ValueError, struct.error) as e:
+            size, want = (0, 0, 0), str(e)
+        check(f"{tn}: a 16-bit depth PNG of the image's size", s == 200 and size[:2] == tuple(want) and size[2] == 16
+              and d.get("max", 0) > d.get("min", 0), f"{s}: {size}, image {want}, range {d.get('min')}..{d.get('max')}")
+    body, ctype = multipart({}, b"not an image", "x.png")
+    s, _, data = request(base, "POST", f"{x}/v1/{task}", key=key, body=body, headers={"Content-Type": ctype})
+    check(f"{tn}: something that is not an image is 400 invalid_image", s == 400 and (body_json(data).get("error") or {}).get(
+        "code") == "invalid_image", f"{s}")
+    time.sleep(1)
+    rows = c.ok("GET", "/api/usage?days=1&group=model")["rows"]
+    row = next((r for r in rows if r["id"] == f"x:{w['name']}"), None)
+    check(f"{tn}: usage under x:{w['name']}", row is not None and row["requests"] >= 3 and row["bytes_in"] > 0
+          and row["bytes_out"] > 0, json.dumps({k: row.get(k) for k in ("requests", "errors", "bytes_in", "bytes_out", "busy_ms")})
+          if row else "no row")
+    check(f"{tn}: time per request", True, f"{out.get('seconds')} s", info=True)
+    return out
+
+
 # ------------------------------------------------------------------ main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -369,11 +517,15 @@ def main() -> int:
     ap.add_argument("--user", default="owner")
     ap.add_argument("--machine", required=True, help="the machine to run the workloads on")
     ap.add_argument("--only", default="process,container", help=f"comma-separated, of {', '.join(KINDS)}")
-    ap.add_argument("--timeout", type=float, default=900, help="seconds a workload may take to be ready (an image pull)")
+    ap.add_argument("--templates", default="", help="also these templates: object-detection,segmentation,depth (or all)")
+    ap.add_argument("--gpu", action="store_true", help="the templates on one NVIDIA card (the CUDA build), else the CPU build")
+    ap.add_argument("--image", help="the detection and depth checks' photo (default: COCO val2017 000000039769)")
+    ap.add_argument("--timeout", type=float, default=1800, help="seconds a workload may take to be ready (an image pull)")
     ap.add_argument("--keep", action="store_true", help="leave the workloads running afterwards")
     ap.add_argument("--out", help="also write the report as JSON here")
     args = ap.parse_args()
     kinds = [k for k in args.only.split(",") if k]
+    wanted = [t for t in args.templates.split(",") if t]
     unknown = [k for k in kinds if k not in KINDS]
     if unknown:
         raise Fail(f"unknown kind(s) {unknown}; known: {', '.join(KINDS)}")
@@ -413,6 +565,31 @@ def main() -> int:
                 continue
             check(f"{name}: ready on {m['name']}", True, f"after {time.monotonic() - t0:.0f} s")
             report["workloads"][name] = exercise(c, args.server, w, check, new_key)
+        if wanted:
+            ts = {t["id"]: t for t in c.ok("GET", "/api/workloads/templates")["templates"]}
+            if wanted == ["all"]:
+                wanted = list(ts)
+            bad = [t for t in wanted if t not in ts]
+            if bad:
+                raise Fail(f"unknown template(s) {bad}; the server has {', '.join(ts)}")
+            image, image_name = photo(args.image)
+            key = new_key("templates", {"workloads": "all"})
+            for tid in wanted:
+                t = ts[tid]
+                body = dict(t["specs"]["cuda" if args.gpu else "cpu"], name=f"{PREFIX}{tid}", machine_id=m["id"])
+                if not (info.get("container") or {}).get("ok"):
+                    check(f"{tid}: template", False, f"no container engine on {m['name']}", skip=True)
+                    continue
+                w = c.ok("POST", "/api/workloads", body)["workload"]
+                t0 = time.monotonic()
+                try:
+                    w = wait_running(c, w["id"], args.timeout)
+                except Fail as e:
+                    check(f"{tid}: ready", False, str(e))
+                    continue
+                check(f"{tid}: ready on {m['name']} ({body['runtime']['image']})", True, f"after {time.monotonic() - t0:.0f} s")
+                report["workloads"][w["name"]] = exercise_template(c, args.server, w, t, check, key, args.gpu, image,
+                                                                    image_name)
     finally:
         if not args.keep:
             cleanup(c)

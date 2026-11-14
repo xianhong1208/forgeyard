@@ -91,7 +91,7 @@ jobs:
       - uses: actions/checkout@v5
       - name: hadolint both Dockerfiles
         run: |
-          for f in Dockerfile.server Dockerfile.agent; do
+          for f in Dockerfile.server Dockerfile.agent images/vision/Dockerfile; do
             echo "$f"
             docker run --rm -i "$HADOLINT" < "$f"
           done
@@ -137,3 +137,18 @@ jobs:
           push: false
           cache-from: type=gha,scope=server-arm64
           cache-to: type=gha,scope=server-arm64,mode=max
+
+  # The workload templates' vision server (images/vision, 1.3): the CPU build, and each task answering a
+  # real request without the network. The CUDA build is made only by publish-images.yml.
+  vision-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: shellcheck the build helpers
+        run: shellcheck images/vision/smoke.sh images/vision/compile.sh
+      - name: Build the vision image (CPU)
+        run: docker build -t forgeyard-vision:ci --build-arg VARIANT=cpu images/vision
+      - name: Smoke test (detect, segment, depth)
+        run: images/vision/smoke.sh forgeyard-vision:ci
+      - name: Image size
+        run: docker image ls forgeyard-vision:ci

@@ -57,6 +57,7 @@ def plan(version: str, namespace: str, ref_type: str, ref_name: str, have_secret
     ns = namespace.strip() or DRY_RUN_NAMESPACE
     agent = images.published_repository(images.AGENT_REPOSITORY, ns)
     server = images.published_repository(images.SERVER_REPOSITORY, ns)
+    vision = images.published_repository(images.VISION_REPOSITORY, ns)
     tags = image_tags(version)
     return {
         "version": version,
@@ -66,6 +67,11 @@ def plan(version: str, namespace: str, ref_type: str, ref_name: str, have_secret
         "server_repository": server,
         "agent_tags": ",".join(f"{agent}:{t}" for t in tags),
         "server_tags": ",".join(f"{server}:{t}" for t in tags),
+        # The workload templates' vision server (1.3): the CPU build under the same tags, the CUDA build
+        # with -cuda after each (latest-cuda).
+        "vision_repository": vision,
+        "vision_tags": ",".join(f"{vision}:{t}" for t in tags),
+        "vision_cuda_tags": ",".join(f"{vision}:{t}-cuda" for t in tags),
     }
 
 
