@@ -1,4 +1,4 @@
-import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
@@ -25,6 +25,7 @@ const KINDS = [
   { icon: IconMicrophone, name: "Speech to text", detail: "faster-whisper behind speaches" },
   { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
   { icon: IconPhotoAi, name: "Images", detail: "diffusers pipelines on vLLM-Omni; stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA) and CPUs" },
+  { icon: IconMovie, name: "Video", detail: "Wan text-to-video pipelines on vLLM-Omni (NVIDIA), as jobs at /v1/videos" },
 ];
 
 export function ModelsPage() {
