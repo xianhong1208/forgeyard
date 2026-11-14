@@ -19,15 +19,16 @@ generation.
     the pixel cap repeated in the engine (`--max-generated-image-size`), VAE slicing, optional model
     offload and VAE tiling.
   - **`sd-cpp`** (new recipe): stable-diffusion.cpp's `sd-server` on AMD GPUs and APUs (Vulkan, the
-    render node only) and the CPU as a process without Docker. Its image is published only under a
-    rolling tag and is pinned by digest (`master-vulkan` at build 32d516c); the CPU process is release
-    `master-1043-3be2378` (later Linux releases need glibc 2.43). **No CUDA image** (#43): on an A100
-    the official `master-cuda` image ran Z-Image-Turbo GGUF at about 45 s a step and crashed at
-    1024x1024 (`unspecified launch failure`), so NVIDIA cards make images with `vllm-omni-image`, and a
-    GGUF image model on a GPU of an NVIDIA-only machine is refused with the reason.
+    render node only), NVIDIA GPUs (CUDA) and the CPU as a process without Docker. Its images are
+    published only under rolling tags and are pinned by digest (`master-vulkan` at build 32d516c,
+    `master-cuda` at build 3bad892, master-1094, with CUDA 12.6, so driver 560 or newer); the CPU
+    process is release `master-1043-3be2378` (later Linux releases need glibc 2.43). The first
+    `master-cuda` pin (build 465adf3) was replaced (#43): on an A100 it ran Z-Image-Turbo GGUF at about
+    45 s a step and crashed (`unspecified launch failure`). With build 3bad892 the A100 makes a
+    1024x1024 Z-Image-Turbo GGUF image in about 31 s.
     A single checkpoint runs with `-m`, a model with separate text encoders and VAE with
-    `--diffusion-model`, `--llm` / `--t5xxl` / `--clip_l` and `--vae`; a random seed per request; with
-    Vulkan `--max-vram` from the reservation.
+    `--diffusion-model`, `--llm` / `--t5xxl` / `--clip_l` and `--vae`; a random seed per request; on a
+    GPU `--max-vram` from the reservation.
 - **`response_format: url` is refused** (400 `response_format_not_supported`): Forgeyard keeps no copy
   of the images it makes. `stream` is refused too (`streaming_not_supported`).
 - **Caps per deployment**, each with a working default: *Images per request* (`max_images`, 4), *Default
