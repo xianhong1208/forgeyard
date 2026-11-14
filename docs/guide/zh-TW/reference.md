@@ -224,6 +224,12 @@ local_dirs = ["/data/models"]
 | `POST /v1/audio/voices`、`DELETE /v1/audio/voices/{name}` | 上傳或刪除聲音（聲音複製）：1.3 一律回應 400 `voice_cloning_not_supported` | — |
 | `POST /v1/images/generations` | 圖片生成（1.3）：OpenAI 的請求格式，圖片只以 base64（`b64_json`）傳回。見[圖片生成](#images) | 否 |
 | `POST /v1/images/edits`、`POST /v1/images/variations` | 圖片編輯與變體：1.3 不提供，一律回應 404 `endpoint_not_supported` | — |
+| `POST /v1/videos` | 影片生成（1.3）：要求一段影片，立刻回應這個工作。可用 JSON、`multipart/form-data`（OpenAI SDK 送的格式）或 URL 編碼表單。見[影片生成](#video) | 否 |
+| `GET /v1/videos` | 這把金鑰自己的影片，最新的在前：`limit`（1 到 100，預設 20）、`after`（看過的最後一個 id）、`order`（`desc` 或 `asc`） | — |
+| `GET /v1/videos/{id}` | 一個影片工作：它的狀態與進度 | — |
+| `GET /v1/videos/{id}/content` | 完成的影片，`video/mp4`，從製作它的副本串流過來。只有 `variant=video`；`Range` 請求回應 206 | — |
+| `DELETE /v1/videos/{id}` | 在它的副本上取消製作中的工作，或刪除完成的影片 | — |
+| `POST /v1/videos/sync`、`POST /v1/videos/{id}/remix` | 不提供：一律回應 404 `endpoint_not_supported` | — |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
 
@@ -331,6 +337,79 @@ local_dirs = ["/data/models"]
 | `busy_ms` | 副本處理這個請求的時間（從送出到收到回應的最後一個位元組），乘以部署占用的 GPU 數（CPU 上為 1）：也就是 GPU 時間 |
 | tokens | 不計。金鑰的每分鐘 token 數不適用；每分鐘請求數照樣適用 |
 
+### 影片生成
+
+`POST /v1/videos` 接受 OpenAI 的 Videos 請求，並立刻回應一個**工作**；影片在一個副本上製作，也由它保存。輪詢 `GET /v1/videos/{id}` 直到 `status` 是 `completed` 或 `failed`，再取回 `GET /v1/videos/{id}/content`。由一種引擎提供（配方 `vllm-omni-video`，NVIDIA 上的 vLLM-Omni）；只由本機部署提供，絕不送往雲端供應商。
+
+| 欄位 | 閘道怎麼處理 |
+|---|---|
+| `model` | 影片模型的名稱，和平常一樣 |
+| `prompt` | 必填，最多為部署的 *Longest prompt*（`max_prompt_chars`，2,000）。超過時回應 400 `prompt_too_long` |
+| `seconds` | 整數秒，數字或字串（`"5"`）都可以，1 到部署的 *Longest video*（`max_seconds`，5）；超過時回應 400 `video_too_long`。沒指定時用 *Default length*（`seconds`，5）。影格數是秒數 x 每秒影格數，再取到模型會做的數量（Wan：4k + 1，所以 16 fps 的 5 秒是 81 格） |
+| `size` | `WIDTHxHEIGHT`；沒指定時用 *Default size*（模型自己的：Wan2.1 為 832x480，Wan2.2 為 1280x704）。每一邊最多 *Largest side*（`max_side`，0 = 模型自己的長邊），而且每格像素不超過預設尺寸放大到該邊時的像素；超過時回應 400 `video_too_large`。邊長是 16 的倍數（Wan2.2-5B 為 32）；否則回應 400 `invalid_size` |
+| `num_inference_steps` | 去噪步數，最多為 *Most steps*（`max_steps`，50）；超過時回應 400 `too_many_steps`。沒指定時用 *Default steps*，否則用模型自己的 |
+| `negative_prompt`、`guidance_scale`、`seed` | 轉送 |
+| `input_reference`（以及 vLLM-Omni 的 `image_reference`、`video_reference`、`audio_reference`） | 拒絕，回應 400 `input_reference_not_supported`：1.3 只支援文字轉影片 |
+| `quality`、`user` | 接受但忽略 |
+
+其他東西都不會送到引擎：閘道只送出提示、模型、尺寸、影格數、每秒影格數和上面的欄位（絕不送 vLLM-Omni 的 `lora`、`extra_params` 或影格插補的路徑）。
+
+**工作**採用 OpenAI 的格式：`{"id", "object": "video", "model", "status", "progress", "created_at",
+"completed_at", "expires_at", "size", "seconds", "quality", "remixed_from_video_id", "error"}`。
+
+- `id` 是 Forgeyard 自己的（`video_` 加上 32 個隨機十六進位數字），絕不是引擎的。別的金鑰的 id 回應 404 `video_not_found`，和不存在的 id 完全一樣。
+- `status` 是 `queued`、`in_progress`、`completed` 或 `failed`。`progress` 是引擎回報的值：vLLM-Omni 在影片做好之前都是 0，做好後是 100。
+- `seconds` 是字串，和 OpenAI 的 API 一樣。`expires_at` 在工作結束時設定：部署的 *Keep results* 之後。
+- 工作 `failed` 時的 `error`（`{"code", "message"}`）：
+
+| `error.code` | 意思 |
+|---|---|
+| `generation_failed` | 引擎做影片失敗；後面附上它的訊息 |
+| `timed_out` | 在部署的 *Longest job*（`timeout`）內沒有做完；閘道已在副本上取消它 |
+| `replica_restarted` | 副本的引擎重新啟動：它的工作（放在記憶體裡）也跟著不見了 |
+| `replica_gone` | 副本被停止、重新配置或刪除 |
+| `video_lost` | 副本已經不知道這個工作（它的引擎重新啟動過） |
+
+不保存提示。工作的資料列在結果過期一週後刪除。
+
+**內容。** `GET /v1/videos/{id}/content` 從製作它的副本串流 MP4，以 `video/mp4` 加上 `Content-Disposition: inline` 傳回。`variant=thumbnail` 和 `variant=spritesheet` 回應 400 `variant_not_supported`（引擎只做影片）。還沒做好的工作回應 409 `video_not_ready`，失敗的回應 409 `video_failed`，過期的回應 410 `video_expired`，副本後來重新啟動或被停止的回應 410 `video_lost`。
+
+**刪除。** `DELETE /v1/videos/{id}` 在副本上取消製作中的工作，或刪除完成的影片，並移除這個工作：`{"id", "object": "video.deleted", "deleted": true}`。
+
+**同時的工作數。** 一個副本一次做一段影片；其他的在它上面等待。閘道把工作送到工作最少的就緒副本。一個部署最多同時有 *Jobs at once*（`queue`，8）個在等待或製作中的工作，其中來自同一把金鑰（或 Playground 裡同一個人）的最多 *Jobs per key*（`jobs_per_key`，2）個。再多一個就回應 429 `queue_full` 或 `too_many_jobs` 並附上 `Retry-After`（依它最近的影片花了多久計算）。金鑰的每分鐘請求數會計入每個要求的工作；輪詢、列出和下載都不算。
+
+**過期。** 結果在 *Keep results*（`keep_minutes`，1,440）內可以取回；之後伺服器會在副本上刪除它。引擎自己也會在那之後一小時刪除它的檔案（`VLLM_OMNI_SERVER_STORAGE__FILE_TTL`），而且檔案放在副本的容器裡，所以停止或重新啟動的副本不會留下任何檔案。
+
+部署參數（配方 `vllm-omni-video`）：
+
+| 參數 | 預設值 | 作用 |
+|---|---|---|
+| `default_size`（*Default size*） | `auto` | 沒指定尺寸的請求用這個尺寸；`auto` 是模型自己的 |
+| `seconds`（*Default length*） | `5` | 沒指定長度的請求用這個長度 |
+| `max_seconds`（*Longest video*） | `5` | 更長的請求：400。記憶體估算依它計算 |
+| `max_side`（*Largest side*，Advanced） | `0` | 影片最寬或最高的像素數；0 是模型自己的 |
+| `fps`（*Frames per second*，Advanced） | `0` | 0 是模型自己的（Wan2.1 為 16，Wan2.2 為 24） |
+| `steps`、`max_steps`（Advanced） | `0`、`50` | 預設步數（0：模型自己的）與請求最多能要的步數 |
+| `queue`（*Jobs at once*，Advanced） | `8` | 部署上等待或製作中的工作數 |
+| `jobs_per_key`（*Jobs per key*，Advanced） | `2` | 其中單一金鑰或單一使用者的工作數 |
+| `keep_minutes`（*Keep results*，Advanced） | `1440` | 完成的影片可以取回多久 |
+| `timeout`（*Longest job*，Advanced） | `3600` | 從要求開始算的秒數；到時還在製作的工作會被取消並回報失敗 |
+| `max_prompt_chars`（*Longest prompt*，Advanced） | `2000` | 更長的提示：400 |
+| `offload`（*Offload to host memory*，Advanced） | `none` | `model`：卡上只放正在工作的元件（`--enable-cpu-offload`）；較慢 |
+
+**每個工作在結束時計入一次**（`GET /api/usage` 與 **Usage** 頁面）：
+
+| 單位 | 怎麼算 |
+|---|---|
+| 請求數 | 每個工作一個。完成的算有回應；失敗的算一個錯誤，其他什麼都不算；製作中被刪除的算 499（不是錯誤）。被拒絕的請求（400、404、429）在被拒絕時計入 |
+| `media_ms` | 影片的長度（毫秒），用引擎回報的值（否則用影格數 / 每秒影格數） |
+| `busy_ms` | 從看到工作進入製作中到它做完的時間，乘以部署占用的 GPU 數：也就是 GPU 時間 |
+| tokens | 不計 |
+
+Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`）、`GET
+/api/playground/videos/options?model=<model>`、`GET` 與 `DELETE /api/playground/videos/{id}`，以及 `GET
+/api/playground/videos/{id}/content`：規則相同，以登入的使用者身分（session cookie 與主控台的 `X-Forgeyard: 1` 標頭），只能看到自己的工作，計為 console。工作存放在伺服器的資料庫裡（資料表 `video_jobs`，migration `0014`）。
+
 ### 標頭
 
 | 標頭 | 方向 | 值 |
@@ -377,11 +456,15 @@ local_dirs = ["/data/models"]
 | 400 | `streaming_not_supported` | 圖片：`stream: true` | 拿掉它 |
 | 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request* | 少要幾張，或調高 `max_images` |
 | 400 | `image_too_large` | 圖片：某一邊超過部署的 *Largest side* | 要小一點的尺寸，或調高 `max_side` |
-| 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明） | 使用類似訊息建議的尺寸 |
+| 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明）。影片：同上，每邊 64 到 2,048，16 或 32 的倍數 | 使用類似訊息建議的尺寸 |
 | 400 | `unsupported_output_format` | 圖片：`output_format` 不是 png、jpeg 或 webp，或是引擎不產生的格式 | 改要 png |
-| 400 | `too_many_steps` | 圖片：`num_inference_steps` 超過部署的 *Most steps* | 少一點步數，或調高 `max_steps` |
-| 400 | `prompt_too_long` | 圖片：`prompt` 或 `negative_prompt` 超過部署的 *Longest prompt* | 縮短它，或調高 `max_prompt_chars` |
-| 4xx/5xx | `engine_error` | 圖片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
+| 400 | `too_many_steps` | 圖片與影片：`num_inference_steps` 超過部署的 *Most steps* | 少一點步數，或調高 `max_steps` |
+| 400 | `prompt_too_long` | 圖片與影片：`prompt` 或 `negative_prompt` 超過部署的 *Longest prompt* | 縮短它，或調高 `max_prompt_chars` |
+| 400 | `video_too_long` | 影片：`seconds` 超過部署的 *Longest video* | 要短一點的秒數，或調高 `max_seconds` |
+| 400 | `video_too_large` | 影片：某一邊超過 *Largest side*，或每格像素比預設尺寸放大到該邊時還多 | 要小一點的尺寸，或調高 `max_side` |
+| 400 | `input_reference_not_supported` | 影片：帶了 `input_reference`（或 `image_reference`、`video_reference`、`audio_reference`）：1.3 只支援文字轉影片 | 改在提示裡描述 |
+| 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；引擎只做影片 | 改用 `variant=video` |
+| 4xx/5xx | `engine_error` | 圖片與影片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
@@ -393,13 +476,19 @@ local_dirs = ["/data/models"]
 | 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
 | 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **Allowed**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
 | 404 | `unknown_endpoint` | 閘道沒有這個路徑 | 使用上面列出的端點 |
-| 404 | `endpoint_not_supported` | `/v1/images/edits` 或 `/v1/images/variations`：1.3 不提供 | 改用 `/v1/images/generations` |
+| 404 | `endpoint_not_supported` | `/v1/images/edits`、`/v1/images/variations`、`/v1/videos/sync` 或 `/v1/videos/{id}/remix`：1.3 不提供 | 改用 `/v1/images/generations`，或 `/v1/videos` 的工作 |
+| 404 | `video_not_found` | 影片：這把金鑰沒有這段影片（別的金鑰的 id 也一樣回應） | 查看 `GET /v1/videos` |
+| 409 | `video_not_ready` | 影片：取還在 `queued` 或 `in_progress` 的工作的內容 | 輪詢到 `completed` |
+| 409 | `video_failed` | 影片：取失敗工作的內容 | 看工作的 `error`，重新要求 |
+| 410 | `video_expired` | 影片：結果超過部署的 *Keep results*，已被刪除 | 重新要求 |
+| 410 | `video_lost` | 影片：製作它的副本重新啟動或被停止，它的檔案也跟著不見了 | 重新要求 |
 | 413 | `request_too_large` | 請求內容（媒體網址下載並內嵌後）大於模型的 *Largest request* 或 `GATEWAY_MAX_BODY_MB` | 送少一點或縮小圖片，或調高參數或設定 |
 | 413 | `media_too_large` | 媒體網址的檔案大於 `MEDIA_FETCH_MAX_MB` | 送小一點的檔案，或調高設定 |
 | 421 | `host_not_allowed` | 伺服器不回應網址裡的主機名稱 | 使用它的位址，或把名稱加進 `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | 超過金鑰每分鐘的請求數或 token 數 | 等待 `Retry-After` 秒 |
 | 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
-| 429 | `queue_full` | 圖片：每個副本都在忙，部署的佇列也滿了 | 等待 `Retry-After` 秒 |
+| 429 | `queue_full` | 圖片：每個副本都在忙，部署的佇列也滿了。影片：部署已經有 *Jobs at once* 個工作 | 等待 `Retry-After` 秒 |
+| 429 | `too_many_jobs` | 影片：這把金鑰（或這個人）在部署上已經有 *Jobs per key* 段影片在等待或製作中 | 等待 `Retry-After` 秒，或刪掉一段 |
 | 502 | `upstream_unreachable` | 連不上任何副本 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
 | 502 | `upstream_error` | 回應傳送到一半時，和副本或供應商的連線斷了 | 重試 |
 | 502 | `replica_refused_key` | 副本拒絕了閘道的內部金鑰 | 停止再啟動部署 |
@@ -413,7 +502,7 @@ local_dirs = ["/data/models"]
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
 | 503 | `queue_timeout` | 圖片：請求等待空出副本的時間超過部署的 *Timeout* | 稍後重試，或加一個副本 |
-| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段）；圖片則是在部署的 *Timeout* 內 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
+| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段）；圖片則是在部署的 *Timeout* 內；影片則是副本在 60 秒內沒有接下工作 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
 | 504 | `provider_timeout` | 供應商沒有及時回應（`PROVIDER_READ_TIMEOUT`，或供應商自己的逾時設定） | 稍後重試 |
 
 另外兩種情況：
@@ -637,6 +726,7 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `speaches-tts`（1.3） | `cpu` | CPU（容器），任何機器都可以 | 與 faster-whisper 相同的 `ghcr.io/speaches-ai/speaches:0.8.3-cpu` 映像檔。只用 CPU：Kokoro 和 Piper 跑在 ONNX Runtime 上，用 CPU 產生語音的速度就比播放還快；在 CUDA 映像檔裡 Kokoro 其實也是用 CPU 跑 |
 | `vllm-omni-tts`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | `vllm/vllm-omni:v0.32.0`（CUDA 13.0） |
 | `vllm-omni-image`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | 同樣的 `vllm/vllm-omni:v0.32.0` |
+| `vllm-omni-video`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | 同樣的 `vllm/vllm-omni:v0.32.0` |
 | `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
 | | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
@@ -649,6 +739,8 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 `scripts/pin_images.py` 會在 `forgeyard/recipes/images.lock.json` 記錄每個映像檔的正確副本可能顯示的 id（index、manifest 和 config 的 digest，以及每個平台的內容 id），所以在連不到 registry 的機器上用 `docker load` 載入的副本會被檢查並使用：[離線機器](how-to.md#offline-machines)。
 
 Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎）。
+
+影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 
 ## 容器映像檔
 

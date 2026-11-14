@@ -446,6 +446,41 @@ media: {inputs: [image, audio, video], files: false}
 
 **在離線的 AMD 機器上：** 用 `docker load` 載入 `sd-cpp` 配方的 Vulkan 映像檔（見[離線機器](#offline-machines)）。模型則先在一台連得到 Hugging Face 的機器上部署一次，再把它在那台機器模型快取裡的目錄（`hub/models--<org>--<name>`，用 `tar` 或 `rsync -a`：裡面用的是相對連結）複製到離線機器快取裡的相同位置。那裡的部署會發現已經快取好，什麼都不用下載。
 
+## 生成影片
+
+1. **加入影片模型。** 在 **Models → Add a model → Recommended** 的 **Video** 群組裡有 Wan2.1-T2V-1.3B（832x480、16 fps，在預設上限下大約需要 22 GiB 的 GPU 記憶體）和 Wan2.2-TI2V-5B（1280x704、24 fps，大約 33 GiB；它的估算還沒實測），兩個都是 Apache-2.0，給 NVIDIA GPU 用（vLLM-Omni）。從 **Search Hugging Face** 找到的模型，只要是 diffusers 儲存庫，而且 `model_index.json` 寫的是文字轉影片 pipeline（`WanPipeline`）就能用。
+2. **照常部署。** *Default size*、*Default length* 和 *Longest video* 在表單上；最長邊、每秒影格數、步數、同時的工作數、每把金鑰的工作數、結果保留多久、最長的工作和卸載在 **Advanced** 底下。預設值就能用。
+3. **用 OpenAI SDK 呼叫：**要求影片、輪詢它，然後下載。
+
+   ```python
+   import time
+
+   video = client.videos.create(model="wan2.1-t2v-1.3b", prompt="A red kite over a green hill, slow camera pan",
+                                seconds="5", size="832x480")
+   while video.status in ("queued", "in_progress"):
+       time.sleep(5)
+       video = client.videos.retrieve(video.id)
+   if video.status == "completed":
+       client.videos.download_content(video.id).write_to_file("kite.mp4")
+   else:
+       print(video.error.code, video.error.message)
+   ```
+
+   `seconds` 是字串，和 OpenAI 的 API 一樣。`size` 請用模型接受的尺寸：OpenAI 自己的尺寸（`1280x720`、`720x1280`）比 Wan2.1-1.3B 允許的大。步數、負面提示和 seed 放在 `extra_body`：`extra_body={"num_inference_steps": 30, "negative_prompt": "blurry", "seed": 7}`。`client.videos.list()` 列出你這把金鑰的影片，`client.videos.delete(video.id)` 會取消製作中的影片或刪除完成的影片。
+
+   用 curl 的話，以表單送出：
+
+   ```bash
+   curl https://192.168.1.20:7860/v1/videos -H "Authorization: Bearer $FORGEYARD_KEY" \
+     -F model=wan2.1-t2v-1.3b -F prompt="A red kite over a green hill" -F seconds=5 -F size=832x480
+   curl https://192.168.1.20:7860/v1/videos/<id> -H "Authorization: Bearer $FORGEYARD_KEY"
+   curl https://192.168.1.20:7860/v1/videos/<id>/content -H "Authorization: Bearer $FORGEYARD_KEY" -o kite.mp4
+   ```
+
+4. **在 Playground 試試看：** 影片模型會有一個 **Video** 面板，可以輸入提示、選部署接受的尺寸和長度、看工作的進度，完成的影片會直接在頁面上播放並附下載連結。你之前用這個模型做的影片列在下方。
+
+**要多久：** 每段影片要幾分鐘，每個副本一次做一段；其他的在它上面排隊。影片長或尺寸大時，在 **Advanced** 調高 *Longest job*。
+
 ## 加入雲端供應商
 
 管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。

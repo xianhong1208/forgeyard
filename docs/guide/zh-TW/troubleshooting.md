@@ -336,6 +336,35 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 **`sd-cpp` 副本在 CPU 機器上無法啟動：** 它的行程引擎需要 glibc 2.39 以上（Ubuntu 24.04、Debian 13），以及能解開 `.zip` 引擎的 1.3 版 agent。舊版 agent 會在配置結果裡顯示 "cannot unpack .zip engines"：請更新它。
 
+## 影片失敗或被拒絕
+
+**你看到：** `POST /v1/videos` 回應 400；`code` 說明原因。任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `video_too_long` | `seconds` 超過部署的 *Longest video* | 要短一點的秒數，或調高它（記憶體會跟著變大） |
+| `video_too_large` | 某一邊超過 *Largest side*，或每格像素比預設尺寸放大到該邊時還多 | 要模型自己的尺寸（Wan2.1 為 832x480），或調高 *Largest side* |
+| `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Wan2.2-5B 為 32） | 使用訊息建議的尺寸 |
+| `input_reference_not_supported` | 帶了圖片或影片參考：1.3 只支援文字轉影片 | 改在提示裡描述 |
+| `too_many_steps`、`prompt_too_long` | 超過 *Most steps* 或 *Longest prompt* | 少一點步數，或縮短提示 |
+
+**429 `too_many_jobs`：** 你的金鑰（或在 Playground 裡的你）在那個部署上已經有 *Jobs per key* 段影片在等待或製作中。**429 `queue_full`：** 部署已經有 *Jobs at once* 個工作。等待 `Retry-After` 秒，或刪掉不再需要的工作。
+
+**一直是 `queued`：** 一個副本一次做一段影片；其他的在它上面排隊。每段要幾分鐘。加一個副本，或要短一點、小一點的影片。
+
+**回報 `failed`：** `error.code` 說明原因。
+
+| `error.code` | 原因 | 怎麼做 |
+|---|---|---|
+| `replica_restarted`、`video_lost` | 副本的引擎重新啟動，它的工作（放在記憶體裡）也跟著不見了 | 重新要求；看部署的事件了解它為什麼重新啟動 |
+| `replica_gone` | 副本被停止、搬移或刪除 | 部署跑起來之後重新要求 |
+| `timed_out` | 在部署的 *Longest job* 內沒有做完 | 要短一點或小一點的影片，或調高 *Longest job* |
+| `generation_failed` | 引擎做影片失敗；它的訊息在 `error.message` | 看訊息；記憶體不足的錯誤：見下方 |
+
+**410 `video_expired`：** 影片超過 *Keep results* 已被刪除。**410 `video_lost`：** 影片做好之後，它的副本重新啟動或被停止了。兩種情況都請重新要求。
+
+**共用的卡 GPU 記憶體不足：** 調低 *Longest video* 或 *Largest side*，或在 **Advanced** 開啟 *Offload to host memory*（光是文字編碼器就有 11 GB；影片會變慢）。
+
 ## 費用顯示有請求沒有價格
 
 **你會看到：** **Usage** → **Cost** 把一些請求算在 *Without a price* 底下，並說明上面的費用沒有包含它們。

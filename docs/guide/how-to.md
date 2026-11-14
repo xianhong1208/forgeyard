@@ -640,6 +640,54 @@ Hugging Face, then copy its directory from that machine's model cache
 (`hub/models--<org>--<name>`, with `tar` or `rsync -a`: it uses relative links) into the same place in
 the offline machine's cache. The deployment there finds it cached and downloads nothing.
 
+## Generate videos
+
+1. **Add a video model.** On **Models → Add a model → Recommended**, the **Video** group has
+   Wan2.1-T2V-1.3B (832x480 at 16 fps, about 22 GiB of GPU memory with the default caps) and
+   Wan2.2-TI2V-5B (1280x704 at 24 fps, about 33 GiB; its estimate is not yet measured), both Apache-2.0
+   and for an NVIDIA GPU (vLLM-Omni). A model from **Search Hugging Face** works when it is a diffusers
+   repository whose `model_index.json` names a text-to-video pipeline (`WanPipeline`).
+2. **Deploy it** as usual. *Default size*, *Default length* and *Longest video* are on the form; the
+   largest side, frames per second, steps, jobs at once, jobs per key, how long results are kept, the
+   longest job and offloading are under **Advanced**. Their defaults work.
+3. **Call it** with the OpenAI SDK: ask for the video, poll it, then download it.
+
+   ```python
+   import time
+
+   video = client.videos.create(model="wan2.1-t2v-1.3b", prompt="A red kite over a green hill, slow camera pan",
+                                seconds="5", size="832x480")
+   while video.status in ("queued", "in_progress"):
+       time.sleep(5)
+       video = client.videos.retrieve(video.id)
+   if video.status == "completed":
+       client.videos.download_content(video.id).write_to_file("kite.mp4")
+   else:
+       print(video.error.code, video.error.message)
+   ```
+
+   `seconds` is a string, as in OpenAI's API. Give `size` as the model takes it: OpenAI's own sizes
+   (`1280x720`, `720x1280`) are larger than Wan2.1-1.3B allows. Steps, a negative prompt and a seed go in
+   `extra_body`: `extra_body={"num_inference_steps": 30, "negative_prompt": "blurry", "seed": 7}`.
+   `client.videos.list()` lists your key's videos and `client.videos.delete(video.id)` cancels one at
+   work or deletes a finished one.
+
+   With curl, as a form:
+
+   ```bash
+   curl https://192.168.1.20:7860/v1/videos -H "Authorization: Bearer $FORGEYARD_KEY" \
+     -F model=wan2.1-t2v-1.3b -F prompt="A red kite over a green hill" -F seconds=5 -F size=832x480
+   curl https://192.168.1.20:7860/v1/videos/<id> -H "Authorization: Bearer $FORGEYARD_KEY"
+   curl https://192.168.1.20:7860/v1/videos/<id>/content -H "Authorization: Bearer $FORGEYARD_KEY" -o kite.mp4
+   ```
+
+4. **Try it in the Playground:** a video model gets a **Video** panel with a prompt, the sizes and
+   lengths the deployment takes, the job's progress, and the finished video playing in the page with a
+   download link. Your earlier videos with that model are listed under it.
+
+**How long:** minutes per video, one at a time per replica; the others wait their turn on it.
+Raise *Longest job* under **Advanced** for long or large videos.
+
 ## Add a cloud provider
 
 Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
