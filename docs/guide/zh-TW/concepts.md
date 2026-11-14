@@ -99,7 +99,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 | 引擎（配方） | 在哪裡跑 | 模型 |
 |---|---|---|
 | vLLM-Omni（`vllm-omni-image`） | NVIDIA GPU | diffusers pipeline（帶 `model_index.json` 的儲存庫）：Z-Image-Turbo、Stable Diffusion XL、FLUX.1-schnell、Qwen-Image |
-| stable-diffusion.cpp（`sd-cpp`） | AMD GPU 與 APU（Vulkan）、CPU（行程，不需要 Docker）；不支援 NVIDIA（[#43](https://github.com/xianhong1208/forgeyard/issues/43)） | GGUF 或單一檔案：Stable Diffusion 1.5 / XL checkpoint，以及在同一個儲存庫裡、旁邊附有文字編碼器與 VAE 的 Z-Image 和 FLUX |
+| stable-diffusion.cpp（`sd-cpp`） | AMD GPU 與 APU（Vulkan）、NVIDIA（CUDA）、CPU（行程，不需要 Docker） | GGUF 或單一檔案：Stable Diffusion 1.5 / XL checkpoint，以及在同一個儲存庫裡、旁邊附有文字編碼器與 VAE 的 Z-Image 和 FLUX |
 
 - **只有 base64。** Forgeyard 不保留它產生的圖片，所以給不出網址：`response_format: url` 會被拒絕。請解碼 `data[].b64_json`。
 - **每個部署都有上限，各有能用的預設值：**一次請求最多幾張圖片（4）、最長邊（模型自己的：Stable Diffusion 1.5 為 512，其他為 1024）、最多幾步（50）。記憶體估算依這些上限計算，所以調高上限，估算也會跟著變大。

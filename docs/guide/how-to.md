@@ -473,9 +473,8 @@ a custom recipe whose vulkan variant sets `GGML_VK_DISABLE_COOPMAT: "1"` in its 
    - Z-Image-Turbo, Stable Diffusion XL and FLUX.1-schnell for an NVIDIA GPU (vLLM-Omni). About
      30, 17 and 42 GiB of GPU memory with the default caps; FLUX.1-schnell is gated (accept its terms on
      Hugging Face and give a token).
-   - Z-Image-Turbo and FLUX.1-schnell as GGUF for stable-diffusion.cpp: an AMD GPU or APU (Vulkan),
-     about 18 and 19 GiB at 1024x1024, or the CPU (slowly). Not on NVIDIA: use the vLLM-Omni ones there
-     ([#43](https://github.com/xianhong1208/forgeyard/issues/43)).
+   - Z-Image-Turbo and FLUX.1-schnell as GGUF for stable-diffusion.cpp: an AMD GPU or APU (Vulkan) or
+     an NVIDIA GPU (CUDA), about 18 and 19 GiB at 1024x1024, or the CPU (slowly).
    - Stable Diffusion 1.5 as GGUF for the CPU: small and old (512x512), to check that images work.
 
    A model from **Search Hugging Face** works when it is tagged *text-to-image* and is a diffusers

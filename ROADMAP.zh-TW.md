@@ -95,9 +95,9 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
 2. ✅ **llama.cpp b12242**（#9），內建 Vulkan variant，給 AMD APU 以及 ROCm 映像檔沒有支援的顯示卡使用。
 3. ✅ **文字轉語音**（#11，`/v1/audio/speech`）：NVIDIA 上的 vLLM-Omni（Qwen3-TTS）、AMD 與 CPU 上的 llama.cpp TTS GGUF，以及
    CPU 與 CUDA 上給小型英文聲音用的 speaches（Kokoro）；聲音、串流，以及用量中的字元數與音訊長度。聲音複製維持關閉。
-4. *審查中*：**圖片生成**（`/v1/images/generations`）：NVIDIA 上的 vLLM-Omni（diffusers pipeline），AMD（Vulkan）與 CPU 上的
-   stable-diffusion.cpp（沒有 CUDA 映像檔：它在 A100 上會當掉，#43）；只回傳 base64，每個部署有上限與佇列，用量記錄圖片數、千像素與
-   忙碌時間。不提供編輯。
+4. *審查中*：**圖片生成**（`/v1/images/generations`）：NVIDIA 上的 vLLM-Omni（diffusers pipeline），AMD（Vulkan）、NVIDIA
+   （CUDA；第一個 CUDA build 在 A100 上會當掉，已換成較新的 build，#43）與 CPU 上的 stable-diffusion.cpp；只回傳 base64，每個部署有上限與佇列，
+   用量記錄圖片數、千像素與忙碌時間。不提供編輯。
 5. 通用直通（`/x/<name>/…`），附現成的工作負載範本：物件偵測、影像分割、深度估計（只用寬鬆授權的映像檔）。
 6. 影片生成（非同步的 `/v1/videos`），時間不夠時第一個延到之後的版本。
 
