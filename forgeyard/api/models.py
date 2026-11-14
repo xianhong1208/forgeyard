@@ -23,17 +23,19 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, utcnow
-from forgeyard.models import catalog, hub as hf_hub, inspect as inspector, recipes, recommended as rec, scheduler, sources
+from forgeyard.models import (catalog, hub as hf_hub, inspect as inspector, modalities, recipes, recommended as rec,
+                              scheduler, sources)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
 from forgeyard.security.ratelimit import limiter, retry_after
-from forgeyard.workloads import placement
+from forgeyard.workloads import images, placement
 
 router = APIRouter(prefix="/api", tags=["models"])
 
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
-TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text"}
+TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
+              "image": "Images", "video": "Video"}
 
 
 def _engine_args(raw) -> dict:
@@ -82,16 +84,56 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "revision": m.revision, "file": m.file, "format": m.format, "task": m.task,
             "task_label": TASK_LABEL.get(m.task, m.task), "size_bytes": m.size_bytes, "engine_args": m.engine_args or {},
             "summary": model_summary(m), "recipes": compatible(m, all_recipes), "deployments": deployments,
-            "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at}
+            "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
+            "voices": list((m.meta or {}).get("voices") or []), "image": image_out(m.meta or {}),
+            "video": video_out(m.meta or {}),
+            **media_out(m.meta or {}, m.format)}
+
+
+def image_out(meta: dict) -> Optional[dict]:
+    """An image model's native size, the multiple its sizes take, and its parts: a diffusers pipeline's
+    components, or the component files beside a stable-diffusion.cpp model (1.3)."""
+    img = meta.get("image") if isinstance(meta.get("image"), dict) else None
+    if img is None:
+        return None
+    d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
+    return {"size": img.get("size"), "multiple": img.get("multiple"), "single": img.get("single"),
+            "components": dict(img.get("components") or {}), "pipeline": d.get("pipeline"),
+            "parts": {k: {"class": v.get("class"), "params": v.get("params")} for k, v in (d.get("components") or {}).items()}}
+
+
+def video_out(meta: dict) -> Optional[dict]:
+    """A video model's own size, frame rate and the multiple its sizes take (1.3), and its pipeline's parts."""
+    v = meta.get("video") if isinstance(meta.get("video"), dict) else None
+    if v is None:
+        return None
+    d = meta.get("diffusers") if isinstance(meta.get("diffusers"), dict) else {}
+    return {"size": v.get("size"), "multiple": v.get("multiple"), "fps": v.get("fps"), "pipeline": d.get("pipeline"),
+            "parts": {k: {"class": c.get("class"), "params": c.get("params")} for k, c in (d.get("components") or {}).items()}}
+
+
+def media_out(meta: dict, fmt: str) -> dict:
+    """Licence, gated, the media it takes (None: unknown, a catalog entry from before 1.3) and its
+    projector file, for the catalog and the inspection preview."""
+    mm = meta.get("mmproj") if isinstance(meta.get("mmproj"), dict) else None
+    return {"license": meta.get("license"), "license_from": meta.get("license_from"), "gated": bool(meta.get("gated")),
+            "modalities": modalities.of_model(meta, fmt),
+            "mmproj": {"path": mm.get("path"), "size": mm.get("size")} if mm else None,
+            "mmproj_files": meta.get("mmproj_files") or []}
 
 
 def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
     out = {"name": r.name, "title": r.title, "description": r.description, "engine": r.engine, "version": r.version,
            "tasks": r.tasks, "formats": r.formats, "api": r.api, "share": r.share, "builtin": r.builtin,
            "estimate": r.estimate.method,
+           "media": r.media.model_dump() if r.media is not None else None,
+           "tts": r.tts.model_dump() if r.tts is not None else None,
            "params": {k: p.model_dump(exclude_none=True) for k, p in r.params.items()},
            "devices": sorted({"gpu" if v.gpu else "cpu" for v in r.variants}),
+           # image_check: ids are recorded for the image, so a copy loaded with `docker load` is
+           # checked and run on a machine that cannot reach the registry (workloads/images.py).
            "variants": [{"name": v.name, "vendor": v.when.vendor, "runtime": v.runtime, "image": v.image,
+                         "image_check": images.check_for(v.image) is not None,
                          "arch": v.when.arch, "compute_capability": v.when.compute_capability,
                          "driver": v.when.driver,
                          "engine": v.engine.url if v.engine else v.command} for v in r.variants]}
@@ -121,17 +163,36 @@ class InspectIn(BaseModel):
     source: str = Field(max_length=1024)
     revision: Optional[str] = Field(default=None, max_length=128)
     file: Optional[str] = Field(default=None, max_length=512)
+    # GGUF vision models: the projector file (mmproj-*.gguf) to use with it. Not given: the
+    # repository's F16 one (else BF16, Q8_0, the first) when it has any; "none": none.
+    mmproj: Optional[str] = Field(default=None, max_length=512)
     # Gated repositories: used for these requests only, never stored with the catalog entry.
     token: Optional[str] = Field(default=None, max_length=512)
     format: Optional[str] = Field(default=None, max_length=16)       # local models
     size_bytes: Optional[int] = Field(default=None, ge=0)             # local models
+    # Image models for stable-diffusion.cpp (1.3): the component files beside the model file, by role
+    # (vae, llm, t5xxl, clip_l, clip_g). Not given: found by their names.
+    components: Optional[dict[str, Optional[str]]] = None
+    # What the model does (chat, embed, rerank, asr, tts, image); for an inspection, what the suggestion
+    # is for (default: what Hugging Face says). "image" reads a GGUF repository as an image model.
+    task: Optional[str] = Field(default=None, max_length=16)
 
 
 class ModelIn(InspectIn):
     name: str = Field(max_length=64)
     title: Optional[str] = Field(default=None, max_length=120)
-    task: Optional[str] = Field(default=None, max_length=16)
     engine_args: Optional[dict] = None
+
+
+def _recommended_components(source: str, file: Optional[str]) -> Optional[dict]:
+    """The component files the recommended list names for this source and file (an image model for
+    stable-diffusion.cpp), or None."""
+    try:
+        e = next((e for e in rec.recommended().models if e.source == source.strip() and e.components
+                  and (e.file or None) == (file or None)), None)
+    except rec.RecommendedError:
+        return None
+    return dict(e.components) if e is not None else None
 
 
 def _inspect(db: DbSession, body: InspectIn) -> dict:
@@ -139,12 +200,16 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
         src = sources.parse_source(body.source)
     except sources.SourceError as e:
         raise fail(422, "invalid_source", str(e)) from None
+    if body.components is None and body.task == "image":
+        body.components = _recommended_components(body.source, body.file)
     s = catalog.get_sources(db)
     try:
         return inspector.inspect_source(src, ref=body.revision, file=body.file, endpoint=s["hf_endpoint"],
                                         policy=catalog.hf_policy(), url_policy=catalog.url_policy(db),
                                         local_dirs=s["local_dirs"], token=(body.token or "").strip() or None,
-                                        fmt=body.format, size_bytes=body.size_bytes)
+                                        fmt=body.format, size_bytes=body.size_bytes, mmproj=body.mmproj,
+                                        task=body.task if body.task in recipes.TASKS else None,
+                                        components=body.components)
     except (inspector.InspectError, sources.SourceError) as e:
         raise fail(422, "cannot_inspect", str(e)) from None
 
@@ -152,7 +217,6 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
 class InspectPreviewIn(InspectIn):
     # What the suggestion is for: the task chosen (default: what Hugging Face says), the recipe
     # and device to estimate with (default: the first recipe that serves it, on a GPU if one is free).
-    task: Optional[str] = Field(default=None, max_length=16)
     recipe: Optional[str] = Field(default=None, max_length=40)
     device: Optional[str] = Field(default=None, max_length=8)
 
@@ -186,7 +250,7 @@ def suggest(db: DbSession, meta: dict, task: Optional[str], recipe_name: Optiona
     out: dict = {"recipe": name, "recipes": usable, "device": dev, "devices": (["gpu"] if has_gpu else []) + (["cpu"] if has_cpu else [])}
     try:
         params = normalise_params(recipe, {"gpus": 1 if dev == "gpu" else 0})
-        est = compute_estimate(meta, recipe, params, device=dev, gpu_context=scheduler.gpu_context())
+        est = compute_estimate(meta, recipe, params, device=dev, gpu_context=scheduler.gpu_context(), task=task)
     except EstimateError as e:
         out["error"] = str(e)
         return out
@@ -218,6 +282,7 @@ def inspect_model(body: InspectPreviewIn, _: Caller = Depends(require_admin), db
     fits = [n for n, (r, _) in all_r.items() if fmt in r.formats and (task is None or task in r.tasks)]
     preview = {k: v for k, v in meta.items() if k not in ("files",)}
     preview["file_count"] = len(meta.get("files") or [])
+    preview.update(media_out(meta, fmt))
     return {"meta": preview, "recipes": fits,
             "suggestion": suggest(db, meta, task, body.recipe, body.device if body.device in ("gpu", "cpu") else None)}
 
@@ -284,7 +349,30 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     meta = _inspect(db, body)
     task = (body.task or meta.get("task_hint") or "").strip()
     if task not in recipes.TASKS:
-        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank or asr)")
+        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr, tts, image or video)")
+    if task == "image" and "image" not in meta and meta.get("kind") != "local":
+        raise fail(422, "not_an_image_model", "This repository is not one Forgeyard can make images with: a diffusers "
+                                              "pipeline (model_index.json) or GGUF / safetensors files for "
+                                              "stable-diffusion.cpp.")
+    if task == "video" and "video" not in meta and meta.get("kind") != "local":
+        raise fail(422, "not_a_video_model", "This repository is not one Forgeyard can make videos with: a diffusers "
+                                             "text-to-video pipeline (model_index.json naming WanPipeline).")
+    if task == "image" and "video" in meta:
+        raise fail(422, "not_an_image_model", "This repository is a video pipeline: add it as a video model.")
+    if task in ("tts", "image", "video"):
+        # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
+        # takes in chat.
+        meta["modalities"] = []
+    if not meta.get("license"):
+        # A conversion without a licence of its own (a GGUF or ONNX repository) from the recommended list:
+        # the original model's licence, saying where it comes from.
+        try:
+            origin = next((e for e in rec.recommended().models if e.source == body.source.strip() and e.license_from
+                           and (e.file or None) == (meta.get("file") or None)), None)
+        except rec.RecommendedError:
+            origin = None
+        if origin is not None:
+            meta["license"], meta["license_from"] = origin.license, origin.license_from
     src = sources.parse_source(body.source)
     m = CatalogModel(name=name, title=(body.title or "").strip() or None, source=str(src), kind=src.kind,
                      ref=meta.get("ref"), revision=meta.get("revision"), file=meta.get("file"),
@@ -316,7 +404,7 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
         changed["title"] = m.title
     if body.task is not None:
         if body.task not in recipes.TASKS:
-            raise fail(422, "bad_task", "task: chat, embed, rerank or asr")
+            raise fail(422, "bad_task", "task: chat, embed, rerank, asr, tts, image or video")
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:

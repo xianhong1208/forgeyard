@@ -246,7 +246,7 @@ describe("GPU access on the Machines page", () => {
     expect(within(card).getByText(/process as nobody \(rlimits\) · container: docker not found/)).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Change GPU access" }));
     fireEvent.click(within(card).getByRole("button", { name: "None" }));
-    const group = within(card).getByRole("group", { name: "GPUs Forgeyard may assign on a100-box" });
+    const group = within(card).getByRole("group", { name: "GPU access on a100-box: the GPUs Forgeyard may assign" });
     fireEvent.click(within(group).getAllByRole("checkbox")[4]);
     await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Save" })));
     expect(confirm.mock.calls[0]).toEqual(["Let Forgeyard assign only GPU #4 on a100-box? No workload will ever get another card of this machine."]);

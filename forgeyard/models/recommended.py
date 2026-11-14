@@ -23,6 +23,13 @@ class RecommendedError(ValueError):
     pass
 
 
+# Licences the built-in list may hold (1.3): permissive ones, OpenRAIL-style ones, and model licences
+# whose terms allow commercial use (Gemma's terms; Meta's Llama 3.1 / 3.2 community licences, which
+# allow it below 700 million monthly users and with attribution). Hugging Face's ids.
+ALLOWED_LICENSES = {"apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause", "openrail", "openrail++", "creativeml-openrail-m",
+                    "bigscience-openrail-m", "gemma", "llama3.1", "llama3.2"}
+
+
 class Group(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^[a-z0-9-]{1,32}$")
@@ -37,14 +44,23 @@ class Entry(BaseModel):
     source: str
     revision: Optional[str] = None
     file: Optional[str] = None
+    mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr"]
-    format: Literal["safetensors", "gguf", "ctranslate2"]
+    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video"]
+    format: Literal["safetensors", "gguf", "ctranslate2", "onnx", "diffusers"]
     recipe: str
     device: Literal["gpu", "cpu"] = "gpu"
     download_gib: float = Field(gt=0, le=10_000)
     memory_gib: float = Field(gt=0, le=10_000)
     gated: bool = False
+    license: str = Field(min_length=1, max_length=64)
+    # When the repository states no licence (a GGUF or ONNX conversion): the original model whose licence
+    # `license` is, checked by scripts/check_recommended.py.
+    license_from: Optional[str] = None
+    inputs: list[Literal["image", "audio", "video"]] = Field(default_factory=list)  # besides text
+    languages: list[str] = Field(default_factory=list, max_length=40)   # tts: the languages it speaks
+    # image models for stable-diffusion.cpp (1.3): the component files beside `file`, by role
+    components: dict[str, str] = Field(default_factory=dict)
     engine_args: dict[str, list[str]] = Field(default_factory=dict)
     note: str = Field(min_length=1, max_length=200)
 
@@ -87,13 +103,47 @@ def check(data: dict) -> Recommended:
             raise RecommendedError(f"{where}: revision is a branch, tag, ref or commit")
         if e.group not in groups:
             raise RecommendedError(f"{where}: no group {e.group!r}")
-        if (e.format == "gguf") != bool(e.file):
-            raise RecommendedError(f"{where}: a GGUF entry names its file, and only a GGUF entry does")
+        if (e.format == "gguf" or (e.task == "image" and e.format == "safetensors")) != bool(e.file):
+            raise RecommendedError(f"{where}: a GGUF entry (or an image model's safetensors) names its file, and only "
+                                   "those do")
         if e.file:
             try:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
+        if e.task in ("tts", "image", "video") and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
+            # 1.3: speech, image and video models are pinned to a commit here, so the voices, the component
+            # files and the measured memory stay those of the files that were checked.
+            what = {"tts": "text-to-speech", "image": "image", "video": "video"}[e.task]
+            raise RecommendedError(f"{where}: a {what} entry is pinned to a commit (revision: 40 hex characters)")
+        if e.components:
+            if e.task != "image" or e.format not in ("gguf", "safetensors"):
+                raise RecommendedError(f"{where}: only an image model's GGUF or safetensors entry names components")
+            for role, path in e.components.items():
+                if role not in recipes.IMAGE_COMPONENTS:
+                    raise RecommendedError(f"{where}: components: {role!r} is not one of "
+                                           f"{', '.join(recipes.IMAGE_COMPONENTS)}")
+                try:
+                    sources.safe_relpath(path)
+                except sources.SourceError as err:
+                    raise RecommendedError(f"{where}: components.{role}: {err}") from None
+        if e.license_from is not None:
+            try:
+                if sources.parse_source(e.license_from).kind != "hf":
+                    raise sources.SourceError("license_from is an hf:// repository")
+            except sources.SourceError as err:
+                raise RecommendedError(f"{where}: license_from: {err}") from None
+        if e.license not in ALLOWED_LICENSES:
+            raise RecommendedError(f"{where}: the licence {e.license!r} is not one the recommended list may hold")
+        if e.mmproj is not None:
+            if e.format != "gguf":
+                raise RecommendedError(f"{where}: only a GGUF entry names a projector (mmproj) file")
+            try:
+                sources.safe_relpath(e.mmproj)
+            except sources.SourceError as err:
+                raise RecommendedError(f"{where}: {err}") from None
+            if not sources.is_mmproj(e.mmproj):
+                raise RecommendedError(f"{where}: {e.mmproj} is not an mmproj-*.gguf file")
         recipe = builtin.get(e.recipe)
         if recipe is None:
             raise RecommendedError(f"{where}: no built-in recipe {e.recipe!r}")

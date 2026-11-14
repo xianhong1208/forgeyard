@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from forgeyard.install.images import reference_error
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -57,7 +59,8 @@ class Settings(BaseSettings):
 
     session_idle_minutes: int = 120
     session_max_days: int = 7
-    # "auto": Secure cookies when the request came over https.
+    # "auto": Secure cookies when the request came over https; "true" / "false" to force. Anything else
+    # stops the start (it used to act as "auto" without a word).
     cookie_secure: str = "auto"
 
     # Requests per minute per client IP across the API. 0 turns it off.
@@ -71,6 +74,11 @@ class Settings(BaseSettings):
     # agent_offline_seconds is shown offline (a server-side check, so a silent network drop counts).
     agent_heartbeat_seconds: int = 10
     agent_offline_seconds: int = 30
+    # The agent image the Machines page puts in its `docker run` (forgeyard/install/images.py). Empty:
+    # the published one, docker.io/<namespace>/forgeyard-agent, or a local build while none is
+    # published. Without :TAG or @sha256:DIGEST the tag is this server's version. A mirror or a
+    # private registry goes here, e.g. registry.example.org/forgeyard/forgeyard-agent.
+    agent_image: str = ""
 
     # Models (M3).
     # Where Hugging Face models are inspected and downloaded from (a mirror can be set here).
@@ -100,6 +108,13 @@ class Settings(BaseSettings):
     gateway_default_tpm: int = 0
     gateway_max_rpm: int = 0
     gateway_max_tpm: int = 0
+    # Images, audio and video in chat (1.3). The gateway fetches http(s) media URLs itself, through the
+    # egress rules (public addresses only, every redirect checked), and sends them on as data: URIs;
+    # engines never fetch. At most this many MiB per fetched item.
+    media_fetch_max_mb: int = Field(default=20, ge=1, le=1024)
+    # Let media URLs point at private or loopback addresses (an image server on your LAN). Link-local
+    # and metadata addresses stay refused.
+    media_allow_private_hosts: bool = False
     # How often gateway usage counted in memory is written to the database (seconds).
     usage_flush_seconds: float = 5.0
 
@@ -144,6 +159,15 @@ class Settings(BaseSettings):
     def egress_allowed_host_list(self) -> list[str]:
         return [h.strip().lower() for h in self.egress_allowed_hosts.split(",") if h.strip()]
 
+    @field_validator("agent_image")
+    @classmethod
+    def _agent_image(cls, v: str) -> str:
+        v = v.strip()
+        problem = reference_error(v) if v else None
+        if problem:
+            raise ValueError(problem)
+        return v
+
     @field_validator("registration")
     @classmethod
     def _registration(cls, v: str) -> str:
@@ -167,6 +191,15 @@ class Settings(BaseSettings):
     @property
     def public_url_upgraded(self) -> bool:
         return self._public_url_upgraded
+
+    @field_validator("cookie_secure")
+    @classmethod
+    def _cookie_secure(cls, v: str) -> str:
+        v = v.strip().lower()
+        v = {"1": "true", "yes": "true", "on": "true", "0": "false", "no": "false", "off": "false"}.get(v, v)
+        if v not in ("auto", "true", "false"):
+            raise ValueError("COOKIE_SECURE must be 'auto', 'true' or 'false'")
+        return v
 
     @field_validator("tls")
     @classmethod

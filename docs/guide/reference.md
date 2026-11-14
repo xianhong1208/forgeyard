@@ -5,15 +5,41 @@ Every setting of the server and the agent, the command line, and where things ar
 ## Server settings
 
 The server reads its settings from environment variables, or from a `.env` file in the folder it
-starts in (`.env.example` lists them with comments). Restart the server after a change.
+starts in (`.env.example` lists them with comments, the common ones first). Restart the server
+after a change.
+
+The server checks its settings when it starts:
+
+- **A value it cannot use stops the start** with the setting's name and the values it takes:
+  `TLS`, `REGISTRATION`, `COOKIE_SECURE`, `GATEWAY_CLOUD_DEFAULT`, `GATEWAY_CLOUD_MAX`, a number
+  that is not a number, and only one of `TLS_CERT_FILE` and `TLS_KEY_FILE`.
+- **Anything surprising is logged as a warning** and shown to admins under
+  [Setup health](#setup-health-checks): a name that is not a setting ("did you mean"), a setting
+  that another one makes useless, and risky combinations.
+
+### Common settings
+
+Most installations set only some of these. Everything after this table is advanced: the defaults
+are fine for almost everyone.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HOST` | `127.0.0.1` | Where to listen. `0.0.0.0` opens it to the network, which a machine other than this one needs to join |
+| `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
+| `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate. Empty: the address each browser opened Forgeyard with, which other machines cannot use when that was `127.0.0.1` |
+| `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token. A relative path is relative to the folder the server starts in |
+| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
+| `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key: both or neither (one alone stops the start). Checked every 12 hours and reloaded when they changed. Ignored with `TLS=off` |
+| `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it. Ignored without your own certificate |
+| `REGISTRATION` | `off` | `approval`: people can ask for an account, which waits for an admin |
+| `HF_ENDPOINT` | `https://huggingface.co` | Where Hugging Face models are inspected and downloaded from (a mirror can go here) |
+| `EGRESS_PROXY` | — | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
 
 ### Network and addresses
 
 | Variable | Default | What it does |
 |---|---|---|
-| `HOST` | `127.0.0.1` | Where to listen. `0.0.0.0` opens it to the network |
-| `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
-| `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate |
 | `ALLOWED_HOSTS` | — | More host names to answer to, comma-separated. `localhost` and IP addresses always work; any other name gets 421 |
 | `TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed, comma-separated IPs |
 
@@ -21,31 +47,27 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key (both or neither); checked every 12 hours and reloaded when they changed |
-| `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it |
-| `TLS_EXTRA_NAMES` | — | More names or IP addresses for Forgeyard's own server certificate, comma-separated |
+| `TLS_EXTRA_NAMES` | — | More names or IP addresses for Forgeyard's own server certificate, comma-separated. Ignored with your own certificate |
+
+`TLS`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `TLS_CA_FILE` are under [Common settings](#common-settings).
 
 ### Data and secrets
 
 | Variable | Default | What it does |
 |---|---|---|
-| `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token |
-| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
 | `SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets. Back it up apart from the database |
-| `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file |
+| `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file. Set one of the two: with both, this one is used and the file is ignored |
 
 ### Accounts and sign-in
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Create the owner on the first start, instead of the setup page |
-| `FORGEYARD_SETUP_TOKEN` | — | Use this setup token instead of a random one |
-| `REGISTRATION` | `off` | `approval`: people can ask for an account, which waits for an admin |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Create the owner on the first start, instead of the setup page. Read only then: remove them afterwards |
+| `FORGEYARD_SETUP_TOKEN` | — | Use this setup token instead of a random one (no use once setup is done) |
 | `SESSION_IDLE_MINUTES` | `120` | Signed out after this long without a request |
 | `SESSION_MAX_DAYS` | `7` | Signed out after this long in any case |
-| `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS; `true` or `false` to force |
-| `RATE_LIMIT_PER_MINUTE` | `600` | API requests per minute per address (0: no limit) |
+| `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS; `true` or `false` to force. Any other value stops the start |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Requests per minute per address to the web UI's API, `/api` (0: no limit). The gateway, `/v1`, has per-key limits instead |
 | `LOGIN_FREE_FAILURES` | `5` | Failed sign-ins per account before each further try waits (2 s, doubling, at most 5 min) |
 | `LOGIN_IP_FAILURES` | `30` | Failed sign-ins per address within 15 minutes before that address waits |
 
@@ -54,16 +76,16 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | Variable | Default | What it does |
 |---|---|---|
 | `AGENT_HEARTBEAT_SECONDS` | `10` | How often agents send a heartbeat |
-| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline |
+| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Keep it at least 2.5 heartbeats long, or machines flap |
+| `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
 ### Models
 
 | Variable | Default | What it does |
 |---|---|---|
-| `HF_ENDPOINT` | `https://huggingface.co` | Where Hugging Face models are inspected and downloaded from (a mirror can go here) |
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
-| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated (admins change it on **Models**) |
-| `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated (admins change it on **Models**) |
+| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins |
+| `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
 | `VRAM_HEADROOM_MIB` | `512` | Memory always left free on a card when placing replicas |
 
@@ -73,10 +95,20 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | Seconds to connect to a replica before trying the next one |
 | `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for its answer's headers or the next piece of a stream |
-| `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one) |
+| `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
 | `USAGE_FLUSH_SECONDS` | `5` | How often usage counted in memory is written to the database |
+
+### Media in chat
+
+| Variable | Default | What it does |
+|---|---|---|
+| `MEDIA_FETCH_MAX_MB` | `20` | The most the gateway downloads for one media URL (an `https://` image in a chat request) before it refuses it (413 `media_too_large`) |
+| `MEDIA_ALLOW_PRIVATE_HOSTS` | `false` | Let media URLs point at private or loopback addresses (an image server on your LAN). Link-local and metadata addresses stay refused |
+
+Media URLs also follow `EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS` and `EGRESS_CA_FILE` below. See
+[Images, audio and video in chat](#images-audio-and-video-in-chat).
 
 ### Cloud providers
 
@@ -84,7 +116,6 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 |---|---|---|
 | `GATEWAY_CLOUD_DEFAULT` | `off` | The cloud setting a new API key gets: `off`, `fallback` or `on`. Admins change it on **API keys** (stored in the database); existing keys keep theirs |
 | `GATEWAY_CLOUD_MAX` | `off` | The most anyone may give their own key, also applied to existing keys on every request. Admins may give any key anything |
-| `EGRESS_PROXY` | empty | Send provider requests through this proxy (`http://host:port`). A proxy from the environment is never used |
 | `EGRESS_ALLOWED_HOSTS` | empty | Only these provider hosts, comma-separated (`*.example.org` for subdomains). Empty: any |
 | `EGRESS_CA_FILE` | empty | A CA file to trust for providers on top of the system's (a company proxy that inspects TLS) |
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | Let providers outside your network use private or loopback addresses and plain http. For testing with a stand-in only; link-local and metadata addresses stay refused |
@@ -94,6 +125,28 @@ starts in (`.env.example` lists them with comments). Restart the server after a 
 | `PROVIDER_RETRY_AFTER_CAP` | `2` | When no other target is left, a `Retry-After` up to this many seconds is waited for once |
 | `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Where **Refresh prices from OpenRouter** reads prices (only when an admin asks; no key is sent). Change it only to test against a stand-in |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | Budgets reserve a cloud request's estimated cost before it is sent. A request without `max_tokens` is estimated with an answer of this many tokens |
+
+`EGRESS_PROXY` is under [Common settings](#common-settings). `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`,
+`GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX` are only first values too: once an admin saves
+**API keys → Limits for keys** or **Cloud for keys**, the database wins, and Setup health says so
+when the environment still holds another value.
+
+### Units, zero and empty
+
+| Kind | How it is written |
+|---|---|
+| Durations | Seconds, unless the name says `MINUTES` or `DAYS`. A route's *Wait for a free local slot* is in milliseconds |
+| Sizes | `_MIB` is mebibytes. `GATEWAY_MAX_BODY_MB` and the agent's `log_max_mb` are mebibytes too, despite the name. Sizes typed in forms take `8Gi` (GiB); `8G` and `8GB` are decimal (10⁹ bytes) |
+| Money | US dollars in the web UI; micro-dollars (`_micros`) in the API; prices per million tokens |
+| Rates | Per minute; `LOGIN_IP_FAILURES` counts within 15 minutes |
+
+| Setting | `0` means | Empty means |
+|---|---|---|
+| `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, **Limits for keys** | No limit | No limit |
+| A key's own requests or tokens per minute | Refused (at least 1) | The server's default |
+| A budget (key, person, provider) | **$0: every cloud request it applies to is blocked** | No budget |
+| `RATE_LIMIT_PER_MINUTE` | Off | — |
+| A route's *Wait for a free local slot* | Spill at once | — |
 
 The headers and error codes of `/v1` are listed under [The gateway (/v1)](#the-gateway-v1).
 
@@ -188,6 +241,17 @@ page cannot use a signed-in browser against it.
 | `POST /v1/score` | Rerankers (vLLM's score API) | no |
 | `POST /v1/audio/transcriptions` | Speech to text (faster-whisper), as `multipart/form-data` with a `model` field | no |
 | `POST /v1/audio/translations` | Speech to English text, as above | no |
+| `POST /v1/audio/speech` | Text to speech (1.3): OpenAI's request, the audio back as it is made. See [Text to speech](#text-to-speech) | no |
+| `GET /v1/audio/voices?model=<model>` | A speech model's voices, its default voice, the formats it makes, how it streams and its input cap | — |
+| `POST /v1/audio/voices`, `DELETE /v1/audio/voices/{name}` | Uploading or deleting a voice (voice cloning): always 400 `voice_cloning_not_supported` in 1.3 | — |
+| `POST /v1/images/generations` | Image generation (1.3): OpenAI's request, images back as base64 (`b64_json`) only. See [Images](#images) | no |
+| `POST /v1/images/edits`, `POST /v1/images/variations` | Image edits and variations: not offered in 1.3, always 404 `endpoint_not_supported` | — |
+| `POST /v1/videos` | Video generation (1.3): asks for a video, answers at once with the job. JSON, `multipart/form-data` (what OpenAI's SDK sends) or a URL-encoded form. See [Video](#video) | no |
+| `GET /v1/videos` | The key's own videos, newest first: `limit` (1 to 100, 20), `after` (the last id seen), `order` (`desc` or `asc`) | — |
+| `GET /v1/videos/{id}` | One video job: its status and progress | — |
+| `GET /v1/videos/{id}/content` | The finished video, `video/mp4`, streamed from the replica that made it. `variant=video` only; `Range` requests answer 206 | — |
+| `DELETE /v1/videos/{id}` | Cancels a job at work, or deletes a finished video, on its replica | — |
+| `POST /v1/videos/sync`, `POST /v1/videos/{id}/remix` | Not offered: always 404 `endpoint_not_supported` | — |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -199,12 +263,240 @@ What the gateway does with a request:
   key or the provider's key, and passes nothing else of yours on: not your API key, not your other
   headers.
 - `max_tokens` (or `max_completion_tokens`) counts against the key's tokens per minute when the
-  request arrives, and sets the most a request may cost under a budget.
+  request arrives, and sets the most a request may cost under a budget. For text to speech, each
+  character of `input` counts as one token instead (see [Text to speech](#text-to-speech)); an image
+  request counts no tokens (see [Images](#images)).
 - A streamed chat or completion gets a final usage chunk (`stream_options.include_usage`) so that
   tokens are counted. If you did not ask for it, the gateway removes it again.
-- The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB).
+- The body may be at most `GATEWAY_MAX_BODY_MB` (32 MB), or the model's own *Largest request*
+  (`max_body_mb`, 64 MB by default for vLLM and llama.cpp deployments).
 - If you close the connection, the gateway closes its request upstream at once, so the engine stops
   generating.
+
+### Images, audio and video in chat
+
+`POST /v1/chat/completions` takes OpenAI's content parts. What the gateway accepts and what it sends
+on:
+
+| Part | Accepted as | Sent to the engine as |
+|---|---|---|
+| Text | `text`, `input_text`, `refusal` | unchanged |
+| Image | `image_url` (`{"url": …, "detail"}` or a bare string), `input_image` | `image_url` with a `data:` URI |
+| Audio | `input_audio` (`{"data": <base64>, "format"}`, or a `data:audio/…` URI), `audio_url` | `input_audio` with base64 `data` |
+| Video | `video_url`, `input_video` | `video_url` with a `data:` URI |
+| File (PDF) | `file` with `file_data` as a `data:` URI | unchanged, only to a recipe that takes files (no built-in one does) |
+
+- A media URL may be a `data:` URI (base64, of the part's kind) or an `http(s)` URL. **The gateway
+  fetches URLs itself** and sends the engine a `data:` URI: engines never fetch anything. It follows
+  the egress rules: public addresses only (private ones with `MEDIA_ALLOW_PRIVATE_HOSTS`; link-local
+  and metadata addresses never), at most 3 redirects, each checked again, `MEDIA_FETCH_MAX_MB` per
+  item, 20 seconds per item, and the answer must be of the part's kind (`image/…` for an image).
+  `file://` and every other scheme answer 400 `media_url_refused`.
+- The request goes only to a deployment that takes what it carries: its model takes that medium
+  (read from the model's `config.json`, or its projector file for GGUF), its recipe does, and it is
+  within the deployment's *Images per request* (images and audio clips, 4 by default) and *Videos
+  per request* (0 by default: video is off until enabled). Otherwise 400 `media_not_supported` or
+  `too_many_media_items`.
+- **Requests with media never go to a cloud provider** (nor to a provider inside your network), in
+  1.3. A route served only by providers answers 400 `media_local_only`; on a mixed route they never
+  spill.
+- Usage counts the media items (`media_items` in `GET /api/usage`). Image tokens are in
+  `prompt_tokens` as the engine reports them.
+
+The deployment parameters, under **Advanced** in the deploy form (recipes `vllm` and `llama-cpp`):
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `images` (*Images per request*) | `4` | The most images, and audio clips, one request may carry; 0 turns them off. Passed to vLLM in `--limit-mm-per-prompt` |
+| `videos` (*Videos per request*) | `0` | Video is off until this is 1 or more. On vLLM it reserves memory for a long video at startup |
+| `video_fps` (*Video frames per second*, `llama-cpp` only) | `1` | Frames read from each second of a video (`--video-fps`), for models without a rate of their own; each frame costs about as much as an image. Qwen3-VL reads 2 frames a second whatever this says (llama.cpp b12242): a 6-second clip took 5,345 tokens on Qwen3-VL 2B. Give video deployments a context of 8,192 or more |
+| `max_body_mb` (*Largest request*) | `64` | The largest request the gateway sends this deployment, in MiB (413 above) |
+| `image_tokens` (*Largest image*) | `1024` | Each image is scaled down to at most this many tokens: about 1024 × 1024 pixels on Qwen3-VL. On `llama-cpp` through `--image-max-tokens`; on `vllm` through `--mm-processor-kwargs` `max_pixels`, for models whose image tokens grow with the resolution (Qwen-VL; Gemma takes a fixed number per image). Without it a 5 MB photo became about 4,000 tokens on llama.cpp (125 s on 8 CPU threads) and about 16,000 on vLLM, more than an 8,192-token context. A model added before this setting existed is not capped on vLLM until it is added again |
+
+A recipe without these parameters gets 4 images or audio clips, no video and `GATEWAY_MAX_BODY_MB`.
+
+### Text to speech
+
+`POST /v1/audio/speech` takes OpenAI's request and answers with the audio itself (not JSON), passed
+through as the engine makes it. Three engines serve it (recipes `vllm-omni-tts`, `llama-cpp` with a
+TTS GGUF, `speaches-tts`); local deployments only, never a cloud provider.
+
+| Field | What the gateway does |
+|---|---|
+| `model` | The speech model's name, as usual |
+| `input` | Required, at most the deployment's *Longest input* (`max_input_chars`; 0 means a quarter of the context length for vLLM-Omni and llama.cpp, 1,024 at their default, and 4,096 for speaches). Longer: 400 `input_too_long` |
+| `voice` | One of the model's voices (`GET /v1/audio/voices`), as a name or `{"id": …}`. OpenAI's names (`alloy`, `nova`, …) that the model does not have, or no voice, get the recipe's default voice or the first the engine lists; the answer names it in `X-Forgeyard-Voice` (`default` when the model has no voices of its own and speaks with its one voice) |
+| `response_format` | `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, of those the engine makes; others 400 `unsupported_response_format`. Left out: the engine's default (vLLM-Omni and llama.cpp `wav`, speaches `mp3`), not OpenAI's `mp3` |
+| `stream_format` | `audio`: raw audio as it is made (a streamed WAV declares an unknown size). `sse`: OpenAI's `speech.audio.delta` / `speech.audio.done` events (vLLM-Omni only). Left out: the whole file. An engine that cannot: 400 `stream_format_not_supported`. `stream: true` means `stream_format: audio` |
+| `speed` | 0.25 to 4, passed on (llama.cpp takes only 1.0, speaches 0.5 to 2 for Kokoro) |
+| `instructions` | Passed on: vLLM-Omni Qwen3-TTS uses it (style and emotion), the others ignore it |
+| `language`, `lang`, `sample_rate`, `seed`, … | Passed on. For llama.cpp the gateway sets `lang` (`zh`, `ja`, `ko`) from the text's script and `n_predict` (ten audio frames a character, at least 512, at most the context) when you leave them out |
+
+**Voice cloning is not available in 1.3.** A reference recording (`ref_audio`, `ref_text`,
+`speaker_ref_b64`, `speaker_embedding`, …), a voice given as audio data or a link, Qwen3-TTS's
+`task_type: "Base"`, and uploading or deleting voices answer 400 `voice_cloning_not_supported`.
+Nothing of it reaches an engine.
+
+What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| `characters` | The input's characters (Unicode code points), counted before sending |
+| `media_ms` | The audio's length in milliseconds, read as it passes: `wav` from its header (or the bytes after it, when streamed), `pcm` from its size and the sample rate the answer states (`x-audio-sample-rate`, or `rate=` in its type; else the voice's own), `flac` from its STREAMINFO, `mp3` and `aac` by counting frames, `opus` from the last Ogg page; SSE from the size of the `pcm` deltas. Nothing for other answers |
+| tokens | Only what the engine reports: vLLM-Omni's `x-vllm-omni-input-tokens` and `-output-tokens`, or the usage of `speech.audio.done` |
+
+**Limits:** rpm as for every request; **tpm counts one token per character of `input`**, held when
+the request arrives (a 15-character request needs 15 tokens of room). Budgets apply to cloud spend
+only, and speech never goes to the cloud. A key's model list applies to speech and to the voice list.
+
+`GET /v1/audio/voices?model=<model>` answers
+`{"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", "formats",
+"default_format", "stream_formats", "max_input_chars"}`, asked of a ready replica and kept for 5
+minutes. Voices uploaded to an engine are never listed.
+
+### Images
+
+`POST /v1/images/generations` takes OpenAI's request and answers OpenAI's JSON with the images as
+base64. Two engines serve it (recipes `vllm-omni-image` for diffusers pipelines on NVIDIA,
+`sd-cpp` for stable-diffusion.cpp on AMD with Vulkan, NVIDIA and the CPU); local deployments only,
+never a cloud provider.
+
+| Field | What the gateway does |
+|---|---|
+| `model` | The image model's name, as usual |
+| `prompt` | Required, at most the deployment's *Longest prompt* (`max_prompt_chars`, 4,000). Longer: 400 `prompt_too_long`. Engine settings inside it (`<sd_cpp_extra_args>`) are refused: use the fields below |
+| `n` | 1 to the deployment's *Images per request* (`max_images`, 4 by default); more: 400 `too_many_images`. Left out: 1 |
+| `size` | `WIDTHxHEIGHT`, or `auto` or left out for the deployment's *Default size* (the model's own: 512x512 for Stable Diffusion 1.5, 1024x1024 for SDXL, Z-Image and FLUX). Each side at most *Largest side* (`max_side`, 0 = the model's own); larger: 400 `image_too_large`. Each side a multiple of 16 (diffusion transformers) or 64 (Stable Diffusion's UNet); else 400 `invalid_size` |
+| `response_format` | Left out or `b64_json`. **`url` is refused** with 400 `response_format_not_supported`: Forgeyard keeps no copy of the images it makes, so there is no URL to give. Decode `data[].b64_json` |
+| `output_format` | `png` (the default), `jpeg` or `webp`; others 400 `unsupported_output_format`. `output_compression` (0 to 100) for jpeg and webp |
+| `num_inference_steps` | Denoising steps, at most the deployment's *Most steps* (`max_steps`, 50); more: 400 `too_many_steps`. Left out: the deployment's *Default steps*, else the model's own |
+| `negative_prompt`, `guidance_scale`, `seed` | Passed on: as fields to vLLM-Omni, inside the prompt as stable-diffusion.cpp's `<sd_cpp_extra_args>` (built by the gateway). Without `seed` every request is a new image |
+| `true_cfg_scale` | vLLM-Omni only (Qwen-Image); stable-diffusion.cpp ignores it |
+| `quality`, `style`, `background`, `moderation`, `user` | Accepted and ignored |
+| `stream` | Refused (400 `streaming_not_supported`): the answer comes when the images are made |
+
+Nothing else reaches the engine: fields an engine would take but Forgeyard does not offer (vLLM-Omni's
+`lora` with a path on the server, its `extra_params` and system prompts) are left out.
+
+The answer: `{"created", "data": [{"b64_json"}], "output_format", "size"}`. The engines' own extras
+(stable-diffusion.cpp's `generation_info` with the prompt and settings, vLLM-Omni's stage timings) are
+not passed on. An engine's error comes back in OpenAI's shape with its status and the code
+`engine_error`.
+
+**The queue.** A deployment works on *Requests at once* (`concurrency`, 1) per replica; the others wait
+in the gateway, first come first served, at most *Queue length* (`queue`, 8) of them. One more gets 429
+`queue_full` with `Retry-After` (from how long its requests took lately). A request that waits longer
+than the deployment's *Timeout* gets 503 `queue_timeout`; once a replica has it, the gateway waits up
+to that *Timeout* (`timeout`: 600 s for vLLM-Omni, 1,800 s for stable-diffusion.cpp) for the images,
+then 504 `upstream_timeout`. A client that gives up while waiting leaves the queue; its request never
+reaches the engine.
+
+**No prompt filtering.** The gateway checks the request's shape and the deployment's caps, not what the
+prompt asks for. If a deployment needs a safety filter, put one in front of it.
+
+What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| `images` | The images in the answer |
+| `kilopixels` | Their width x height / 1,000, read from each image's own header (PNG, JPEG, WebP), else the size asked |
+| `busy_ms` | The time the replica worked on the request (from sending it to the last byte of the answer), times the GPUs the deployment holds (1 on a CPU): GPU time |
+| tokens | None. A key's tokens per minute does not apply; its requests per minute does |
+
+### Video
+
+`POST /v1/videos` takes OpenAI's Videos request and answers at once with a **job**; the video is made on
+one replica, which keeps it. Poll `GET /v1/videos/{id}` until `status` is `completed` or `failed`, then
+fetch `GET /v1/videos/{id}/content`. One engine serves it (recipe `vllm-omni-video`, vLLM-Omni on
+NVIDIA); local deployments only, never a cloud provider.
+
+| Field | What the gateway does |
+|---|---|
+| `model` | The video model's name, as usual |
+| `prompt` | Required, at most the deployment's *Longest prompt* (`max_prompt_chars`, 2,000). Longer: 400 `prompt_too_long` |
+| `seconds` | A whole number of seconds, as a number or a string (`"5"`), 1 to the deployment's *Longest video* (`max_seconds`, 5); more: 400 `video_too_long`. Left out: *Default length* (`seconds`, 5). Frames are seconds x the frame rate, rounded to the counts the model makes (Wan: 4k + 1, so 5 s at 16 fps is 81 frames) |
+| `size` | `WIDTHxHEIGHT`, or left out for *Default size* (the model's own: 832x480 for Wan2.1, 1280x704 for Wan2.2). Each side at most *Largest side* (`max_side`, 0 = the model's own long side), and no more pixels a frame than the default size scaled to that side; larger: 400 `video_too_large`. Sides are multiples of 16 (32 for Wan2.2-5B); else 400 `invalid_size` |
+| `num_inference_steps` | Denoising steps, at most *Most steps* (`max_steps`, 50); more: 400 `too_many_steps`. Left out: *Default steps*, else the model's own |
+| `negative_prompt`, `guidance_scale`, `seed` | Passed on |
+| `input_reference` (and vLLM-Omni's `image_reference`, `video_reference`, `audio_reference`) | Refused with 400 `input_reference_not_supported`: text to video only in 1.3 |
+| `quality`, `user` | Accepted and ignored |
+
+Nothing else reaches the engine: the gateway sends only the prompt, the model, the size, the frames,
+the frame rate and the fields above (never vLLM-Omni's `lora`, `extra_params` or frame interpolation
+paths).
+
+**The job** has OpenAI's shape: `{"id", "object": "video", "model", "status", "progress", "created_at",
+"completed_at", "expires_at", "size", "seconds", "quality", "remixed_from_video_id", "error"}`.
+
+- `id` is Forgeyard's own (`video_` and 32 random hex digits), never the engine's. Another key's id
+  answers 404 `video_not_found`, exactly as an id that does not exist.
+- `status` is `queued`, `in_progress`, `completed` or `failed`. `progress` is what the engine reports:
+  vLLM-Omni says 0 until the video is made, then 100.
+- `seconds` is a string, as in OpenAI's API. `expires_at` is set once the job ends: the deployment's
+  *Keep results* later.
+- `error` (`{"code", "message"}`) once `failed`:
+
+| `error.code` | Means |
+|---|---|
+| `generation_failed` | The engine failed the video; its message follows |
+| `timed_out` | Not done within the deployment's *Longest job* (`timeout`); the gateway cancelled it on the replica |
+| `replica_restarted` | The replica's engine restarted: its jobs (kept in its memory) went with it |
+| `replica_gone` | The replica was stopped, placed again or deleted |
+| `video_lost` | The replica no longer knows the job (its engine restarted) |
+
+The prompt is not stored. A job's row stays a week after its result expired, then goes.
+
+**Content.** `GET /v1/videos/{id}/content` streams the MP4 from the replica that made it, as
+`video/mp4` with `Content-Disposition: inline`. `variant=thumbnail` and `variant=spritesheet` answer 400
+`variant_not_supported` (the engine makes the video only). A job not made yet answers 409
+`video_not_ready`, a failed one 409 `video_failed`, an expired one 410 `video_expired`, and one whose
+replica restarted or was stopped since 410 `video_lost`.
+
+**Deleting.** `DELETE /v1/videos/{id}` cancels a job at work on its replica, or deletes a finished
+video there, and removes the job: `{"id", "object": "video.deleted", "deleted": true}`.
+
+**Jobs at once.** A replica makes one video at a time; the others wait on it. The gateway sends a job
+to the ready replica with the fewest jobs. A deployment takes at most *Jobs at once* (`queue`, 8)
+waiting or being made, and of those *Jobs per key* (`jobs_per_key`, 2) from one key (or one person in
+the Playground). One more gets 429 `queue_full` or `too_many_jobs` with `Retry-After` (from how long
+its videos took lately). The key's requests per minute count each job asked for; polls, lists and
+downloads do not.
+
+**Expiry.** A result can be fetched for *Keep results* (`keep_minutes`, 1,440); then the server deletes it
+on the replica. The engine also deletes its own files an hour after that (`VLLM_OMNI_SERVER_STORAGE__FILE_TTL`),
+and keeps them inside the replica's container, so a stopped or restarted replica leaves none behind.
+
+The deployment parameters (recipe `vllm-omni-video`):
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `default_size` (*Default size*) | `auto` | The size of requests that give none; `auto` is the model's own |
+| `seconds` (*Default length*) | `5` | The length of requests that give none |
+| `max_seconds` (*Longest video*) | `5` | Longer requests: 400. The memory estimate is sized for it |
+| `max_side` (*Largest side*, Advanced) | `0` | The widest or tallest video, in pixels; 0 is the model's own |
+| `fps` (*Frames per second*, Advanced) | `0` | 0 is the model's own (16 for Wan2.1, 24 for Wan2.2) |
+| `steps`, `max_steps` (Advanced) | `0`, `50` | Default steps (0: the model's own) and the most a request may ask |
+| `queue` (*Jobs at once*, Advanced) | `8` | Jobs waiting or being made on the deployment |
+| `jobs_per_key` (*Jobs per key*, Advanced) | `2` | Of those, one key's or one person's |
+| `keep_minutes` (*Keep results*, Advanced) | `1440` | How long a finished video can be fetched |
+| `timeout` (*Longest job*, Advanced) | `3600` | Seconds from asking; a job still at work then is cancelled and failed |
+| `max_prompt_chars` (*Longest prompt*, Advanced) | `2000` | Longer prompts: 400 |
+| `offload` (*Offload to host memory*, Advanced) | `none` | `model`: only the component at work on the card (`--enable-cpu-offload`); slower |
+
+What is counted, **once per job, when it ends** (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| requests | One per job. A finished one counts as answered; a failed one as an error and nothing else; one deleted while at work as 499 (not an error). A refused request (400, 404, 429) is counted when it is refused |
+| `media_ms` | The video's length in milliseconds, as the engine reports it (else frames / frames per second) |
+| `busy_ms` | From when the job was seen in progress until it was done, times the GPUs the deployment holds: GPU time |
+| tokens | None |
+
+The Playground's **Video** panel uses `/api/playground/videos` (`POST`, `GET`), `GET
+/api/playground/videos/options?model=<model>`, `GET` and `DELETE /api/playground/videos/{id}` and `GET
+/api/playground/videos/{id}/content`: the same rules, as the signed-in person (the session cookie and
+the console's `X-Forgeyard: 1` header), for that person's own jobs, counted as console. The jobs are kept
+in the server's database (table `video_jobs`, migration `0014`).
 
 ### Headers
 
@@ -215,6 +507,7 @@ What the gateway does with a request:
 | `X-Forgeyard-Target` | answer | Who answered: `local:<deployment>#<replica>` or `provider:<provider>/<model>`. Never a key |
 | `X-Forgeyard-Replica` | answer | For a local answer: `<model>#<replica>` |
 | `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
+| `X-Forgeyard-Voice` | answer | Text to speech: the voice the gateway chose because the request named none, or an OpenAI voice the model does not have; `default` when the model has only its own voice |
 | `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
 | `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
 
@@ -233,9 +526,35 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | Status | `code` | Means | What to do |
 |---|---|---|---|
 | 400 | `invalid_json` | The body is not JSON | Send JSON |
-| 400 | `invalid_request` | No `model`, a body that is not an object, or audio not sent as `multipart/form-data` | Fix the request |
+| 400 | `invalid_request` | No `model`, a body that is not an object, or audio not sent as `multipart/form-data`; for speech, no `input`, a `speed` outside 0.25 to 4, another `stream_format`, or `GET /v1/audio/voices` without `model` | Fix the request |
 | 400 | `wrong_endpoint` | The model is served at another endpoint; the message names it | Use that endpoint |
 | 400 | `context_length_exceeded` | Only on a route with **Spill a prompt that is too long**: the prompt does not fit the local context, and nothing else could take it | Shorten the prompt or lower `max_tokens` |
+| 400 | `invalid_content_part` | A content part that is not an object with a `type`, a type the gateway does not take (`*_embeds`, unknown ones), or a media part without its URL | Use the parts listed under [Images, audio and video in chat](#images-audio-and-video-in-chat) |
+| 400 | `invalid_media_data` | A `data:` URI that is not base64, or not of the part's kind (an image part with `data:text/plain`), or a `file` part without a `data:` URI | Send `data:<type>;base64,…` |
+| 400 | `media_url_refused` | A media URL with another scheme than http(s) or `data:` (`file://`…), credentials, or a host that resolves to a private, loopback, link-local or metadata address, also after a redirect; a URL in `input_audio.data` | Send a public URL or a `data:` URI |
+| 400 | `media_fetch_failed` | The gateway could not fetch a media URL: no answer, a status other than 200, more than 3 redirects, more than 20 seconds, or not of the part's kind | Check the URL, or send the file as a `data:` URI |
+| 400 | `media_not_supported` | The model does not take that medium (images to a text model, video while *Videos per request* is 0); the message says what it takes | Use a model that takes it, or enable video on the deployment |
+| 400 | `too_many_media_items` | More images (or audio clips, or videos) than the deployment's *Images per request* or *Videos per request* | Send fewer, or raise the parameter |
+| 400 | `file_input_not_supported` | A `file` part (PDF) to a model whose recipe does not take files; the gateway does not convert files | Send the pages as images, or the text |
+| 400 | `media_local_only` | A request with media to a model served only by providers | Use a local model |
+| 400 | `input_too_long` | Text to speech: `input` is longer than the deployment's *Longest input* | Split the text, or raise `max_input_chars` |
+| 400 | `unsupported_response_format` | Text to speech: a `response_format` that is not OpenAI's, or that the engine does not make; the message lists what it makes | Ask for one of those |
+| 400 | `stream_format_not_supported` | Text to speech: `stream_format` the engine does not offer (`sse` on llama.cpp or speaches) | Leave it out, or use `audio` |
+| 400 | `language_not_supported` | Text to speech: Chinese, Japanese or Korean text to speaches, which deletes those characters | Use a Qwen3-TTS deployment |
+| 400 | `voice_cloning_not_supported` | Text to speech: a reference recording, a voice given as audio or a link, `task_type: "Base"`, or uploading a voice. Not in 1.3 | Use one of the model's voices |
+| 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
+| 400 | `streaming_not_supported` | Images: `stream: true` | Leave it out |
+| 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
+| 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
+| 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
+| 400 | `unsupported_output_format` | Images: an `output_format` other than png, jpeg or webp, or one the engine does not make | Ask for png |
+| 400 | `too_many_steps` | Images and videos: `num_inference_steps` over the deployment's *Most steps* | Ask for fewer, or raise `max_steps` |
+| 400 | `prompt_too_long` | Images and videos: `prompt` or `negative_prompt` longer than the deployment's *Longest prompt* | Shorten it, or raise `max_prompt_chars` |
+| 400 | `video_too_long` | Videos: `seconds` over the deployment's *Longest video* | Ask for fewer seconds, or raise `max_seconds` |
+| 400 | `video_too_large` | Videos: a side over *Largest side*, or more pixels a frame than the default size scaled to it | Ask for a smaller size, or raise `max_side` |
+| 400 | `input_reference_not_supported` | Videos: `input_reference` (or `image_reference`, `video_reference`, `audio_reference`): text to video only in 1.3 | Describe it in the prompt |
+| 400 | `variant_not_supported` | Videos: `variant=thumbnail` or `spritesheet`; the engine makes the video only | Ask for `variant=video` |
+| 4xx/5xx | `engine_error` | Images and videos: the engine refused or failed the request; its status and message are passed on | Read the message; an out-of-memory error means a smaller size or fewer images |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
@@ -247,10 +566,19 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 403 | `model_not_allowed` | The key is limited to other models | Use an allowed model, or change the key's models |
 | 404 | `model_not_found` | No such model for this key: it does not exist, or it is cloud-only and the key's cloud setting is not **Allowed**. From `GET /v1/models/{model}`, also a stopped model | Check `GET /v1/models` |
 | 404 | `unknown_endpoint` | The gateway has no such path | Use an endpoint above |
-| 413 | `request_too_large` | The body is larger than `GATEWAY_MAX_BODY_MB` | Send less, or raise the setting |
+| 404 | `endpoint_not_supported` | `/v1/images/edits`, `/v1/images/variations`, `/v1/videos/sync` or `/v1/videos/{id}/remix`: not offered in 1.3 | Use `/v1/images/generations`, or a job at `/v1/videos` |
+| 404 | `video_not_found` | Videos: no such video for this key (another key's id answers the same) | Check `GET /v1/videos` |
+| 409 | `video_not_ready` | Videos: the content of a job still `queued` or `in_progress` | Poll until it is `completed` |
+| 409 | `video_failed` | Videos: the content of a failed job | Read the job's `error`, and ask again |
+| 410 | `video_expired` | Videos: the result is older than the deployment's *Keep results* and was deleted | Ask for it again |
+| 410 | `video_lost` | Videos: the replica that made it restarted or was stopped, and its files went with it | Ask for it again |
+| 413 | `request_too_large` | The body (with media URLs fetched and inlined) is larger than the model's *Largest request* or `GATEWAY_MAX_BODY_MB` | Send less or smaller images, or raise the parameter or the setting |
+| 413 | `media_too_large` | A media URL's file is larger than `MEDIA_FETCH_MAX_MB` | Send a smaller file, or raise the setting |
 | 421 | `host_not_allowed` | The server does not answer to the host name in the URL | Use its address, or add the name to `ALLOWED_HOSTS` |
 | 429 | `rate_limit_exceeded` | Over the key's requests or tokens per minute | Wait `Retry-After` seconds |
 | 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
+| 429 | `queue_full` | Images: every replica is busy and the deployment's queue is full. Videos: the deployment holds *Jobs at once* | Wait `Retry-After` seconds |
+| 429 | `too_many_jobs` | Videos: this key (or person) already has *Jobs per key* videos waiting or being made on the deployment | Wait `Retry-After` seconds, or delete one |
 | 502 | `upstream_unreachable` | No replica could be connected to | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
 | 502 | `upstream_error` | The connection to the replica or provider broke while the answer was coming | Retry |
 | 502 | `replica_refused_key` | The replica refused the gateway's internal key | Stop and start the deployment |
@@ -263,7 +591,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it | Retry |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
-| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT` | Lower `max_tokens`, or raise the setting |
+| 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |
+| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT`; for images, within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
 | 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
 
 Two more cases:
@@ -276,6 +605,122 @@ Two more cases:
 - **A stream that breaks off** after it started cannot change its status any more. The gateway ends
   it with one last event, an error with the code `upstream_stream_broken`:
   `data: {"error": {…, "code": "upstream_stream_broken"}}`.
+
+## The passthrough (/x/)
+
+Programs call an exposed workload at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
+whose **Workloads** setting allows it. Like `/v1`, it takes `Authorization: Bearer fyk_…` only: no
+cookies, no key in the query string, no CORS headers.
+
+### Paths and methods
+
+| What | Rule |
+|---|---|
+| Methods | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| Prefix | `/x/<name>` is removed: `/x/<name>/a/b?c=1` reaches the workload as `/a/b?c=1`, and `/x/<name>` alone as `/` |
+| Path | Passed on byte for byte, as it came. Refused with 400 `invalid_path`, never normalised: `.` or `..` segments, an encoded `.`, `/` or `\` (`%2e`, `%2f`, `%5c`), a backslash, control characters (raw or encoded) and non-ASCII bytes |
+| Query | Passed on as it came |
+| Not passed on | WebSockets (`Upgrade` is removed), gRPC, HTTP/2 to the workload |
+
+### Request and answer headers
+
+| Header | Direction | What happens |
+|---|---|---|
+| `Authorization` | request | Your API key is checked and removed; the workload gets the replica's internal key, which the agent's key guard checks and removes |
+| `Cookie`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard`, `X-Forgeyard-*` | request | Removed |
+| `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` | request | Set fresh: the client's address, `https` or `http`, and the host it called |
+| `X-Forwarded-Prefix` | request | `/x/<name>` |
+| `X-Request-Id` | both | A new id per request, sent to the workload and back to the client |
+| Hop-by-hop headers (`Connection` and what it names, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Expect`, `Proxy-*`) | both | Removed |
+| `Set-Cookie`, `Access-Control-*`, `Strict-Transport-Security`, `Clear-Site-Data`, `Alt-Svc`, `Service-Worker-Allowed`, `Report-To`, `NEL`, `Date`, `Server` | answer | Removed (the server sends its own `Date` and `Server`) |
+| `Content-Security-Policy` | answer | Always `sandbox; default-src 'none'; frame-ancestors 'none'` |
+| `X-Content-Type-Options`, `X-Frame-Options`, `Cache-Control`, `Cross-Origin-Resource-Policy`, `Referrer-Policy` | answer | Always `nosniff`, `DENY`, `no-store`, `same-origin` and `no-referrer` |
+| `Location`, `Content-Location` | answer | A path, or an address of the workload itself, is rewritten under `/x/<name>`; other sites and relative references stay. Redirects are never followed |
+| `X-Forgeyard-Target` | answer | `workload:<name>#<replica>` |
+| `Content-Encoding`, `Content-Length` and the rest | answer | Passed on: the body is relayed as raw bytes as it arrives (compressed bodies stay compressed; SSE and chunked answers stream) |
+
+### Limits and timeouts
+
+| Limit | Default | Set on |
+|---|---|---|
+| Largest request body | 32 MiB (413 `request_too_large` above) | the workload: **Largest request (MiB)**, 1 to 1,024 |
+| Wait for each piece of the answer | 600 s (504 `upstream_timeout` before the first byte) | the workload: **Read timeout (s)**, 1 to 3,600 |
+| Connecting to a replica | `GATEWAY_CONNECT_TIMEOUT` (5 s); a replica that cannot be reached is skipped for the next one | the server |
+| Requests at once per replica | no limit (429 `workload_busy` when every replica is full) | the workload |
+| Requests at once per key | no limit (429 `key_busy`); in the Playground, per person | the workload |
+| Requests per minute | the key's own limit (429 `rate_limit_exceeded`); tokens per minute do not apply | the key |
+
+Every 429 carries `Retry-After`. A client that goes away closes the request to the workload at once.
+
+**Usage** counts each request under the model `x:<name>`: requests, errors (an answer's own 5xx too),
+limited requests, bytes in (request bodies) and out (answer bodies as sent), busy time (from sending
+the request until the answer ended) and latency.
+
+### Errors at /x/
+
+Errors from the gateway have the same shape as at `/v1`. An answer from the workload itself, also a
+401 or a 5xx, is passed on as it is.
+
+| Status | `code` | Means | What to do |
+|---|---|---|---|
+| 400 | `invalid_path` | The path has a dot segment, an encoded `.`, `/` or `\`, a backslash, a control character or non-ASCII bytes | Send the path without them |
+| 401 | `missing_api_key`, `invalid_api_key`, `revoked_api_key`, `expired_api_key`, `account_disabled` | As at `/v1` | As at `/v1` |
+| 403 | `workloads_not_allowed` | The key's **Workloads** setting is *None* | Change the key's setting |
+| 404 | `workload_not_found` | No such exposed workload for this key: it does not exist, is not exposed, or is not on the key's list | Check the name and the key's list |
+| 413 | `request_too_large` | The body is larger than the workload's **Largest request** | Send less, or raise the limit |
+| 429 | `rate_limit_exceeded` | Over the key's requests per minute | Wait `Retry-After` seconds |
+| 429 | `workload_busy` | Every replica has as many requests in flight as **Requests at once per replica** | Wait `Retry-After` seconds, or add replicas |
+| 429 | `key_busy` | The key has as many requests in flight to this workload as **Requests at once per key** | Wait for one to finish |
+| 502 | `upstream_unreachable` | No replica could be connected to (its program is down or restarting) | Check the workload's output |
+| 502 | `upstream_error` | The request to the replica failed | Retry |
+| 502 | `replica_refused_key` | The replica's key guard refused the gateway's internal key | Stop and start the workload |
+| 503 | `no_ready_replica` | The workload is stopped, or no replica is ready, or a replica is not behind the key guard yet; the message says which | Start it, wait, or update the agent |
+| 504 | `upstream_timeout` | No answer within the workload's **Read timeout** | Raise the timeout, or check the workload |
+
+An answer that breaks off after it started cannot change its status: the connection is closed before
+the body is complete, so a client never takes a cut-off body for a whole one.
+
+### From the Playground
+
+The console's **Playground → Vision** tab calls exposed vision workloads through routes of its own,
+never through `/x/`: they take the console's sign-in (its cookie, and on `POST` the `X-Forgeyard: 1`
+header from the console's own origin), and `/x/` keeps taking API keys only. Anyone signed in may use
+them. A vision workload is an exposed service started with `--task detect`, `--task segment` or
+`--task depth`, as every [template](#workload-templates) is.
+
+| Route | What it does |
+|---|---|
+| `GET /api/playground/vision/options` | `workloads`: each exposed vision workload's `name`, `workload_id`, `task`, `title`, `model`, `licence`, `endpoint`, `path`, `ready` (replicas behind the key guard), `reason` (why none is ready), `max_body_mb`; `tasks`: the templates' tasks |
+| `POST /api/playground/vision/<name>/<task>` | The body (the image, as multipart) to the workload's own `POST /v1/<task>`, nothing else: no other path, method or query |
+
+The request then follows the `/x/` rules above: the same replicas and key guard, request and answer
+headers (the cookie never reaches the workload), the workload's **Largest request**, **Requests at
+once per replica** and **Requests at once per key** (counted per person), its timeouts, and the same
+errors. Another task than the workload's, or a workload that is not an exposed vision workload, is 404
+`workload_not_found`; a task the vision server does not have is 404 `unknown_task`. Usage is counted
+under `x:<name>` as *console*, for the person signed in.
+
+## Workload templates
+
+The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
+`X.Y.Z` (CPU, linux/amd64 and linux/arm64) or `X.Y.Z-cuda` (torch with CUDA 13.0, linux/amd64, NVIDIA
+driver 580 or newer). Built from `images/vision` in the repository, the dependencies pinned with hashes
+and the models baked in at their revisions; it runs as an unprivileged user. `GET /api/workloads/templates`
+lists the templates with the workload spec each one makes.
+
+| Endpoint | Takes | Returns |
+|---|---|---|
+| `GET /` | | `task`, `model`, `revision`, `licence`, `device` (`cpu` or `cuda`), `endpoint` |
+| `GET /health` | | 200 once the model is loaded |
+| `POST /v1/detect` | `image`; `threshold` (0.5), `max_detections` (100) | `detections`: `label`, `score`, `box` `[x0, y0, x1, y1]` in pixels |
+| `POST /v1/segment` | `image`; `points` `[[x, y], …]` with `labels` (1 inside, 0 outside), or `box` `[x0, y0, x1, y1]`; `multimask` (true) | `masks`: `score`, `area`, `box`, `png` (a 1-bit PNG, base64), best first |
+| `POST /v1/depth` | `image` | `depth_png` (a 16-bit PNG, base64, the image's size, nearer is brighter), `min`, `max`: relative depth, not metres |
+
+An image is a multipart file field `image` (other fields as form fields, JSON values allowed) or a JSON
+body `{"image": "<base64 or a data: URI>", …}`; PNG, JPEG or WebP, at most 20 MiB and 40 megapixels.
+Every answer also has `model`, `revision`, `width`, `height` and `ms`. The server's errors are
+`{"error": {"message", "code"}}` with 400 (`invalid_image`, `missing_image`, `missing_prompt`,
+`invalid_option`, `invalid_json`) or 413 (`image_too_large`); through `/x/` they are passed on as they are.
 
 ## Workload environment
 
@@ -293,7 +738,60 @@ A workload's replica starts with an empty environment. It gets only what its spe
 
 A spec that sets a GPU variable (also `HIP_VISIBLE_DEVICES` and `GPU_DEVICE_ORDINAL`), `PORT`, or
 any name that starts with `FORGEYARD_` or `PORT_` is refused. In a process's arguments and in
-environment values, `${PORT}` and `${PORT_<NAME>}` become the port.
+environment values, `${PORT}` and `${PORT_<NAME>}` become the port. In a process's arguments,
+`${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard
+(a workload exposed at `/x/`), else the agent's address.
+
+## Setup health checks
+
+Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
+warnings) and as a banner on the page concerned. Users and operators see none of them. Every check
+runs when the page asks, from the settings, the database and the agents' last reports. *Errors*
+stay until fixed; an admin may snooze a *warning* or a *note* (`info` in the API) for 30 days, for themselves only. How
+to use it: [Check the setup health](how-to.md#check-the-setup-health).
+
+| Id | Severity | When |
+|---|---|---|
+| `setting-unknown` | warning | A name in `.env`, or one in the environment that starts like a setting (`GATEWAY_`, `PROVIDER_`, `EGRESS_`…) or is very close to one, is not a setting. It says which setting you probably meant |
+| `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
+| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `SECRET_KEY_FILE` are set |
+| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS`, `PROVIDER_ALLOW_PRIVATE_HOSTS` or `MEDIA_ALLOW_PRIVATE_HOSTS` is on |
+| `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
+| `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
+| `setup-token-left` | note | `FORGEYARD_SETUP_TOKEN` is still set after setup |
+| `env-seed-ignored` | note | A first-value setting (`MODEL_URL_HOSTS`, `MODEL_LOCAL_DIRS`, `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, `GATEWAY_CLOUD_*`) differs from what an admin saved, which wins |
+| `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **I have a backup of key id …** ticks it off; it comes back when the key changes |
+| `host-loopback` | error | `HOST` is a loopback address, but a machine joined from another address (and no proxy is in front) |
+| `public-url-unset` | note | `PUBLIC_URL` is empty on a server other machines can reach. A warning when you opened the page as `127.0.0.1` or `localhost` |
+| `certificate-name-missing` | error | Your own certificate does not name `PUBLIC_URL`'s host |
+| `certificate-expiring` | warning | Your own certificate expires within 30 days, or Forgeyard's CA within 90. An error within 14 days |
+| `registrations-pending` | note | People are waiting for approval |
+| `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
+| `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
+| `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
+| `process-workloads-off` | note | An online agent refuses process workloads; the finding gives its reason |
+| `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
+| `machine-simulated` | warning | A machine reports simulated hardware |
+| `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
+| `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
+| `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
+| `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
+| `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
+| `cloud-model-unpriced` | error | A route's cloud model has no input or output price while any budget exists: its requests answer 402 `budget_unpriced` |
+| `cloud-model-cost-unknown` | note | The same without budgets: its cost is unknown |
+| `provider-no-key` | error | An enabled provider whose kind needs an API key has none |
+| `provider-blocked-by-egress` | error | A provider's host is not in `EGRESS_ALLOWED_HOSTS` |
+| `provider-inside-public-address` | warning | A provider marked as inside your network resolves only to public addresses |
+| `cloud-default-open` | note | New keys get more than **Never**, or people may set their own keys to **Allowed**. A warning when a key also has no budget |
+| `cloud-unreachable` | note | Routes have cloud targets, but no key may use the cloud |
+| `route-cloud-before-local` | warning | A route's cloud tier comes before its first local tier |
+| `route-cloud-never-used` | note | A **Local only** route has cloud targets, or a spill rule has no tier after the local one |
+| `route-no-target` | error | No target of a route can answer: every one is disabled, or its provider is |
+| `route-local-stopped` | warning | A route with local and cloud tiers whose local deployments are all stopped |
+| `budget-zero` | note | A budget is $0, which blocks every cloud request it applies to |
+| `prices-stale` | note | Prices from OpenRouter of a model a route uses are over 60 days old |
+| `keys-idle-never-expire` | note | Keys that never expire were not used for 90 days |
 
 ## Command line
 
@@ -348,9 +846,81 @@ dependencies. It uses `uv` when it is installed, else a Python 3.13 or newer tha
 else it installs `uv` into `/opt/forgeyard/bin`, which brings its own Python. Without systemd it
 installs everything and prints how to start the agent.
 
+## Built-in recipes
+
+A recipe's variants are tried in order; the first one whose `when` matches a card (or the CPU) and
+whose runtime works on the machine runs the replica. A deployment cannot pick a variant; a custom
+recipe with only the variants you want can.
+
+| Recipe | Variant | Runs on | Image or release |
+|---|---|---|---|
+| `vllm`, `vllm-pooling` | `cuda`, `cuda-12.9`, `rocm` | NVIDIA (compute capability 7.0+, driver 580+, or 575+ for `cuda-12.9`); AMD `gfx90a`, `gfx942`, `gfx950`, `gfx1100`, `gfx1101`, `gfx1150`, `gfx1151`, `gfx1200`, `gfx1201` | `vllm/vllm-openai:v0.32.0`, `-cu129`, `vllm/vllm-openai-rocm:v0.32.0` |
+| `llama-cpp` | `cuda` | NVIDIA, compute capability 5.0+, driver 570+ | `ghcr.io/ggml-org/llama.cpp:server-cuda-b12242` (CUDA 12.8) |
+| | `rocm` | AMD `gfx908`, `gfx90a`, `gfx942`, `gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1200`, `gfx1201` | `…:server-rocm-b12242` (ROCm 7.2.1) |
+| | `vulkan` | any other AMD GPU: APUs (`gfx1151`, `gfx1150`, `gfx1103`, …) and cards the ROCm image lacks. Only the card's render node, no `/dev/kfd` | `…:server-vulkan-b12242` (Mesa RADV) |
+| | `cpu`, `cpu-process` | x86_64 and aarch64 in a container; x86_64 as a process without Docker | `…:server-b12242`; release `b12242`, `llama-b12242-bin-ubuntu-x64.tar.gz`, checked against its SHA-256 |
+| `faster-whisper` | `cuda`, `cuda-12.4`, `cpu` | NVIDIA, CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
+| `speaches-tts` (1.3) | `cpu` | CPU (in a container), on any machine | the same `ghcr.io/speaches-ai/speaches:0.8.3-cpu` image as faster-whisper. CPU only: Kokoro and Piper run on ONNX Runtime and make speech faster than it plays there; in the CUDA image Kokoro still used the CPU |
+| `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
+| `vllm-omni-image` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | the same `vllm/vllm-omni:v0.32.0` |
+| `vllm-omni-video` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | the same `vllm/vllm-omni:v0.32.0` |
+| `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
+| | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
+| | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
+
+`llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
+
+stable-diffusion.cpp publishes its images only under tags that move with every build (`master-vulkan`,
+`master-cuda`). The recipe pins the builds that were checked by digest; `scripts/pin_images.py` keeps
+them (it reports that the tag moved on as information) unless it is run with `--move-rolling`. Its later
+Linux releases are built on Ubuntu 26.04 (glibc 2.43), which is why the CPU process is an earlier build;
+its OpenAI API is the same. `sd-server` has no API key: an agent without the key guard (before 1.1) gets
+no `sd-cpp` replica. The first CUDA pin (build `465adf3`) crashed with Z-Image-Turbo on an A100
+([#43](https://github.com/xianhong1208/forgeyard/issues/43)); build `3bad892` replaced it.
+
+Every image is pinned by digest as well (`tag@sha256:…`); the tag is what the pages show.
+`scripts/pin_images.py` records in `forgeyard/recipes/images.lock.json` the ids a correct copy of each
+image can show (index, manifest and config digests, and a content id per platform), so a copy loaded
+with `docker load` on a machine without registry access is checked and used:
+[Offline machines](how-to.md#offline-machines).
+
+A variant's fields: `name`, `when` (`vendor`: `nvidia`, `amd` or `cpu`; `arch`: AMD gfx targets or
+CPU architectures; `compute_capability` and `driver`: comparisons such as `>=8.0`), `runtime`
+(`container` or `process`), `image` and `entrypoint` (container), `engine` (`url`, `sha256`,
+`binary`: a release the agent downloads) or `command` (an installed program) for a process, `args`
+and `env` to replace the recipe's, and `amd_kfd` (AMD containers; `true` by default: `/dev/kfd` and
+the card's render node; `false`: the render node only, for engines that use only Vulkan).
+
+A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
+`frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
+`openai-videos`, and its `{keep_seconds}` placeholder is the deployment's `keep_minutes` and an hour.
+
+## Container images
+
+Each release publishes two images on Docker Hub, built by CI from the release's tag:
+
+| Image | What | Platforms |
+|---|---|---|
+| `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
+| `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
+
+- **Tags**: `1.3.0` (exactly that release), `1.3` (its newest patch release), `latest` (the newest
+  release). A pre-release only gets its own version. Each image carries OCI labels (source,
+  licence, version, revision), its build provenance and an SBOM.
+- **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with
+  `DATA_DIR=/data` (a volume), `HOST=0.0.0.0` and `PORT=7860` (exposed), and a health check on
+  `/api/health`. [Run the server in Docker](how-to.md#run-the-server-in-docker).
+- **The agent image** runs `forgeyard agent` behind `tini`, as root (it drives the host's Docker),
+  with `FORGEYARD_LIMITS=rlimit`, the workload account `forgeyard-run` (uid 990) and a volume at
+  `/var/lib/forgeyard-agent`. [Run the agent in Docker](how-to.md#run-the-agent-in-docker).
+- **Which agent image a server names**: [`AGENT_IMAGE`](#machines), else the published one at the
+  server's version. When nothing is published (the namespace in `forgeyard/install/images.py` is
+  empty) and `AGENT_IMAGE` is not set, it names a local build, `forgeyard-agent:<version>`, and
+  **Add a machine** shows how to build it.
+
 ## Files and directories
 
-On the server, in its folder:
+On the server, in its folder (in the server image: in the `/data` volume, without `data/`):
 
 | Path | What |
 |---|---|

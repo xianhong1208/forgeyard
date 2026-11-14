@@ -1,14 +1,15 @@
 import { IconMinus, IconPlus } from "@tabler/icons-react";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { VENDOR_NAME } from "../lib/machines";
-import type { Machine, MachinesResponse, WorkloadResponse } from "../lib/types";
+import { buildGateway, gatewayForm, type GatewayForm } from "../lib/passthrough";
+import type { Machine, MachinesResponse, WorkloadResponse, WorkloadTemplate } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { allowedCards, allowlistSummary, buildSpec, canRunWorkloads, emptyForm, gpuCards, type WorkloadForm } from "../lib/workloads";
+import { allowedCards, allowlistSummary, buildSpec, canRunWorkloads, emptyForm, formFromSpec, gpuCards, type WorkloadForm } from "../lib/workloads";
 
 function Segmented<T extends string>({ label, value, options, onChange }: {
   label: string; value: T; options: { value: T; label: string; hint?: string }[]; onChange: (v: T) => void;
@@ -62,6 +63,21 @@ export function WorkloadNewPage() {
   const navigate = useNavigate();
   const { data: machines } = useApi<MachinesResponse>("/machines");
   const [f, setF] = useState<WorkloadForm>(emptyForm);
+  const [g, setG] = useState<GatewayForm>(() => gatewayForm());
+  // A ready-made template (1.3): /workloads/new?template=<id>&gpu=1 fills the form; everything stays editable.
+  const [params] = useSearchParams();
+  const templateId = params.get("template");
+  const onGpu = params.get("gpu") === "1";
+  const { data: templates } = useApi<{ templates: WorkloadTemplate[] }>(templateId ? "/workloads/templates" : null);
+  const template = templates?.templates?.find((t) => t.id === templateId) ?? null;
+  // Filled once per template (React's "adjust state when a prop changes", not an effect).
+  const [applied, setApplied] = useState<string | null>(null);
+  const wanted = template ? `${template.id}:${onGpu}` : null;
+  if (template && wanted !== applied) {
+    setApplied(wanted);
+    setF(formFromSpec(onGpu ? template.specs.cuda : template.specs.cpu));
+    setG({ ...gatewayForm(), expose: true });
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof WorkloadForm>(k: K, v: WorkloadForm[K]) => setF((cur) => ({ ...cur, [k]: v }));
@@ -78,13 +94,15 @@ export function WorkloadNewPage() {
   const usable = (machines?.machines ?? []).filter((m) => m.status !== "revoked");
   const chosen: Machine | undefined = usable.find((m) => String(m.id) === f.machine);
   const spec = buildSpec(f);
+  const exposing = f.kind === "service" && g.expose;
+  const body = exposing ? { ...spec, gateway: buildGateway(g) } : spec;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const r = await api<WorkloadResponse>("/workloads", { method: "POST", body: spec });
+      const r = await api<WorkloadResponse>("/workloads", { method: "POST", body });
       navigate(`/workloads/${r.workload.id}`);
     } catch (err) {
       setError(errorText(err));
@@ -100,6 +118,14 @@ export function WorkloadNewPage() {
     <>
       <PageHeader index="02 · Workloads" title="New workload"
         lead="A container or a process, on a machine you pick or the first online machine with room. It starts as soon as it is placed." />
+      {template && (
+        <div className="tpl-from" role="status">
+          <span>From the template <strong>{template.title}</strong>{onGpu ? " on an NVIDIA GPU" : " on the CPU"}:</span>{" "}
+          <a href={template.model_url} target="_blank" rel="noreferrer" className="mono">{template.model}</a>{" "}
+          <span className="chip mono" title="The model's licence">{template.licence}</span>{" "}
+          <span className="muted small">serving code {template.code_licence}. Change anything before you start it.</span>
+        </div>
+      )}
       <form className="wl-form" onSubmit={submit} aria-label="New workload">
         <section className="panel">
           <h2>What</h2>
@@ -171,6 +197,8 @@ export function WorkloadNewPage() {
                   <option value="amd">AMD</option>
                 </select>
               </div>
+              <Input label="Share the card (memory)" value={f.vram} onChange={(v) => set("vram", v)} placeholder="the card to itself"
+                hint="For example 3Gi: shares the card with others, reserving this much. Empty: the whole card." />
             </div>
           )}
           {f.gpuMode === "indices" && chosen && (
@@ -269,7 +297,11 @@ export function WorkloadNewPage() {
               </select>
             </div>
           </section>
-        ) : (
+        ) : null}
+
+        {f.kind === "service" && <GatewayPanel g={g} setG={setG} name={f.name.trim()} ports={f.ports.map((p) => p.name.trim()).filter(Boolean)} />}
+
+        {f.kind === "task" && (
           <section className="panel">
             <h2>Limits and retries</h2>
             <div className="grid-3">
@@ -287,7 +319,7 @@ export function WorkloadNewPage() {
         <div className="form-foot">
           <details className="spec-preview">
             <summary>Spec that will be sent</summary>
-            <pre className="mono" aria-label="Spec JSON">{JSON.stringify(spec, null, 2)}</pre>
+            <pre className="mono" aria-label="Spec JSON">{JSON.stringify(body, null, 2)}</pre>
           </details>
           <div className="row-gap">
             <button className="btn btn-primary" disabled={busy}>{busy ? "Creating…" : "Create and start"}</button>
@@ -297,4 +329,49 @@ export function WorkloadNewPage() {
       </form>
     </>
   );
+}
+
+// Exposing the service behind the gateway at /x/<name> (1.3): off by default; the limits are collapsed.
+export function GatewayPanel({ g, setG, name, ports, heading = true }: {
+  g: GatewayForm; setG: (g: GatewayForm) => void; name: string; ports: string[]; heading?: boolean;
+}) {
+  const set = <K extends keyof GatewayForm>(k: K, v: GatewayForm[K]) => setG({ ...g, [k]: v });
+  const path = `/x/${name || "<name>"}`;
+  const inner = (
+    <>
+      {heading && <h2 id="gw-title">Gateway</h2>}
+      <label className="card-pick gw-expose">
+        <input type="checkbox" checked={g.expose} onChange={(e) => set("expose", e.target.checked)} />
+        <span>
+          <span className="strong">Expose at <code>{path}</code></span>
+          <span className="muted small">Programs call the service's HTTP API through the gateway with an API key whose
+            Workloads setting allows it. Its ports then answer only the gateway (the agent's key guard).</span>
+        </span>
+      </label>
+      {g.expose && (
+        <details className="gw-advanced">
+          <summary>Limits and timeouts</summary>
+          <div className="grid-3">
+            <div className="field">
+              <label htmlFor="gw-port">Port</label>
+              <select id="gw-port" value={g.port} onChange={(e) => set("port", e.target.value)}>
+                <option value="">The first ({ports[0] ?? "none"})</option>
+                {ports.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <Input label="Read timeout (s)" id="gw-read-timeout" value={g.readTimeout} onChange={(v) => set("readTimeout", v)} inputMode="numeric"
+              hint="Longest wait for each piece of an answer." />
+            <Input label="Largest request (MiB)" id="gw-max-body" value={g.maxBodyMb} onChange={(v) => set("maxBodyMb", v)} inputMode="numeric"
+              hint="413 above it." />
+            <Input label="Requests at once per replica" id="gw-concurrency" value={g.concurrency} onChange={(v) => set("concurrency", v)}
+              inputMode="numeric" placeholder="no limit" hint="429 when every replica is full." />
+            <Input label="Requests at once per key" id="gw-key-concurrency" value={g.keyConcurrency} onChange={(v) => set("keyConcurrency", v)}
+              inputMode="numeric" placeholder="no limit" />
+          </div>
+          <p className="field-hint">APIs only: answers are sandboxed (no cookies, no scripts), WebSockets and gRPC are not passed on.</p>
+        </details>
+      )}
+    </>
+  );
+  return heading ? <section className="panel" aria-labelledby="gw-title">{inner}</section> : <div className="gw-form">{inner}</div>;
 }

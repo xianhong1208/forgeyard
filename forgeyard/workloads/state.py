@@ -17,7 +17,9 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, utcnow
 from forgeyard.machines.messages import StatusIn
-from forgeyard.machines.protocol import FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS, PROTOCOL_VERSION
+from forgeyard.machines.protocol import (FEATURE_IMAGE_IDS, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS,
+                                         PROTOCOL_VERSION)
+from forgeyard.workloads import expose, images
 
 MAX_EVENTS = 300
 # Agent states in which the replica is (or may be) running something.
@@ -61,7 +63,8 @@ def compat_spec(spec: dict) -> dict:
 
 
 def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = None,
-                    key_env: Optional[str] = None, guard: bool = False) -> dict:
+                    key_env: Optional[str] = None, guard: bool = False, image_ids: bool = False,
+                    exposed: bool = False) -> dict:
     w = r.workload
     spec = r.spec or w.spec
     out = {"id": r.uid, "workload_id": w.id, "workload": w.name, "ordinal": r.ordinal, "generation": r.generation,
@@ -70,11 +73,21 @@ def replica_desired(r: Replica, *, models: bool = True, token: Optional[str] = N
         out["model"] = dict(r.model, token=token) if token else dict(r.model)
     if r.engine:
         out["engine"] = dict(r.engine)
-    if r.secret and (key_env or guard):
+    if exposed:
+        if r.secret:
+            # A workload exposed at /x/ (1.3): only the agent's guard requires the key, and removes it
+            # before the request reaches the program (which never gets it in its environment either).
+            out["replica_key"] = {"env": None, "value": r.secret, "strip": True}
+    elif r.secret and (key_env or guard):
         # The engine's internal key (M4): the agent passes it in the environment variable the
         # recipe names, keeps it in memory only, and sends it with its health checks. An agent with
         # the key guard also requires it on the replica's port, on every path (env None: only there).
         out["replica_key"] = {"env": key_env, "value": r.secret}
+    if image_ids:
+        # Beside the spec, never in it: an agent validates the spec with extra="forbid".
+        check = images.check_for(((spec or {}).get("runtime") or {}).get("image"))
+        if check is not None:
+            out["image_ids"] = check
     return out
 
 
@@ -86,6 +99,7 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
     models = FEATURE_MODELS in features
     keys = FEATURE_REPLICA_KEYS in features
     guard = keys and FEATURE_REPLICA_GUARD in features
+    image_ids = FEATURE_IMAGE_IDS in features
     reps = desired_replicas(db, node_id)
     tokens: dict[int, Optional[str]] = {}
     key_envs: dict[int, Optional[str]] = {}
@@ -96,9 +110,15 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
             if keys:
                 recipe = get_recipe(db, dep.recipe)
                 key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None
+    can_expose = expose.can_guard(node)
     return {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
             "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id),
-                                         key_env=key_envs.get(r.workload_id), guard=guard) for r in reps]}
+                                         key_env=key_envs.get(r.workload_id), guard=guard,
+                                         image_ids=image_ids,
+                                         # Plain replicas get a key only when exposed; one that was
+                                         # exposed stays guarded (and stripped) until it restarts.
+                                         exposed=can_expose and r.workload.runtime != "model" and bool(r.secret))
+                         for r in reps]}
 
 
 # ------------------------------------------------------------------ status from the agent

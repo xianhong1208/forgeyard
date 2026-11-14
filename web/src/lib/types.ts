@@ -121,6 +121,8 @@ export type NewJoinToken = JoinToken & {
   // The three ways to add the machine (forgeyard/install/commands.py): null install_command when the
   // server is not reached over HTTPS (install.sh is served over HTTPS only).
   install_command?: string | null;
+  // The agent image the Docker way runs: published (pulled), or a local build while none is published.
+  agent_image?: { reference: string; published: boolean; local_tag: string };
   docker_build_command?: string;
   docker_commands?: { nvidia: string; amd: string; cpu: string };
   config_file?: string;
@@ -199,27 +201,66 @@ export type Workload = {
   replicas: number;
   replica_list: Replica[];
   deployment_id?: number | null;
+  // 1.3: exposed behind the gateway at /x/<name> (null for a model deployment's workload).
+  gateway?: WorkloadGateway | null;
+};
+
+export type WorkloadTemplate = {
+  id: string; title: string; task: string; name: string; summary: string; model: string; revision: string;
+  licence: string; code_licence: string; model_url: string; endpoint: string; example: string; answer: string;
+  images: { cpu: string; cuda: string };
+  specs: { cpu: Record<string, unknown>; cuda: Record<string, unknown> };
+};
+
+export type WorkloadGatewaySettings = {
+  expose: boolean; port: string | null; read_timeout: number; max_body_mb: number;
+  concurrency: number | null; key_concurrency: number | null;
+};
+
+export type WorkloadGateway = WorkloadGatewaySettings & {
+  exposed: boolean; path: string; port_name: string | null;
+  guarded: number[];     // replicas behind the agent's key guard
+  unguarded: number[];   // placed replicas that are not (an agent too old, or not restarted yet)
 };
 
 export type WorkloadEvent = { at: string; kind: string; replica: number | null; message: string };
 
 export type WorkloadsResponse = { workloads: Workload[]; server_time: string; can_manage: boolean };
 
-export type WorkloadResponse = { workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
+export type WorkloadResponse = {
+  workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean;
+  gateway_base?: string; trust_url?: string | null;
+};
 
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
 // ---------------------------------------------------------------- models (M3)
-export type Task = "chat" | "embed" | "rerank" | "asr";
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video";
 
-export type RecipeParam = { type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string };
+export type RecipeParam = {
+  type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
+  // Shown in the deploy form's collapsed Advanced section: its default works untouched (1.3).
+  advanced?: boolean;
+};
 
-export type RecipeVariant = { name: string; vendor: "nvidia" | "amd" | "cpu"; runtime: "container" | "process"; image: string | null; arch: string[] | null; compute_capability: string | null; driver: string | null; engine: string | null };
+// What a model takes in chat besides text (1.3).
+export type Medium = "image" | "audio" | "video";
+
+export type RecipeVariant = { name: string; vendor: "nvidia" | "amd" | "cpu"; runtime: "container" | "process"; image: string | null; arch: string[] | null; compute_capability: string | null; driver: string | null; engine: string | null;
+  // Ids are recorded for the image: a copy loaded with `docker load` is checked and used offline.
+  image_check?: boolean };
 
 export type Recipe = {
   name: string; title: string; description: string; engine: string; version: string; tasks: Task[]; formats: string[];
   api: Record<string, string>; share: "exclusive" | "vram"; builtin: boolean; estimate: string;
   params: Record<string, RecipeParam>; devices: ("gpu" | "cpu")[]; variants: RecipeVariant[]; yaml?: string;
+  media?: { inputs: Medium[]; files: boolean } | null;
+  // 1.3, text to speech: the formats the engine makes, how it streams, its default voice.
+  tts?: { formats: string[]; default_format: string; stream_formats: string[]; voices: string | null; default_voice: string | null; cjk: boolean } | null;
+  // 1.3, image generation: how the gateway sends the request, the formats it makes, its most images.
+  image?: { request: "fields" | "sd-cpp"; output_formats: string[]; max_n: number } | null;
+  // 1.3, video generation: how the gateway asks the engine, and the frame counts it makes (k x step + 1).
+  video?: { request: "vllm-omni"; frames_step: number } | null;
 };
 
 export type CatalogModel = {
@@ -228,6 +269,28 @@ export type CatalogModel = {
   engine_args: Record<string, string[]>; recipes: string[]; deployments: number; created_by: string | null; created_at: string;
   summary: { params?: number; layers?: number; kv_heads?: number; head_dim?: number; max_context?: number; dtype?: string; architecture?: string; weights_bytes?: number };
   gguf_files: { path: string; size: number; parts: number }[];
+  // 1.3: the licence Hugging Face shows, gated, the media it takes (null: unknown, added before 1.3)
+  // and a GGUF vision model's projector file.
+  license?: string | null; gated?: boolean; modalities?: Medium[] | null;
+  // A conversion without a licence of its own (1.3): the original model whose licence it is.
+  license_from?: string | null;
+  mmproj?: { path: string; size: number } | null; mmproj_files?: { path: string; size: number }[];
+  // 1.3, text to speech: the built-in voices its config names (Qwen3-TTS), if any.
+  voices?: string[];
+  // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
+  image?: ImageModel | null;
+  // 1.3, video models: the native size and frame rate, and the pipeline's components.
+  video?: VideoModel | null;
+};
+
+export type VideoModel = {
+  size: [number, number] | null; multiple: number | null; fps: number | null; pipeline: string | null;
+  parts: Record<string, { class: string | null; params: number | null }>;
+};
+
+export type ImageModel = {
+  size: number | null; multiple: number | null; single: boolean | null; components: Record<string, string>;
+  pipeline: string | null; parts: Record<string, { class: string | null; params: number | null }>;
 };
 
 export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };
@@ -293,11 +356,17 @@ export type ApiKey = {
   user: { id: number; username: string | null }; this_minute: { requests: number; tokens: number };
   // Monthly cloud budget (1.2) and this month's spend; budget_locked_by: an admin set it on someone else's key.
   budget?: Budget; budget_locked_by?: string | null;
+  // Exposed workloads at /x/ (1.3): none (the default), listed (workload_list) or all.
+  workloads?: WorkloadAccess; workload_list?: string[] | null; workloads_locked_by?: string | null;
 };
+
+export type WorkloadAccess = "none" | "listed" | "all";
+export type WorkloadChoice = { name: string; exposed: boolean; path: string };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
   models: { name: string; api: string; kind?: RouteKind }[];
+  workloads?: WorkloadChoice[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
   month?: string; resets_at?: string; person_budget?: Budget;
 };
@@ -310,6 +379,10 @@ export type UsageRow = {
   cached_tokens?: number; reasoning_tokens?: number; spilled?: number;
   // Cost (1.2): micro-USD; unpriced requests are not in cost_micros.
   cost_micros?: number; unpriced?: number; cost_reported?: number; cost_estimated?: number;
+  // 1.3 units: media items sent in chat (images, audio clips, videos); the others are filled by
+  // later model kinds.
+  media_items?: number; characters?: number; images?: number; kilopixels?: number; media_ms?: number;
+  bytes_in?: number; bytes_out?: number; busy_ms?: number;
   cloud?: boolean;   // grouped by target or provider: outside your network
 };
 

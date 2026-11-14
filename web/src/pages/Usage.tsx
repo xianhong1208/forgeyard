@@ -6,6 +6,7 @@ import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { alerting, budgetInput, LEVEL_LABEL, parseBudget, resetText, type BudgetPerson, type BudgetsResponse } from "../lib/budgets";
 import { ms, num } from "../lib/gateway";
+import { bytes } from "../lib/machines";
 import { share, usd } from "../lib/prices";
 import type { UsageResponse, UsageRow } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -39,6 +40,19 @@ export function UsagePage() {
   usePoll(reload, 10000);
   const t = data?.total;
   const max = Math.max(1, ...(data?.rows ?? []).map((r) => r.requests));
+  // 1.3: the media column shows once there are images, audio or video in the period.
+  const media = (t?.media_items ?? 0) > 0;
+  // Text to speech: characters spoken and the audio's length.
+  const speech = (t?.characters ?? 0) > 0;
+  // Images: how many, their megapixels and the time replicas spent making them (GPU time on a GPU).
+  const images = (t?.images ?? 0) > 0;
+  // Workloads at /x/ (1.3): request and answer bodies, and the time replicas spent on them.
+  const traffic = (t?.bytes_in ?? 0) + (t?.bytes_out ?? 0) > 0;
+  // Video (1.3): the length made (media_ms on rows without characters spoken) and the GPU time.
+  const video = (data?.rows ?? []).some((r) => (r.media_ms ?? 0) > 0 && !(r.characters ?? 0));
+  const length = speech || video;
+  const lengthLabel = speech && video ? "Audio / video" : video ? "Video" : "Audio";
+  const busy = images || traffic || video;
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
   const setBy = tab === "cost" ? setCostGroup : setGroup;
   // The last step of the users' Get started list is opening this page.
@@ -89,6 +103,11 @@ export function UsagePage() {
           <div><dt>Requests</dt><dd>{num(t.requests)}</dd></div>
           <div><dt>Errors</dt><dd className={t.errors ? "usage-bad" : ""}>{num(t.errors)}{t.limited > 0 && <span className="muted small"> ({num(t.limited)} limited)</span>}</dd></div>
           <div><dt>Tokens</dt><dd>{num(t.tokens)} <span className="muted small">{num(t.prompt_tokens)} in · {num(t.completion_tokens)} out</span></dd></div>
+          {media && <div><dt>Media items</dt><dd>{num(t.media_items)} <span className="muted small">images, audio, video</span></dd></div>}
+          {speech && <div><dt>Speech</dt><dd>{num(t.characters)} <span className="muted small">characters · {audioLength(t.media_ms)} of audio</span></dd></div>}
+          {video && <div><dt>Video</dt><dd>{audioLength(t.media_ms)} <span className="muted small">made{speech ? " (with the audio)" : ""} · {busyTime(t.busy_ms)} busy</span></dd></div>}
+          {images && <div><dt>Images</dt><dd>{num(t.images)} <span className="muted small">{megapixels(t.kilopixels)} · {busyTime(t.busy_ms)} busy</span></dd></div>}
+          {traffic && <div><dt>Workload traffic</dt><dd>{bytes(t.bytes_in)} <span className="muted small">in · {bytes(t.bytes_out)} out</span></dd></div>}
           <div><dt>Latency p50</dt><dd>{ms(t.latency_p50_ms)}</dd></div>
           <div><dt>Latency p95</dt><dd>{ms(t.latency_p95_ms)}</dd></div>
         </dl>
@@ -109,7 +128,7 @@ export function UsagePage() {
           <div className="table-wrap">
             <table className="table usage-table">
               <thead>
-                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th><th>Avg</th><th>p50</th><th>p95</th></tr>
+                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{length && <th>{lengthLabel}</th>}{images && <th>Images</th>}{traffic && <th>Bytes in / out</th>}{busy && <th>Busy</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
               </thead>
               <tbody>
                 {data.rows.map((r: UsageRow) => (
@@ -122,6 +141,12 @@ export function UsagePage() {
                     <td data-label="Errors" className="num"><span>{num(r.errors)}{r.limited > 0 && <span className="muted small"> · {num(r.limited)} limited</span>}</span></td>
                     <td data-label="Tokens in" className="num"><span>{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span></td>
                     <td data-label="Tokens out" className="num">{num(r.completion_tokens)}</td>
+                    {media && <td data-label="Media" className="num" title="Images, audio clips and videos sent in chat">{num(r.media_items ?? 0)}</td>}
+                    {speech && <td data-label="Characters" className="num" title="Characters turned into speech">{num(r.characters ?? 0)}</td>}
+                    {length && <td data-label={lengthLabel} className="num" title="Length of the speech or video made (speech: where its format says it)">{audioLength(r.media_ms)}</td>}
+                    {images && <td data-label="Images" className="num" title="Images made, and their megapixels">{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</td>}
+                    {traffic && <td data-label="Bytes" className="num" title="Request and answer bodies of workloads at /x/">{r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—"}</td>}
+                    {busy && <td data-label="Busy" className="num" title="Time replicas worked on these requests (images and videos: times the GPUs each holds)">{busyTime(r.busy_ms)}</td>}
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
                     <td data-label="p95" className="num">{ms(r.latency_p95_ms)}</td>
@@ -303,4 +328,28 @@ function PersonBudget({ p, admin, onSaved }: { p: BudgetPerson; admin: boolean; 
       )}
     </div>
   );
+}
+
+// Kilopixels as megapixels: "12.6 MP".
+export function megapixels(kp: number | null | undefined): string {
+  if (!kp) return "0 MP";
+  return `${(kp / 1000).toLocaleString("en-US", { maximumFractionDigits: kp < 10000 ? 2 : 1 })} MP`;
+}
+
+// Busy milliseconds (GPU time on a GPU) as "2 h 05 min", "3 min 05 s" or "12.3 s".
+export function busyTime(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  const s = ms / 1000;
+  if (s < 3600) return audioLength(ms);
+  const h = Math.floor(s / 3600);
+  return `${h} h ${String(Math.round((s - h * 3600) / 60)).padStart(2, "0")} min`;
+}
+
+// Milliseconds of audio as "1 min 05 s" or "12.3 s".
+export function audioLength(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)} s`;
+  const m = Math.floor(s / 60);
+  return `${m} min ${String(Math.round(s - m * 60)).padStart(2, "0")} s`;
 }

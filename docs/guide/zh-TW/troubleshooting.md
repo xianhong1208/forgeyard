@@ -66,6 +66,40 @@ sudo forgeyard agent config
 - 自己在機器上拉取一次映像檔：`docker pull vllm/vllm-openai:v0.32.0`；之後 agent 就會在本機找到它；
 - 或修好輔助程式（`docker-credential-<name> list` 必須能以 agent 執行時的使用者身分正常執行）。
 
+## 拉不到 Forgeyard 的映像檔
+
+**你會看到：**agent（或伺服器）的 `docker run` 停在下列其中一種訊息：
+
+- `manifest unknown` 或 `not found`：沒有這個 tag 的映像檔；
+- `no matching manifest for linux/arm/v7`（或其他平台）；
+- `toomanyrequests: You have reached your pull rate limit`；
+- `dial tcp: lookup registry-1.docker.io … no such host`，或逾時。
+
+**原因與處理方式：**
+
+- **沒有這個 tag。**agent 的 tag 就是伺服器的版本。在兩個版本之間從原始碼建置的伺服器，會用到一個從未發布過的版本號。請改在機器上自己建置映像檔（[離線機器，或自己建置映像檔](how-to.md#offline-machines-or-build-it-yourself)），或把 `AGENT_IMAGE` 指向一個已發布的版本。
+- **平台不同。**映像檔只有 linux/amd64 和 linux/arm64；`uname -m` 必須是 `x86_64` 或 `aarch64`。
+- **次數限制。**Docker Hub 會限制每個位址的匿名拉取次數。在那台機器上登入一次（`sudo docker login`）、等一段時間，或透過鏡像站拉取並把 `AGENT_IMAGE` 指向它。
+- **連不到 Docker Hub**（沒有網路、防火牆或 DNS 過濾）：用檔案帶過去：在連得到的機器上拉取並 `docker save`，再到這台機器上 `docker load`（[做法](how-to.md#offline-machines-or-build-it-yourself)）。agent 的 `docker run` 就會在本機找到它。在這種機器上，模型的引擎映像檔也要這樣處理：[離線機器](how-to.md#offline-machines)。
+
+## replica 失敗：映像檔不在這台機器上
+
+**你會看到：** 部署的 replica 失敗，訊息是 `the image is not on this machine and could not be pulled; on an offline machine, docker load the image (Forgeyard checks it by its recorded ids)`，後面接著 Docker 的錯誤（`lookup ghcr.io … no such host`、逾時、`pull access denied`）。
+
+**原因：** 這台機器上沒有引擎映像檔，用釘住的 digest 和用 tag 都找不到，而且機器連不到 registry。
+
+**做法：** 把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
+
+如果訊息是 `… is loaded but Forgeyard has no recorded ids for this image`，表示映像檔來自自訂 recipe：Forgeyard 無法檢查它載入的副本，請在那個 recipe 裡只用 tag 指定它（不加 `@sha256:…`）。
+
+## replica 失敗：那個 tag 底下載入的是別的映像檔
+
+**你會看到：** `a different image is loaded under ghcr.io/…:<tag> (its ids do not match the recorded ones), so it is not run, and the pinned image could not be pulled`。
+
+**原因：** recipe 的 tag 底下載入了一個映像檔，但不是 recipe 釘住的那個：另一次建置（重用 tag 的舊版引擎、registry 上被移動的 tag）、把別的平台的各層當成這個平台，或在本機修改後重新加上 tag 的映像檔。Forgeyard 絕不會用它取代釘住的映像檔，而是向 registry 要釘住的那個，但這台機器連不到 registry。
+
+**做法：** 載入 recipe 指定的映像檔，照[離線機器](how-to.md#offline-machines)用 digest 拉取；`docker load` 會取代那個 tag。`docker image inspect <tag>` 可以看目前載入的是什麼。
+
 ## Hugging Face 下載很慢
 
 **你會看到：** 部署長時間停在 *downloading*；它的頁面會顯示進度和速度。
@@ -108,6 +142,14 @@ sudo forgeyard agent config
 | `offline` | 這台機器的 agent 沒有連線 |
 
 **做法：** 釋出卡上的記憶體（停掉某些東西）、允許更多卡（[GPU 存取權](how-to.md#restrict-gpus-on-a-shared-machine)）、降低上下文長度或並行數、選擇量化過或較小的模型，或者先部署，讓它等到有空間為止（API 的 `"wait": true`）。
+
+## 副本一直停在 pending
+
+**你會看到：**部署或 workload 已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**，沒有任何原因：沒有下載、也沒有啟動。
+
+**原因：**那台機器的 agent 沒有處理它的工作清單。1.2.0 以前的 agent 會跨連線記住最後收到的工作清單編號，而之後重新啟動過的伺服器又從 1 開始編號：agent 把這些清單全當成舊的，默默丟掉。1.3.0 起的伺服器編號方式不會再這樣，連舊版 agent 也一樣；1.3.0 起的 agent 每次連線都重新計數，丟掉清單時也會留下紀錄。
+
+**怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
 
 ## 來自 /v1 的錯誤：401、403、429、503
 
@@ -161,6 +203,15 @@ sudo forgeyard agent config
 - 其他 4xx 會保留供應商的狀態碼、代碼和訊息，並在訊息前加上供應商的名稱。
 
 更多內容請見[雲端供應商](cloud-providers.md#troubleshooting)。
+
+## 來自 /x/ 的錯誤
+
+- **403 `workloads_not_allowed`：** 金鑰的 **Workloads at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
+- **404 `workload_not_found`：** 名稱打錯、工作負載沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他工作負載。
+- **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或工作負載是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動工作負載。
+- **副本因「listens beyond loopback」被停止：** 在金鑰守門員後面，行程必須監聽 `127.0.0.1`。在它的參數裡用 `${BIND_ADDRESS}`，不要用 `0.0.0.0`。
+- **頁面、它的連結或轉址不對：** 前綴會被拿掉，所以服務看到的是 `/`。把它的 root path 設成 `/x/<name>`（FastAPI 的 `root_path`、`--root-path`、`GRADIO_ROOT_PATH`），或讀 `X-Forwarded-Prefix`。瀏覽器介面在 `/x/` 無法使用：回應會被放進沙箱。
+- **WebSocket 或 gRPC 用戶端失敗：** 1.3 兩者都不轉送。請用一般的 HTTP，串流請用 SSE。
 
 ## 程式不信任憑證
 
@@ -225,6 +276,95 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **做法：** 到 **API keys**，打開金鑰的 **Limits**，把 *Cloud providers* 設為 **Only to spill**（或 **Allowed**，連只有雲端的模型也能用），再按 **Save limits**。一般人最多只能選到管理員在 **Cloud for keys** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
 
+## 圖片被拒絕
+
+**你看到：** 帶圖片（或音訊、影片）的對話請求回應 400 或 413；`code` 說明原因。請求的任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `media_not_supported` | 模型不接受這種媒體：純文字模型、加入時沒有 projector 檔的 GGUF 模型，或部署的 *Videos per request* 為 0 時送影片 | 改用視覺模型；重新加入 GGUF 模型並附上 projector；在 **Advanced** 開啟影片 |
+| `too_many_media_items` | 圖片多於部署的 *Images per request*（4） | 少送一些，或調高它 |
+| `media_url_refused` | 網址是 `file://` 或其他 scheme、帶有帳密，或主機是（或轉址到）私有、loopback、link-local 或 metadata 位址 | 改送公開的 `https://` 網址或 `data:` URI。區網內的圖片伺服器，請在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true` |
+| `media_fetch_failed` | 閘道下載不到：對方回應的狀態碼不是 200、超過 20 秒、轉址超過 3 次，或傳回的不是圖片 | 自己打開網址看看；有些網站拒絕程式下載。改以 `data:` URI 送出檔案 |
+| `media_too_large`（413） | 檔案大於 `MEDIA_FETCH_MAX_MB`（20） | 送小一點的圖片，或調高設定 |
+| `request_too_large`（413） | 圖片以 base64 內嵌後（比檔案大三分之一），請求超過部署的 *Largest request*（64 MiB） | 送小一點的圖片，或在 **Advanced** 調高 |
+| `file_input_not_supported` | `file` 區塊（PDF）：內建引擎都不接受檔案，閘道也不會轉換 | 改送頁面圖片或文字 |
+| `media_local_only` | 模型只由雲端供應商提供；媒體只留在你自己的部署上 | 改用本機的視覺模型 |
+
+vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一段長影片預留記憶體，剩給 KV cache 的就不夠了。調低上下文長度，或再把影片關掉。
+
+## 語音被拒絕，或聽起來不對
+
+**你看到：** `/v1/audio/speech` 回應 400；`code` 說明原因。任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `voice_cloning_not_supported` | 請求帶了參考錄音（`ref_audio`、`speaker_ref_b64` 等）、以音訊或連結當聲音，或 `task_type: "Base"`；或程式試圖上傳聲音 | 使用模型自己的聲音：`GET /v1/audio/voices?model=…` |
+| `input_too_long` | 字元數超過部署的 *Longest input*（vLLM-Omni 與 llama.cpp 預設為上下文的四分之一，即 1,024；speaches 為 4,096） | 把文字按句子或段落拆開，或在 **Advanced** 調高它（上下文也一起調高） |
+| `unsupported_response_format` | 引擎不產生這種格式（llama.cpp 的 mp3 或 opus、speaches 的 opus 或 aac） | 改用它能產生的格式；訊息會列出來 |
+| `stream_format_not_supported` | 對 llama.cpp 或 speaches 用了 `stream_format: sse` | 改用 `audio`，或拿掉它 |
+| `language_not_supported` | 把中文、日文或韓文送給 speaches：它已發布的版本會刪掉這些字 | 改用 Qwen3-TTS 部署 |
+
+**音訊最後被截掉：** llama.cpp 生成到 `n_predict` 個音訊幀就停；請求沒給時，閘道設為每個字元十個（至少 512，最多到上下文長度）。說得比較慢的模型可能需要更多：自己送 `n_predict`，並保持在部署的上下文長度內。
+
+**中文被念成英文，或念得不好：** 在 llama.cpp 上，Qwen3-TTS 沒收到 `lang` 時會說英文。閘道會依中文、日文或韓文字元自動設定；如果文字大多是拉丁字母，請自己送 `"lang": "zh"`。
+
+**聲音不是指定的那一個：** OpenAI 的聲音名稱（`alloy`、`nova` 等）不是模型的聲音；閘道改用模型的預設聲音，並在 `X-Forgeyard-Voice` 標出。請改用模型列出的聲音。
+
+**串流卻到最後才一次送出：** 有些模型要把整句做完才會吐出音訊（llama.cpp 上的 Chatterbox 就是）。Qwen3-TTS 會串流。
+
+## 圖片請求被拒絕，或很慢
+
+**你看到：** `/v1/images/generations` 回應 400；`code` 說明原因。任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `response_format_not_supported` | `response_format: url`。Forgeyard 不保留圖片，所以沒有網址可給 | 拿掉它（或用 `b64_json`），並解碼 `data[].b64_json` |
+| `too_many_images` | `n` 超過部署的 *Images per request* | 少要幾張，或調高它（在 vLLM-Omni 上記憶體會跟著變大） |
+| `image_too_large` | 某一邊超過 *Largest side*（預設是模型自己的尺寸） | 要小一點的尺寸，或在 **Advanced** 調高 *Largest side* |
+| `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Stable Diffusion 的 UNet 為 64） | 使用訊息建議的尺寸 |
+| `too_many_steps` | `num_inference_steps` 超過 *Most steps* | 少一點步數 |
+| `invalid_request` | 沒有提示，或提示裡有 `<sd_cpp_extra_args>` | 送出提示；改用 `num_inference_steps`、`seed`、`negative_prompt` |
+
+**429 `queue_full`：** 部署忙碌中，佇列也滿了。等待 `Retry-After` 秒、加一個副本，或調高 *Queue length*。**503 `queue_timeout`：** 請求等待的時間超過了 *Timeout*。
+
+**504 `upstream_timeout`：** 產生圖片花的時間超過部署的 *Timeout*（vLLM-Omni 為 600 秒，stable-diffusion.cpp 為 1,800 秒）。在 CPU 上，請要小一點的尺寸、少一點步數或少幾張圖片，或調高 *Timeout*。
+
+**關於記憶體的 `engine_error`：** vLLM-Omni 部署會一直占著它最大的請求所需要的記憶體。如果共用的卡記憶體不夠，調低 *Images per request* 或 *Largest side*，或在 **Advanced** 開啟 *Offload to host memory*（較慢）或 *VAE tiling*。
+
+**圖片看起來不像模型的範例：** stable-diffusion.cpp 的取樣設定來自目錄項目的引擎參數（Z-Image-Turbo：`--cfg-scale 1 --steps 8`）。從搜尋加入的模型沒有這些設定：請加到它的項目裡。
+
+**`sd-cpp` 副本在 CPU 機器上無法啟動：** 它的行程引擎需要 glibc 2.39 以上（Ubuntu 24.04、Debian 13），以及能解開 `.zip` 引擎的 1.3 版 agent。舊版 agent 會在配置結果裡顯示 "cannot unpack .zip engines"：請更新它。
+
+## 影片失敗或被拒絕
+
+**你看到：** `POST /v1/videos` 回應 400；`code` 說明原因。任何內容都沒有送到引擎。
+
+| `code` | 原因 | 怎麼做 |
+|---|---|---|
+| `video_too_long` | `seconds` 超過部署的 *Longest video* | 要短一點的秒數，或調高它（記憶體會跟著變大） |
+| `video_too_large` | 某一邊超過 *Largest side*，或每格像素比預設尺寸放大到該邊時還多 | 要模型自己的尺寸（Wan2.1 為 832x480），或調高 *Largest side* |
+| `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Wan2.2-5B 為 32） | 使用訊息建議的尺寸 |
+| `input_reference_not_supported` | 帶了圖片或影片參考：1.3 只支援文字轉影片 | 改在提示裡描述 |
+| `too_many_steps`、`prompt_too_long` | 超過 *Most steps* 或 *Longest prompt* | 少一點步數，或縮短提示 |
+
+**429 `too_many_jobs`：** 你的金鑰（或在 Playground 裡的你）在那個部署上已經有 *Jobs per key* 段影片在等待或製作中。**429 `queue_full`：** 部署已經有 *Jobs at once* 個工作。等待 `Retry-After` 秒，或刪掉不再需要的工作。
+
+**一直是 `queued`：** 一個副本一次做一段影片；其他的在它上面排隊。每段要幾分鐘。加一個副本，或要短一點、小一點的影片。
+
+**回報 `failed`：** `error.code` 說明原因。
+
+| `error.code` | 原因 | 怎麼做 |
+|---|---|---|
+| `replica_restarted`、`video_lost` | 副本的引擎重新啟動，它的工作（放在記憶體裡）也跟著不見了 | 重新要求；看部署的事件了解它為什麼重新啟動 |
+| `replica_gone` | 副本被停止、搬移或刪除 | 部署跑起來之後重新要求 |
+| `timed_out` | 在部署的 *Longest job* 內沒有做完 | 要短一點或小一點的影片，或調高 *Longest job* |
+| `generation_failed` | 引擎做影片失敗；它的訊息在 `error.message` | 看訊息；記憶體不足的錯誤：見下方 |
+
+**410 `video_expired`：** 影片超過 *Keep results* 已被刪除。**410 `video_lost`：** 影片做好之後，它的副本重新啟動或被停止了。兩種情況都請重新要求。
+
+**共用的卡 GPU 記憶體不足：** 調低 *Longest video* 或 *Largest side*，或在 **Advanced** 開啟 *Offload to host memory*（光是文字編碼器就有 11 GB；影片會變慢）。
+
 ## 費用顯示有請求沒有價格
 
 **你會看到：** **Usage** → **Cost** 把一些請求算在 *Without a price* 底下，並說明上面的費用沒有包含它們。
@@ -247,6 +387,18 @@ limits = "rlimit"
 ```
 
 或使用 `--limits rlimit`，或 `FORGEYARD_LIMITS=rlimit`（agent 的 Docker 映像檔已經設定好了）。這樣行程類工作負載會以每個行程為單位套用資源限制，CPU 用量只會被計算，不會被設上限。
+
+## 伺服器拒絕某個設定，或對它發出警告
+
+**伺服器無法啟動**，紀錄裡寫著 `Setting COOKIE_SECURE: …`（或其他名稱）：這個值無法使用。訊息會列出這個設定可以填哪些值。`TLS`、`REGISTRATION`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也是一樣，`TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個時也是（`HTTPS: Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither`）。
+
+**伺服器有啟動，但出現像 `Settings: GATEWAY_CLOUD_DEFUALT is not a setting` 這樣的紀錄**：伺服器會忽略那個名稱。每一行都會說明原因和該怎麼做：
+
+- *is not a setting… Did you mean …?*：打錯字，或是其他版本的設定。請在 `.env` 或環境變數裡改正名稱。
+- *is ignored*：另一個設定讓它沒有作用，例如沒有自己的憑證卻設了 `TLS_CA_FILE`，或管理員已經儲存過 **Model sources** 之後的 `MODEL_URL_HOSTS`（以儲存的值為準：請在網頁介面修改）。
+- *ADMIN_PASSWORD is still set*：它只在第一次啟動時讀取。請把它從 `.env` 移除。
+
+管理員也會在 **Get started → Setup health** 看到同樣的內容，並附上修正位置的連結（[檢查設定健康狀態](how-to.md#check-the-setup-health)）。
 
 ## 回報問題時要附上的資訊
 

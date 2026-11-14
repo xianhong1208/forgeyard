@@ -12,8 +12,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from forgeyard import __version__
+from forgeyard import __version__, settings_check
 from forgeyard.api import (
+    advisor as advisor_api,
     audit_log,
     auth,
     budgets,
@@ -25,6 +26,7 @@ from forgeyard.api import (
     machines,
     models,
     onboarding,
+    passthrough,
     prices,
     providers,
     routing,
@@ -35,7 +37,7 @@ from forgeyard.api import (
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import get_engine, new_session
-from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy
+from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy, videojobs
 from forgeyard.gateway.usage import recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
@@ -74,6 +76,9 @@ async def lifespan(_app: FastAPI):
                     "TLS (docs/https-and-trust.md); admins see a warning while requests arrive over plain HTTP.")
     db = new_session()
     try:
+        # Misspelled, ignored or risky settings: logged here, and shown to admins by the setup advisor.
+        for problem in settings_check.problems(settings, db=db):
+            log.warning("Settings: %s. %s", problem.title, problem.detail)
         liveness.mark_all_offline(db)  # no agent is connected to a server that just started
     finally:
         db.close()
@@ -81,11 +86,12 @@ async def lifespan(_app: FastAPI):
     usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
     alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(get_settings().usage_flush_seconds))
+    videos = asyncio.create_task(videojobs.run_forever())  # follows /v1/videos jobs, expires their results (1.3)
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        for task in (sweeper, usage_writer, renewer, alerts):
+        for task in (sweeper, usage_writer, renewer, alerts, videos):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
@@ -131,9 +137,11 @@ def create_app() -> FastAPI:
     app.include_router(prices.router)
     app.include_router(routing.router)
     app.include_router(onboarding.router)
+    app.include_router(advisor_api.router)
     app.include_router(tls_api.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
+    app.include_router(passthrough.router)
     app.include_router(agent_api.router)
     app.include_router(install.router)
     app.include_router(guide.router)

@@ -10,7 +10,7 @@ server 不需要能連到機器。
 1. admin 在 **Machines → Add a machine** 取得**一次性加入 token**（只能用一次、15 分鐘內有效、只顯示一次、
    伺服器只存雜湊），有三種用法：單行安裝（server 提供的 `install.sh`：裝上與 server 同版本的 agent、寫好
    `/etc/forgeyard/agent.toml`、建立 `KillMode=process` 的 systemd 服務）、agent 的 Docker 映像檔
-   （`Dockerfile.agent`），或在 Forgeyard 目錄裡搭配設定檔執行。見[使用指南](guide/zh-TW/quick-start.md#3-add-a-machine)。
+   （`Dockerfile.agent`，每個版本都會發布，見[容器映像檔](#容器映像檔)），或在 Forgeyard 目錄裡搭配設定檔執行。見[使用指南](guide/zh-TW/quick-start.md#3-add-a-machine)。
 2. 不論哪種方式，agent 加入的流程都一樣，例如在 Forgeyard 目錄裡：
 
    ```bash
@@ -137,7 +137,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
     large-v3 turbo），以及 BGE-M3 與它的 reranker。每一項標示 task、建議的配方、大約下載量與一份需要多少記憶體。Gemma 3 與 Llama 是
-    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
+    **gated**：需要一個已在 Hugging Face 接受授權條款的帳號的 token（Gemma 4 不需要）。**Vision** 群組（1.3）有給 vLLM 的 Qwen3-VL 2B / 4B / 8B，以及給 llama.cpp、附 projector 檔的 Qwen3-VL 2B / 8B GGUF。**Text to speech** 群組（1.3）有給 vLLM-Omni 的 Qwen3-TTS 0.6B / 1.7B CustomVoice、給 llama.cpp 的 Qwen3-TTS 1.7B GGUF 與 Chatterbox Turbo，以及給 speaches 的 Kokoro-82M；語音項目都固定到某個 commit、列出會說的語言，而本身沒寫授權的轉檔版本會標出它的來源（`license_from`），由 `scripts/check_recommended.py` 讀取來源的授權。**Video** 群組（1.3）有給 vLLM-Omni 的 Wan2.1-T2V-1.3B（固定在 A100 驗收所用的 commit）與 Wan2.2-TI2V-5B，都固定到某個 commit。**Images** 群組（1.3）有給 vLLM-Omni 的 Z-Image-Turbo、Stable Diffusion XL 與 FLUX.1-schnell，給 stable-diffusion.cpp、附文字編碼器與 VAE 的 GGUF 版 Z-Image-Turbo 與 FLUX.1-schnell，以及給 CPU 的 Stable Diffusion 1.5 GGUF；圖片項目都固定到某個 commit，GGUF 項目會寫出它的 `components`。FLUX.1-dev、SD-Turbo、SDXL-Turbo 與 SD3.5 因授權而不收。每一項都寫明**授權**，清單只收允許商業使用的授權（forgeyard/models/recommended.py 的 `ALLOWED_LICENSES`）：寬鬆授權（Apache-2.0、MIT、BSD）、OpenRAIL 類，以及條款允許商業使用的模型授權。Gemma 的條款（允許商業使用、有會延伸到使用者的禁止用途政策，Google 也保留限制違規使用的權利）與 Meta 的 Llama 3.1 / 3.2 社群授權（月活躍使用者 7 億以下可商用，須標示）留在清單上，標為 gated 並顯示授權；禁止商業使用的授權（CC-BY-NC、僅限研究）不能加入。BGE-M3 用的是 `refs/pr/130`，即 Hugging Face 官方轉出的
     safetensors 版本（main 分支只有 PyTorch 權重）。`python scripts/check_recommended.py` 會用 Forgeyard 自己的檢視與估算逐項對 Hugging Face 檢查。
   - **Search Hugging Face（搜尋）**：由 server 呼叫 `<HF_ENDPOINT>/api/models`（瀏覽器不會直接連 Hugging Face），可依 task 與格式
     （safetensors、GGUF、CTranslate2）篩選，依下載數排序（搜尋 rerank 時也會查 text classification，因為很多 reranker 被歸在那一類，並把名稱含 "rerank" 的排在前面），顯示下載數、按讚數、最後更新、是否 gated，以及 Hugging Face 有提供時的大小。
@@ -150,25 +150,41 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   `local://<dir>`。模型**不下載就先檢視**：固定到哪個 commit、檔案與大小、`config.json`、safetensors header（參數量）或 GGUF
   header（用 HTTP range 讀）。gated repo 的 token 只用在這次檢視，不保存。admin 可以替模型加上各配方的引擎參數
   （Qwen3-Reranker 需要 vLLM 的 `--hf-overrides`）。
+  檢視（1.3）也會讀出**授權**（card 的 `license`，"other" 時用 `license_name`，否則看 `license:` tag）、是否 **gated**，以及**文字以外能接受什麼**：有 `vision_config` 或圖片 token 是圖片，有 `audio_config` 是音訊，有影片 token 或 `video_preprocessor_config.json` 是影片（Omni 模型看 `thinker_config`）。GGUF repo 的 **projector 檔**（`mmproj-*.gguf`）不算模型選項：加入模型時一併選一個（預設 F16，其次 BF16、Q8_0、第一個；或不選），讀它的 `clip.has_vision_encoder` / `clip.has_audio_encoder`（在 llama.cpp 裡視覺代表圖片與影片），並和模型一起下載。1.3 之前加入的目錄項目沒有這些資訊：safetensors 視為未知（媒體照樣轉送，由引擎回應），GGUF 視為只有文字。
+  **語音模型（1.3）：** Hugging Face 的 `text-to-speech` 對應 `tts` task。Qwen3-TTS 的層數來自它的 `talker_config`（寫出音訊編碼的語言模型；Omni 對話模型仍讀原本的設定），內建聲音來自 `talker_config.spk_id`；由 `model.onnx` 組成的 repo 是 `onnx` 格式（speaches 的 Kokoro 與 Piper；整個 repo 都下載，包括 README，因為 speaches 靠 card 決定怎麼執行），Piper 聲音的取樣率讀自它的 `config.json`。TTS 模型的 projector 是它的音訊解碼器，所以存成不接受任何媒體。
+  **圖片模型（1.3）：** Hugging Face 的 `text-to-image` 對應 `image` task。有 `model_index.json` 的 repo 是新的 `diffusers` 格式：它的元件（值為 `[library, class]` 的項目）從 safetensors 檔頭讀出（參數量、bytes、dtype），下載 model_index.json 與各元件的目錄，每個元件只取一組權重（旁邊有 fp16 variant 時取一般檔案；頂層的檔案一律不下載，那裡的單檔 checkpoint 會讓下載量加倍），UNet 的 `sample_size` 決定原生尺寸（否則 1024）。以 `image` task 讀取的 GGUF 或 safetensors repo 是給 stable-diffusion.cpp 的模型：所選的檔案，加上旁邊依名稱找到或由呼叫者指定的檔案（`components`：`vae`、`llm`、`t5xxl`、`clip_l`、`clip_g`）；其中有文字編碼器時模型是分開的（`--diffusion-model`），否則是單一 checkpoint（`-m`）；原生尺寸由名稱判斷（Stable Diffusion 1.x 為 512），否則為 1024。
+
+  **影片模型（1.3）：** Hugging Face 的 `text-to-video` 對應 `video` task。`model_index.json` 寫的是文字轉影片 pipeline（`WanPipeline`，或不是圖片轉影片的 `…VideoPipeline`）的 diffusers repo 是影片模型：元件和圖片一樣讀取，原生尺寸、每秒影格數與尺寸倍數則來自它的 VAE 與 transformer 設定：VAE 把 8 × 8 個像素（Wan2.2 的是 16 × 16，`scale_factor_spatial`）、transformer 再把 2 × 2 個這樣的格子打包成一個 token，所以 Wan2.1 以 16 fps 做 832x480、尺寸為 16 的倍數，Wan2.2-TI2V-5B（`expand_timesteps`）以 24 fps 做 1280x704、尺寸為 32 的倍數。
 - **配方**是 YAML（[forgeyard/recipes](../forgeyard/recipes)）：task、格式、每個 task 的協定、參數、估算方法、health check，以及依硬體
   （廠商、NVIDIA compute capability 或 AMD gfx target、driver 版本）分的 **variant**；每個 variant 是固定版本的容器映像，或給沒有
   Docker 的 CPU 機器、由 agent 下載並以 SHA-256 檢查的固定版本執行檔。內建的映像以 **digest 釘選**，寫成
   `repo:tag@sha256:…`：agent 拉取並執行的是 digest，registry 上的 tag 被改掉也改變不了實際執行的東西；介面顯示 tag。
   要升級引擎：改 tag，執行 `uv run --no-sync python scripts/pin_images.py --write`（從 Docker Hub 或 GHCR 取得多架構 digest，
   並檢查每個 variant 宣稱的平台都在），再檢查 diff；不加 `--write` 則檢查每個 digest 是否仍對應它的 tag。內建映像少了 digest
-  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。內建：
+  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，估算的 `vision_overhead` / `video_overhead`、文字轉語音用的 `tts` 區塊（引擎能產生的格式與預設格式、串流方式、列出聲音的路徑、預設聲音、gateway 替它補上的請求欄位、能否說中日韓文），以及兩階段引擎用的估算 `codec_overhead` 與 `{gpu_util_main}` / `{gpu_util_codec}` 佔位符。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
 
   | 配方 | 服務 | 執行在 | 固定版本 |
   |---|---|---|---|
   | `vllm` | chat（safetensors） | NVIDIA、AMD | `vllm/vllm-openai:v0.32.0`（CUDA 13.0，driver ≥ 580）、`-cu129`（≥ 575）、`vllm/vllm-openai-rocm:v0.32.0` |
   | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
-  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-*-b11977`，行程用 release `b11977` |
+  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD（Instinct 與 ROCm 映像有編譯的獨立顯卡用 ROCm；APU 與其他 AMD GPU 用 Vulkan，只給 render node）、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` 與 `server-b12242`，行程用 release `b12242` |
   | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
+  | `speaches-tts`（1.3） | 文字轉語音（ONNX：Kokoro、Piper），英文 | 只用 CPU（容器）：即使在 CUDA 映像檔裡，ONNX Runtime 也是用 CPU 跑 Kokoro | speaches 的 CPU 映像 |
+  | `vllm-omni-tts`（1.3） | 文字轉語音（safetensors：Qwen3-TTS） | NVIDIA，單張 GPU，預設共用 | `vllm/vllm-omni:v0.32.0`（CUDA 13.0，driver ≥ 580），`vllm serve <model> --omni` |
+  | `vllm-omni-image`（1.3） | 圖片（diffusers pipeline） | NVIDIA，單張 GPU，預設共用 | 同樣的 `vllm/vllm-omni:v0.32.0` |
+  | `vllm-omni-video`（1.3） | 影片（diffusers 文字轉影片 pipeline：Wan） | NVIDIA，單張 GPU，預設共用 | 同樣的 `vllm/vllm-omni:v0.32.0` |
+  | `sd-cpp`（1.3） | 圖片（GGUF、單一檔案） | NVIDIA（CUDA）、AMD（Vulkan，只給 render node）、CPU（行程） | 以 digest 固定的 `ghcr.io/leejet/stable-diffusion.cpp:master-{cuda,vulkan}`（tag 會持續移動；第一個 CUDA 版本在 A100 上會當掉，已換掉，#43），行程用 release `master-1043-3be2378`（.zip，glibc 2.39） |
 
+  `llama-cpp` 在每個 variant 上也提供 `tts`（附 projector 的 TTS GGUF）。
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
   （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
   GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
+  能讀圖片的模型（1.3）會加上配方的**視覺項**：vLLM 加 `vision_overhead`（1.5 GiB：vLLM 啟動時會用最大的圖片跑一次視覺編碼器並保留 encoder cache，之後才決定 KV cache 大小；視覺權重已含在模型權重裡），開啟影片時再加 `video_overhead`（1 GiB）；llama.cpp 加 projector 檔本身（整個載入，預設放到 GPU）與它的 buffer 用的 `vision_overhead`（在 CPU 上量測）。開啟圖片時，估算會註明圖片也會占用上下文 token。
+  **兩階段語音引擎（1.3）：** vLLM-Omni 把 Qwen3-TTS 跑成 talker（語言模型，依它的 `talker_config` 像一般 safetensors 模型估算）與音訊解碼器（code2wav）兩段，放在同一張卡上，兩段各是一個 vLLM 引擎，各自檢查自己那份卡總量的 `gpu_memory_utilization`。估算加上配方的 `codec_overhead`（4.5 GiB：解碼器那段，vLLM-Omni 在 A100 40GB 上量到 3.8 GiB，再含它的 CUDA context），產生參數時再把保留量拆開：解碼器拿自己那份當它的比例，其餘給 talker（`--stage-overrides`）。speaches 的 TTS 模型和 Whisper 一樣是模型檔加 overhead。
+  **圖片（1.3，method `diffusers`）：** 每個元件的權重（vLLM-Omni 以 16 bit 載入 pipeline，所以 float32 檔案算一半；stable-diffusion.cpp 照檔案原本的格式載入），加上部署允許的最大請求所需的量：引擎一次一起產生請求中所有圖片時（vLLM-Omni）為 `activation_per_mp` × *Largest side* 下的百萬像素 × *Images per request*，一張接一張產生時（stable-diffusion.cpp）則 × 1；再加一次 `vae_per_mp` × 百萬像素、overhead 與 CUDA context。開啟 *Offload to host memory* 時只算最大的元件。vLLM-Omni 的 diffusion pipeline 只有在 paged 模式才讀 `--gpu-memory-utilization`，所以沒有任何東西保留固定的比例：限制記憶體的是上限，由 gateway 強制執行，也在引擎重複設定（`--max-generated-image-size`）。stable-diffusion.cpp 依保留量拿到 `--max-vram`。在 CPU 上量測（stable-diffusion.cpp）：Stable Diffusion 1.5 與 Z-Image-Turbo 都隨圖片大小線性成長，權重之外每百萬像素約 6.3 GiB（它的 VAE 以 32 bit 解碼）。
+
+  **影片（1.3，method `diffusers`，task 為 `video` 的配方）：** 各元件以 16 bit 計的權重，加上部署允許的最長、最大的影片：`activation_per_ktoken`（96 MiB）× 千個 token 數，其中 token 數 = 潛在影格數 × (W / 16) × (H / 16)（Wan2.1；Wan2.2-5B 為 / 32），潛在影格數 = (影格數 − 1) / 4 + 1（16 fps、832x480 的 5 秒：81 格、21 個潛在影格、32,760 個 token），再加上 `vae_per_mp`（8 GiB）× 一格的百萬像素（Wan 的 VAE 一次解碼幾格）、overhead（1.5 GiB）與 CUDA context：預設值下 Wan2.1-1.3B 約 21.6 GiB，Wan2.2-TI2V-5B 約 32.8 GiB。activation 與 VAE 兩項是初步估計，要在 A100 上校正（`scripts/accept_video.py` 會讀取卡的記憶體）。
 - **排程**：先過濾（有對應硬體與 driver 的 variant、runtime、GPU allowlist、記憶體夠），再評分：**binpack**（剛好塞得下的那張卡優先，
   讓整張空著的卡留給大模型），同分時**已經快取該模型**的機器優先。記憶體是 agent 回報的卡上**空閒**量（卡可能被 Forgeyard 以外的工作佔用），
   減掉 Forgeyard 已保留但還沒反映在空閒量裡的部分，再減 `VRAM_HEADROOM_MIB`（512）；絕不用卡的總量。放不下時拒絕部署，
@@ -237,7 +253,28 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   可依日期、模型、key、人、來源（API key 或 playground）或本機與雲端分組；**Cost** 分頁再依日期、key、人、模型或供應商顯示費用
   （見〈費用〉）。在記憶體裡計數，每 `USAGE_FLUSH_SECONDS`（5 秒）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
   一列。client 中途離開（499）不算錯誤。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。
-- **Playground**：在 console 裡用串流 chat，也能試 embeddings、rerank 與語音轉文字；走同一套路由，以登入的使用者身分
+- **對話中的圖片、音訊與影片（1.3，** forgeyard/gateway/media.py**）。** vLLM 0.32 與 llama-server（b11977、b12242）會自己下載媒體區塊裡的任何 http(s) 網址，沒有私有位址過濾（vLLM 還會跟隨轉址），而且是從你的網路內部連出去。所以：
+  - gateway 走過 `messages[].content[]`，把每個媒體區塊**重建**成同一種形式（`image_url` 與 `video_url` 帶 `data:` URI，`input_audio` 帶 base64），只保留檢查過的欄位；接受 `input_image`、`input_video` 與 `audio_url` 並轉換。文字區塊不變；其他類型與 `*_embeds` 一律拒絕（`invalid_content_part`）；
+  - `http(s)` 網址**由 gateway 下載**，用 egress client（forgeyard/gateway/egress.py：`EGRESS_PROXY`、`EGRESS_CA_FILE`、`EGRESS_ALLOWED_HOSTS`）：名稱解析出的每個位址都要檢查，除非 `MEDIA_ALLOW_PRIVATE_HOSTS` 否則只接受公開位址，link-local 與 metadata 位址一律拒絕；連線直接連到檢查過的位址；轉址由 gateway 自己跟隨（最多 3 次），每次重新檢查；每個項目 `MEDIA_FETCH_MAX_MB`、20 秒；內容類型必須與區塊相符（以 `application/octet-stream` 回傳的圖片用 magic number 辨識）。資料取代網址。`file://` 與其他所有 scheme：`media_url_refused`；
+  - 引擎本身也加固：`vllm` 與 `vllm-pooling` 帶 `--allowed-media-domains forgeyard.invalid`（清單為空時 vLLM 什麼主機都抓；一個什麼都比對不到的清單就全部拒絕）與 `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`，且不設 `--allowed-local-media-path`；llama-server 沒有這種開關，只能經由 key guard、以 gateway 送來的資料存取；
+  - 路由會縮小（`fit_route`）到能處理請求內容的部署：模型的媒體（來自目錄項目）、配方的 `media.inputs`、部署的 `images`（圖片與音訊片段，4）與 `videos`（0：影片關閉）數量，`files` 只送給配方有宣告的（內建的都沒有：gateway 從不轉換檔案）。否則在下載或送出任何東西之前就回 `media_not_supported`、`too_many_media_items` 或 `file_input_not_supported`；
+  - 1.3 中**媒體絕不送往供應商**（雲端與你網路內的都不送）：這些目標會被排除；只由供應商提供的路由回 `media_local_only`；
+  - 溢出規則把每個媒體項目算成 1,600 token，而不是它的 base64 大小；
+  - 用量會計算媒體項目（`media_items`）；圖片的 token 依引擎回報包含在 `prompt_tokens` 裡（vLLM 帶 `--enable-prompt-tokens-details`）。
+- **每個部署的請求大小上限（1.3）。** 部署的 `max_body_mb`（vLLM 與 llama.cpp 為 64 MiB）就是它的上限；沒有這個參數的配方沿用 `GATEWAY_MAX_BODY_MB`。gateway 先讀到所有部署中最大的上限為止（最多每 5 秒從資料庫讀一次），知道模型之後再套用該路由自己的上限，媒體內嵌後再檢查一次（413 `request_too_large`）。
+- **用量單位（1.3，migration 0012）。** `usage_daily` 為新模型類型的每種單位各加一欄：`media_items`、`characters`、`images`、`kilopixels`、`media_ms`、`bytes_in`、`bytes_out`、`busy_ms`；預設 0，所以舊的資料列意義不變。多模態對話會填 `media_items`；文字轉語音填 `characters` 與 `media_ms`；圖片填 `images`、`kilopixels` 與 `busy_ms`；影片填 `media_ms` 與 `busy_ms`；/x/ 的工作負載填 `bytes_in`、`bytes_out` 與 `busy_ms`。
+- **文字轉語音（1.3，** forgeyard/gateway/speech.py**）。** `POST /v1/audio/speech` 接受 OpenAI 的請求格式。gateway 在送出任何東西之前先檢查（要有 `input`、OpenAI 的格式、`speed`、`stream_format`），並拒絕**聲音複製**：任何參考錄音欄位（`ref_audio`、`speaker_ref_b64` 等）、以資料或連結當作聲音、`task_type: "Base"`，以及上傳或刪除聲音，都回應 400 `voice_cloning_not_supported`（vLLM-Omni 的聲音登錄沒有分使用者，而 `ref_audio` 網址會讓引擎去抓任何東西）。路由會縮小到能處理這個請求的部署：在它的 *Longest input*（`max_input_chars`；0 代表文字和音訊編碼放在同一個上下文的引擎取上下文的四分之一，否則 4,096）之內、格式與串流格式在配方列表裡，而且 speaches 不收中日韓文（它已發布的版本會刪掉這些字）。接著每個部署拿到自己的請求內容：沒指定格式時用它的預設 `response_format`（gateway 才知道回來的是什麼）；沒有聲音、或用了模型沒有的 OpenAI 名稱時，改用配方的預設聲音（或引擎列出的第一個；聲音向副本詢問並保留 5 分鐘），並以 `X-Forgeyard-Voice` 標出；llama.cpp 另依文字的書寫系統補上 `lang`，並補上 `n_predict`（每字元十幀，至少 512，最多到上下文長度）。回應一塊一塊（原始音訊）或一個事件一個事件（vLLM-Omni 的 SSE）地轉給用戶端，並在途中量測長度：wav 與 pcm 看檔頭或標明的取樣率，flac、mp3、aac、opus 看各自的框架，SSE 看片段大小。用量計入有回應的請求的字元數與毫秒數，金鑰的 tpm 以一個字元算一個 token，送出前先預留。語音從不送往供應商（`openai-speech` 的路由不能加供應商目標）。`GET /v1/audio/voices?model=` 以一致的格式列出模型的聲音（不含 vLLM-Omni 上傳的聲音）與它能產生的格式。
+- **圖片（1.3，** forgeyard/gateway/imagegen.py**）。** `POST /v1/images/generations` 接受 OpenAI 的請求，只以 base64 回應：`response_format: url` 回應 400 `response_format_not_supported`（圖片不保留，所以沒有網址），`stream` 也一樣。每個部署都有上限，各有能用的預設值（*Images per request* 4、*Largest side* 為模型自己的、*Most steps* 50、*Longest prompt* 4,000）；路由會縮小到請求符合上限的部署，否則回應最能說明問題的 400（`too_many_images`、`image_too_large`、邊長不是 16 的倍數（UNet 為 64）時的 `invalid_size`、`too_many_steps`、`prompt_too_long`）。引擎只拿到 Forgeyard 認得的欄位：對 vLLM-Omni 以欄位傳送並設 `response_format: b64_json`（它的 `lora` 會載入伺服器上的路徑）；對 sd-server 則放在提示裡、由 gateway 產生的一個 `<sd_cpp_extra_args>` 區塊（跳脫過、單行），用戶端不能自己送。沒指定尺寸時用部署的預設值，而且一定會送出。**佇列：**一個副本接 `concurrency` 個圖片請求（1）；其餘依序在 gateway 裡等待（每個路由與層級各有號碼牌，只有第一個能拿空出的位子），最多 `queue` 個（8）；再多一個就回應 429 `queue_full`，Retry-After 依請求耗時的移動平均計算；等待超過部署 `timeout` 的請求回應 503 `queue_timeout`；用戶端離開的請求會離開佇列，絕不會送到引擎。引擎的回應整個讀完，去掉額外內容（sd-server 的 `generation_info`、vLLM-Omni 的各階段耗時），每張圖片的尺寸從檔頭讀出：用量計入 `images`、`kilopixels` 與 `busy_ms`（副本的時間 × 部署占用的 GPU 數）。引擎錯誤以 OpenAI 的格式傳回（`engine_error`）。不計 token、不送雲端、不過濾提示。`/v1/images/edits` 與 `/variations` 回應 404 `endpoint_not_supported`（vLLM-Omni 的編輯路徑會去抓給它的任何網址；留待之後的版本）。
+- **影片（1.3，** forgeyard/gateway/videogen.py、videojobs.py**）。** `POST /v1/videos` 接受 OpenAI 的 Videos 請求（JSON、OpenAI SDK 送的 multipart，或 URL 編碼表單），並立刻回應一個**工作**：影片要好幾分鐘，而每一種影片 API（OpenAI、Replicate、fal、Veo）都是非同步的。檢查與上限和圖片一樣（*Longest video* 5 秒、*Largest side* 為模型自己的，而且每格像素不超過預設尺寸放大到該邊時的像素、邊長為 16 的倍數（Wan2.2-5B 為 32）、*Most steps* 50、*Longest prompt* 2,000；`video_too_long`、`video_too_large`、`invalid_size`、`too_many_steps`、`prompt_too_long`）；`input_reference` 與 vLLM-Omni 的其他參考輸入一律拒絕（`input_reference_not_supported`：1.3 只支援文字轉影片，而且引擎會讀上傳的檔案、抓網址）。引擎拿到的 multipart 只有提示、它的模型名稱、尺寸、影格數（秒數 × 部署的每秒影格數，取到 Wan 會做的 4k + 1：16 fps 的 5 秒是 81 格）與每秒影格數，再加上步數、guidance、seed 與負面提示；絕不送 `lora`、`extra_params` 或影格插補的路徑。
+  - **工作固定在一個副本上。** vLLM-Omni 把工作放在記憶體裡（它的 `VIDEO_STORE`），檔案放在自己的磁碟上（`VLLM_OMNI_SERVER_STORAGE__PATH`，這裡設在容器內部，所以副本被停止、重新啟動或搬移時，檔案也跟著不見）。所以一個工作一輩子都屬於一個副本：gateway 把它送到工作最少的就緒副本（連不上，或回應 429、503 的副本就跳過），之後只向那個副本詢問狀態、取內容和刪除。引擎一次做一段影片，其餘的自己排隊。
+  - **工作資料表**（`video_jobs`，migration 0014，新的資料表）記錄誰要求的（金鑰，或 Playground 裡的使用者）、部署、副本的 uid 與當時的 generation 和 restarts、引擎的工作 id、狀態與進度、要求的尺寸、秒數、影格數與每秒影格數、時間戳記（建立、開始、完成、依部署 `timeout` 算出的期限，以及依 `keep_minutes` 算出的 `expires_at`）、錯誤，以及檔案是否已移除、用量是否已計入。用戶端看到的是 Forgeyard 自己的 id（`video_` + 128 個隨機位元）；別的金鑰的 id 和不存在的 id 一樣回應 404。不保存提示。
+  - **清掃器**（伺服器裡的一個工作，每 3 秒）向每個製作中工作的副本詢問狀態（用戶端 GET 製作中的工作時也會問，最多每 2 秒一次）：queued、in progress（開始時）、completed（長度來自引擎）、failed（引擎的錯誤）。副本不在了（被停止、重新配置：新的 generation；被刪除）或重新啟動過（restarts 變了），或對這個工作回應 404 時，工作會以 `replica_gone`、`replica_restarted` 或 `video_lost` 回報失敗；連不上的副本會一直重問到工作的期限，到時在副本上取消它並以 `timed_out` 回報失敗。因為工作在資料庫裡、副本也繼續工作，重新啟動的伺服器會接手。超過 `expires_at` 的結果會在它的副本上刪除並標為已移除（內容：410）；資料列在那之後一週刪除。引擎自己的 `FILE_TTL` 清理（部署的 `keep_minutes` 再加一小時）是後面的保險。
+  - **工作的上限。** 接受工作是在鎖裡完成的一步：一個部署等待或製作中的工作最多 `queue`（8）個，其中一把金鑰（或一個人）的最多 `jobs_per_key`（2）個；再多一個就回應 429 `queue_full` 或 `too_many_jobs`，Retry-After 依最近的影片花了多久計算。金鑰的 rpm 計入要求的工作，不計輪詢、列出或下載。
+  - **內容**從副本邊收邊串流（`aiter_raw`），以 `video/mp4` 傳回，並轉送 `Range`，讓瀏覽器可以拖動；還沒做好的工作回應 409 `video_not_ready`，失敗的回應 409 `video_failed`，過期的回應 410 `video_expired`，副本不在的回應 410 `video_lost`。`variant=thumbnail`/`spritesheet` 回應 400 `variant_not_supported`。DELETE 在副本上取消或刪除（盡力而為：不在的副本已經帶走了它），並移除資料列。
+  - **用量**：每個工作一個請求，在結束時記錄（誰先看到結束誰記錄，只記一次）：做好的影片計入 `media_ms`（長度）與 `busy_ms`（從看到它進入製作中到結束，× 部署占用的 GPU 數）；失敗的算一個錯誤，其他什麼都不算；製作中被刪除的算 499。被拒絕的請求在被拒絕時計入。不計 token、不送雲端。
+  - **不用 `/v1/videos/sync`。** vLLM-Omni 的同步路徑要把連線占住好幾分鐘，途中任何代理或用戶端的逾時都會讓它中斷；它和 OpenAI 的 remix 一樣回應 404 `endpoint_not_supported`。
+  - **不用 stable-diffusion.cpp 的影片。** 它原生的 `/sdcpp/v1/vid_gen` 也是非同步的，但它產生 WebM、動態 WebP 或 MJPG AVI（沒有 MP4），而且把整段影片以 base64 放在工作的 JSON 裡、留在引擎的記憶體中：不符合同樣的工作模型（每個工作一個 MP4 檔，以 Range 取回並串流）。AMD 與 CPU 上的影片留待之後。
+- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank、語音轉文字、文字轉語音（**Speak**：模型的聲音與格式，附播放器）與圖片（**Image**：提示、部署接受的尺寸、張數，每張圖片附下載連結）、影片（**Video**：提示、部署接受的尺寸與長度、追蹤工作直到做好，然後在頁面上播放並附下載連結，以及這個人之前的影片），以及給公開視覺工作負載用的 **Vision** 分頁（框、點一下或拖一個框得到的遮罩、深度圖；透過 console 自己的路由套用 `/x/` 的規則，1.3）；走同一套路由，以登入的使用者身分
   （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。它的雲端設定對 admin 是 `on`，對其他人是
   server 允許的上限；個人的預算適用，沒有 key 的預算。
 - **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；
@@ -257,9 +294,55 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
     就重新打開 guard。能在那台機器上執行程式的人（包括跑在那裡的 Forgeyard workload）連得到 loopback port；在那裡，引擎自己的 key
     仍然守著它的 `/v1` 路徑。
   - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
-    （把部署停止再啟動）。一般 workload（不是模型）沒有 guard。
+    （把部署停止再啟動）。一般 workload（不是模型）只有公開在 `/x/` 時才有 guard（見下）。
 
 真機檢查：`scripts/accept_m4.py`。
+
+### 在 /x/ 的 workload（1.3，通用直通）
+
+不是對話、嵌入、語音或圖片模型的東西（偵測、分割、深度估計、Triton 或 KServe 模型、FastAPI 或 BentoML 服務），以 service
+workload 執行，並**公開**在 gateway 後面的 **`https://<server>:7860/x/<name>/…`**，使用和 `/v1` 相同的 API key、限制與用量。研究與
+決策記錄在 issue #23；程式碼在 `forgeyard/gateway/passthrough.py` 與 `forgeyard/workloads/expose.py`。
+
+- **設定：** workload 的 `gateway`（`expose`、`port`、`read_timeout` 600 秒、`max_body_mb` 32、每個 replica 的 `concurrency`、
+  每把 key 的 `key_concurrency`），放在 spec 旁邊、絕不放進 spec（agent 用 `extra="forbid"` 驗證 spec），執行中也能修改。由管理員
+  與 operator 設定，並寫入稽核紀錄（`workload.gateway_changed`）。
+- **在 key guard 後面：** 公開的 replica 在放置時拿到內部 key，只送給列出 `workload_guard` 的 agent，格式是
+  `replica_key {env: null, strip: true}`；其他 agent 不會被放置（並說明原因）。程式聽在 loopback（行程參數裡的
+  `${BIND_ADDRESS}`；容器發布在 loopback），guard 佔住對外 port，檢查 key 後**把它拿掉**，agent 的 health check 也絕不帶它。公開
+  執行中的 workload 時，已放置的 replica 會拿到 key，由 agent 重新啟動到 guard 後面。關掉公開會立刻關閉 `/x/`；guard 會留到
+  workload 重新啟動為止（安全的方向）。
+- **Key：** `api_keys.workloads` = `none`（預設；1.3 之前的每把 key，migration `0013_passthrough`）| `listed`（`workload_list`）|
+  `all`；管理員設定別人的 key 時對擁有者鎖定，和雲端設定一樣。`none` 的 key 拿到 403 `workloads_not_allowed`；不能呼叫的 workload
+  回 404 `workload_not_found`，和不存在的一樣。
+- **請求：** 只接受 `Authorization: Bearer fyk_…`。路徑從原始請求路徑讀取；`.` 路徑段、編碼過的 `.`、`/` 或 `\`、反斜線、控制字元
+  與非 ASCII 位元組一律拒絕（400 `invalid_path`），絕不正規化（httpx 會摺疊 `..`，程式卻會解碼 `%2e%2e`）。前綴拿掉，查詢字串保留。
+  hop-by-hop、`Authorization`、`Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP` 與 `X-Forgeyard-*` 拿掉；重新設定
+  `X-Forwarded-For/-Proto/-Host`、`X-Forwarded-Prefix` 與 `X-Request-Id`。本文最多讀 `max_body_mb`（413），所以連不到的 replica
+  可以跳過、改試下一個。
+- **回應：** 原始位元組（`aiter_raw`，壓縮的本文保留 `Content-Encoding` 與 `Content-Length`），一到就轉送。`Set-Cookie`、
+  `Access-Control-*`、HSTS、`Clear-Site-Data`、`Alt-Svc`、`Service-Worker-Allowed`、回報類標頭與 `X-Forgeyard-*` 拿掉，並**強制**
+  `Content-Security-Policy: sandbox; default-src 'none'; frame-ancestors 'none'`、`nosniff`、`DENY`、`no-store`、
+  `Cross-Origin-Resource-Policy: same-origin` 與 `Referrer-Policy: no-referrer`：從 `/x/` 送出的 HTML 或 script 跑在不透明的
+  origin，絕不是 console 的 origin（console 的 CSRF 檢查是自訂標頭加同源，同源的 script 會通過）。不跟隨轉址；指向 workload 的
+  `Location` / `Content-Location` 改寫到 `/x/<name>` 底下。guard 自己的拒絕（它的 realm）變成 502 `replica_refused_key`；程式自己的
+  401 照樣轉送。中途斷掉的串流會讓連線在未完成時結束。
+- **限制：** key 的 rpm（沒有 tpm）、每個 replica 的同時請求數（429 `workload_busy`）與每把 key 的同時請求數（429 `key_busy`），
+  `Retry-After: 1`；連線逾時 `GATEWAY_CONNECT_TIMEOUT`，之後每次讀取 `read_timeout`（504）。client 離開會關掉往上游的請求。
+- **用量：** `usage_daily` 裡的模型 `x:<name>`，含 `bytes_in`、`bytes_out` 與 `busy_ms`（migration 0012 的欄位）、請求數、錯誤與延遲。
+- **1.3 不做：** WebSocket 與 gRPC（需要端到端的 HTTP/2 trailer）、瀏覽器介面（需要自己的主機名稱與 `*.x.<server>` 萬用憑證）、
+  超過上限的本文串流轉送、上游回報的單位、非同步工作 API、雲端溢出。
+
+**現成範本**（`forgeyard/workloads/templates.py`、`GET /api/workloads/templates`）：物件偵測（RT-DETRv2 R18）、影像分割（SAM 2.1
+Hiera tiny）與深度估計（Depth Anything V2 Small），全部 Apache-2.0（不用 AGPL-3.0 的 Ultralytics YOLO；不用 CC-BY-NC 的 Depth
+Anything Base 或 Large）。沒有官方映像檔能以固定版本、可離線的方式為這些模型提供 HTTP API（Triton 需要模型倉庫，映像檔帶有 NVIDIA
+的容器授權；TorchServe 已封存；Hugging Face 的 inference toolkit 啟動時才下載模型），所以 Forgeyard 自己提供一個小型 server：
+`images/vision`（transformers 上的 FastAPI），三種任務共用一個映像檔（`--task`），模型以固定 revision 包在裡面，相依套件以雜湊值固定，
+base 以 digest 固定，以無特權使用者執行。每次發布時推送 `forgeyard-vision:X.Y.Z`（CPU，amd64 與 arm64）與 `X.Y.Z-cuda`（torch cu130，
+amd64）；CI 會建置 CPU 版本，並在沒有網路的情況下對每個任務做 smoke test。範本就是一般的 workload 規格（CUDA 版本以記憶體共用一張
+NVIDIA 卡，或 CPU 版本），並開啟 `gateway.expose`；console 用它填好新增 workload 的表單。離線時用 `docker save` / `docker load` 搬 tag。
+
+真機檢查：`scripts/accept_x.py`（`--templates`）。
 
 ## 雲端供應商與分層路由（1.2）
 
@@ -375,7 +458,7 @@ Kong 與 GPUStack 之後決定。
   - `GET /api/budgets`（admin：`?everyone=true`）回傳月份、`resets_at`，以及每個 key、個人與供應商的預算、已花費、已預留、使用比例
     與等級（`ok`、80% 起 `warning`、100% 起 `exhausted`；預算為 0 時是 exhausted）。API keys 頁、**Usage → Cost**（*Budgets this
     month*）與供應商的頁面會顯示它們。
-- **1.2 不做：**Anthropic 或 Gemini 的原生翻譯與 `/v1/messages` 直通；Responses API、batch、檔案、圖片；雲端的 rerank、score、
+- **1.2 不做：**Anthropic 或 Gemini 的原生翻譯與 `/v1/messages` 直通；Responses API、batch、檔案、圖片（1.3 中帶媒體的請求也只留在本機）；雲端的 rerank、score、
   語音；串流中途切換；雲端之間依成本、延遲或語意的路由；黏著路由；Entra ID、Vertex 或 Bedrock 認證。
 
 ## 帳號與登入
@@ -402,3 +485,53 @@ Kong 與 GPUStack 之後決定。
   而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 與供應商金鑰要重新輸入，
   replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。
+
+## 容器映像檔
+
+兩個映像檔都從這個 repository 建置，在推送版本 tag `vX.Y.Z` 時由 `.github/workflows/publish-images.yml`
+發布到 Docker Hub：`docker.io/tonyhuang1101/forgeyard`（伺服器，`Dockerfile.server`）與
+`docker.io/tonyhuang1101/forgeyard-agent`（`Dockerfile.agent`）。
+
+- **名稱只寫在一個地方。**`forgeyard/install/images.py` 存放 Docker Hub 的 namespace（`DOCKERHUB_NAMESPACE`）
+  與 repository 名稱。發布的 workflow 從這裡讀取（`scripts/publish_plan.py`），伺服器在 **Add a machine** 產生
+  agent 的 `docker run` 時也是。namespace 是空的就代表還沒有發布：頁面會改用本機建置的
+  `forgeyard-agent:<version>`，並顯示它的 `docker build`。
+- **agent 的 tag 就是伺服器的版本**，所以機器上跑的永遠是和伺服器同版本的 agent。`AGENT_IMAGE` 可以換掉
+  repository（鏡像站、私有 registry）、tag，或加上 digest；因為它會出現在使用者貼上的指令裡，啟動時會依
+  Docker 的映像檔名稱語法檢查。
+- **平台：**linux/amd64 與 linux/arm64，用 buildx 建置（arm64 在 runner 上透過 QEMU）。伺服器的網頁介面只在
+  建置平台上的 node 階段建置一次：每個平台的產出都一樣。agent 的 ROCm 輔助套件（libdrm）和 ROCm 一樣只有
+  amd64；NVML 則來自純 Python 套件，兩個平台都有。
+- **伺服器映像檔**完全依照 `uv.lock` 安裝（不含 dev 群組，含 PostgreSQL），以 uid 10001 執行，把
+  `DATA_DIR=/data` 放在 volume 裡，在 `0.0.0.0:7860` 監聽。它的 `HEALTHCHECK`
+  （`forgeyard/install/healthcheck.py`）透過容器的 loopback 詢問 `/api/health`，不驗證憑證：請求不會離開容器，
+  也不帶任何憑據；驗證反而會因為和健康無關的原因失敗（自己的憑證上寫的是對外的主機名稱）。
+- **tag：**`X.Y.Z`、`X.Y` 與 `latest`；預發布版本只有 `X.Y.Z`。tag 和 `forgeyard/__init__.py` 的版本不符時，
+  workflow 會停止。每個映像檔都有 OCI 標籤、provenance（`mode=max`）與 SBOM。推送後會用 digest 拉回 amd64
+  映像檔，跑和 CI 相同的冒煙測試（`scripts/agent_image_smoke.sh`、`scripts/server_image_smoke.sh`）；
+  digest 會寫進該次執行的摘要。
+- **沒有 Docker Hub 的 secrets**（`DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`）或 namespace，或在分支上手動執行時，
+  workflow 仍會為兩個平台建置兩個映像檔、對 amd64 映像檔跑冒煙測試，並以綠燈結束，用提示說明為什麼沒有推送。
+
+## 設定與設定顧問（1.3）
+
+- **啟動時驗證。** server 無法使用的值會讓它停止啟動，並指出設定名稱與可以填的值（`TLS`、`REGISTRATION`、`COOKIE_SECURE`、
+  雲端等級、數字，以及 `TLS_CERT_FILE`／`TLS_KEY_FILE` 只設其中一個）。其他出乎意料的情況一律是警告，絕不拒絕：
+  `forgeyard/settings_check.py` 找出 `.env` 或環境裡不是設定的名稱（和 agent 一樣附上「你是不是指」）、被另一個設定變得沒有作用的設定
+  （`TLS=off` 時的 `TLS_*`、沒有自己的憑證時的 `TLS_CA_FILE`、兩個機密金鑰設定都有設）、有風險的值（離線時間少於 2.5 次心跳、
+  允許私有位址的開關、HTTPS 下的 `COOKIE_SECURE=false`）、設定完成後還留著的設定用值，以及被資料庫覆蓋的環境變數初始值。
+  server 啟動時把每一項寫進 log（`Settings: …`）。
+- **設定顧問**（`forgeyard/advisor.py`、`GET /api/advisor`，只限 admin）在頁面要求時，對設定、資料庫與各 agent 最後一次的回報
+  執行一串小檢查；它自己不儲存任何東西。一項檢查結果是 `{id, severity, title, detail, fix_url, fix_label, scope, pages}`：
+  `scope` 指出對象（`machine:3`、`key:12`、`route:4`），`pages` 指出 UI 在哪些頁面以橫幅顯示它。*error* 是現在就壞了或不安全，
+  *warning* 是可能會花錢、外洩或壞掉，*info* 是沒有作用或出乎意料。拋出例外的檢查會被記錄並略過，所以一個 bug 絕不會蓋掉其他結果。
+  檢查清單在指南的參考資料（*Setup health checks*）；有測試確保它完整。
+- **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、API keys、
+  Providers、Models、路由、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
+- **延後提醒**是每位 admin、每項結果（`id@scope`）各自的，為期 30 天，存在使用者的 `preferences` JSON（`advisor_snoozed`），
+  所以不需要 migration。error 不能延後。延後的結果如果仍然成立，30 天後會再出現。
+- **機密金鑰備份**（決策 D5）：在 admin 勾選 *I have a backup of key id X* 之前一直是警告。勾選是一筆 `server_settings`
+  （`secret_key_backup`：金鑰 id、誰、何時），和目前的金鑰 id 比對，所以換了新金鑰提醒就會回來。過時的 id 會被拒絕（409），
+  金鑰本身絕不離開 server。
+- **新設定的規則**寫在 `CONTRIBUTING.md`：預設值要能用、要有文件（有測試比對 `Settings`、`.env.example` 與參考資料）、
+  除非必要都算進階設定，而且設錯有風險時要加一項顧問檢查。

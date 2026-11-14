@@ -11,8 +11,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
+import anyio
 from fastapi import APIRouter, Depends, Request, WebSocket
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
@@ -258,14 +260,22 @@ async def stream(ws: WebSocket):
     finally:
         conn.fail_pending()
         if hub.detach(conn):
-            await run_in_threadpool(_db_call, _went_away, node_id)
+            # Shielded: when the handler is cancelled (the server shutting down, or a test client
+            # cancelling right after the close) the machine must still be recorded offline, or it
+            # stays "online" until the offline timeout.
+            with anyio.CancelScope(shield=True):
+                await run_in_threadpool(_db_call, _went_away, node_id)
 
 
 async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None:
     workloads = FEATURE_WORKLOADS in conn.features
     kick = asyncio.create_task(conn.kick.wait())
     recv = dirty = out = None
-    revision = 0
+    # Revisions order the desired lists on one connection. They start from the clock, not from 0, so
+    # a new connection (after a network drop or a server restart) always counts above the old one:
+    # agents up to 1.2.0 keep the highest revision they saw across connections and drop any lower
+    # list without a word, so they took no new work until the count caught up.
+    revision = time.time_ns() // 1_000_000
     try:
         while True:
             if recv is None:

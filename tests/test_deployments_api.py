@@ -208,7 +208,7 @@ def test_fy_dep_006_desired_state_for_new_and_old_agents(owner):
     db = new_session()
     try:
         rep = wstate.desired_message(db, cpu, 1)["replicas"][0]
-        assert rep["spec"]["runtime"]["type"] == "process" and rep["engine"]["binary"] == "llama-b11977/llama-server"
+        assert rep["spec"]["runtime"]["type"] == "process" and rep["engine"]["binary"] == "llama-b12242/llama-server"
         assert rep["model"]["file"] == "Qwen3-1.7B-Q4_K_M.gguf" and rep["spec"]["health"]["start_period"] == 600
         m2 = wstate.desired_message(db, old, 1)["replicas"][0]["spec"]
         assert "vram" not in m2["resources"]["gpus"] and "share" not in m2["resources"]["gpus"]
@@ -234,7 +234,9 @@ def test_fy_dep_007_custom_recipes(owner):
     assert owner.put("/api/recipes/my-whisper", json={"yaml": text.replace("name: my-whisper", "name: other")}).status_code == 422
     assert owner.delete("/api/recipes/vllm").status_code == 409
     names = [x["name"] for x in owner.get("/api/recipes").json()["recipes"]]
-    assert names == ["faster-whisper", "llama-cpp", "vllm", "vllm-pooling", "my-whisper"]
+    assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vllm", "vllm-omni-image", "vllm-omni-tts",
+                     "vllm-omni-video",
+                     "vllm-pooling", "my-whisper"]
     seed_catalog()
     make_node("a100", allowlist=[4], features=MODELS)
     deploy(owner, "asr", "faster-whisper-small", "my-whisper")

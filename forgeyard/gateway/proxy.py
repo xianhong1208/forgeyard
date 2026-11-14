@@ -36,6 +36,21 @@ cloud provider.
    local tier, may still serve it) and the answer says so in `X-Forgeyard-Budget-Exhausted`; when
    nothing else can serve it, 402 `budget_exhausted` (or `budget_unpriced`). The reservation is
    settled with the real cost when the request finishes, and released when it fails.
+10. Images, audio and video in chat (1.3, forgeyard/gateway/media.py): their parts are rebuilt, media
+   URLs fetched by the gateway and inlined, and the route narrowed to the deployments that take
+   what the request carries (`fit_route`). Such requests never go to a provider. Every deployment
+   may also take larger bodies than GATEWAY_MAX_BODY_MB (its `max_body_mb`).
+11. Text to speech (1.3, forgeyard/gateway/speech.py): /v1/audio/speech is checked and counted by the
+   gateway (characters before, audio milliseconds after), voice cloning is refused, each deployment
+   gets its own body (its default format, voice, language and frame cap), and the audio streams
+   through as it is made. Local deployments only.
+12. Images (1.3, forgeyard/gateway/imagegen.py): /v1/images/generations is checked against each
+   deployment's caps (images per request, largest side, steps), sent with only the fields Forgeyard
+   knows, queued in the gateway while every replica is busy (429 `queue_full` once the queue is full),
+   answered as base64 only, and counted in images, kilopixels and busy milliseconds. Local only.
+13. Videos (1.3, forgeyard/gateway/videogen.py and videojobs.py): /v1/videos is asynchronous: a job is
+   checked against each deployment's caps, sent to one replica, which holds it, and its status and
+   MP4 are relayed from that replica; it does not go through forward(). Local only.
 """
 
 from __future__ import annotations
@@ -48,7 +63,7 @@ import logging
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional, Union
 
 import httpx
@@ -59,14 +74,15 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from forgeyard.config import get_settings
-from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc
-from forgeyard.gateway import budgets, egress, multipart, pricing, quirks
+from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
+from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech, videogen
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
 from forgeyard.gateway.usage import recorder
 from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
+from forgeyard.models import modalities
 
 log = logging.getLogger("forgeyard.gateway")
 
@@ -79,6 +95,9 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "score": ("rerank", "json"),
     "audio/transcriptions": ("openai-audio", "multipart"),
     "audio/translations": ("openai-audio", "multipart"),
+    "audio/speech": ("openai-speech", "json"),
+    "images/generations": ("openai-images", "json"),
+    "videos": ("openai-videos", "video"),   # asynchronous jobs (forgeyard/gateway/videojobs.py), not forward()
 }
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
 CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets serve in 1.2
@@ -108,6 +127,10 @@ class LocalGroup:
     concurrency: Optional[int] = None     # requests one replica takes at once (its `concurrency`)
     context: Optional[int] = None         # tokens per request (its `context`)
     running: bool = True                  # False once someone stopped the deployment
+    accepts: Optional[modalities.Accepts] = None   # media and body size it takes (1.3)
+    speaks: Optional[speech.Speaks] = None          # text to speech: formats, voices, input cap (1.3)
+    draws: Optional[imagegen.Draws] = None          # image generation: caps, default size, queue (1.3)
+    films: Optional[videogen.Films] = None          # video generation: caps, default size and length (1.3)
 
 
 @dataclass
@@ -193,7 +216,7 @@ def _int(value) -> Optional[int]:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
-def local_group(t: RouteTarget, d: Deployment) -> LocalGroup:
+def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -> LocalGroup:
     w = d.workload
     replicas = []
     for r in w.replicas:
@@ -210,10 +233,21 @@ def local_group(t: RouteTarget, d: Deployment) -> LocalGroup:
                                machine=r.node.name if r.node else None, secret=r.secret, protected=protected,
                                ready_since=since))
     params = d.params or {}
+    found = (recipes or {}).get(d.recipe)
+    model = d.model
+    accepts = modalities.accepts(found[0], model.meta or {}, model.format, params) \
+        if found is not None and model is not None else None
+    speaks = speech.speaks(found[0], params, model.meta if model is not None else None) \
+        if found is not None and "tts" in found[0].tasks else None
+    draws = imagegen.draws(found[0], params, model.meta if model is not None else None) \
+        if found is not None and "image" in found[0].tasks else None
+    films = videogen.films(found[0], params, model.meta if model is not None else None) \
+        if found is not None and "video" in found[0].tasks else None
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
-                      concurrency=_int(params.get("concurrency")), context=_int(params.get("context")),
-                      running=w.desired_state == "running")
+                      concurrency=draws.concurrency if draws else _int(params.get("concurrency")),
+                      context=_int(params.get("context")), running=w.desired_state == "running", accepts=accepts,
+                      speaks=speaks, draws=draws, films=films)
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -229,10 +263,11 @@ def _route_query():
     return (select(GatewayRoute).options(
         selectinload(GatewayRoute.targets).selectinload(RouteTarget.deployment).selectinload(Deployment.workload)
         .selectinload(Workload.replicas).selectinload(Replica.node),
+        selectinload(GatewayRoute.targets).selectinload(RouteTarget.deployment).selectinload(Deployment.model),
         selectinload(GatewayRoute.targets).selectinload(RouteTarget.provider_model).selectinload(ProviderModel.provider)))
 
 
-def build_route(row: GatewayRoute) -> Route:
+def build_route(row: GatewayRoute, recipes: Optional[dict] = None) -> Route:
     route = Route(served_name=row.served_name, api=row.api, id=row.id, deployment_id=row.deployment_id,
                   local_only=bool(row.local_only), spill_on_long_prompt=bool(row.spill_on_long_prompt),
                   wait_ms=max(0, min(int(row.wait_ms or 0), MAX_WAIT_MS)))
@@ -250,7 +285,7 @@ def build_route(row: GatewayRoute) -> Route:
             continue
         tier = tiers.setdefault(t.tier, Tier(t.tier))
         if t.kind == "local" and t.deployment is not None:
-            tier.locals.append(local_group(t, t.deployment))
+            tier.locals.append(local_group(t, t.deployment, recipes))
         elif t.kind == "provider" and t.provider_model is not None and row.api in CLOUD_APIS:
             ct = cloud_target(t, t.provider_model)
             if ct.enabled:
@@ -260,8 +295,10 @@ def build_route(row: GatewayRoute) -> Route:
 
 
 def load_route(db: DbSession, served_name: str) -> Optional[Route]:
+    from forgeyard.models.catalog import all_recipes
+
     row = db.scalar(_route_query().where(GatewayRoute.served_name == served_name))
-    return build_route(row) if row is not None else None
+    return build_route(row, all_recipes(db)) if row is not None else None
 
 
 def model_names(db: DbSession) -> list[tuple[Route, int]]:
@@ -272,7 +309,8 @@ def model_names(db: DbSession) -> list[tuple[Route, int]]:
 
 def endpoint_for(api: str) -> str:
     return {"openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", "rerank": "/v1/rerank",
-            "openai-audio": "/v1/audio/transcriptions"}.get(api, "/v1")
+            "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
+            "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:
@@ -307,6 +345,128 @@ def check_access(caller: KeyCaller, route: Optional[Route], model: str, endpoint
     return route
 
 
+# ------------------------------------------------------------------ media and body size (1.3)
+MEDIA_ENDPOINTS = ("chat/completions", "embeddings")   # bodies that can carry `messages` with media parts
+KIND_WORDS = {"image": "images", "audio": "audio clips", "video": "videos"}
+
+
+def scan_media(parsed: "Parsed", endpoint: str) -> Optional[gmedia.Media]:
+    """Rebuild the request's media parts (400 for anything not accepted); None for text only."""
+    if endpoint not in MEDIA_ENDPOINTS or parsed.obj is None:
+        return None
+    parsed.media = gmedia.scan(parsed.obj)
+    return parsed.media
+
+
+def body_size(parsed: "Parsed") -> int:
+    """The body's size once media URLs were inlined."""
+    if parsed.obj is None:
+        return parsed.size
+    return len(json.dumps(parsed.obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _takes(g: LocalGroup, m: Optional[gmedia.Media], size: int) -> bool:
+    a = g.accepts
+    if a is None:  # its recipe is gone: the global limit, no media checks
+        return size <= get_settings().gateway_max_body_mb * 1024**2
+    if size > a.max_body:
+        return False
+    if m is None:
+        return True
+    if m.files and not a.files:
+        return False
+    return all(n <= a.limit(kind) for kind, n in m.counts.items() if n)
+
+
+def fit_route(route: Route, parsed: "Parsed", size: int) -> Route:
+    """The route with only the targets that can take this request: deployments whose recipe and
+    model take its media (and as many) and whose `max_body_mb` its size fits; providers only for
+    requests without media, within GATEWAY_MAX_BODY_MB. Raises the most telling error when none can."""
+    if not route.tiers:
+        return route
+    m = parsed.media
+    limit = get_settings().gateway_max_body_mb * 1024**2
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if _takes(g, m, size)]
+        clouds = [] if m is not None else [c for c in tier.clouds if size <= limit]
+        if locals_ or clouds:
+            tiers.append(Tier(tier.index, locals_, clouds))
+    if tiers:
+        return replace(route, tiers=tiers)
+    name = route.served_name
+    groups = [g for tier in route.tiers for g in tier.locals]
+    if m is not None and not groups:
+        raise GatewayError(400, "media_local_only", f"{name!r} is served by providers only, and requests with images, "
+                                                    "audio, video or files are served by local deployments only.",
+                           param="messages")
+    if m is not None:
+        known = [g.accepts for g in groups if g.accepts is not None]
+        if m.files and not any(a.files for a in known):
+            raise GatewayError(400, "file_input_not_supported", f"{name!r} does not take files (file parts). Send the "
+                                                                "pages as images, or the text itself.", param="messages")
+        for kind in gmedia.KINDS:
+            n = m.counts[kind]
+            if not n:
+                continue
+            most = max((a.limit(kind) for a in known), default=0)
+            if most == 0:
+                takes = sorted({k for a in known for k in a.kinds}, key=gmedia.KINDS.index)
+                what = ", ".join(KIND_WORDS[k] for k in takes) if takes else "text only"
+                raise GatewayError(400, "media_not_supported", f"{name!r} does not take {KIND_WORDS[kind]} (it takes "
+                                                               f"{what}).", param="messages")
+            if n > most:
+                raise GatewayError(400, "too_many_media_items", f"{name!r} takes at most {most} {KIND_WORDS[kind]} per "
+                                                                f"request; this one has {n}.", param="messages")
+    most = max([g.accepts.max_body if g.accepts else limit for g in groups] + ([limit] if m is None else []))
+    raise GatewayError(413, "request_too_large", f"The request is {size / 1024**2:.1f} MiB; {name!r} takes at most "
+                                                 f"{most // 1024**2} MiB.")
+
+
+def fit_speech(route: Route, parsed: "Parsed") -> Route:
+    """Text to speech (1.3): check the body (voice cloning refused) and keep the deployments that can
+    take it (input length, format, streaming, script). Raises the most telling error when none can."""
+    if parsed.obj is None:
+        return route
+    ask = speech.check(parsed.obj)
+    parsed.tts = ask
+    parsed.max_tokens = ask.characters   # what the key's tpm holds for it: a character counts as a token
+    text = parsed.obj.get("input") or ""
+    groups = [g for tier in route.tiers for g in tier.locals]
+    why = {g.deployment_id: speech.takes(g.speaks, ask, text) for g in groups}
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if why[g.deployment_id] is None]
+        if locals_:
+            tiers.append(Tier(tier.index, locals_, []))
+    if tiers or not groups:
+        return replace(route, tiers=tiers) if groups else route
+    order = ("input_too_long", "unsupported_response_format", "stream_format_not_supported", "language_not_supported")
+    code = min((c for c in why.values() if c), key=order.index)
+    raise speech.refusal(route.served_name, code, ask, [g.speaks for g in groups if g.speaks is not None])
+
+
+def fit_images(route: Route, parsed: "Parsed") -> Route:
+    """Image generation (1.3): check the body and keep the deployments whose caps it fits (images per
+    request, size, steps, prompt length, format). Raises the most telling error when none can."""
+    if parsed.obj is None:
+        return route
+    ask = imagegen.check(parsed.obj)
+    parsed.image = ask
+    parsed.max_tokens = None             # no tokens: the key's rpm and its other limits apply
+    groups = [g for tier in route.tiers for g in tier.locals]
+    why = {g.deployment_id: imagegen.takes(g.draws, ask) for g in groups}
+    tiers = []
+    for tier in route.tiers:
+        locals_ = [g for g in tier.locals if why[g.deployment_id] is None]
+        if locals_:
+            tiers.append(Tier(tier.index, locals_, []))
+    if tiers or not groups:
+        return replace(route, tiers=tiers) if groups else route
+    code = min((c for c in why.values() if c), key=imagegen.ORDER.index)
+    raise imagegen.refusal(route.served_name, code, ask, [g.draws for g in groups if g.draws is not None])
+
+
 def wants_local_only(request: Request) -> bool:
     return (request.headers.get(LOCAL_ONLY_HEADER) or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -334,6 +494,9 @@ def prompt_estimate(parsed: "Parsed") -> int:
     obj = parsed.obj or {}
     text = obj.get("messages") if "messages" in obj else obj.get("prompt", obj.get("input", ""))
     size = len(json.dumps(text, ensure_ascii=False).encode("utf-8")) if text is not None else 0
+    m = parsed.media
+    if m is not None:  # an image is so many tokens, not the size of its base64 text
+        return max(0, size - m.data_bytes) // BYTES_PER_TOKEN + m.items * gmedia.TOKENS_PER_ITEM + (parsed.max_tokens or 0)
     return size // BYTES_PER_TOKEN + (parsed.max_tokens or 0)
 
 
@@ -346,10 +509,43 @@ class Parsed:
     obj: Optional[dict] = None                     # a JSON body
     parts: Optional[list] = None                   # a multipart body
     boundary: Optional[bytes] = None
+    media: Optional[gmedia.Media] = None           # images, audio, video, files (1.3)
+    tts: Optional[speech.Ask] = None               # a text-to-speech request, checked (1.3)
+    image: Optional[imagegen.Ask] = None           # an image request, checked (1.3)
+    size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 
-async def read_body(request: Request) -> bytes:
+# The largest body any deployment takes (its `max_body_mb`), read every few seconds.
+CEILING_TTL = 5.0
+_ceiling: dict = {"until": 0.0, "bytes": 0}
+
+
+def forget_ceiling() -> None:
+    _ceiling["until"] = 0.0
+
+
+def body_ceiling() -> int:
+    """The most the gateway reads of any request: GATEWAY_MAX_BODY_MB, or a deployment's larger
+    `max_body_mb`. Which limit applies is known only once the body says its model (fit_route)."""
+    now = time.monotonic()
     limit = get_settings().gateway_max_body_mb * 1024**2
+    if now < _ceiling["until"]:
+        return max(limit, _ceiling["bytes"])
+    db = new_session()
+    try:
+        most = 0
+        for params in db.scalars(select(Deployment.params)).all():
+            mb = (params or {}).get("max_body_mb")
+            if isinstance(mb, int) and not isinstance(mb, bool) and mb > 0:
+                most = max(most, mb * 1024**2)
+    finally:
+        db.close()
+    _ceiling.update(until=now + CEILING_TTL, bytes=most)
+    return max(limit, most)
+
+
+async def read_body(request: Request, limit: Optional[int] = None) -> bytes:
+    limit = limit or get_settings().gateway_max_body_mb * 1024**2
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > limit:
         raise GatewayError(413, "request_too_large", f"The request is larger than {limit // 1024**2} MiB.")
@@ -374,7 +570,7 @@ def parse_body(body: bytes, content_type: str, kind: str) -> Parsed:
         if not model:
             raise GatewayError(400, "invalid_request", "The form needs a 'model' field.", param="model")
         stream = (multipart.field(parts, "stream") or "").lower() in ("true", "1")
-        return Parsed(model=model, stream=stream, parts=parts, boundary=boundary)
+        return Parsed(model=model, stream=stream, parts=parts, boundary=boundary, size=len(body))
     try:
         obj = json.loads(body or b"null")
     except (ValueError, UnicodeDecodeError):
@@ -386,7 +582,7 @@ def parse_body(body: bytes, content_type: str, kind: str) -> Parsed:
         raise GatewayError(400, "invalid_request", "The request needs a 'model'.", param="model")
     max_tokens = obj.get("max_completion_tokens", obj.get("max_tokens"))
     max_tokens = max_tokens if isinstance(max_tokens, int) and not isinstance(max_tokens, bool) and max_tokens > 0 else None
-    return Parsed(model=model.strip(), stream=obj.get("stream") is True, max_tokens=max_tokens, obj=obj)
+    return Parsed(model=model.strip(), stream=obj.get("stream") is True, max_tokens=max_tokens, obj=obj, size=len(body))
 
 
 def upstream_body(parsed: Parsed, endpoint: str, upstream_model: str) -> tuple[bytes, bool]:
@@ -479,6 +675,7 @@ def client() -> httpx.AsyncClient:
             timeout=httpx.Timeout(connect=s.gateway_connect_timeout, read=s.gateway_read_timeout, write=60.0, pool=30.0),
             limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
             trust_env=False,          # replicas are on the LAN: never through a proxy from the environment
+            cookies=egress.no_cookies(),  # shared by every request: a cookie one upstream set is never kept
             follow_redirects=False)
         _clients[id(loop)] = (loop, c)
         entry = (loop, c)
@@ -684,6 +881,16 @@ class Job:
         self.hold: Optional[budgets.Hold] = None  # money reserved at the provider it was sent to
         self.budget_blocked: list[str] = []       # budgets that kept it from a provider
         self.budget_target: Optional[tuple] = None  # (target, provider) a budget kept it from, if nothing was sent
+        self.speech_format: Optional[str] = None    # text to speech: the format the engine was asked for (1.3)
+        self.speech_voice: Optional[str] = None     # the voice the gateway chose for it, if any
+        self.speech_rate: Optional[int] = None      # a sample_rate the request asked for
+        self.media_ms: Optional[int] = None         # the audio's length, once it has passed
+        self.made: Optional[imagegen.Made] = None   # images: what the answer held (1.3)
+        self.busy_ms: int = 0                       # images: the replica's time on it, times its GPUs
+        self.image_draws: Optional[imagegen.Draws] = None
+        self.queue_key = ""
+        self.sent_at = 0.0
+        self._ticket: Optional[int] = None
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -692,7 +899,8 @@ class Job:
         self.settled = True
         u = quirks.read_usage(usage)
         if self.admission is not None:
-            key_limiter.settle(self.admission, u.prompt + u.completion)
+            tts = self.parsed.tts
+            key_limiter.settle(self.admission, tts.characters if tts is not None else u.prompt + u.completion)
         c = self.sent_to
         served = status < 400 or status == CLIENT_CLOSED
         self.cost = pricing.cost_of(u, c.prices if c else None, cloud=c is not None and c.external,
@@ -701,7 +909,7 @@ class Job:
         def count() -> None:
             record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt,
                    u.completion, target=self.target, cached=u.cached, reasoning=u.reasoning,
-                   spilled=self.spilled is not None, cost=self.cost)
+                   spilled=self.spilled is not None, cost=self.cost, units=self.units(served))
 
         hold, self.hold = self.hold, None
         if c is None or not c.external:
@@ -712,6 +920,21 @@ class Job:
         picos = self.cost.picos if self.cost.picos is not None else (hold.picos if hold and served else 0)
         budgets.ledger.settle(hold, key_id=self.caller.key_id if self.caller.source == "api" else 0,
                               user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count)
+
+    def units(self, served: bool = True) -> Optional[dict]:
+        """The request's 1.3 usage units: the media items it carried; for speech that was answered, the
+        characters spoken and the audio's milliseconds."""
+        m = self.parsed.media
+        tts = self.parsed.tts
+        if self.parsed.image is not None:
+            if self.made is None:      # set only for an answer that held images
+                return None
+            return {"images": self.made.images, "kilopixels": self.made.kilopixels, "busy_ms": self.busy_ms}
+        if tts is not None:
+            if not served:
+                return None
+            return {"characters": tts.characters, **({"media_ms": self.media_ms} if self.media_ms else {})}
+        return {"media_items": m.items} if m is not None and m.items else None
 
     def release(self) -> None:
         hold, self.hold = self.hold, None
@@ -746,6 +969,8 @@ class Job:
 
     def headers(self, target: str) -> dict:
         out = {"X-Forgeyard-Target": target}
+        if self.speech_voice:
+            out[speech.VOICE_HEADER] = self.speech_voice
         if self.spilled:
             out["X-Forgeyard-Spilled"] = self.spilled
         if self.budget_blocked:
@@ -825,13 +1050,62 @@ class Job:
             pairs = fits
         group_of = {t.uid: g for g, t in pairs}
         remaining = balancer.order(f"{route.served_name}#{tier.index}", [t for _, t in pairs])
-        caps = {t.uid: group_of[t.uid].concurrency for t in remaining} if can_move_on else {}
-        body_for: dict[str, tuple[bytes, bool]] = {}
+        image = parsed.image is not None
+        if image:
+            # Image requests (1.3) always keep to each replica's concurrency (1 by default) and wait in
+            # the gateway's queue, in order, for a free one.
+            caps = {t.uid: group_of[t.uid].concurrency or 1 for t in remaining}
+        else:
+            caps = {t.uid: group_of[t.uid].concurrency for t in remaining} if can_move_on else {}
+        self.queue_key = qkey = f"{route.served_name}#{tier.index}"
+        q = imagegen.queue(qkey) if image else None
+        self._ticket = None
+        try:
+            return await self._local(tier, group_of, remaining, caps, q, can_move_on)
+        finally:
+            if q is not None and self._ticket is not None:
+                q.leave(self._ticket)      # it gave up, failed or was sent: never left in the queue
+                self._ticket = None
+
+    async def _local(self, tier: Tier, group_of: dict, remaining: list, caps: dict, q: Optional[imagegen.Queue],
+                     can_move_on: bool) -> Union[Response, Failed]:
+        route, parsed = self.route, self.parsed
+        image = q is not None
+        waited_from = 0.0
+        body_for: dict = {}
+        speech_of = self._speech_of = {}
         last_exc: Optional[Exception] = None
         refused: Optional[Response] = None
         deadline: Optional[float] = None
         while remaining:
-            pick = next((t for t in remaining if balancer.try_acquire(t.uid, caps.get(t.uid))), None)
+            # An image request tries for a slot only when nobody is waiting before it.
+            may_try = not image or q.may_try(self._ticket)
+            pick = next((t for t in remaining if balancer.try_acquire(t.uid, caps.get(t.uid))), None) if may_try else None
+            if pick is None and image:
+                if self._ticket is None:
+                    limit = sum(g.draws.queue for g in tier.locals if g.draws is not None)
+                    self._ticket = q.join(limit)
+                    if self._ticket is None:
+                        slots = sum(caps.get(t.uid) or 1 for t in remaining)
+                        raise GatewayError(429, "queue_full",
+                                           f"Every replica of {route.served_name!r} is busy and {len(q.waiting)} "
+                                           f"request{'s are' if len(q.waiting) != 1 else ' is'} waiting already. "
+                                           "Try again later.",
+                                           retry_after=imagegen.retry_after(self.queue_key, len(q.waiting), slots))
+                    waited_from = time.monotonic()
+                most = max((g.draws.timeout for g in tier.locals if g.draws is not None), default=imagegen.DEFAULT_TIMEOUT)
+                if time.monotonic() - waited_from > most:
+                    raise GatewayError(503, "queue_timeout", f"The request waited {most:g} s for a free replica of "
+                                                             f"{route.served_name!r}. Try again later.",
+                                       retry_after=imagegen.retry_after(self.queue_key, len(q.waiting), 1))
+                try:
+                    await self.pause(0.05)
+                except ClientGone:
+                    return self.gone()
+                continue
+            if pick is not None and self._ticket is not None:
+                q.leave(self._ticket)
+                self._ticket = None
             if pick is None:
                 # Every replica left is at its deployment's concurrency.
                 if deadline is None:
@@ -848,9 +1122,24 @@ class Job:
             remaining.remove(pick)
             g = group_of[pick.uid]
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
-            if g.upstream_model not in body_for:
-                body_for[g.upstream_model] = upstream_body(parsed, self.endpoint, g.upstream_model)
-            body, strip = body_for[g.upstream_model]
+            if parsed.image is not None:
+                # Each image deployment gets its own body: its default size and steps, its request style.
+                if g.deployment_id not in body_for:
+                    obj = imagegen.body_for(parsed.image, g.draws, g.upstream_model)
+                    body_for[g.deployment_id] = (json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+                                                 .encode("utf-8"), False)
+                body, strip = body_for[g.deployment_id]
+                self.image_draws = g.draws
+            elif parsed.tts is not None:
+                # Each speech deployment gets its own body: its format, voice, language and frame cap.
+                if g.deployment_id not in body_for:
+                    body_for[g.deployment_id] = await self.speech_body(g, pick)
+                body, strip = body_for[g.deployment_id]
+                self.speech_format, self.speech_voice = speech_of[g.deployment_id]
+            else:
+                if g.upstream_model not in body_for:
+                    body_for[g.upstream_model] = upstream_body(parsed, self.endpoint, g.upstream_model)
+                body, strip = body_for[g.upstream_model]
             ctype = self.request.headers.get("content-type", "application/json") if parsed.parts is not None \
                 else "application/json"
             headers = {"Content-Type": ctype, "Accept": self.request.headers.get("accept") or "*/*",
@@ -858,8 +1147,14 @@ class Job:
             if pick.secret:
                 headers["Authorization"] = f"Bearer {pick.secret}"
             http = client()
+            timeout = httpx.USE_CLIENT_DEFAULT
+            if image and g.draws is not None:   # images take long: the deployment's own read timeout
+                timeout = httpx.Timeout(connect=self.settings.gateway_connect_timeout, read=g.draws.timeout,
+                                        write=60.0, pool=30.0)
             try:
-                req = http.build_request("POST", f"{pick.url}/v1/{self.endpoint}", content=body, headers=headers)
+                req = http.build_request("POST", f"{pick.url}/v1/{self.endpoint}", content=body, headers=headers,
+                                         timeout=timeout)
+                self.sent_at = time.monotonic()
                 response = await unless_gone(self.request.receive, http.send(req, stream=True))
             except ClientGone:
                 balancer.release(pick.uid)
@@ -873,8 +1168,8 @@ class Job:
                 continue
             except httpx.TimeoutException:
                 balancer.release(pick.uid)
-                raise GatewayError(504, "upstream_timeout", f"The replica did not answer within "
-                                                            f"{self.settings.gateway_read_timeout:g} s.") from None
+                limit = g.draws.timeout if image and g.draws is not None else self.settings.gateway_read_timeout
+                raise GatewayError(504, "upstream_timeout", f"The replica did not answer within {limit:g} s.") from None
             except httpx.HTTPError as e:
                 balancer.release(pick.uid)
                 raise GatewayError(502, "upstream_error", f"The request to the replica failed ({type(e).__name__}).") from None
@@ -909,6 +1204,22 @@ class Job:
         return Failed("unavailable", GatewayError(502, "upstream_unreachable",
                                                   f"No replica of {route.served_name!r} could be reached "
                                                   f"({type(last_exc).__name__ if last_exc else 'none tried'})."))
+
+    async def speech_body(self, g: LocalGroup, pick: Target) -> tuple[bytes, bool]:
+        """A speech request's body for this deployment; asks a replica for its voices (kept a while)
+        only when the gateway has to choose one."""
+        ask = self.parsed.tts
+        obj = self.parsed.obj or {}
+        names = None
+        if g.speaks is not None and (ask.voice is None or ask.voice.lower() in speech.OPENAI_VOICES):
+            found = await speech.voices_for(g.deployment_id, g.speaks, client(), pick.url, pick.secret)
+            names = [v["id"] for v in found] if found is not None else None
+        out, chosen = speech.body_for(obj, ask, g.speaks, names)
+        out["model"] = g.upstream_model
+        rate = obj.get("sample_rate")
+        self.speech_rate = rate if isinstance(rate, int) and not isinstance(rate, bool) and rate > 0 else None
+        self._speech_of[g.deployment_id] = (out.get("response_format") or ask.format, chosen)
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), False
 
     # -------------------------------------------------------------- providers
     async def cloud(self, tier: Tier, more: bool) -> Union[Response, Failed]:
@@ -1034,16 +1345,72 @@ class Job:
         return await self.serve(response, self.headers(c.label), strip, release=c.key, who=c.provider)
 
     # -------------------------------------------------------------- the answer
+    def audio(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
+        """A speech engine's 200: streamed through, its length measured, usage counted at the end."""
+        fmt = self.speech_format or "wav"
+        meter = speech.Meter(fmt, response.headers.get("content-type", ""), dict(response.headers),
+                             pcm_rate=next((g.speaks.pcm_rate for t in self.route.tiers for g in t.locals
+                                            if g.deployment_id == self.deployment_id and g.speaks), 24000),
+                             asked_rate=self.speech_rate)
+        tokens = {"input_tokens": _int(int(response.headers.get("x-vllm-omni-input-tokens") or 0)),
+                  "output_tokens": _int(int(response.headers.get("x-vllm-omni-output-tokens") or 0))} \
+            if (response.headers.get("x-vllm-omni-input-tokens") or "").isdigit() and \
+            (response.headers.get("x-vllm-omni-output-tokens") or "0").isdigit() else None
+
+        def done(status: int) -> None:
+            balancer.release(release)
+            self.media_ms = meter.ms()
+            self.finish(status, tokens)
+
+        return AudioResponse(response, {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                             meter, done, who=who)
+
+    async def images(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
+        """An image engine's answer (1.3): read whole, rewritten in OpenAI's shape, counted."""
+        try:
+            data = await unless_gone(self.request.receive, response.aread())
+        except ClientGone:
+            return self.gone()
+        except httpx.TimeoutException:
+            raise GatewayError(504, "upstream_timeout", f"The images from {who} did not come in time.") from None
+        except httpx.HTTPError as e:
+            raise GatewayError(502, "upstream_error", f"The answer from {who} broke off ({type(e).__name__}).") from None
+        finally:
+            await response.aclose()
+            balancer.release(release)
+        busy = max(0.0, time.monotonic() - self.sent_at)
+        imagegen.note_busy(self.queue_key, busy)
+        d = self.image_draws
+        status = response.status_code
+        if status == 200:
+            out, made = imagegen.answer(data, self.parsed.image, d)
+            if out is None or not made.images:
+                raise GatewayError(502, "upstream_error", f"The answer from {who} holds no images.")
+            self.made = made
+            self.busy_ms = int(busy * 1000) * max(1, d.gpus if d is not None else 1)
+            self.finish(200, None)
+            return Response(content=out, status_code=200, headers=out_headers, media_type="application/json")
+        self.finish(status, None)
+        return Response(content=imagegen.engine_error(status, data), status_code=status,
+                        headers={**upstream_retry_after(response), **out_headers}, media_type="application/json")
+
     async def serve(self, response: httpx.Response, out_headers: dict, strip: bool, *, release: str,
                     who: str) -> Response:
+        if self.parsed.image is not None:
+            return await self.images(response, out_headers, release, who)
         is_sse = "text/event-stream" in response.headers.get("content-type", "")
         if is_sse and response.status_code == 200:
             def done(status: int, usage) -> None:
                 balancer.release(release)
+                if self.parsed.tts is not None:
+                    self.media_ms = sse.ms()
                 self.finish(status, usage)
 
             out_headers = {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-            return StreamResponse(response, SSEFilter(strip), out_headers, done, who=who)
+            sse = SpeechSSE(self.speech_rate) if self.parsed.tts is not None else SSEFilter(strip)
+            return StreamResponse(response, sse, out_headers, done, who=who)
+        if self.parsed.tts is not None and response.status_code == 200:
+            return self.audio(response, out_headers, release, who)
         try:
             data = await unless_gone(self.request.receive, response.aread())
         except ClientGone:
@@ -1066,6 +1433,98 @@ class Job:
         return Response(content=data, status_code=response.status_code,
                         headers={**upstream_retry_after(response), **out_headers},
                         media_type=response.headers.get("content-type") or "application/json")
+
+
+class SpeechSSE(SSEFilter):
+    """vLLM-Omni's `stream_format: sse` (OpenAI's speech.audio.* events): passed through as they come;
+    the audio deltas are measured (pcm: their bytes over the sample rate) and the final event's
+    token usage kept."""
+
+    def __init__(self, rate: Optional[int] = None):
+        super().__init__(False)
+        self.bytes = 0
+        self.rate = rate
+        self.channels = 1
+        self.fmt: Optional[str] = None
+
+    def _event(self, event: bytes) -> bytes:
+        if b"speech.audio.delta" in event:
+            data = b"".join(line[5:].lstrip() for line in event.splitlines() if line.startswith(b"data:"))
+            try:
+                obj = json.loads(data)
+            except ValueError:
+                obj = None
+            if isinstance(obj, dict):
+                n, rate, channels, fmt = speech.sse_audio(obj)
+                self.bytes += n
+                self.rate = rate or self.rate
+                self.channels = channels or self.channels
+                self.fmt = fmt or self.fmt
+            self.events += 1
+            return event
+        return super()._event(event)
+
+    def ms(self) -> Optional[int]:
+        if not self.bytes or (self.fmt not in (None, "pcm")):
+            return None
+        return int(self.bytes * 1000 / ((self.rate or 24000) * self.channels * 2))
+
+
+AUDIO_HEADERS = ("x-audio-sample-rate", "x-audio-channels", "x-vllm-omni-input-tokens", "x-vllm-omni-output-tokens",
+                 "x-vllm-omni-total-tokens")
+
+
+class AudioResponse(Response):
+    """A speech engine's audio, passed to the client chunk by chunk as it is made (1.3), measured on
+    the way. Stops the upstream request as soon as the client disconnects."""
+
+    def __init__(self, upstream: httpx.Response, headers: dict, meter: speech.Meter,
+                 done: Callable[[int], None], who: str = "replica"):
+        self.status_code = upstream.status_code
+        self.background = None
+        ctype = upstream.headers.get("content-type") or "application/octet-stream"
+        extra = {k: v for k in AUDIO_HEADERS if (v := upstream.headers.get(k))}
+        self.raw_headers = [(b"content-type", ctype.encode("latin-1"))] + [
+            (k.lower().encode("latin-1"), str(v).encode("latin-1")) for k, v in {**extra, **headers}.items()]
+        self.upstream = upstream
+        self.meter = meter
+        self.done = done
+        self.who = who
+
+    async def __call__(self, scope, receive, send):
+        status = self.upstream.status_code
+        await send({"type": "http.response.start", "status": status, "headers": self.raw_headers})
+
+        async def pump():
+            nonlocal status
+            try:
+                async for chunk in self.upstream.aiter_bytes():
+                    if chunk:
+                        self.meter.feed(chunk)
+                        await send({"type": "http.response.body", "body": chunk, "more_body": True})
+            except httpx.HTTPError as e:
+                status = 502  # the headers are sent: the client sees an audio file that ends early
+                log.warning("Streamed audio from %s broke off: %s", self.who, type(e).__name__)
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+        pumping = asyncio.ensure_future(pump())
+        watching = asyncio.ensure_future(_until_disconnect(receive))
+        try:
+            done, _ = await asyncio.wait({pumping, watching}, return_when=asyncio.FIRST_COMPLETED)
+            if pumping not in done:
+                status = CLIENT_CLOSED
+            else:
+                pumping.result()
+        except OSError:
+            status = CLIENT_CLOSED
+        finally:
+            for t in (pumping, watching):
+                t.cancel()
+            for t in (pumping, watching):
+                with contextlib.suppress(BaseException):
+                    await t
+            await self.upstream.aclose()
+            self.done(status)
 
 
 async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint: str, parsed: Parsed,
@@ -1114,10 +1573,12 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
 
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,
            prompt: int = 0, completion: int = 0, limited: bool = False, *, target: str = "local", cached: int = 0,
-           reasoning: int = 0, spilled: bool = False, cost: Optional[pricing.Cost] = None) -> None:
+           reasoning: int = 0, spilled: bool = False, cost: Optional[pricing.Cost] = None,
+           units: Optional[dict] = None) -> None:
     cost = cost or pricing.Cost(0, pricing.NONE)
     recorder.record(source=caller.source, key_id=caller.key_id, user_id=caller.user_id, username=caller.username,
                     model=model, deployment_id=deployment_id, status=status,
                     latency_ms=(time.monotonic() - started) * 1000, prompt_tokens=prompt,
                     completion_tokens=completion, limited=limited, target=target, cached_tokens=cached,
-                    reasoning_tokens=reasoning, spilled=spilled, cost_picos=cost.picos, cost_method=cost.method)
+                    reasoning_tokens=reasoning, spilled=spilled, cost_picos=cost.picos, cost_method=cost.method,
+                    units=units)

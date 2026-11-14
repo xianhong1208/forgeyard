@@ -46,6 +46,7 @@ from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.machines.protocol import PROTOCOL_VERSION
+from forgeyard.workloads import images
 from forgeyard.workloads.spec import WorkloadSpec
 
 log = logging.getLogger("forgeyard.agent")
@@ -98,6 +99,9 @@ class Supervisor:
         self.keys: dict[str, tuple[Optional[str], str]] = {}
         self.guards: dict[str, list[Guard]] = {}
         self.guard_errors: dict[str, str] = {}
+        # 1.3: replicas of workloads exposed at /x/ (`replica_key.strip`): their guard removes the internal
+        # key before a request reaches the program, and their health checks never carry it.
+        self.strip: set[str] = set()
         self.cancels: dict[str, threading.Event] = {}
         self.stopping: set[str] = set()
         self.cache_dirty = models is not None
@@ -117,9 +121,14 @@ class Supervisor:
     def model_cache_info(self) -> Optional[dict]:
         return self.models.info() if self.models is not None else None
 
+    def new_connection(self) -> None:
+        """Revisions order the desired lists of one connection: a new one starts its own order."""
+        self.revision = -1
+
     def set_desired(self, msg: dict) -> None:
         revision = int(msg.get("revision") or 0)
         if revision and revision < self.revision:
+            log.info("Ignored an older desired state (revision %d, after %d).", revision, self.revision)
             return  # an older list, overtaken
         self.revision = revision
         desired = {}
@@ -139,6 +148,12 @@ class Supervisor:
                     self.keys[r["id"]] = (env or None, str(key["value"]))
                     r["key_env"] = env or None
                     r["guarded"] = True
+                    if key.get("strip") is True and not env:
+                        self.strip.add(r["id"])
+                    else:
+                        self.strip.discard(r["id"])
+            if "image_ids" in r:
+                r = {**r, "image_ids": images.parse_check(r["image_ids"])}
             desired[r["id"]] = r
         self.desired = desired
         self.full_due = True
@@ -288,6 +303,9 @@ class Supervisor:
             if want.get("guarded") and not rec.guarded:
                 rec.guarded = True
                 self._save(rec)
+            if want.get("image_ids") and want["image_ids"] != rec.image_ids:
+                rec.image_ids = want["image_ids"]  # a record from before the server or agent knew them
+                self._save(rec)
             if (self._guarded(rec) and rec.id in self.keys and rec.state in LIVE and rec.ports
                     and not plan.guarded(rec.ports)):
                 # Started by an agent without the guard: its engine listens on the published port
@@ -313,6 +331,7 @@ class Supervisor:
                          spec=want.get("spec") or {}, gpus=list(want.get("gpus") or []))
             rec.key_env = want.get("key_env")
             rec.guarded = bool(want.get("guarded"))
+            rec.image_ids = want.get("image_ids")
             if rec.runtime not in self.runtimes:
                 rec.state, rec.final, rec.reason = "failed", True, f"this agent has no {rec.runtime} runtime"
             elif want.get("model") is not None or want.get("engine") is not None:
@@ -608,6 +627,7 @@ class Supervisor:
             self.stopping.discard(rec.id)
             self.tokens.pop(rec.id, None)
             self.keys.pop(rec.id, None)
+            self.strip.discard(rec.id)
 
     async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
@@ -668,7 +688,8 @@ class Supervisor:
 
     async def _probe(self, rec: Record, h: dict, host: str, port: int) -> None:
         args = (h.get("type", "http"), host, port, h.get("path") or "/", float(h.get("timeout") or 3))
-        key = self.keys.get(rec.id) if self._guarded(rec) else None
+        # An exposed workload's program never sees the internal key, not even from its health check.
+        key = self.keys.get(rec.id) if self._guarded(rec) and rec.id not in self.strip else None
         if key is not None:  # speaches guards /health too; vLLM and llama.cpp ignore it there
             err = await asyncio.to_thread(self.prober, *args, headers={"Authorization": f"Bearer {key[1]}"})
         else:
@@ -714,6 +735,7 @@ class Supervisor:
             for g in guards:
                 if not g.has_key(key[1] if key else None):
                     g.set_key(key[1] if key else None)
+                g.strip_auth = rec.id in self.strip
             return None
         opened: list[Guard] = []
         for p in rec.ports:
@@ -721,7 +743,7 @@ class Supervisor:
                 continue
             g = Guard(listen=(p.get("address") or self.address, int(p["host_port"])),
                       upstream=(plan.LOOPBACK, int(p["internal"])), key=key[1] if key else None,
-                      name=f"{rec.workload} #{rec.ordinal}")
+                      name=f"{rec.workload} #{rec.ordinal}", strip_auth=rec.id in self.strip)
             try:
                 await g.start()
             except OSError as e:

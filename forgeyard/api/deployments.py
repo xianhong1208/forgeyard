@@ -26,6 +26,8 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
                           utcnow)
+from forgeyard.gateway import imagegen, proxy
+from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
 from forgeyard.models import catalog, routes, scheduler
 from forgeyard.models.catalog import Context
@@ -39,6 +41,7 @@ router = APIRouter(prefix="/api", tags=["deployments"])
 SERVED_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 CLIP = Path(__file__).resolve().parent.parent / "models" / "assets" / "jfk-ask-not.mp3"
 TRY_TIMEOUT = 120.0
+TRY_IMAGE_TIMEOUT = 300.0     # an image on a CPU takes a while
 
 
 class DeploymentIn(BaseModel):
@@ -121,7 +124,8 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
     params = normalise_params(recipe, body.params)
     device = "gpu" if params["gpus"] > 0 else "cpu"
     try:
-        est = compute_estimate(m.meta or {}, recipe, params, device=device, gpu_context=scheduler.gpu_context())
+        est = compute_estimate(m.meta or {}, recipe, params, device=device, gpu_context=scheduler.gpu_context(),
+                               task=m.task)
     except EstimateError as e:
         raise fail(422, "cannot_estimate", str(e)) from None
     if body.machine_id is not None and db.get(Node, body.machine_id) is None:
@@ -278,6 +282,7 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
                  machine_id=body.machine_id, gpus=ctx.gpus, share=ctx.share, estimate=ctx.estimate.amount,
                  token=bool(d.hf_token) or None)
     db.commit()
+    proxy.forget_ceiling()  # its max_body_mb may raise how much the gateway reads
     placement.place_and_poke(db)
     db.expire_all()
     d = _get(db, d.id)
@@ -347,18 +352,35 @@ class TryIn(BaseModel):
 
 
 def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None) -> tuple[int, dict | str]:
-    headers = {"Content-Type": content_type, "Accept": "application/json"}
+    speech = content_type == SPEECH_CTYPE
+    plain = speech or content_type == IMAGE_CTYPE
+    headers = {"Content-Type": "application/json" if plain else content_type, "Accept": "*/*" if speech else "application/json"}
     if secret:
         headers["Authorization"] = f"Bearer {secret}"  # the replica's internal key (M4)
     req = urllib.request.Request(url, data=body, method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=TRY_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=TRY_IMAGE_TIMEOUT if content_type == IMAGE_CTYPE else TRY_TIMEOUT) as resp:
             raw = resp.read(2 * 1024**2)
             status = resp.status
     except urllib.error.HTTPError as e:
         raw, status = e.read(64 * 1024), e.code
     except (urllib.error.URLError, OSError) as e:
         raise fail(502, "replica_unreachable", f"The replica did not answer: {getattr(e, 'reason', e)}") from None
+    if content_type == IMAGE_CTYPE and 200 <= status < 300:
+        # Image generation (1.3): what came back, not the image itself.
+        try:
+            obj = json.loads(raw)
+            items = [i for i in obj.get("data") or [] if isinstance(i, dict) and isinstance(i.get("b64_json"), str)]
+        except (ValueError, AttributeError):
+            return status, raw[:4000].decode("utf-8", "replace")
+        dims = imagegen.b64_dims(items[0]["b64_json"]) if items else None
+        return status, {"images": len(items), "width": dims[0] if dims else None, "height": dims[1] if dims else None,
+                        "format": dims[2] if dims else None,
+                        "bytes": sum(len(i["b64_json"]) * 3 // 4 for i in items)}
+    if speech and 200 <= status < 300:
+        # Text to speech (1.3): a WAV file, summarised by its length (the audio itself is not returned).
+        ms = wav_ms(raw[:8192], len(raw))
+        return status, {"audio_bytes": len(raw), "audio_ms": ms, "riff": raw[:4] == b"RIFF"}
     text = raw.decode("utf-8", "replace")
     try:
         return status, json.loads(text)
@@ -366,8 +388,19 @@ def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None
         return status, text[:4000]
 
 
-def try_request(api: str, upstream: str, text: Optional[str]) -> tuple[str, bytes, str]:
+SPEECH_CTYPE = "application/json; tts"   # marks the speech test request (sent as plain application/json)
+IMAGE_CTYPE = "application/json; image"  # and the image one (1.3)
+TRY_IMAGE_SIZE = 256                       # small, so a CPU answers within the time a test waits
+
+
+def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[str] = None,
+                draws: Optional[imagegen.Draws] = None) -> tuple[str, bytes, str]:
     """(path, body, content type) of a small request in the route's protocol."""
+    if api == "openai-images":
+        # One small image, in the request shape this engine takes.
+        side = TRY_IMAGE_SIZE if draws is None else max(draws.multiple, TRY_IMAGE_SIZE // draws.multiple * draws.multiple)
+        ask = imagegen.Ask(prompt=text or "A lighthouse on a rocky coast at sunset, oil painting.", n=1, size=(side, side))
+        return "/v1/images/generations", json.dumps(imagegen.body_for(ask, draws, upstream)).encode(), IMAGE_CTYPE
     if api == "openai-chat":
         # enable_thinking=False: reasoning models (Qwen3) answer straight away; other templates ignore it.
         body = {"model": upstream, "max_tokens": 128, "temperature": 0,
@@ -390,7 +423,43 @@ def try_request(api: str, upstream: str, text: Optional[str]) -> tuple[str, byte
                   "Content-Type: audio/mpeg\r\n\r\n").encode() + CLIP.read_bytes() + b"\r\n",
                  f"--{boundary}--\r\n".encode()]
         return "/v1/audio/transcriptions", b"".join(parts), f"multipart/form-data; boundary={boundary}"
+    if api == "openai-speech":
+        # WAV: every speech engine makes it, and its header gives the length.
+        body = {"model": upstream, "input": text or "Hello from Forgeyard. This is a short test.", "response_format": "wav"}
+        if voice:
+            body["voice"] = voice
+        return "/v1/audio/speech", json.dumps(body).encode(), SPEECH_CTYPE
     raise fail(422, "unsupported", f"No test request for {api}.")
+
+
+def _try_videos(target: dict, replica) -> dict:
+    """Video models (1.3): a video takes minutes, so the check asks the replica's video API for its job list
+    (with its internal key) instead of making one; the Playground's Video panel makes one."""
+    import time
+
+    url = target["url"].rstrip("/") + "/v1/videos"
+    headers = {"Accept": "application/json"}
+    if replica is not None and replica.secret:
+        headers["Authorization"] = f"Bearer {replica.secret}"
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TRY_TIMEOUT) as resp:
+            raw, status = resp.read(256 * 1024), resp.status
+    except urllib.error.HTTPError as e:
+        raw, status = e.read(64 * 1024), e.code
+    except (urllib.error.URLError, OSError) as e:
+        raise fail(502, "replica_unreachable", f"The replica did not answer: {getattr(e, 'reason', e)}") from None
+    ms = int((time.monotonic() - started) * 1000)
+    try:
+        answer = json.loads(raw)
+    except ValueError:
+        answer = raw[:4000].decode("utf-8", "replace")
+    ok = 200 <= status < 300
+    n = len(answer.get("data") or []) if ok and isinstance(answer, dict) else 0
+    summary = (f"The replica's video API answers ({n} job{'s' if n != 1 else ''} on it). A video takes minutes: make "
+               "one in the Playground.") if ok else str(answer)[:500]
+    return {"status": status, "ok": ok, "api": "openai-videos", "endpoint": url, "request": {"method": "GET"},
+            "summary": summary, "answer": {"jobs": n} if ok else None, "ms": ms}
 
 
 def summarise(api: str, answer) -> str:
@@ -409,6 +478,14 @@ def summarise(api: str, answer) -> str:
             return "; ".join(f"#{r['index']} {r['relevance_score']:.3f}" for r in res)
         if api == "openai-audio":
             return str(answer.get("text", "")).strip()[:1000]
+        if api == "openai-images":
+            fmt = (answer.get("format") or "image").upper()
+            return (f"{answer.get('images', 0)} image ({answer.get('width')}x{answer.get('height')} {fmt}, "
+                    f"{answer.get('bytes', 0) / 1024:.0f} KiB)")
+        if api == "openai-speech":
+            ms = answer.get("audio_ms")
+            return (f"{ms / 1000:.1f} s of audio" if ms else "audio of unknown length") + \
+                f" (WAV, {answer.get('audio_bytes', 0) / 1024:.0f} KiB)"
     except (KeyError, IndexError, TypeError, ValueError):
         pass
     return json.dumps(answer)[:500]
@@ -427,12 +504,19 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     target = next(iter(routes.endpoints(d.workload, ready_only=True)), None)
     if route is None or target is None:
         raise fail(409, "not_ready", "No replica of this deployment is ready yet.")
-    path, payload, ctype = try_request(route.api, upstream, body.input)
+    recipe = catalog.get_recipe(db, d.recipe)
+    voice = recipe.speech.default_voice if recipe is not None and recipe.tts is not None else None
+    draws = imagegen.draws(recipe, d.params or {}, d.model.meta if d.model is not None else None) \
+        if recipe is not None and "image" in recipe.tasks else None
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
+    if route.api == "openai-videos":
+        return _try_videos(target, replica)
+    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)
     return {"status": status, "ok": 200 <= status < 300, "api": route.api, "endpoint": target["url"] + path.lstrip("/"),
-            "request": json.loads(payload) if ctype == "application/json" else {"model": upstream, "file": CLIP.name},
+            "request": json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE)
+            else {"model": upstream, "file": CLIP.name},
             "summary": summarise(route.api, answer) if 200 <= status < 300 else str(answer)[:500],
             "answer": answer if isinstance(answer, dict) else None, "ms": ms}

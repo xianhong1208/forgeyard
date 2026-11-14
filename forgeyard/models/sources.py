@@ -188,19 +188,47 @@ def _matches(path: str, patterns) -> bool:
 def detect_format(paths: list[str], library: Optional[str] = None) -> str:
     if any(p.lower().endswith(".gguf") for p in paths):
         return "gguf"
+    # A diffusers pipeline (1.3, image generation): model_index.json names its components (transformer or
+    # unet, text encoders, vae, scheduler), each in its own directory.
+    if "model_index.json" in paths and any(p.endswith(".safetensors") and "/" in p for p in paths):
+        return "diffusers"
     if any(p.endswith(".safetensors") for p in paths):
         return "safetensors"
     if (library or "").lower() == "ctranslate2" or ("model.bin" in paths and any(p.startswith("vocabulary") for p in paths)):
         return "ctranslate2"
+    # ONNX speech models for speaches (Kokoro, Piper): model.onnx with its voices or config (1.3).
+    if any(p.lower().endswith(".onnx") for p in paths):
+        return "onnx"
     return "other"
 
 
+def is_mmproj(path: str) -> bool:
+    """A llama.cpp multimodal projector (mmproj-*.gguf), not a model of its own."""
+    return posixpath.basename(path).lower().startswith("mmproj") and path.lower().endswith(".gguf")
+
+
+def mmproj_choices(files: list[dict]) -> list[dict]:
+    return sorted(({"path": f["path"], "size": int(f.get("size") or 0)} for f in files if is_mmproj(f["path"])),
+                  key=lambda e: e["path"])
+
+
+def default_mmproj(choices: list[dict]) -> Optional[str]:
+    """F16 when there is one (llama.cpp's own default precision for projectors), else BF16, Q8_0,
+    or the first."""
+    for want in ("f16", "bf16", "q8_0"):
+        for c in choices:
+            if re.search(rf"[-_.]{want}\.gguf$", c["path"].lower()):
+                return c["path"]
+    return choices[0]["path"] if choices else None
+
+
 def gguf_choices(files: list[dict]) -> list[dict]:
-    """GGUF files a deployment can pick from; split models appear once (their first part, total size)."""
+    """GGUF files a deployment can pick from; split models appear once (their first part, total size).
+    Projector files (mmproj) are not models and are chosen separately."""
     out: dict[str, dict] = {}
     for f in files:
         path = f["path"]
-        if not path.lower().endswith(".gguf"):
+        if not path.lower().endswith(".gguf") or is_mmproj(path):
             continue
         m = SPLIT_GGUF_RE.match(path)
         if m:
@@ -221,15 +249,150 @@ def default_gguf(choices: list[dict]) -> Optional[str]:
     return choices[0]["path"] if len(choices) == 1 else None
 
 
-def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None) -> list[dict]:
-    """The files a deployment downloads, from the repository's file list."""
+# ------------------------------------------------------------------ image models (1.3)
+# Weight files of a diffusers component that the default from_pretrained() does not load: precision
+# variants (diffusion_pytorch_model.fp16.safetensors) when the plain file is there too.
+_VARIANT_RE = re.compile(r"^(.+?)\.(fp16|bf16|fp32|non_ema|ema|fp8|int8|nf4)((?:-\d{5}-of-\d{5})?\.[^/]+)$")
+DIFFUSERS_WEIGHTS = (".safetensors",)
+
+
+def diffusers_components(index: dict) -> list[str]:
+    """The component directories a diffusers pipeline loads: model_index.json's entries that are a
+    [library, class] pair with both set (scheduler and tokenizer included; feature extractors and the
+    like that a text-to-image pipeline leaves out are null there)."""
+    out = []
+    for k, v in (index or {}).items():
+        if k.startswith("_") or not isinstance(v, list) or len(v) != 2 or not all(isinstance(x, str) and x for x in v):
+            continue
+        if re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}", k):
+            out.append(k)
+    return out
+
+
+def select_diffusers(files: list[dict], components: list[str]) -> list[dict]:
+    """A diffusers pipeline's files: model_index.json and the components' directories, each with one
+    set of weights (the plain files when the precision variants are there too), and nothing at the
+    repository's top level besides (single-file checkpoints such as sd_xl_base_1.0.safetensors would
+    double the download)."""
+    comps = set(components)
+    paths = {f["path"] for f in files}
+    out = []
+    for f in files:
+        path = f["path"]
+        if path == "model_index.json":
+            out.append(f)
+            continue
+        if "/" not in path or path.split("/", 1)[0] not in comps or "/." in path:
+            continue
+        if _matches(path, _OTHER_WEIGHTS + ("openvino_model.*",)):
+            continue
+        m = _VARIANT_RE.match(path)
+        if m and path.endswith(DIFFUSERS_WEIGHTS) and (m.group(1) + m.group(3)) in paths:
+            continue          # a precision variant of a file that is there
+        if m and path.endswith(".json") and (m.group(1) + m.group(3)) in paths:
+            continue          # its index (diffusion_pytorch_model.fp16.safetensors.index.json)
+        out.append(f)
+    if len(out) > MAX_FILES:
+        raise SourceError(f"the repository has more than {MAX_FILES} files to download")
+    return out
+
+
+# Separate component files of an image model for stable-diffusion.cpp, recognised by name: the VAE
+# (ae.safetensors, ae-f16.gguf, sdxl_vae.safetensors), the language-model text encoder of Z-Image,
+# Qwen-Image and FLUX.2 (qwen_3_4b-Q8_0.gguf, qwen_2.5_vl_7b…, mistral…), T5-XXL and the CLIP encoders.
+_COMPONENT_RE = {
+    "vae": re.compile(r"(^|[-_.])(vae|ae)([-_.]|$)"),
+    "llm": re.compile(r"(^|[-_.])(qwen|mistral|llm|gemma|llama)"),
+    "t5xxl": re.compile(r"(^|[-_.])(t5xxl|umt5|t5)([-_.]|$)"),
+    "clip_l": re.compile(r"(^|[-_.])clip[-_.]?l([-_.]|$)"),
+    "clip_g": re.compile(r"(^|[-_.])clip[-_.]?g([-_.]|$)"),
+}
+_PRECISION_ORDER = ("q8_0", "f16", "bf16", "fp16", "q6_k", "q5_k", "q5_0", "q4_k", "q4_0")
+
+
+def component_role(path: str) -> Optional[str]:
+    name = posixpath.basename(path).lower()
+    if not name.endswith((".gguf", ".safetensors")) or name.startswith(("taesd", "taef", "tae_", "tae-")):
+        return None
+    for role, rx in _COMPONENT_RE.items():
+        if rx.search(name.rsplit(".", 1)[0]):
+            return role
+    return None
+
+
+def image_components(files: list[dict], chosen: Optional[str]) -> dict[str, str]:
+    """{role: path} for the component files of an image model beside its main file: one per role, the
+    most precise of the usual choices (Q8_0, then F16 / BF16, then smaller quantisations)."""
+    found: dict[str, list[str]] = {}
+    for f in files:
+        path = f["path"]
+        if path == chosen or path.startswith(".") or "/." in path:
+            continue
+        role = component_role(path)
+        if role:
+            found.setdefault(role, []).append(path)
+
+    def rank(role: str, path: str) -> tuple:
+        low = path.lower()
+        # A VAE is small: its unquantised safetensors (what the model cards use) before a GGUF of it.
+        fmt = 0 if role != "vae" or low.endswith(".safetensors") else 1
+        return (fmt, next((i for i, p in enumerate(_PRECISION_ORDER) if p in low), len(_PRECISION_ORDER)), path)
+
+    return {role: sorted(paths, key=lambda p: rank(role, p))[0] for role, paths in found.items()}
+
+
+def image_size_guess(name: str) -> tuple[int, int]:
+    """(native side in pixels, the multiple sizes must be of) for a single checkpoint file, from its name:
+    Stable Diffusion 1.x 512, 2.x (768 checkpoints) 768, others (SDXL and the diffusion transformers) 1024."""
+    low = posixpath.basename(name).lower()
+    if re.search(r"(v1[-_.]?[45]|sd[-_]?1[-_.]?[45x]|sd15|stable-diffusion-v1)", low):
+        return 512, 64
+    if re.search(r"(v2[-_.]?[01]?_768|768-v|sd2.*768)", low):
+        return 768, 64
+    if re.search(r"(v2[-_.]?[01]|sd2|stable-diffusion-2)", low):
+        return 512, 64
+    if re.search(r"(sdxl|sd_xl|xl[-_]base|xl[-_]turbo)", low):
+        return 1024, 64
+    return 1024, 16
+
+
+def image_file_choices(files: list[dict], fmt: str) -> list[dict]:
+    """The files an image model for stable-diffusion.cpp can start from: its GGUF or safetensors files
+    that are not a component of another (a VAE, a text encoder), split GGUFs once."""
+    ext = ".gguf" if fmt == "gguf" else ".safetensors"
+    keep = [f for f in files if f["path"].lower().endswith(ext) and component_role(f["path"]) is None
+            and not posixpath.basename(f["path"]).lower().startswith(("taesd", "taef"))]
+    if fmt == "gguf":
+        return gguf_choices(keep)
+    return sorted(({"path": f["path"], "size": int(f.get("size") or 0), "parts": 1} for f in keep), key=lambda e: e["path"])
+
+
+def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmproj: Optional[str] = None,
+                 components: Optional[dict] = None) -> list[dict]:
+    """The files a deployment downloads, from the repository's file list (and, for a GGUF vision
+    model, its projector file). `components` (1.3, image models for stable-diffusion.cpp): the model
+    is the chosen file (GGUF or safetensors) and these component files, nothing else."""
+    if components is not None:
+        want = set(components.values())
+        out = []
+        for f in files:
+            path = f["path"]
+            m, c = SPLIT_GGUF_RE.match(path), SPLIT_GGUF_RE.match(chosen or "")
+            if path == chosen or path in want or (m and c and m.group(1) == c.group(1) and m.group(3) == c.group(3)):
+                out.append(f)
+        if not any(f["path"] == chosen or SPLIT_GGUF_RE.match(f["path"]) for f in out):
+            raise SourceError(f"{chosen} is not a file of this repository")
+        return out
     out = []
     for f in files:
         path = f["path"]
         if path in (".gitattributes",) or path.startswith(".") or "/." in path:
             continue
         if fmt == "gguf":
-            if not path.lower().endswith(".gguf"):
+            if mmproj and path == mmproj:
+                out.append(f)
+                continue
+            if not path.lower().endswith(".gguf") or is_mmproj(path):
                 continue
             if chosen is None:
                 raise SourceError("choose which GGUF file to use")
@@ -252,6 +415,9 @@ TASK_FROM_PIPELINE = {
     "feature-extraction": "embed", "sentence-similarity": "embed",
     "text-ranking": "rerank", "text-classification": "rerank",
     "automatic-speech-recognition": "asr",
+    "text-to-speech": "tts",
+    "text-to-image": "image",
+    "text-to-video": "video",
 }
 
 

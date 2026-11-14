@@ -1,17 +1,19 @@
-import { IconBrain, IconCloud, IconCpu, IconMicrophone, IconPlus, IconSortDescending, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
+import { AdvisorBanner } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
-import { Notice, PageHeader } from "../components/ui";
+import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
+import { engineCarry } from "../lib/engineImages";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { API_KIND } from "../lib/gateway";
-import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, params } from "../lib/models";
+import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
 import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, targetName, targetWhere, tiers } from "../lib/routing";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RoutesResponse } from "../lib/types";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RecipeVariant, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
@@ -21,6 +23,9 @@ const KINDS = [
   { icon: IconVectorBezier2, name: "Embeddings", detail: "vLLM's pooling runner; small, shares a GPU" },
   { icon: IconSortDescending, name: "Rerank", detail: "vLLM's pooling runner; small, shares a GPU" },
   { icon: IconMicrophone, name: "Speech to text", detail: "faster-whisper behind speaches" },
+  { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
+  { icon: IconPhotoAi, name: "Images", detail: "diffusers pipelines on vLLM-Omni; stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA) and CPUs" },
+  { icon: IconMovie, name: "Video", detail: "Wan text-to-video pipelines on vLLM-Omni (NVIDIA), as jobs at /v1/videos" },
 ];
 
 export function ModelsPage() {
@@ -41,6 +46,7 @@ export function ModelsPage() {
           <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
       />
+      <AdvisorBanner pages={["models"]} />
       <HelpLinks>
         <HelpLink page="quick-start" anchor="5-add-a-recommended-model">How do I deploy my first model?</HelpLink>
         <HelpLink page="concepts" anchor="models-recipes-and-estimates">Models, recipes and estimates</HelpLink>
@@ -204,7 +210,7 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
         ) : (
           <div className="table-wrap">
             <table className="table catalog-table">
-              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Recipes</th><th /></tr></thead>
+              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Recipes</th><th /></tr></thead>
               <tbody>{data.models.map((m) => <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload} />)}</tbody>
             </table>
           </div>
@@ -234,16 +240,32 @@ function ModelRow({ m, canManage, canDeploy, reload }: { m: CatalogModel; canMan
   return (
     <tr>
       <td data-label="Model">
+        <div className="cell-stack">
         <div className="strong">{m.title ?? m.name}</div>
         <div className="mono small muted" title={m.revision ?? undefined}>{m.source}{m.file ? ` · ${m.file}` : ""}{m.revision ? ` @ ${m.revision.slice(0, 10)}` : ""}</div>
+        {m.mmproj && <div className="mono small muted" title="Projector file (llama.cpp --mmproj)">+ {m.mmproj.path}</div>}
         {error && <div className="field-error">{error}</div>}
+        </div>
       </td>
-      <td data-label="Task"><span className="chip">{m.task_label}</span></td>
+      <td data-label="Task">
+        <div className="chip-row">
+          <span className="chip">{m.task_label}</span>
+          {m.modalities && m.modalities.length > 0 && (
+            <span className="chip chip-tone-run" title="What it takes in chat besides text"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>
+          )}
+        </div>
+      </td>
       <td data-label="Format" className="mono small">{m.format}</td>
       <td data-label="Size" className="small">{bytes(m.size_bytes)}</td>
       <td data-label="Architecture" className="small">
         {m.summary.architecture ?? "—"}{m.summary.params ? ` · ${params(m.summary.params)} params` : ""}
         {m.summary.layers ? <div className="muted">{m.summary.layers} layers{m.summary.kv_heads ? `, ${m.summary.kv_heads} KV heads` : ""}{m.summary.max_context ? `, ${m.summary.max_context} ctx` : ""}</div> : null}
+      </td>
+      <td data-label="Licence" className="small">
+        <div className="cell-stack">
+          <span className="mono nowrap" title={m.license_from ? `The licence of ${m.license_from.replace("hf://", "")}, which this is converted from` : undefined}>{m.license ?? "—"}{m.license_from ? "*" : ""}</span>
+          {m.gated && <span className="muted"><IconLock size={11} aria-hidden="true" /> gated</span>}
+        </div>
       </td>
       <td data-label="Recipes" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
       <td className="cell-actions">
@@ -275,7 +297,57 @@ function RecipeCard({ r }: { r: Recipe }) {
           </li>
         ))}
       </ul>
+      <OfflineImages name={r.name} variants={r.variants} />
     </article>
+  );
+}
+
+// The commands that carry a container image to a machine that cannot reach the registry, for the
+// variant picked (one at a time: the recipe card is narrow and the commands are long).
+function OfflineImages({ name, variants }: { name: string; variants: RecipeVariant[] }) {
+  const byImage = new Map<string, { names: string[]; checked: boolean }>();
+  for (const v of variants) {
+    if (v.runtime !== "container" || !v.image) continue;
+    const entry = byImage.get(v.image) ?? { names: [], checked: Boolean(v.image_check) };
+    entry.names.push(v.name);
+    byImage.set(v.image, entry);
+  }
+  const images = [...byImage];
+  const [picked, setPicked] = useState(0);
+  if (images.length === 0) return null;
+  const [image, e] = images[Math.min(picked, images.length - 1)];
+  const carry = engineCarry(image);
+  const what = e.names.join(", ");
+  const id = `offline-${name}`;
+  return (
+    <details className="docker-advanced recipe-offline">
+      <summary className="small">Machine without registry access: load the image</summary>
+      <p className="small">
+        On a machine that can reach the registry, save the image of the variant you need to a file. Copy it over, load it, and
+        deploy as usual. <HelpLink page="how-to" anchor="offline-machines">Offline machines</HelpLink>
+      </p>
+      {images.length > 1 && (
+        <div className="field recipe-offline-pick">
+          <label htmlFor={id}>Variant</label>
+          <select id={id} value={Math.min(picked, images.length - 1)} onChange={(ev) => setPicked(Number(ev.target.value))}>
+            {images.map(([img, x], n) => <option key={img} value={n}>{x.names.join(", ")} · {imageTag(img).split("/").pop()}</option>)}
+          </select>
+        </div>
+      )}
+      <p className="small mono muted recipe-offline-image">{imageTag(image)}</p>
+      <CopyBlock value={carry.save} label={`Save command for ${what}`} />
+      <CopyBox value={carry.load} label={`Load command for ${what}`} />
+      <p className="small muted">
+        {e.checked ? (
+          <>Forgeyard checks the loaded image against the ids recorded for it, so this recipe works offline as it is.</>
+        ) : (
+          <>
+            No ids are recorded for this image, so Forgeyard cannot check a loaded copy: name it by its tag only (without{" "}
+            <code>@sha256:…</code>) in the recipe.
+          </>
+        )}
+      </p>
+    </details>
   );
 }
 

@@ -68,6 +68,33 @@ Isolation, in short:
 Only admins and operators create workloads, because whoever can create one can run code on the
 machines. Model deployments are workloads too; most people only deploy models.
 
+## Workloads at /x/
+
+A service workload can be **exposed** behind the gateway: programs then call its own HTTP API at
+`https://<server>:7860/x/<name>/…` with an API key, as they call models at `/v1`. Use it for what is
+not a chat, embedding, speech or image model: object detection, segmentation, depth, Triton or KServe
+models, a FastAPI or BentoML service.
+
+- **Behind the key guard.** An exposed workload runs behind the agent's key guard, like a model
+  replica: the program listens on loopback, the guard holds the published port, and only the gateway
+  gets through. The guard removes the gateway's internal key before the request reaches the program.
+  Every port of the workload is guarded, not only the exposed one.
+- **Keys opt in.** A key's **Workloads** setting says which exposed workloads it may call: *None*
+  (the default, and every key from before 1.3), *Listed workloads* or *Every exposed workload*.
+- **APIs, not web pages.** Answers are sandboxed (`Content-Security-Policy: sandbox`), cookies and
+  CORS headers are removed, and redirects are rewritten under `/x/<name>`. A browser UI (Gradio,
+  Jupyter) does not work at `/x/`. WebSockets and gRPC are not passed on in 1.3, and nothing spills
+  to the cloud.
+- **Counted.** Requests, errors, bytes in and out, busy time and latency go to **Usage** as the
+  model `x:<name>`; the key's requests per minute apply.
+
+Admins and operators expose a workload, when they create it or later on its page. See
+[Expose a workload at /x/](how-to.md#expose-a-workload-at-x).
+
+Three **templates** start the most common vision APIs this way in one step (object detection,
+segmentation, depth), on Forgeyard's own image with permissively licensed models only. See
+[Start a workload from a template](how-to.md#start-a-workload-from-a-template).
+
 ## Models, recipes and estimates
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
@@ -75,10 +102,11 @@ machines. Model deployments are workloads too; most people only deploy models.
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
 - A **recipe** says how to run a kind of model: which engine, which container image (pinned by
   digest) or release, which parameters, and how much memory it needs. Built in: `vllm` (chat on
-  NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on GPU or CPU) and
+  NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
-  concurrency you choose, the engine's own overhead and the CUDA context. The deploy page shows it,
+  concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
+  reads images, its vision encoder. The deploy page shows it,
   part by part, and where it fits, before anything is downloaded.
 - The **model cache** on each machine (`/srv/forgeyard-models` by default) keeps the downloaded
   files, checked against their checksums, shared by every replica there. Containers get their model
@@ -105,8 +133,101 @@ next one if a replica does not answer. Replicas cannot be used around it: each h
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
 The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
-streaming), embeddings, rerank and speech to text. Its requests count as `console` in Usage, and its
+streaming, and images for models that read them), embeddings, rerank and speech to text. Its **Vision**
+tab sends a picture to an exposed vision workload (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
 cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
+
+## Images, audio and video in chat
+
+Models that read images (Qwen3-VL, Gemma 3 and 4, and similar) take them in
+`/v1/chat/completions` as OpenAI's content parts. What a model takes is read when it is added to
+the catalog: from its `config.json`, or, for a GGUF model, from its **projector file**
+(`mmproj-*.gguf`), which llama.cpp needs to see images. The catalog shows it next to the licence.
+
+- Send an image as a `data:` URI, or as an `https://` URL: the **gateway downloads it** and passes
+  the data on. Engines never download anything themselves, and the gateway only fetches public
+  addresses, so a request cannot make your servers reach into your own network.
+- Each deployment takes at most a few images per request (4 by default), video only when it is
+  turned on (it is off by default: it costs memory at startup), and requests up to a size (64 MB by
+  default). These are in the deploy form's **Advanced** section; the defaults work.
+- Requests with images, audio or video stay on your own deployments; they never go to a cloud
+  provider.
+- Usage counts the media items; image tokens are inside the prompt tokens.
+
+## Text to speech
+
+Speech models answer `/v1/audio/speech`, OpenAI's text-to-speech call, with the audio itself. Three
+engines serve them:
+
+| Engine (recipe) | Where | Models | Languages |
+|---|---|---|---|
+| vLLM-Omni (`vllm-omni-tts`) | NVIDIA GPUs | Qwen3-TTS CustomVoice: nine built-in voices, style instructions | Chinese (with Mandarin dialects), English and eight more |
+| llama.cpp (`llama-cpp`) | AMD GPUs and APUs (Vulkan or ROCm), NVIDIA, the CPU | TTS GGUFs with their projector: Qwen3-TTS, Chatterbox | Qwen3-TTS: Chinese, English and more; Chatterbox: English |
+| speaches (`speaches-tts`) | the CPU, NVIDIA | Kokoro-82M (51 voices), Piper voices | English (and other Latin-script languages) |
+
+- A speech model has **voices** of its own (the Playground lists them). OpenAI's voice names such as
+  `alloy` are replaced by the model's default voice, and the answer says which.
+- **Voice cloning is not available**: no reference recordings, no uploaded voices. Only the voices a
+  model was made with speak.
+- Each deployment takes at most so many characters per request (*Longest input*, under
+  **Advanced**). The default fits what the engine can speak in one go.
+- Usage counts the **characters** spoken and the **length of the audio**. For a key's tokens per
+  minute, a character counts as a token.
+- Speech stays on your own deployments; it never goes to a cloud provider.
+
+## Images
+
+Image models answer `/v1/images/generations`, OpenAI's image call, with the images as base64. Two
+engines serve them:
+
+| Engine (recipe) | Where | Models |
+|---|---|---|
+| vLLM-Omni (`vllm-omni-image`) | NVIDIA GPUs | diffusers pipelines (a repository with `model_index.json`): Z-Image-Turbo, Stable Diffusion XL, FLUX.1-schnell, Qwen-Image |
+| stable-diffusion.cpp (`sd-cpp`) | AMD GPUs and APUs (Vulkan), NVIDIA (CUDA), the CPU (a process, no Docker) | GGUF or single files: Stable Diffusion 1.5 / XL checkpoints, Z-Image and FLUX with their text encoder and VAE beside them in the same repository |
+
+- **Base64 only.** Forgeyard keeps no copy of the images it makes, so it cannot hand out a URL:
+  `response_format: url` is refused. Decode `data[].b64_json`.
+- **Caps per deployment, each with a working default:** the most images per request (4), the largest
+  side (the model's own: 512 for Stable Diffusion 1.5, 1024 for the others), the most steps (50). The
+  memory estimate is sized for them, so raising a cap raises the estimate.
+- **One at a time, then a queue.** An image takes seconds on a GPU and minutes on a CPU. A replica
+  works on one request at a time (*Requests at once*); the others wait in the gateway, in order. When
+  the queue is full, a request gets 429 with `Retry-After`.
+- **Licences.** The catalog shows each model's licence and whether it is gated. The recommended list
+  holds only Apache-2.0 and OpenRAIL models; FLUX.1-dev, SD-Turbo and SD3.5 are not on it (non-commercial
+  or revenue-limited terms), though they can be added by hand. OpenRAIL models (SDXL, SD 1.5) may be used
+  commercially, but their licence forbids some uses: their cards mark the licence and link to it, as they
+  do for Gemma and Llama.
+- **No prompt filtering.** Forgeyard checks a request's shape and caps, not what it asks for.
+- Usage counts the **images**, their **kilopixels** and the **busy time** (GPU time on a GPU).
+- Images stay on your own deployments; they never go to a cloud provider.
+
+## Video
+
+Video models answer `/v1/videos`, OpenAI's Videos API. A video takes minutes, so it is a **job**: the
+request answers at once with the job (`queued`), you poll it until it is `completed` (or `failed`), then
+fetch the MP4. One engine serves it: vLLM-Omni (recipe `vllm-omni-video`) on NVIDIA GPUs, with Wan
+text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
+
+- **A job lives on one replica.** The gateway sends it to the ready replica with the fewest jobs, and
+  asks that replica, and only that one, for its status and its file. The engine keeps its jobs in
+  memory and its files on its own disk.
+- **A replica that goes takes its jobs with it.** When the replica is stopped, moved or deleted, or its
+  engine restarts, its jobs report `failed` with the reason (`replica_gone`, `replica_restarted`,
+  `video_lost`): ask again. A finished video whose replica went answers 410 for its content.
+- **Jobs survive a server restart.** They are in the server's database and the replicas keep working;
+  the server picks them up again.
+- **Results expire.** A finished video can be fetched for the deployment's *Keep results* (1,440
+  minutes, a day); then it is deleted on the replica and its content answers 410. The engine also
+  sweeps its own old files an hour after that, in case a deletion was missed.
+- **Caps per deployment, each with a working default:** the longest video (5 s), the largest size (the
+  model's own: 832x480 for Wan2.1, 1280x704 for Wan2.2), jobs waiting or being made (8), of those one
+  key's (2), and the longest a job may take (an hour). The memory estimate is sized for the longest,
+  largest video.
+- **Text to video only** in 1.3: image-to-video references are refused.
+- **The prompt is not kept**, and a key sees only its own jobs.
+- Usage counts **one request per video**, its **length** and the **busy time** (GPU time).
+- Videos stay on your own deployments; they never go to a cloud provider.
 
 ## API keys, limits and usage
 

@@ -218,3 +218,23 @@ def test_fy_guide_010_the_reference_lists_every_command_and_install_option():
         assert "forgeyard serve" in text and "forgeyard secrets reset" in text
         for f in flags | install_flags:
             assert re.search(rf"(?<![\w-]){re.escape(f)}(?![\w-])", text), (lang, f)
+
+
+def test_fy_guide_011_the_roadmap_in_both_languages_stays_in_step():
+    """FY-GUIDE-011: ROADMAP.md and ROADMAP.zh-TW.md both exist and link to each other, have the
+    same number of `##` and `###` headings, and list the same versions in the "Next" table; the
+    Chinese README links the Chinese roadmap."""
+    en_path, zh_path = ROOT / "ROADMAP.md", ROOT / "ROADMAP.zh-TW.md"
+    assert en_path.is_file() and zh_path.is_file()
+    en, zh = en_path.read_text(), zh_path.read_text()
+    assert "[繁體中文](ROADMAP.zh-TW.md)" in en
+    assert "[English](ROADMAP.md)" in zh
+    for level in ("##", "###"):
+        heading = re.compile(rf"^{level} \S", re.M)
+        assert len(heading.findall(en)) == len(heading.findall(zh)), level
+    row = re.compile(r"^\|\s*\*\*(\d+(?:\.\d+)+)", re.M)
+    en_versions = set(row.findall(en))
+    assert {"1.3.1", "1.4", "1.9"} <= en_versions
+    assert set(row.findall(zh)) == en_versions
+    readme = (ROOT / "README.zh-TW.md").read_text()
+    assert "(ROADMAP.zh-TW.md)" in readme and "(ROADMAP.md)" not in readme

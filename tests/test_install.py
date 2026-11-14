@@ -23,7 +23,7 @@ from forgeyard import __version__
 from forgeyard.agent import state
 from forgeyard.agent.inventory import SIMULATION_ENV
 from forgeyard.config import get_settings
-from forgeyard.install import commands, wheel
+from forgeyard.install import commands, images, wheel
 from forgeyard.security import tls
 from tests.conftest import OWNER, SETUP_TOKEN, make_client
 from tests.tls_helpers import LiveTLS, ca_of, free_port, https
@@ -134,12 +134,13 @@ def test_fy_inst_004_a_proxy_that_terminates_tls_counts_and_odd_hosts_are_refuse
             commands.install_script(bad)
 
 
-def test_fy_inst_005_the_machines_page_gets_three_ways_that_pin_the_ca(owner):
+def test_fy_inst_005_the_machines_page_gets_three_ways_that_pin_the_ca(owner, monkeypatch):
     """FY-INST-005: a new join token comes with the one-line install (CA check first, then the
     script, with the token and the pin), the Docker build and run commands for NVIDIA, AMD and
     CPU (host network, the socket, the state volume, the cache at the same path, the pin), a config
     file and the manual commands; all with the same fingerprint."""
     tls.ensure()  # what the first start does (the TestClient does not start a TLS listener)
+    monkeypatch.setattr(images, "DOCKERHUB_NAMESPACE", "")  # a local build (FY-INST-013 covers the published image)
     owner.base_url = "https://localhost"
     r = owner.post("/api/machines/join-tokens")
     assert r.status_code == 201
@@ -441,8 +442,8 @@ def test_fy_img_002_the_image_has_what_the_hosts_libamd_smi_loads():
     libdrm_amdgpu.so; without them amdsmi read no ASIC information on the real Strix Halo. The smoke
     test loads both inside the image."""
     text = (ROOT / "Dockerfile.agent").read_text()
-    install = re.search(r"apt-get install -y --no-install-recommends ([^\\\n]+)", text).group(1).split()
-    assert {"libdrm2", "libdrm-amdgpu1"} <= set(install)
+    installs = re.findall(r"apt-get install -y --no-install-recommends ([^;\\\n]+)", text)
+    assert {"libdrm2", "libdrm-amdgpu1"} <= {p for i in installs for p in i.split()}
     assert 'ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so"' in text and "ldconfig" in text
     smoke = (ROOT / "scripts" / "agent_image_smoke.sh").read_text()
     assert 'ctypes.CDLL("libdrm.so.2"); ctypes.CDLL("libdrm_amdgpu.so")' in smoke

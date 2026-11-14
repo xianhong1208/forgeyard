@@ -217,6 +217,10 @@ class Workload(Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 1.3: exposed behind the gateway at /x/<name> (forgeyard/gateway/passthrough.py). Kept beside the
+    # spec, never in it (agents validate the spec with extra="forbid"), and changeable while it runs.
+    # NULL: not exposed.
+    gateway: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     replicas: Mapped[list["Replica"]] = relationship(
         back_populates="workload", cascade="all, delete-orphan", order_by="Replica.ordinal"
@@ -304,8 +308,8 @@ class CatalogModel(Base):
     ref: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)       # what was asked: main, a tag
     revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)   # the commit it is pinned to
     file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)      # the GGUF file
-    format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2
-    task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr
+    format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2 | onnx | diffusers
+    task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr | tts | image
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     # Extra engine arguments per recipe (e.g. Qwen3-Reranker's --hf-overrides for vllm-pooling).
     engine_args: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -362,7 +366,7 @@ class GatewayRoute(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     served_name: Mapped[str] = mapped_column(String(128), unique=True)
-    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio
+    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio | openai-speech | openai-images
     # The deployment this route was created with (NULL: a route an admin made, e.g. cloud only).
     deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"),
                                                          unique=True, nullable=True)
@@ -497,6 +501,11 @@ class ApiKey(Base):
     # (forgeyard/gateway/budgets.py); NULL: no budget. Its owner may set it unless an admin did.
     budget_micros: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     budget_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Which exposed workloads (/x/<name>, 1.3) this key may call: none (every key from before 1.3),
+    # listed (the names in workload_list) or all.
+    workloads: Mapped[str] = mapped_column(String(8), default="none", server_default="none")
+    workload_list: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    workloads_locked_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -542,6 +551,18 @@ class UsageDaily(Base):
     unpriced: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cost_reported: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cost_estimated: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Units of the model kinds added in 1.3 (migration 0012), 0 on rows from before: media items sent
+    # in chat (images, audio clips, videos), characters turned into speech, images generated and their
+    # size in kilopixels, audio or video produced in milliseconds, request and answer bytes, and the
+    # milliseconds a replica was busy with the requests.
+    media_items: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    characters: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    images: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    kilopixels: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    media_ms: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    bytes_in: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    bytes_out: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    busy_ms: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     latency_ms_sum: Mapped[int] = mapped_column(BigInteger, default=0)
     # Request counts per latency bucket (forgeyard/gateway/usage.py: BUCKETS_MS), for p50 / p95.
     latency_buckets: Mapped[list] = mapped_column(JSON, default=list)
@@ -580,6 +601,55 @@ class ServerSetting(Base):
     value: Mapped[dict] = mapped_column(JSON, default=dict)
     updated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+
+class VideoJob(Base):
+    """A video being made (1.3, /v1/videos): asked through the gateway, made by one replica, which holds
+    the job and its file (vLLM-Omni keeps both on the replica). The gateway relays its status and its
+    content from that replica; a replica that is gone or restarted takes its jobs with it, and the job
+    then reports `failed` (or, made already, its content is gone). Results expire after the
+    deployment's `keep_minutes` and are deleted on the replica; the row goes a week later.
+
+    Who may see it: the API key that asked (source "api", key_id) or, from the Playground, the person
+    (source "console", user_id). `public_id` is the opaque id clients use; another key's id answers 404.
+    The prompt is not stored."""
+
+    __tablename__ = "video_jobs"
+    __table_args__ = (Index("ix_video_jobs_owner", "source", "key_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(40), unique=True)       # video_<32 hex>, random
+    source: Mapped[str] = mapped_column(String(8))                        # api | console
+    key_id: Mapped[int] = mapped_column(Integer, default=0)               # 0: the console
+    user_id: Mapped[int] = mapped_column(Integer, default=0)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    model: Mapped[str] = mapped_column(String(128))                       # the served name asked for
+    deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="SET NULL"),
+                                                         nullable=True, index=True)
+    replica_uid: Mapped[str] = mapped_column(String(32))                  # the replica that holds it
+    replica_epoch: Mapped[str] = mapped_column(String(32))                # its generation:restarts then
+    upstream_id: Mapped[str] = mapped_column(String(128))                 # the engine's own job id
+    status: Mapped[str] = mapped_column(String(16), index=True)           # queued | in_progress | completed | failed
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    size: Mapped[str] = mapped_column(String(16))                         # WIDTHxHEIGHT asked
+    seconds: Mapped[int] = mapped_column(Integer)                         # seconds asked
+    frames: Mapped[int] = mapped_column(Integer)                          # frames asked of the engine
+    fps: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # what was made, once made
+    gpus: Mapped[int] = mapped_column(Integer, default=1)
+    error_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A job at work past this is stopped and reported failed (the deployment's timeout when asked).
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    keep_s: Mapped[int] = mapped_column(Integer)                          # how long a result is kept, when asked
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Its file is gone from the replica: expired and deleted there, or lost with the replica.
+    removed: Mapped[bool] = mapped_column(Boolean, default=False)
+    counted: Mapped[bool] = mapped_column(Boolean, default=False)         # its usage is recorded
 
 
 _engine = None

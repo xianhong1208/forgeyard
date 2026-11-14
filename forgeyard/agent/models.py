@@ -24,8 +24,10 @@ import logging
 import os
 import posixpath
 import shutil
+import stat
 import tarfile
 import threading
+import zipfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -46,6 +48,38 @@ Progress = Callable[[str, int, int, Optional[str]], None]   # phase, done, total
 
 class CacheError(Exception):
     """The model or engine cannot be made available; the message is shown on the replica."""
+
+
+MAX_UNZIPPED = 16 * 1024**3
+
+
+def unzip(archive: Path, dest: Path) -> None:
+    """Unpack a .zip engine release (1.3: stable-diffusion.cpp publishes only .zip) as safely as the
+    tar.gz path does: relative paths inside `dest` only, no links (a zip has none that Python makes),
+    regular files and directories only, the executable bit kept from the archive's Unix mode, and at
+    most MAX_UNZIPPED bytes in all."""
+    total = 0
+    with zipfile.ZipFile(archive) as z:
+        for info in z.infolist():
+            name = info.filename
+            try:
+                rel = sources.safe_relpath(name.rstrip("/"))
+            except sources.SourceError:
+                raise CacheError(f"the engine archive has an unsafe path {name!r}") from None
+            mode = (info.external_attr >> 16) & 0o177777
+            if mode and stat.S_ISLNK(mode):
+                raise CacheError(f"the engine archive has a link {name!r}")
+            target = dest / rel
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            total += info.file_size
+            if total > MAX_UNZIPPED:
+                raise CacheError("the engine archive unpacks to more than 16 GiB")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(info) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out, CHUNK)
+            os.chmod(target, 0o755 if mode & 0o111 else 0o644)
 
 
 class Cancelled(CacheError):
@@ -425,9 +459,12 @@ class ModelCache:
                 shutil.rmtree(tmp, ignore_errors=True)
                 tmp.mkdir()
                 try:
-                    with tarfile.open(part) as tar:
-                        tar.extractall(tmp, filter="data")  # no absolute paths, no escaping links
-                except (tarfile.TarError, OSError) as e:
+                    if zipfile.is_zipfile(part):
+                        unzip(part, tmp)
+                    else:
+                        with tarfile.open(part) as tar:
+                            tar.extractall(tmp, filter="data")  # no absolute paths, no escaping links
+                except (tarfile.TarError, zipfile.BadZipFile, CacheError, OSError) as e:
                     shutil.rmtree(tmp, ignore_errors=True)
                     raise CacheError(f"cannot unpack the engine: {e}") from None
                 for p in [tmp, *tmp.rglob("*")]:

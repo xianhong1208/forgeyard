@@ -91,6 +91,63 @@ helpers. That is enough for every built-in engine image, since they are all publ
   then finds it locally;
 - or fix the helper (`docker-credential-<name> list` must work for the user the agent runs as).
 
+## The Forgeyard image does not pull
+
+**You see:** `docker run` of the agent (or the server) stops with one of:
+
+- `manifest unknown` or `not found`: no image with that tag;
+- `no matching manifest for linux/arm/v7` (or another platform);
+- `toomanyrequests: You have reached your pull rate limit`;
+- `dial tcp: lookup registry-1.docker.io … no such host`, or a timeout.
+
+**Why, and what to do:**
+
+- **No such tag.** The agent's tag is the server's version. A server built from source between two
+  releases names a version that was never published. Build the image on the machine instead
+  ([Offline machines, or build it yourself](how-to.md#offline-machines-or-build-it-yourself)), or
+  point `AGENT_IMAGE` at a published version.
+- **Another platform.** The images are built for linux/amd64 and linux/arm64 only; `uname -m` must
+  say `x86_64` or `aarch64`.
+- **Rate limit.** Docker Hub limits anonymous pulls per address. Sign in once on that machine
+  (`sudo docker login`), wait, or pull through a mirror and set `AGENT_IMAGE` to it.
+- **No access to Docker Hub** (no internet, a firewall or a DNS filter): carry the image over as a
+  file: pull and `docker save` it on a machine that can, then `docker load` it on this one
+  ([how](how-to.md#offline-machines-or-build-it-yourself)). The agent's `docker run` then finds it
+  locally. The models' engine images need the same on such a machine:
+  [Offline machines](how-to.md#offline-machines).
+
+## A replica fails: the image is not on this machine
+
+**You see:** a deployment's replica fails with `the image is not on this machine and could not be
+pulled; on an offline machine, docker load the image (Forgeyard checks it by its recorded ids)`,
+followed by Docker's error (`lookup ghcr.io … no such host`, a timeout, `pull access denied`).
+
+**Why:** the engine image is not on the machine, neither by its pinned digest nor by its tag, and the
+machine cannot reach the registry.
+
+**Do:** carry the image over as a file and load it: [Offline machines](how-to.md#offline-machines).
+The recipe's page lists the commands for each of its images. The agent tries again by itself; the
+next start uses the loaded image. If the machine should reach the registry, check its DNS and proxy
+first (`docker pull` of the image there must work).
+
+When the message instead says `… is loaded but Forgeyard has no recorded ids for this image`, the
+image comes from a custom recipe: Forgeyard cannot check a loaded copy of it, so name it by its tag
+only (without `@sha256:…`) in that recipe.
+
+## A replica fails: a different image is loaded under that tag
+
+**You see:** `a different image is loaded under ghcr.io/…:<tag> (its ids do not match the recorded
+ones), so it is not run, and the pinned image could not be pulled`.
+
+**Why:** an image is loaded under the recipe's tag, but it is not the image the recipe pins: another
+build (an older engine under a reused tag, a tag moved on the registry), another platform's layers
+claimed as this one, or an image changed and tagged locally. Forgeyard never runs it in place of the
+pinned image, and asks the registry for the pinned one, which this machine cannot reach.
+
+**Do:** load the image the recipe names, pulled by its digest as in
+[Offline machines](how-to.md#offline-machines); `docker load` replaces the tag. `docker image inspect
+<tag>` shows what is loaded now.
+
 ## Hugging Face downloads are slow
 
 **You see:** a deployment stays in *downloading* for a long time; its page shows the progress and
@@ -148,6 +205,22 @@ line says why it was not chosen:
 **Do:** free memory on a card (stop something), allow more cards ([GPU access](how-to.md#restrict-gpus-on-a-shared-machine)),
 lower the context length or concurrency, choose a quantised or smaller model, or deploy it to wait
 until room appears (the API's `"wait": true`).
+
+## A replica stays pending
+
+**You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
+is online, and the replica stays **pending** with no reason: nothing is downloaded or started.
+
+**Why:** the machine's agent is not acting on its work list. Agents up to 1.2.0 kept the number of the
+last work list they received across connections, and a server restarted since then numbered its
+lists from 1 again: the agent took them all for old ones and dropped them without a word. A server
+from 1.3.0 numbers them so that this cannot happen, also for those older agents; an agent from
+1.3.0 starts a new count on every connection and logs any list it drops.
+
+**Do:** run the server's own version on the agent ([upgrades](how-to.md#upgrade-the-server-and-the-agents)); until then,
+restarting the agent (`sudo systemctl restart forgeyard-agent`, or `docker restart forgeyard-agent`)
+makes it take its work at once. **Setup health** flags agents older than the server, and replicas
+that waited for a machine for more than 15 minutes.
 
 ## Errors from /v1: 401, 403, 429, 503
 
@@ -230,6 +303,23 @@ provider answered.
 - Any other 4xx keeps the provider's status, code and message, prefixed with the provider's name.
 
 More in [Cloud providers](cloud-providers.md#troubleshooting).
+
+## Errors from /x/
+
+- **403 `workloads_not_allowed`:** the key's **Workloads at /x/** is *None*, the default. Change it
+  on **API keys**.
+- **404 `workload_not_found`:** the name is wrong, the workload is not exposed (its page, **Gateway**),
+  or the key lists other workloads.
+- **503 `no_ready_replica` and "runs without the agent's key guard":** the replica's agent is older
+  than 1.3, or the workload was exposed while running and has not restarted behind the guard yet.
+  Update the agent, or stop and start the workload.
+- **The replica stops with "listens beyond loopback":** behind the key guard a process must listen on
+  `127.0.0.1`. Use `${BIND_ADDRESS}` in its arguments instead of `0.0.0.0`.
+- **A page, its links or its redirects are wrong:** the prefix is stripped, so the service sees `/`.
+  Set its root path to `/x/<name>` (FastAPI `root_path`, `--root-path`, `GRADIO_ROOT_PATH`), or read
+  `X-Forwarded-Prefix`. A browser UI does not work at `/x/`: answers are sandboxed.
+- **A WebSocket or gRPC client fails:** neither is passed on in 1.3. Use plain HTTP, or SSE for a
+  stream.
 
 ## A program does not trust the certificate
 
@@ -329,6 +419,119 @@ local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 admin allows under **Cloud for keys**. In the Playground, admins may use the cloud and everyone else
 gets that most. Details: [When a request spills](cloud-providers.md#when-a-request-spills).
 
+## An image is refused
+
+**You see:** a chat request with an image (or audio, or video) answers 400 or 413; the `code` says
+why. Nothing of it reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `media_not_supported` | The model does not read that medium: a text model, a GGUF model added without its projector file, or video while the deployment's *Videos per request* is 0 | Use a vision model; add the GGUF model again with its projector; turn video on under **Advanced** |
+| `too_many_media_items` | More images than the deployment's *Images per request* (4) | Send fewer, or raise it |
+| `media_url_refused` | The URL is `file://` or another scheme, has credentials, or its host is (or redirects to) a private, loopback, link-local or metadata address | Send a public `https://` URL or a `data:` URI. For an image server on your LAN, set `MEDIA_ALLOW_PRIVATE_HOSTS=true` on the server |
+| `media_fetch_failed` | The gateway could not download it: the server answered another status than 200, took longer than 20 s, redirected more than 3 times, or sent something that is not an image | Open the URL yourself; some sites refuse downloads by programs. Send the file as a `data:` URI instead |
+| `media_too_large` (413) | The file is larger than `MEDIA_FETCH_MAX_MB` (20) | Send a smaller image, or raise the setting |
+| `request_too_large` (413) | The request, with images inlined as base64 (a third larger than the files), is over the deployment's *Largest request* (64 MiB) | Send smaller images, or raise it under **Advanced** |
+| `file_input_not_supported` | A `file` part (PDF): no built-in engine takes files, and the gateway does not convert them | Send the pages as images, or the text |
+| `media_local_only` | The model is served only by cloud providers; media stay on your own deployments | Use a local vision model |
+
+A vision model on vLLM that **does not start after video was turned on**: vLLM reserves memory for
+a long video at startup and is left with too little for the KV cache. Lower the context length, or
+turn video off again.
+
+## Speech is refused, or sounds wrong
+
+**You see:** `/v1/audio/speech` answers 400; the `code` says why. Nothing reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `voice_cloning_not_supported` | The request carries a reference recording (`ref_audio`, `speaker_ref_b64`, …), a voice given as audio or a link, or `task_type: "Base"`; or a program tried to upload a voice | Use one of the model's voices: `GET /v1/audio/voices?model=…` |
+| `input_too_long` | More characters than the deployment's *Longest input* (by default a quarter of the context, 1,024, for vLLM-Omni and llama.cpp; 4,096 for speaches) | Split the text into sentences or paragraphs, or raise it under **Advanced** (and the context with it) |
+| `unsupported_response_format` | The engine does not make that format (mp3 or opus from llama.cpp, opus or aac from speaches) | Ask for one it makes; the message lists them |
+| `stream_format_not_supported` | `stream_format: sse` to llama.cpp or speaches | Use `audio`, or leave it out |
+| `language_not_supported` | Chinese, Japanese or Korean to speaches: its released versions delete those characters | Use a Qwen3-TTS deployment |
+
+**The audio is cut off at the end:** llama.cpp stops at `n_predict` audio frames; the gateway sets
+ten a character (at least 512, at most the context) when the request gives none. A model that speaks
+slowly may need more: send `n_predict` yourself, and keep it within the deployment's context.
+
+**The Chinese is read in English, or badly:** on llama.cpp, Qwen3-TTS speaks English unless it gets
+`lang`. The gateway sets it from Chinese, Japanese or Korean characters; for text mostly in Latin
+letters, send `"lang": "zh"` yourself.
+
+**The voice is not the one asked for:** OpenAI's names (`alloy`, `nova`, …) are not the model's
+voices; the gateway uses the model's default voice and names it in `X-Forgeyard-Voice`. Ask for one
+the model lists.
+
+**Streaming sends everything at the end:** some models make the whole utterance before any audio
+comes out (Chatterbox on llama.cpp does). Qwen3-TTS streams.
+
+## An image request is refused, or slow
+
+**You see:** `/v1/images/generations` answers 400; the `code` says why. Nothing reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `response_format_not_supported` | `response_format: url`. Forgeyard keeps no copies of images, so it has no URL to give | Leave it out (or `b64_json`) and decode `data[].b64_json` |
+| `too_many_images` | `n` over the deployment's *Images per request* | Ask for fewer, or raise it (memory grows with it on vLLM-Omni) |
+| `image_too_large` | A side over *Largest side* (by default the model's own size) | Ask for a smaller size, or raise *Largest side* under **Advanced** |
+| `invalid_size` | Not `WIDTHxHEIGHT`, or sides that are not multiples of 16 (64 for Stable Diffusion's UNet) | Use the size the message suggests |
+| `too_many_steps` | `num_inference_steps` over *Most steps* | Ask for fewer |
+| `invalid_request` | No prompt, or `<sd_cpp_extra_args>` in it | Send a prompt; use `num_inference_steps`, `seed`, `negative_prompt` instead |
+
+**429 `queue_full`:** the deployment is busy and its queue is full. Wait `Retry-After` seconds, add a
+replica, or raise *Queue length*. **503 `queue_timeout`:** a request waited longer than *Timeout*.
+
+**504 `upstream_timeout`:** making the images took longer than the deployment's *Timeout* (600 s for
+vLLM-Omni, 1,800 s for stable-diffusion.cpp). On a CPU, ask for a smaller size, fewer steps or fewer
+images, or raise *Timeout*.
+
+**An `engine_error` about memory:** a vLLM-Omni deployment holds what its largest request needed. If
+a shared card runs out, lower *Images per request* or *Largest side*, or turn on *Offload to host
+memory* (slower) or *VAE tiling* under **Advanced**.
+
+**The image does not look like the model's examples:** stable-diffusion.cpp takes a model's sampling
+settings from the catalog entry's engine arguments (Z-Image-Turbo: `--cfg-scale 1 --steps 8`). A model
+added from search has none: add them to its entry.
+
+**An `sd-cpp` replica does not start on a CPU machine:** its process engine needs glibc 2.39 or newer
+(Ubuntu 24.04, Debian 13) and a 1.3 agent, which unpacks `.zip` engines. An older agent shows "cannot
+unpack .zip engines" in the placement: update it.
+
+## A video fails, or is refused
+
+**You see:** `POST /v1/videos` answers 400; the `code` says why. Nothing reached the engine.
+
+| `code` | Why | Do |
+|---|---|---|
+| `video_too_long` | `seconds` over the deployment's *Longest video* | Ask for fewer seconds, or raise it (memory grows with it) |
+| `video_too_large` | A side over *Largest side*, or more pixels a frame than the default size scaled to it | Ask for the model's own size (832x480 for Wan2.1), or raise *Largest side* |
+| `invalid_size` | Not `WIDTHxHEIGHT`, or sides that are not multiples of 16 (32 for Wan2.2-5B) | Use the size the message suggests |
+| `input_reference_not_supported` | An image or video reference: only text to video in 1.3 | Describe it in the prompt |
+| `too_many_steps`, `prompt_too_long` | Over *Most steps* or *Longest prompt* | Ask for fewer, or shorten the prompt |
+
+**429 `too_many_jobs`:** your key (or you, in the Playground) already has *Jobs per key* videos waiting
+or being made on that deployment. **429 `queue_full`:** the deployment holds *Jobs at once*. Wait
+`Retry-After` seconds, or delete a job you no longer need.
+
+**It stays `queued`:** a replica makes one video at a time; the others wait on it. Each takes minutes.
+Add a replica, or ask for shorter or smaller videos.
+
+**It reports `failed`:** `error.code` says why.
+
+| `error.code` | Why | Do |
+|---|---|---|
+| `replica_restarted`, `video_lost` | The replica's engine restarted, and its jobs (kept in its memory) went with it | Ask again; look at the deployment's events for why it restarted |
+| `replica_gone` | The replica was stopped, moved or deleted | Ask again once the deployment is running |
+| `timed_out` | Not done within the deployment's *Longest job* | Ask for a shorter or smaller video, or raise *Longest job* |
+| `generation_failed` | The engine failed the video; its message is in `error.message` | Read it; an out-of-memory error: see below |
+
+**410 `video_expired`:** the video was older than *Keep results* and was deleted. **410
+`video_lost`:** its replica restarted or was stopped after it was made. Ask for it again either way.
+
+**Out of GPU memory on a shared card:** lower *Longest video* or *Largest side*, or turn on *Offload to
+host memory* under **Advanced** (the text encoder alone is 11 GB; slower videos).
+
 ## Cost shows requests without a price
 
 **You see:** **Usage** → **Cost** counts requests under *Without a price*, and says the cost above
@@ -361,6 +564,26 @@ limits = "rlimit"
 
 or `--limits rlimit`, or `FORGEYARD_LIMITS=rlimit` (the agent's Docker image sets this already).
 Process workloads then get resource limits per process, and their CPU is counted, not capped.
+
+## The server refuses a setting, or warns about one
+
+**It does not start** and the log says `Setting COOKIE_SECURE: …` (or another name): that value
+cannot be used. The message lists what the setting takes. The same goes for `TLS`, `REGISTRATION`,
+`GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX`, and for setting only one of `TLS_CERT_FILE` and
+`TLS_KEY_FILE` (`HTTPS: Set both TLS_CERT_FILE and TLS_KEY_FILE, or neither`).
+
+**It starts with lines like `Settings: GATEWAY_CLOUD_DEFUALT is not a setting`**: the server ignores
+that name. Each line says why and what to do:
+
+- *is not a setting… Did you mean …?*: a typo, or a setting from another version. Fix the name in
+  `.env` or the environment.
+- *is ignored*: another setting makes it useless, e.g. `TLS_CA_FILE` without your own certificate,
+  or `MODEL_URL_HOSTS` after an admin saved **Model sources** (the saved value wins: change it in
+  the web UI).
+- *ADMIN_PASSWORD is still set*: it is only read on the first start. Remove it from `.env`.
+
+Admins see the same lines, with a link to the fix, under **Get started → Setup health**
+([Check the setup health](how-to.md#check-the-setup-health)).
 
 ## What to include in a bug report
 

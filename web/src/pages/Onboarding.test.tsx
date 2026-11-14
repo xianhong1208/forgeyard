@@ -155,12 +155,15 @@ const recommended: RecommendedResponse = {
   models: [
     { name: "qwen3-reranker-0.6b", title: "Qwen3 Reranker 0.6B", source: "hf://Qwen/Qwen3-Reranker-0.6B", revision: null, file: null, group: "qwen3",
       task: "rerank", format: "safetensors", recipe: "vllm-pooling", device: "gpu", download_gib: 1.1, memory_gib: 3.4, gated: false,
-      engine_args: { "vllm-pooling": ["--hf-overrides", "{}"] }, note: "Re-orders results.", in_catalog: null },
+      engine_args: { "vllm-pooling": ["--hf-overrides", "{}"] }, note: "Re-orders results.", in_catalog: null,
+      license: "apache-2.0", inputs: [], mmproj: null },
     { name: "qwen3-1.7b-gguf", title: "Qwen3 1.7B (GGUF, for the CPU)", source: "hf://ggml-org/Qwen3-1.7B-GGUF", revision: null,
       file: "Qwen3-1.7B-Q4_K_M.gguf", group: "qwen3", task: "chat", format: "gguf", recipe: "llama-cpp", device: "cpu", download_gib: 1.2,
-      memory_gib: 2.9, gated: false, engine_args: {}, note: "CPU.", in_catalog: "qwen-cpu" },
+      memory_gib: 2.9, gated: false, engine_args: {}, note: "CPU.", in_catalog: "qwen-cpu",
+      license: "apache-2.0", inputs: [], mmproj: null },
     { name: "gemma-3-4b-it", title: "Gemma 3 4B", source: "hf://google/gemma-3-4b-it", revision: null, file: null, group: "llm", task: "chat",
-      format: "safetensors", recipe: "vllm", device: "gpu", download_gib: 8, memory_gib: 14.7, gated: true, engine_args: {}, note: "Google.", in_catalog: null },
+      format: "safetensors", recipe: "vllm", device: "gpu", download_gib: 8, memory_gib: 14.7, gated: true, engine_args: {}, note: "Google.", in_catalog: null,
+      license: "gemma", inputs: ["image"], mmproj: null },
   ],
 };
 
@@ -199,7 +202,11 @@ describe("add a model", () => {
     expect(screen.getByText("In the catalog as qwen-cpu")).toBeTruthy();
     const gemma = screen.getByText("Gemma 3 4B").closest("li")!;
     expect(within(gemma).getByText(/Needs a Hugging Face token and accepting the licence/)).toBeTruthy();
+    // a licence with terms says so and links the licence; a permissive one does not (FY-WEB-174)
+    expect(within(gemma).getByText(/Gemma terms: commercial use is allowed/)).toBeTruthy();
+    expect(within(gemma).getByRole("link", { name: "The licence" }).getAttribute("href")).toBe("https://huggingface.co/google/gemma-3-4b-it");
     const rr = screen.getByText("Qwen3 Reranker 0.6B").closest("li")!;
+    expect(within(rr).queryByRole("link", { name: "The licence" })).toBeNull();
     await act(async () => fireEvent.click(within(rr).getByRole("button", { name: "Choose" })));
     expect(await screen.findByText("Fits now on a100 (GPU #4).")).toBeTruthy();
     expect(screen.getByText("3.38 GiB")).toBeTruthy();

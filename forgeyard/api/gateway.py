@@ -5,7 +5,13 @@ web page cannot use a signed-in browser against it; for the same reason the cons
 does not apply (clients are not browsers). The host check (421) does. No CORS headers are sent.
 
 The console's playground (`/api/playground/…`) goes through the same code with the signed-in
-user, under the console's own rules (cookie + CSRF), counted as "console" in usage.
+user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Vision tab
+(1.3, `/api/playground/vision/…`) reaches exposed vision workloads the way /x/ does
+(forgeyard/gateway/vision.py).
+
+Videos (1.3, /v1/videos) are jobs (forgeyard/gateway/videojobs.py): POST answers at once, GET polls,
+GET …/content fetches the MP4, DELETE cancels or deletes. The Playground's `/api/playground/videos…`
+are the same, for the signed-in person's own jobs.
 """
 
 from __future__ import annotations
@@ -18,7 +24,8 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from forgeyard.db import new_session
-from forgeyard.gateway import keys, proxy
+from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs, vision
+from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.security import sessions
@@ -71,10 +78,22 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
     parsed = None
     try:
         kind = proxy.ENDPOINTS[endpoint][1]
-        body = await proxy.read_body(request)
+        body = await proxy.read_body(request, await run_in_threadpool(proxy.body_ceiling))
         parsed = proxy.parse_body(body, request.headers.get("content-type", ""), kind)
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
+        if endpoint == speech.ENDPOINT:
+            route = proxy.fit_speech(route, parsed)  # 1.3: checked, voice cloning refused, counted
+        elif endpoint == imagegen.ENDPOINT:
+            route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
+        # Images, audio and video (1.3): parts rebuilt, the route narrowed to what can take them,
+        # media URLs fetched by the gateway, and the size checked again with them inlined.
+        media = proxy.scan_media(parsed, endpoint)
+        route = proxy.fit_route(route, parsed, parsed.size)
+        if media is not None and media.fetch:
+            await gmedia.fetch_all(media)
+            parsed.size = proxy.body_size(parsed)
+            route = proxy.fit_route(route, parsed, parsed.size)
     except GatewayError as e:
         if parsed is not None:  # a body without a model is not counted under any model
             proxy.record(caller, parsed.model, route.deployment_id if route else None, e.status, started)
@@ -128,6 +147,148 @@ async def translations(request: Request):
     return await _api(request, "audio/translations")
 
 
+@router.post("/audio/speech")
+async def speech_create(request: Request):
+    return await _api(request, "audio/speech")
+
+
+@router.post("/images/generations")
+async def images_generate(request: Request):
+    return await _api(request, "images/generations")
+
+
+@router.post("/images/edits")
+@router.post("/images/variations")
+async def images_edit(request: Request):
+    """Image edits and variations: not in 1.3 (vLLM-Omni's edit route fetches any URL it is given, and
+    variations are a retired DALL-E 2 feature)."""
+    try:
+        await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+    except GatewayError as e:
+        return e.response()
+    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway does not edit images or make variations "
+                                                       "(yet): it serves /v1/images/generations.").response()
+
+
+# ------------------------------------------------------------------ videos (1.3)
+async def _caller(request: Request) -> KeyCaller:
+    return await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+
+
+@router.post("/videos")
+async def videos_create(request: Request):
+    """A video job (OpenAI's Videos API): JSON or multipart (prompt, model, seconds, size)."""
+    try:
+        caller = await _caller(request)
+    except GatewayError as e:
+        return e.response()
+    return await videojobs.submit(request, caller)
+
+
+@router.get("/videos")
+async def videos_list(request: Request, limit: Optional[str] = None, after: Optional[str] = None,
+                      order: Optional[str] = None):
+    try:
+        return await videojobs.listing(await _caller(request), limit, after, order)
+    except GatewayError as e:
+        return e.response()
+
+
+@router.get("/videos/{video_id}")
+async def videos_get(video_id: str, request: Request):
+    try:
+        return await videojobs.retrieve(video_id, await _caller(request))
+    except GatewayError as e:
+        return e.response()
+
+
+@router.get("/videos/{video_id}/content")
+async def videos_content(video_id: str, request: Request):
+    try:
+        return await videojobs.content(video_id, await _caller(request), request)
+    except GatewayError as e:
+        return e.response()
+
+
+@router.delete("/videos/{video_id}")
+async def videos_delete(video_id: str, request: Request):
+    try:
+        return await videojobs.remove(video_id, await _caller(request))
+    except GatewayError as e:
+        return e.response()
+
+
+@router.post("/videos/{video_id}/remix")
+@router.post("/videos/sync")
+async def videos_other(request: Request, video_id: str = ""):
+    """Remixing a video (OpenAI's) and vLLM-Omni's synchronous videos: not offered."""
+    try:
+        await _caller(request)
+    except GatewayError as e:
+        return e.response()
+    return GatewayError(404, "endpoint_not_supported", "Forgeyard's gateway makes videos as jobs only: POST /v1/videos, "
+                                                       "then poll GET /v1/videos/{id}. Remixing is not offered.").response()
+
+
+def _speaks_out(sp: Optional[speech.Speaks]) -> dict:
+    """What a client can ask of the deployment besides the voice."""
+    if sp is None:
+        return {}
+    return {"formats": list(sp.formats), "default_format": sp.default_format, "stream_formats": list(sp.stream_formats),
+            "max_input_chars": sp.max_chars}
+
+
+async def voices(model: Optional[str], caller: KeyCaller):
+    """A speech model's voices (1.3), asked of one of its ready replicas (kept a few minutes):
+    {"object": "list", "model", "voices": [{"id", "name", "language"?, "gender"?}], "default", and what it
+    makes: "formats", "default_format", "stream_formats", "max_input_chars"}."""
+    if not model:
+        raise GatewayError(400, "invalid_request", "Say which model: GET /v1/audio/voices?model=<model>.", param="model")
+    route = await run_in_threadpool(_route, model)
+    route = proxy.check_access(caller, route, model, speech.ENDPOINT)
+    groups = [g for tier in route.tiers for g in tier.locals]
+    ready = [(g, t) for g in groups for t in g.replicas]
+    if not ready:
+        known = next((g.speaks.model_voices for g in groups if g.speaks and g.speaks.model_voices), ())
+        if known:
+            sp = next(g.speaks for g in groups if g.speaks)
+            default = sp.default_voice if sp.default_voice in known else known[0]
+            return {"object": "list", "model": model, "voices": [{"id": v, "name": v} for v in known], "default": default,
+                    **_speaks_out(sp)}
+        reason = "; ".join(g.reason for g in groups if g.reason)
+        raise GatewayError(503, "no_ready_replica", f"{model!r} has no ready replica. {reason}".strip())
+    t = balancer.order(f"{route.served_name}#voices", [t for _, t in ready])[0]
+    g = next(gr for gr, tr in ready if tr.uid == t.uid)
+    found = await speech.voices_for(g.deployment_id, g.speaks, proxy.client(), t.url, t.secret)
+    if found is None:
+        raise GatewayError(502, "upstream_error", f"{model!r} did not list its voices.")
+    ids = [v["id"] for v in found]
+    default = g.speaks.default_voice if g.speaks and g.speaks.default_voice in ids else (ids[0] if ids else None)
+    return {"object": "list", "model": model, "voices": found, "default": default, **_speaks_out(g.speaks)}
+
+
+@router.get("/audio/voices")
+async def list_voices(request: Request, model: Optional[str] = None):
+    try:
+        caller = await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+        return await voices(model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@router.post("/audio/voices")
+@router.delete("/audio/voices/{name:path}")
+async def upload_voice(request: Request, name: str = ""):
+    """Uploading or deleting a voice (vLLM-Omni's voice cloning): not in 1.3."""
+    try:
+        await run_in_threadpool(_authenticate, request.headers.get("authorization"))
+    except GatewayError as e:
+        return e.response()
+    return GatewayError(400, "voice_cloning_not_supported", "Voice cloning is not available: voices cannot be "
+                                                            "uploaded. GET /v1/audio/voices?model=<model> lists the "
+                                                            "model's own voices.").response()
+
+
 def _model_out(name: str, created: int) -> dict:
     return {"id": name, "object": "model", "created": created, "owned_by": "forgeyard"}
 
@@ -170,10 +331,172 @@ async def get_model(model: str, request: Request):
 async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
-                                                 "/v1/score and /v1/audio/transcriptions.").response()
+                                                 "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
+                                                 "/v1/audio/voices, /v1/images/generations and /v1/videos.").response()
 
 
 # ------------------------------------------------------------------ the console's playground
+def image_options(model: Optional[str], caller: KeyCaller) -> dict:
+    """What an image model's deployments take (1.3), for the Playground's Image tab: the most images per
+    request, the largest side, the default size, the multiple sizes must be of, the formats, the most
+    steps, the longest prompt (over every deployment of the route: what at least one takes)."""
+    if not model:
+        raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
+    route = proxy.check_access(caller, _route(model), model, imagegen.ENDPOINT)
+    ds = [g.draws for tier in route.tiers for g in tier.locals if g.draws is not None]
+    if not ds:
+        raise GatewayError(503, "no_target", f"{model!r} has no image deployment.")
+    first = ds[0]
+    return {"model": model, "max_n": max(d.max_n for d in ds), "max_side": max(d.max_side for d in ds),
+            "default_size": f"{first.width}x{first.height}", "multiple": min(d.multiple for d in ds),
+            "formats": sorted({f for d in ds for f in d.formats}, key=imagegen.FORMATS.index),
+            "max_steps": max(d.max_steps for d in ds), "max_prompt_chars": max(d.max_prompt for d in ds)}
+
+
+@console.get("/images/options")
+async def playground_image_options(request: Request, model: Optional[str] = None):
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
+                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+    try:
+        return await run_in_threadpool(image_options, model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+def video_options(model: Optional[str], caller: KeyCaller) -> dict:
+    """What a video model's deployments take (1.3), for the Playground's Video panel: sizes (the default, the
+    largest side, the multiple), lengths (the default, the longest), frames per second, the longest prompt,
+    how long results are kept (over every deployment of the route: what at least one takes)."""
+    if not model:
+        raise GatewayError(400, "invalid_request", "Say which model: ?model=<model>.", param="model")
+    route = proxy.check_access(caller, _route(model), model, videogen.ENDPOINT)
+    fs = [g.films for tier in route.tiers for g in tier.locals if g.films is not None]
+    if not fs:
+        raise GatewayError(503, "no_target", f"{model!r} has no video deployment.")
+    first = fs[0]
+    return {"model": model, "default_size": f"{first.width}x{first.height}", "max_side": max(f.max_side for f in fs),
+            "max_pixels": max(f.max_pixels for f in fs), "multiple": min(f.multiple for f in fs),
+            "seconds": first.seconds, "max_seconds": max(f.max_seconds for f in fs), "fps": first.fps,
+            "max_steps": max(f.max_steps for f in fs), "max_prompt_chars": max(f.max_prompt for f in fs),
+            "keep_minutes": max(f.keep for f in fs) // 60}
+
+
+async def _console(request: Request):
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    return caller, (None if caller is not None else _not_signed_in(reason))
+
+
+@console.get("/videos/options")
+async def playground_video_options(request: Request, model: Optional[str] = None):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await run_in_threadpool(video_options, model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.post("/videos")
+async def playground_videos_create(request: Request):
+    """A video job as the signed-in person (1.3): the /v1/videos rules, counted as "console"."""
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    return await videojobs.submit(request, caller)
+
+
+@console.get("/videos")
+async def playground_videos_list(request: Request, limit: Optional[str] = None, after: Optional[str] = None,
+                                 order: Optional[str] = None):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.listing(caller, limit, after, order)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.get("/videos/{video_id}")
+async def playground_videos_get(video_id: str, request: Request):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.retrieve(video_id, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.get("/videos/{video_id}/content")
+async def playground_videos_content(video_id: str, request: Request):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.content(video_id, caller, request)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.delete("/videos/{video_id}")
+async def playground_videos_delete(video_id: str, request: Request):
+    caller, denied = await _console(request)
+    if denied is not None:
+        return denied
+    try:
+        return await videojobs.remove(video_id, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+@console.get("/audio/voices")
+async def playground_voices(request: Request, model: Optional[str] = None):
+    """The playground's voice list for a speech model, as the signed-in user."""
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
+                                        "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+    try:
+        return await voices(model, caller)
+    except GatewayError as e:
+        return e.response()
+
+
+def _not_signed_in(reason: Optional[str]) -> JSONResponse:
+    return JSONResponse({"detail": {"code": "not_signed_in" if reason == "no_session" else "session_ended",
+                                    "message": "Sign in to continue.", "reason": reason}}, status_code=401)
+
+
+def _vision_options() -> dict:
+    db = new_session()
+    try:
+        return vision.options(db)
+    finally:
+        db.close()
+
+
+@console.get("/vision/options")
+async def playground_vision_options(request: Request):
+    """The exposed vision workloads (1.3), for the Playground's Vision tab."""
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return _not_signed_in(reason)
+    return await run_in_threadpool(_vision_options)
+
+
+@console.post("/vision/{workload}/{task}")
+async def playground_vision(workload: str, task: str, request: Request):
+    """An image to an exposed vision workload's /v1/<task> (1.3), as the signed-in user: the /x/ rules."""
+    caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
+    if caller is None:
+        return _not_signed_in(reason)
+    return await vision.handle(request, workload, task, caller)
+
+
 @console.post("/{endpoint:path}")
 async def playground(endpoint: str, request: Request):
     """The playground's requests: the same routing as /v1, as the signed-in user, without an API

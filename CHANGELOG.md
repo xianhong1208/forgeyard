@@ -6,6 +6,429 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-14
+
+More kinds of models behind the same gateway: images, audio and video in chat; text to speech at
+`/v1/audio/speech`; image generation at `/v1/images/generations`; video generation as jobs at
+`/v1/videos`; and any service workload's own HTTP API at `/x/<name>`, with ready-made object
+detection, segmentation and depth templates to try in the Playground's Vision tab. Also llama.cpp
+b12242 with a built-in Vulkan variant for AMD APUs, built-in recipes on machines without registry
+access, setup health checks, the server and agent images on Docker Hub, and `accept_all.py`, a full
+regression run on real machines.
+
+### Added
+
+- **Video generation at `/v1/videos`** (#24), OpenAI's Videos API as asynchronous jobs: `POST /v1/videos`
+  (JSON, multipart as OpenAI's SDK sends it, or a URL-encoded form: `prompt`, `model`, `seconds`, `size`,
+  and `num_inference_steps`, `guidance_scale`, `seed`, `negative_prompt`) answers at once with a job;
+  `GET /v1/videos/{id}` polls it (`queued`, `in_progress`, `completed`, `failed`); `GET
+  /v1/videos/{id}/content` streams the MP4 (`Range` passed on); `GET /v1/videos` lists the key's own
+  jobs; `DELETE /v1/videos/{id}` cancels or deletes. `input_reference` and the other image-to-video
+  references are refused (400 `input_reference_not_supported`); thumbnails, `/v1/videos/sync` and remix
+  are not offered.
+  - **`vllm-omni-video`** (new recipe): diffusers text-to-video pipelines (Wan2.1-T2V-1.3B,
+    Wan2.2-TI2V-5B) on NVIDIA with the same `vllm/vllm-omni:v0.32.0` image; the engine keeps its videos
+    inside the replica's container, with its own sweep (`FILE_TTL`) behind the gateway's expiry. Frames
+    are seconds x the model's frame rate rounded to 4k + 1 (5 s at 16 fps is 81).
+  - **Jobs stay on the replica that makes them:** a new table `video_jobs` (migration `0014_video_jobs`;
+    no existing row changes) holds the key or person, the deployment, the replica, the engine's job id,
+    the status, the size and seconds asked, the timestamps, the expiry and the error; the gateway relays
+    status, content and deletion from that replica only, and a server-side sweeper follows the jobs at
+    work every few seconds. A job whose replica restarts or goes reports `failed` with the reason
+    (`replica_restarted`, `replica_gone`, `video_lost`); a finished video's content then answers 410.
+    Jobs survive a server restart. Ids are Forgeyard's own and random; another key's id answers 404.
+    The prompt is not stored.
+  - **Caps per deployment**, each with a working default: *Default size* (the model's own), *Default
+    length* and *Longest video* (5 s), and under Advanced *Largest side*, *Frames per second*, steps,
+    *Jobs at once* (8), *Jobs per key* (2; 429 `queue_full` / `too_many_jobs` with `Retry-After`),
+    *Keep results* (1,440 minutes; then deleted on the replica, 410 `video_expired`), *Longest job*
+    (3,600 s, `timed_out`), *Longest prompt* and *Offload to host memory*.
+  - **Usage:** one request per job, recorded when it ends: the video's length in `media_ms` and the GPU
+    time in `busy_ms`; a failed job counts as an error only; one deleted while at work as 499. No cloud.
+  - **Memory estimate** for video: the weights in 16 bits, the activations per thousand tokens of the
+    longest, largest video (latent frames x patches per frame) and one frame's VAE decode; first
+    estimates (about 21.6 GiB for Wan2.1-1.3B, 32.8 GiB for Wan2.2-5B). Wan2.1-1.3B used 20.75 GiB on an A100
+    (25 of 25 acceptance checks; 832x480 for 5 s in 136 s); Wan2.2-5B is not yet run.
+  - **Catalog:** Hugging Face's `text-to-video` is the new `video` task; a diffusers repository naming
+    `WanPipeline` is read as a video model with its own size, frame rate and size multiple. A **Video**
+    group in the recommended list: Wan2.1-T2V-1.3B (pinned to `0fad780`) and Wan2.2-TI2V-5B, Apache-2.0.
+  - **Playground → Video:** a prompt, the sizes and lengths the deployment takes, the job followed until
+    it is made, the video played in the page with a download link, and the person's earlier videos;
+    through `/api/playground/videos…` with the console's sign-in and CSRF rule, counted as console. A
+    deployment's **Try it** asks a replica's video API for its jobs instead of making a video. **Usage**
+    shows the video length.
+  - `scripts/accept_video.py` (also the `video` group of `accept_all.py`) checks it on a real machine with
+    the official SDK: a video made, followed and fetched as a real MP4 (its boxes read: size, frames,
+    length), the caps, another key's 404, the per-key cap, deleting, usage, expiry, and a job failing
+    when its deployment is stopped under it.
+  - Video with stable-diffusion.cpp (AMD, CPU) is not in 1.3: its jobs return WebM, WebP or AVI inside
+    the job's JSON, not an MP4 file. No agent change: agents of 1.3 serve it as they are.
+- **Generic passthrough at `/x/<name>/…`** (#23): a service workload's own HTTP API behind the gateway,
+  for programs with an API key, any method, the prefix stripped and the query kept.
+  - **Exposing** a workload (Workloads → New workload → *Gateway*, or later on its page): admins and
+    operators; audited. Settings beside the spec, changeable while it runs, the limits collapsed:
+    port, read timeout (600 s), largest request (32 MiB), requests at once per replica and per key.
+  - **Behind the agent's key guard**, like a model replica: the program on loopback (`${BIND_ADDRESS}`
+    in a process's arguments), the guard on the published port, which checks the gateway's internal
+    key and **removes** it; health checks never carry it either. Agents announce `workload_guard`;
+    an exposed workload is placed only on them. Every port of an exposed workload is guarded.
+  - **A key's new *Workloads* setting**: *None* (the default, and every existing key, migration
+    `0013_passthrough`), *Listed workloads* or *Every exposed workload*; an admin's value on someone
+    else's key is locked, like the cloud setting. 403 `workloads_not_allowed`, 404
+    `workload_not_found`.
+  - **APIs, not web pages:** `Content-Security-Policy: sandbox`, `nosniff`, `DENY`, `no-store`, CORP and
+    `no-referrer` forced on every answer; `Set-Cookie`, `Access-Control-*`, HSTS, `Clear-Site-Data`,
+    `Alt-Svc` and `X-Forgeyard-*` dropped; client credentials and forwarded headers replaced by fresh
+    `X-Forwarded-*`, `X-Forwarded-Prefix` and `X-Request-Id`; `Location` rewritten under the prefix,
+    redirects never followed. Dot segments and encoded separators are refused (400 `invalid_path`), not
+    normalised. Answers stream as raw bytes. No WebSockets, gRPC or cloud spill in 1.3.
+  - **Limits:** the key's requests per minute, 429 `workload_busy` and `key_busy` with `Retry-After`,
+    413 `request_too_large`, 504 `upstream_timeout`; a client that goes away closes the upstream request.
+  - **Usage** as the model `x:<name>`: requests, errors, bytes in and out and busy time (new columns on
+    **Usage**), latency.
+  - `scripts/accept_x.py` (also the `passthrough` group of `accept_all.py`) checks it on real machines.
+- **Ready-made workload templates** (#23): **Workloads → Start from a template** fills the new-workload
+  form, exposed at `/x/<name>`, on an NVIDIA GPU (shared by memory) or the CPU:
+  - *Object detection*: RT-DETRv2 ResNet-18 (`POST /v1/detect`, boxes);
+  - *Segmentation*: SAM 2.1 Hiera tiny (`POST /v1/segment` with a point or a box, masks);
+  - *Depth estimation*: Depth Anything V2 Small (`POST /v1/depth`, a 16-bit depth PNG).
+  All Apache-2.0, shown with each template (no Ultralytics YOLO, AGPL-3.0; no Depth Anything Base or
+  Large, CC-BY-NC). They run Forgeyard's own **vision server image** (`images/vision`): the models baked
+  in at pinned revisions, dependencies pinned with hashes, an unprivileged user; published with each
+  release as `forgeyard-vision:X.Y.Z` (CPU, amd64 and arm64) and `X.Y.Z-cuda` (amd64, NVIDIA driver
+  580+), built and smoke-tested in CI. `GET /api/workloads/templates`. `accept_x.py --templates` (and
+  `accept_all.py --x-templates`) check them on a real machine: an image in, boxes, masks and depth out.
+- **Playground → Vision** (#47): try an exposed vision workload from the console, as yourself, without an
+  API key. Pick a workload (its task and model), drop or choose a picture (PNG, JPEG or WebP, up to the
+  workload's limit), then: **detection** draws boxes with label and score, with a score slider;
+  **segmentation** takes a click (a point) or a dragged box and lays the mask over the picture, with the
+  other masks a button away; **depth** shows the depth map beside the photo, in colour or grey. With no
+  exposed vision workload, the tab says how to start one from a template. Errors in plain words.
+  - Through the console's own routes, `GET /api/playground/vision/options` and
+    `POST /api/playground/vision/<name>/<task>`: the console's sign-in and CSRF rule, anyone signed in;
+    only exposed workloads started with `--task detect|segment|depth`, and only their `/v1/<task>` (404
+    `workload_not_found`, `unknown_task`). The request then follows the `/x/` rules: key guard, header
+    rules, body limit, concurrency, timeouts, usage under `x:<name>` as *console*. `/x/` still takes API
+    keys only.
+  - At `/x/` too: `key_concurrency` is counted per person for the Playground (it has no key), and the
+    console's `X-Forgeyard` header is removed like `X-Forgeyard-*`.
+
+- **Image generation** at `POST /v1/images/generations`, OpenAI's request shape, images back as base64
+  only, with two engines:
+  - **`vllm-omni-image`** (new recipe): diffusers pipelines (Z-Image-Turbo, Stable Diffusion XL,
+    FLUX.1-schnell, Qwen-Image) on NVIDIA with the same `vllm/vllm-omni:v0.32.0` image as text to speech,
+    the pixel cap repeated in the engine (`--max-generated-image-size`), VAE slicing, optional model
+    offload and VAE tiling.
+  - **`sd-cpp`** (new recipe): stable-diffusion.cpp's `sd-server` on AMD GPUs and APUs (Vulkan, the
+    render node only), NVIDIA GPUs (CUDA) and the CPU as a process without Docker. Its images are
+    published only under rolling tags and are pinned by digest (`master-vulkan` at build 32d516c,
+    `master-cuda` at build 3bad892, master-1094, with CUDA 12.6, so driver 560 or newer); the CPU
+    process is release `master-1043-3be2378` (later Linux releases need glibc 2.43). The first
+    `master-cuda` pin (build 465adf3) was replaced (#43): on an A100 it ran Z-Image-Turbo GGUF at about
+    45 s a step and crashed (`unspecified launch failure`). With build 3bad892 the A100 makes a
+    1024x1024 Z-Image-Turbo GGUF image in about 31 s.
+    A single checkpoint runs with `-m`, a model with separate text encoders and VAE with
+    `--diffusion-model`, `--llm` / `--t5xxl` / `--clip_l` and `--vae`; a random seed per request; on a
+    GPU `--max-vram` from the reservation.
+- **`response_format: url` is refused** (400 `response_format_not_supported`): Forgeyard keeps no copy
+  of the images it makes. `stream` is refused too (`streaming_not_supported`).
+- **Caps per deployment**, each with a working default: *Images per request* (`max_images`, 4), *Default
+  size* (the model's own), and under Advanced *Largest side* (`max_side`, the model's own), *Default
+  steps*, *Most steps* (`max_steps`, 50), *Longest prompt* (4,000), *Requests at once*, *Queue length*
+  (8), *Timeout* (600 s for vLLM-Omni, 1,800 s for stable-diffusion.cpp), *Offload to host memory* and
+  *VAE tiling*. Over a cap: 400 `too_many_images`, `image_too_large`, `invalid_size`, `too_many_steps`,
+  `prompt_too_long`, `unsupported_output_format`.
+- **A queue per deployment in the gateway:** image requests wait for a free replica in order; with the
+  queue full, 429 `queue_full` with `Retry-After`; a request that waits longer than the deployment's
+  timeout, 503 `queue_timeout`. Image requests get the deployment's own read timeout.
+- Only fields Forgeyard knows reach the engine (`negative_prompt`, `num_inference_steps`,
+  `guidance_scale`, `seed`, as fields for vLLM-Omni and as `<sd_cpp_extra_args>` for sd-server, which
+  clients may not send themselves); vLLM-Omni's `lora` path, `extra_params` and system prompts never do.
+  The answer keeps OpenAI's shape without the engines' extras; engine errors come back as
+  `engine_error`. `/v1/images/edits` and `/v1/images/variations` answer 404 `endpoint_not_supported`.
+- **Usage** counts `images`, their `kilopixels` (read from each image's header) and `busy_ms` (the
+  replica's time × the GPUs it holds), shown on **Usage**. No tokens; local only (the new
+  `openai-images` routes take no provider); no prompt filtering.
+- **Catalog:** the new `image` task (Hugging Face's `text-to-image`) and `diffusers` format; the
+  inspector reads a pipeline's components from model_index.json and their safetensors headers, and a
+  GGUF / safetensors repository for stable-diffusion.cpp with its text encoder and VAE files found by
+  name (or named, `components`). Estimate method `diffusers`: the components (in 16 bits for vLLM-Omni),
+  activations for the caps, one VAE decode; model offload.
+- **Recommended models:** an *Images* group with Z-Image-Turbo, Stable Diffusion XL base 1.0 and
+  FLUX.1-schnell (gated) for vLLM-Omni, Z-Image-Turbo Q8_0 and FLUX.1-schnell Q4_0 GGUF for
+  stable-diffusion.cpp, and Stable Diffusion 1.5 Q8_0 GGUF for the CPU; Apache-2.0 and OpenRAIL
+  licences only, pinned to commits.
+- **Playground: Image**, for image models: a prompt, the sizes the deployment takes, how many, and the
+  images with a download link each. A deployment's **Try it** makes one 256x256 image and shows its size.
+- The agent unpacks `.zip` engine releases (feature `engine_zip`); a `.zip` engine goes only to agents
+  that list it, and an engine without an API key of its own (`sd-cpp`) only to agents with the key guard.
+- `scripts/pin_images.py` keeps an image pinned on a rolling tag (it reports the move as information)
+  unless `--move-rolling`.
+- `scripts/accept_img.py`: the real-hardware acceptance of image generation with the official SDK
+  (images that decode at the size asked, checked without Pillow; n; the caps; url refused; the queue;
+  usage; the key guard; what the image shows, through a chat model that reads images), and an `img`
+  group in `scripts/accept_all.py`.
+
+- **Text to speech** at `POST /v1/audio/speech`, OpenAI's request shape, with three engines:
+  - **`vllm-omni-tts`** (new recipe): Qwen3-TTS CustomVoice on NVIDIA with vLLM-Omni 0.32.0
+    (`vllm/vllm-omni:v0.32.0`, pinned by digest), nine built-in voices, Chinese (with Mandarin
+    dialects), English and eight more languages, style `instructions`, wav, pcm, flac, mp3 and opus,
+    raw and SSE streaming. Its two stages (talker and audio decoder) share one card: the estimate adds
+    the decoder (`codec_overhead`, 4.5 GiB) and each stage gets its share of the reservation through
+    `--stage-overrides`.
+  - **`llama-cpp`** now also serves `tts`: a TTS GGUF with its projector (Qwen3-TTS, Chatterbox) on
+    llama.cpp b12242's `/v1/audio/speech`, on every variant (AMD Vulkan and ROCm, NVIDIA, the CPU),
+    wav and pcm, raw streaming. The gateway sets `lang` from the text's script and `n_predict` from
+    its length when a request leaves them out.
+  - **`speaches-tts`** (new recipe): Kokoro-82M and Piper voices (a new model format, `onnx`) with the
+    same speaches 0.8.3 images as faster-whisper, CPU and CUDA, mp3, flac, wav and pcm. English only:
+    its released versions delete Chinese, Japanese and Korean characters, so such input is refused
+    (400 `language_not_supported`) instead of answered with silence.
+- **Voice cloning is blocked:** reference recordings (`ref_audio`, `speaker_ref_b64`, …), a voice given
+  as audio or a link, Qwen3-TTS's `task_type: "Base"` and uploading or deleting voices answer 400
+  `voice_cloning_not_supported`; nothing reaches an engine.
+- The gateway checks a speech request before sending it (input, format, `speed`, `stream_format`),
+  sends each deployment only what it can do (400 `unsupported_response_format`,
+  `stream_format_not_supported`), caps the input per deployment (**Longest input**,
+  `max_input_chars`, under Advanced: by default a quarter of the context for vLLM-Omni and llama.cpp,
+  4,096 for speaches; 400 `input_too_long`), fills in the engine's default format, and replaces a
+  missing voice or an OpenAI voice name the model lacks with its default voice, named in the new
+  `X-Forgeyard-Voice` header. The audio streams through as the engine makes it.
+- **Usage** counts the characters spoken (`characters`) and the audio's length (`media_ms`, read from
+  wav and pcm headers or rates, flac, mp3, aac and opus framing, SSE deltas), shown on **Usage**. A
+  key's **tpm counts one token per character** of speech, held before sending. Speech is local only:
+  routes of the new `openai-speech` API take no provider.
+- `GET /v1/audio/voices?model=` lists a speech model's voices (asked of a replica, kept 5 minutes),
+  its default voice, formats, stream formats and input cap.
+- **Playground: Speak**, for speech models: text with its character count against the cap, the
+  model's voices, its formats, streaming, an audio player and a download link. A deployment's **Try
+  it** speaks a short sentence and shows the audio's length.
+- **Recommended models:** a *Text to speech* group with Qwen3-TTS 0.6B and 1.7B CustomVoice
+  (vLLM-Omni), Qwen3-TTS 1.7B GGUF and Chatterbox Turbo (llama.cpp) and Kokoro 82M (speaches), each
+  pinned to a commit, with its languages and licence (Apache-2.0 or MIT; a conversion without a
+  licence of its own names its original in `license_from`). The catalog reads Qwen3-TTS's voices and
+  talker, and Hugging Face's `text-to-speech` as the new `tts` task.
+- `scripts/accept_tts.py`: the real-hardware acceptance of text to speech with the official SDK
+  (Chinese and English, streaming, every format, voices, refusals, usage, the key guard, and an
+  intelligibility check through speech to text), and a `tts` group in `scripts/accept_all.py`.
+- **Engine images on machines without registry access.** A built-in recipe's image can be carried
+  over as a file (`docker save` on a machine that can pull it, `docker load` on the one that
+  cannot), and the recipe works as it is: no custom recipe naming the image by tag only. Recipes pin
+  images as `tag@sha256:…`, which Docker finds by the digest only, and a loaded copy often lacks it
+  (Docker's classic store drops it; its containerd store can give the copy an id of its own, seen on a
+  real offline AMD APU machine: an id found in no registry). So `scripts/pin_images.py` now also
+  records, in `forgeyard/recipes/images.lock.json`, every id a correct copy can show (the index, each
+  platform's manifest and config digest) and a content id per platform (layers, platform,
+  entrypoint, command, environment, user, working directory, stop signal); its check mode verifies
+  them against the registry. When the pinned digest is not local but the tag is, the agent runs that
+  image by its local id if it matches, never otherwise. A failed pull says the image is not on the
+  machine and how to load it, or that a different image is loaded under the tag. Each recipe on
+  **Models → Catalog and recipes** lists the commands for its images
+  ([Offline machines](docs/guide/how-to.md#offline-machines)). Protocol: agents that list the new
+  `image_ids` feature get the ids beside each replica's spec; older agents get exactly what they got
+  before.
+- **Setup health** for admins: Forgeyard checks its own setup for settings and combinations that
+  are broken, risky or useless, from the settings, the database and the agents' reports, and says
+  what to do with a link to the fix. About 40 checks, among them: a key that may spend on cloud
+  providers with no budget, a route's cloud model without a price under a budget (402
+  `budget_unpriced`), a cloud tier before the local one, a provider marked inside your network with
+  a public address, a shared machine whose GPU access nobody chose, an agent older than the server,
+  `HOST` on loopback while machines joined from elsewhere, a certificate that expires or does not
+  name `PUBLIC_URL`, and keys that never expire and sat unused for 90 days. Shown under
+  **Get started → Setup health**, as a count in the top bar and as a banner on the page concerned.
+  Warnings and notes can be snoozed for 30 days per admin; errors cannot. `GET /api/advisor`.
+- A reminder to **back up `data/secret.key`**, until an admin ticks *I have a backup of key id …*;
+  it comes back when the key changes.
+- The server warns at start about a name in `.env` or the environment that is not a setting ("did
+  you mean …?"), settings that another one makes useless (`TLS_CA_FILE` without your own
+  certificate, any `TLS_*` with `TLS=off`, `SECRET_KEY_FILE` next to `FORGEYARD_SECRET_KEY`), an
+  offline time under 2.5 heartbeats, the private-address switches, `ADMIN_PASSWORD` or the setup
+  token left after setup, and first-value settings (`MODEL_URL_HOSTS`, `GATEWAY_MAX_RPM`,
+  `GATEWAY_CLOUD_MAX`…) that the database overrides.
+- `.env.example` lists every setting, the common ones first and the advanced ones commented out at
+  their defaults; a test keeps it, the code and the reference in step. The reference has a
+  *Common settings* table, units, and what 0 and empty mean.
+- `CONTRIBUTING.md`: rules for new settings.
+- **`scripts/accept_all.py`, the full regression run** on real machines: one command checks every feature
+  shipped so far, so each pull request and release can show the old ones still work. Seven groups, run in
+  order and chosen with `--only` / `--skip`: `server` (HTTPS with the CA, security headers, 421, CSRF,
+  sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh`), `machines` (online, the
+  hardware, the GPU allowlist enforced, join commands pinning the CA), `workloads` (a process service,
+  tasks with retries and `max_duration`, a container task, GPU isolation with `gpu_probe.py`), `models`
+  (small models on the CPU and GPU machines, each skipped when its estimate does not fit; the estimate on
+  the deployment page; Try it), `gateway` (`/v1` with the official SDK: every endpoint, streaming with
+  and without usage, key allowlists, rpm, revoking, locked limits, the key guard, balancing and failover,
+  the Playground, usage, a stopped deployment leaving the list), `cloud` (with `--cloud-provider`:
+  spilling, keys that may not, local only, the cloud maximum, cost, key, person and provider budgets and
+  their alerts, with exactly one request to the provider) and `console` (every main page as an admin and
+  as a plain user at 1440 and 390 px, with Playwright). PASS, FAIL or SKIP with the reason per check, a
+  table per group, totals and the time, `--out` JSON. Everything it makes is named `accept-<run>-…` and
+  removed at the end, also after a failure or Ctrl-C; a provider budget it changes is put back. Guide:
+  *How-to → Check a server end to end*.
+- **Images, audio and video in chat** at `/v1/chat/completions` (and the Playground): `image_url`,
+  `input_image`, `input_audio`, `audio_url`, `video_url` and `input_video` parts. The gateway rebuilds
+  every media part in one shape (`image_url` and `video_url` with a `data:` URI, `input_audio` with
+  base64) and keeps only the fields it checked; other part types and `*_embeds` answer 400
+  `invalid_content_part`.
+- **The gateway fetches media URLs itself**, through the egress rules: public addresses only
+  (`MEDIA_ALLOW_PRIVATE_HOSTS` for a LAN image server; link-local and metadata addresses never), every
+  redirect checked again (at most 3), `MEDIA_FETCH_MAX_MB` (20) per item, 20 seconds per item, the
+  answer's type must match the part. `file://` and other schemes answer 400 `media_url_refused`.
+- A request goes only to a deployment that takes what it carries: what the **model** takes (read
+  from its `config.json`, or a GGUF model's projector), what the **recipe** takes (its new `media`
+  block), and the deployment's **Images per request** (4) and **Videos per request** (0: video is off
+  until enabled), in the deployment form's collapsed **Advanced** section. New codes:
+  `media_not_supported`, `too_many_media_items`, `file_input_not_supported`, `invalid_media_data`,
+  `media_fetch_failed`, `media_too_large` (413), `media_local_only`.
+- **Body limit per deployment:** *Largest request* (`max_body_mb`, 64 MiB for vLLM and llama.cpp); the
+  gateway reads up to the largest any deployment takes, then applies the model's own (413
+  `request_too_large`). Recipes without the parameter keep `GATEWAY_MAX_BODY_MB`.
+- **vLLM**: `--limit-mm-per-prompt` from those parameters; `--enable-prompt-tokens-details`.
+- **llama.cpp**: GGUF catalog entries can carry a **projector file** (`mmproj-*.gguf`, F16 by
+  default, or chosen, or none), downloaded with the model and passed as `--mmproj` (recipes:
+  `optional_args` with `if_model: mmproj` and the `{mmproj_file}` placeholder). Images are scaled to
+  at most *Largest image* (`image_tokens`, 1,024 tokens, Advanced; `--image-max-tokens`): without it a
+  5 MB photo became 4,076 tokens and took 125 s on 8 CPU threads; with it 1,034 tokens and 21 s, the
+  same answer.
+- Measured on the CPU (Qwen3-VL 2B Q4_K_M with its F16 projector, llama.cpp b11977, 8 threads, context
+  4,096 × 2): estimate 3.95 GiB; RSS 3.37 GiB idle, peak 3.86 GiB after a 1,024-token image. A 256 ×
+  256 image takes 66 tokens and 1.1 s; llama-server's `prompt_tokens` include the image tokens.
+- **The catalog shows each model's licence, whether it is gated, and what it takes besides text**,
+  read from Hugging Face when it is added. The recommended list holds only allowed licences
+  (permissive, OpenRAIL-style, or terms that allow commercial use: Gemma's terms and Meta's Llama 3.1 /
+  3.2 licences stay) and adds a **Vision** group: Qwen3-VL 2B, 4B and 8B (vLLM), Qwen3-VL 2B GGUF
+  (CPU) and 8B GGUF (llama.cpp on a GPU or an AMD APU), with their projectors.
+- **The estimate counts the vision encoder:** a recipe's `vision_overhead` (vLLM profiles the
+  encoder at startup before sizing the KV cache: 1.5 GiB to start with, to be calibrated on an A100)
+  and `video_overhead` (1 GiB, when video is on); for GGUF the projector file itself plus llama.cpp's
+  buffers.
+- **Usage units for the whole of 1.3** (migration 0012): `media_items`, `characters`, `images`,
+  `kilopixels`, `media_ms`, `bytes_in`, `bytes_out` and `busy_ms` per usage row, 0 on rows from
+  before, in `GET /api/usage`. Chat fills `media_items` (**Usage** shows a Media column once there are
+  any); speech, images, video and the passthrough fill the others.
+- **llama.cpp on AMD GPUs through Vulkan, built in.** The `llama-cpp` recipe gains a `vulkan` variant
+  (the official `server-vulkan` image, 0.3 GB, Mesa's RADV driver). AMD cards now get, in order:
+  `rocm` for the Instinct cards (`gfx908`, `gfx90a`, `gfx942`, which have no Vulkan) and the discrete
+  Radeon cards the ROCm image is built for (`gfx1030`, `gfx1100`–`gfx1102`, `gfx1200`, `gfx1201`);
+  `vulkan` for every other AMD GPU, among them the APUs with unified memory (Strix Halo `gfx1151`,
+  Strix Point `gfx1150`, Phoenix `gfx1103`) and cards the ROCm image lacks. The custom
+  `llama-cpp-vulkan` recipe used so far on a Strix Halo is no longer needed (guide: *How-to → Add an
+  AMD machine*, also for machines that cannot reach `ghcr.io`).
+- Recipes: **`amd_kfd: false`** on an AMD container variant gives the container only its card's render
+  node (`/dev/dri/renderD*`) and that node's group, not `/dev/kfd` (ROCm's compute interface); the
+  `vulkan` variant uses it. The server marks such a card `"kfd": false` in the replica's GPU list; an
+  older agent ignores the mark and passes `/dev/kfd` as before.
+- Reference: *Built-in recipes*, every variant in order with where it runs and what it pins.
+- **Playground:** attach images in the chat tab (sent as `data:` URIs) and see them in the transcript.
+- Recipe parameters can be **advanced** (the deploy form's collapsed Advanced section), and a
+  deployment made before a recipe gained a parameter renders its default.
+- `scripts/accept_mm.py`: the real-hardware acceptance of media in chat, through the API and the official
+  SDK, with idempotent cleanup.
+- **Container images on Docker Hub**, for linux/amd64 and linux/arm64: the server
+  (`docker.io/tonyhuang1101/forgeyard`, new `Dockerfile.server`) and the agent
+  (`docker.io/tonyhuang1101/forgeyard-agent`). A release tag `vX.Y.Z` publishes both with
+  `.github/workflows/publish-images.yml`, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only
+  `X.Y.Z`), with OCI labels, provenance and an SBOM, then pulls the amd64 images back by digest and
+  smoke-tests them. Without the Docker Hub secrets or the namespace it builds and tests both and ends
+  green with a notice instead of pushing. The namespace is one constant,
+  `forgeyard/install/images.py: DOCKERHUB_NAMESPACE`.
+- **The server image**: the web UI built in a node stage, exactly `uv.lock` (with PostgreSQL) on
+  Python 3.13 slim, run as uid 10001, everything kept in a `/data` volume (database, `secret.key`,
+  `tls/`), port 7860, a `HEALTHCHECK` on `/api/health`, the setup token in `docker logs`. Guide:
+  *Run the server in Docker* (volume, `PUBLIC_URL`, backups, upgrading by tag, pinning a digest);
+  the quick start and the README offer it as a two-command start.
+- **`AGENT_IMAGE`** (server setting): the agent image **Add a machine → Docker** puts in its
+  command; a mirror, a private registry, a tag or a digest. Empty: the published image at the
+  server's own version. Anything that is not a plain image reference stops the server at start.
+- CI: `server-image` builds the server image, lints both Dockerfiles with hadolint and runs
+  `scripts/server_image_smoke.sh` (first start and setup through the API, HTTPS from the volume's
+  CA, the health check, then a new container on the same volume keeps the owner, the CA and
+  `secret.key`); `images-arm64` builds both images for linux/arm64.
+
+- **Licences with terms are marked on the recommended list.** OpenRAIL (SDXL, SD 1.5), Gemma and Llama
+  cards show the licence in a warning colour, say what it asks, and link to it (the original model's
+  page for a conversion). Apache-2.0, MIT and BSD models are unchanged.
+
+### Changed
+- `speaches-tts` runs on the CPU only: on a real A100 Kokoro used no GPU memory in speaches' CUDA image
+  (ONNX Runtime stayed on the CPU) while the deployment reserved the card; on a CPU it makes speech about
+  four times faster than it plays.
+
+- **llama.cpp b11977 → b12242** (2026-11-10) in every variant of the `llama-cpp` recipe: the CUDA
+  (still CUDA 12.8, driver ≥ 570), ROCm (7.2.1), Vulkan and CPU images, pinned by digest, and the CPU
+  release archive, pinned by its SHA-256. b12242 is the first build with published images after
+  llama-server gained the OpenAI-compatible `/v1/audio/speech` endpoint (ggml-org/llama.cpp#31763, in
+  b12238), which text to speech uses. Every flag Forgeyard passes is unchanged (checked against
+  `llama-server --help` of the release). Measured on the CPU process variant (8 threads), b11977
+  against b12242: Qwen3-1.7B Q4_K_M generates at the same speed within the noise of a shared machine
+  (44.1 and 42.8 tokens/s in one round, 40.8 and 40.7 in the other); Qwen3-VL 2B reads an image by
+  URL in the same 1,034 tokens, in 18 to 20 s on both; Qwen2.5-Omni 3B reads the same audio clip in
+  779 tokens on both.
+- **Video on llama.cpp with Qwen3-VL** now follows the model's own sampling (2 frames a second, in
+  pairs, with timestamps; ggml-org/llama.cpp#31619), and *Video frames per second* applies only to
+  models without a rate of their own. The 6-second sample clip on Qwen3-VL 2B takes 5,345 prompt
+  tokens instead of 3,565, more than a 4,096-token context: give video deployments 8,192 or more
+  (`scripts/accept_mm.py` does for GGUF video runs).
+- **The llama.cpp estimate counts video**: 512 MiB more once *Videos per request* is 1 or more (the
+  recipe's `video_overhead`, shown as *Video*). Measured on the CPU with Qwen3-VL 2B at a context of
+  8,192: peak RSS 3.83 GiB without video and 4.24 GiB with the 6-second clip (4.15 on b11977), against
+  an estimate of 3.95 GiB that did not count it.
+- `COOKIE_SECURE` takes `auto`, `true` or `false` (also `yes`/`no`/`1`/`0`); anything else stops the
+  start, instead of acting as `auto`. A setting the server cannot use is reported by name, without
+  a traceback.
+- The agent's `limits = auto` asks systemd for a throwaway scope (`systemd-run --scope true`) instead
+  of looking for its files, so an agent in a container that sees the host's systemd uses rlimits
+  instead of failing every process workload with *Failed to connect to bus*.
+- Labels: budget fields say that $0 blocks all cloud spend and empty means no budget; a provider's
+  *Answer timeout* shows the server's default; a route's *Wait for a free local slot* says it is in
+  milliseconds; the GPU choice on **Machines** is called *GPU access*, like everywhere else.
+- **Add a machine → Docker** pulls the published agent image of the server's version; building it
+  moved to *Advanced / offline*, next to `docker save` / `docker load` for machines without registry
+  access (with the tag to use when `AGENT_IMAGE` pins a digest). While nothing is published the page
+  shows the build step as before.
+- The agent image builds for linux/arm64 too: its ROCm helpers (libdrm) are installed on amd64 only;
+  NVML stays on both. It now carries OCI labels (source, licence, version, revision).
+
+### Fixed
+- **A machine whose agent disconnected while the server was busy could stay "online"** until the
+  offline timeout: when the connection's handler was cancelled (a server shutting down) before it
+  recorded the machine offline, that step was skipped. It is now shielded from the cancel.
+- **Video on llama.cpp** read 4 frames a second (llama-server's default), so a 6-second 720p clip took
+  about 11,500 tokens and overran a 4,096-token context (found on a real CPU machine). The `llama-cpp`
+  recipe gets *Video frames per second* (`video_fps`, 1 by default, advanced).
+- `scripts/accept_mm.py` covers every medium on both engines: `--video-url sample` (a 6.5 MB clip) and
+  an audio model for llama.cpp (Qwen2.5-Omni-3B GGUF); a model name with a dot no longer makes an
+  invalid deployment name.
+- **Large images on vLLM:** a phone photo sent to Qwen3-VL on vLLM became about 16,000 tokens and
+  was refused by an 8,192-token context (found on a real A100). vLLM now gets the same *Largest image*
+  cap as llama.cpp (`image_tokens`, 1,024 by default) as `--mm-processor-kwargs` `max_pixels`, for
+  models whose image tokens grow with the resolution; the inspector records their pixels per token
+  (`vision_tile_px`). The same photo then took 1,014 tokens and 2 s (FY-MM-025).
+- **After a server restart, connected agents took no new work** until they were restarted: replicas
+  placed on them stayed *pending* with no reason. The server numbered each connection's work lists
+  from 1, and the agent kept the highest number across connections, silently dropping anything lower.
+  The server now numbers them from the clock, so they keep growing (this also fixes agents up to
+  1.2.0 without upgrading them), and the agent starts a new count on every connection and logs a list
+  it drops (FY-WST-008, FY-SUP-015, FY-AGT-031). Found on real machines after updating the server.
+
+- `PUT /api/keys/cloud` with only one of `default` and `max` reset the other one to `off`; a field
+  left out now keeps its saved value. `PUT /api/keys/limits` does the same (`null` still clears one).
+- The guide said the Docker form's server address defaults to `PUBLIC_URL`; with `PUBLIC_URL` empty
+  it is the address you opened the page with.
+
+### Security
+
+- **Engines never fetch a URL from a request.** vLLM 0.32 and llama-server (b11977, b12242) download any http(s)
+  media URL themselves, with no private-address filter (vLLM also follows redirects). Besides the
+  gateway doing the fetching, the `vllm` and `vllm-pooling` recipes pass `--allowed-media-domains
+  forgeyard.invalid` (a list that matches nothing turns engine fetches off) and
+  `VLLM_MEDIA_URL_ALLOW_REDIRECTS=0`. llama-server has no such switch; only the gateway reaches it
+  (the agent's key guard), and the gateway sends it only `data:` URIs and base64.
+- **Media never go to a provider:** requests with images, audio, video or files are served by local
+  deployments only; a route served only by providers answers 400 `media_local_only`, and on a mixed
+  route they do not spill.
+
+
 ## [1.2.0] — 2026-11-11
 
 Cloud model APIs behind the same gateway, local first: providers and tiered routes with spill rules,

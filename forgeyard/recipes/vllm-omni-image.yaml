@@ -1,0 +1,102 @@
+# Image generation with vLLM-Omni on NVIDIA GPUs: diffusers pipelines (a repository with
+# model_index.json) such as Z-Image-Turbo, Stable Diffusion XL, FLUX.1-schnell and Qwen-Image, behind
+# OpenAI's /v1/images/generations. Docs:
+# https://github.com/vllm-project/vllm-omni/blob/v0.32.0/docs/serving/image_generation_api.md
+#
+# Pinned: vLLM-Omni 0.32.0, the image the vllm-omni-tts recipe already uses (CUDA 13.0, driver >= 580,
+# compute capability 7.5 and newer). `vllm serve <model directory> --omni` reads model_index.json and
+# loads the pipeline (vllm_omni/entrypoints/openai/api_server.py and diffusion/ at v0.32.0).
+#
+# Memory: a diffusion pipeline here holds its components in bfloat16 (float32 files are cast) and
+# allocates while it works; --gpu-memory-utilization is only read in its paged mode, which these
+# pipelines do not use, so nothing reserves a fixed share of the card. What bounds it is the
+# deployment's caps, which the gateway enforces before a request reaches the engine (the most images
+# per request, the largest side; --max-generated-image-size repeats the pixel cap in the engine), and
+# the estimate is sized for them: weights + activations for max_images images at once at
+# max_side x max_side + one VAE decode (--vae-use-slicing decodes the images one at a time). Offload
+# (--enable-cpu-offload) keeps only the component in use on the card.
+#
+# Requests (ImageGenerationRequest at v0.32.0): prompt, n (1-10), size WxH, response_format
+# b64_json or file, output_format png / jpeg / webp, and the extensions negative_prompt,
+# num_inference_steps, guidance_scale, true_cfg_scale and seed. The gateway sends only these (and
+# always b64_json): the request's `lora` (a path on the server), extra_params, system prompts and the
+# rest never reach the engine. /v1/images/edits is not offered: its `url` fields make the engine fetch
+# any URL, and the edit models (Qwen-Image-Edit) are too large for one shared card.
+name: vllm-omni-image
+title: vLLM-Omni (images)
+description: >-
+  Text to image on NVIDIA GPUs with vLLM-Omni: diffusers pipelines such as Z-Image-Turbo, Stable
+  Diffusion XL and FLUX.1-schnell, behind OpenAI's /v1/images/generations (base64 images).
+engine: vllm-omni
+version: "0.32.0"
+tasks: [image]
+formats: [diffusers]
+api: {image: openai-images}
+upstream_model: served_name
+share: vram
+port: 8000
+health: {path: /health, start_period: 1800, interval: 10, timeout: 5, failure_threshold: 3}
+estimate:
+  method: diffusers
+  cast_16bit: true
+  parallel: true
+  # A request's images are denoised together: per image and megapixel, the transformer's or UNet's
+  # activations (with classifier-free guidance's second pass) under PyTorch's caching allocator.
+  # Calibrated on the A100 at acceptance (scripts/accept_img.py reports the card's memory).
+  activation_per_mp: 1536MiB
+  # One image's VAE decode at a time (slicing), per megapixel.
+  vae_per_mp: 3GiB
+  overhead: 1GiB
+params:
+  max_images: {type: int, default: 4, min: 1, max: 10, label: Images per request (most),
+               help: "The largest n a request may ask for (the default is 1). Images are made together, so memory grows
+                 with this."}
+  default_size: {type: choice, default: auto, choices: [auto, 512x512, 768x768, 1024x1024, 1024x768, 768x1024,
+                                                         1280x720, 720x1280, 1536x1024, 1024x1536],
+                 label: Default size, help: "The size of requests that give none. auto: the model's own (1024x1024 for
+                   SDXL, Z-Image and FLUX)."}
+  max_side: {type: int, default: 0, min: 0, max: 4096, advanced: true, label: Largest side (pixels),
+             help: "The widest or tallest image a request may ask for. 0: the model's own size. Memory grows with the
+               square of this."}
+  steps: {type: int, default: 0, min: 0, max: 200, advanced: true, label: Default steps,
+          help: "Denoising steps for requests that give no num_inference_steps. 0: the model's own default."}
+  max_steps: {type: int, default: 50, min: 1, max: 200, advanced: true, label: Most steps,
+              help: Requests asking for more num_inference_steps are refused (400).}
+  concurrency: {type: int, default: 1, min: 1, max: 8, advanced: true, label: Requests at once,
+                help: "Requests a replica works on at the same time; the rest wait in the gateway's queue."}
+  queue: {type: int, default: 8, min: 0, max: 256, advanced: true, label: Queue length,
+          help: "Requests that may wait for a busy replica; one more gets 429 with Retry-After."}
+  timeout: {type: int, default: 600, min: 30, max: 3600, advanced: true, label: Timeout (seconds),
+            help: How long the gateway waits for the images once a replica has the request.}
+  max_prompt_chars: {type: int, default: 4000, min: 1, max: 32000, advanced: true, label: Longest prompt (characters),
+                     help: Longer prompts are refused (400 prompt_too_long).}
+  offload: {type: choice, default: none, choices: [none, model], advanced: true, label: Offload to host memory,
+            help: "model: only the component at work (text encoder, transformer, VAE) is on the card, the rest waits in
+              host memory. Less GPU memory, slower requests."}
+  vae_tiling: {type: choice, default: "off", choices: ["off", "on"], advanced: true, label: VAE tiling,
+               help: "Decodes large images in tiles: less memory above 1024x1024, sometimes faint seams."}
+args: ["{model_path}", --omni, --served-model-name, "{served_name}", --host, "{host}", --port, "{port}",
+       --max-generated-image-size, "{max_pixels}", --vae-use-slicing, --allowed-media-domains, forgeyard.invalid]
+optional_args:
+  - if: {offload: model}
+    args: [--enable-cpu-offload]
+  - if: {vae_tiling: "on"}
+    args: [--vae-use-tiling]
+image:
+  request: fields
+  output_formats: [png, jpeg, webp]
+  max_n: 10
+env:
+  VLLM_MEDIA_URL_ALLOW_REDIRECTS: "0"
+  HF_HUB_OFFLINE: "1"
+  HF_HUB_CACHE: "{model_hub}"
+  VLLM_NO_USAGE_STATS: "1"
+  DO_NOT_TRACK: "1"
+# The replica's internal key: as in vllm-omni-tts (vLLM's VLLM_API_KEY guards /v1; /health stays open).
+api_key_env: VLLM_API_KEY
+variants:
+  - name: cuda
+    when: {vendor: nvidia, compute_capability: ">=7.5", driver: ">=580"}
+    runtime: container
+    image: vllm/vllm-omni:v0.32.0@sha256:f713b909f16cf8c7901f17c3aee3f471cbee5fbde5603b7dbe2631630887d7c2
+    entrypoint: [vllm, serve]

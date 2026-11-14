@@ -511,3 +511,74 @@ def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
     runs = fake.runs()
     assert runs and all(pinned in r for r in runs)
     assert [c for c in fake.calls() if c and c[0] == "pull"] == [["pull", pinned]]
+
+
+def test_fy_rt_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_files():
+    """FY-RT-027: systemd_running() starts a throwaway scope with systemd-run: a failure (a container
+    that sees the host's systemd files but has no bus), a missing systemd-run, a timeout or an OSError
+    all mean "no systemd", and only a scope that really started means yes."""
+    import subprocess
+
+    from forgeyard.agent.workloads import process
+
+    calls = []
+
+    def run(code=0, exc=None):
+        def _run(argv, **kw):
+            calls.append((argv, kw.get("timeout")))
+            if exc:
+                raise exc
+            return subprocess.CompletedProcess(argv, code, b"", b"Failed to connect to bus: No such file or directory")
+        return _run
+
+    found = lambda name: "/usr/bin/" + name  # noqa: E731
+    assert process.systemd_running(run(0), found) is True
+    assert calls[-1] == (process.SYSTEMD_PROBE, process.SYSTEMD_PROBE_TIMEOUT)
+    assert calls[-1][0][:2] == ["systemd-run", "--scope"] and calls[-1][0][-1] == "true"
+    assert process.systemd_running(run(1), found) is False
+    assert process.systemd_running(run(exc=subprocess.TimeoutExpired("systemd-run", 10)), found) is False
+    assert process.systemd_running(run(exc=OSError("no exec")), found) is False
+    n = len(calls)
+    assert process.systemd_running(run(0), lambda name: None) is False and len(calls) == n  # nothing to run
+
+
+def test_fy_rt_028_vulkan_amd_container_gets_the_render_node_only(tmp_path, monkeypatch):
+    """FY-RT-028: an AMD card sent with "kfd": false (a Vulkan engine) gets only its render node and
+    the group that owns it: no /dev/kfd and not its group. Without the flag (ROCm, or a server
+    older than 1.3) /dev/kfd stays, and so does its group."""
+    import forgeyard.agent.workloads.container as ctr_mod
+
+    gids = {"/dev/kfd": 991, "/dev/dri/renderD129": 992}
+    real_exists, real_stat = os.path.exists, os.stat
+
+    class St:
+        def __init__(self, gid):
+            self.st_gid = gid
+
+    monkeypatch.setattr(ctr_mod.os.path, "exists", lambda p: p in gids or real_exists(p))
+    monkeypatch.setattr(ctr_mod.os, "stat", lambda p, *a, **k: St(gids[p]) if p in gids else real_stat(p, *a, **k))
+    fake = FakeDocker(tmp_path / "bin")
+    rt = _ctr(tmp_path, fake)
+    gpu_spec = container(resources={"gpus": {"count": 1}})
+
+    def run_with(card, rid):
+        async def scenario():
+            sup = Supervisor(tmp_path / rid, {"container": rt}, tick=0.05, bind_address="127.0.0.1")
+            sup.set_desired(desired(replica(rid, gpu_spec, gpus=[card])))
+            await converge(sup, lambda s: s.records[rid].state == "running")
+        asyncio.run(scenario())
+        run = fake.runs()[-1]
+        return ([run[i + 1] for i, a in enumerate(run) if a == "--device"],
+                [run[i + 1] for i, a in enumerate(run) if a == "--group-add"])
+
+    assert run_with(dict(amd_card(1, minor=129), kfd=False), "r-vk-000000001") == (["/dev/dri/renderD129"], ["992"])
+    assert run_with(amd_card(1, minor=129), "r-rocm-0000001") == (["/dev/kfd", "/dev/dri/renderD129"], ["991", "992"])
+    # The argv alone: one card that needs ROCm is enough for /dev/kfd.
+    argv = plan.container_run_argv("docker", name="n", image="i", command=None, args=[], env_file="e", labels={},
+                                   ports=[], bind="127.0.0.1", cpu=None, memory=None,
+                                   gpus=[dict(amd_card(1), kfd=False), amd_card(2, minor=130)], gpu_mode=None,
+                                   render_devices=["/dev/dri/renderD129", "/dev/dri/renderD130"], render_gids=[],
+                                   log_max_bytes=1024**2)
+    assert "/dev/kfd" in argv
+    assert plan.needs_kfd([dict(amd_card(1), kfd=False)]) is False and plan.needs_kfd([]) is False
+    assert plan.needs_kfd([amd_card(1)]) is True and plan.needs_kfd([dict(amd_card(1), kfd=True)]) is True
