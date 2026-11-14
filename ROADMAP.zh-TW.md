@@ -88,8 +88,8 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
 
 ## 已發布：1.3.0（2026-11-14），更多種類的模型
 
-每種模型一個（或幾個）pull request，每一個都完整（配方、估算、閘道、用量、Playground、文件、測試）。除了影片生成，每一項都在真實
-硬體上驗收過（見「尚待驗證」）。
+每種模型一個（或幾個）pull request，每一個都完整（配方、估算、閘道、用量、Playground、文件、測試）。每一項都在真實
+硬體上驗收過。
 
 1. ✅ **多模態對話**（#4）：vLLM 與 llama.cpp 上的對話圖片（projector 檔），影片需自行開啟，以及整個 1.3 的用量單位。
 2. ✅ **llama.cpp b12242**（#9），內建 Vulkan variant，給 AMD APU 以及 ROCm 映像檔沒有支援的顯示卡使用。
@@ -205,5 +205,5 @@ Forgeyard 目前執行在自己的伺服器上，每台機器一個 agent。針�
 - **在 systemd 主機上的單行安裝，以及在真實 GPU 上的 agent 映像檔。** 兩者都只在沒有 systemd 或 Docker 的容器裡跑過（安裝用替身
   `systemctl`，映像檔則在沒有 GPU 的 CI runner 上）。在真實主機上要確認：服務（`KillMode=process`：工作負載在
   `systemctl restart forgeyard-agent` 之後仍繼續執行）、映像檔中的 `--gpus all`，以及掛載了 ROCm 的 AMD。
-- **用 vLLM-Omni 生成影片**（`vllm-omni-video`）。目前只透過真實的閘道搭配替身引擎檢查過；要在 NVIDIA GPU 上確認 Wan2.1 與 Wan2.2，
-  並用那次執行校正記憶體估算。
+- **Wan2.2-TI2V-5B 影片生成**（`vllm-omni-video`，約 33 GiB），在 NVIDIA GPU 上。Wan2.1-T2V-1.3B 已在 A100 上通過：
+  25 項檢查，832x480、5 秒的影片 136 秒完成，實測 20.75 GiB，估算 21.62 GiB。

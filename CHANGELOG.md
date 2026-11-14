@@ -47,7 +47,8 @@ regression run on real machines.
     time in `busy_ms`; a failed job counts as an error only; one deleted while at work as 499. No cloud.
   - **Memory estimate** for video: the weights in 16 bits, the activations per thousand tokens of the
     longest, largest video (latent frames x patches per frame) and one frame's VAE decode; first
-    estimates (about 21.6 GiB for Wan2.1-1.3B, 32.8 GiB for Wan2.2-5B), to be calibrated on the A100.
+    estimates (about 21.6 GiB for Wan2.1-1.3B, 32.8 GiB for Wan2.2-5B). Wan2.1-1.3B used 20.75 GiB on an A100
+    (25 of 25 acceptance checks; 832x480 for 5 s in 136 s); Wan2.2-5B is not yet run.
   - **Catalog:** Hugging Face's `text-to-video` is the new `video` task; a diffusers repository naming
     `WanPipeline` is read as a video model with its own size, frame rate and size multiple. A **Video**
     group in the recommended list: Wan2.1-T2V-1.3B (pinned to `0fad780`) and Wan2.2-TI2V-5B, Apache-2.0.

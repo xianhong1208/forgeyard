@@ -115,8 +115,7 @@ and thinking.
 ## Shipped: 1.3.0 (2026-11-14), more kinds of models
 
 One pull request (or a few) per kind, each complete (recipe, estimate, gateway, usage, Playground,
-docs, tests). Each was accepted on real hardware except video generation (see *Verification still
-to do*).
+docs, tests). Each was accepted on real hardware.
 
 1. ✅ **Multimodal chat** (#4): images in chat on vLLM and llama.cpp (projector files), video
    opt-in, the usage units for all of 1.3.
@@ -267,6 +266,5 @@ version is not decided yet.
   container without systemd or Docker (the install with a stand-in `systemctl`, the image in CI on a
   runner without GPUs). On a real host, confirm the service (`KillMode=process`: workloads survive
   `systemctl restart forgeyard-agent`), `--gpus all` in the image, and AMD with ROCm mounted.
-- **Video generation with vLLM-Omni** (`vllm-omni-video`). Checked so far through the real gateway
-  with a stand-in engine; confirm Wan2.1 and Wan2.2 on an NVIDIA GPU, and calibrate the memory
-  estimate from that run.
+- **Wan2.2-TI2V-5B video** (`vllm-omni-video`, about 33 GiB) on an NVIDIA GPU. Wan2.1-T2V-1.3B passed on
+  an A100: 25 checks, 832x480 for 5 s in 136 s, 20.75 GiB measured against an estimate of 21.62 GiB.
