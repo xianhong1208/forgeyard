@@ -40,7 +40,8 @@ def test_fy_rec_001_the_shipped_list(owner):
     GGUF, Qwen3 embedding and reranker 0.6B/4B, gpt-oss, Gemma 3 and Llama marked gated, Qwen3-VL
     (1.3), Whisper small and large-v3-turbo, BGE-M3 and its reranker."""
     data = rec.load()
-    assert [g.id for g in data.groups] == ["qwen3", "llm", "vision", "speech", "tts", "images", "retrieval"]
+    assert [g.id for g in data.groups] == ["qwen3", "llm", "vision", "speech", "tts", "images", "video",
+                                                    "retrieval"]
     by = {e.name: e for e in data.models}
     for size in ("0.6b", "1.7b", "4b", "8b", "14b", "32b"):
         assert by[f"qwen3-{size}"].recipe == "vllm" and by[f"qwen3-{size}"].task == "chat"

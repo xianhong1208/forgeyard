@@ -235,6 +235,7 @@ def test_fy_dep_007_custom_recipes(owner):
     assert owner.delete("/api/recipes/vllm").status_code == 409
     names = [x["name"] for x in owner.get("/api/recipes").json()["recipes"]]
     assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vllm", "vllm-omni-image", "vllm-omni-tts",
+                     "vllm-omni-video",
                      "vllm-pooling", "my-whisper"]
     seed_catalog()
     make_node("a100", allowlist=[4], features=MODELS)
