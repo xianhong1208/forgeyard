@@ -83,7 +83,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 | 沒有 GPU 的 x86-64 | Linux | llama.cpp（Qwen3-1.7B GGUF）同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp b12242（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以程序方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
-還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
+還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，以及在有 systemd 的主機上用單行指令安裝。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
 
 ### 實測過的模型
 
@@ -107,7 +107,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 | Kokoro 82M | speaches（`speaches-tts`） | CPU |
 | **圖片生成** | | |
 | Stable Diffusion XL base 1.0、Z-Image-Turbo | vLLM-Omni（`vllm-omni-image`） | NVIDIA A100 |
-| Stable Diffusion 1.5 GGUF | stable-diffusion.cpp（`sd-cpp`，CPU 行程） | CPU |
+| Stable Diffusion 1.5 GGUF | stable-diffusion.cpp（`sd-cpp`） | CPU（行程）；NVIDIA A100（CUDA） |
 | Z-Image-Turbo GGUF | stable-diffusion.cpp（`sd-cpp`） | CPU（行程）；AMD Strix Halo（Vulkan）；NVIDIA A100（CUDA） |
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
