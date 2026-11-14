@@ -45,6 +45,11 @@ version until 1.0.
   also works when the answer closes the connection), a retry's pause (up to 30 s), the checksum of a
   finished file, and a replica's wait for another one's download of the same model. When the agent
   stops, its downloads are cancelled too, instead of running on in their threads.
+- **A replica restarted under the same id in a new generation keeps its internal key.** Found with
+  #55 on a real run: an edit restarts a replica; the agent stored the new generation's key from the
+  desired list, then dropped it while removing the old generation, so the new one waited ("waiting for
+  the server …") for good. The agent now forgets a key (and a Hugging Face token) only when the
+  replica id is no longer wanted at all. #55 also gives a restarted replica a new id on the server.
 - **Model download progress never passes 100%.** Seen for real: `14.54 of 12.93 GiB (112%)` on a
   resume, with 11.66 GiB on disk. The files already complete were counted twice, once in the starting
   total and again as the loop passed them. Progress is now the bytes of that model on disk (finished

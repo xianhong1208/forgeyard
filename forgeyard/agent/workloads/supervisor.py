@@ -725,9 +725,13 @@ class Supervisor:
             await self._remove_inner(rec)
         finally:
             self.stopping.discard(rec.id)
-            self.tokens.pop(rec.id, None)
-            self.keys.pop(rec.id, None)
-            self.strip.discard(rec.id)
+            if self.desired is None or rec.id not in self.desired:
+                # Its key and token go with it. Not when the desired list wants the same replica id in
+                # a new generation (an edit restarts it): what set_desired stored is that generation's,
+                # and dropping it left the new replica waiting for the server for good.
+                self.tokens.pop(rec.id, None)
+                self.keys.pop(rec.id, None)
+                self.strip.discard(rec.id)
 
     async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]

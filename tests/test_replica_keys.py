@@ -231,3 +231,33 @@ def test_fy_rk_006_health_checks_send_it_and_nothing_starts_without_it(tmp_path)
     state = asyncio.run(restarted())
     assert state[0] == "backoff" and "internal key" in state[1]
     assert len(fake.runs()) == runs_before + 1  # started once, after the key arrived
+
+
+def test_fy_rk_007_a_new_generation_of_the_same_replica_keeps_its_key(tmp_path):
+    """FY-RK-007 (found with #55 on a real run): an edit restarts a replica under the same id in a new
+    generation. The agent stores the new key from `desired`, then removes the old generation; that
+    removal used to drop the key, so the new generation waited for the server for good. Now it keeps
+    the key and starts, with the new key; removing the replica for good still forgets it."""
+    fake = FakeDocker(tmp_path / "bin")
+    from forgeyard.agent.workloads.container import ContainerRuntime
+
+    rt = ContainerRuntime(RecordStore(tmp_path / "state"), agent_id="agent-1", engine=str(fake.path))
+    rid = "abcdef0123456789"
+
+    async def scenario():
+        sup = Supervisor(tmp_path / "state", {"container": rt}, tick=0.05, port_range=(32000, 32010))
+        sup.set_desired(desired(keyed(replica(rid, container()), env="VLLM_API_KEY")))
+        await converge(sup, lambda s: s.records[rid].state == "running")
+        sup.set_desired(desired(keyed(replica(rid, container(), generation=2), env="VLLM_API_KEY", value="k2-" + "b" * 40),
+                                revision=7))
+        await converge(sup, lambda s: rid in s.records and s.records[rid].generation == 2
+                       and s.records[rid].state == "running", timeout=10)
+        assert sup.keys[rid] == ("VLLM_API_KEY", "k2-" + "b" * 40)
+        sup.set_desired(desired(revision=8))
+        await converge(sup, lambda s: not s.records, timeout=10)
+        assert rid not in sup.keys
+        await sup.close()
+
+    asyncio.run(scenario())
+    runs = [c for c in fake.calls() if c and c[0] == "run"]
+    assert len(runs) == 2
