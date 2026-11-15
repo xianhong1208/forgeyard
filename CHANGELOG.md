@@ -60,6 +60,13 @@ version until 1.0.
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
 
+## [1.3.3] — 2026-11-15
+
+The READMEs rewritten (what Forgeyard does, how to install it, a quick start), and the Python examples
+and console snippets working with the current OpenAI SDK (3.51 and later).
+
+### Changed
+
 - **Both READMEs rewritten** (#32): badges (licence, CI, release, Docker Hub pulls), a one-line pitch,
   a console screenshot, the key features, installing the server and an agent, a quick start with the
   official OpenAI SDK, deployment options, the documentation, and the hardware and models tested
