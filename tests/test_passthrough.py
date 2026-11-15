@@ -439,25 +439,34 @@ def test_fy_x_014_concurrency_per_replica_and_per_key(xw):
     """FY-X-014: with concurrency 1 a second request while one is in flight is 429 workload_busy; with
     key_concurrency 1 the same key gets 429 key_busy while another key still gets through; both carry
     Retry-After, and the slots are free again afterwards."""
-    xw.app.slow = 1.0
+    xw.app.slow = 2.0
     live = LiveServer()
     other = new_key(xw.owner, "other", workloads="all")["key"]
     try:
         def call(key, path="/x/web/slow"):
             return httpx.get(live.url + path, headers={"Authorization": f"Bearer {key}"}, timeout=10)
 
+        def start_slow():
+            # The slots are taken before the request is passed on, so once the app has it they are held.
+            # A fixed sleep was not enough on a busy CI machine: the second call got in first.
+            def reached():
+                return sum(e["path"] == "/slow" for e in xw.app.seen)
+            before, deadline = reached(), time.monotonic() + 5
+            t = threading.Thread(target=call, args=(xw.key,))
+            t.start()
+            while reached() == before:
+                assert time.monotonic() < deadline, "the slow request never reached the app"
+                time.sleep(0.01)
+            return t
+
         set_gateway(xw.owner, "web", expose=True, concurrency=1)
-        t = threading.Thread(target=call, args=(xw.key,))
-        t.start()
-        time.sleep(0.4)
+        t = start_slow()
         r = call(other, "/x/web/fast")
         assert r.status_code == 429 and r.json()["error"]["code"] == "workload_busy" and r.headers["retry-after"] == "1"
         t.join()
         assert call(other, "/x/web/fast").status_code == 200
         set_gateway(xw.owner, "web", expose=True, key_concurrency=1)
-        t = threading.Thread(target=call, args=(xw.key,))
-        t.start()
-        time.sleep(0.4)
+        t = start_slow()
         r = call(xw.key, "/x/web/fast")
         assert r.status_code == 429 and r.json()["error"]["code"] == "key_busy" and r.headers["retry-after"] == "1"
         assert call(other, "/x/web/fast").status_code == 200
