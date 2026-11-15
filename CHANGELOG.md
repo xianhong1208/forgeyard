@@ -6,6 +6,18 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-11-15
+
+A dependency fix for the web build's lint tools: no change to the server, the agent or the console.
+
+### Security
+
+- **`minimatch` ≥ 11.0.1 in the web build's lint tools** (#31): versions 7 to 11.0.0 let an attacker who
+  controls a glob pattern blow up memory and CPU. It came in only through eslint and typescript-eslint, which
+  run at development time and are not part of the built console. eslint 10.15 uses minimatch 11;
+  typescript-eslint 8.72 still asks for 10, so `web/package.json` overrides it to `^11.0.5` until it moves.
+  `npm audit` reports 0 vulnerabilities.
+
 ## [1.3.1] — 2026-11-15
 
 Change a deployment in place (GPU sharing, context, requests at once, the machine), and see what it
