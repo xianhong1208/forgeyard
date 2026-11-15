@@ -1,0 +1,84 @@
+# Development
+
+[繁體中文](development.zh-TW.md)
+
+How to build and test Forgeyard, and where things are in the code. To report a bug or send a change,
+start with [CONTRIBUTING.md](../CONTRIBUTING.md); to set up and use Forgeyard, see the
+[guide](guide/README.md).
+
+You need Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22.12+ for the UI, and Docker only to
+build the container images.
+
+## Build and test
+
+```bash
+uv sync
+uv run --no-sync python -m pytest -q          # backend tests (SQLite)
+uv run --no-sync ruff check .
+TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db uv run --no-sync python -m pytest -q
+                                               # same suite on PostgreSQL — WIPES that database
+cd web
+npm run dev                                   # UI on :5173, API proxied to https://127.0.0.1:7860
+npm run lint && npm run typecheck && npm test && npm run build
+cd ..
+shellcheck -s sh forgeyard/install/install.sh  # the install script stays POSIX sh
+docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image_smoke.sh forgeyard-agent:dev
+docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smoke.sh forgeyard:dev
+```
+
+Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrade head`, and a
+test fails when the models and migrations drift apart. Test IDs (`FY-…`) are unique across the
+project.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `forgeyard/app.py` | FastAPI app: guards, routes, background jobs (usage, alerts, certificate renewal), the built UI |
+| `forgeyard/cli.py` | `python -m forgeyard [serve]`, `secrets reset` and `forgeyard agent …` |
+| `forgeyard/config.py` | every server setting (environment and `.env`) |
+| `forgeyard/db.py`, `forgeyard/migrations/` | the database models; Alembic migrations, run on start |
+| `forgeyard/api/` | the HTTP API: `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads`, `onboarding` (Get started), `tls` (the CA download), `install` (`/install.sh` and the wheel), `guide` |
+| `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground (its Vision tab through `forgeyard/gateway/vision.py`); API keys, their limits, cloud setting and budget, and usage |
+| `forgeyard/api/providers.py` | cloud providers and their models: add, test, import, prices by hand, clone |
+| `forgeyard/api/routing.py` | routes and their tiers of targets |
+| `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |
+| `forgeyard/api/budgets.py` | monthly budgets of people and providers, and this month's spend |
+| `forgeyard/gateway/proxy.py` | forwarding a request through a route's tiers: replicas, providers, spill, streaming |
+| `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API key checks and cloud settings; requests and tokens per minute; replica order and provider cooldowns |
+| `forgeyard/gateway/quirks.py` | what differs per provider kind: how the key is sent, parameters dropped or renamed, how usage is read back |
+| `forgeyard/gateway/where.py` | whether a new provider is outside your network, from its kind and its address |
+| `forgeyard/gateway/egress.py` | the HTTP client for providers: TLS, no redirects, the address checks, `EGRESS_*` |
+| `forgeyard/gateway/pricing.py` | a request's cost from its usage and prices; OpenRouter's list and price matching |
+| `forgeyard/gateway/budgets.py` | the budget ledger: reserve, settle, release, the 80% and 100% alerts, 402 |
+| `forgeyard/gateway/media.py` | images, audio and video in chat: parts rebuilt, media URLs fetched under the egress rules |
+| `forgeyard/gateway/speech.py` | text to speech: request checks, voice cloning refused, what each engine is given, the audio's length |
+| `forgeyard/gateway/imagegen.py` | image generation: request checks, per-deployment caps, what each engine is given, the queue, the answer and its size |
+| `forgeyard/gateway/videogen.py`, `videojobs.py` | video generation: request checks, per-deployment caps, the job object; the jobs on their replica, the sweeper, expiry, content and usage |
+| `forgeyard/gateway/passthrough.py` | the generic passthrough at `/x/<name>`: paths refused, headers dropped and forced, the answer as raw bytes, limits, usage |
+| `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
+| `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
+| `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
+| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list, the server's Hugging Face token |
+| `forgeyard/recipes/` | the built-in engine recipes (YAML), images pinned by digest |
+| `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, HTTPS and the CA, secrets at rest, `secrets reset` |
+| `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`) |
+| `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
+| `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
+| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks |
+| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, the published images' names (`images.py`), the server image's health check |
+| `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
+| `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
+| `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
+| `Dockerfile.server`, `scripts/server_image_smoke.sh` | the server's container image and its CI smoke test |
+| `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | a release tag publishes both images on Docker Hub |
+| `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](guide/how-to.md#check-a-server-end-to-end)) |
+| `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
+| `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
+| `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
+| `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
+| `images/vision/` | the vision server behind the workload templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
+| `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
+| `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
+| `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

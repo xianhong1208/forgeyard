@@ -402,7 +402,7 @@ the program in one of these ways:
 | Program | How |
 |---|---|
 | curl | `curl --cacert forgeyard-ca.pem …`, or install the CA in the system (below) |
-| Python, OpenAI SDK, `httpx` | in code: `httpx.Client(verify=ssl.create_default_context(cafile="forgeyard-ca.pem"))`, as in the [quick start](quick-start.md#python-with-the-openai-sdk); or `SSL_CERT_FILE` |
+| Python, OpenAI SDK, `httpx` | in code: `http_client=DefaultHttpxClient(verify=ssl.create_default_context(cafile="forgeyard-ca.pem"))` for the SDK (`verify=` the same for `httpx`), as in the [quick start](quick-start.md#python-with-the-openai-sdk); or `SSL_CERT_FILE` |
 | Python, `requests` | `REQUESTS_CA_BUNDLE` |
 | Node.js | `NODE_EXTRA_CA_CERTS=forgeyard-ca.pem`: added to Node's own list, which stays |
 | Anything else | its own setting for a CA file, if it has one |

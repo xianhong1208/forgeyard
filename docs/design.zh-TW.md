@@ -210,11 +210,10 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
 ```python
 import ssl
 
-import httpx
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 
 ca = ssl.create_default_context(cafile="forgeyard-ca.pem")   # server 的 CA，從 "Trust this server" 下載
-client = OpenAI(base_url="https://<server>:7860/v1", api_key="fyk_…", http_client=httpx.Client(verify=ca))
+client = OpenAI(base_url="https://<server>:7860/v1", api_key="fyk_…", http_client=DefaultHttpxClient(verify=ca))
 client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hi"}])
 ```
 

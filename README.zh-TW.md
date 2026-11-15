@@ -1,64 +1,70 @@
 # Forgeyard
 
-一個控制台管理你自己的 GPU（和 CPU）：同一個 LAN 或 VPN 上的 NVIDIA、AMD ROCm 與純 CPU 機器。每台機器上的 agent
-回報硬體；你在上面跑服務與任務，用配方部署模型，統一走一個 OpenAI 相容的 `/v1` 閘道，有 API 金鑰、限制與用量統計。視覺模型能在對話中讀圖片，圖片由閘道下載，引擎從不自己抓。語音模型在 `/v1/audio/speech` 把文字轉成語音（Qwen3-TTS 說中文與英文，CPU 上也有小型英文聲音）。圖片模型在 `/v1/images/generations` 產生圖片（NVIDIA 上用 vLLM-Omni，AMD 與 CPU 上用 stable-diffusion.cpp），影片模型在 `/v1/videos` 以非同步工作產生 MP4 影片（NVIDIA 上 vLLM-Omni 的 Wan）。其他任何服務（偵測、分割、Triton 或 FastAPI 模型）都能公開在 `/x/<name>/…`，使用同樣的金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API，並能在 Playground 的 Vision 分頁試用。雲端模型 API 也可以放在同一個閘道後面，本機優先，並有費用追蹤與每月預算。
+[![授權：Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+[![CI](https://github.com/xianhong1208/forgeyard/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/xianhong1208/forgeyard/actions/workflows/ci.yml?query=branch%3Adev)
+[![最新版本](https://img.shields.io/github/v/release/xianhong1208/forgeyard)](https://github.com/xianhong1208/forgeyard/releases/latest)
+[![Docker Hub 下載次數](https://img.shields.io/docker/pulls/tonyhuang1101/forgeyard)](https://hub.docker.com/r/tonyhuang1101/forgeyard)
 
-[English](README.md)
+在你自己的 NVIDIA、AMD 與 CPU 機器上執行 AI 模型，統一走一個 OpenAI 相容的 API。
 
-> **狀態：1.3.2。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的機器上驗收過）。1.1 加入首次使用清單與推薦模型、開箱即用的
-> HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
-> 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
-> 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3 加入更多種類的模型：對話中的圖片、音訊與影片、文字轉語音、圖片生成，
-> 以及以非同步工作產生的影片；任何服務型工作負載的 HTTP API 也能放在閘道後面的 `/x/<name>`，並附現成的視覺範本；llama.cpp
-> 內建給 AMD APU 用的 Vulkan variant，伺服器與 agent 映像檔也發布在 Docker Hub。1.3.1 可以直接修改部署，並顯示它在等什麼
-> （共用就放得下的 GPU、一直沒被機器接手的副本、引擎映像檔拉取的進度），同時簡化設定，並把 llama.cpp 升到 1.0.0；1.3.2 修正網頁建置所用 lint 工具的相依套件。見
-> [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
+每台機器上的 agent 回報它的硬體。你從模型目錄部署模型，Forgeyard 把它放到放得下的機器上，任何程式都能用 API
+金鑰在 `/v1` 呼叫它。
 
-## 使用指南
+**[使用指南](docs/guide/zh-TW/README.md)** · **[English](README.md)** · **[發展藍圖](ROADMAP.zh-TW.md)** ·
+**[變更紀錄](CHANGELOG.md)**（英文）
 
-安裝與使用需要知道的都在**[使用指南](docs/guide/zh-TW/README.md)**（[English](docs/guide/README.md)），
-Forgeyard 自己也在 `/guide` 提供：
+![Models 頁面：一台 CPU 機器上的四個部署（對話、看圖對話、圖片生成、文字轉語音），都是 healthy，可以在 /v1 呼叫](docs/images/console-models.png)
 
-| | |
-|---|---|
-| [快速入門](docs/guide/zh-TW/quick-start.md) | 從零開始，大約十分鐘完成第一次 `/v1` 呼叫 |
-| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、工作負載、模型、部署與閘道、金鑰、角色 |
-| [操作指南](docs/guide/zh-TW/how-to.md) | AMD 與純 CPU 機器、用 Docker 跑伺服器與 agent、共用 GPU、自己的憑證、升級、備份 |
-| [雲端供應商](docs/guide/zh-TW/cloud-providers.md) | 把 OpenAI、Anthropic、Gemini、Azure、OpenRouter 或你自己的伺服器放到 `/v1` 後面；請求何時溢出；哪些金鑰可以使用雲端 |
-| [疑難排解](docs/guide/zh-TW/troubleshooting.md) | 在真實機器上遇過的問題與解法 |
-| [參考資料](docs/guide/zh-TW/reference.md) | 伺服器與 agent 的所有設定、指令、檔案與連接埠 |
+## ✨ 主要功能
 
-各部分的運作細節：[docs/design.zh-TW.md](docs/design.zh-TW.md)。HTTPS、信任與加密儲存的機密：
-[docs/https-and-trust.md](docs/https-and-trust.md)（英文）。
+- **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本、服務與任務；AMD
+  顯示卡使用 ROCm 或 Vulkan 版本。
+- **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。
+- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量，副本之間會自動容錯移轉。
+- **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
+  OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
+- **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
+- **任何 HTTP 服務都能用同一套金鑰。** 工作負載的 API 放在 `/x/<name>/…`，有金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API。
+- **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。
+- **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。
 
-## 簡介
+## 1.3 的新功能
 
-伺服器（Python 3.13 與 [uv](https://docs.astral.sh/uv/)；建置 UI 需要 Node 22.12+）：
+1.3 加入對話中的圖片、音訊與影片、文字轉語音、圖片與影片生成、`/x/` 的工作負載與視覺範本，伺服器與 agent 映像檔也發布到 Docker
+Hub。1.3.1 可以直接修改部署。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+
+## 🚀 安裝
+
+### 伺服器
+
+伺服器不需要 GPU。用 Docker（linux/amd64 與 linux/arm64，什麼都不用建置）：
 
 ```bash
+sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
+  -p 7860:7860 \
+  -v forgeyard-data:/data \
+  -e PUBLIC_URL=https://192.168.1.20:7860 \
+  docker.io/tonyhuang1101/forgeyard:1.3.2
+sudo docker logs forgeyard
+```
+
+或從原始碼安裝，需要 [uv](https://docs.astral.sh/uv/)（它會自己取得 Python 3.13），以及建置網頁 UI 用的 Node 22.12 或更新版本：
+
+```bash
+git clone https://github.com/xianhong1208/forgeyard.git
+cd forgeyard
 cd web && npm ci && npm run build && cd ..
 uv sync
 HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 ```
 
-它一啟動就用自己的憑證授權單位提供 HTTPS，印出 `/setup` 用的一次性設定權杖，所有資料都放在 `data/`
-（要備份資料庫、`data/secret.key` 與 `data/tls/`）。
-管理員可以在 **Get started → Setup health** 看到設定中需要注意的地方：拼錯的設定、沒有預算卻能使用雲端的金鑰、
-沒人選過的共用 GPU、過舊的 agent 等等，每一項都附有前往修正之處的連結。
+把 `192.168.1.20` 換成你伺服器的位址。紀錄裡會有 `https://192.168.1.20:7860/setup` 用的一次性設定權杖。伺服器用自己的憑證授權單位提供
+HTTPS，所有資料都放在 `data/`（Docker 則是 `forgeyard-data` volume）。clone 下來的是最新的正式版本；`git checkout dev`
+可以取得還沒發布的內容。
 
-或者用 Docker，兩個指令、什麼都不用建置（映像檔在 Docker Hub 上，支援 linux/amd64 與 linux/arm64）：
+### Agent：每台要跑模型的機器
 
-```bash
-sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.2
-sudo docker logs forgeyard      # the one-time setup token
-```
-
-映像檔把所有資料存在 `forgeyard-data` volume 裡；備份、依 tag 升級與釘選 digest：見
-[用 Docker 執行伺服器](docs/guide/zh-TW/how-to.md#run-the-server-in-docker)。
-
-加入機器：**Machines → Add a machine** 會給你一行安裝指令。它先用指紋核對伺服器的 CA，再把與伺服器同版本的
-agent 裝成 systemd 服務：
+**Machines → Add a machine** 會產生指令。單行安裝會先用指紋核對伺服器的 CA，再把與伺服器同版本的 agent 裝成 systemd 服務：
 
 ```bash
 curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
@@ -68,12 +74,89 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
   sudo sh -s -- --join fyj_… --ca-fingerprint sha256:3f9a…
 ```
 
-也可以用 agent 映像檔跑一個 `docker run`，映像檔是伺服器版本的 `docker.io/tonyhuang1101/forgeyard-agent`
-（**Docker** 分頁會產生指令），或在 Forgeyard 目錄裡搭配 `/etc/forgeyard/agent.toml` 執行。接著在 **Models** 部署模型，用 API 金鑰和任何 OpenAI
-用戶端呼叫 `https://192.168.1.20:7860/v1`。之後可以用 **Edit** 修改它的 GPU 共用、上下文長度、並行數、副本數和機器；多個副本會一次重新啟動一個，模型會持續回應。
+也可以用 **Docker** 分頁產生的 agent 映像檔指令。在 NVIDIA 機器上長得像這樣：
 
-**從 1.0 升級：** 執行 `uv sync`，重新啟動伺服器，再到每台用一般 HTTP 加入的機器上執行一次 `agent trust` 指令；見
-[docs/https-and-trust.md](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。
+```bash
+sudo docker run -d --name forgeyard-agent --restart always --network host \
+  --gpus all \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v forgeyard-agent:/var/lib/forgeyard-agent \
+  -v /srv/forgeyard-models:/srv/forgeyard-models \
+  -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+  -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+  -e FORGEYARD_JOIN_TOKEN=fyj_… \
+  -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.2
+```
+
+加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
+[加入 AMD 機器](docs/guide/zh-TW/how-to.md#加入-amd-機器)、
+[加入純 CPU 機器](docs/guide/zh-TW/how-to.md#加入純-cpu-機器)、
+[用 Docker 執行 agent](docs/guide/zh-TW/how-to.md#用-docker-執行-agent)。
+
+## 快速開始
+
+1. 開啟 `https://192.168.1.20:7860/setup`，輸入設定權杖，建立擁有者。接著開啟 **Trust this server**，在你的裝置上安裝 CA。
+2. **Machines → Add a machine**，在機器上執行那行指令。幾秒內它就會出現。
+3. **Models → Catalog and recipes → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
+4. **API keys → New key**。在要呼叫模型的電腦上取得 CA 檔案和 SDK：
+
+   ```bash
+   export FORGEYARD_API_KEY=fyk_…
+   curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem
+   pip install openai
+   ```
+
+5. 用官方 OpenAI SDK 呼叫它：
+
+   ```python
+   import os
+   import ssl
+
+   from openai import DefaultHttpxClient, OpenAI
+
+   ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+   client = OpenAI(base_url="https://192.168.1.20:7860/v1", api_key=os.environ["FORGEYARD_API_KEY"],
+                   http_client=DefaultHttpxClient(verify=ca))
+   reply = client.chat.completions.create(
+       model="qwen",
+       messages=[{"role": "user", "content": "Say hello in five words. /no_think"}],
+       max_tokens=100,
+   )
+   print(reply.choices[0].message.content)
+   ```
+
+使用指南的[快速入門](docs/guide/zh-TW/quick-start.md)會一步一步說明，附上每個指令印出的內容，以及怎麼核對 CA 的指紋。
+
+## 部署方式
+
+| 方式 | 做法 |
+|---|---|
+| **Docker** | 伺服器與 agent 都在 Docker Hub 上，名稱是 `tonyhuang1101/forgeyard` 與 `tonyhuang1101/forgeyard-agent`，每個版本一個 tag：[用 Docker 執行伺服器](docs/guide/zh-TW/how-to.md#用-docker-執行伺服器)、[用 Docker 執行 agent](docs/guide/zh-TW/how-to.md#用-docker-執行-agent) |
+| **systemd** | 單行安裝會把 agent 裝成 `forgeyard-agent` 服務。從原始碼安裝的伺服器也能當成服務執行：[把伺服器當成服務執行](docs/guide/zh-TW/how-to.md#把伺服器當成服務執行) |
+| **放在反向代理後面** | 由 nginx 或 Caddy 處理 HTTPS，伺服器以 `TLS=off` 在 `127.0.0.1` 上執行：[使用自己的憑證或反向代理](docs/guide/zh-TW/how-to.md#使用自己的憑證或反向代理) |
+
+升級、備份和搬移模型快取：見[操作指南](docs/guide/zh-TW/how-to.md#升級伺服器和-agent)。
+
+## 📚 文件
+
+**[使用指南](docs/guide/zh-TW/README.md)**（[English](docs/guide/README.md)）也由 Forgeyard 自己在 `/guide` 提供：
+
+| 頁面 | 內容 |
+|---|---|
+| [快速入門](docs/guide/zh-TW/quick-start.md) | 從零開始，大約十分鐘完成第一次 `/v1` 呼叫 |
+| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、工作負載、模型、部署與閘道、金鑰、角色 |
+| [操作指南](docs/guide/zh-TW/how-to.md) | AMD 與純 CPU 機器、用 Docker 跑伺服器與 agent、共用 GPU、自己的憑證、升級、備份 |
+| [雲端供應商](docs/guide/zh-TW/cloud-providers.md) | 把 OpenAI、Anthropic、Gemini、Azure、OpenRouter 或你自己的伺服器放到 `/v1` 後面；請求何時溢出；哪些金鑰可以使用雲端 |
+| [疑難排解](docs/guide/zh-TW/troubleshooting.md) | 在真實機器上遇過的問題與解法 |
+| [參考資料](docs/guide/zh-TW/reference.md) | 伺服器與 agent 的所有設定、指令、檔案與連接埠 |
+
+另外：
+
+- [設計說明](docs/design.zh-TW.md)：各部分的運作細節。
+- [HTTPS 與信任](docs/https-and-trust.md)（英文）：憑證授權單位、agent 的指紋、加密儲存的機密，以及
+  [從 1.0 升級：用一般 HTTP 加入的 agent](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。
+- [開發](docs/development.zh-TW.md)：建置、測試，以及程式碼結構。
 
 ## 已驗證的硬體
 
@@ -117,84 +200,12 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
 
-## 開發
+## 🤝 參與貢獻
 
-```bash
-uv sync
-uv run --no-sync python -m pytest -q          # 後端測試（SQLite）
-uv run --no-sync ruff check .
-TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db uv run --no-sync python -m pytest -q
-                                               # 同一套測試跑在 PostgreSQL 上——會清空該資料庫
-cd web
-npm run dev                                   # UI 在 :5173，API 轉到 https://127.0.0.1:7860
-npm run lint && npm run typecheck && npm test && npm run build
-cd ..
-shellcheck -s sh forgeyard/install/install.sh  # 安裝腳本維持 POSIX sh
-docker build -f Dockerfile.agent -t forgeyard-agent:dev . && scripts/agent_image_smoke.sh forgeyard-agent:dev
-docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smoke.sh forgeyard:dev
-```
+歡迎回報問題、提出想法或送 pull request：請看 [CONTRIBUTING.md](CONTRIBUTING.md)（英文），建置與測試則看
+[docs/development.zh-TW.md](docs/development.zh-TW.md)。安全漏洞請依 [SECURITY.md](SECURITY.md)（英文）私下回報；那份文件也說明了
+Forgeyard 對網路環境和使用者的假設。
 
-資料表變更一律走 Alembic（`forgeyard/migrations`）；啟動時執行 `upgrade head`，model 與 migration 不一致時
-會有測試失敗。測試編號（`FY-…`）在整個專案中唯一。
-
-## 程式碼結構
-
-| 路徑 | 內容 |
-|---|---|
-| `forgeyard/app.py` | FastAPI 應用程式：防護、路由、背景工作（用量、警示、憑證更新）、建置好的 UI |
-| `forgeyard/cli.py` | `python -m forgeyard [serve]`、`secrets reset` 與 `forgeyard agent …` |
-| `forgeyard/config.py` | 伺服器的每個設定（環境變數與 `.env`） |
-| `forgeyard/db.py`, `forgeyard/migrations/` | 資料庫模型；Alembic migration，啟動時執行 |
-| `forgeyard/api/` | HTTP API：`auth`（初始設定、登入、工作階段、連結）、`users`、`audit_log`、`machines`、`workloads`、`onboarding`（Get started）、`tls`（下載 CA）、`install`（`/install.sh` 與 wheel）、`guide` |
-| `forgeyard/api/models.py`, `deployments.py` | 模型目錄、recipe、來源；部署、估算、試用 |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground（它的 Vision 分頁經過 `forgeyard/gateway/vision.py`）；API 金鑰、它的限制、雲端設定與預算，以及用量 |
-| `forgeyard/api/providers.py` | 雲端供應商與它的模型：新增、測試、匯入、手動價格、複製 |
-| `forgeyard/api/routing.py` | 路由與它分層的目標 |
-| `forgeyard/api/prices.py` | 從 OpenRouter 更新價格：預覽與套用 |
-| `forgeyard/api/budgets.py` | 個人與供應商的每月預算，以及本月的花費 |
-| `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送：副本、供應商、溢出、串流 |
-| `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API 金鑰檢查與雲端設定；每分鐘請求數與 token 數；副本順序與供應商冷卻 |
-| `forgeyard/gateway/quirks.py` | 各種供應商的差異：金鑰怎麼送、拿掉或改名的參數、怎麼讀回用量 |
-| `forgeyard/gateway/where.py` | 依種類和位址判斷新的供應商是否在你的網路外 |
-| `forgeyard/gateway/egress.py` | 供應商用的 HTTP client：TLS、不跟隨重新導向、位址檢查、`EGRESS_*` |
-| `forgeyard/gateway/pricing.py` | 依用量與價格計算請求的費用；OpenRouter 的清單與價格對應 |
-| `forgeyard/gateway/budgets.py` | 預算帳本：預留、結算、釋放、80% 與 100% 警示、402 |
-| `forgeyard/gateway/media.py` | 對話中的圖片、音訊與影片：重建內容區塊、依 egress 規則下載媒體網址 |
-| `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種引擎拿到什麼、音訊長度 |
-| `forgeyard/gateway/imagegen.py` | 圖片生成：檢查請求、每個部署的上限、每種引擎拿到什麼、佇列、回應與圖片尺寸 |
-| `forgeyard/gateway/videogen.py`、`videojobs.py` | 影片生成：檢查請求、每個部署的上限、工作物件；工作留在它的副本上、清掃器、過期、內容與用量 |
-| `forgeyard/gateway/passthrough.py` | `/x/<name>` 的通用直通：拒絕哪些路徑、拿掉與強制哪些標頭、以原始位元組轉送回應、限制與用量 |
-| `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
-| `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
-| `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
-| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單、伺服器的 Hugging Face 權杖 |
-| `forgeyard/recipes/` | 內建的引擎 recipe（YAML），映像檔以 digest 固定 |
-| `forgeyard/security/` | 密碼、工作階段、速率限制、host／CSRF middleware、HTTPS 與 CA、靜態加密的機密、`secrets reset` |
-| `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`） |
-| `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
-| `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
-| `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門、紀錄、健康檢查 |
-| `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |
-| `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
-| `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |
-| `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | agent 的容器映像檔與它的 CI 冒煙測試 |
-| `Dockerfile.server`, `scripts/server_image_smoke.sh` | 伺服器的容器映像檔與它的 CI 冒煙測試 |
-| `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | 推送版本 tag 時，把兩個映像檔發布到 Docker Hub |
-| `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](docs/guide/zh-TW/how-to.md#check-a-server-end-to-end)） |
-| `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
-| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
-| `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
-| `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
-| `images/vision/` | 工作負載範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
-| `scripts/accept_x.py` | `/x/` 直通在真實硬體上的驗收（也是 `accept_all.py` 的 `passthrough` 群組） |
-| `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
-| `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |
-
-## 參與與安全
-
-歡迎回報問題、提出想法或送 pull request，請先看 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。安全漏洞請依
-[SECURITY.md](SECURITY.md)（英文）私下回報；那份文件也說明了 Forgeyard 對網路環境和使用者的假設。
-
-## 授權
+## 📄 授權
 
 [Apache License 2.0](LICENSE)。
