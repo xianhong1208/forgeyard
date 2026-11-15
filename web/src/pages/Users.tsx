@@ -18,7 +18,8 @@ export function UsersPage() {
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [link, setLink] = useState<Link | null>(null);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ username: "", email: "", role: "user" as Role });
+  // No email field (1.3.1, D11): nothing sends mail. The API still takes one, and the list shows it.
+  const [form, setForm] = useState({ username: "", role: "user" as Role });
   const [busy, setBusy] = useState(false);
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
@@ -39,10 +40,10 @@ export function UsersPage() {
     try {
       const r = await api<{ user: User; set_password_url: string; expires_hours: number }>("/users", {
         method: "POST",
-        body: { username: form.username, email: form.email || null, role: form.role },
+        body: { username: form.username, role: form.role },
       });
       setLink({ username: r.user.username, url: r.set_password_url, hours: r.expires_hours });
-      setForm({ username: "", email: "", role: "user" });
+      setForm({ username: "", role: "user" });
       setAdding(false);
       load();
     } catch (err) {
@@ -100,8 +101,6 @@ export function UsersPage() {
           <div className="add-user-grid">
             <Field label="Username" name="new-username" required autoCapitalize="none" autoComplete="off"
               value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
-            <Field label="Email (optional)" name="new-email" type="email" autoComplete="off"
-              value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             <div className="field">
               <label htmlFor="new-role">Role</label>
               <select id="new-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>

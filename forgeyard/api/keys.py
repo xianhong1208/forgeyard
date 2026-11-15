@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
 from forgeyard.api.tls import trust_page
+from forgeyard.config import get_settings
 from forgeyard.db import ApiKey, Deployment, GatewayRoute, Workload, as_utc, get_db, utcnow
 from forgeyard.models import routes as mroutes
 from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
@@ -218,7 +219,17 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
                                         spend.held.get(("person", me.id), 0)),
             "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
             "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows],
-            "workloads": workload_choices(db)}
+            "workloads": workload_choices(db), **({"env_seeds": _env_seeds(db)} if admin else {})}
+
+
+def _env_seeds(db: DbSession) -> dict:
+    """Which of the admin settings on this page still take their value from .env (D1): the web UI
+    marks them, and saving the panel replaces them."""
+    from forgeyard import settings_check
+
+    s = get_settings()
+    return {"limits": settings_check.env_seeds(s, db, gkeys.LIMITS_KEY),
+            "cloud": settings_check.env_seeds(s, db, gkeys.CLOUD_KEY)}
 
 
 @router.post("/keys", status_code=201)

@@ -91,7 +91,7 @@ def join(body: JoinIn, request: Request, db: DbSession = Depends(get_db)):
         "name": node.name,
         "credential": credential,
         "protocol": PROTOCOL_VERSION,
-        "heartbeat_interval": settings.agent_heartbeat_seconds,
+        "heartbeat_interval": settings.heartbeat_seconds,
         "offline_after": settings.agent_offline_seconds,
     }
 
@@ -248,7 +248,7 @@ async def stream(ws: WebSocket):
             return
         settings = get_settings()
         await ws.send_json({"v": PROTOCOL_VERSION, "type": "welcome", **welcome, "server_version": __version__,
-                            "heartbeat_interval": settings.agent_heartbeat_seconds,
+                            "heartbeat_interval": settings.heartbeat_seconds,
                             "offline_after": settings.agent_offline_seconds,
                             "features": sorted(SERVER_FEATURES)})
         if FEATURE_WORKLOADS in features:

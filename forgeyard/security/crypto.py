@@ -1,11 +1,12 @@
 """Secrets at rest: AES-256-GCM with a server key that is never in the database.
 
-Encrypted in the database: Hugging Face tokens on deployments, model replicas' internal keys, the
-values of workload environment variables, and cloud providers' API keys (1.2). Passwords, sessions, API keys and join tokens are not
+Encrypted in the database: Hugging Face tokens on deployments and the server's own (1.3.1, a
+`server_settings` row), model replicas' internal keys, the values of workload environment variables,
+and cloud providers' API keys (1.2). Passwords, sessions, API keys and join tokens are not
 encrypted but hashed (they are only ever compared, never read back).
 
     stored value   fy1:<key id>:<base64url(nonce || ciphertext || tag)>
-    key            32 random bytes in data_dir/secret.key (SECRET_KEY_FILE), mode 0600, made on
+    key            32 random bytes in data_dir/secret.key (FORGEYARD_SECRET_KEY_FILE), mode 0600, made on
                    first start; or FORGEYARD_SECRET_KEY (base64), never written anywhere
     key id         the first 8 hex digits of sha256("forgeyard-secret-key" || key): stored next to
                    the data (server_settings "secret_key"), so a missing or wrong key is noticed at

@@ -78,7 +78,7 @@ def test_fy_cfg_003_unknown_names_get_did_you_mean():
     setting are (HOME, PATH, HOSTNAME, a CI runner's AGENT_TOOLSDIRECTORY are not); settings in another case, and the agent's FORGEYARD_* names, are fine."""
     env = {"HOME": "/root", "PATH": "/bin", "HOSTNAME": "x", "public_url": "https://a", "GATEWAY_CLOUD_DEFUALT": "on",
            "PUBLC_URL": "https://b", "FORGEYARD_SERVER": "https://s", "FORGEYARD_MODEL_CACHE": "/srv",
-           "FORGEYARD_SECRET_KEY_FILE": "/k", "HF_HOME": "/hf", "TLS": "on",
+           "FORGEYARD_SECRET_KEYFILE": "/k", "FORGEYARD_SECRET_KEY_FILE": "/k", "HF_HOME": "/hf", "TLS": "on",
            "AGENT_TOOLSDIRECTORY": "/opt/hostedtoolcache", "MODEL_NAME": "x", "TLS_VERSION": "1.3",
            "AGENT_OFFLINE_SECOND": "40"}
     found = {name: (where, hint) for name, where, hint in
@@ -87,7 +87,7 @@ def test_fy_cfg_003_unknown_names_get_did_you_mean():
                      "GATEWAY_CLOUD_DEFUALT": ("the environment", "GATEWAY_CLOUD_DEFAULT"),
                      "PUBLC_URL": ("the environment", "PUBLIC_URL"),
                      "AGENT_OFFLINE_SECOND": ("the environment", "AGENT_OFFLINE_SECONDS"),
-                     "FORGEYARD_SECRET_KEY_FILE": ("the environment", "FORGEYARD_SECRET_KEY")}
+                     "FORGEYARD_SECRET_KEYFILE": ("the environment", "FORGEYARD_SECRET_KEY_FILE")}
     probs = settings_check.static_problems(Settings(_env_file=None), env, ["DATA_DIRS"])
     p = next(p for p in probs if p.scope == "setting:DATA_DIRS")
     assert p.id == "setting-unknown" and p.severity == "warning" and "Did you mean DATA_DIR?" in p.detail
@@ -151,6 +151,7 @@ def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatc
     not while the seed is still used, nor when they agree, nor for a seed that is not set (MODEL_URL_HOSTS
     here). Directories compare case-sensitively."""
     monkeypatch.setenv("ADMIN_PASSWORD", "some-old-password-1")
+    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")
     monkeypatch.setenv("GATEWAY_MAX_RPM", "30")
     monkeypatch.setenv("GATEWAY_CLOUD_DEFAULT", "fallback")
     monkeypatch.setenv("GATEWAY_CLOUD_MAX", "fallback")
@@ -173,7 +174,7 @@ def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatc
         assert sorted(p.scope for p in seeds) == ["setting:GATEWAY_CLOUD_DEFAULT", "setting:MODEL_LOCAL_DIRS"]
         assert all(p.severity == "info" and "(owner)" in p.detail for p in seeds)
         cloud = next(p for p in seeds if p.scope == "setting:GATEWAY_CLOUD_DEFAULT")
-        assert cloud.fix_url == "/keys" and "API keys → Cloud for keys" in cloud.detail
+        assert cloud.fix_url == "/keys" and "API keys → Cloud policy" in cloud.detail
     finally:
         db.close()
 

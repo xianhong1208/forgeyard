@@ -377,7 +377,8 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
             <input id="m-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)} placeholder="hf_…" />
             <p className="field-hint">
               This model is gated: accept its licence on huggingface.co with your account, then paste a read token from your
-              Hugging Face settings. It is used to read the model now and is not stored; deployments ask for it again.
+              Hugging Face settings. It is used to read the model now and is not stored. To use one token for every gated model,
+              inspecting and downloading, save it as the server's token under Model sources.
             </p>
           </div>
           <button type="button" className="btn" disabled={!f.token.trim() || inspecting} onClick={() => setAsk((cur) => ({ ...cur, round: cur.round + 1 }))}>Read it with this token</button>

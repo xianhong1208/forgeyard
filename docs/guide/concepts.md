@@ -130,9 +130,12 @@ segmentation, depth), on Forgeyard's own image with permissively licensed models
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
   part by part, and where it fits, before anything is downloaded.
-- The **model cache** on each machine (`/srv/forgeyard-models` by default) keeps the downloaded
-  files, checked against their checksums, shared by every replica there. Containers get their model
-  mounted read-only.
+- The **model cache** on each machine (`/srv/forgeyard-models` by default, for an agent run as root)
+  keeps the downloaded files, checked against their checksums, shared by every replica there.
+  Containers get their model mounted read-only.
+- **Gated** Hugging Face models need a token of an account that accepted their licence. The server
+  keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
+  inspecting and downloading them; a deployment may bring its own, which wins for it.
 
 ## Deployments and the gateway
 
@@ -282,6 +285,12 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
   (the default, and every key from before 1.2), **Only to spill**, or **Allowed** (cloud-only models
   too). A route marked **Local only**, and a request with `X-Forgeyard-Local-Only: 1`, never leave
   either.
+- The **cloud policy** (an admin's choice on **API keys**) is two values in one: what new keys get,
+  and the most people may give their own keys. *No cloud*, *People may opt in to spill*, *Spill by
+  default* and *Cloud allowed* name the usual pairs; *Custom* shows both.
+- A provider is **outside your network** (it costs money, and only keys allowed to use the cloud
+  reach it) or **inside** it (every key reaches it and no budget applies). A new provider gets the
+  tick its kind and its address suggest; an admin confirms it.
 - Answers name who served them in `X-Forgeyard-Target`. Usage counts local and cloud apart.
 
 [Cloud providers](cloud-providers.md) has the details for each provider.

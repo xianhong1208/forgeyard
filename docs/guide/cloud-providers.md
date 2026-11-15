@@ -33,9 +33,11 @@ On **Providers**, choose **Add a provider**, pick the kind and paste the key. Th
    whose list does not show your deployments).
 3. Put a model in a route (see [route a model to the cloud](#route-a-model-to-the-cloud)).
 
-**Outside your network** is ticked for every kind except *OpenAI-compatible server*. Keep it ticked
-for a third party. Untick it for a server of your own: a provider inside your network does not
-count as cloud, so every key may use it.
+**Outside your network** is ticked for every kind except *OpenAI-compatible server*, which is ticked
+when its base URL is a public address (or a name that resolves to one) and left unticked for a
+private address or a name on your own network; the form says why. Keep it ticked for a third party.
+Untick it for a server of your own: a provider inside your network does not count as cloud, so every
+key may use it. Providers added before 1.3.1 keep their tick.
 
 ### OpenAI
 
@@ -73,8 +75,10 @@ reports the cost of each request.
 ### A server of your own (vLLM elsewhere)
 
 Kind *OpenAI-compatible server* and its base URL, such as `https://llm.example.org/v1`, plus a key
-if it wants one. *Outside your network* is unticked by default: it is your server, so keys need no
-cloud permission to use it. Over a VPN with a private address, you may tick **Allow plain HTTP**.
+if it wants one. *Outside your network* stays unticked for a private address (`10.x`, `192.168.x`,
+a VPN's `100.64.x`, IPv6 `fd…`) or a name such as `llm.lan` or `gpu-box`: it is your server, so keys
+need no cloud permission to use it. A public address ticks it (Together, Groq and similar are third
+parties); untick it only if the server really is yours. Over a VPN with a private address, you may tick **Allow plain HTTP**.
 Forgeyard drops nothing from requests to it.
 
 ## Route a model to the cloud
@@ -122,9 +126,9 @@ If the local tier was busy and the cloud cannot take the request either, the req
 replica after all, past its *Concurrent requests*: the engine queues it.
 
 Within a cloud tier, a target that answers 429 or 5xx, or cannot be reached, is skipped and tried
-last for 30 seconds (`PROVIDER_COOLDOWN_SECONDS`). Several targets in one tier share the requests by
+last for 30 seconds. Several targets in one tier share the requests by
 their weight. When nothing else is left and the provider asked to wait up to 2 seconds
-(`Retry-After`, `PROVIDER_RETRY_AFTER_CAP`), the request waits once and tries again.
+(`Retry-After`), the request waits once and tries again.
 
 A request can forbid the cloud for itself with the header `X-Forgeyard-Local-Only: 1`. It never
 widens what the key allows:
@@ -152,7 +156,8 @@ Each API key has a **cloud** setting:
 - Every key made before 1.2 is **Never**. A new key gets the server's default, which is **Never**
   unless an admin changes it.
 - People may give their own keys at most the setting **The most people may give their own keys**, which is
-  **Never** unless an admin raises it. Both are under **API keys**, then **Cloud for keys**.
+  **Never** unless an admin raises it. Both are under **API keys**, then **Cloud policy**: pick a
+  policy, or *Custom* to set the two apart ([Choose the cloud policy for keys](how-to.md#choose-the-cloud-policy-for-keys)).
 - Lowering **The most people may give their own keys** applies at once: a person's key set higher works
   at the new maximum from the next request (the API keys table shows "now … (server maximum)" next to
   it), and gets its own setting back when the maximum is raised again. Values an admin set, and admins'

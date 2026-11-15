@@ -481,9 +481,39 @@ media: {inputs: [image, audio, video], files: false}
 
 **要多久：** 每段影片要幾分鐘，每個副本一次做一段；其他的在它上面排隊。影片長或尺寸大時，在 **Advanced** 調高 *Longest job*。
 
+## 使用受限（gated）的 Hugging Face 模型
+
+有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
+
+1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
+2. 管理員：打開 **Models → Catalog**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
+
+部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
+
+權杖只會送到 Hugging Face（`HF_ENDPOINT`），絕不會送到 `https://` 的 GGUF 主機。受限模型的部署沒有可用的權杖時，Setup health 會提醒（`gated-model-no-token`）。
+
 ## 加入雲端供應商
 
-管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+
+**Outside your network (cloud)** 會自動幫你勾好：OpenAI、Anthropic、Gemini、Azure 和 OpenRouter 一律勾選；*OpenAI-compatible server* 則在它的 base URL 是公開位址（或解析成公開位址的名稱）時勾選。私有位址（`10.x`、`172.16–31.x`、`192.168.x`、`100.64–127.x`、loopback、link-local、IPv6 `fc00::/7`），或像 `gpu-box`、`*.local`、`*.lan`、`*.internal` 這樣的名稱則不勾選。表單會說明原因；判斷錯了就自己改。名稱在伺服器上解析不出來時，維持不勾選，並說明無法判斷。
+
+## 選擇金鑰的雲端政策
+
+管理員：**API keys → Cloud policy** 決定新金鑰拿到什麼，以及大家最多能把自己的金鑰開放到什麼程度。選一個，再按 **Save cloud policy**：
+
+| 政策 | 新金鑰拿到 | 大家能把自己的金鑰設成 |
+|---|---|---|
+| **No cloud**（預設） | Never | Never |
+| **People may opt in to spill** | Never | Only to spill |
+| **Spill by default** | Only to spill | Only to spill |
+| **Cloud allowed** | Only to spill | Allowed |
+| **Custom** | 自己選 | 自己選 |
+
+*Only to spill* 只在本機部署無法使用、忙碌，或回應 429 或 503 時，才把請求送到雲端層；*Allowed* 也會使用排在本機之前的雲端層。改變政策不會改動既有金鑰自己的設定，但調低上限會立刻套用到大家設得比較高的金鑰。管理員可以把任何金鑰設成任何值，並對擁有者鎖定。預算仍然有效：[追蹤並限制雲端花費](#track-and-limit-cloud-spend)。
+
+設了 `GATEWAY_CLOUD_DEFAULT` 或 `GATEWAY_CLOUD_MAX`、而還沒有人儲存過政策時，面板會把這些值標示為 *from .env*。儲存之後就永久取代它們。
 
 ## 追蹤並限制雲端花費
 
@@ -539,7 +569,7 @@ media: {inputs: [image, audio, video], files: false}
 
 管理員在 **Users**：
 
-1. **Add user**：一個 **Username**、選填的 **Email (optional)**，以及 **Role**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **Create and get link**。
+1. **Add user**：一個 **Username** 和 **Role**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **Create and get link**。
 2. 把一次性連結傳給對方。它用來設定對方的密碼，只能用一次，72 小時後失效。你永遠看不到對方的密碼。
 
 之後在同一份清單上：**Password link** 會給忘記密碼的人一個新連結（24 小時）；**Sign out** 會結束對方所有的工作階段；**Disable** 讓對方無法登入，他的 API 金鑰也會失效；**Delete** 會刪除對方。擁有者不能被停用、降級或刪除。
@@ -823,7 +853,7 @@ PostgreSQL：照常使用 `pg_dump`。
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：gated 模型的 Hugging Face 權杖要重新輸入，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的工作負載則必須重新建立（它們的事件裡會說明）。
+它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的工作負載則必須重新建立（它們的事件裡會說明）。
 
 ## 搬移模型快取
 
