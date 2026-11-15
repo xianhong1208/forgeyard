@@ -39,7 +39,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
 
 1.3 adds images, audio and video in chat, text to speech, image and video generation, workloads at
 `/x/` with vision templates, and the server and agent images on Docker Hub. 1.3.1 lets you change a
-deployment in place. Every change is in the [CHANGELOG](CHANGELOG.md).
+deployment in place; 1.3.2 and 1.3.3 are fixes. Every change is in the
+[CHANGELOG](CHANGELOG.md).
 
 ## 🚀 Installation
 
@@ -52,7 +53,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.2
+  docker.io/tonyhuang1101/forgeyard:1.3.3
 sudo docker logs forgeyard
 ```
 
@@ -97,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
