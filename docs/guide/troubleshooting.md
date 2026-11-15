@@ -207,6 +207,40 @@ network reaches it. At 4 MiB/s, a 16 GB model takes over an hour.
   [Move a model cache](how-to.md#move-a-model-cache));
 - or put the files in a directory on the machine and add them as a `local://` model.
 
+## A machine cannot reach Hugging Face
+
+**You see:** a replica on that machine waits in **backoff** with *Qwen3-1.7B-Q4_K_M.gguf: download
+failed: cannot resolve huggingface.co: …* (or *github.com* for a llama.cpp engine archive, or an
+image that *could not be pulled*), then its deployment's page says *cpu-01 could not reach
+huggingface.co; placed on cpu-02 instead*.
+
+**Why:** the agent tries a download five times, a minute in all; when it still could not reach the
+source (the name did not resolve, the connection was refused or timed out, the network was
+unreachable), the server remembers for an hour that this machine cannot reach that host. A replica
+of a deployment that is not pinned to the machine is then placed again on another machine that
+fits, and new replicas that would download from that host go elsewhere first. A machine that
+already has the model (and the engine) needs no download, so it is still used for it.
+
+The replica stays on the machine, and keeps trying, when:
+
+- the deployment is pinned to it: *the deployment is pinned to cpu-01, so the replica stays there
+  and tries again*;
+- no other machine can take it: *no other machine can take it, so it tries again on cpu-01*.
+
+An HTTP error (a missing file, 401 for a gated model), a checksum mismatch or a full disk is not
+counted: another machine would get the same answer.
+
+**Do:**
+
+- let the machine reach the host (DNS, a firewall rule, a proxy route); Forgeyard tries it again
+  for new placements an hour after the last failure, or at once after a server restart;
+- or bring the files to it: copy a model cache from a machine that has the model
+  ([Move a model cache](how-to.md#move-a-model-cache)), `docker load` an engine image (see
+  [A replica fails: the image is not on this machine](#a-replica-fails-the-image-is-not-on-this-machine)),
+  or add the model from a local directory as a `local://` model;
+- or use a mirror the machine can reach (`HF_ENDPOINT`, see
+  [Hugging Face downloads are slow](#hugging-face-downloads-are-slow)).
+
 ## vLLM does not start on a shared card
 
 **You see:** a vLLM replica fails soon after it starts, and its output ends with something like

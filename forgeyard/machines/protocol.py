@@ -13,7 +13,9 @@ agent -> server
   status     (M2) replica states: after every desired, and whenever one changes. `full` lists
              every replica the agent knows. (M3) a replica may carry `download` progress, and the
              message `model_cache` (free space, the cached models) when that changed. (1.3.1) an
-             image pull is reported as a `download` with phase "image" (see "pull_progress")
+             image pull is reported as a `download` with phase "image" (see "pull_progress"). (1.4)
+             `model_cache.engines` lists the engine archives unpacked there (first 16 hex digits of
+             their SHA-256); older servers ignore it
   logs       (M2) answer to a logs_request: the last lines of a replica's output
 
 server -> agent

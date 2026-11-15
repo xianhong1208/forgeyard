@@ -147,6 +147,29 @@ describe("budgets on Usage → Cost", () => {
     expect(fetch.mock.calls.some(([u]) => u === "/api/budgets")).toBe(true);
   });
 
+  it("FY-WEB-218 a revoked key leaves the budget list and its warnings (1.4)", async () => {
+    const revoked = { id: "k2", name: "old-laptop", prefix: "fyk_ZzZzZzZz", status: "revoked", user: { id: 2, username: "ursula" },
+      locked_by: null, ...B(1_000_000, 1_000_000, "exhausted" as const) };
+    server((url) => {
+      if (url.startsWith("/api/budgets")) return { status: 200, body: { ...budgets(), keys: [...budgets().keys, revoked] } };
+      if (url.startsWith("/api/usage")) return { status: 200, body: usage() };
+    });
+    mount("/usage");
+    fireEvent.click(await screen.findByRole("tab", { name: "Cost" }));
+    const panel = (await screen.findByRole("heading", { name: "Budgets this month" })).closest("section") as HTMLElement;
+    expect(within(panel).getByRole("meter", { name: /Budget of the key laptop/ })).toBeTruthy();
+    expect(within(panel).queryByText(/old-laptop/)).toBeNull();
+    expect(within(panel).queryByRole("meter", { name: /Budget of the key old-laptop/ })).toBeNull();
+    cleanup();
+    const gone = key({ id: "k2", name: "old-laptop", status: "revoked", revoked_at: "2026-11-12T00:00:00Z", revoked_by: "owner",
+      budget: B(1_000_000, 1_000_000, "exhausted") });
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [key(), gone] }) } : undefined), USER);
+    mount("/keys");
+    expect(await screen.findByRole("meter", { name: /Budget of laptop/ })).toBeTruthy();
+    expect(screen.queryByRole("meter", { name: /Budget of old-laptop/ })).toBeNull();
+    expect(screen.queryByText(/old-laptop \(fyk_AbCdEfGh…\): budget/)).toBeNull();
+  });
+
   it("people who are not admins see their own budgets and cannot set them", async () => {
     server((url) => {
       if (url.startsWith("/api/budgets")) {

@@ -371,6 +371,10 @@ show it too:
   and the providers');
 - a provider's page: its budget, and the Providers list flags one past 80%.
 
+A **revoked key** leaves these lists and warnings, and gets no alert after it was revoked; what it
+spent this month still counts in its person's and its provider's budgets. `GET /api/budgets` leaves it
+out too.
+
 There is no e-mail: check the audit log or the pages.
 
 ### How spend is counted

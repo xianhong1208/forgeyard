@@ -292,7 +292,8 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
           )}</td>
         <td data-label="Budget" className="small">
           <div>
-            {k.budget ? <BudgetMeter b={k.budget} label={`Budget of ${k.name}`} compact /> : <span className="muted">none</span>}
+            {k.status === "revoked" ? <span className="muted">—</span>
+              : k.budget ? <BudgetMeter b={k.budget} label={`Budget of ${k.name}`} compact /> : <span className="muted">none</span>}
             {budgetLock && <LockChip by={budgetLock} />}
           </div>
         </td>

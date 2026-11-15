@@ -161,6 +161,17 @@ describe("models", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ input: "Hi" });
   });
 
+  it("FY-WEB-216 the deployment links to its workload and says why a replica is on its machine (1.4)", async () => {
+    const note = "cpu-01 could not reach huggingface.co; placed on cpu-02 instead";
+    server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null,
+      placement_note: note })), events: [], server_time: "", can_manage: true } } : undefined);
+    mount("/models/deployments/3");
+    expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
+    expect(screen.getByText("Workload").closest("span")?.querySelector("a")?.getAttribute("href")).toBe("/workloads/11");
+    const row = within(screen.getByRole("table")).getByText("a100").closest("td") as HTMLElement;
+    expect(within(row).getByText(note)).toBeTruthy();
+  });
+
   it("FY-WEB-051 users see deployments and try them, but cannot deploy, stop or delete", async () => {
     server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null })), events: [], server_time: "", can_manage: false } }
       : url === "/api/models" ? { status: 200, body: { ...catalog, can_manage: false, can_deploy: false, sources: undefined } } : undefined,

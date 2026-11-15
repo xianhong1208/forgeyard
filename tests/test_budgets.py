@@ -575,3 +575,28 @@ def test_fy_bdg_020_dollar_amounts_in_messages():
     from forgeyard.gateway.budgets import usd
     assert [usd(x) for x in (0, 250, 1_215, 10_000, 1_234_567, None)] == \
         ["$0.00", "$0.00025", "$0.001215", "$0.01", "$1.23", "unknown"]
+
+
+def test_fy_bdg_021_revoked_keys_leave_the_budget_lists_and_alerts(priced):
+    """FY-BDG-021 (1.4, #36): a revoked key is no longer listed under Budgets (mine or everyone's), even
+    with spend this month, and an alert queued for it before it was revoked is not written; what it
+    spent stays in its person's and provider's totals."""
+    m = priced
+    m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": (ANSWER_PICOS + need()) // P + 1})
+    set_state("chat", 0, "starting", "loading")
+    assert send(m).status_code == 200
+    assert send(m).status_code == 200                       # 83%: a warning is queued, not written yet
+    recorder.flush()
+    listed = m.owner.get("/api/budgets?everyone=true").json()
+    assert any(k["id"] == m.kid for k in listed["keys"])
+    me = next(p for p in listed["people"] if p["username"] == "owner")
+    spent = me["spent_micros"]
+    assert spent > 0
+    assert m.owner.delete(f"/api/keys/{m.kid}").status_code in (200, 204)
+    ledger.write_alerts()
+    assert audit_actions(m.owner) == []                     # the queued warning of the revoked key is dropped
+    for url in ("/api/budgets", "/api/budgets?everyone=true"):
+        body = m.owner.get(url).json()
+        assert all(k["id"] != m.kid for k in body["keys"]), url
+        assert next(p for p in body["people"] if p["username"] == "owner")["spent_micros"] == spent
+    assert sum(p["spent_micros"] for p in m.owner.get("/api/budgets?everyone=true").json()["providers"]) >= spent

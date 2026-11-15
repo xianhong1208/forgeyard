@@ -87,6 +87,29 @@ describe("workloads", () => {
     expect(screen.getByRole("link", { name: "New workload" })).toBeTruthy();
   });
 
+  it("FY-WEB-217 a model workload says which deployment created it, in the list and on its page (1.4)", async () => {
+    const note = "cpu-01 could not reach huggingface.co; placed on cpu-02 instead";
+    const model: Workload = { ...web, id: 9, name: "chat", runtime: "model", deployment_id: 3, deployment: { id: 3, name: "chat-dep" },
+      spec: { ...web.spec, name: "chat", runtime: { type: "model", recipe: "llama-cpp", model: "qwen3-1.7b-gguf" } },
+      replica_list: [replica({ machine: { id: 2, name: "cpu-02", status: "online", connected: true }, gpus: [], placement_note: note })] };
+    server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web, model], server_time: "", can_manage: true } }
+      : url === "/api/workloads/9" ? { status: 200, body: { workload: model, events: [], server_time: "", can_manage: false } } : undefined);
+    mount("/workloads");
+    const card = await screen.findByRole("article", { name: "Workload chat" });
+    expect(within(card).getByText(/created by deployment/)).toBeTruthy();
+    expect(within(card).getByRole("link", { name: "chat-dep" }).getAttribute("href")).toBe("/models/deployments/3");
+    expect(within(card).getByText(note)).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Workload web" })).queryByText(/created by deployment/)).toBeNull();
+    cleanup();
+    mount("/workloads/9");
+    expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
+    const links = screen.getAllByRole("link", { name: "chat-dep" });
+    expect(links.length).toBe(2);  // the status line and the spec's "Created by"
+    expect(links.every((a) => a.getAttribute("href") === "/models/deployments/3")).toBe(true);
+    expect(screen.getByText("Created by")).toBeTruthy();
+    expect(within(screen.getByRole("table")).getByText(note)).toBeTruthy();
+  });
+
   it("FY-WEB-040 users can look but not start; the old Deployments link lands on Models (M3)", async () => {
     server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "", can_manage: false } }
       : url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: false } } : undefined),

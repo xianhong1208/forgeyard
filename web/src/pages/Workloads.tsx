@@ -117,6 +117,9 @@ function WorkloadCard({ w }: { w: Workload }) {
           <span className="chip">{w.runtime}</span>
           {w.gateway?.exposed && <span className="chip chip-tone-run mono" title="Exposed behind the gateway">{w.gateway.path}</span>}
           {w.kind === "service" && <span className="muted small">{w.ready}/{w.replicas} ready</span>}
+          {w.deployment && (
+            <span className="small wl-origin">created by deployment <Link className="mono" to={`/models/deployments/${w.deployment.id}`}>{w.deployment.name}</Link></span>
+          )}
         </div>
         <span className="muted small" title={exact(w.created_at)}>
           {w.created_by ? `${w.created_by} · ` : ""}{when(w.created_at)}
@@ -147,6 +150,7 @@ function ReplicaLine({ r }: { r: Replica }) {
         })}
       </span>
       {r.reason && <span className="rep-reason">{r.reason}</span>}
+      {r.placement_note && <span className="rep-reason rep-note">{r.placement_note}</span>}
     </li>
   );
 }

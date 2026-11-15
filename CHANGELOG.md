@@ -6,7 +6,35 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Placement knows what a machine can fetch** (#56). Among the machines that fit, a machine that
+  could not reach a source a replica would download from there in the last hour (the model's host,
+  the engine archive's, the image registry) comes last; then replicas spread over machines; then a
+  machine that already has the model in its cache, then one that also has the engine archive or
+  image; then binpack. The model cache used to count only on a tie.
+  - A download that could not reach its source (DNS, connection refused or timed out, network
+    unreachable) is remembered per machine and host for an hour, in memory. HTTP errors, a refused
+    token, checksums and a full disk are not counted.
+  - A replica in backoff because of such a failure is placed again on another machine that fits;
+    a pinned deployment's replica stays and says why. On one machine, a later recipe variant that
+    needs no such fetch (the process engine when ghcr.io is unreachable) is chosen over the first.
+  - The deployment's and workload's pages say why a replica is where it is: *cpu-01 could not reach
+    huggingface.co; placed on cpu-02 instead*. The API gives it as the replica's `placement_note`,
+    and the placement preview gives `needs` and `unreachable` per machine.
+  - Agents list the engine archives they unpacked (`model_cache.engines`); an engine image or
+    archive also counts as on a machine once a replica started from it there. Older agents work
+    as before.
+- **A model workload names the deployment that created it** (part of #36): *created by deployment
+  X* with a link on the Workloads list and on the workload's page, and the deployment links to its
+  workload. `GET /api/workloads` gives `deployment: {id, name}`.
+
 ### Changed
+
+- **Revoked keys leave the budget lists and alerts** (part of #36): Usage → Cost (*Budgets this
+  month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%
+  alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
+  person's and its provider's budgets.
 
 - **Both READMEs rewritten** (#32): badges (licence, CI, release, Docker Hub pulls), a one-line pitch,
   a console screenshot, the key features, installing the server and an agent, a quick start with the

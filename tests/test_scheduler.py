@@ -183,26 +183,33 @@ def test_fy_sch_004_exclusive_and_shared_never_mix(fleet):
         m for m in r.json()["detail"]["machines"] if m["name"] == "a100")["reason"]
 
 
-def test_fy_sch_005_binpack_then_cached_then_name():
-    """FY-SCH-005: the tightest fit wins; on the same whole GiB left, the machine with the model in
-    its cache; then the name. Spread picks the emptiest."""
+def test_fy_sch_005_cached_then_binpack_then_name():
+    """FY-SCH-005 (changed in 1.4, #56): a machine with the model in its cache wins, then the one with
+    fewer other things to fetch; then the tightest fit (on the same whole GiB left, the name). Spread
+    picks the emptiest."""
 
     class N:
         def __init__(self, name):
             self.name, self.status, self.id = name, "online", ord(name[0])
 
-    def opt(name, left, cached):
-        return Option(N(name), None, [], left, cached)
+    def opt(name, left, cached, needs=()):
+        return Option(N(name), None, [], left, cached, list(needs))
 
     v = lambda o: scheduler.Verdict(1, o.node.name, "online", True, option=o)  # noqa: E731
     tight, roomy = opt("b", 2 * GIB, False), opt("a", 30 * GIB, True)
-    assert scheduler.choose([v(roomy), v(tight)], None) is tight
-    same1, same2 = opt("a", int(5.2 * GIB), False), opt("z", int(5.7 * GIB), True)
-    assert scheduler.choose([v(same1), v(same2)], None) is same2
+    assert scheduler.choose([v(roomy), v(tight)], None) is roomy
+    tight2, roomy2 = opt("b", 2 * GIB, False), opt("a", 30 * GIB, False)
+    assert scheduler.choose([v(roomy2), v(tight2)], None) is tight2
+    same1, same2 = opt("a", int(5.2 * GIB), False), opt("z", int(5.7 * GIB), False)
+    assert scheduler.choose([v(same1), v(same2)], None) is same1
     assert scheduler.choose([v(opt("b", GIB, False)), v(opt("a", GIB, False))], None).node.name == "a"
-    assert scheduler.choose([v(roomy), v(tight)], None, strategy="spread") is roomy
-    # A machine that already has a replica of the same deployment comes last (M4: spread).
-    assert scheduler.choose([v(roomy), v(tight)], None, siblings={tight.node.id}) is roomy
+    assert scheduler.choose([v(roomy2), v(tight2)], None, strategy="spread") is roomy2
+    # Both cached: the one that would also have to fetch its engine comes after, whatever the fit.
+    engine = opt("c", GIB, True, [("engine", "github.com")])
+    ready = opt("d", 40 * GIB, True)
+    assert scheduler.choose([v(engine), v(ready)], None) is ready
+    # A machine that already has a replica of the same deployment comes last (M4: spread), cache or not.
+    assert scheduler.choose([v(roomy), v(tight)], None, siblings={roomy.node.id}) is tight
 
 
 def test_fy_sch_006_prefers_the_machine_with_the_model_cached(owner):
