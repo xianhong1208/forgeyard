@@ -6,6 +6,10 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-11-15
+
+A dependency fix for the web build's lint tools: no change to the server, the agent or the console.
+
 ### Security
 
 - **`minimatch` ≥ 11.0.1 in the web build's lint tools** (#31): versions 7 to 11.0.0 let an attacker who
