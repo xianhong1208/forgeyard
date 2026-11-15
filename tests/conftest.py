@@ -1,9 +1,11 @@
 import json
 import os
 import re
+import time
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IllegalStateChangeError
 from sqlalchemy.orm import close_all_sessions
 from fastapi.testclient import TestClient
 
@@ -110,11 +112,26 @@ def isolated(tmp_path, monkeypatch):
         state.reset()
     forget_ceiling()
     yield
-    close_all_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
+    _close_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
     reset_engine()
     get_settings.cache_clear()
     for state in (limiter, balancer, key_limiter, in_flight, recorder, ledger, hub, crypto, tls.live, reach):
         state.reset()
+
+
+def _close_sessions() -> None:
+    """close_all_sessions, waiting for a session that another thread is using right now: work the server
+    handed to a thread (asyncio.to_thread) can still be connecting when a test ends, and closing it then
+    raises IllegalStateChangeError (seen once on PostgreSQL in CI)."""
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            close_all_sessions()
+            return
+        except IllegalStateChangeError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.05)
 
 
 def make_client(**kwargs) -> TestClient:
