@@ -150,7 +150,7 @@ Also in 1.3.0, alongside the model types:
   on each page.
 - ✅ **Container images on Docker Hub** (#2, #12): the server and the agent, amd64 and arm64,
   published by a release tag.
-- **Simpler settings** and **deployments that stay where they ran** moved to 1.3.1 (see *Next*).
+- **Simpler settings** and **deployments that stay where they ran** moved to 1.3.1 (shipped, below).
 
 The owner's decisions for 1.3 (2026-11-11):
 
@@ -170,11 +170,29 @@ The owner's decisions for 1.3 (2026-11-11):
 - **Settings:** every new setting or parameter has a default that works untouched, sits in
   *Advanced* unless a normal user must decide it, and is derived from the model when it can be.
 
+## Shipped: 1.3.1 (2026-11-15), change a deployment, see what it waits for
+
+1. ✅ **Change a deployment** (#55, for #26, #27 and #29): **Edit** a deployment's GPU sharing,
+   context, requests at once or machine, and its replicas restart; a restarted replica goes back to
+   the machine it ran on first. **GPU sharing is pointed out:** chat models stay exclusive by
+   default, but when a model needs half a card or less, the deploy page, a refusal ("fits if both
+   share VRAM") and Setup health say that sharing would fit. A replica that its machine never picks
+   up says so, with the agent's version and what to do.
+2. ✅ **Progress for every download** (#57, for #28): pulling an engine image shows how much has
+   arrived, like a model download; a pull fails only when it stops making progress
+   (`pull_stall_minutes`), not after a fixed 30 minutes; removing a deployment stops its pull or
+   download at once, and the replica says it was cancelled.
+3. ✅ **Simpler settings** (#58, for #30): one cloud-policy choice per key, one server-wide Hugging
+   Face token, a provider's *Outside your network* ticked from its kind and address, agent defaults
+   that match the installer, and the settings removed in 1.4 deprecated with a warning.
+4. ✅ **llama.cpp 1.0.0** (#59, for #48), its first release with a semantic version, in every variant
+   of the `llama-cpp` recipe, with an optional FP8 KV cache (half the KV memory; not on Vulkan).
+   Accepted on the CPU, an NVIDIA A100 (CUDA) and AMD Strix Halo (Vulkan, offline).
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.3.1: change a deployment, see what it waits for** | **Edit a deployment** (GPU sharing, context, requests at once, the machine) and its replicas restart; a restarted deployment goes back to its previous machine first. **GPU sharing is pointed out:** chat models stay exclusive by default, but when a model needs half a card or less, the deploy page, a refusal ("fits if both share VRAM") and the setup advisor say that sharing would fit. **Progress for every download:** pulling an engine image shows how much has arrived, like a model download does; a pull fails only when it stops making progress, not after a fixed 30 minutes, and a cancelled pull says it was cancelled. A hint when a replica is never picked up by its machine. **Simpler settings:** one cloud-policy choice, one server-wide Hugging Face token, agent defaults that match the installer. **llama.cpp 1.0.0** (#48), its first release with a semantic version, in every variant of the `llama-cpp` recipe, with an optional FP8 KV cache (half the KV memory; not on Vulkan). |
 | **1.3.2: dependency fix** | The web build's lint tools move off `minimatch` < 11.0.1. |
 | **1.3.3: README** | The READMEs rewritten around what Forgeyard does, how to install it and a quick start; the developer layout moves to `docs/development.md`. |
 | **1.4: easier to see** | **Charts:** usage and cost over time as line charts on **Usage**, split by key, model, provider or person, with the day, week and month view. **Machines and models, redesigned:** each machine shows what it is at a glance (an icon per kind: NVIDIA, AMD, APU, CPU), and its page lists the models, workloads and memory on it; models are grouped by kind (chat, multimodal, speech, images, embeddings, rerank) with an icon each; the other pages follow the same layout. **Download to…:** download a model to chosen machines before deploying it, with progress on the model's and each machine's page; each machine lists the models in its cache and their size, and can remove them. A machine that cannot reach the internet gets the model, and engine images, **relayed** by the server or by another machine that has them, checked by SHA-256, with progress too. **Clearer pages:** a model workload says which deployment created it and links to it; revoked keys leave the budget lists and alerts; the *Routes and cloud* and *Catalog and recipes* tabs are renamed after trying a few names and layouts. |
@@ -254,7 +272,7 @@ version is not decided yet.
 
 - **AMD ROCm on real hardware.** Done on a real Strix Halo (gfx1151, ROCm 7.0.2): the
   inventory through the `amdsmi` library, unified memory and the 96 GiB
-  pool, joining, the GPU allowlist, and llama.cpp served through `/v1` with the built-in `vulkan` variant (b12242),
+  pool, joining, the GPU allowlist, and llama.cpp served through `/v1` with the built-in `vulkan` variant (b12242, then llama.cpp 1.0.0),
   its image loaded from a file (that machine cannot reach ghcr.io) and checked by its recorded ids.
   Still to confirm:
   - the ROCm images of the `vllm` and `llama-cpp` recipes (both list gfx1151 among their targets;

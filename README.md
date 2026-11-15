@@ -14,7 +14,7 @@ tracking and monthly budgets.
 
 [繁體中文說明](README.zh-TW.md)
 
-> **Status: 1.3.0.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on real machines). 1.1
+> **Status: 1.3.1.** 1.0.0 was the MVP (milestones M0 to M4, each accepted on real machines). 1.1
 > added a first-run checklist and recommended models, HTTPS out of the box, a one-line agent install,
 > an agent container image and this guide. 1.2 put cloud providers behind the same gateway, local
 > first: a model spills to OpenAI, Anthropic, Gemini, Azure or OpenRouter when its replicas are busy
@@ -23,11 +23,10 @@ tracking and monthly budgets.
 > more kinds of models: images, audio and video in chat, text to speech, image generation and video
 > generation as jobs, plus any service workload's HTTP API at `/x/<name>` with ready-made vision
 > templates; llama.cpp gains a built-in Vulkan variant for AMD APUs, and the server and agent images
-> are on Docker Hub. See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
->
-> Coming in 1.3.1: a replica shows how far its engine image's pull has got, like a model download,
-> and a pull fails only when it stops making progress; deleting a deployment stops its download or
-> pull at once.
+> are on Docker Hub. 1.3.1 lets you change a deployment in place and shows what it waits for (GPU
+> sharing that would fit, a replica its machine never picks up, how far an engine image's pull has
+> got), simplifies the settings and moves llama.cpp to 1.0.0. See [CHANGELOG.md](CHANGELOG.md) and
+> [ROADMAP.md](ROADMAP.md).
 
 ## The guide
 
@@ -67,7 +66,7 @@ and linux/arm64):
 
 ```bash
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.0
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.1
 sudo docker logs forgeyard      # the one-time setup token
 ```
 
@@ -101,8 +100,8 @@ Every release is checked on real machines, not only in CI. So far:
 
 | Hardware | Software | What ran |
 |---|---|---|
-| NVIDIA A100 80GB PCIe (an 8-GPU host, with a GPU allowlist) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker, images and video in chat with Qwen3-VL-2B, audio in chat with Gemma 4 12B), speaches 0.8.3 (faster-whisper), vLLM-Omni (Qwen3-TTS text to speech, Stable Diffusion XL and Z-Image-Turbo image generation, Wan2.1 video generation); the gateway with the official OpenAI SDK; the agent from its container image |
-| AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build (accepted on b12242) served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io`; on the same build, images, audio and video in chat (Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF) and text to speech (Qwen3-TTS 1.7B and Chatterbox Turbo GGUF); image generation with stable-diffusion.cpp's Vulkan build (Z-Image-Turbo GGUF), its image loaded from a file |
+| NVIDIA A100 80GB PCIe (an 8-GPU host, with a GPU allowlist) | driver 580, CUDA 13.0, Docker | joining and the GPU allowlist; services and tasks as processes and containers, each seeing only its card; vLLM 0.32 (Qwen3-4B chat, Qwen3 embedding and reranker, images and video in chat with Qwen3-VL-2B, audio in chat with Gemma 4 12B), speaches 0.8.3 (faster-whisper), vLLM-Omni (Qwen3-TTS text to speech, Stable Diffusion XL and Z-Image-Turbo image generation, Wan2.1 video generation), llama.cpp 1.0.0's CUDA build (images, audio and video in chat with Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF, text to speech with Qwen3-TTS 1.7B and Chatterbox Turbo GGUF); the gateway with the official OpenAI SDK; the agent from its container image |
+| AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo, gfx1151 APU, 96 GiB carve-out) | Ubuntu 24.04, ROCm 7.0.2, amd-smi 26.0.2 | the inventory through the `amdsmi` library (unified memory), joining, and Qwen3-1.7B GGUF on llama.cpp's Vulkan build (accepted on b12242) served through `/v1`, on a machine that could reach neither Hugging Face nor `ghcr.io`; on llama.cpp 1.0.0's Vulkan build, offline too, images, audio and video in chat (Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF) and text to speech (Qwen3-TTS 1.7B and Chatterbox Turbo GGUF); image generation with stable-diffusion.cpp's Vulkan build (Z-Image-Turbo GGUF), its image loaded from a file |
 | x86-64 without a GPU | Linux | llama.cpp 1.0.0 as a process (Qwen3-1.7B GGUF) on two agents at once: balancing, failover when one engine dies; images, audio and video in chat with llama.cpp (Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF); text to speech with llama.cpp 1.0.0 (Qwen3-TTS 1.7B GGUF in Chinese and English, Chatterbox Turbo) and speaches (Kokoro 82M), the speech checked by faster-whisper; image generation with stable-diffusion.cpp as a process (Stable Diffusion 1.5 and Z-Image-Turbo GGUF) |
 | Google Gemini (`gemini-2.5-flash`) | its OpenAI-compatible endpoint | spilling when a request is too long for the local model, streaming, cost (thinking tokens included) and budgets |
 
@@ -122,15 +121,15 @@ and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Tur
 | **Multimodal chat** | | |
 | Qwen3-VL-2B Instruct: image, video | vLLM (`vllm`) | NVIDIA A100 |
 | Gemma 4 12B: audio | vLLM (`vllm`) | NVIDIA A100 |
-| Qwen3-VL-2B GGUF: image, video | llama.cpp (`llama-cpp`) | CPU (1.0.0); AMD Strix Halo (Vulkan, accepted on b12242) |
-| Qwen2.5-Omni-3B GGUF: image, audio, video | llama.cpp (`llama-cpp`) | CPU (1.0.0); AMD Strix Halo (Vulkan, accepted on b12242) |
+| Qwen3-VL-2B GGUF: image, video | llama.cpp 1.0.0 (`llama-cpp`) | CPU; NVIDIA A100 (CUDA); AMD Strix Halo (Vulkan) |
+| Qwen2.5-Omni-3B GGUF: image, audio, video | llama.cpp 1.0.0 (`llama-cpp`) | CPU; NVIDIA A100 (CUDA); AMD Strix Halo (Vulkan) |
 | **Embeddings and rerank** | | |
 | Qwen3-Embedding-0.6B, Qwen3-Reranker-0.6B | vLLM pooling (`vllm-pooling`) | NVIDIA A100 |
 | **Speech to text** | | |
 | faster-whisper small | speaches 0.8.3 (`faster-whisper`) | NVIDIA A100 |
 | **Text to speech** | | |
 | Qwen3-TTS 12Hz 0.6B and 1.7B CustomVoice | vLLM-Omni (`vllm-omni-tts`) | NVIDIA A100 |
-| Qwen3-TTS 12Hz 1.7B GGUF, Chatterbox Turbo GGUF | llama.cpp (`llama-cpp`) | CPU (1.0.0); AMD Strix Halo (Vulkan, accepted on b12242) |
+| Qwen3-TTS 12Hz 1.7B GGUF, Chatterbox Turbo GGUF | llama.cpp 1.0.0 (`llama-cpp`) | CPU; NVIDIA A100 (CUDA); AMD Strix Halo (Vulkan) |
 | Kokoro 82M | speaches (`speaches-tts`) | CPU |
 | **Image generation** | | |
 | Stable Diffusion XL base 1.0, Z-Image-Turbo | vLLM-Omni (`vllm-omni-image`) | NVIDIA A100 |
