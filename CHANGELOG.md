@@ -66,6 +66,8 @@ version until 1.0.
 
 - **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model
   library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
+- **A long command no longer fills the Workloads list on a phone**: at narrow widths it shows three lines
+  and an ellipsis; the whole command is in its tooltip.
 
 ## [1.3.3] — 2026-11-15
 

@@ -772,7 +772,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .wl { padding: 12px 14px 8px; }
   .wl-head { flex-direction: column; gap: 4px; }
-  .wl-cmd { margin-left: 0; white-space: normal; overflow-wrap: anywhere; }
+  .wl-cmd { margin-left: 0; white-space: normal; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
   .rep { grid-template-columns: 30px auto minmax(0, 1fr); }
   .rep-gpus, .rep-ports { grid-column: 2 / -1; }
   .event { grid-template-columns: minmax(0, 1fr); gap: 2px; }
