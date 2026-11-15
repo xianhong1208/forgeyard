@@ -60,12 +60,27 @@ def _detail(value: Any) -> dict:
     return value
 
 
+def _count(value: Any) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return n if 0 <= n <= 100_000 else 0
+
+
 def _download(value: Any) -> Optional[dict]:
-    """{"phase": "model"|"engine", "done": bytes, "total": bytes, "file"?: name}: small, or dropped."""
+    """{"phase": "model"|"engine"|"image", "done": bytes, "total": bytes, "file"?: name, and for an image
+    "layers", "layers_done", "unpacking"}: small, or dropped. `done` never exceeds a known total."""
     if not isinstance(value, dict):
         return None
-    out = {"phase": str(value.get("phase") or "model")[:16], "done": _bytes(value.get("done")) or 0,
-           "total": _bytes(value.get("total")) or 0}
+    done, total = _bytes(value.get("done")) or 0, _bytes(value.get("total")) or 0
+    out = {"phase": str(value.get("phase") or "model")[:16], "done": min(done, total) if total else done,
+           "total": total}
+    if out["phase"] == "image":
+        out["layers"] = _count(value.get("layers"))
+        out["layers_done"] = min(_count(value.get("layers_done")), out["layers"])
+        if value.get("unpacking") is True:
+            out["unpacking"] = True
     if value.get("file"):
         out["file"] = str(value["file"])[:200]
     if value.get("waiting"):

@@ -194,7 +194,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .action-setup { background: var(--heat-soft); border-color: #f3d39b; color: var(--heat-ink); }
 .action-bad { background: var(--bad-soft); border-color: #f2c4c0; color: var(--bad); }
 .load-more { display: flex; justify-content: center; margin-top: 16px; }
-.add-user-grid { display: grid; grid-template-columns: 1fr 1fr 180px; gap: 14px; }
+.add-user-grid { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 14px; }
 .add-user .muted { margin: 12px 0; }
 
 /* ---------------------------------------------------------------- machines */
@@ -418,6 +418,18 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .verdicts li.nope .mono.strong { color: var(--ink-2); }
 .verdict-reason { margin-top: 2px; color: var(--ink-2); overflow-wrap: anywhere; }
 .notice .verdicts { margin-top: 6px; }
+/* 1.3.1: GPU sharing would fit */
+.share-hint { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+  margin-top: 12px; padding: 10px 14px; border: 1px solid #c7d9eb; border-radius: var(--radius); background: var(--info-soft);
+  color: #1e3f5e; font-size: 13.5px; }
+.share-hint p { margin: 0; flex: 1 1 28ch; min-width: 0; }
+.share-fits { margin-top: 3px; color: #1e3f5e; }
+.stuck-list { margin: 4px 0 0; padding-left: 18px; }
+.cell-stuck { margin-top: 4px; font-size: 12.5px; color: #8a1a12; max-width: 46ch; overflow-wrap: anywhere; }
+.edit-plan { margin: 0 0 10px; font-size: 13.5px; }
+.edit-changes { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.edit-changes li { overflow-wrap: anywhere; }
+.rep-stuck { color: #8a1a12; }
 .notice .verdicts li { border-top-color: #f2c4c0; }
 
 .bar-dl { width: 120px; display: inline-block; vertical-align: middle; }
@@ -1154,3 +1166,20 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .tpl { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); display: grid; gap: 6px; align-content: start; min-width: 0; }
 .tpl p { margin: 0; overflow-wrap: anywhere; }
 .tpl-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+/* 1.3.1 settings: values from .env, the server's Hugging Face token, where a provider is, the context hint */
+.from-env { margin: 4px 0 12px; max-width: 90ch; color: var(--ink-2); line-height: 1.7; }
+.from-env .chip { margin-right: 6px; }
+.from-env code { overflow-wrap: anywhere; }
+.hf-token { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.hf-token h3 { margin: 0 0 6px; font-size: 14px; font-weight: 650; }
+.hf-token p { max-width: 90ch; }
+.hf-token-state { margin: 8px 0 0; line-height: 1.7; }
+.hf-token-state .chip { margin-right: 6px; }
+.provider-check + .where-hint, p.where-hint { margin: 6px 0 0 26px; max-width: 86ch; }
+.where-hint .chip { margin-right: 6px; }
+.ctx-hint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.ctx-hint .linkish { padding: 0; border: 0; background: none; color: var(--info); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.ctx-hint .linkish:hover { color: var(--ink); }
+.ctx-hint .linkish:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+.cloud-policy { max-width: 640px; }

@@ -47,6 +47,28 @@ card outside the list is never given to anything Forgeyard runs.
 - A process gets only its cards' IDs in `CUDA_VISIBLE_DEVICES` (NVIDIA) or `ROCR_VISIBLE_DEVICES`
   (AMD); a container gets only its cards passed in. A card in use cannot be taken off the list.
 
+## GPU sharing
+
+Every GPU deployment is **Exclusive** or **Share VRAM**:
+
+- **Exclusive**, the default for chat recipes: each replica gets whole cards, and nothing else
+  Forgeyard runs goes on them. The model has all of the card's compute.
+- **Share VRAM**, the default for embeddings, rerankers and speech to text: a replica reserves its
+  estimate, and other sharing replicas fit in the rest of the card (vLLM is told to use only that
+  much). Replicas on one card share its compute, so under load each answers more slowly.
+
+An exclusive replica and a sharing one never use the same card: both must share. Forgeyard points out
+when sharing would help:
+
+- the deploy and edit pages say so when an exclusive model needs half its card or less (*This model
+  needs 14.38 GiB of an 80.00 GiB card; with Share VRAM the rest can hold other models*);
+- a refusal says *fits if both share VRAM* and names the replica holding the card, when the memory is
+  there and only exclusivity is in the way;
+- **Setup health** notes (`deployment-could-share`) a running exclusive replica that reserves less than
+  half of a card of 24 GiB or more.
+
+Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
+
 ## Workloads
 
 A **workload** is something to run on your machines:
@@ -108,9 +130,12 @@ segmentation, depth), on Forgeyard's own image with permissively licensed models
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
   part by part, and where it fits, before anything is downloaded.
-- The **model cache** on each machine (`/srv/forgeyard-models` by default) keeps the downloaded
-  files, checked against their checksums, shared by every replica there. Containers get their model
-  mounted read-only.
+- The **model cache** on each machine (`/srv/forgeyard-models` by default, for an agent run as root)
+  keeps the downloaded files, checked against their checksums, shared by every replica there.
+  Containers get their model mounted read-only.
+- **Gated** Hugging Face models need a token of an account that accepted their licence. The server
+  keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
+  inspecting and downloading them; a deployment may bring its own, which wins for it.
 
 ## Deployments and the gateway
 
@@ -120,7 +145,9 @@ A **deployment** runs one model with one recipe, as one or more replicas. Forgey
    for big models), on machines that already have the model cached when it can, and replicas of
    one deployment on **different machines** when it can;
 2. refuses a deployment that fits nowhere, and says, machine by machine, why and by how much;
-3. downloads the model on that machine, starts the engine and waits until it is healthy.
+3. downloads the model on that machine (and pulls the engine's image, if it is not there yet), starts
+   the engine and waits until it is healthy. The deployment's page shows how far the download and the
+   pull have got; deleting the deployment stops both at once.
 
 Every ready deployment answers at **`https://<server>:7860/v1`**, the **gateway**, under its model
 name, with the OpenAI API: `/v1/models`, `/v1/chat/completions`, `/v1/completions`,
@@ -258,6 +285,12 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
   (the default, and every key from before 1.2), **Only to spill**, or **Allowed** (cloud-only models
   too). A route marked **Local only**, and a request with `X-Forgeyard-Local-Only: 1`, never leave
   either.
+- The **cloud policy** (an admin's choice on **API keys**) is two values in one: what new keys get,
+  and the most people may give their own keys. *No cloud*, *People may opt in to spill*, *Spill by
+  default* and *Cloud allowed* name the usual pairs; *Custom* shows both.
+- A provider is **outside your network** (it costs money, and only keys allowed to use the cloud
+  reach it) or **inside** it (every key reaches it and no budget applies). A new provider gets the
+  tick its kind and its address suggest; an admin confirms it.
 - Answers name who served them in `X-Forgeyard-Target`. Usage counts local and cloud apart.
 
 [Cloud providers](cloud-providers.md) has the details for each provider.

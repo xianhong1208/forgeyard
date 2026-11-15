@@ -6,6 +6,186 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-11-15
+
+Change a deployment in place (GPU sharing, context, requests at once, the machine), and see what it
+waits for: GPU sharing is pointed out when it would fit, a replica that its machine never picks up
+says so, and pulling an engine image shows its progress like a model download, failing only when it
+stops making progress. Removing a deployment stops its pull or download at once and says it was
+cancelled. Simpler settings: one cloud policy, one server-wide Hugging Face token, agent defaults
+that match the installer, and the settings removed in 1.4 deprecated. Also llama.cpp 1.0.0 in every
+variant of the `llama-cpp` recipe, with an optional FP8 KV cache.
+
+### Added
+
+- **FP8 KV cache on llama.cpp** (#48): the `llama-cpp` recipe's *KV cache type* (`kv_cache`, under
+  **Advanced**, default `f16`) can be `f8_e4m3`, llama.cpp 1.0.0's FP8 cache (`-ctk f8_e4m3 -ctv
+  f8_e4m3`, K and V both). The estimate follows it: 1 byte a value instead of 2 (`… x 1 B (f8_e4m3)`),
+  so Qwen3-4B at a context of 8,192 needs 576 MiB less a concurrent request (1.125 GiB of KV cache
+  becomes 0.5625). The estimate also knows llama.cpp's other cache types for custom recipes (`q8_0` is
+  34 bytes for 32 values, …) and refuses a type it does not know rather than guessing. Measured on the
+  CPU process variant with Qwen3-1.7B Q4_K_M, a context of 8,192 and 8 threads: peak RSS 2.81 GiB in
+  f16 and 2.35 GiB in FP8 (0.46 GiB less; the estimate says 0.44), but generation at 30 tokens/s
+  instead of 42. `f16` passes no flag, so every existing deployment runs as before.
+- **A recipe variant can refuse parameter values** (`unsupported: {kv_cache: [f8_e4m3]}`): a deployment
+  with one of them is never placed on that variant, and the placement says why (`vulkan: kv_cache
+  f8_e4m3 is not available on this variant`). The built-in `vulkan` variant refuses FP8: llama.cpp 1.0.0
+  has no FP8 code for Vulkan, and llama-server aborted at startup with it (`cannot run the operation
+  (SET_ROWS)`, the release's Vulkan build on Mesa's lavapipe). An FP8 deployment on an AMD APU is
+  refused (409); a card the ROCm image is built for runs it on `rocm`.
+- **Image pull progress** (#28). The agent pulls an engine image itself before `docker run`, through
+  the engine's API on its socket (`POST /images/create`, Docker or Podman), and reports it like a model
+  download: `pulling the image: 0.80 of 1.90 GiB (42%)`, each layer counted once ("Already exists"
+  layers count as done), `3 of 7 layers` while some sizes are not known yet, `unpacking` at the end.
+  The deployment and workload pages show a bar. Without the socket (a remote `DOCKER_HOST`, another
+  Docker context) it pulls with the CLI, which reports layers only, and keeps the anonymous retry for a
+  broken credential helper. A loaded image that matches its recorded ids (#10) is never pulled. A
+  failed pull says which layer it was at and how far it got. `forgeyard agent runtimes` says which way
+  the agent pulls.
+- **`pull_stall_minutes`** (`FORGEYARD_PULL_STALL_MINUTES`, `--pull-stall-minutes`, default 5): an
+  image pull fails when no new bytes arrive for that long (three times as long while it unpacks).
+- **Change a deployment** (#26): **Edit** on a deployment's page, and `PATCH /api/deployments/{id}`
+  for admins and operators. GPU sharing, GPUs per replica, context length, concurrency and the
+  recipe's other parameters, the memory override, extra engine arguments, the number of replicas and
+  the machine (*Automatic*, or *Pinned to* one machine) can be changed; the model, recipe and names
+  stay. The new estimate and placement are checked before saving, with the same refusals as a deploy
+  (409 `does_not_fit` unless `wait`), and `dry_run` shows the estimate, where each replica would go,
+  what changes and what restarts without saving. Saving restarts the replicas on the new settings:
+  several replicas one at a time (the next once the one before it is ready, so the model keeps
+  answering; the page shows *updating: 1 of 2 on the new settings*), a single replica stopped and
+  started again; changing only the number of replicas, or unpinning, restarts nothing. A stopped
+  deployment is only saved. Audited as `deployment.changed`. A replica restarting on its own card
+  counts its own memory there as free, so a bigger context that fits once it stops is accepted.
+- **GPU sharing is pointed out when it would fit** (#27); chat recipes stay **Exclusive** by default.
+  The deploy and edit pages say *This model needs X of a Y card; with Share VRAM the rest can hold
+  other models. They will share compute.* when an exclusive model needs half its card or less, with a
+  **Use Share VRAM** button; a refusal caused by exclusive cards when the memory is there says *fits if
+  both share VRAM* and names the replica holding the card (`share_fits` per machine in the API); and
+  Setup health has a note, `deployment-could-share`, for a running exclusive replica that reserves
+  less than half of a card of 24 GiB or more.
+- **A replica that no agent picks up says so** (#29): placed on a connected machine whose agent has
+  not reported it for 2 minutes (after the placement or the agent's last connection), the deployment,
+  workload and Models pages say *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
+  update the agent*, or, for an agent of the server's version, to restart it and look at its log
+  (`not_picked_up` per replica in the API).
+
+- **Simpler settings** (#30). One **Cloud policy** on **API keys** instead of two selects: *No cloud*,
+  *People may opt in to spill*, *Spill by default*, *Cloud allowed*, or *Custom* (which shows the two
+  selects). It stores the same two values as before. A pair that is no preset opens as *Custom*.
+- **One Hugging Face token for the server** (#30): admins set it under **Models → Model sources**
+  (`PUT`/`DELETE /api/hf-token`, audited as `hf_token.set` / `hf_token.cleared`). It is stored
+  encrypted with the secret key like the other secrets and never returned, only whether it is set and
+  its last four characters. Inspecting a Hugging Face model uses it, and the agent that downloads a
+  Hugging Face model gets it with the download, unless the inspection or the deployment brings its
+  own token. A deployment's own token stays an override under **Advanced**, and existing deployments
+  keep theirs. It is never sent to an `https://` GGUF host. `secrets reset` drops it when the key is
+  lost. Setup health: `gated-model-no-token` (V33).
+- **Where a new provider is** (#30): *Outside your network (cloud)* is ticked from the kind and the
+  base URL. OpenAI, Anthropic, Gemini, Azure and OpenRouter are outside. An OpenAI-compatible server
+  is inside for a private address (RFC 1918, 100.64.0.0/10, loopback, link-local, IPv6 ULA) or a
+  local name (a single label, `.local`, `.lan`, `.internal`, `.home.arpa`), outside for a public
+  address, and otherwise judged by what its name resolves to on the server. When that cannot be told,
+  it stays inside and the form says so. The form shows the reason and admins may change the tick;
+  `POST /api/providers/where` gives it, and a provider created through the API without `external` gets
+  it. Existing providers are untouched.
+- **The deploy form's context length** shows *model max N · largest that fits here M* (#30), each a
+  one-click value; the default context stays as it was. `context_hint` in
+  `POST /api/deployments/estimate`.
+- **Values from `.env` are marked** (#30): until an admin saves **Limits for keys**, **Cloud policy**
+  or **Model sources**, those panels say which variables their values come from (`env_seeds` in the
+  API).
+
+### Changed
+
+- **llama.cpp b12242 → 1.0.0** (#48) in every variant of the `llama-cpp` recipe: llama.cpp's first
+  release with a semantic version (2026-11-13). Its tag is the commit of nightly build b12359, whose
+  images and archives are the release's: the CUDA (still `server-cuda` = CUDA 12.8, driver ≥ 570),
+  ROCm (7.2.1), Vulkan and CPU images are tagged `server-*-v1.0.0-b12359-b1b770d` and pinned by digest
+  (their recorded ids are in `images.lock.json`), and the CPU process variant downloads
+  `llama-b12359-bin-ubuntu-x64.tar.gz`, pinned by its SHA-256 (built on Ubuntu 22.04: glibc 2.34 and
+  GLIBCXX_3.4.30 at most, as before, so it runs on Ubuntu 24.04 and Debian 13). The Dockerfiles are
+  unchanged. Every flag Forgeyard passes is unchanged (checked against the release binary's
+  `llama-server --help`, now a test fixture); the removed C API and `--defrag-thold` were never used.
+  Text to speech keeps llama-server's own `/v1/audio/speech`, which it already used since b12242 (the
+  release notes list it as new since 0.9.0): its request handling is the same at 1.0.0, which only adds
+  the server-wide `--tts-lang` and `--tts-voice` defaults (the gateway still sets `lang` per request),
+  so the formats (wav, pcm), streaming (`audio` only), the voices from `/props` and the voice-cloning
+  refusals at the gateway are unchanged. The MoE expert cache is not used (every layer is offloaded).
+  **The 1.0.0 server security fixes** (media URLs to private addresses refused unless
+  `--media-allow-private-urls`, CORS and DNS rebinding, MCP tools) **are a further layer here, not the
+  protection**: the engine listens on loopback behind the agent's key guard, and the gateway fetches
+  media URLs itself and sends only `data:` URIs. `--cors-origins` stays `*`, which keeps the new Host
+  check off for the key guard's requests. Measured on the CPU process variant (8 pinned threads),
+  b12242 against 1.0.0 with Qwen3-1.7B Q4_K_M: `llama-bench` generates 43.2 and 43.0 against 43.2 and
+  43.0 tokens/s (prompt 287 to 305 against 302 to 303); the same chat prompt through llama-server with
+  the recipe's flags, 38.6 to 41.5 against 41.5 to 42.6 tokens/s, peak RSS 2.82 against 2.81 GiB.
+  Accepted on the CPU process variant (`scripts/accept_all.py` models, gateway and tts groups, with
+  balancing over two agents and failover when an engine is killed;
+  `accept_mm.py` Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF with image, video and audio; `accept_tts.py`
+  Qwen3-TTS 1.7B GGUF and Chatterbox Turbo GGUF); the NVIDIA and AMD Vulkan variants on 1.0.0 are
+  still to be accepted on real hardware (they were on b12242).
+- **A pull no longer fails after a fixed 30 minutes** (#28). Seen for real: a 1.86 GB image at under
+  1 MB/s timed out twice and never started. Only a stall fails it now; `docker run` itself, on the local
+  image, has 10 minutes.
+- **Protocol:** the server lists the feature `pull_progress`; only then does an agent send an image
+  pull as a `download` with phase `image` (`layers`, `layers_done`, `unpacking`) and a reason per
+  step. To an older server it says only `pulling the image`, so that server records no event per
+  progress report. An older agent works as before, with "starting the container" while it pulls. **The
+  agent image must be rebuilt** for real agents to get any of this.
+- **A restarted replica goes back to the machine it ran on** (#26) when that machine still takes it,
+  instead of the best fit elsewhere: after **Stop** then **Start**, after an edit, and for plain
+  workloads too. A stopped, unpinned deployment no longer restarts on a machine that cannot reach its
+  model while its old machine has room. The server keeps this in memory; a replica still waiting when
+  the server restarts is placed by the usual rules.
+
+- **Agent defaults match the installer** (#30): the model cache is `/srv/forgeyard-models` when the
+  agent runs as root (`~/.local/share/forgeyard-models` otherwise), so a machine started without
+  `models.cache` now serves models. Process workloads run as `forgeyard-run` when the agent runs as
+  root and that account exists; the agent never creates it. `forgeyard agent config` shows both as
+  `(default)`. An empty value (`--model-cache ""`, `FORGEYARD_MODEL_CACHE=`, `cache = ""`) still means
+  "serve no models". `agent init` writes `~/.local/share/forgeyard-models` for a non-root agent
+  (before: `~/.cache/forgeyard-models`).
+- **Agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS`** (at least every 2 seconds), 10
+  seconds with the default 30, as before (#30).
+- **The New user and Register forms ask for no email** (#30): nothing sends mail. The API still takes
+  one and the column stays; Account shows it only when there is one.
+
+### Deprecated
+
+These still work in 1.3 and are **removed in 1.4**. The server logs a warning at start naming what
+replaces each one, and Setup health lists it (`setting-deprecated`):
+
+- `SECRET_KEY_FILE`: renamed `FORGEYARD_SECRET_KEY_FILE` (with both set, the new name wins).
+- `AGENT_HEARTBEAT_SECONDS`: the heartbeat follows `AGENT_OFFLINE_SECONDS`.
+- `FORGEYARD_SETUP_TOKEN`: use the printed setup token, or `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+- `USAGE_FLUSH_SECONDS`, `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and
+  `OPENROUTER_MODELS_URL`: fixed at their defaults (5 s, 30 s, 2 s, OpenRouter's public list).
+
+### Fixed
+
+- **A cancelled pull says so** (#28): when a deployment is removed (stopped, changed) while its image
+  pulls or its model downloads, the replica's last reason is `cancelled: the deployment was removed`
+  (`… stopped`, `… changed`), never the offline advice "the image is not on this machine and could not
+  be pulled".
+- **Removing a deployment stops its model download at once and releases the model's lock.** Seen for
+  real: the download went on writing for some seconds, and a new deployment of the same model waited on
+  the lock. The cancel was only set by the next reconcile round, after the agent had looked at every
+  running replica (one `docker inspect` each); it is now set as soon as the desired list arrives. It
+  also ends a read waiting on a stalled connection (before: up to the 60 s socket timeout; the abort
+  also works when the answer closes the connection), a retry's pause (up to 30 s), the checksum of a
+  finished file, and a replica's wait for another one's download of the same model. When the agent
+  stops, its downloads are cancelled too, instead of running on in their threads.
+- **A replica restarted under the same id in a new generation keeps its internal key.** Found with
+  #55 on a real run: an edit restarts a replica; the agent stored the new generation's key from the
+  desired list, then dropped it while removing the old generation, so the new one waited ("waiting for
+  the server …") for good. The agent now forgets a key (and a Hugging Face token) only when the
+  replica id is no longer wanted at all. #55 also gives a restarted replica a new id on the server.
+- **Model download progress never passes 100%.** Seen for real: `14.54 of 12.93 GiB (112%)` on a
+  resume, with 11.66 GiB on disk. The files already complete were counted twice, once in the starting
+  total and again as the loop passed them. Progress is now the bytes of that model on disk (finished
+  and partial files), each counted once, and the agent, the server and the page also clamp it to the
+  total.
+
 ## [1.3.0] — 2026-11-14
 
 More kinds of models behind the same gateway: images, audio and video in chat; text to speech at

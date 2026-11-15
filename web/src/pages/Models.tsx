@@ -186,7 +186,7 @@ function DeploymentCard({ d }: { d: Deployment }) {
               <span className="rep-ports">{ep && <a className="mono" href={ep.url} target="_blank" rel="noreferrer">{ep.url.replace(/^http:\/\//, "").replace(/\/$/, "")}</a>}</span>
               {frac !== null ? (
                 <span className="rep-reason"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {downloadText(r)}</span>
-              ) : r.reason && <span className="rep-reason">{r.reason}</span>}
+              ) : r.not_picked_up ? <span className="rep-reason rep-stuck">{r.not_picked_up}</span> : r.reason && <span className="rep-reason">{r.reason}</span>}
             </li>
           );
         })}
@@ -384,10 +384,18 @@ function Sources({ sources, onSaved }: { sources: ModelSources; onSaved: () => v
       setMsg({ tone: "ok", text: "Saved." }); onSaved();
     } catch (e) { setMsg({ tone: "error", text: errorText(e) }); }
   };
+  const seeds = sources.env_seeds ?? [];
   return (
     <section className="panel" aria-labelledby="sources-title">
       <h2 id="sources-title">Model sources</h2>
       <p className="muted small">Hugging Face models come from <code>{sources.hf_endpoint}</code>. Anything else only from what is listed here. Private and metadata addresses are always refused{sources.allow_private_hosts ? " (except: private hosts are allowed on this server for a LAN mirror)" : ""}.</p>
+      {seeds.length > 0 && (
+        <p className="from-env small" role="note">
+          <span className="chip chip-tone-wait">from .env</span>
+          <span>These lists come from {seeds.map((n, i) => <span key={n}>{i ? ", " : ""}<code>{n}</code></span>)}: nobody has saved them here
+            yet. Saving replaces them, and the environment is then ignored.</span>
+        </p>
+      )}
       <div className="grid-2">
         <div className="field"><label htmlFor="s-hosts">Hosts for GGUF URLs (one per line, *.example.org for subdomains)</label>
           <textarea id="s-hosts" className="mono" rows={3} value={hosts} onChange={(e) => setHosts(e.target.value)} /></div>
@@ -397,6 +405,51 @@ function Sources({ sources, onSaved }: { sources: ModelSources; onSaved: () => v
       </div>
       {msg && <div style={{ marginTop: 12 }}><Notice tone={msg.tone}>{msg.text}</Notice></div>}
       <div className="row-gap" style={{ marginTop: 12 }}><button type="button" className="btn" onClick={() => void save()}>Save sources</button></div>
+      <HfToken info={sources.hf_token} onSaved={onSaved} />
     </section>
+  );
+}
+
+// 1.3.1 (D2): one Hugging Face token for the server, for gated models. Write-only: only whether one is
+// set and its last four characters ever come back.
+function HfToken({ info, onSaved }: { info?: ModelSources["hf_token"]; onSaved: () => void }) {
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const send = async (method: "PUT" | "DELETE") => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api("/hf-token", method === "PUT" ? { method, body: { token: token.trim() } } : { method });
+      setToken("");
+      setMsg({ tone: "ok", text: method === "PUT" ? "Token saved." : "Token removed." });
+      onSaved();
+    } catch (e) { setMsg({ tone: "error", text: errorText(e) }); } finally { setBusy(false); }
+  };
+  return (
+    <div className="hf-token">
+      <h3 id="hf-token-title">Hugging Face token</h3>
+      <p className="muted small">
+        For gated models (Llama, Gemma 3, FLUX.1-schnell…): used to inspect them and sent to the agent that downloads them, only to Hugging
+        Face. A deployment's own token (Deploy a model → Advanced) wins for that deployment. Stored encrypted; never shown again.
+      </p>
+      <p className="small hf-token-state">
+        {info?.set
+          ? <><span className="chip chip-tone-ok">set</span> ends in <code>…{info.last4}</code>{info.updated_by ? <> · by {info.updated_by}</> : null}{info.updated_at ? <> · {when(info.updated_at)}</> : null}</>
+          : <><span className="chip">not set</span> Gated models need a token, here or on each deployment.</>}
+      </p>
+      <form className="token-row" onSubmit={(e) => { e.preventDefault(); if (token.trim()) void send("PUT"); }}>
+        <div className="field">
+          <label htmlFor="hf-token">{info?.set ? "Replace the token" : "Token"}</label>
+          <input id="hf-token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="hf_…" />
+          <p className="field-hint">A read token of an account that accepted the model's licence on huggingface.co.</p>
+        </div>
+        <div className="row-gap">
+          <button type="submit" className="btn" disabled={busy || !token.trim()}>Save token</button>
+          {info?.set && <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void send("DELETE")}>Remove token</button>}
+        </div>
+      </form>
+      {msg && <div style={{ marginTop: 10 }}><Notice tone={msg.tone}>{msg.text}</Notice></div>}
+    </div>
   );
 }

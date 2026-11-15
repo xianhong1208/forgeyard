@@ -9,7 +9,7 @@ import { api, errorText } from "../lib/api";
 
 export function RegisterPage() {
   const { state, loadError, reload } = useAuth();
-  const [form, setForm] = useState({ username: "", email: "", password: "" });
+  const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -23,7 +23,7 @@ export function RegisterPage() {
     setBusy(true);
     setError(null);
     try {
-      await api("/auth/register", { method: "POST", body: { ...form, email: form.email || null } });
+      await api("/auth/register", { method: "POST", body: form });
       setDone(true);
     } catch (err) {
       setError(errorText(err));
@@ -41,7 +41,6 @@ export function RegisterPage() {
           {error && <Notice tone="error">{error}</Notice>}
           <form onSubmit={submit} className="stack">
             <Field label="Username" name="username" required autoCapitalize="none" autoComplete="username" value={form.username} onChange={set("username")} />
-            <Field label="Email (optional)" name="email" type="email" autoComplete="email" value={form.email} onChange={set("email")} />
             <Field label="Password" name="password" type="password" required minLength={12} autoComplete="new-password"
               value={form.password} onChange={set("password")} hint="At least 12 characters; common passwords are refused." />
             <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? "Sending…" : "Request account"}</button>

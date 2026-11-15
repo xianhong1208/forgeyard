@@ -47,17 +47,17 @@ Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）
 
 **從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
 
-**連不到 `ghcr.io` 的機器**用檔案拿到映像檔。在連得到的機器上，用 tag 拉取，並確認它就是釘選的那一個（這個 tag 的 `DIGEST` 必須是配方裡的 `sha256:28a56d03…`）：
+**連不到 `ghcr.io` 的機器**用檔案拿到映像檔。在連得到的機器上，用 tag 拉取，並確認它就是釘選的那一個（這個 tag 的 `DIGEST` 必須是配方裡的 `sha256:784bb87c…`）：
 
 ```bash
-sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242
+sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d
 sudo docker images --digests ghcr.io/ggml-org/llama.cpp
-sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama-vulkan.tar.gz
+sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama-vulkan.tar.gz
 ```
 
 把檔案複製過去，在那裡用 `gunzip -c llama-vulkan.tar.gz | sudo docker load` 載入。配方寫的映像檔是 `tag@sha256:digest`，Docker 會用 digest 找它。Docker 用傳統的映像檔儲存方式時（`docker info` 顯示的 storage driver 是 `overlay2` 之類），載入的映像檔保留 tag，但不保留拉取時的 digest（`docker images --digests` 顯示 `<none>`）：`docker run` 找不到它，會試著從 `ghcr.io` 拉取，副本就帶著這個錯誤失敗。用 containerd 映像檔儲存時（`docker info` 裡有 `driver-type: io.containerd.snapshotter.v1`），載入後用 `docker images --digests` 檢查。沒有 digest 的話，就用一個自訂配方，映像檔寫載入的 tag、不加 digest：Docker 會在本機找到它，不會去拉取。
 
-> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本（build b11977）作為自訂配方部署模型、透過 `/v1` 呼叫。還沒在實際硬體上檢查的：內建的 Vulkan variant（b12242）、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔，以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
+> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本透過 `/v1` 提供模型：先是自訂配方（build b11977），後來是內建的 Vulkan variant（build b12242），映像檔從檔案載入。還沒在實際硬體上檢查的：llama.cpp 1.0.0 上的內建 Vulkan variant、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔，以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
 
 ## 加入純 CPU 機器
 
@@ -97,7 +97,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1
 ```
 
 接著：
@@ -129,7 +129,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -140,7 +140,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1 inventory
 ```
 
 ### 純 CPU
@@ -154,7 +154,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1
 ```
 
 ### 為什麼要用這些選項
@@ -172,8 +172,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **Advanced / offline** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.0 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.3.0 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.1 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.3.1 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -187,16 +187,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.3.0 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.3.1 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.3.0`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.3.1`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.0`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.1`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類工作負載和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -206,7 +206,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+     docker.io/tonyhuang1101/forgeyard-agent:1.3.1
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -227,8 +227,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
    ```bash
    sudo docker pull ghcr.io/ggml-org/llama.cpp@sha256:<digest> && \
-     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 && \
-     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama.cpp-server-vulkan-b12242.tar.gz
+     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d && \
+     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz
    ```
 
    用 digest 拉，檔案裡就正好是 recipe 釘住的映像檔；`docker load` 會保留 tag，agent 就是靠 tag 找到它。
@@ -237,7 +237,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 3. **把檔案複製到**離線機器（`scp`、USB 隨身碟），在那裡載入（Podman 用 `podman load`）：
 
    ```bash
-   gunzip -c llama.cpp-server-vulkan-b12242.tar.gz | sudo docker load
+   gunzip -c llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz | sudo docker load
    ```
 
 4. 照平常一樣**部署**。
@@ -339,8 +339,8 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
 只提供寬鬆授權的模型：不用 Ultralytics YOLOv8 或 YOLO11（AGPL-3.0），Depth Anything V2 也只用 Small（Base 和 Large 是 CC-BY-NC-4.0）。模型以固定的 revision 包在映像檔裡，所以映像檔到了機器上之後，範本就不需要網路。連不到 Docker Hub 的機器，請把映像檔複製過去（CUDA 版本需要 NVIDIA 驅動 580 或更新；沒有可用的 GPU 時會改用 CPU）：
 
 ```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda | gzip > forgeyard-vision.tar.gz
+docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.1-cuda
+docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.1-cuda | gzip > forgeyard-vision.tar.gz
 # on the machine without the network:
 gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
@@ -481,9 +481,39 @@ media: {inputs: [image, audio, video], files: false}
 
 **要多久：** 每段影片要幾分鐘，每個副本一次做一段；其他的在它上面排隊。影片長或尺寸大時，在 **Advanced** 調高 *Longest job*。
 
+## 使用受限（gated）的 Hugging Face 模型
+
+有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
+
+1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
+2. 管理員：打開 **Models → Catalog**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
+
+部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
+
+權杖只會送到 Hugging Face（`HF_ENDPOINT`），絕不會送到 `https://` 的 GGUF 主機。受限模型的部署沒有可用的權杖時，Setup health 會提醒（`gated-model-no-token`）。
+
 ## 加入雲端供應商
 
-管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+
+**Outside your network (cloud)** 會自動幫你勾好：OpenAI、Anthropic、Gemini、Azure 和 OpenRouter 一律勾選；*OpenAI-compatible server* 則在它的 base URL 是公開位址（或解析成公開位址的名稱）時勾選。私有位址（`10.x`、`172.16–31.x`、`192.168.x`、`100.64–127.x`、loopback、link-local、IPv6 `fc00::/7`），或像 `gpu-box`、`*.local`、`*.lan`、`*.internal` 這樣的名稱則不勾選。表單會說明原因；判斷錯了就自己改。名稱在伺服器上解析不出來時，維持不勾選，並說明無法判斷。
+
+## 選擇金鑰的雲端政策
+
+管理員：**API keys → Cloud policy** 決定新金鑰拿到什麼，以及大家最多能把自己的金鑰開放到什麼程度。選一個，再按 **Save cloud policy**：
+
+| 政策 | 新金鑰拿到 | 大家能把自己的金鑰設成 |
+|---|---|---|
+| **No cloud**（預設） | Never | Never |
+| **People may opt in to spill** | Never | Only to spill |
+| **Spill by default** | Only to spill | Only to spill |
+| **Cloud allowed** | Only to spill | Allowed |
+| **Custom** | 自己選 | 自己選 |
+
+*Only to spill* 只在本機部署無法使用、忙碌，或回應 429 或 503 時，才把請求送到雲端層；*Allowed* 也會使用排在本機之前的雲端層。改變政策不會改動既有金鑰自己的設定，但調低上限會立刻套用到大家設得比較高的金鑰。管理員可以把任何金鑰設成任何值，並對擁有者鎖定。預算仍然有效：[追蹤並限制雲端花費](#track-and-limit-cloud-spend)。
+
+設了 `GATEWAY_CLOUD_DEFAULT` 或 `GATEWAY_CLOUD_MAX`、而還沒有人儲存過政策時，面板會把這些值標示為 *from .env*。儲存之後就永久取代它們。
 
 ## 追蹤並限制雲端花費
 
@@ -498,6 +528,27 @@ media: {inputs: [image, audio, video], files: false}
 4. **留意警示。** 預算用到 80% 和 100% 時，**Audit log** 會各記錄一筆事件（`budget.warning`、`budget.exhausted`），頁面也會顯示警告。不會寄電子郵件。
 
 費用怎麼算、預算如何預留金額、用完之後會怎樣：請見[費用與價格](cloud-providers.md#cost-and-prices)和[預算](cloud-providers.md#budgets)。
+
+## 修改部署
+
+在部署的頁面選擇 **Edit**（管理員和操作員）。可以修改：
+
+- **GPU sharing**：*Exclusive* 讓每張卡只給一個副本；*Share VRAM* 只保留估算的記憶體量，卡上其餘的空間可以放其他模型，彼此共用算力（[GPU 共用](concepts.md#gpu-sharing)）；
+- **GPUs per replica**、**Context length**、**Concurrent requests** 和 recipe 的其他參數、記憶體覆寫值，以及額外的引擎參數；
+- **Replicas**：增加的副本會直接加上，不影響正在執行的；減少時移除編號最大的；
+- **Machine**：*Automatic*（由 Forgeyard 選擇），或 *Pinned to* 某一台機器。固定到另一台機器時，副本會搬過去；改回 *Automatic* 則什麼都不會搬。
+
+模型、recipe 和名稱不能改：要改就部署一個新的。儲存之前，頁面會顯示新的估算、每個副本會放在哪裡，以及儲存後會發生什麼事。放不下的修改會像部署一樣被拒絕（[部署放不下](troubleshooting.md#a-deployment-does-not-fit)）。已停止的部署只會儲存設定：下次啟動時才套用。
+
+儲存後，副本會以新設定重新啟動：
+
+- **多個副本**一次重新啟動一個：前一個以新設定就緒之後，才換下一個，所以模型會持續回應。全部完成之前，頁面會顯示 *updating: 1 of 2 on the new settings*；
+- **只有一個副本**時，它會停止再啟動：新的就緒之前，模型不會回應。要避免這樣，可以在同一次修改裡把 **Replicas** 調成 2：新副本會先啟動，舊的再重新啟動，之後再調回來即可；
+- 只改副本數量，或改回 *Automatic*，不會重新啟動任何東西。
+
+重新啟動的副本（修改之後，或先 **Stop** 再 **Start**）只要原本那台機器還放得下，就會回到原本的機器，而不是改放到別處最剛好的地方：那台機器已經有模型和引擎了。如果那台機器沒有空間了，或已離線，副本就放到放得下的地方。伺服器把這件事記在記憶體裡：伺服器重新啟動時還在等空間的副本，會照一般規則放置。
+
+用程式修改：`PATCH /api/deployments/{id}`（[參考](reference.md#change-a-deployment-through-the-api)）。
 
 ## 在共用機器上限制 GPU
 
@@ -518,7 +569,7 @@ media: {inputs: [image, audio, video], files: false}
 
 管理員在 **Users**：
 
-1. **Add user**：一個 **Username**、選填的 **Email (optional)**，以及 **Role**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **Create and get link**。
+1. **Add user**：一個 **Username** 和 **Role**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **Create and get link**。
 2. 把一次性連結傳給對方。它用來設定對方的密碼，只能用一次，72 小時後失效。你永遠看不到對方的密碼。
 
 之後在同一份清單上：**Password link** 會給忘記密碼的人一個新連結（24 小時）；**Sign out** 會結束對方所有的工作階段；**Disable** 讓對方無法登入，他的 API 金鑰也會失效；**Delete** 會刪除對方。擁有者不能被停用、降級或刪除。
@@ -608,7 +659,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.0
+  docker.io/tonyhuang1101/forgeyard:1.3.1
 sudo docker logs forgeyard
 ```
 
@@ -626,7 +677,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.3.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -634,7 +685,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.3.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -642,26 +693,26 @@ sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
 **升級**靠 tag。先備份，再拉取新版本，用它執行同一個指令；volume 會保留所有資料，資料庫的變更會在啟動時執行：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.3.1
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.3.2
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.1
+  docker.io/tonyhuang1101/forgeyard:1.3.2
 ```
 
-`1.3.1` 就是那個版本；`1.3` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
+`1.3.2` 就是那個版本；`1.3` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
 
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.3.0
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.3.1
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**Machines** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.3.0 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.3.1 .`
 
 ## 把伺服器當成服務執行
 
@@ -802,7 +853,7 @@ PostgreSQL：照常使用 `pg_dump`。
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：gated 模型的 Hugging Face 權杖要重新輸入，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的工作負載則必須重新建立（它們的事件裡會說明）。
+它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的工作負載則必須重新建立（它們的事件裡會說明）。
 
 ## 搬移模型快取
 

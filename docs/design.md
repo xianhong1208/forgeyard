@@ -279,7 +279,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   |---|---|---|---|
   | `vllm` | chat (safetensors) | NVIDIA, AMD | `vllm/vllm-openai:v0.32.0` (CUDA 13.0, driver ≥ 580), `-cu129` (≥ 575), `vllm/vllm-openai-rocm:v0.32.0` |
   | `vllm-pooling` | embeddings, rerank | NVIDIA, AMD, shares a GPU by default | the same images, `--runner pooling` |
-  | `llama-cpp` | chat (GGUF) | NVIDIA, AMD (ROCm for Instinct and the discrete cards its image is built for, Vulkan for APUs and every other AMD GPU, with the render node only), CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-b12242` and `server-b12242`, release `b12242` for the process |
+  | `llama-cpp` | chat (GGUF) | NVIDIA, AMD (ROCm for Instinct and the discrete cards its image is built for, Vulkan for APUs and every other AMD GPU, with the render node only), CPU (container or process) | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-v1.0.0-b12359-b1b770d` and `server-v1.0.0-b12359-b1b770d` (llama.cpp 1.0.0, 1.3.1; b12242 before), release `b12359` for the process |
   | `faster-whisper` | speech to text | NVIDIA, CPU, shares a GPU by default | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
   | `speaches-tts` (1.3) | text to speech (ONNX: Kokoro, Piper), English | CPU (container) only: ONNX Runtime ran Kokoro on the CPU even in the CUDA image | the speaches CPU image |
   | `vllm-omni-tts` (1.3) | text to speech (safetensors: Qwen3-TTS) | NVIDIA, one GPU, shares it by default | `vllm/vllm-omni:v0.32.0` (CUDA 13.0, driver ≥ 580), `vllm serve <model> --omni` |
@@ -427,7 +427,8 @@ page contain these lines whenever the server uses its own CA.
   its last 7 days.
 - **Images, audio and video in chat (1.3,** forgeyard/gateway/media.py**).** vLLM 0.32 and llama-server
   (b11977, b12242) download any http(s) URL they find in a media part, with no private-address filter (vLLM
-  also follows redirects), from inside your network. So:
+  also follows redirects), from inside your network; llama-server 1.0.0 refuses private addresses, which is
+  a further layer, not the protection. So:
   - the gateway walks `messages[].content[]` and **rebuilds every media part** in one shape
     (`image_url` and `video_url` with a `data:` URI, `input_audio` with base64), keeping only the fields
     it checked; `input_image`, `input_video` and `audio_url` are accepted and converted. Text parts
@@ -863,7 +864,7 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   what and from where.
 - **Secrets at rest:** Hugging Face tokens, replicas' internal keys, workload environment values and
   cloud providers' API keys are stored encrypted (AES-256-GCM) with a server key that is not in the database
-  (`data/secret.key`, mode 0600, or `SECRET_KEY_FILE` / `FORGEYARD_SECRET_KEY`). The server refuses
+  (`data/secret.key`, mode 0600, or `FORGEYARD_SECRET_KEY_FILE` / `FORGEYARD_SECRET_KEY`). The server refuses
   to start with a missing or wrong key, instead of making a new one over the old secrets. If the
   key is lost, `python -m forgeyard secrets reset --yes` starts over: the tokens and provider keys are
   entered again, and the replicas restart with new keys. Passwords, sessions, API keys and join tokens are

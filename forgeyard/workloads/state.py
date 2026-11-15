@@ -9,13 +9,15 @@ two sides out of step: the next `desired` converges again.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, utcnow
+from forgeyard import __version__
+from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, as_utc, utcnow
 from forgeyard.machines.messages import StatusIn
 from forgeyard.machines.protocol import (FEATURE_IMAGE_IDS, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS,
                                          PROTOCOL_VERSION)
@@ -105,8 +107,16 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
     key_envs: dict[int, Optional[str]] = {}
     ids = {r.workload_id for r in reps if r.model}
     if ids:
+        from forgeyard.models import hf_token
+
+        server: Optional[str] = None  # the server's token, read once when a deployment needs it
         for dep in db.scalars(select(Deployment).where(Deployment.workload_id.in_(ids))).all():
-            tokens[dep.workload_id] = dep.hf_token
+            # The deployment's own token, else the server's (1.3.1), and only for Hugging Face models:
+            # an https:// GGUF host never gets one.
+            hf = dep.model is not None and dep.model.kind == "hf"
+            if hf and not dep.hf_token and server is None:
+                server = hf_token.get(db) or ""
+            tokens[dep.workload_id] = hf_token.choose(dep.hf_token, server if hf else None)
             if keys:
                 recipe = get_recipe(db, dep.recipe)
                 key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None
@@ -183,7 +193,12 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         if st.final and not r.final and not stopping:
             r.final = True
             desired_changed = True
-        progress_only = before[0] == r.state and st.download is not None and (before[1] or "").startswith("downloading")
+        progress_only = (before[0] == r.state and st.download is not None
+                         and (before[1] or "").startswith(("downloading", "pulling the image")))
+        if (r.workload.desired_state == "stopped" and r.reason
+                and r.reason.startswith("cancelled: the ") and r.reason.endswith(" was removed")):
+            # The agent only sees that the replica is no longer wanted; here it was stopped, not removed.
+            r.reason = r.reason.removesuffix(" was removed") + " was stopped"
         if before != (r.state, r.reason, r.exit_code) and not progress_only:
             event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: "
                   f"{describe(r.state, r.reason, r.exit_code, r.pid)}", r.ordinal)
@@ -198,6 +213,12 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
                 event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: stopped", r.ordinal)
     db.flush()
     return desired_changed
+
+
+def is_ready(r: Replica) -> bool:
+    """Healthy, or running when it has no health check."""
+    health = (r.spec or r.workload.spec or {}).get("health")
+    return r.state == "healthy" or (r.state == "running" and not health)
 
 
 # ------------------------------------------------------------------ changes from people
@@ -260,6 +281,48 @@ def unplace_node(db: DbSession, node_id: int, why: str) -> list[Workload]:
         touched.append(w)
     db.flush()
     return touched
+
+
+# 1.3.1: a replica placed on a connected machine whose agent has not reported it for this long is shown
+# as not picked up. An agent gets its work list within a second of a placement (or of connecting) and
+# answers every list with the state of each replica on it, so two minutes of silence is not a slow start.
+NOT_PICKED_UP_AFTER = timedelta(minutes=2)
+
+
+def _version(v: Optional[str]) -> tuple[int, ...]:
+    m = re.match(r"\d+(?:\.\d+)*", (v or "").strip().lstrip("v"))
+    return tuple(int(x) for x in m.group(0).split(".")) if m else ()
+
+
+def not_picked_up(r: Replica, now: datetime, connected: Callable[[int], bool]) -> Optional[str]:
+    """Why a replica placed on a machine has not started: its agent, connected, never said a word
+    about it (an agent too old for this server, one that drops its work list, a stuck agent). None
+    when the replica is not in that situation."""
+    from forgeyard.machines.protocol import PROTOCOL_VERSION
+
+    node = r.node
+    if node is None or r.final or r.state != "pending" or r.started_at is not None or r.download is not None:
+        return None
+    if r.workload.desired_state != "running":
+        return None
+    if r.reason and r.reason != f"waiting for {node.name} to come online":
+        return None  # its agent (or the scheduler) said why
+    if not connected(node.id):
+        return None  # offline: the machine's own state says so
+    since = as_utc(r.updated_at)
+    if node.connected_at is not None and as_utc(node.connected_at) > since:
+        since = as_utc(node.connected_at)
+    waited = now - since
+    if waited < NOT_PICKED_UP_AFTER:
+        return None
+    minutes = int(waited.total_seconds() // 60)
+    text = (f"{node.name}'s agent ({node.agent_version or 'unknown version'}) has not taken this replica for "
+            f"{minutes} minute{'s' if minutes != 1 else ''}")
+    theirs = _version(node.agent_version)
+    old_protocol = node.protocol is not None and node.protocol < PROTOCOL_VERSION
+    if old_protocol or not theirs or theirs < _version(__version__):
+        return text + f"; update the agent (the server is {__version__})"
+    return text + f"; restart the agent on {node.name} and look at its log"
 
 
 def summary(w: Workload) -> dict:

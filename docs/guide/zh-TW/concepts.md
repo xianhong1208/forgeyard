@@ -29,6 +29,21 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - 記憶體以卡片當下回報的**可用**量為準，所以別人正在用的記憶體會被扣除，另外再保留一段安全餘裕（512 MiB）。
 - 行程只會在 `CUDA_VISIBLE_DEVICES`（NVIDIA）或 `ROCR_VISIBLE_DEVICES`（AMD）裡拿到自己那幾張卡的 ID；容器也只會被傳入自己的卡。正在使用中的卡不能從清單中移除。
 
+## GPU 共用
+
+每個 GPU 部署不是 **Exclusive** 就是 **Share VRAM**：
+
+- **Exclusive** 是對話 recipe 的預設：每個副本拿到整張卡，Forgeyard 不會在上面放其他東西。模型可以用到整張卡的算力。
+- **Share VRAM** 是嵌入、重排序和語音轉文字的預設：副本只保留估算的記憶體量，其他共用的副本可以放進卡上其餘的空間（vLLM 也會被告知只用那麼多）。同一張卡上的副本共用算力，所以負載高時每個都會回應得慢一些。
+
+獨占的副本和共用的副本絕不會用同一張卡：兩邊都必須共用。Forgeyard 會在共用有幫助時提醒：
+
+- 獨占的模型只需要它那張卡一半以下的記憶體時，部署和修改頁面會說明（*This model needs 14.38 GiB of an 80.00 GiB card; with Share VRAM the rest can hold other models*）；
+- 記憶體其實夠、只是被獨占擋住時，拒絕訊息會寫 *fits if both share VRAM*，並說出佔著那張卡的副本；
+- **Setup health** 會為保留不到 24 GiB 以上卡片一半記憶體、正在執行的獨占副本提供一則說明（`deployment-could-share`）。
+
+要在部署上修改，用 **Edit**：[修改部署](how-to.md#change-a-deployment)。
+
 ## 工作負載
 
 **工作負載**是要在你的機器上執行的東西：
@@ -64,7 +79,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。
 - **recipe**（配方）描述某一類模型要怎麼執行：用哪個引擎、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
-- 每台機器上的**模型快取**（預設 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。
+- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。
+- **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Model sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
 
 ## 部署與閘道
 
@@ -72,7 +88,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 1. 把每個副本放到放得下的地方：選擇夠大的卡中最剛好的那張（讓整張空著的卡留給大模型），盡可能放在已經快取了這個模型的機器上，並盡可能把同一個部署的副本放在**不同機器**上；
 2. 如果哪裡都放不下，就拒絕這個部署，並逐台機器說明原因和差多少；
-3. 在那台機器上下載模型、啟動引擎，並等到它變成健康狀態。
+3. 在那台機器上下載模型（如果引擎的映像檔還不在，也會拉取它）、啟動引擎，並等到它變成健康狀態。部署的頁面會顯示下載和拉取的進度；刪除部署會立刻停止這兩者。
 
 每個就緒的部署都以它的模型名稱，在 **`https://<server>:7860/v1`**（也就是**閘道**）以 OpenAI API 提供服務：`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/score`、`/v1/audio/transcriptions` 和 `/translations`。`/v1/models` 列出你的金鑰可以用的模型；部署停止後，它會從清單消失，直到再次啟動為止，除非它的路由能把請求送到你的金鑰可以用的雲端供應商。
 
@@ -150,6 +166,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - `/v1` 上的每個模型名稱都是一條**路由**。路由有分成好幾**層**的**目標**：本機部署和供應商的模型。部署自己的路由一開始只有一層，就是這個部署。管理員可以加上雲端模型作為第二層，或建立只有雲端模型的路由。
 - **本機優先。**只有在回答開始之前，而且本機這層無法使用、**忙碌**（每個副本都達到部署的 *Concurrent requests*）或回應 429 或 503 時，請求才會移到下一層。對本機 context 來說太長的提示，只有路由有設定時才會溢出。
 - 每把 API 金鑰的**雲端**設定決定它的請求能不能離開你的網路：**Never**（預設值，1.2 以前的金鑰也都是）、**Only to spill**，或 **Allowed**（也包括只有雲端的模型）。勾選 **Local only** 的路由，以及帶著 `X-Forgeyard-Local-Only: 1` 的請求，也都不會離開。
+- **雲端政策**（管理員在 **API keys** 的選擇）是把兩個值合成一個：新金鑰拿到什麼，以及大家最多能給自己的金鑰什麼。*No cloud*、*People may opt in to spill*、*Spill by default* 和 *Cloud allowed* 是常用的組合；*Custom* 會顯示兩個值。
+- 供應商不是在**你的網路外**（要花錢，只有允許使用雲端的金鑰能用），就是在**網路內**（每把金鑰都能用，不套用預算）。新的供應商會依它的種類和位址預先勾好，由管理員確認。
 - 回答會在 `X-Forgeyard-Target` 標明是誰提供的。Usage 會分開統計本機和雲端。
 
 各供應商的細節請見[雲端供應商](cloud-providers.md)。

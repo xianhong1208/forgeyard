@@ -7,6 +7,7 @@ import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
+import { downloadFraction, downloadText } from "../lib/models";
 import { buildGateway, gatewayForm, xCurl, xUrl, type GatewayForm } from "../lib/passthrough";
 import type { LogsResponse, Replica, Workload, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -76,6 +77,7 @@ export function WorkloadDetailPage() {
       />
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      {w && <NotPickedUpNotice w={w} />}
       {w && (
         <>
           <div className="wl-status">
@@ -121,15 +123,36 @@ export function WorkloadDetailPage() {
   );
 }
 
+// 1.3.1: replicas placed on a connected machine that its agent has not taken (see the troubleshooting guide).
+export function NotPickedUpNotice({ w }: { w: Workload }) {
+  const stuck = w.replica_list.filter((r) => r.not_picked_up);
+  if (!stuck.length) return null;
+  return (
+    <Notice tone="error">
+      <strong>{stuck.length === 1 ? `Replica #${stuck[0].ordinal} was never picked up.` : `${stuck.length} replicas were never picked up.`}</strong>
+      <ul className="stuck-list">
+        {stuck.map((r) => <li key={r.ordinal}>#{r.ordinal}: {r.not_picked_up}.</li>)}
+      </ul>
+      <HelpLink page="troubleshooting" anchor="a-replica-stays-pending">Why a replica stays pending</HelpLink>
+    </Notice>
+  );
+}
+
 function ReplicaRow({ r, w, guarded }: { r: Replica; w: Workload; guarded: boolean }) {
   const tone = STATE_TONE[r.state];
   const health = w.spec.health;
+  const frac = downloadFraction(r);
   return (
     <tr>
       <td data-label="Replica" className="mono">#{r.ordinal}</td>
       <td data-label="State">
         <span className={`chip chip-tone-${tone}`}>{stateLabel(r)}</span>
-        {r.reason && <div className="cell-reason">{r.reason}</div>}
+        {frac !== null ? (
+          <div className="dl" aria-label="Download progress">
+            <span className="bar bar-dl"><span style={{ width: `${Math.round(frac * 100)}%` }} /></span>
+            <span className="small">{downloadText(r)} ({Math.round(frac * 100)}%)</span>
+          </div>
+        ) : r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
       </td>
       <td data-label="Machine">
         {r.machine ? (

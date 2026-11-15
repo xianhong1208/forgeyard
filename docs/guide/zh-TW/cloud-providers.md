@@ -20,7 +20,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 2. 打開這個供應商，加入它的模型：直接輸入名稱，或用 **Import from /models**（Azure 不適用，它的清單不會列出你的部署）。
 3. 把模型放進路由（請見[把模型導向雲端](#route-a-model-to-the-cloud)）。
 
-除了 *OpenAI-compatible server* 以外，所有種類都預設勾選 **Outside your network**。第三方服務請保持勾選；自己的伺服器請取消勾選：在你網路內的供應商不算雲端，所以每把金鑰都能使用。
+除了 *OpenAI-compatible server* 以外，所有種類都預設勾選 **Outside your network**；*OpenAI-compatible server* 在 base URL 是公開位址（或解析成公開位址的名稱）時勾選，是私有位址或你自己網路上的名稱時不勾選，表單會說明原因。第三方服務請保持勾選；自己的伺服器請取消勾選：在你網路內的供應商不算雲端，所以每把金鑰都能使用。1.3.1 之前加入的供應商維持原本的勾選。
 
 ### OpenAI
 
@@ -44,7 +44,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 ### 你自己的伺服器（其他地方的 vLLM）
 
-種類選 *OpenAI-compatible server*，填入它的 base URL（例如 `https://llm.example.org/v1`），需要的話再加上金鑰。*Outside your network* 預設不勾選：這是你自己的伺服器，所以金鑰不需要雲端權限就能使用。如果透過 VPN 連到私有位址，可以勾選 **Allow plain HTTP**。Forgeyard 送給它的請求不會刪掉任何參數。
+種類選 *OpenAI-compatible server*，填入它的 base URL（例如 `https://llm.example.org/v1`），需要的話再加上金鑰。私有位址（`10.x`、`192.168.x`、VPN 的 `100.64.x`、IPv6 `fd…`）或像 `llm.lan`、`gpu-box` 這樣的名稱，*Outside your network* 維持不勾選：這是你自己的伺服器，所以金鑰不需要雲端權限就能使用。公開位址會自動勾選（Together、Groq 之類都是第三方）；只有伺服器真的是你的才取消勾選。如果透過 VPN 連到私有位址，可以勾選 **Allow plain HTTP**。Forgeyard 送給它的請求不會刪掉任何參數。
 
 ## 把模型導向雲端
 
@@ -77,7 +77,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會送到本機副本，不再受 *Concurrent requests* 限制：由引擎排隊處理。
 
-在雲端層內，回應 429 或 5xx、或連不上的目標會被略過，並在 30 秒內（`PROVIDER_COOLDOWN_SECONDS`）排到最後才嘗試。同一層的多個目標會依權重分攤請求。當沒有其他目標可試、而供應商要求等待不超過 2 秒時（`Retry-After`，`PROVIDER_RETRY_AFTER_CAP`），請求會等一次再試。
+在雲端層內，回應 429 或 5xx、或連不上的目標會被略過，並在 30 秒內排到最後才嘗試。同一層的多個目標會依權重分攤請求。當沒有其他目標可試、而供應商要求等待不超過 2 秒時（`Retry-After`），請求會等一次再試。
 
 單一請求可以用 `X-Forgeyard-Local-Only: 1` 標頭禁止自己使用雲端。它永遠不會放寬金鑰原本的權限：
 
@@ -101,7 +101,7 @@ curl https://192.168.1.20:7860/v1/chat/completions \
 | **Allowed**（`on`） | 依上面的規則溢出 | 會列出，也可以使用 |
 
 - 1.2 以前建立的金鑰一律是 **Never**。新金鑰會拿到伺服器的預設值，除非管理員改過，否則是 **Never**。
-- 每個人能替自己的金鑰設定的值，最多到 **The most people may give their own keys** 的設定，除非管理員調高，否則是 **Never**。兩者都在 **API keys** 的 **Cloud for keys**。
+- 每個人能替自己的金鑰設定的值，最多到 **The most people may give their own keys** 的設定，除非管理員調高，否則是 **Never**。兩者都在 **API keys** 的 **Cloud policy**：選一個政策，或選 *Custom* 分別設定（[選擇金鑰的雲端政策](how-to.md#choose-the-cloud-policy-for-keys)）。
 - 調低 **The most people may give their own keys** 會立刻生效：設得比較高的個人金鑰，從下一個請求起就照新的上限運作（API keys 表格會在旁邊顯示「now …（server maximum）」），之後把上限調回來，金鑰原本的設定也會恢復。管理員設定的值，以及管理員自己的金鑰，不受影響。
 - 管理員可以設定任何金鑰的雲端設定。設在別人的金鑰上時，這個值會像限制一樣對擁有者**鎖定**。**Unlock cloud** 會把它還原成預設值。
 - 在你網路內的供應商（沒有勾選 *Outside your network*）不算雲端：每把金鑰都能使用。

@@ -85,7 +85,7 @@ MODELS = {
     "chatterbox-turbo-gguf": {"source": "hf://ggml-org/chatterbox-turbo-GGUF",
                               "revision": "66f0393558d0ac1e0337e23a4d15f26e8eca0e12", "file": "chatterbox-turbo-Q8_0.gguf",
                               "mmproj": "mmproj-chatterbox-turbo-F16.gguf", "recipe": "llama-cpp", "zh": False,
-                              # It makes the whole utterance before any audio comes out (b12242, CPU):
+                              # It makes the whole utterance before any audio comes out (b12242 and 1.0.0, CPU):
                               # its streaming check is information only.
                               "streams": False, "params": {}},
     "qwen3-tts-1.7b-gguf": {"source": "hf://ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF",

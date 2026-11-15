@@ -82,8 +82,10 @@ proxy's CA with `--ca-file` if you trust it.
 `~/.docker/config.json`) that cannot run where the agent runs: a desktop keychain without a session,
 a helper missing in the agent's container.
 
-**What Forgeyard does:** when a pull fails this way, the agent pulls again anonymously, without the
-helpers. That is enough for every built-in engine image, since they are all public.
+**What Forgeyard does:** the agent pulls an engine image through Docker's API on its socket, which
+needs no helper. When it has to use the `docker` CLI instead (no socket, a registry that wants your
+credentials) and the pull fails this way, it pulls again anonymously, without the helpers. That is
+enough for every built-in engine image, since they are all public.
 
 **Do,** if it still fails (a private image, or no internet on the machine):
 
@@ -123,7 +125,8 @@ pulled; on an offline machine, docker load the image (Forgeyard checks it by its
 followed by Docker's error (`lookup ghcr.io … no such host`, a timeout, `pull access denied`).
 
 **Why:** the engine image is not on the machine, neither by its pinned digest nor by its tag, and the
-machine cannot reach the registry.
+machine cannot reach the registry. When the pull got under way first, the message also says where it
+stopped: `at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`.
 
 **Do:** carry the image over as a file and load it: [Offline machines](how-to.md#offline-machines).
 The recipe's page lists the commands for each of its images. The agent tries again by itself; the
@@ -147,6 +150,44 @@ pinned image, and asks the registry for the pinned one, which this machine canno
 **Do:** load the image the recipe names, pulled by its digest as in
 [Offline machines](how-to.md#offline-machines); `docker load` replaces the tag. `docker image inspect
 <tag>` shows what is loaded now.
+
+## An image pull is slow, or fails with "made no progress"
+
+**You see:** a replica shows `pulling the image: 0.80 of 1.90 GiB (42%)` for a long time (or
+`3 of 7 layers`, or `unpacking`), or it fails with `the image pull made no progress for 5 minutes (at
+layer …)`.
+
+**Why:** before it starts a container, the agent pulls the engine image itself and reports how much
+has arrived, layer by layer. Engine images are large (vLLM's is several GB), so at under 1 MB/s a pull
+takes an hour or more. A pull fails only when **no new bytes arrive for 5 minutes** (15 while the
+layers are unpacked): a slow pull that keeps moving is never stopped, however long it takes. The
+total can grow at first: Docker learns a layer's size only when it starts downloading it, and until
+every size is known the page shows the layers instead of a percentage.
+
+**Do:**
+
+- wait: a failed or stalled pull is tried again, and Docker keeps the layers it finished;
+- on a network that stalls for long stretches, raise the limit on that machine:
+  `FORGEYARD_PULL_STALL_MINUTES=15` (or `pull_stall_minutes = 15` under `[workloads]` in
+  `agent.toml`), then restart the agent;
+- or pull it there yourself once (`sudo docker pull <image>`, the recipe's page lists it), or carry it
+  over as a file: [Offline machines](how-to.md#offline-machines). A local image is never pulled again.
+
+The progress needs Docker's (or Podman's) API socket: the agent's container mounts
+`/var/run/docker.sock`. Without it, the agent pulls with the CLI, which reports layers but no bytes.
+`forgeyard agent runtimes` says which one it uses (`image pulls through the engine API`).
+
+## A replica says "cancelled: the deployment was removed"
+
+**You see:** in the agent's log, or as the last word of a replica, `cancelled: the deployment was
+removed` (`… was stopped`, `… was changed`).
+
+**Why:** the deployment was deleted, stopped or edited while that replica was still downloading its
+model or pulling its image. The agent ends the download or the pull at once and releases the model,
+so another deployment of the same model starts from what is already on disk. Nothing is wrong with the
+machine or the image; it is not an offline machine's "could not be pulled".
+
+**Do:** nothing. Deploy again to go on: the model download resumes where it stopped.
 
 ## Hugging Face downloads are slow
 
@@ -183,6 +224,19 @@ between placing and starting, there is no longer enough.
 - or lower what it needs: a shorter **Context length**, fewer **Concurrent requests**, or a
   smaller model. The deploy page shows the new estimate before you deploy.
 
+## llama.cpp does not start with the FP8 KV cache
+
+**You see:** a `llama-cpp` deployment whose *KV cache type* is `f8_e4m3` fails right after it starts,
+and its output ends with `FP8 cache is not supported for architecture '…'`; or deploying it on an AMD
+APU answers *vulkan: kv_cache f8_e4m3 is not available on this variant*.
+
+**Why:** llama.cpp 1.0.0 refuses the FP8 cache for some architectures (MLA models such as DeepSeek, and
+a few others), and it has no FP8 for Vulkan at all (llama-server would abort), so Forgeyard never
+places an FP8 deployment on the `vulkan` variant.
+
+**Do:** set *KV cache type* back to `f16` (**Edit** on the deployment's page, under **Advanced**). On
+an AMD card the ROCm image is built for, FP8 runs on `rocm`.
+
 ## A deployment does not fit
 
 **You see:** *Deploy* answers *Nothing can take a replica that needs … GiB per GPU*, followed by one
@@ -197,6 +251,7 @@ line says why it was not chosen:
 | `no allowed GPU that vllm supports` | no card on the GPU allowlist, or no recipe variant for that card and driver |
 | `needs 14.38 GiB per GPU; available: #0 12.07 GiB, … (2.31 GiB short)` | the best card misses that much free memory |
 | `needs 1 GPU it can have; in use: #1 (qwen)` | the cards are taken by replicas that do not share |
+| `…; fits if both share VRAM: #1 has 60.00 GiB available, held by qwen` | the memory is there, but the card is held exclusively: turn on **Share VRAM** on both ([GPU sharing](concepts.md#gpu-sharing)) |
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | a CPU model, and not enough free RAM |
 | `no container runtime (…)` | the recipe needs Docker or Podman, which the machine does not have |
 | `its agent does not serve models` | the agent has no model cache (`[models] cache` in its settings) |
@@ -209,7 +264,12 @@ until room appears (the API's `"wait": true`).
 ## A replica stays pending
 
 **You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
-is online, and the replica stays **pending** with no reason: nothing is downloaded or started.
+is online, and the replica stays **pending**: nothing is downloaded or started. After 2 minutes the
+deployment and workload pages say *Replica #0 was never picked up*, with the machine, its agent's
+version and what to do, for example *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
+update the agent (the server is 1.3.1)*. An agent gets its work list within a second of a placement
+(or of connecting) and answers every list with the state of each replica, so two minutes of silence
+from a connected agent is not a slow start.
 
 **Why:** the machine's agent is not acting on its work list. Agents up to 1.2.0 kept the number of the
 last work list they received across connections, and a server restarted since then numbered its
@@ -217,9 +277,13 @@ lists from 1 again: the agent took them all for old ones and dropped them withou
 from 1.3.0 numbers them so that this cannot happen, also for those older agents; an agent from
 1.3.0 starts a new count on every connection and logs any list it drops.
 
+It also happens with an agent that lacks something the replica needs and drops it, or one that is
+stuck.
+
 **Do:** run the server's own version on the agent ([upgrades](how-to.md#upgrade-the-server-and-the-agents)); until then,
 restarting the agent (`sudo systemctl restart forgeyard-agent`, or `docker restart forgeyard-agent`)
-makes it take its work at once. **Setup health** flags agents older than the server, and replicas
+makes it take its work at once. When the agent already runs the server's version, the message says
+to restart it and look at its log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`). **Setup health** flags agents older than the server, and replicas
 that waited for a machine for more than 15 minutes.
 
 ## Errors from /v1: 401, 403, 429, 503
@@ -416,7 +480,7 @@ local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 
 **Do:** on **API keys**, open the key's **Limits** and set *Cloud providers* to **Only to spill**
 (or **Allowed**, for cloud-only models too), then **Save limits**. People can choose at most what an
-admin allows under **Cloud for keys**. In the Playground, admins may use the cloud and everyone else
+admin allows under **Cloud policy**. In the Playground, admins may use the cloud and everyone else
 gets that most. Details: [When a request spills](cloud-providers.md#when-a-request-spills).
 
 ## An image is refused

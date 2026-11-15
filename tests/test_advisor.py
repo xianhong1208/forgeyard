@@ -152,7 +152,7 @@ def gpu(nid, index) -> Accelerator:
 
 
 # ------------------------------------------------------------------ the API
-def test_fy_adv_001_admins_only_and_the_shape_of_a_finding(owner):
+def test_fy_adv_001_admins_only_and_the_shape_of_a_finding(owner, monkeypatch):
     """FY-ADV-001: GET /api/advisor answers admins only (an operator and a user get 403); each finding
     has id, key (id@scope), severity, title, detail, fix_url, fix_label, scope, pages and snoozable;
     the badge counts errors and warnings, not info."""
@@ -161,13 +161,15 @@ def test_fy_adv_001_admins_only_and_the_shape_of_a_finding(owner):
     for name in ("olga", "ursula"):
         assert sign_in(owner, name, PW).get("/api/advisor").status_code == 403
     node("gpu-01", agent_version="0.9.0", protocol=0)
+    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")  # setup-token-left: info
+    get_settings.cache_clear()
     body = owner.get("/api/advisor").json()
     assert set(body) >= {"findings", "snoozed", "counts", "badge", "snooze_days", "checked_at"}
     f = next(f for f in body["findings"] if f["id"] == "agent-outdated")
     assert set(f) == {"id", "key", "severity", "title", "detail", "fix_url", "fix_label", "scope", "pages", "snoozable"}
     assert f["key"] == f"agent-outdated@{f['scope']}" and f["severity"] == "error" and f["snoozable"] is False
     assert body["badge"] == body["counts"]["error"] + body["counts"]["warning"]
-    assert body["counts"]["info"] >= 1  # setup-token-left: the tests pin a setup token
+    assert body["counts"]["info"] >= 1
     severities = [f["severity"] for f in body["findings"]]
     assert severities == sorted(severities, key=advisor.SEVERITIES.index)
 
@@ -247,11 +249,13 @@ def test_fy_adv_004_settings_problems_are_findings(owner, monkeypatch):
     """FY-ADV-004: the settings checks (FY-CFG-*) show up with their own ids and scopes."""
     monkeypatch.setenv("GATEWAY_CLOUD_DEFUALT", "on")
     monkeypatch.setenv("MODEL_ALLOW_PRIVATE_HOSTS", "true")
+    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")
     get_settings.cache_clear()
     found = findings()
     assert "setting:GATEWAY_CLOUD_DEFUALT" in {f.scope for f in found["setting-unknown"]}
     assert found["private-hosts-allowed"][0].severity == "warning"
     assert found["setup-token-left"][0].severity == "info"
+    assert found["setting-deprecated"][0].scope == "setting:FORGEYARD_SETUP_TOKEN"
 
 
 # ------------------------------------------------------------------ server and network

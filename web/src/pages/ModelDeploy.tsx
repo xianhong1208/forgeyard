@@ -1,5 +1,5 @@
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { Link, useNavigate, useSearchParams } from "react-router";
 
@@ -8,7 +8,7 @@ import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, type DeployForm } from "../lib/models";
-import type { CatalogModel, CatalogResponse, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam } from "../lib/types";
+import type { CatalogModel, CatalogResponse, ContextHint, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 export const ESTIMATE_DELAY_MS = 400;
@@ -24,6 +24,9 @@ export function ModelDeployPage() {
     device: search.get("device") === "cpu" ? "cpu" : "gpu" }));
   const [est, setEst] = useState<EstimateResponse | null>(null);
   const [estError, setEstError] = useState<string | null>(null);
+  // The context hint (D9) of the last estimate that worked: still offered while a context that is too
+  // long makes the estimate fail, so one click puts it back in range.
+  const [ctxHint, setCtxHint] = useState<{ key: string; hint: ContextHint } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; machines?: MachineVerdict[] } | null>(null);
 
@@ -40,18 +43,20 @@ export function ModelDeployPage() {
 
   const body = deployBody(view, recipe);
   const bodyKey = JSON.stringify({ ...body, hf_token: undefined });
+  // What the context hint depends on besides the context itself: another model, recipe or machine needs a new one.
+  const hintKey = JSON.stringify([view.model, view.recipe, view.device, f.machine]);
 
   useEffect(() => {
     if (!recipe) return;
     let alive = true;
     const timer = window.setTimeout(() => {
       api<EstimateResponse>("/deployments/estimate", { method: "POST", body: { ...JSON.parse(bodyKey), name: JSON.parse(bodyKey).name || "preview" } }).then(
-        (r) => { if (alive) { setEst(r); setEstError(null); } },
+        (r) => { if (alive) { setEst(r); setEstError(null); if (r.context_hint) setCtxHint({ key: hintKey, hint: r.context_hint }); } },
         (e) => { if (alive) { setEst(null); setEstError(errorText(e)); } },
       );
     }, ESTIMATE_DELAY_MS);
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [bodyKey, recipe]);
+  }, [bodyKey, recipe, hintKey]);
 
   if (user && user.role === "user") {
     return (<><PageHeader index="03 · Models" title="Deploy a model" /><Notice>Only admins and operators deploy models: a deployment runs code on a machine.</Notice></>);
@@ -144,7 +149,11 @@ export function ModelDeployPage() {
                       <p className="field-hint">Shared cards hold several replicas, each held to its own reservation.</p></div>
                   </>
                 )}
-                {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam} />)}
+                {shown.map(([k, p]) => (
+                  <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam}
+                    extra={ctxHint && ctxHint.key === hintKey && ctxHint.hint.param === k
+                      ? <ContextHintLine hint={ctxHint.hint} value={view.params[k]} pinned={!!f.machine} onPick={(n) => setParam(k, String(n))} /> : null} />
+                ))}
                 <div className="field"><label htmlFor="d-replicas">Replicas</label>
                   <input id="d-replicas" inputMode="numeric" value={f.replicas} onChange={(e) => set("replicas", e.target.value)} /></div>
                 <div className="field"><label htmlFor="d-machine">Machine</label>
@@ -153,6 +162,9 @@ export function ModelDeployPage() {
                     {usable.map((m) => <option key={m.id} value={m.id}>{m.name} · {m.status}</option>)}
                   </select></div>
               </div>
+              {view.device === "gpu" && (f.share || recipe.share) === "exclusive" && est?.placement.share_hint && (
+                <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
+              )}
               <details className="spec-preview" style={{ marginTop: 14 }}>
                 <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, token</summary>
                 <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
@@ -164,8 +176,11 @@ export function ModelDeployPage() {
                   <div className="field"><label htmlFor="d-extra">Extra engine arguments</label>
                     <textarea id="d-extra" className="mono" rows={3} value={f.extraArgs} onChange={(e) => set("extraArgs", e.target.value)} placeholder="one per line" /></div>
                   <div className="field"><label htmlFor="d-token">Hugging Face token</label>
-                    <input id="d-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)} />
-                    <p className="field-hint">Gated models only. Sent only to the agent that downloads; never shown again.</p></div>
+                    <input id="d-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)}
+                      placeholder={cat?.hf_token_set ? "the server's token" : undefined} />
+                    <p className="field-hint">{cat?.hf_token_set
+                      ? "Gated models use the server's token; one here replaces it for this deployment only."
+                      : "Gated models only (or set one for the server under Models → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
                 </div>
               </details>
             </section>
@@ -207,7 +222,19 @@ export function paramApplies(name: string, model: CatalogModel | undefined): boo
   return true;
 }
 
-function ParamField({ name, p, value, onChange }: { name: string; p: RecipeParam; value: string | undefined; onChange: (k: string, v: string) => void }) {
+// 1.3.1: an exclusive model that needs half its card or less: say that sharing would leave room.
+export function ShareHintNotice({ hint, onShare }: { hint: ShareHint; onShare: () => void }) {
+  return (
+    <div className="share-hint" role="note" aria-label="GPU sharing hint">
+      <p>{hint.text}{hint.machine && hint.gpu !== null ? <span className="muted"> ({hint.machine} GPU #{hint.gpu})</span> : null}</p>
+      <button type="button" className="btn btn-quiet" onClick={onShare}>Use Share VRAM</button>
+    </div>
+  );
+}
+
+export function ParamField({ name, p, value, onChange, extra }: {
+  name: string; p: RecipeParam; value: string | undefined; onChange: (k: string, v: string) => void; extra?: ReactNode;
+}) {
   return (
     <div className="field">
       <label htmlFor={`d-p-${name}`}>{p.label ?? name}</label>
@@ -219,11 +246,33 @@ function ParamField({ name, p, value, onChange }: { name: string; p: RecipeParam
         <input id={`d-p-${name}`} inputMode="numeric" value={value ?? ""} onChange={(e) => onChange(name, e.target.value)} />
       )}
       {p.help && <p className="field-hint">{p.help}</p>}
+      {extra}
     </div>
   );
 }
 
-function EstimatePanel({ est, error, pending }: { est: EstimateResponse | null; error: string | null; pending: boolean }) {
+// D9: the context keeps its default; the model's maximum and the largest that fits are one click away.
+export function ContextHintLine({ hint, value, pinned, onPick }: { hint: ContextHint; value: string | undefined; pinned: boolean; onPick: (n: number) => void }) {
+  if (!hint.model_max) return null;
+  const current = Number(value);
+  const pick = (n: number, label: string) => (
+    <button type="button" className="linkish" disabled={current === n} onClick={() => onPick(n)} aria-label={`Use ${label}: ${n.toLocaleString("en-US")} tokens`}>
+      {n.toLocaleString("en-US")}
+    </button>
+  );
+  const where = pinned ? "on this machine" : "here";
+  return (
+    <p className="ctx-hint" aria-label="Context hint">
+      <span>model max {pick(hint.model_max, "the model's maximum")}</span>
+      <span aria-hidden="true">·</span>
+      {hint.fits_max
+        ? <span>largest that fits {where} {pick(hint.fits_max, "the largest that fits")}</span>
+        : <span>no context fits {where} now</span>}
+    </p>
+  );
+}
+
+export function EstimatePanel({ est, error, pending }: { est: { estimate: Estimate; placement: Placement } | null; error: string | null; pending: boolean }) {
   if (error) return <section className="panel"><h2>Estimate</h2><Notice tone="error">{error}</Notice></section>;
   if (!est) return <section className="panel"><h2>Estimate</h2><p className="muted small">{pending ? "Estimating…" : "Choose a model and a recipe."}</p></section>;
   const e = est.estimate;
@@ -247,7 +296,7 @@ function EstimatePanel({ est, error, pending }: { est: EstimateResponse | null; 
   );
 }
 
-function PlacementView({ p }: { p: Placement }) {
+export function PlacementView({ p }: { p: Placement }) {
   return (
     <div className="placement">
       <h3 className="sub">Where it would go</h3>
@@ -257,7 +306,7 @@ function PlacementView({ p }: { p: Placement }) {
             <li key={x.replica}><IconCheck size={15} aria-hidden="true" className="ok-ic" />
               <span>Replica {x.replica}: <strong>{x.machine}</strong> {x.gpus.length ? `GPU ${x.gpus.map((g) => `#${g}`).join(", ")}` : "CPU"} · {x.variant}{x.runtime === "process" ? " (process)" : ""}
                 {x.gpu_memory_utilization && <> · <span className="mono">--gpu-memory-utilization {x.gpu_memory_utilization}</span></>}
-                {x.cached && <> · model cached there</>}{!x.online && <> · waits for it to come online</>}</span></li>
+                {x.previous && <> · where it runs now</>}{x.cached && <> · model cached there</>}{!x.online && <> · waits for it to come online</>}</span></li>
           ))}
         </ul>
       ) : (
@@ -268,7 +317,7 @@ function PlacementView({ p }: { p: Placement }) {
   );
 }
 
-function Verdicts({ list }: { list: MachineVerdict[] }) {
+export function Verdicts({ list }: { list: MachineVerdict[] }) {
   return (
     <ul className="verdicts">
       {list.map((m) => (
@@ -276,6 +325,15 @@ function Verdicts({ list }: { list: MachineVerdict[] }) {
           <span className="mono strong">{m.name}</span>{m.status !== "online" && <span className="muted small"> ({m.status})</span>}
           {m.short_by ? <span className="chip chip-tone-bad">{gib(m.short_by)} short</span> : m.fits ? <span className="chip chip-tone-ok">fits</span> : null}
           <div className="small verdict-reason">{m.reason || (m.fits ? `${m.variant} · ${(m.cards ?? []).map((c) => `${c.index === null ? "RAM" : `#${c.index}`} ${gib(c.available)} available`).join(", ")}` : "")}</div>
+          {m.share_fits && (
+            <div className="small share-fits">
+              {m.share_fits.both
+                ? <>To use it: turn on <strong>Share VRAM</strong> here, and on {m.share_fits.exclusive.join(", ")} (Edit on its page).</>
+                : m.share_fits.exclusive.length
+                  ? <>To use it: turn on <strong>Share VRAM</strong> on {m.share_fits.exclusive.join(", ")} (Edit on its page).</>
+                  : <>To use it: turn on <strong>Share VRAM</strong> here.</>}
+            </div>
+          )}
         </li>
       ))}
     </ul>

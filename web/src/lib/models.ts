@@ -1,5 +1,5 @@
 import { bytes } from "./machines";
-import type { CatalogModel, Medium, Recipe, Replica, Task } from "./types";
+import type { CatalogModel, Deployment, Medium, Recipe, Replica, Task } from "./types";
 
 export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video" };
 
@@ -27,18 +27,27 @@ export function params(n: number | undefined): string {
   return n >= 1e9 ? `${(n / 1e9).toFixed(2)} B` : `${Math.round(n / 1e6)} M`;
 }
 
-// "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar.
+// "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar (never past the end).
 export function downloadFraction(r: Replica): number | null {
   const d = r.download;
   if (!d || !d.total) return null;
-  return Math.min(1, d.done / d.total);
+  return Math.max(0, Math.min(1, d.done / d.total));
 }
 
+// What the bar says: a model or engine download, or an image pull (1.3.1). Never more than the total.
 export function downloadText(r: Replica): string | null {
   const d = r.download;
   if (!d) return null;
+  const done = d.total ? Math.min(d.done, d.total) : d.done;
+  if (d.phase === "image") {
+    const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
+    if (d.unpacking) return `Pulling the image: unpacking, ${layers}`;
+    if (d.total) return `Pulling the image: ${bytes(done)} of ${bytes(d.total)}`;
+    if (done && layers) return `Pulling the image: ${bytes(done)}, ${layers}`;
+    return layers ? `Pulling the image: ${layers}` : "Pulling the image";
+  }
   const what = d.phase === "engine" ? "engine" : "model";
-  return d.total ? `Downloading the ${what}: ${bytes(d.done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(d.done)}`;
+  return d.total ? `Downloading the ${what}: ${bytes(done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(done)}`;
 }
 
 export function compatibleRecipes(model: CatalogModel | undefined, recipes: Recipe[]): Recipe[] {
@@ -99,4 +108,51 @@ export function deployBody(f: DeployForm, recipe: Recipe | undefined): Record<st
   if (f.machine) body.machine_id = Number(f.machine);
   if (f.token.trim()) body.hf_token = f.token.trim();
   return body;
+}
+
+// 1.3.1: changing a deployment. The form starts from what it runs with now.
+export type EditForm = {
+  device: "gpu" | "cpu";
+  gpus: string;
+  share: "exclusive" | "vram";
+  replicas: string;
+  machine: string;   // "" = automatic, else the id of the machine it is pinned to
+  vram: string;
+  extraArgs: string;
+  params: Record<string, string>;
+};
+
+function sizeText(n: number): string {
+  const g = n / 1024 ** 3;
+  return Number.isInteger(g) ? `${g}Gi` : String(n);
+}
+
+export function editForm(d: Deployment, recipe: Recipe): EditForm {
+  const p = d.params;
+  const params: Record<string, string> = recipeDefaults(recipe);
+  for (const k of Object.keys(recipe.params)) if (p[k] !== undefined && p[k] !== null) params[k] = String(p[k]);
+  const gpus = Number(p.gpus ?? 1);
+  return {
+    device: gpus === 0 ? "cpu" : "gpu", gpus: String(gpus || 1), share: p.share === "vram" ? "vram" : "exclusive",
+    replicas: String(d.workload.replica_list.length || d.workload.spec.replicas || 1),
+    machine: d.workload.spec.machine_id ? String(d.workload.spec.machine_id) : "",
+    vram: typeof p.vram === "number" ? sizeText(p.vram) : "", extraArgs: Array.isArray(p.extra_args) ? p.extra_args.join("\n") : "",
+    params,
+  };
+}
+
+// The PATCH body: every parameter (the server compares), null to go back to a default.
+export function editBody(f: EditForm, recipe: Recipe): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  for (const [k, def] of Object.entries(recipe.params)) {
+    const v = f.params[k];
+    if (v === undefined || v === "") continue;
+    p[k] = def.type === "int" || def.type === "float" ? Number(v) : v;
+  }
+  p.gpus = f.device === "cpu" ? 0 : Number(f.gpus || "1");
+  p.share = f.share;
+  p.vram = f.vram.trim() || null;
+  const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
+  p.extra_args = extra.length ? extra : null;
+  return { params: p, replicas: Number(f.replicas || "1"), machine_id: f.machine ? Number(f.machine) : null };
 }

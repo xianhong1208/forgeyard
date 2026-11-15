@@ -31,6 +31,7 @@ bind_address = "192.168.1.21"
 container_engine = "podman"
 limits = "rlimit"
 log_max_mb = 25
+pull_stall_minutes = 12
 
 [models]
 cache = "/srv/forgeyard-models"
@@ -61,6 +62,7 @@ def test_fy_acfg_001_every_setting_comes_from_the_file(tmp_path):
     assert args.no_workloads is False and args.workload_user == "forgeyard-run" and args.work_dir == "/var/lib/fy-test-work"
     assert args.port_range == "31000-31999" and args.bind_address == "192.168.1.21"
     assert args.container_engine == "podman" and args.limits == "rlimit" and args.log_max_mb == 25
+    assert args.pull_stall_minutes == 12
     assert args.model_cache == "/srv/forgeyard-models" and args.model_local_dir == ["/data/models", "/mnt/models"]
     assert args.allow_private_model_hosts is True
     assert res.path == path and {k for k, v in res.sources.items() if v != "file"} == {"ca_file"}
@@ -258,7 +260,7 @@ def test_fy_init_002_a_container_a_cpu_machine_and_no_root(tmp_path, monkeypatch
     assert cli_main(["agent", "init", "--print", "--simulate-inventory", str(_cpu_fixture(tmp_path))]) == 0
     data = tomllib.loads(capsys.readouterr().out)
     assert "user" not in data["workloads"] and data["workloads"]["limits"] == "rlimit"
-    assert data["models"]["cache"].endswith("/.cache/forgeyard-models")
+    assert data["models"]["cache"].endswith("/.local/share/forgeyard-models")  # the agent's own default (D6)
     # values given in the environment are kept as they are (the Docker image sets these)
     monkeypatch.setenv("FORGEYARD_LIMITS", "auto")
     monkeypatch.setenv("FORGEYARD_MODEL_CACHE", "/srv/m")

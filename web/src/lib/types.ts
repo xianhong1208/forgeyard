@@ -158,9 +158,16 @@ export type Replica = {
   updated_at: string;
   // Model deployments (M3).
   vram?: number | null;
-  download?: { phase: "model" | "engine"; done: number; total: number; file?: string } | null;
+  // An image pull (1.3.1) is reported the same way: phase "image", with its layers; total 0 while
+  // some layer's size is not known yet.
+  download?: {
+    phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
+    layers?: number; layers_done?: number; unpacking?: boolean;
+  } | null;
   ready_at?: string | null;
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
+  // 1.3.1: placed on a connected machine whose agent has not taken it for two minutes: why, and what to do.
+  not_picked_up?: string | null;
 };
 
 export type ContainerRuntimeSpec = { type: "container"; image: string; command: string[] | null; args: string[] };
@@ -293,9 +300,19 @@ export type ImageModel = {
   pipeline: string | null; parts: Record<string, { class: string | null; params: number | null }>;
 };
 
-export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };
+// 1.3.1: the server's Hugging Face token, as the UI may see it (never the token itself).
+export type HfTokenInfo = { set: boolean; last4: string | null; updated_by: string | null; updated_at: string | null };
 
-export type CatalogResponse = { models: CatalogModel[]; recipes: Recipe[]; can_manage: boolean; can_deploy: boolean; sources?: ModelSources };
+export type ModelSources = {
+  url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean;
+  // Environment variables the lists still come from (nobody saved them yet), and the server's token.
+  env_seeds?: string[]; hf_token?: HfTokenInfo;
+};
+
+export type CatalogResponse = {
+  models: CatalogModel[]; recipes: Recipe[]; can_manage: boolean; can_deploy: boolean; sources?: ModelSources;
+  hf_token_set?: boolean;
+};
 
 export type EstimatePart = { label: string; bytes: number; detail: string };
 
@@ -305,13 +322,26 @@ export type MachineVerdict = {
   machine_id: number; name: string; status: string; fits: boolean; reason: string; short_by: number | null;
   cards: { index: number | null; available: number; total: number | null; shared_with: string[] }[];
   variant?: string; runtime?: string; image?: string | null; gpus?: number[]; cached?: boolean; leftover?: number;
+  // 1.3.1: exclusive cards are in the way, but the memory is there if they are shared.
+  share_fits?: { gpus: number[]; holders: string[]; exclusive: string[]; both: boolean };
 };
 
-export type PlacedReplica = { replica: number; machine: string; machine_id: number; variant: string; runtime: string; image: string | null; gpus: number[]; cached: boolean; leftover: number; online: boolean; gpu_memory_utilization?: string };
+export type PlacedReplica = { replica: number; machine: string; machine_id: number; variant: string; runtime: string; image: string | null; gpus: number[]; cached: boolean; leftover: number; online: boolean; gpu_memory_utilization?: string;
+  // 1.3.1 (a change): it goes back to the machine it runs on now.
+  previous?: boolean };
 
-export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: MachineVerdict[]; summary?: string; failed_replica?: number };
+// 1.3.1: an exclusive GPU deployment that needs half its card or less could share it.
+export type ShareHint = { need: number; card_total: number; card_model: string | null; machine: string | null; gpu: number | null; text: string };
 
-export type EstimateResponse = { estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string };
+export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: MachineVerdict[]; summary?: string; failed_replica?: number; share_hint?: ShareHint | null };
+
+// 1.3.1 (D9): the model's longest context and the largest that fits right now, offered as one click.
+export type ContextHint = { param: string; model_max: number | null; fits_max: number | null };
+
+export type EstimateResponse = {
+  estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string;
+  context_hint?: ContextHint | null;
+};
 
 export type Endpoint = {
   replica: number; machine: string | null; state: string; ready: boolean; url: string;
@@ -331,6 +361,18 @@ export type Deployment = {
   // 1.2: the deployment's own route with its tiers, and other routes it is a target of.
   routing?: RouteInfo | null; also_in?: string[];
   usage?: { days: number; total: UsageRow; by_day: UsageRow[] };
+  // 1.3.1: the machine a person chose (null: Forgeyard chooses), and an edit's restarts in progress.
+  pinned?: { id: number; name: string | null } | null;
+  rollout?: { generation: number; updated: number; total: number; next: number } | null;
+};
+
+export type RestartMode = "none" | "on_start" | "rolling" | "all";
+
+// PATCH /api/deployments/{id} (1.3.1); dry_run answers the same without `deployment`.
+export type EditResponse = {
+  estimate: Estimate; placement: Placement; params: Record<string, unknown>;
+  changes: Record<string, { before: unknown; after: unknown }>; restart: RestartMode; restart_text: string;
+  deployment?: Deployment;
 };
 
 export type DeploymentsResponse = { deployments: Deployment[]; server_time: string; can_manage: boolean };
@@ -365,6 +407,8 @@ export type WorkloadChoice = { name: string; exposed: boolean; path: string };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
+  // Admins: environment variables the panels' values still come from (D1).
+  env_seeds?: { limits: string[]; cloud: string[] };
   models: { name: string; api: string; kind?: RouteKind }[];
   workloads?: WorkloadChoice[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
@@ -415,6 +459,9 @@ export type RouteOptions = {
   deployments: { id: number; name: string; served_name: string; api: string | null }[];
   provider_models: { id: number; upstream_model: string; display_name: string | null; api: string; provider: ProviderRef }[];
 };
+
+// 1.3.1 (D4): whether a provider looks outside your network, and why.
+export type ProviderWhere = { external: boolean; basis: "kind" | "address" | "name" | "resolved" | "unknown"; reason: string };
 
 export type ProviderKind = {
   kind: string; label: string; base_url: string; base_url_hint: string; auth: string; embeddings: boolean; models_endpoint: boolean;

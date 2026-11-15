@@ -1,16 +1,30 @@
 # llama.cpp's llama-server for GGUF models: NVIDIA and AMD GPUs (ROCm or Vulkan) and plain CPUs, in
 # a container or (CPU) as a process that needs no Docker.
 #
-# Pinned: build b12242 (2026-11-10). llama.cpp ships a build per merge rather than stable releases,
-# and publishes images only for some builds, so the pin is one build for which the official images
-# (ghcr.io/ggml-org/llama.cpp:server-*-b12242) and the release archives exist, so every variant runs
-# the same code: https://github.com/ggml-org/llama.cpp/releases/tag/b12242. It is the first build
-# with images after the OpenAI-compatible /v1/audio/speech endpoint was merged
-# (ggml-org/llama.cpp#31763, in b12238), which text-to-speech uses. The CUDA image (`server-cuda`,
-# the same digest as `server-cuda12`) is CUDA 12.8 (driver >= 570); the CPU process variant downloads the official Ubuntu x64 archive, checked
-# against the SHA-256 GitHub publishes for it.
+# Pinned: release v1.0.0 (2026-11-13), llama.cpp's first semantic-version release
+# (https://github.com/ggml-org/llama.cpp/releases/tag/v1.0.0). Its tag is the commit of nightly build
+# b12359 (b1b770d), whose binaries and images are the release's: the images are tagged
+# server-*-v1.0.0-b12359-b1b770d (version, build, commit) and the archives are those of build b12359,
+# so every variant runs the same code. Before 1.0.0 the pin was nightly build b12242. The CUDA image
+# (`server-cuda`, the same digest as `server-cuda12`) is CUDA 12.8 (driver >= 570); `server-cuda13`
+# (CUDA 13.5) is not used. The CPU process variant downloads the official Ubuntu x64 archive, checked
+# against the SHA-256 GitHub publishes for it; it is built on Ubuntu 22.04 (GCC 11) and needs glibc
+# 2.34 and libstdc++ GLIBCXX_3.4.30 at most, so it runs on Ubuntu 24.04 and Debian 13 (it reports
+# itself as "1.0.0-dev (build 12359)": the nightly build of the release's commit).
 #
-# AMD (.devops/rocm.Dockerfile and vulkan.Dockerfile at b12242), tried in this order:
+# What 1.0.0 changed for this recipe, checked against llama-server --help and the source at the tag:
+# every flag below is unchanged; the removed C API (llama_set_warmup and others) and --defrag-thold are
+# not used here. New and used here: the KV cache type f8_e4m3 (-ctk/-ctv, the kv_cache parameter). New
+# and not used: the MoE expert cache (--moe-cache-mib, for MoE weights kept on the CPU, which these
+# deployments never do: -ngl offloads every layer), --tts-lang and --tts-voice (the gateway sets `lang`
+# per request), --media-allow-private-urls and --allow-unauthenticated-tools (both stay off). The
+# server security fixes of 1.0.0 (SSRF of media URLs, CORS, DNS rebinding, MCP tools) are a further
+# layer here, not the protection: the engine listens on loopback only (a process binds 127.0.0.1, a
+# container publishes on 127.0.0.1), it is reached only through the agent's key guard, and the gateway
+# fetches media URLs itself. --cors-origins keeps its default (*), which leaves the new Host check
+# (DNS rebinding) off, so the key guard's requests are answered whatever host name they carry.
+#
+# AMD (.devops/rocm.Dockerfile and vulkan.Dockerfile, the same at b12242 and v1.0.0), tried in this order:
 # - rocm: the ROCm 7.2.1 image (7.7 GB compressed), built for gfx908, gfx90a, gfx942, gfx1030, gfx1100,
 #   gfx1101, gfx1102, gfx1150, gfx1151, gfx1200 and gfx1201. It runs the Instinct cards (CDNA, which
 #   have no Vulkan at all, MI300A included) and the discrete Radeon cards of that list. The APU
@@ -29,17 +43,21 @@
 # llama-server grows its context to fill whatever is free, which on a shared card is someone
 # else's memory.
 #
-# Images, audio and video in chat (1.3; tools/server/server-common.cpp, the same at b11977 and
-# b12242): a GGUF vision model comes with a projector file (mmproj-*.gguf) in its catalog entry,
-# passed as --mmproj. Video is decoded with ffmpeg (in the official images). llama-server downloads any http(s) URL in a media
-# part with no host check and has no flag to turn that off, so the gateway fetches URLs itself and
-# sends only data: URIs and base64 (and the agent's key guard lets only the gateway reach it);
-# --media-path is never set, so file:// is refused. --image-max-tokens caps what one image takes: by
-# default Qwen3-VL lets a 5 MB photo become ~4,000 tokens (measured: 125 s on 8 CPU threads, and it
-# nearly filled a 4,096-token context), so images are scaled to at most image_tokens (1,024).
-# Text to speech (1.3; tools/server/server-context.cpp and server-chat.cpp at b12242, from
-# ggml-org/llama.cpp#31763): a TTS GGUF (Qwen3-TTS, Chatterbox, LFM3-Audio, Pocket TTS, Soprano) with
-# its projector (the audio decoder, and the voices of models that have some) answers POST
+# Images, audio and video in chat (1.3; tools/server/server-common.cpp at b11977, b12242 and v1.0.0):
+# a GGUF vision model comes with a projector file (mmproj-*.gguf) in its catalog entry, passed as
+# --mmproj. Video is decoded with ffmpeg (in the official images). Up to b12242 llama-server downloaded
+# any http(s) URL in a media part with no host check; since v1.0.0 (ggml-org/llama.cpp#32115) it
+# refuses local and private addresses unless --media-allow-private-urls is set (it is not). Either way
+# the gateway fetches URLs itself and sends only data: URIs and base64 (and the agent's key guard lets
+# only the gateway reach it); --media-path is never set, so file:// is refused. --image-max-tokens
+# caps what one image takes: by default Qwen3-VL lets a 5 MB photo become ~4,000 tokens (measured:
+# 125 s on 8 CPU threads, and it nearly filled a 4,096-token context), so images are scaled to at most
+# image_tokens (1,024).
+# Text to speech (1.3; tools/server/server-context.cpp and server-chat.cpp, from ggml-org/llama.cpp#31763
+# in b12238; the request handling is the same at v1.0.0, which only adds the server-wide defaults
+# --tts-lang and --tts-voice, not used): this is llama-server's own endpoint, not an adapter. A TTS
+# GGUF (Qwen3-TTS, Chatterbox, LFM3-Audio, Pocket TTS, Soprano) with its projector (the audio decoder,
+# and the voices of models that have some) answers POST
 # /v1/audio/speech: wav (default) or pcm (16-bit, the rate in the Content-Type), streamed with
 # stream_format audio (a WAV then declares an unknown size); no SSE, mp3 or opus; speed only 1.0;
 # `instructions` ignored. Voices are listed by GET /props ("voices", only for models that have
@@ -63,7 +81,7 @@ description: >-
   other cards) in a container, or on the CPU in a container or as a plain process. OpenAI-compatible
   API, for chat and for text to speech (Qwen3-TTS, Chatterbox and other TTS GGUFs with their projector).
 engine: llama.cpp
-version: b12242
+version: "1.0.0"
 tasks: [chat, tts]
 formats: [gguf]
 api: {chat: openai-chat, tts: openai-speech}
@@ -112,6 +130,10 @@ params:
               help: "Frames read from each second of a video, for models without their own rate (Qwen3-VL reads 2 a
                 second whatever this says: a 6-second clip took 5,345 tokens). Each frame costs about as much as an
                 image; give video a context of 8,192 or more."}
+  kv_cache: {type: choice, default: f16, choices: [f16, f8_e4m3], advanced: true, label: KV cache type,
+             help: "f8_e4m3 (FP8) keeps the KV cache in 1 byte a value instead of 2: half its memory, a little less
+               accurate. CPU, NVIDIA and AMD ROCm only, not Vulkan. On the CPU it generated about 30% slower. Some
+               models refuse it."}
   max_body_mb: {type: int, default: 64, min: 1, max: 1024, advanced: true, label: Largest request (MiB),
                 help: "Requests larger than this are refused by the gateway (413). Images are sent as base64,
                   a third larger than the files."}
@@ -124,6 +146,10 @@ args: [-m, "{model_file}", --alias, "{served_name}", --host, "{host}", --port, "
 optional_args:
   - if_model: mmproj
     args: [--mmproj, "{mmproj_file}", --image-max-tokens, "{image_tokens}", --video-fps, "{video_fps}"]
+  # FP8 KV cache (1.0.0, ggml-org/llama.cpp#28392): K and V both, so the estimate's 1 byte a value holds.
+  # f16 passes nothing: llama-server's default, so a deployment made before 1.0.0 runs as it did.
+  - if: {kv_cache: f8_e4m3}
+    args: [-ctk, f8_e4m3, -ctv, f8_e4m3]
 media: {inputs: [image, audio, video], files: false}
 tts:
   formats: [wav, pcm]
@@ -141,24 +167,28 @@ variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=5.0", driver: ">=570"}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b12242@sha256:a361e47e28e8801e290f3c855292e0f25047e5d8e998b0d101431f54db68e008
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-v1.0.0-b12359-b1b770d@sha256:a8cf841eef4e9d6ea28bb4d88eea1004032a2bf0d1302bff7b8d2100e801ed16
   - name: rocm
     when: {vendor: amd, arch: [gfx908, gfx90a, gfx942, gfx1030, gfx1100, gfx1101, gfx1102, gfx1200, gfx1201]}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-rocm-b12242@sha256:69b0ab208a2e17294195132ab6c75eb6e9d1828c0b87409891aff86b9726cdfd
+    image: ghcr.io/ggml-org/llama.cpp:server-rocm-v1.0.0-b12359-b1b770d@sha256:4bbbd2e33deb54330fd23edde3a2cdf12b05ce4415139c7e8639a9aebbacdcf2
   - name: vulkan
     when: {vendor: amd}
     runtime: container
     amd_kfd: false
-    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:28a56d03c5cc4abeb16b2a5422c5286d9e48020a3cb3416434bff5fbf847bfa6
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d@sha256:784bb87c7b22cf8653322f3680f33e1fd013d122d817441d5d2fc6410dee68da
+    # llama.cpp 1.0.0 has no FP8 for Vulkan: with -ctk/-ctv f8_e4m3 llama-server aborts at startup
+    # ("cannot run the operation (SET_ROWS)": the release's Vulkan build on Mesa's lavapipe; ggml-vulkan
+    # has no FP8 code at all). Such a deployment is not placed on an AMD card that would take Vulkan.
+    unsupported: {kv_cache: [f8_e4m3]}
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
-    image: ghcr.io/ggml-org/llama.cpp:server-b12242@sha256:4d2de15a0ffbce704777c64026b40512a71e0bbc0b303a5fe5ea9bf71760dff9
+    image: ghcr.io/ggml-org/llama.cpp:server-v1.0.0-b12359-b1b770d@sha256:e3032ea0712da96dec820c770626385de4322dd06619fb5829256a504bbc9375
   - name: cpu-process
     when: {vendor: cpu, arch: [x86_64]}
     runtime: process
     engine:
-      url: https://github.com/ggml-org/llama.cpp/releases/download/b12242/llama-b12242-bin-ubuntu-x64.tar.gz
-      sha256: 909eef25cd53e6601c8a07c866d8dbb2983e74177088d55182137a8fb8255d62
-      binary: llama-b12242/llama-server
+      url: https://github.com/ggml-org/llama.cpp/releases/download/b12359/llama-b12359-bin-ubuntu-x64.tar.gz
+      sha256: 0bc1f091e8916102b6d8f2cf944233a620e90a0f856c72d0ce41150c65c2e72e
+      binary: llama-b12359/llama-server

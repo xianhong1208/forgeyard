@@ -318,7 +318,7 @@ Forgeyard encrypts the secrets it has to read back:
 
 They are encrypted with AES-256-GCM under a server key that is **not in the database**:
 `data/secret.key` (32 random bytes, mode 0600, made on the first start), or the file named by
-`SECRET_KEY_FILE`, or the base64 key in `FORGEYARD_SECRET_KEY` (never written anywhere). Each
+`FORGEYARD_SECRET_KEY_FILE` (`SECRET_KEY_FILE` before 1.3.1), or the base64 key in `FORGEYARD_SECRET_KEY` (never written anywhere). Each
 value is bound to its column, so a value copied elsewhere does not decrypt.
 
 Passwords, sessions, API keys and join tokens are not encrypted: they are hashed, because they
@@ -366,6 +366,6 @@ It refuses to run when the key is not actually lost.
 | `TLS_CA_FILE` | — | With your own certificate: the CA agents pin and devices download |
 | `TLS_EXTRA_NAMES` | — | More names or IPs for Forgeyard's server certificate, comma-separated |
 | `TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-For` / `X-Forwarded-Proto` are believed |
-| `SECRET_KEY_FILE` | `data/secret.key` | Where the key that encrypts stored secrets is |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | Where the key that encrypts stored secrets is (`SECRET_KEY_FILE`, its old name, works until 1.4) |
 | `FORGEYARD_SECRET_KEY` | — | The key itself (base64, 32 bytes), instead of a file |
 | `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS |

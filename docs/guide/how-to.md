@@ -71,12 +71,12 @@ one replaces it. A deployment keeps the recipe it was made with, so deploy the m
 
 **A machine that cannot reach `ghcr.io`** gets the image as a file. On a machine that can, pull it
 by its tag and check that it is the pinned one (the `DIGEST` of that tag must be the recipe's,
-`sha256:28a56d03…`):
+`sha256:784bb87c…`):
 
 ```bash
-sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242
+sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d
 sudo docker images --digests ghcr.io/ggml-org/llama.cpp
-sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama-vulkan.tar.gz
+sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama-vulkan.tar.gz
 ```
 
 Copy the file over and load it there with `gunzip -c llama-vulkan.tar.gz | sudo docker load`. The
@@ -90,8 +90,9 @@ image is the loaded tag without the digest; Docker then finds it locally and doe
 
 > AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2: the
 > inventory (through the `amdsmi` library, `amd-smi` and `rocm-smi`), joining, the GPU allowlist,
-> and a model served through `/v1` with llama.cpp's Vulkan build as a custom recipe (build b11977).
-> Not checked on real hardware yet: the built-in Vulkan variant (b12242), the ROCm images of the
+> and models served through `/v1` with llama.cpp's Vulkan build, first as a custom recipe (build
+> b11977), then with the built-in Vulkan variant (build b12242) from an image loaded from a file. Not
+> checked on real hardware yet: the built-in Vulkan variant on llama.cpp 1.0.0, the ROCm images of the
 > `vllm` and `llama-cpp` recipes, and discrete AMD cards (recorded data only). Report anything that
 > looks wrong with the output of `forgeyard agent inventory --json --raw`.
 
@@ -156,7 +157,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1
 ```
 
 Then:
@@ -188,7 +189,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -203,7 +204,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1 inventory
 ```
 
 ### CPU only
@@ -217,7 +218,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.1
 ```
 
 ### Why these options
@@ -250,8 +251,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.0 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.3.0 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.1 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.3.1 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -270,18 +271,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.3.0 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.3.1 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.3.0`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.3.1`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.0` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.1` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its container workloads and models keep running.
@@ -294,7 +295,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.3.0
+     docker.io/tonyhuang1101/forgeyard-agent:1.3.1
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -320,8 +321,8 @@ the deployment stay as they are.
 
    ```bash
    sudo docker pull ghcr.io/ggml-org/llama.cpp@sha256:<digest> && \
-     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 && \
-     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama.cpp-server-vulkan-b12242.tar.gz
+     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d && \
+     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz
    ```
 
    Pulled by the digest, the file holds exactly the pinned image; `docker load` keeps the tag, which
@@ -331,7 +332,7 @@ the deployment stay as they are.
    load`):
 
    ```bash
-   gunzip -c llama.cpp-server-vulkan-b12242.tar.gz | sudo docker load
+   gunzip -c llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz | sudo docker load
    ```
 
 4. **Deploy** as usual.
@@ -477,8 +478,8 @@ reach Docker Hub, copy the image (the CUDA build needs NVIDIA driver 580 or newe
 it runs on the CPU):
 
 ```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.0-cuda | gzip > forgeyard-vision.tar.gz
+docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.1-cuda
+docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.1-cuda | gzip > forgeyard-vision.tar.gz
 # on the machine without the network:
 gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
@@ -688,14 +689,66 @@ the offline machine's cache. The deployment there finds it cached and downloads 
 **How long:** minutes per video, one at a time per replica; the others wait their turn on it.
 Raise *Longest job* under **Advanced** for long or large videos.
 
+## Use gated Hugging Face models
+
+Some models (Llama, Gemma 3, FLUX.1-schnell…) are *gated*: Hugging Face serves them only to an
+account that accepted their licence. Forgeyard needs a token of such an account to inspect them and
+to download them, and one token for the whole server is enough:
+
+1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
+   **Settings → Access Tokens**, make a token with *Read* access.
+2. Admins: open **Models → Catalog**. Under **Model sources**, paste it into **Hugging Face token**
+   and choose **Save token**. It is stored encrypted with the server's secret key and never shown
+   again, only its last four characters.
+3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
+   downloads it gets the token with the download (it never stores it).
+
+A deployment can still bring its own token: **Deploy a model → Advanced → Hugging Face token**. It
+wins over the server's for that deployment only, and deployments made before 1.3.1 keep theirs. The
+same goes for the token field in **Add a model**, which is used for that one inspection.
+**Remove token** takes the server's token away; deployments with their own keep working.
+
+A token is only ever sent to Hugging Face (`HF_ENDPOINT`), never to an `https://` GGUF host. Setup
+health says when a deployment of a gated model has no token to use (`gated-model-no-token`).
+
 ## Add a cloud provider
 
 Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
 OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test connection**. Add the
 models you want, then put one in a route: open a deployment, choose **Routing and cloud spill**, add
 a tier with the cloud model, and save. Give the keys that may use it a cloud setting other than
-**Never** on **API keys**. [Cloud providers](cloud-providers.md#add-a-provider) has the steps for
-each provider, and what each one's endpoint cannot do.
+**Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
+[Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
+one's endpoint cannot do.
+
+**Outside your network (cloud)** is ticked for you: always for OpenAI, Anthropic, Gemini, Azure and
+OpenRouter, and for an *OpenAI-compatible server* when its base URL is a public address (or a name
+that resolves to one). A private address (`10.x`, `172.16–31.x`, `192.168.x`, `100.64–127.x`,
+loopback, link-local, IPv6 `fc00::/7`) or a name such as `gpu-box`, `*.local`, `*.lan` or
+`*.internal` leaves it unticked. The form says why; change the tick if it is wrong. When the name
+does not resolve from the server, the box stays unticked and the form says it could not tell.
+
+## Choose the cloud policy for keys
+
+Admins: **API keys → Cloud policy** decides what new keys get and how far people may open their own
+keys to cloud providers. Pick one and choose **Save cloud policy**:
+
+| Policy | New keys get | People may set their own keys to |
+|---|---|---|
+| **No cloud** (the default) | Never | Never |
+| **People may opt in to spill** | Never | Only to spill |
+| **Spill by default** | Only to spill | Only to spill |
+| **Cloud allowed** | Only to spill | Allowed |
+| **Custom** | your choice | your choice |
+
+*Only to spill* sends a request to a cloud tier only when the local deployment is unavailable, busy or
+answers 429 or 503; *Allowed* also uses cloud tiers placed before local ones. Changing the policy
+changes no existing key's own setting, but a lower maximum applies at once to keys people set
+higher. Admins may give any key any setting, which locks it for its owner. Budgets still apply:
+[Track and limit cloud spend](#track-and-limit-cloud-spend).
+
+When `GATEWAY_CLOUD_DEFAULT` or `GATEWAY_CLOUD_MAX` is set and nobody has saved a policy yet, the
+panel marks the values as *from .env*. Saving replaces them for good.
 
 ## Track and limit cloud spend
 
@@ -720,6 +773,43 @@ Admins, once providers are in use:
 How cost is worked out, how a budget reserves money and what happens when it runs out:
 [Cost and prices](cloud-providers.md#cost-and-prices) and [Budgets](cloud-providers.md#budgets).
 
+## Change a deployment
+
+On the deployment's page, choose **Edit** (admins and operators). You can change:
+
+- **GPU sharing**: *Exclusive* keeps each card to one replica; *Share VRAM* reserves only the
+  estimate, so other models fit in the rest of the card, sharing its compute
+  ([GPU sharing](concepts.md#gpu-sharing));
+- **GPUs per replica**, **Context length**, **Concurrent requests** and the recipe's other
+  parameters, the memory override and the extra engine arguments;
+- **Replicas**: more are added without touching the running ones; fewer remove the
+  highest-numbered ones;
+- **Machine**: *Automatic* (Forgeyard chooses) or *Pinned to* one machine. Pinning it to another
+  machine moves its replicas there; going back to *Automatic* moves nothing.
+
+The model, the recipe and the names stay: deploy a new one to change them. Before you save, the page
+shows the new estimate, where each replica would go and what saving does. A change that does not fit
+is refused like a deploy ([A deployment does not fit](troubleshooting.md#a-deployment-does-not-fit)).
+A stopped deployment is only saved: the new settings apply when it starts.
+
+Saving restarts the replicas on the new settings:
+
+- **several replicas** restart one at a time: the next one only once the one before it is ready on
+  the new settings, so the model keeps answering. The page shows *updating: 1 of 2 on the new
+  settings* until all are done;
+- **one replica** stops and starts again: the model does not answer until the new one is ready. To
+  avoid that, raise **Replicas** to 2 in the same change: the new replica starts first, then the old
+  one restarts, and you can lower it again afterwards;
+- changing only the number of replicas, or going back to *Automatic*, restarts nothing.
+
+A replica that restarts (after an edit, or **Stop** then **Start**) goes back to the machine it ran on
+when that machine still takes it, rather than the best fit elsewhere: that machine already has the
+model and the engine. When it no longer has room, or is offline, the replica goes where it fits. The
+server keeps this in memory: a replica still waiting for room when the server restarts is placed by
+the usual rules.
+
+From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, find the machine, choose **Change GPU access**.
@@ -743,8 +833,8 @@ To keep a model on one card next to other programs, deploy it with **GPU sharing
 
 Admins, on **Users**:
 
-1. **Add user**: a **Username**, an optional **Email (optional)**, and a **Role** (`user`,
-   `operator` or `admin`; see [Roles](concepts.md#roles)). Choose **Create and get link**.
+1. **Add user**: a **Username** and a **Role** (`user`, `operator` or `admin`; see
+   [Roles](concepts.md#roles)). Choose **Create and get link**.
 2. Send them the one-time link. It sets their password, works once, and expires in 72 hours. You never
    see their password.
 
@@ -847,7 +937,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.0
+  docker.io/tonyhuang1101/forgeyard:1.3.1
 sudo docker logs forgeyard
 ```
 
@@ -881,7 +971,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.3.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -890,7 +980,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.3.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -899,23 +989,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.3.1
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.3.2
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.1
+  docker.io/tonyhuang1101/forgeyard:1.3.2
 ```
 
-`1.3.1` is exactly that release, `1.3` follows its newest patch release and `latest` the newest
+`1.3.2` is exactly that release, `1.3` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.3.0
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.3.1
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -923,7 +1013,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.3.0 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.3.1 .`
 
 ## Run the server as a service
 
@@ -1105,9 +1195,9 @@ key is really lost, stop the server and start over with:
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-It makes a new key and drops what the old one encrypted: enter the Hugging Face tokens of gated
-models again, model replicas restart with new internal keys, and workloads with lost environment
-values have to be created again (their events say so).
+It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
+(and any deployment's own), model replicas restart with new internal keys, and workloads with lost
+environment values have to be created again (their events say so).
 
 ## Move a model cache
 

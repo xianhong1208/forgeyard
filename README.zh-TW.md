@@ -5,13 +5,14 @@
 
 [English](README.md)
 
-> **狀態：1.3.0。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的機器上驗收過）。1.1 加入首次使用清單與推薦模型、開箱即用的
+> **狀態：1.3.1。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的機器上驗收過）。1.1 加入首次使用清單與推薦模型、開箱即用的
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
 > 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3 加入更多種類的模型：對話中的圖片、音訊與影片、文字轉語音、圖片生成，
 > 以及以非同步工作產生的影片；任何服務型工作負載的 HTTP API 也能放在閘道後面的 `/x/<name>`，並附現成的視覺範本；llama.cpp
-> 內建給 AMD APU 用的 Vulkan variant，伺服器與 agent 映像檔也發布在 Docker Hub。見 [CHANGELOG.md](CHANGELOG.md) 與
-> [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
+> 內建給 AMD APU 用的 Vulkan variant，伺服器與 agent 映像檔也發布在 Docker Hub。1.3.1 可以直接修改部署，並顯示它在等什麼
+> （共用就放得下的 GPU、一直沒被機器接手的副本、引擎映像檔拉取的進度），同時簡化設定，並把 llama.cpp 升到 1.0.0。見
+> [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
 
 ## 使用指南
 
@@ -49,7 +50,7 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 ```bash
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.0
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.1
 sudo docker logs forgeyard      # the one-time setup token
 ```
 
@@ -69,7 +70,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 
 也可以用 agent 映像檔跑一個 `docker run`，映像檔是伺服器版本的 `docker.io/tonyhuang1101/forgeyard-agent`
 （**Docker** 分頁會產生指令），或在 Forgeyard 目錄裡搭配 `/etc/forgeyard/agent.toml` 執行。接著在 **Models** 部署模型，用 API 金鑰和任何 OpenAI
-用戶端呼叫 `https://192.168.1.20:7860/v1`。
+用戶端呼叫 `https://192.168.1.20:7860/v1`。之後可以用 **Edit** 修改它的 GPU 共用、上下文長度、並行數、副本數和機器；多個副本會一次重新啟動一個，模型會持續回應。
 
 **從 1.0 升級：** 執行 `uv sync`，重新啟動伺服器，再到每台用一般 HTTP 加入的機器上執行一次 `agent trust` 指令；見
 [docs/https-and-trust.md](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。
@@ -80,9 +81,9 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 
 | 硬體 | 軟體 | 測過的內容 |
 |---|---|---|
-| NVIDIA A100 80GB PCIe（8 卡主機，使用 GPU 允許清單） | driver 580、CUDA 13.0、Docker | 加入伺服器與 GPU 允許清單；服務和任務以行程或容器執行，各自只看到分配到的顯示卡；vLLM 0.32（Qwen3-4B 對話、Qwen3 embedding 與 reranker、用 Qwen3-VL-2B 在對話中處理圖片與影片、用 Gemma 4 12B 在對話中處理音訊）、speaches 0.8.3（faster-whisper）、vLLM-Omni（Qwen3-TTS 文字轉語音、Stable Diffusion XL 與 Z-Image-Turbo 生成圖片、Wan2.1 生成影片）；用官方 OpenAI SDK 呼叫閘道；以容器映像檔執行 agent |
-| AMD Ryzen AI MAX+ 395 與 Radeon 8060S（Strix Halo，gfx1151 APU，BIOS 切出 96 GiB 給 VRAM） | Ubuntu 24.04、ROCm 7.0.2、amd-smi 26.0.2 | 透過 `amdsmi` 函式庫偵測硬體（統一記憶體）、加入伺服器，並在連不到 Hugging Face 和 `ghcr.io` 的機器上用 llama.cpp 的 Vulkan 版本跑 Qwen3-1.7B GGUF，透過 `/v1` 提供服務；同一個版本上也測了對話中的圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）以及文字轉語音（Qwen3-TTS 1.7B 與 Chatterbox Turbo GGUF）；用 stable-diffusion.cpp 的 Vulkan 版本生成圖片（Z-Image-Turbo GGUF），映像檔從檔案載入 |
-| 沒有 GPU 的 x86-64 | Linux | llama.cpp（Qwen3-1.7B GGUF）同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp b12242（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以程序方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
+| NVIDIA A100 80GB PCIe（8 卡主機，使用 GPU 允許清單） | driver 580、CUDA 13.0、Docker | 加入伺服器與 GPU 允許清單；服務和任務以行程或容器執行，各自只看到分配到的顯示卡；vLLM 0.32（Qwen3-4B 對話、Qwen3 embedding 與 reranker、用 Qwen3-VL-2B 在對話中處理圖片與影片、用 Gemma 4 12B 在對話中處理音訊）、speaches 0.8.3（faster-whisper）、vLLM-Omni（Qwen3-TTS 文字轉語音、Stable Diffusion XL 與 Z-Image-Turbo 生成圖片、Wan2.1 生成影片）、llama.cpp 1.0.0 的 CUDA 版本（用 Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF 在對話中處理圖片、音訊與影片，用 Qwen3-TTS 1.7B 與 Chatterbox Turbo GGUF 做文字轉語音）；用官方 OpenAI SDK 呼叫閘道；以容器映像檔執行 agent |
+| AMD Ryzen AI MAX+ 395 與 Radeon 8060S（Strix Halo，gfx1151 APU，BIOS 切出 96 GiB 給 VRAM） | Ubuntu 24.04、ROCm 7.0.2、amd-smi 26.0.2 | 透過 `amdsmi` 函式庫偵測硬體（統一記憶體）、加入伺服器，並在連不到 Hugging Face 和 `ghcr.io` 的機器上用 llama.cpp 的 Vulkan 版本（在 b12242 上驗收）跑 Qwen3-1.7B GGUF，透過 `/v1` 提供服務；在 llama.cpp 1.0.0 的 Vulkan 版本上（同樣離線）測了對話中的圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）以及文字轉語音（Qwen3-TTS 1.7B 與 Chatterbox Turbo GGUF）；用 stable-diffusion.cpp 的 Vulkan 版本生成圖片（Z-Image-Turbo GGUF），映像檔從檔案載入 |
+| 沒有 GPU 的 x86-64 | Linux | llama.cpp 1.0.0 以程序執行（Qwen3-1.7B GGUF），同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp 1.0.0（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以程序方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
 還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，在有 systemd 的主機上用單行指令安裝，以及 Wan2.2-TI2V-5B 的影片生成。影片生成已用 vLLM-Omni 檢查過（A100 上的 Wan2.1-T2V-1.3B，832x480、5 秒）。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
@@ -93,19 +94,19 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 |---|---|---|
 | **對話** | | |
 | Qwen3-4B | vLLM 0.32（`vllm`） | NVIDIA A100 |
-| Qwen3-1.7B GGUF | llama.cpp（`llama-cpp`） | CPU；AMD Strix Halo（Vulkan） |
+| Qwen3-1.7B GGUF | llama.cpp（`llama-cpp`） | CPU（1.0.0）；AMD Strix Halo（Vulkan，在 b12242 上驗收） |
 | **多模態對話** | | |
 | Qwen3-VL-2B Instruct：圖片、影片 | vLLM（`vllm`） | NVIDIA A100 |
 | Gemma 4 12B：音訊 | vLLM（`vllm`） | NVIDIA A100 |
-| Qwen3-VL-2B GGUF：圖片、影片 | llama.cpp（`llama-cpp`） | CPU；AMD Strix Halo（Vulkan） |
-| Qwen2.5-Omni-3B GGUF：圖片、音訊、影片 | llama.cpp（`llama-cpp`） | CPU；AMD Strix Halo（Vulkan） |
+| Qwen3-VL-2B GGUF：圖片、影片 | llama.cpp 1.0.0（`llama-cpp`） | CPU；NVIDIA A100（CUDA）；AMD Strix Halo（Vulkan） |
+| Qwen2.5-Omni-3B GGUF：圖片、音訊、影片 | llama.cpp 1.0.0（`llama-cpp`） | CPU；NVIDIA A100（CUDA）；AMD Strix Halo（Vulkan） |
 | **Embedding 與 rerank** | | |
 | Qwen3-Embedding-0.6B、Qwen3-Reranker-0.6B | vLLM pooling（`vllm-pooling`） | NVIDIA A100 |
 | **語音轉文字** | | |
 | faster-whisper small | speaches 0.8.3（`faster-whisper`） | NVIDIA A100 |
 | **文字轉語音** | | |
 | Qwen3-TTS 12Hz 0.6B 與 1.7B CustomVoice | vLLM-Omni（`vllm-omni-tts`） | NVIDIA A100 |
-| Qwen3-TTS 12Hz 1.7B GGUF、Chatterbox Turbo GGUF | llama.cpp（`llama-cpp`） | CPU；AMD Strix Halo（Vulkan） |
+| Qwen3-TTS 12Hz 1.7B GGUF、Chatterbox Turbo GGUF | llama.cpp 1.0.0（`llama-cpp`） | CPU；NVIDIA A100（CUDA）；AMD Strix Halo（Vulkan） |
 | Kokoro 82M | speaches（`speaches-tts`） | CPU |
 | **圖片生成** | | |
 | Stable Diffusion XL base 1.0、Z-Image-Turbo | vLLM-Omni（`vllm-omni-image`） | NVIDIA A100 |
@@ -154,6 +155,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送：副本、供應商、溢出、串流 |
 | `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API 金鑰檢查與雲端設定；每分鐘請求數與 token 數；副本順序與供應商冷卻 |
 | `forgeyard/gateway/quirks.py` | 各種供應商的差異：金鑰怎麼送、拿掉或改名的參數、怎麼讀回用量 |
+| `forgeyard/gateway/where.py` | 依種類和位址判斷新的供應商是否在你的網路外 |
 | `forgeyard/gateway/egress.py` | 供應商用的 HTTP client：TLS、不跟隨重新導向、位址檢查、`EGRESS_*` |
 | `forgeyard/gateway/pricing.py` | 依用量與價格計算請求的費用；OpenRouter 的清單與價格對應 |
 | `forgeyard/gateway/budgets.py` | 預算帳本：預留、結算、釋放、80% 與 100% 警示、402 |
@@ -165,7 +167,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
-| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單 |
+| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單、伺服器的 Hugging Face 權杖 |
 | `forgeyard/recipes/` | 內建的引擎 recipe（YAML），映像檔以 digest 固定 |
 | `forgeyard/security/` | 密碼、工作階段、速率限制、host／CSRF middleware、HTTPS 與 CA、靜態加密的機密、`secrets reset` |
 | `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`） |

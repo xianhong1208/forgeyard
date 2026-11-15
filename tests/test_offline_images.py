@@ -5,7 +5,9 @@ and the protocol that carries the ids (FY-OFF-*).
 The registry data in tests/fixtures/images/ is real: ghcr.io's index, manifests and configs of
 ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242, fetched anonymously on 2026-11-12, and the manifest
 behind the Id a loaded copy of that image showed on a real offline machine (Docker's containerd image
-store): sha256:cb7d70b2…, which is in no registry."""
+store): sha256:cb7d70b2…, which is in no registry. The recipe has moved on to llama.cpp 1.0.0 (1.3.1);
+these tests keep running on b12242's real data, with the ids recorded for it then
+(tests/fixtures/images/llama-cpp-vulkan-b12242-lock.json, its entry in the lock as it was)."""
 
 import asyncio
 import hashlib
@@ -35,6 +37,18 @@ CONFIG_AMD64 = "sha256:977c1b42052a5ed559fff6f72b1649091290ed8810d28153c73f051c6
 CONFIG_ARM64 = "sha256:95d89570949fa16f3f5e3b270719c7b9fef2d8aa06d2400ad6919b8973667a61"
 # What `docker images --digests` showed for the loaded copy on the offline machine.
 LOADED_ID = "sha256:cb7d70b298bb580d44cd96d7f229b2ea38185de5a299af51098d52bfc4981aca"
+B12242_LOCK = json.loads((FIX / "llama-cpp-vulkan-b12242-lock.json").read_bytes())
+
+
+def committed_lock() -> dict:
+    return json.loads(images.LOCK_PATH.read_text(encoding="utf-8"))["images"]
+
+
+def builtin_vulkan() -> str:
+    """The built-in llama-cpp recipe's Vulkan image, as pinned now."""
+    from forgeyard.models.recipes import builtin_recipes
+
+    return builtin_recipes()["llama-cpp"][0].variant("vulkan").image
 
 
 def raw(name: str) -> bytes:
@@ -54,7 +68,8 @@ def inspected(image_id: str, *, arch: str = "amd64", tags=(TAG,), digests=(), **
 
 
 def check() -> dict:
-    found = images.check_for(VULKAN)
+    """What the server sends an agent for the b12242 Vulkan image (its recorded ids)."""
+    found = images.entry_check(B12242_LOCK[VULKAN])
     assert found is not None
     return found
 
@@ -72,7 +87,7 @@ def test_fy_off_001_the_committed_ids_are_the_registrys(monkeypatch):
                         "content": images.content_of_config(config("amd64"))},
         "linux/arm64": {"manifest": MANIFEST_ARM64, "config": CONFIG_ARM64,
                         "content": images.content_of_config(config("arm64"))}}}
-    assert images.load_lock()[VULKAN] == entry
+    assert B12242_LOCK[VULKAN] == entry
     assert check()["ids"] == sorted([INDEX, MANIFEST_AMD64, MANIFEST_ARM64, CONFIG_AMD64, CONFIG_ARM64])
     # A registry that serves other bytes than the digest asked for is refused.
     bad = httpx.Client(transport=httpx.MockTransport(_registry(tamper=CONFIG_AMD64)))
@@ -187,7 +202,7 @@ def test_fy_off_007_offline_nothing_loaded_says_how_to_load_it(tmp_path):
     assert rec.reason.startswith("the image is not on this machine and could not be pulled; on an offline "
                                  "machine, docker load the image (Forgeyard checks it by its recorded ids)")
     assert "no such host" in rec.reason
-    assert fake.runs() and all(VULKAN in r for r in fake.runs())
+    assert fake.pulls() and all(VULKAN in r for r in fake.pulls()) and fake.runs() == []
 
 
 def test_fy_off_008_a_different_image_under_the_tag_is_never_run(tmp_path):
@@ -268,8 +283,8 @@ def test_fy_off_012_only_agents_that_list_image_ids_get_them(owner):
         assert wstate.desired_message(db, m2, 1)["replicas"] == []
     finally:
         db.close()
-    assert on_new["spec"]["runtime"]["image"] == VULKAN
-    assert on_new["image_ids"] == check() and "image_ids" not in json.dumps(on_new["spec"])
+    assert on_new["spec"]["runtime"]["image"] == builtin_vulkan()
+    assert on_new["image_ids"] == images.check_for(builtin_vulkan()) and "image_ids" not in json.dumps(on_new["spec"])
     assert "image_ids" not in on_old
     assert set(on_new) - set(on_old) == {"image_ids"}
     for entry in (on_new, on_old):
@@ -307,7 +322,7 @@ def test_fy_off_014_every_builtin_image_has_recorded_ids_and_nothing_else_does()
     from forgeyard.models import recipes
 
     used = {v.image for r, _ in recipes.builtin_recipes().values() for v in r.variants if v.runtime == "container"}
-    lock = images.load_lock()
+    lock = committed_lock()
     assert set(lock) == used
     for image, entry in lock.items():
         assert "linux/amd64" in entry["platforms"], image
@@ -332,7 +347,7 @@ def test_fy_off_015_pin_images_check_mode(tmp_path, capsys):
 
     assert run() == 1 and "no ids recorded for" in capsys.readouterr().out
     assert run("--write") == 0
-    assert json.loads(lock.read_text())["images"] == {VULKAN: images.load_lock()[VULKAN]}
+    assert json.loads(lock.read_text())["images"] == {VULKAN: B12242_LOCK[VULKAN]}
     assert run() == 0 and "match the registry" in capsys.readouterr().out
     data = json.loads(lock.read_text())
     data["images"][VULKAN]["platforms"]["linux/amd64"]["content"] = "sha256:" + "0" * 64
@@ -416,7 +431,7 @@ def test_fy_off_016_the_recipe_list_says_which_images_are_checked_offline(owner)
     assert llama == {"cuda": True, "rocm": True, "vulkan": True, "cpu": True, "cpu-process": False}
     text = builtin_recipes()["llama-cpp"][1].replace("name: llama-cpp", "name: own-llama")
     other = "sha256:" + "0" * 64
-    text = text.replace(INDEX, other)
+    text = text.replace(builtin_vulkan().split("@")[1], other)
     assert owner.post("/api/recipes", json={"yaml": text}).status_code == 201
     own = {r["name"]: r for r in owner.get("/api/recipes").json()["recipes"]}["own-llama"]
     assert {v["name"]: v["image_check"] for v in own["variants"]} == {

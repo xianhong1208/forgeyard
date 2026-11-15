@@ -3,7 +3,8 @@
 Run with the server stopped. It makes a new key (the old key file, if any, is kept as
 secret.key.lost-<time>), then for every stored secret the new key cannot read:
 
-- Hugging Face tokens are dropped: enter them again on each deployment of a gated model;
+- Hugging Face tokens are dropped: set the server's token again (Models -> Model sources), and enter
+  again any token of a deployment's own;
 - model replicas lose their internal key and are placed again, so they restart with a new one;
 - workload environment values are emptied (the names stay), and the workload's events say which:
   delete the workload and create it again with the values;
@@ -71,6 +72,14 @@ def reset() -> dict:
                                 .where(deployments.c.hf_token.is_not(None))).all():
             if not _readable(box, row.hf_token, "deployments.hf_token"):
                 conn.execute(deployments.update().where(deployments.c.id == row.id).values(hf_token=None))
+                counts["hf_tokens"] += 1
+        from forgeyard.models import hf_token
+
+        row = conn.execute(sa.select(settings_t.c.value).where(settings_t.c.key == hf_token.KEY)).first()
+        if row is not None:
+            value = json.loads(row.value) if isinstance(row.value, str) else (row.value or {})
+            if value.get("token") and not _readable(box, value["token"], hf_token.PURPOSE):
+                conn.execute(settings_t.delete().where(settings_t.c.key == hf_token.KEY))
                 counts["hf_tokens"] += 1
         for row in conn.execute(sa.select(providers.c.id, providers.c.api_key)
                                 .where(providers.c.api_key.is_not(None))).all():

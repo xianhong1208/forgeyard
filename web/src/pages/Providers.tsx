@@ -1,5 +1,5 @@
 import { IconArrowLeft, IconCloud, IconCopy, IconCurrencyDollar, IconDownload, IconPlugConnected, IconPlus, IconTrash } from "@tabler/icons-react";
-import { Fragment, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
@@ -12,7 +12,7 @@ import { budgetInput, LEVEL_LABEL, LEVEL_TONE, parseBudget, type Budget } from "
 import { exact, when } from "../lib/format";
 import { num } from "../lib/gateway";
 import { PRICE_FIELDS, PRICE_LABEL, parsePrice, perMillion, priceText, SOURCE_LABEL } from "../lib/prices";
-import type { Egress, Provider, ProviderKind, ProviderModel, ProviderResponse, ProvidersResponse, TestResult, UpstreamModel } from "../lib/types";
+import type { Egress, Provider, ProviderKind, ProviderModel, ProviderResponse, ProvidersResponse, ProviderWhere, TestResult, UpstreamModel } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 type Msg = { tone: "ok" | "error"; text: string } | null;
@@ -160,6 +160,8 @@ export function ProvidersPage() {
   );
 }
 
+export const WHERE_DELAY_MS = 400;
+
 function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCancel: () => void; onAdded: (p: Provider) => void }) {
   const [kind, setKind] = useState(kinds[0]?.kind ?? "openai");
   const k = kinds.find((x) => x.kind === kind) ?? kinds[0];
@@ -171,7 +173,19 @@ function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCa
   const [headers, setHeaders] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const ext = external ?? k?.default_external ?? true;
+  // 1.3.1 (D4): what the kind and the base URL's address suggest, asked of the server (it resolves
+  // names from where requests are sent). Untouched, the box follows it; what is shown is what is saved.
+  const [where, setWhere] = useState<ProviderWhere | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      api<ProviderWhere>("/providers/where", { method: "POST", body: { kind, base_url: baseUrl.trim() || null } }).then(
+        (r) => { if (alive) setWhere(r); }, () => { if (alive) setWhere(null); });
+    }, WHERE_DELAY_MS);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [kind, baseUrl]);
+  const suggested = where?.external ?? k?.default_external ?? true;
+  const ext = external ?? suggested;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -180,8 +194,8 @@ function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCa
     try {
       const r = await api<{ provider: Provider }>("/providers", {
         method: "POST",
-        body: { name: name.trim() || k.label, kind, base_url: baseUrl.trim() || null, api_key: key.trim() || null, external: ext,
-          allow_http: !ext && allowHttp, headers: parseHeaders(headers) },
+        body: { name: name.trim() || k.label, kind, base_url: baseUrl.trim() || null, api_key: key.trim() || null,
+          external: ext, allow_http: !ext && allowHttp, headers: parseHeaders(headers) },
       });
       onAdded(r.provider);
     } catch (err) {
@@ -225,6 +239,15 @@ function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCa
           <input type="checkbox" checked={ext} onChange={(e) => setExternal(e.target.checked)} />
           <span><strong>Outside your network (cloud).</strong> Only keys allowed to use the cloud reach it. Untick for a server of your own, e.g. a vLLM on your VPN.</span>
         </label>
+        {where && (
+          <p className="where-hint small muted" role="status" aria-label="Why this is ticked">
+            <span className={`chip ${where.external ? "chip-tone-wait" : where.basis === "unknown" ? "" : "chip-tone-ok"}`}>
+              {where.basis === "unknown" ? "cannot tell" : where.external ? "outside" : "inside"}
+            </span>
+            {where.reason}
+            {external !== null && external !== where.external && <> You changed this: it is {external ? "ticked" : "unticked"} by hand.</>}
+          </p>
+        )}
         {!ext && (
           <label className="check provider-check">
             <input type="checkbox" checked={allowHttp} onChange={(e) => setAllowHttp(e.target.checked)} />

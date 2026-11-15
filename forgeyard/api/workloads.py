@@ -84,6 +84,8 @@ def replica_out(r: Replica) -> dict:
         "started_at": r.started_at, "finished_at": r.finished_at, "updated_at": r.updated_at,
         "vram": r.vram, "download": r.download, "ready_at": r.ready_at,
         "runs": {"type": rt.get("type"), "image": rt.get("image"), "command": rt.get("command")} if rt else None,
+        # 1.3.1: placed on a connected machine whose agent has not taken it (state.not_picked_up).
+        "not_picked_up": wstate.not_picked_up(r, utcnow(), hub.connected) if node is not None else None,
     }
 
 
@@ -264,6 +266,7 @@ def start_workload(workload_id: int, caller: Caller = Depends(require_operator),
     w.generation += 1
     w.updated_at = utcnow()
     for r in w.replicas:
+        placement.remember(r)  # 1.3.1: back to the machine it ran on, when that machine still takes it
         wstate.reset_replica(r, w.generation)
     wstate.event(db, w, "started", f"Started again by {caller.user.username} (generation {w.generation}).")
     audit.record(db, "workload.started", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id,

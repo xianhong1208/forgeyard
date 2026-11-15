@@ -15,7 +15,8 @@ The server checks its settings when it starts:
   that is not a number, and only one of `TLS_CERT_FILE` and `TLS_KEY_FILE`.
 - **Anything surprising is logged as a warning** and shown to admins under
   [Setup health](#setup-health-checks): a name that is not a setting ("did you mean"), a setting
-  that another one makes useless, and risky combinations.
+  that another one makes useless, risky combinations, and a
+  [deprecated setting](#deprecated-settings), named with what replaces it.
 
 ### Common settings
 
@@ -55,7 +56,7 @@ are fine for almost everyone.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets. Back it up apart from the database |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets (Hugging Face tokens, provider keys, replica keys, workload environment values). Back it up apart from the database |
 | `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file. Set one of the two: with both, this one is used and the file is ignored |
 
 ### Accounts and sign-in
@@ -63,7 +64,6 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Create the owner on the first start, instead of the setup page. Read only then: remove them afterwards |
-| `FORGEYARD_SETUP_TOKEN` | — | Use this setup token instead of a random one (no use once setup is done) |
 | `SESSION_IDLE_MINUTES` | `120` | Signed out after this long without a request |
 | `SESSION_MAX_DAYS` | `7` | Signed out after this long in any case |
 | `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS; `true` or `false` to force. Any other value stops the start |
@@ -75,8 +75,7 @@ are fine for almost everyone.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `AGENT_HEARTBEAT_SECONDS` | `10` | How often agents send a heartbeat |
-| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Keep it at least 2.5 heartbeats long, or machines flap |
+| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Agents send a heartbeat every third of it (at least every 2 seconds) |
 | `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
 ### Models
@@ -84,7 +83,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
-| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins |
+| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins. Until then the panel marks it *from .env* |
 | `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
 | `VRAM_HEADROOM_MIB` | `512` | Memory always left free on a card when placing replicas |
@@ -98,7 +97,6 @@ are fine for almost everyone.
 | `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
-| `USAGE_FLUSH_SECONDS` | `5` | How often usage counted in memory is written to the database |
 
 ### Media in chat
 
@@ -121,15 +119,29 @@ Media URLs also follow `EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS` and `EGRESS_CA_FIL
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | Let providers outside your network use private or loopback addresses and plain http. For testing with a stand-in only; link-local and metadata addresses stay refused |
 | `PROVIDER_CONNECT_TIMEOUT` | `10` | Seconds to connect to a provider before trying the next target |
 | `PROVIDER_READ_TIMEOUT` | `300` | Seconds a provider may take for its answer's headers or the next piece of a stream (a provider can set its own) |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | A provider target that answered 429 or 5xx, or could not be reached, is tried last for this long (longer if its `Retry-After` says so, up to 5 minutes) |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | When no other target is left, a `Retry-After` up to this many seconds is waited for once |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Where **Refresh prices from OpenRouter** reads prices (only when an admin asks; no key is sent). Change it only to test against a stand-in |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | Budgets reserve a cloud request's estimated cost before it is sent. A request without `max_tokens` is estimated with an answer of this many tokens |
 
 `EGRESS_PROXY` is under [Common settings](#common-settings). `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`,
 `GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX` are only first values too: once an admin saves
-**API keys → Limits for keys** or **Cloud for keys**, the database wins, and Setup health says so
-when the environment still holds another value.
+**API keys → Limits for keys** or **Cloud policy**, the database wins, and Setup health says so
+when the environment still holds another value. Until an admin saves, those panels mark the values
+that came from the environment as *from .env*.
+
+### Deprecated settings
+
+These still work in 1.3 and are **removed in 1.4**. When one is set, the server logs a warning at
+start that names what replaces it, and Setup health lists it (`setting-deprecated`). Nothing else
+changes while they are set.
+
+| Variable | Default | Replaced by |
+|---|---|---|
+| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`, the same value under a name that matches `FORGEYARD_SECRET_KEY`. With both set, `FORGEYARD_SECRET_KEY_FILE` is used |
+| `AGENT_HEARTBEAT_SECONDS` | — | Nothing: agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS` (at least every 2 seconds), 10 seconds by default. Set, it still decides the heartbeat |
+| `FORGEYARD_SETUP_TOKEN` | — | Nothing: the server prints a random setup token (and keeps it in `data/secrets.json` until setup). For an unattended first start use `ADMIN_USERNAME` and `ADMIN_PASSWORD` |
+| `USAGE_FLUSH_SECONDS` | `5` | Nothing: usage counted in memory is written to the database every 5 seconds |
+| `PROVIDER_COOLDOWN_SECONDS` | `30` | Nothing: a provider target that answered 429 or 5xx, or could not be reached, is tried last for 30 seconds (longer if its `Retry-After` says so, up to 5 minutes) |
+| `PROVIDER_RETRY_AFTER_CAP` | `2` | Nothing: when no other target is left, a `Retry-After` of up to 2 seconds is waited for once |
+| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Nothing: **Refresh prices from OpenRouter** always reads OpenRouter's public list (only when an admin asks; no key is sent) |
 
 ### Units, zero and empty
 
@@ -172,16 +184,24 @@ wrong type; a bad value).
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info, or debug for every message (-v). |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | Labels shown on the Machines page, e.g. { rack = "a" }. Environment: rack=a,room=2. Merged key by key: a flag wins over the environment, the environment over the file. |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false: only report hardware, run nothing. |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | — | The unprivileged account process workloads run as when the agent runs as root (required then). |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run` if it exists (as root) | The unprivileged account process workloads run as when the agent runs as root. Default: forgeyard-run if that account exists (never created by the agent); without one, a root agent refuses process workloads. |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | One directory per process replica. Default: next to the state directory (<state_dir>-work). |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | Host ports for services and model replicas. |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | The address published ports listen on. Default: this machine's address towards the server. |
 | `[workloads]` `container_engine` | `FORGEYARD_CONTAINER_ENGINE` | `--container-engine` | `auto` | auto (docker, then podman), docker, podman, none, or the engine CLI's path. |
 | `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | How process workloads are limited: systemd (a scope with CPU and memory caps; root on a systemd host), rlimit (no systemd, e.g. in a container), or auto. |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | Output kept per replica, in MB. |
-| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | — | Where models and engines are downloaded and kept. Without it this machine serves no models. In the Docker image it must be the same path inside and outside the container. |
+| `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | An image pull fails when no new bytes arrive for this many minutes (three times as long while it unpacks). A slow pull that keeps moving is never stopped. |
+| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models` (as root) | Where models and engines are downloaded and kept. Default: /srv/forgeyard-models as root, else ~/.local/share/forgeyard-models. Empty (""): this machine serves no models. In the Docker image it must be the same path inside and outside the container. |
 | `[models]` `local_dirs` | `FORGEYARD_MODEL_LOCAL_DIRS` | `--model-local-dir` | — | Directories local:// models may come from on this machine. Environment: comma-separated. |
 | `[models]` `allow_private_hosts` | `FORGEYARD_ALLOW_PRIVATE_MODEL_HOSTS` | `--allow-private-model-hosts` | `false` | Allow model downloads from private addresses and plain http (a LAN mirror only). |
+
+**Two defaults depend on the machine** and match what `install.sh` sets up: the model cache is
+`/srv/forgeyard-models` when the agent runs as root (`~/.local/share/forgeyard-models` otherwise),
+and process workloads run as `forgeyard-run` when the agent runs as root and that account exists.
+The agent never creates the account; `install.sh` and the agent image do. `forgeyard agent config`
+shows these as `(default)`. To keep a machine from serving models, set the cache to an empty value
+(`--model-cache ""`, `FORGEYARD_MODEL_CACHE=` or `cache = ""`).
 
 `server`, `ca_fingerprint`, `ca_file` and `name` are used to join. Once the machine has joined, its
 state directory says which server it talks to and which CA it trusts: a different value in the file
@@ -309,7 +329,7 @@ The deployment parameters, under **Advanced** in the deploy form (recipes `vllm`
 |---|---|---|
 | `images` (*Images per request*) | `4` | The most images, and audio clips, one request may carry; 0 turns them off. Passed to vLLM in `--limit-mm-per-prompt` |
 | `videos` (*Videos per request*) | `0` | Video is off until this is 1 or more. On vLLM it reserves memory for a long video at startup |
-| `video_fps` (*Video frames per second*, `llama-cpp` only) | `1` | Frames read from each second of a video (`--video-fps`), for models without a rate of their own; each frame costs about as much as an image. Qwen3-VL reads 2 frames a second whatever this says (llama.cpp b12242): a 6-second clip took 5,345 tokens on Qwen3-VL 2B. Give video deployments a context of 8,192 or more |
+| `video_fps` (*Video frames per second*, `llama-cpp` only) | `1` | Frames read from each second of a video (`--video-fps`), for models without a rate of their own; each frame costs about as much as an image. Qwen3-VL reads 2 frames a second whatever this says (llama.cpp b12242 and 1.0.0): a 6-second clip took 5,345 tokens on Qwen3-VL 2B. Give video deployments a context of 8,192 or more |
 | `max_body_mb` (*Largest request*) | `64` | The largest request the gateway sends this deployment, in MiB (413 above) |
 | `image_tokens` (*Largest image*) | `1024` | Each image is scaled down to at most this many tokens: about 1024 × 1024 pixels on Qwen3-VL. On `llama-cpp` through `--image-max-tokens`; on `vllm` through `--mm-processor-kwargs` `max_pixels`, for models whose image tokens grow with the resolution (Qwen-VL; Gemma takes a fixed number per image). Without it a 5 MB photo became about 4,000 tokens on llama.cpp (125 s on 8 CPU threads) and about 16,000 on vLLM, more than an 8,192-token context. A model added before this setting existed is not capped on vLLM until it is added again |
 
@@ -742,6 +762,46 @@ environment values, `${PORT}` and `${PORT_<NAME>}` become the port. In a process
 `${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard
 (a workload exposed at `/x/`), else the agent's address.
 
+## Change a deployment through the API
+
+`PATCH /api/deployments/{id}`, for admins and operators, with a console session (the same requests
+the **Edit** page makes; writes also send the `X-Forgeyard: 1` header). A field left out keeps its
+value.
+
+| Field | Value |
+|---|---|
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`) and `extra_args` (a list). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `replicas` | 1 to 16 |
+| `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
+| `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
+| `dry_run` | `true`: only check. The answer is the same, without `deployment`, and nothing is saved |
+
+The model, the recipe, the name and the served name cannot be changed (422). The answer:
+
+| Field | What it is |
+|---|---|
+| `estimate` | The new estimate |
+| `placement` | Where each replica would go, as for a deploy; `previous` marks a replica that stays on its machine, and `share_hint` is set when an exclusive model needs half its card or less |
+| `changes` | `{name: {before, after}}` for each parameter, `replicas` and `machine_id` that changes; `{}` when nothing does |
+| `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, or `on_start` (stopped: the settings apply when it starts) |
+| `restart_text` | The same in a sentence |
+| `deployment` | The deployment after saving (not on a dry run) |
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `does_not_fit` | The deployment runs and the new settings fit nowhere now; `machines` says why for each machine, as for a deploy. Nothing is saved |
+| 409 | `recipe_gone` | Its recipe no longer exists |
+| 422 | `invalid_params` | A parameter is unknown or out of its range |
+| 422 | `cannot_estimate` | The new parameters cannot be estimated for this model |
+| 404 | `not_found`, `machine_not_found` | No such deployment, or no such machine for `machine_id` |
+| 403 | | Not an admin or an operator |
+
+Each saved change is audited as `deployment.changed`, with the changes and the restart. `GET
+/api/deployments/{id}` also gives `pinned` (the machine chosen, or `null`), `rollout` (while replicas
+restart: `{generation, updated, total, next}`) and, per replica, `not_picked_up`: set when the replica
+was placed on a connected machine whose agent has not reported it for 2 minutes
+([A replica stays pending](troubleshooting.md#a-replica-stays-pending)).
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
@@ -754,8 +814,9 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 |---|---|---|
 | `setting-unknown` | warning | A name in `.env`, or one in the environment that starts like a setting (`GATEWAY_`, `PROVIDER_`, `EGRESS_`…) or is very close to one, is not a setting. It says which setting you probably meant |
 | `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
-| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `SECRET_KEY_FILE` are set |
-| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `setting-deprecated` | warning | A [deprecated setting](#deprecated-settings) is set. It still works until 1.4; the finding names what replaces it |
+| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and a key file (`FORGEYARD_SECRET_KEY_FILE` or `SECRET_KEY_FILE`) are set, or the two file settings name different files |
+| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 heartbeats (`AGENT_HEARTBEAT_SECONDS`, or the shortest heartbeat of 2 seconds) |
 | `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS`, `PROVIDER_ALLOW_PRIVATE_HOSTS` or `MEDIA_ALLOW_PRIVATE_HOSTS` is on |
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
@@ -776,7 +837,9 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
+| `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
 | `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
+| `gated-model-no-token` | note | A deployment of a gated Hugging Face model has no token of its own, and the server has none. An error once its download was refused |
 | `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
 | `cloud-model-unpriced` | error | A route's cloud model has no input or output price while any budget exists: its requests answer 402 `budget_unpriced` |
 | `cloud-model-cost-unknown` | note | The same without budgets: its cost is unknown |
@@ -855,10 +918,10 @@ recipe with only the variants you want can.
 | Recipe | Variant | Runs on | Image or release |
 |---|---|---|---|
 | `vllm`, `vllm-pooling` | `cuda`, `cuda-12.9`, `rocm` | NVIDIA (compute capability 7.0+, driver 580+, or 575+ for `cuda-12.9`); AMD `gfx90a`, `gfx942`, `gfx950`, `gfx1100`, `gfx1101`, `gfx1150`, `gfx1151`, `gfx1200`, `gfx1201` | `vllm/vllm-openai:v0.32.0`, `-cu129`, `vllm/vllm-openai-rocm:v0.32.0` |
-| `llama-cpp` | `cuda` | NVIDIA, compute capability 5.0+, driver 570+ | `ghcr.io/ggml-org/llama.cpp:server-cuda-b12242` (CUDA 12.8) |
-| | `rocm` | AMD `gfx908`, `gfx90a`, `gfx942`, `gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1200`, `gfx1201` | `…:server-rocm-b12242` (ROCm 7.2.1) |
-| | `vulkan` | any other AMD GPU: APUs (`gfx1151`, `gfx1150`, `gfx1103`, …) and cards the ROCm image lacks. Only the card's render node, no `/dev/kfd` | `…:server-vulkan-b12242` (Mesa RADV) |
-| | `cpu`, `cpu-process` | x86_64 and aarch64 in a container; x86_64 as a process without Docker | `…:server-b12242`; release `b12242`, `llama-b12242-bin-ubuntu-x64.tar.gz`, checked against its SHA-256 |
+| `llama-cpp` | `cuda` | NVIDIA, compute capability 5.0+, driver 570+ | `ghcr.io/ggml-org/llama.cpp:server-cuda-v1.0.0-b12359-b1b770d` (CUDA 12.8) |
+| | `rocm` | AMD `gfx908`, `gfx90a`, `gfx942`, `gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1200`, `gfx1201` | `…:server-rocm-v1.0.0-b12359-b1b770d` (ROCm 7.2.1) |
+| | `vulkan` | any other AMD GPU: APUs (`gfx1151`, `gfx1150`, `gfx1103`, …) and cards the ROCm image lacks. Only the card's render node, no `/dev/kfd` | `…:server-vulkan-v1.0.0-b12359-b1b770d` (Mesa RADV) |
+| | `cpu`, `cpu-process` | x86_64 and aarch64 in a container; x86_64 as a process without Docker | `…:server-v1.0.0-b12359-b1b770d`; release `v1.0.0` (its archives are build `b12359`'s), `llama-b12359-bin-ubuntu-x64.tar.gz`, checked against its SHA-256 (glibc 2.34 or newer: Ubuntu 22.04 and later, Debian 12 and later) |
 | `faster-whisper` | `cuda`, `cuda-12.4`, `cpu` | NVIDIA, CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
 | `speaches-tts` (1.3) | `cpu` | CPU (in a container), on any machine | the same `ghcr.io/speaches-ai/speaches:0.8.3-cpu` image as faster-whisper. CPU only: Kokoro and Piper run on ONNX Runtime and make speech faster than it plays there; in the CUDA image Kokoro still used the CPU |
 | `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
@@ -869,6 +932,17 @@ recipe with only the variants you want can.
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
+
+`llama-cpp` runs llama.cpp **1.0.0** (1.3.1), its first release with a semantic version. The release's
+images and archives are those of the nightly build of the same commit, `b12359`, so the image tags
+name the version, the build and the commit (`server-vulkan-v1.0.0-b12359-b1b770d`), and
+`llama-server --version` says `1.0.0-dev (build 12359)`. Until 1.3.0 it ran build `b12242`. Every flag
+the recipe passes is the same in both. Its *KV cache type* (`kv_cache`, under **Advanced**) is `f16`
+by default; `f8_e4m3` (FP8, new in llama.cpp 1.0.0) stores the KV cache in one byte a value instead of
+two, so the estimate's KV cache halves: for Qwen3-4B at a context of 8,192, 1.125 GiB a sequence
+becomes 0.5625 GiB (576 MiB less a concurrent request). FP8 has kernels for the CPU, CUDA and ROCm;
+llama.cpp has none for Vulkan, so leave it at `f16` there. Some architectures refuse it (MLA models
+such as DeepSeek), and the replica then fails to start: set it back to `f16`.
 
 stable-diffusion.cpp publishes its images only under tags that move with every build (`master-vulkan`,
 `master-cuda`). The recipe pins the builds that were checked by digest; `scripts/pin_images.py` keeps
@@ -889,7 +963,9 @@ CPU architectures; `compute_capability` and `driver`: comparisons such as `>=8.0
 (`container` or `process`), `image` and `entrypoint` (container), `engine` (`url`, `sha256`,
 `binary`: a release the agent downloads) or `command` (an installed program) for a process, `args`
 and `env` to replace the recipe's, and `amd_kfd` (AMD containers; `true` by default: `/dev/kfd` and
-the card's render node; `false`: the render node only, for engines that use only Vulkan).
+the card's render node; `false`: the render node only, for engines that use only Vulkan), and `unsupported` (1.3.1: parameter
+values the variant cannot run, such as `{kv_cache: [f8_e4m3]}`; a deployment with one of them is never
+placed on it, and the placement says why).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
@@ -904,7 +980,7 @@ Each release publishes two images on Docker Hub, built by CI from the release's 
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.3.0` (exactly that release), `1.3` (its newest patch release), `latest` (the newest
+- **Tags**: `1.3.1` (exactly that release), `1.3` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

@@ -4,6 +4,10 @@ Everyone signed in sees the catalog and the recipes. Admins add and remove model
 and remove custom recipes, and set which URL hosts and local directories models may come from.
 Operators deploy (forgeyard.api.deployments).
 
+Admins also set the server's Hugging Face token (1.3.1, forgeyard/models/hf_token.py): it is used to
+inspect gated models and is sent to the agents that download them, unless an inspection or a
+deployment brings its own.
+
 Adding a model starts from the recommended list (forgeyard/models/recommended.yaml), a Hugging Face
 search run by the server, or a source typed in. Inspecting one also says which recipe would serve
 it, what one replica would reserve, and on which machines it would fit right now.
@@ -23,8 +27,8 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, utcnow
-from forgeyard.models import (catalog, hub as hf_hub, inspect as inspector, modalities, recipes, recommended as rec,
-                              scheduler, sources)
+from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
+                              recommended as rec, scheduler, sources)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
@@ -153,9 +157,11 @@ def list_models(caller: Caller = Depends(current), db: DbSession = Depends(get_d
     rows = db.scalars(select(CatalogModel).order_by(CatalogModel.name)).all()
     out = {"models": [model_out(m, all_r, counts.get(m.id, 0)) for m in rows],
            "recipes": [recipe_out(r) for r, _ in all_r.values()],
-           "can_manage": caller.user.role == "admin", "can_deploy": can_run_workloads(caller.user)}
+           "can_manage": caller.user.role == "admin", "can_deploy": can_run_workloads(caller.user),
+           # Whether the server has a Hugging Face token (the deploy form says its own field is an override).
+           "hf_token_set": hf_token.info(db)["set"]}
     if caller.user.role == "admin":
-        out["sources"] = catalog.get_sources(db)
+        out["sources"] = sources_out(db)
     return out
 
 
@@ -166,7 +172,8 @@ class InspectIn(BaseModel):
     # GGUF vision models: the projector file (mmproj-*.gguf) to use with it. Not given: the
     # repository's F16 one (else BF16, Q8_0, the first) when it has any; "none": none.
     mmproj: Optional[str] = Field(default=None, max_length=512)
-    # Gated repositories: used for these requests only, never stored with the catalog entry.
+    # Gated repositories: used for these requests only, never stored with the catalog entry. Not
+    # given: the server's token, when an admin set one.
     token: Optional[str] = Field(default=None, max_length=512)
     format: Optional[str] = Field(default=None, max_length=16)       # local models
     size_bytes: Optional[int] = Field(default=None, ge=0)             # local models
@@ -206,7 +213,8 @@ def _inspect(db: DbSession, body: InspectIn) -> dict:
     try:
         return inspector.inspect_source(src, ref=body.revision, file=body.file, endpoint=s["hf_endpoint"],
                                         policy=catalog.hf_policy(), url_policy=catalog.url_policy(db),
-                                        local_dirs=s["local_dirs"], token=(body.token or "").strip() or None,
+                                        local_dirs=s["local_dirs"],
+                                        token=hf_token.choose(body.token, hf_token.get(db) if src.kind == "hf" else None),
                                         fmt=body.format, size_bytes=body.size_bytes, mmproj=body.mmproj,
                                         task=body.task if body.task in recipes.TASKS else None,
                                         components=body.components)
@@ -512,9 +520,42 @@ class SourcesIn(BaseModel):
 _HOST_RE = re.compile(r"^(\*\.)?[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)+$")
 
 
+def sources_out(db: DbSession) -> dict:
+    """The source allowlists, which of them still come from .env (D1), and the server's Hugging Face
+    token (whether one is set, never the token)."""
+    from forgeyard import settings_check
+
+    return {**catalog.get_sources(db), "env_seeds": settings_check.env_seeds(get_settings(), db, catalog.SOURCES_KEY),
+            "hf_token": hf_token.info(db)}
+
+
 @router.get("/model-sources")
 def get_sources(_: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
-    return {"sources": catalog.get_sources(db)}
+    return {"sources": sources_out(db)}
+
+
+class HfTokenIn(BaseModel):
+    token: str = Field(max_length=hf_token.MAX_LENGTH)
+
+
+@router.put("/hf-token")
+def set_hf_token(body: HfTokenIn, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    """Set (or replace) the server's Hugging Face token. Stored encrypted; never returned."""
+    try:
+        hf_token.put(db, body.token, caller.user.username)
+    except hf_token.TokenError as e:
+        raise fail(422, "bad_token", str(e)) from None
+    audit.record(db, "hf_token.set", actor=caller.user, ip=caller.ip)
+    db.commit()
+    return {"hf_token": hf_token.info(db)}
+
+
+@router.delete("/hf-token")
+def clear_hf_token(caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
+    if hf_token.clear(db):
+        audit.record(db, "hf_token.cleared", actor=caller.user, ip=caller.ip)
+        db.commit()
+    return {"hf_token": hf_token.info(db)}
 
 
 @router.put("/model-sources")
@@ -542,4 +583,4 @@ def set_sources(body: SourcesIn, caller: Caller = Depends(require_admin), db: Db
                  before={"url_hosts": before["url_hosts"], "local_dirs": before["local_dirs"]},
                  after={"url_hosts": sorted(set(hosts)), "local_dirs": sorted(set(dirs))})
     db.commit()
-    return {"sources": catalog.get_sources(db)}
+    return {"sources": sources_out(db)}

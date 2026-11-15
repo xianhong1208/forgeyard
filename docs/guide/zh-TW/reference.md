@@ -9,7 +9,7 @@
 伺服器啟動時會檢查它的設定：
 
 - **無法使用的值會讓伺服器停止啟動**，並指出是哪個設定、可以填哪些值：`TLS`、`REGISTRATION`、`COOKIE_SECURE`、`GATEWAY_CLOUD_DEFAULT`、`GATEWAY_CLOUD_MAX`、不是數字的數字設定，以及 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個。
-- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定，以及有風險的組合。
+- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定、有風險的組合，以及[已淘汰的設定](#deprecated-settings)（並指出改用什麼）。
 
 ### 常用設定
 
@@ -48,7 +48,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰。請和資料庫分開備份 |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰（Hugging Face 權杖、供應商金鑰、副本金鑰、工作負載環境變數的值）。請和資料庫分開備份 |
 | `FORGEYARD_SECRET_KEY` | — | 直接給金鑰本身（32 位元組的 base64），取代檔案。兩者只設一個：兩個都設的話，會使用這一個，並忽略檔案 |
 
 ### 帳號與登入
@@ -56,7 +56,6 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | 在第一次啟動時建立擁有者，取代設定頁面。只在那時讀取：之後請移除 |
-| `FORGEYARD_SETUP_TOKEN` | — | 使用這個設定權杖，而不是隨機產生的（設定完成後就沒有作用） |
 | `SESSION_IDLE_MINUTES` | `120` | 超過這段時間沒有任何請求就自動登出 |
 | `SESSION_MAX_DAYS` | `7` | 無論如何，超過這段時間就自動登出 |
 | `COOKIE_SECURE` | `auto` | `auto`：瀏覽器使用 HTTPS 時就使用 `Secure` cookie；設成 `true` 或 `false` 可強制指定。其他任何值都會停止啟動 |
@@ -68,8 +67,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `AGENT_HEARTBEAT_SECONDS` | `10` | agent 送出心跳的頻率 |
-| `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。請至少設為心跳間隔的 2.5 倍，否則機器會在上線和離線之間反覆跳動 |
+| `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
 | `AGENT_IMAGE` | — | **Add a machine** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
 ### 模型
@@ -77,7 +75,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
-| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準 |
+| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
 | `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
 | `VRAM_HEADROOM_MIB` | `512` | 放置副本時，每張卡一律保留不用的記憶體 |
@@ -91,7 +89,6 @@
 | `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的）。部署的配方有 *Largest request* 參數（`max_body_mb`，vLLM 與 llama.cpp 預設 64）時，改以該值為上限 |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API keys** 修改 |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
-| `USAGE_FLUSH_SECONDS` | `5` | 把記憶體中統計的用量寫入資料庫的頻率 |
 
 ### 對話中的媒體
 
@@ -114,12 +111,23 @@
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | 讓標示為在你網路外的供應商也能使用私有或 loopback 位址和純 http。只用於以替身伺服器測試；link-local 和 metadata 位址仍然一律拒絕 |
 | `PROVIDER_CONNECT_TIMEOUT` | `10` | 連線到供應商的秒數上限，超過就改試下一個目標 |
 | `PROVIDER_READ_TIMEOUT` | `300` | 供應商回傳回應標頭或串流下一段內容的秒數上限（每個供應商可以另外設定） |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | 回應 429 或 5xx、或連不上的供應商目標，在這段時間內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | 沒有其他目標可試時，不超過這個秒數的 `Retry-After` 會等一次再試 |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | **Refresh prices from OpenRouter** 讀取價格的位置（只在管理員要求時讀取，不送出金鑰）。只有在用替身伺服器測試時才需要修改 |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | 預算會在雲端請求送出前先預留它的估計費用。沒有 `max_tokens` 的請求，以這個 token 數估計它的回應 |
 
-`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud for keys** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。
+`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud policy** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。在管理員儲存之前，這些面板會把來自環境的值標示為 *from .env*。
+
+### 已淘汰的設定
+
+這些設定在 1.3 仍然有效，**在 1.4 移除**。只要設了其中一個，伺服器啟動時會記下一則警告，指出改用什麼，Setup health 也會列出（`setting-deprecated`）。設著它們時，其他行為都不變。
+
+| 變數 | 預設值 | 改用 |
+|---|---|---|
+| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`：同樣的值，名稱和 `FORGEYARD_SECRET_KEY` 一致。兩者都設時使用 `FORGEYARD_SECRET_KEY_FILE` |
+| `AGENT_HEARTBEAT_SECONDS` | — | 不需要：agent 每隔 `AGENT_OFFLINE_SECONDS` 的三分之一送出心跳（至少每 2 秒一次），預設是 10 秒。設了的話仍由它決定心跳間隔 |
+| `FORGEYARD_SETUP_TOKEN` | — | 不需要：伺服器會印出一個隨機的設定權杖（設定完成前存在 `data/secrets.json`）。無人值守的第一次啟動請用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` |
+| `USAGE_FLUSH_SECONDS` | `5` | 不需要：記憶體中統計的用量每 5 秒寫入資料庫一次 |
+| `PROVIDER_COOLDOWN_SECONDS` | `30` | 不需要：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
+| `PROVIDER_RETRY_AFTER_CAP` | `2` | 不需要：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試 |
+| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | 不需要：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰） |
 
 ### 單位、零與空白
 
@@ -156,16 +164,19 @@
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info，或 debug 以顯示所有訊息（-v）。 |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | 顯示在 Machines 頁面上的標籤，例如 { rack = "a" }。環境變數格式：rack=a,room=2。逐個 key 合併：旗標優先於環境變數，環境變數優先於檔案。 |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false：只回報硬體，不執行任何東西。 |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | — | agent 以 root 執行時，行程類工作負載使用的無特權帳號（此時為必填）。 |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run`（以 root 執行且帳號存在時） | agent 以 root 執行時，行程類工作負載使用的無特權帳號。預設：forgeyard-run 帳號存在時就用它（agent 不會自己建立）；沒有的話，以 root 執行的 agent 會拒絕行程類工作負載。 |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | 每個行程副本一個目錄。預設：放在狀態目錄旁邊（<state_dir>-work）。 |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | 服務和模型副本使用的主機連接埠。 |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | 公開的連接埠監聽的位址。預設：這台機器連往伺服器時使用的位址。 |
 | `[workloads]` `container_engine` | `FORGEYARD_CONTAINER_ENGINE` | `--container-engine` | `auto` | auto（先試 docker，再試 podman）、docker、podman、none，或容器引擎 CLI 的路徑。 |
 | `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | 行程類工作負載的資源限制方式：systemd（有 CPU 和記憶體上限的 scope；需要在有 systemd 的主機上以 root 執行）、rlimit（沒有 systemd，例如在容器裡），或 auto。 |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | 每個副本保留的輸出量，單位 MB。 |
-| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | — | 下載並保存模型和引擎的位置。沒有設定的話，這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
+| `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | 連續這麼多分鐘沒有收到新的位元組時，拉取映像檔就算失敗（解開各層時是三倍）。持續有進度的慢速拉取絕不會被中止。 |
+| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models`（以 root 執行時） | 下載並保存模型和引擎的位置。預設：以 root 執行時是 /srv/forgeyard-models，否則是 ~/.local/share/forgeyard-models。設成空白（""）：這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
 | `[models]` `local_dirs` | `FORGEYARD_MODEL_LOCAL_DIRS` | `--model-local-dir` | — | 這台機器上 local:// 模型可以使用的目錄。環境變數格式：以逗號分隔。 |
 | `[models]` `allow_private_hosts` | `FORGEYARD_ALLOW_PRIVATE_MODEL_HOSTS` | `--allow-private-model-hosts` | `false` | 允許從私有位址和純 http 下載模型（僅限區域網路內的鏡像站）。 |
+
+**有兩個預設值取決於機器**，和 `install.sh` 的設定一致：agent 以 root 執行時，模型快取是 `/srv/forgeyard-models`（否則是 `~/.local/share/forgeyard-models`）；agent 以 root 執行且 `forgeyard-run` 帳號存在時，行程類工作負載以它執行。agent 不會自己建立這個帳號，`install.sh` 和 agent 映像檔會。`forgeyard agent config` 會把它們標示為 `(default)`。不想讓某台機器提供模型，就把快取設成空白（`--model-cache ""`、`FORGEYARD_MODEL_CACHE=` 或 `cache = ""`）。
 
 `server`、`ca_fingerprint`、`ca_file` 和 `name` 是加入時使用的。機器加入之後，它的狀態目錄會記錄要連哪台伺服器、信任哪個 CA：檔案或環境變數裡如果有不同的值，會被回報並忽略；要更改請用 `forgeyard agent trust`。
 
@@ -265,7 +276,7 @@ local_dirs = ["/data/models"]
 |---|---|---|
 | `images`（*Images per request*） | `4` | 一個請求最多可帶的圖片與音訊片段數；0 表示關閉。以 `--limit-mm-per-prompt` 傳給 vLLM |
 | `videos`（*Videos per request*） | `0` | 設為 1 以上才接受影片。在 vLLM 上，啟動時會為一段長影片預留記憶體 |
-| `video_fps`（*Video frames per second*，僅 `llama-cpp`） | `1` | 影片每秒讀取幾格（`--video-fps`），用於沒有自己取樣率的模型；每一格大約和一張圖片一樣花 token。Qwen3-VL 不管這個值，固定每秒讀 2 格（llama.cpp b12242）：一段 6 秒的影片在 Qwen3-VL 2B 上用了 5,345 token。開啟影片的部署，上下文請設 8,192 以上 |
+| `video_fps`（*Video frames per second*，僅 `llama-cpp`） | `1` | 影片每秒讀取幾格（`--video-fps`），用於沒有自己取樣率的模型；每一格大約和一張圖片一樣花 token。Qwen3-VL 不管這個值，固定每秒讀 2 格（llama.cpp b12242 與 1.0.0）：一段 6 秒的影片在 Qwen3-VL 2B 上用了 5,345 token。開啟影片的部署，上下文請設 8,192 以上 |
 | `max_body_mb`（*Largest request*） | `64` | 閘道送給這個部署的最大請求，單位 MiB（超過回 413） |
 | `image_tokens`（*Largest image*） | `1024` | 每張圖片最多縮成這麼多 token：Qwen3-VL 約 1024 × 1024 像素。`llama-cpp` 透過 `--image-max-tokens`；`vllm` 透過 `--mm-processor-kwargs` 的 `max_pixels`，適用於圖片 token 數會隨解析度增加的模型（Qwen-VL；Gemma 每張圖的 token 數固定）。不設的話，一張 5 MB 的照片在 llama.cpp 約 4,000 token（8 個 CPU 執行緒要 125 秒），在 vLLM 約 16,000 token，超過 8,192 token 的上下文。在這個設定出現之前加入的模型，要重新加入後 vLLM 才會套用上限 |
 
@@ -619,6 +630,40 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面（公開在 `/x/` 的工作負載）是 `127.0.0.1`，否則是 agent 自己的位址。
 
+## 透過 API 修改部署
+
+`PATCH /api/deployments/{id}`，限管理員和操作員，使用主控台的登入工作階段（和 **Edit** 頁面送出的請求相同；寫入請求還要帶 `X-Forgeyard: 1` 標頭）。沒有送的欄位維持原值。
+
+| 欄位 | 值 |
+|---|---|
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）和 `extra_args`（清單）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `replicas` | 1 到 16 |
+| `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
+| `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
+| `dry_run` | `true`：只檢查。回應內容相同，但沒有 `deployment`，也不會儲存任何東西 |
+
+模型、recipe、名稱和對外的模型名稱都不能改（422）。回應：
+
+| 欄位 | 內容 |
+|---|---|
+| `estimate` | 新的估算 |
+| `placement` | 每個副本會放在哪裡，和部署時一樣；`previous` 標示留在原機器上的副本；獨占的模型只需要它那張卡一半以下的記憶體時，會有 `share_hint` |
+| `changes` | 每個會改變的參數、`replicas` 和 `machine_id`：`{name: {before, after}}`；沒有任何改變時是 `{}` |
+| `restart` | `rolling`（一次一個副本）、`all`（唯一的副本重新啟動）、`none`，或 `on_start`（已停止：啟動時才套用） |
+| `restart_text` | 用一句話說明同一件事 |
+| `deployment` | 儲存後的部署（dry run 時沒有） |
+
+| 狀態 | `code` | 什麼時候 |
+|---|---|---|
+| 409 | `does_not_fit` | 部署正在執行，而新設定目前哪裡都放不下；`machines` 會像部署時一樣逐台說明原因。不會儲存任何東西 |
+| 409 | `recipe_gone` | 它的 recipe 已經不存在 |
+| 422 | `invalid_params` | 有不認得的參數，或超出範圍 |
+| 422 | `cannot_estimate` | 無法為這個模型估算新參數 |
+| 404 | `not_found`、`machine_not_found` | 沒有這個部署，或沒有 `machine_id` 指定的機器 |
+| 403 | | 不是管理員或操作員 |
+
+每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)）。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。
@@ -627,8 +672,9 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 |---|---|---|
 | `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`PROVIDER_`、`EGRESS_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
 | `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
-| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `SECRET_KEY_FILE` 都有設定 |
-| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `setting-deprecated` | 警告 | 設了一個[已淘汰的設定](#deprecated-settings)。它在 1.4 之前仍然有效；這項發現會指出改用什麼 |
+| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和金鑰檔（`FORGEYARD_SECRET_KEY_FILE` 或 `SECRET_KEY_FILE`）都有設定，或兩個檔案設定指向不同的檔案 |
+| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 次心跳（`AGENT_HEARTBEAT_SECONDS`，或最短的 2 秒心跳） |
 | `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS`、`PROVIDER_ALLOW_PRIVATE_HOSTS` 或 `MEDIA_ALLOW_PRIVATE_HOSTS` 已開啟 |
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
@@ -649,7 +695,9 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
+| `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
+| `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |
 | `cloud-model-unpriced` | 錯誤 | 已經有預算存在時，某條路由的雲端模型沒有輸入或輸出價格：它的請求會回應 402 `budget_unpriced` |
 | `cloud-model-cost-unknown` | 提示 | 同樣的情況但沒有預算：它的費用未知 |
@@ -718,10 +766,10 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | 配方 | Variant | 執行在 | 映像檔或 release |
 |---|---|---|---|
 | `vllm`、`vllm-pooling` | `cuda`、`cuda-12.9`、`rocm` | NVIDIA（compute capability 7.0 以上，driver 580 以上；`cuda-12.9` 為 575 以上）；AMD `gfx90a`、`gfx942`、`gfx950`、`gfx1100`、`gfx1101`、`gfx1150`、`gfx1151`、`gfx1200`、`gfx1201` | `vllm/vllm-openai:v0.32.0`、`-cu129`、`vllm/vllm-openai-rocm:v0.32.0` |
-| `llama-cpp` | `cuda` | NVIDIA，compute capability 5.0 以上，driver 570 以上 | `ghcr.io/ggml-org/llama.cpp:server-cuda-b12242`（CUDA 12.8） |
-| | `rocm` | AMD `gfx908`、`gfx90a`、`gfx942`、`gfx1030`、`gfx1100`、`gfx1101`、`gfx1102`、`gfx1200`、`gfx1201` | `…:server-rocm-b12242`（ROCm 7.2.1） |
-| | `vulkan` | 其他所有 AMD GPU：APU（`gfx1151`、`gfx1150`、`gfx1103`…）與 ROCm 映像檔沒有編譯的卡。只給那張卡的 render node，不給 `/dev/kfd` | `…:server-vulkan-b12242`（Mesa RADV） |
-| | `cpu`、`cpu-process` | x86_64 與 aarch64 用容器；x86_64 沒有 Docker 時用行程 | `…:server-b12242`；release `b12242` 的 `llama-b12242-bin-ubuntu-x64.tar.gz`，用它的 SHA-256 檢查 |
+| `llama-cpp` | `cuda` | NVIDIA，compute capability 5.0 以上，driver 570 以上 | `ghcr.io/ggml-org/llama.cpp:server-cuda-v1.0.0-b12359-b1b770d`（CUDA 12.8） |
+| | `rocm` | AMD `gfx908`、`gfx90a`、`gfx942`、`gfx1030`、`gfx1100`、`gfx1101`、`gfx1102`、`gfx1200`、`gfx1201` | `…:server-rocm-v1.0.0-b12359-b1b770d`（ROCm 7.2.1） |
+| | `vulkan` | 其他所有 AMD GPU：APU（`gfx1151`、`gfx1150`、`gfx1103`…）與 ROCm 映像檔沒有編譯的卡。只給那張卡的 render node，不給 `/dev/kfd` | `…:server-vulkan-v1.0.0-b12359-b1b770d`（Mesa RADV） |
+| | `cpu`、`cpu-process` | x86_64 與 aarch64 用容器；x86_64 沒有 Docker 時用行程 | `…:server-v1.0.0-b12359-b1b770d`；release `v1.0.0`（它的封存檔就是 build `b12359` 的）的 `llama-b12359-bin-ubuntu-x64.tar.gz`，用它的 SHA-256 檢查（glibc 2.34 以上：Ubuntu 22.04 以後、Debian 12 以後） |
 | `faster-whisper` | `cuda`、`cuda-12.4`、`cpu` | NVIDIA、CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
 | `speaches-tts`（1.3） | `cpu` | CPU（容器），任何機器都可以 | 與 faster-whisper 相同的 `ghcr.io/speaches-ai/speaches:0.8.3-cpu` 映像檔。只用 CPU：Kokoro 和 Piper 跑在 ONNX Runtime 上，用 CPU 產生語音的速度就比播放還快；在 CUDA 映像檔裡 Kokoro 其實也是用 CPU 跑 |
 | `vllm-omni-tts`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | `vllm/vllm-omni:v0.32.0`（CUDA 13.0） |
@@ -733,12 +781,21 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
+`llama-cpp` 跑的是 llama.cpp **1.0.0**（1.3.1），這是它第一個使用語意化版本號的 release。這個 release
+的映像檔與封存檔就是同一個 commit 的每日建置 `b12359`，所以映像檔 tag 同時寫出版本、build 和 commit
+（`server-vulkan-v1.0.0-b12359-b1b770d`），`llama-server --version` 顯示 `1.0.0-dev (build 12359)`。1.3.0
+以前跑的是 build `b12242`。配方傳的每個參數在兩者都一樣。它的 *KV cache type*（`kv_cache`，在
+**Advanced** 裡）預設是 `f16`；`f8_e4m3`（FP8，llama.cpp 1.0.0 新增）讓 KV cache 每個值只用一個位元組而不是兩個，
+所以估算的 KV cache 減半：Qwen3-4B 在上下文 8,192 時，每個序列從 1.125 GiB 變成 0.5625 GiB（每多一個同時請求少
+576 MiB）。FP8 在 CPU、CUDA 和 ROCm 上有對應的 kernel；llama.cpp 沒有 Vulkan 的版本，所以在 Vulkan 上請保持 `f16`。
+有些架構不接受它（MLA 模型，例如 DeepSeek），這時副本會啟動失敗：改回 `f16` 即可。
+
 stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`master-cuda`）發布映像檔。配方用 digest 釘住檢查過的那些 build；`scripts/pin_images.py` 會保留它們（tag 已經移動只會當成資訊回報），除非執行時加上 `--move-rolling`。它之後的 Linux release 是在 Ubuntu 26.04（glibc 2.43）上建置的，所以 CPU 行程用的是較早的 build；它的 OpenAI API 是一樣的。`sd-server` 沒有 API 金鑰：沒有金鑰守門的 agent（1.1 之前）不會分到 `sd-cpp` 副本。第一個釘選的 CUDA build（`465adf3`）在 A100 上跑 Z-Image-Turbo 會當掉（[#43](https://github.com/xianhong1208/forgeyard/issues/43)），已換成 build `3bad892`。
 
 每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
 `scripts/pin_images.py` 會在 `forgeyard/recipes/images.lock.json` 記錄每個映像檔的正確副本可能顯示的 id（index、manifest 和 config 的 digest，以及每個平台的內容 id），所以在連不到 registry 的機器上用 `docker load` 載入的副本會被檢查並使用：[離線機器](how-to.md#offline-machines)。
 
-Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎）。
+Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 
@@ -751,7 +808,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.3.0`（就是那個版本）、`1.3`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.3.1`（就是那個版本）、`1.3`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、工作負載帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。

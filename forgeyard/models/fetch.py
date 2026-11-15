@@ -155,6 +155,15 @@ class _PinnedHTTP(http.client.HTTPConnection):
         self.sock = socket.create_connection((self._address, self.port), self.timeout)
 
 
+def response_socket(conn: http.client.HTTPConnection, resp: Optional[http.client.HTTPResponse]):
+    """The socket a response is read from. The connection drops it when the answer closes the
+    connection (HTTP/1.0, `Connection: close`); the response's file still holds it."""
+    sock = getattr(conn, "sock", None)
+    if sock is None and resp is not None:
+        sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
+    return sock
+
+
 class Response:
     """An open response: status, headers, the final URL, and read() / close()."""
 
@@ -171,6 +180,15 @@ class Response:
     def read1(self, n: int) -> bytes:
         """Up to n bytes of what has arrived (at least one, or b"" at the end)."""
         return self._resp.read1(n)
+
+    def abort(self) -> None:
+        """From another thread: end a read that is waiting on the network (a cancel)."""
+        sock = response_socket(self._conn, self._resp)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
     def close(self) -> None:
         try:
