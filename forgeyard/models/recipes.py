@@ -53,6 +53,10 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
         runtime: container
         amd_kfd: false                 AMD cards get only their render node, not /dev/kfd (ROCm's
                                        compute interface): Vulkan needs nothing else. Default true
+        unsupported: {kv_cache: [f8_e4m3]}
+                                       parameter values this variant cannot run (1.3.1): a deployment
+                                       with one of them is not placed on it (llama.cpp has no FP8
+                                       KV cache on Vulkan: llama-server aborts at startup)
       - name: cpu-process
         when: {vendor: cpu, arch: [x86_64]}
         runtime: process
@@ -195,6 +199,9 @@ class Variant(_M):
     # AMD containers: pass /dev/kfd (ROCm/HIP) besides each card's render node. False for engines
     # that use only the render node (Vulkan), so the container gets nothing it does not use.
     amd_kfd: bool = True
+    # Parameter values this variant cannot run (1.3.1): {param: [values]}. A deployment with one of
+    # them is never placed on this variant (the next one that matches is tried), and says why.
+    unsupported: dict[str, list[Annotated[str, Field(max_length=64)]]] = Field(default_factory=dict, max_length=8)
 
     @model_validator(mode="after")
     def _runtime(self) -> "Variant":
@@ -456,6 +463,11 @@ class Recipe(_M):
                     raise ValueError(f"optional_args: {k!r} is not a parameter")
         for v in self.variants:
             texts += list(v.args or []) + list(v.env.values())
+            for k, values in v.unsupported.items():
+                if k not in self.params:
+                    raise ValueError(f"variant {v.name}: unsupported names {k!r}, which is not a parameter")
+                if not values:
+                    raise ValueError(f"variant {v.name}: unsupported.{k} lists no values")
         for text in texts:
             for ph in PLACEHOLDER_RE.findall(text):
                 if ph not in known:
@@ -569,6 +581,14 @@ def variant_matches(variant: Variant, accel: dict) -> Optional[str]:
         return f"{arch or 'unknown architecture'} is not one of {', '.join(w.arch)}"
     if w.driver and not version_ok(accel.get("driver"), w.driver):
         return f"driver {accel.get('driver') or 'unknown'} is not {w.driver}"
+    return None
+
+
+def variant_params_problem(variant: Variant, params: dict) -> Optional[str]:
+    """Why this variant cannot run a deployment with these parameters (its `unsupported` values), or None."""
+    for name, values in variant.unsupported.items():
+        if name in params and str(params[name]) in values:
+            return f"{name} {params[name]} is not available on this variant"
     return None
 
 

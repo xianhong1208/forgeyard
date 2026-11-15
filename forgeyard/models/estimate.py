@@ -5,7 +5,8 @@
   head size x tokens x bytes, where tokens = context x concurrent sequences; plus the recipe's
   engine overhead and the CUDA context of the process.
 - GGUF (llama.cpp): the exact tensor sizes from the header, the KV cache of the offloaded layers
-  (f16), the logits buffer (vocabulary x 512-token micro-batch x 4 bytes) and the recipe overhead.
+  (f16, 2 bytes a value, or what the kv_cache parameter names: f8_e4m3, llama.cpp 1.0, 1 byte), the
+  logits buffer (vocabulary x 512-token micro-batch x 4 bytes) and the recipe overhead.
 - files (faster-whisper, speaches TTS): the model files plus the recipe overhead.
 - two-stage speech engines (vLLM-Omni, 1.3): the talker as above (its config is the talker's), plus
   the recipe's `codec_overhead` for the audio decoder stage on the same card.
@@ -38,6 +39,11 @@ GIB = 1024**3
 MIB = 1024**2
 LLAMA_UBATCH = 512
 _DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "half": 2, "float32": 4, "float": 4, "fp8": 1}
+# llama.cpp's KV cache types (-ctk/-ctv, the values llama-server 1.0.0 accepts) as (bytes, values) per
+# block of ggml: f16 is 2 bytes a value, f8_e4m3 (1.0.0) 1, q8_0 34 bytes for 32 values. The built-in
+# recipe's kv_cache parameter offers f16 and f8_e4m3; a custom recipe may name any of them.
+GGUF_KV_BYTES = {"f32": (4, 1), "f16": (2, 1), "bf16": (2, 1), "f8_e4m3": (1, 1), "q8_0": (34, 32),
+                 "q4_0": (18, 32), "q4_1": (20, 32), "iq4_nl": (18, 32), "q5_0": (22, 32), "q5_1": (24, 32)}
 
 
 CODEC_LABEL = "Audio decoder"
@@ -185,16 +191,22 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
     if max_ctx and int(params.get("context") or 0) > max_ctx:
         raise EstimateError(f"context: this model supports at most {max_ctx} tokens")
     tokens = kv_tokens(recipe, params)
-    per_layer_token = int(g.get("kv_heads") or 0) * (int(g.get("key_length") or 0) + int(g.get("value_length") or 0)) * 2
+    kv_type = str(params.get("kv_cache") or "f16")
+    if kv_type not in GGUF_KV_BYTES:
+        raise EstimateError(f"kv_cache: {kv_type} is not a KV cache type the estimate knows")
+    kv_num, kv_den = GGUF_KV_BYTES[kv_type]
+    # Values in the cache per layer and token (K and V of every KV head).
+    per_layer_token = int(g.get("kv_heads") or 0) * (int(g.get("key_length") or 0) + int(g.get("value_length") or 0))
     logits = int(g.get("vocab") or 0) * LLAMA_UBATCH * 4
     est = Estimate("gguf", device, gpus if device == "gpu" else 0, kv_tokens=tokens)
     kv_detail = (f"{layers} layers x {g.get('kv_heads')} KV heads x ({g.get('key_length')} + {g.get('value_length')}) x "
-                 f"{tokens} tokens ({params.get('context')} x {params.get('concurrency')}) x 2 B (f16)")
+                 f"{tokens} tokens ({params.get('context')} x {params.get('concurrency')}) x "
+                 + (f"{kv_num} B" if kv_den == 1 else f"{kv_num}/{kv_den} B") + f" ({kv_type})")
     if device == "cpu":
         est.parts = [
             Part("Weights", int(g["tensor_bytes"]), f"{len(g.get('layer_bytes') or [])} blocks + embeddings, "
                                                      "memory-mapped from the cache"),
-            Part("KV cache", per_layer_token * layers * tokens, kv_detail),
+            Part("KV cache", per_layer_token * layers * tokens * kv_num // kv_den, kv_detail),
             Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
             Part("Engine overhead", recipe.estimate.cpu_overhead, "compute buffers (recipe)"),
         ]
@@ -210,7 +222,7 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
     est.parts = [
         Part("Weights", on_gpu // gpus, f"{offload} of {layers} layers on the GPU"
                                         + (" and the output layer" if int(params.get('gpu_layers', 999)) > layers else "")),
-        Part("KV cache", per_layer_token * offload * tokens // gpus, kv_detail),
+        Part("KV cache", per_layer_token * offload * tokens * kv_num // kv_den // gpus, kv_detail),
         Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
         Part("Engine overhead", recipe.estimate.overhead, "compute buffers (recipe)"),
         Part("CUDA context", ctx, "per process"),

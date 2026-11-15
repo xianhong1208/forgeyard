@@ -71,12 +71,12 @@ one replaces it. A deployment keeps the recipe it was made with, so deploy the m
 
 **A machine that cannot reach `ghcr.io`** gets the image as a file. On a machine that can, pull it
 by its tag and check that it is the pinned one (the `DIGEST` of that tag must be the recipe's,
-`sha256:28a56d03…`):
+`sha256:784bb87c…`):
 
 ```bash
-sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242
+sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d
 sudo docker images --digests ghcr.io/ggml-org/llama.cpp
-sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama-vulkan.tar.gz
+sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama-vulkan.tar.gz
 ```
 
 Copy the file over and load it there with `gunzip -c llama-vulkan.tar.gz | sudo docker load`. The
@@ -90,8 +90,9 @@ image is the loaded tag without the digest; Docker then finds it locally and doe
 
 > AMD support has been checked on a real Strix Halo (Radeon 8060S, gfx1151) with ROCm 7.0.2: the
 > inventory (through the `amdsmi` library, `amd-smi` and `rocm-smi`), joining, the GPU allowlist,
-> and a model served through `/v1` with llama.cpp's Vulkan build as a custom recipe (build b11977).
-> Not checked on real hardware yet: the built-in Vulkan variant (b12242), the ROCm images of the
+> and models served through `/v1` with llama.cpp's Vulkan build, first as a custom recipe (build
+> b11977), then with the built-in Vulkan variant (build b12242) from an image loaded from a file. Not
+> checked on real hardware yet: the built-in Vulkan variant on llama.cpp 1.0.0, the ROCm images of the
 > `vllm` and `llama-cpp` recipes, and discrete AMD cards (recorded data only). Report anything that
 > looks wrong with the output of `forgeyard agent inventory --json --raw`.
 
@@ -320,8 +321,8 @@ the deployment stay as they are.
 
    ```bash
    sudo docker pull ghcr.io/ggml-org/llama.cpp@sha256:<digest> && \
-     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 && \
-     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama.cpp-server-vulkan-b12242.tar.gz
+     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d && \
+     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz
    ```
 
    Pulled by the digest, the file holds exactly the pinned image; `docker load` keeps the tag, which
@@ -331,7 +332,7 @@ the deployment stay as they are.
    load`):
 
    ```bash
-   gunzip -c llama.cpp-server-vulkan-b12242.tar.gz | sudo docker load
+   gunzip -c llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz | sudo docker load
    ```
 
 4. **Deploy** as usual.

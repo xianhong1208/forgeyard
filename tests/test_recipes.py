@@ -203,16 +203,22 @@ def test_fy_rec_010_amd_kfd_only_for_amd_containers():
 
 
 def test_fy_rec_011_llama_cpp_is_one_build_everywhere():
-    """FY-REC-011: every llama.cpp variant runs the recipe's version: each image tag ends in it and
-    the process engine is that build's archive, so a bump cannot leave one variant behind."""
+    """FY-REC-011: every llama.cpp variant runs the recipe's version: each image tag names it with the one
+    build and commit the release was made from (server-*-v1.0.0-b12359-b1b770d), and the process engine
+    is that build's archive, so a bump cannot leave one variant behind."""
     r = recipes.builtin_recipes()["llama-cpp"][0]
-    assert r.version == "b12242"
+    assert r.version == "1.0.0"
+    builds = set()
     for v in r.variants:
         if v.image:
-            assert v.image.split("@")[0].endswith(f"-{r.version}"), v.image
             assert v.image.startswith("ghcr.io/ggml-org/llama.cpp:server-"), v.image
+            m = re.fullmatch(r"ghcr\.io/ggml-org/llama\.cpp:server-(?:[a-z0-9]+-)?v(\d+\.\d+\.\d+)-(b\d+)-([0-9a-f]{7})"
+                             r"@sha256:[0-9a-f]{64}", v.image)
+            assert m and m.group(1) == r.version, v.image
+            builds.add(m.group(2, 3))
+    assert builds == {("b12359", "b1b770d")}
     e = r.variant("cpu-process").engine
-    assert e.url == (f"https://github.com/ggml-org/llama.cpp/releases/download/{r.version}/"
-                     f"llama-{r.version}-bin-ubuntu-x64.tar.gz")
-    assert e.binary == f"llama-{r.version}/llama-server" and re.fullmatch(r"[0-9a-f]{64}", e.sha256)
-    assert r.variant("vulkan").image.startswith("ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:")
+    assert e.url == ("https://github.com/ggml-org/llama.cpp/releases/download/b12359/"
+                     "llama-b12359-bin-ubuntu-x64.tar.gz")
+    assert e.binary == "llama-b12359/llama-server" and re.fullmatch(r"[0-9a-f]{64}", e.sha256)
+    assert r.variant("vulkan").image.startswith("ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d@sha256:")

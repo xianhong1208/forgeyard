@@ -1,0 +1,17 @@
+{
+  "ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:28a56d03c5cc4abeb16b2a5422c5286d9e48020a3cb3416434bff5fbf847bfa6": {
+    "index": "sha256:28a56d03c5cc4abeb16b2a5422c5286d9e48020a3cb3416434bff5fbf847bfa6",
+    "platforms": {
+      "linux/amd64": {
+        "manifest": "sha256:6aa95eba499ed44085cb614140243b0965431d83164b10444dec88c677f9f857",
+        "config": "sha256:977c1b42052a5ed559fff6f72b1649091290ed8810d28153c73f051c60532597",
+        "content": "sha256:f2955ad1541a08fc1799c9656209810e1356913466656c942567964811be5f84"
+      },
+      "linux/arm64": {
+        "manifest": "sha256:431e8e0a09f4109909927f7e649cdd85099631406711f6d0513f0317858f8011",
+        "config": "sha256:95d89570949fa16f3f5e3b270719c7b9fef2d8aa06d2400ad6919b8973667a61",
+        "content": "sha256:2e747c8e833dae3d7358e80fe469de352714bf89f9fe4da91405e1e383842006"
+      }
+    }
+  }
+}

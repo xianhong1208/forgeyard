@@ -254,7 +254,7 @@ def test_fy_sch_008_cpu_gguf_container_or_process(owner):
     d = deploy(owner, "small", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})
     row = replica_row("small")
     assert row.spec["runtime"]["type"] == "process" and row.spec["runtime"]["command"] == "llama-server"
-    assert row.engine["sha256"] == "909eef25cd53e6601c8a07c866d8dbb2983e74177088d55182137a8fb8255d62"
+    assert row.engine["sha256"] == "0bc1f091e8916102b6d8f2cf944233a620e90a0f856c72d0ce41150c65c2e72e"
     args = row.spec["runtime"]["args"]
     assert args[:2] == ["-m", "${MODEL_FILE}"] and args[args.index("--host") + 1] == "${BIND_ADDRESS}"
     assert args[args.index("--port") + 1] == "${PORT}" and args[args.index("-ngl") + 1] == "0"
@@ -268,7 +268,7 @@ def test_fy_sch_008_cpu_gguf_container_or_process(owner):
         db.close()
     deploy(owner, "small2", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})
     row2 = replica_row("small2")
-    assert row2.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-b12242@sha256:") and row2.engine is None
+    assert row2.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-v1.0.0-b12359-b1b770d@sha256:") and row2.engine is None
     many = owner.post("/api/deployments/estimate", json={"name": "t", "model": "qwen3-1.7b-gguf", "recipe": "llama-cpp",
                                                          "params": {"gpus": 0, "threads": 24}}).json()["placement"]
     assert many["fits"] is False and "needs 24 CPU threads, 16 free of 32" in many["machines"][0]["reason"]
@@ -368,7 +368,7 @@ def test_fy_sch_013_llama_cpp_on_amd_apu_takes_vulkan_and_discrete_takes_rocm(ow
     row = replica_row("apu")
     vulkan = recipes.builtin_recipes()["llama-cpp"][0].variant("vulkan")
     assert row.node_id == apu and row.spec["runtime"]["image"] == vulkan.image
-    assert row.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242@sha256:")
+    assert row.spec["runtime"]["image"].startswith("ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d@sha256:")
     assert row.spec["resources"]["gpus"]["vendor"] == "amd"
     assert [(g["vendor"], g["index"], g["kfd"]) for g in row.gpus] == [("amd", 0, False)]
     args = row.spec["runtime"]["args"]
