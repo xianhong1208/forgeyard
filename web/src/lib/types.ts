@@ -168,6 +168,8 @@ export type Replica = {
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
   // 1.3.1: placed on a connected machine whose agent has not taken it for two minutes: why, and what to do.
   not_picked_up?: string | null;
+  // 1.4: why it is on this machine, when one that could not fetch what it needs decided it.
+  placement_note?: string | null;
 };
 
 export type ContainerRuntimeSpec = { type: "container"; image: string; command: string[] | null; args: string[] };
@@ -208,6 +210,8 @@ export type Workload = {
   replicas: number;
   replica_list: Replica[];
   deployment_id?: number | null;
+  // 1.4: the deployment that created this (model) workload.
+  deployment?: { id: number; name: string } | null;
   // 1.3: exposed behind the gateway at /x/<name> (null for a model deployment's workload).
   gateway?: WorkloadGateway | null;
 };

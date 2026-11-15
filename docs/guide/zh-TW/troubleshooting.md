@@ -135,6 +135,25 @@ sudo forgeyard agent config
 - 從另一台已經有這個模型的機器複製模型快取（結構相同，請看[搬移模型快取](how-to.md#move-a-model-cache)）；
 - 或把檔案放到機器上的某個目錄，再以 `local://` 模型的方式加入。
 
+## 機器連不到 Hugging Face
+
+**你會看到：** 那台機器上的副本停在 **backoff**，顯示 *Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co: …*（llama.cpp 引擎壓縮檔則是 *github.com*，映像檔則是 *could not be pulled*），接著部署的頁面顯示 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*。
+
+**原因：** agent 會嘗試下載五次，總共大約一分鐘；如果還是連不到來源（名稱解析失敗、連線被拒或逾時、網路無法連線），伺服器就會記住這台機器一小時內連不到那個主機。沒有指定這台機器的部署，它的副本會重新放到另一台放得下的機器上；之後需要從那個主機下載的新副本，也會先放到其他機器。已經有這個模型（和引擎）的機器不需要下載，所以仍然會用來放它。
+
+在以下情況，副本會留在這台機器上繼續重試：
+
+- 部署指定了這台機器：*the deployment is pinned to cpu-01, so the replica stays there and tries again*；
+- 沒有其他機器放得下：*no other machine can take it, so it tries again on cpu-01*。
+
+HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁碟已滿都不算：換一台機器也會得到同樣的結果。
+
+**做法：**
+
+- 讓這台機器連得到那個主機（DNS、防火牆規則、proxy 路由）；Forgeyard 會在最後一次失敗一小時後，或伺服器重新啟動後，再把新的副本放到這台機器上試試；
+- 或把檔案帶過去：從已經有這個模型的機器複製模型快取（[搬移模型快取](how-to.md#move-a-model-cache)）、用 `docker load` 載入引擎映像檔（請看[副本失敗：映像檔不在這台機器上](#a-replica-fails-the-image-is-not-on-this-machine)），或把模型從本機目錄以 `local://` 模型的方式加入；
+- 或使用這台機器連得到的鏡像站（`HF_ENDPOINT`，請看 [Hugging Face 下載很慢](#hugging-face-downloads-are-slow)）。
+
 ## vLLM 在共用的卡上無法啟動
 
 **你會看到：** vLLM 副本啟動後不久就失敗，輸出的最後類似 `ValueError: Free memory on device (…) is less than desired GPU memory utilization (…)`。

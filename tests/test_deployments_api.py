@@ -316,3 +316,19 @@ def test_fy_dep_008_try_it_and_routes(owner):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_fy_dep_009_a_model_workload_names_the_deployment_that_created_it(owner):
+    """FY-DEP-009 (1.4, #36): a model deployment's workload says which deployment created it, in the
+    workload list and on its own page; a plain workload names none."""
+    seed_catalog()
+    make_node("a100", allowlist=[4], features=MODELS)
+    d = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
+    plain = owner.post("/api/workloads", json={"name": "web", "kind": "service", "runtime": {
+        "type": "process", "command": "python3", "args": ["-m", "http.server", "${PORT}"]}, "ports": [{"name": "http"}]})
+    assert plain.status_code == 201, plain.text
+    listed = {w["name"]: w for w in owner.get("/api/workloads").json()["workloads"]}
+    assert listed["embed"]["deployment"] == {"id": d["id"], "name": "embed"} and listed["embed"]["deployment_id"] == d["id"]
+    assert "deployment" not in listed["web"]
+    one = owner.get(f"/api/workloads/{d['workload']['id']}").json()["workload"]
+    assert one["deployment"] == {"id": d["id"], "name": "embed"}

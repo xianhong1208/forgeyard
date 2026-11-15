@@ -231,7 +231,8 @@ function Budgets({ everyone }: { everyone: boolean }) {
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!data) return null;
   const people = data.people.filter((p) => p.budget_micros !== null || (data.everyone && p.spent_micros > 0) || data.is_admin);
-  const keys = data.keys.filter((k) => k.budget_micros !== null);
+  // 1.4: a revoked key leaves the budget lists and warnings; its spend stays in its person's and provider's.
+  const keys = data.keys.filter((k) => k.budget_micros !== null && k.status !== "revoked");
   const providers = data.providers;
   const warn = [
     ...alerting(data.people).map((p) => ({ id: `p${p.id}`, text: data.everyone ? `${p.username}'s budget` : "Your budget", level: p.level })),

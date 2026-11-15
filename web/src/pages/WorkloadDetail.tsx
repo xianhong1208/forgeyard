@@ -84,6 +84,9 @@ export function WorkloadDetailPage() {
             <span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
             {w.kind === "service" && <span>{w.ready} of {w.replicas} ready</span>}
             {w.generation > 1 && <span className="muted small">generation {w.generation}</span>}
+            {w.deployment && (
+              <span className="small">Created by deployment <Link className="mono" to={`/models/deployments/${w.deployment.id}`}>{w.deployment.name}</Link></span>
+            )}
           </div>
           <section className="panel" aria-labelledby="replicas-title">
             <h2 id="replicas-title">Replicas</h2>
@@ -155,9 +158,12 @@ function ReplicaRow({ r, w, guarded }: { r: Replica; w: Workload; guarded: boole
         ) : r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
       </td>
       <td data-label="Machine">
-        {r.machine ? (
-          <span className="mono">{r.machine.name}{!r.machine.connected && <span className="muted"> (offline)</span>}</span>
-        ) : <span className="muted">not placed</span>}
+        <div>
+          {r.machine ? (
+            <span className="mono">{r.machine.name}{!r.machine.connected && <span className="muted"> (offline)</span>}</span>
+          ) : <span className="muted">not placed</span>}
+          {r.placement_note && <div className="cell-note">{r.placement_note}</div>}
+        </div>
       </td>
       <td data-label="GPUs" className="mono">{gpuLabel(r)}</td>
       <td data-label="Address">
@@ -253,7 +259,8 @@ function Spec({ w }: { w: Workload }) {
   const facts: [string, ReactNode][] = [["Runtime", rt.type]];
   if (rt.type === "model") {
     facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
-    if (w.deployment_id) facts.push(["Deployment", <Link key="d" to={`/models/deployments/${w.deployment_id}`}>open the deployment</Link>]);
+    if (w.deployment) facts.push(["Created by", <span key="d">deployment <Link className="mono" to={`/models/deployments/${w.deployment.id}`}>{w.deployment.name}</Link></span>]);
+    else if (w.deployment_id) facts.push(["Deployment", <Link key="d" to={`/models/deployments/${w.deployment_id}`}>open the deployment</Link>]);
   } else {
     facts.push(rt.type === "container" ? ["Image", <code key="i" title={rt.image}>{imageTag(rt.image)}</code>] : ["Command", <code key="c">{rt.command}</code>]);
     if (rt.type === "container" && rt.command) facts.push(["Entrypoint", <code key="e">{rt.command.join(" ")}</code>]);

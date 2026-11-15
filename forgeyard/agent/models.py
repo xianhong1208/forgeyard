@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import shutil
 import stat
 import tarfile
@@ -47,6 +48,8 @@ RETRIES = 5
 LOCK_POLL = 0.2
 DISK_MARGIN = 1024**3
 MANIFEST_DIR = ".forgeyard"
+# engines/<name>-<sha256[:16]>, as ensure_engine unpacks them (not its .tmp-… directories).
+ENGINE_DIR_RE = re.compile(r"^[A-Za-z0-9._-]+-([0-9a-f]{16})$")
 
 Progress = Callable[[str, int, int, Optional[str]], None]   # phase, done, total, file
 
@@ -202,7 +205,17 @@ class ModelCache:
             free, total = du.free, du.total
         except OSError:
             free = total = None
-        return {"ok": True, "free_bytes": free, "total_bytes": total, "cached": self.cached_keys()}
+        return {"ok": True, "free_bytes": free, "total_bytes": total, "cached": self.cached_keys(),
+                "engines": self.cached_engines()}
+
+    def cached_engines(self) -> list[str]:
+        """The engine archives unpacked here, by the first 16 hex digits of their SHA-256 (1.4: placement
+        prefers a machine that has the engine a replica needs)."""
+        try:
+            names = sorted(p.name for p in (self.root / "engines").iterdir() if p.is_dir())
+        except OSError:
+            return []
+        return [m.group(1) for m in (ENGINE_DIR_RE.match(n) for n in names) if m][:256]
 
     # ------------------------------------------------------------------ locking
     @contextmanager

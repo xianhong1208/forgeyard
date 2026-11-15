@@ -155,7 +155,8 @@ def describe(state: str, reason: Optional[str], exit_code: Optional[int], pid: O
 def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
     """Record what the agent reports. Only replicas placed on *this* machine and of the current
     generation are touched: an agent can never change another machine's replicas. Returns True
-    when the desired state of this machine changed (a replica finished)."""
+    when the desired state of this machine changed (a replica finished, or, 1.4, was taken off this
+    machine because it could not fetch what it needs here)."""
     rows = {r.uid: r for r in db.scalars(select(Replica).where(Replica.node_id == node.id)).all()}
     desired_changed = False
     now = utcnow()
@@ -202,6 +203,14 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         if before != (r.state, r.reason, r.exit_code) and not progress_only:
             event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: "
                   f"{describe(r.state, r.reason, r.exit_code, r.pid)}", r.ordinal)
+        if r.workload.runtime == "model":  # (a replica being stopped is "stopping": neither branch)
+            from forgeyard.models import reach, scheduler
+
+            if ready:
+                reach.seen(node.id, r)  # its engine archive or image is on this machine now
+            elif state == "backoff" and before != (r.state, r.reason, r.exit_code) \
+                    and scheduler.fetch_failed(db, r, node):
+                desired_changed = True  # 1.4: it could not fetch here; it is placed elsewhere
     if msg.full:
         reported = {s.id for s in msg.replicas}
         for r in rows.values():

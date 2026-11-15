@@ -242,6 +242,8 @@ prompt size (about 3 bytes a token, on the high side) × input price
 - **Usage → Cost**：*Budgets this month*，列出適用於你的每個預算（管理員：所有人的，以及供應商的）；
 - 供應商頁面：它的預算；Providers 清單會標示超過 80% 的供應商。
 
+**已撤銷的金鑰**不會出現在這些清單和警告裡，撤銷之後也不會再有它的警示；它本月已經花的錢，仍然算在它的人和它的供應商的預算裡。`GET /api/budgets` 也不會列出它。
+
 沒有電子郵件通知：請查看稽核紀錄或這些頁面。
 
 ### 花費怎麼算

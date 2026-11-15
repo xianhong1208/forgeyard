@@ -84,6 +84,7 @@ export function DeploymentDetailPage() {
             <span className="small">{d.pinned ? <>Pinned to <span className="mono">{d.pinned.name ?? `machine ${d.pinned.id}`}</span></> : <span className="muted">Machine: automatic</span>}</span>
             {d.estimate.device === "gpu" && <span className="small">{d.params.share === "vram" ? "Shares VRAM" : <span className="muted">Exclusive GPU</span>}</span>}
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
+            <span className="small">Workload <Link className="mono" to={`/workloads/${w.id}`}>{w.name}</Link></span>
           </div>
           <Gateway d={d} />
           <section className="panel" aria-labelledby="replicas-title">
@@ -106,7 +107,8 @@ export function DeploymentDetailPage() {
                             </div>
                           ) : r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
                         </td>
-                        <td data-label="Machine">{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}</td>
+                        <td data-label="Machine"><div>{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}
+                          {r.placement_note && <div className="cell-note">{r.placement_note}</div>}</div></td>
                         <td data-label="Device" className="mono">{r.gpus.length ? `GPU ${gpuLabel(r)}` : r.machine ? "CPU" : "—"}</td>
                         <td data-label="Runs" className="mono small" title={r.runs?.image ?? undefined}>{r.runs ? (r.runs.image ? imageTag(r.runs.image) : (Array.isArray(r.runs.command) ? r.runs.command.join(" ") : r.runs.command)) : "—"}
                           {r.pid ? <div className="muted">pid {r.pid}</div> : r.container ? <div className="muted">{r.container}</div> : null}</td>

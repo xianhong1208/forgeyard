@@ -18,6 +18,7 @@ provider, in micro-USD.
   (the table `budget_alerts` makes it once, also across restarts), checked when a request is settled
   or reserved (so a budget lowered below the month's spend alerts on its next request). A request
   refused by a budget whose spend and reservations are already past 80% counts as reaching 100%.
+  A key revoked before its alert is written gets none (1.4): revoked keys leave the budget alerts.
 
 The ledger lives in this one server process, under a lock, so concurrent requests cannot reserve
 the same money twice. It is seeded once per month from `usage_daily.cost_micros` (after writing what
@@ -40,7 +41,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import audit
-from forgeyard.db import BudgetAlert, ProviderModel, UsageDaily, new_session
+from forgeyard.db import ApiKey, BudgetAlert, ProviderModel, UsageDaily, new_session
 from forgeyard.gateway import pricing
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.quirks import Usage
@@ -344,6 +345,8 @@ class Ledger:
         written = 0
         try:
             for a in pending:
+                if a.limit.scope == "key" and _revoked(db, a.limit.id):
+                    continue          # 1.4: a key revoked since the request alerts no more
                 try:
                     with db.begin_nested():
                         db.add(BudgetAlert(scope=a.limit.scope, scope_id=a.limit.id, month=a.month, threshold=a.threshold,
@@ -378,6 +381,10 @@ class Ledger:
                 await asyncio.to_thread(self.write_alerts)
             except Exception:
                 log.exception("Writing budget alerts failed; trying again")
+
+
+def _revoked(db: DbSession, key_id: int) -> bool:
+    return db.scalar(select(ApiKey.revoked_at).where(ApiKey.id == key_id)) is not None
 
 
 ledger = Ledger()

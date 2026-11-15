@@ -139,13 +139,28 @@ segmentation, depth), on Forgeyard's own image with permissively licensed models
 
 ## Deployments and the gateway
 
-A **deployment** runs one model with one recipe, as one or more replicas. Forgeyard:
+A **deployment** runs one model with one recipe, as one or more replicas. Its replicas run as a
+workload of runtime `model`, which the Workloads list shows as *created by deployment X*; the
+deployment and its workload link to each other. Forgeyard:
 
-1. places each replica where it fits: the tightest card that is big enough (whole cards stay free
-   for big models), on machines that already have the model cached when it can, and replicas of
-   one deployment on **different machines** when it can;
-2. refuses a deployment that fits nowhere, and says, machine by machine, why and by how much;
-3. downloads the model on that machine (and pulls the engine's image, if it is not there yet), starts
+1. places each replica where it fits. Among the machines that fit, in this order:
+   - a machine that **could not reach** a source the replica would download from there (the model's
+     host, such as huggingface.co, the engine archive's, such as github.com, or the image registry,
+     such as ghcr.io) in the last hour comes last: it is used only when nothing else fits. A
+     download counts as "could not reach" when the name did not resolve, the connection was refused
+     or timed out, or the network was unreachable; an HTTP error, a refused token or a full disk does
+     not;
+   - replicas of one deployment go on **different machines** when they can;
+   - a machine that already has the **model in its cache** wins, then one that also has the engine
+     (the archive a process engine runs, or the image a container engine runs);
+   - then the tightest card that is big enough (whole cards stay free for big models);
+2. places a replica again on another machine that fits when its download **could not reach its
+   source** where it was (it waits in backoff there): the machine is remembered for an hour as one
+   that cannot reach that host. A deployment pinned to a machine stays there and keeps trying. The
+   replica says why, on its deployment's page: *cpu-01 could not reach huggingface.co; placed on
+   cpu-02 instead*;
+3. refuses a deployment that fits nowhere, and says, machine by machine, why and by how much;
+4. downloads the model on that machine (and pulls the engine's image, if it is not there yet), starts
    the engine and waits until it is healthy. The deployment's page shows how far the download and the
    pull have got; deleting the deployment stops both at once.
 

@@ -800,7 +800,14 @@ Each saved change is audited as `deployment.changed`, with the changes and the r
 /api/deployments/{id}` also gives `pinned` (the machine chosen, or `null`), `rollout` (while replicas
 restart: `{generation, updated, total, next}`) and, per replica, `not_picked_up`: set when the replica
 was placed on a connected machine whose agent has not reported it for 2 minutes
-([A replica stays pending](troubleshooting.md#a-replica-stays-pending)).
+([A replica stays pending](troubleshooting.md#a-replica-stays-pending)), and (1.4)
+`placement_note`: why the replica is on its machine when a machine that could not fetch what it needs
+decided it, such as *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*
+([A machine cannot reach Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)). The
+deployment's `workload` (as in `GET /api/workloads/{id}`) names it back: `deployment: {id, name}`. In
+`placement`, each machine and each placed replica lists `needs` (what it would download there:
+`model`, `engine`, `image`) and, when that machine could not reach one of those sources in the last
+hour, `unreachable`.
 
 ## Setup health checks
 

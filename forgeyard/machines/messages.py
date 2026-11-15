@@ -4,6 +4,7 @@ model name must never keep a machine from connecting."""
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -88,13 +89,21 @@ def _download(value: Any) -> Optional[dict]:
     return out
 
 
+_ENGINE_ID = re.compile(r"^[0-9a-f]{16}$")
+
+
 def _model_cache(value: Any) -> Optional[dict]:
     if not isinstance(value, dict):
         return None
     cached = [str(k)[:400] for k in (value.get("cached") or []) if isinstance(k, str)][:512]
-    return {"ok": bool(value.get("ok")), "free_bytes": _bytes(value.get("free_bytes")),
-            "total_bytes": _bytes(value.get("total_bytes")), "cached": cached,
-            "reason": (str(value["reason"])[:300] if value.get("reason") else None)}
+    out = {"ok": bool(value.get("ok")), "free_bytes": _bytes(value.get("free_bytes")),
+           "total_bytes": _bytes(value.get("total_bytes")), "cached": cached,
+           "reason": (str(value["reason"])[:300] if value.get("reason") else None)}
+    # 1.4: the engine archives unpacked there, by the first 16 hex digits of their SHA-256.
+    engines = [e for e in (value.get("engines") or []) if isinstance(e, str) and _ENGINE_ID.match(e)][:256]
+    if engines:
+        out["engines"] = engines
+    return out
 
 
 Bytes = Annotated[Optional[int], BeforeValidator(_bytes)]

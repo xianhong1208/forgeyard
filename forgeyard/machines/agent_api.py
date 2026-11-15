@@ -172,8 +172,9 @@ def _status(db: DbSession, node_id: int, msg: StatusIn) -> Optional[bool]:
         return None
     changed = wstate.apply_status(db, node, msg)
     db.commit()
-    if changed:  # a replica finished: its resources are free for what is waiting
+    if changed:  # a replica finished (its resources are free for what is waiting) or moves elsewhere
         placement.place_and_poke(db)
+        hub.poke(node_id)  # its agent drops a replica that was taken off this machine
     return changed
 
 

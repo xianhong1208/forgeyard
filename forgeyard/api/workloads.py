@@ -23,6 +23,7 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, public_base, require_operator
 from forgeyard.db import Node, Replica, Workload, WorkloadEvent, get_db, utcnow
 from forgeyard.machines.hub import hub
+from forgeyard.models import reach
 from forgeyard.machines.protocol import FEATURE_WORKLOADS, PROTOCOL_VERSION
 from forgeyard.workloads import expose, placement, state as wstate
 from forgeyard.workloads.spec import WorkloadSpec, env_masked
@@ -86,6 +87,8 @@ def replica_out(r: Replica) -> dict:
         "runs": {"type": rt.get("type"), "image": rt.get("image"), "command": rt.get("command")} if rt else None,
         # 1.3.1: placed on a connected machine whose agent has not taken it (state.not_picked_up).
         "not_picked_up": wstate.not_picked_up(r, utcnow(), hub.connected) if node is not None else None,
+        # 1.4: why it is on this machine, when a machine that could not fetch what it needs decided it.
+        "placement_note": reach.note_of(r.id),
     }
 
 
@@ -118,7 +121,10 @@ def workload_out(w: Workload, caller: Caller, *, detail: bool = False) -> dict:
         from forgeyard.db import Deployment
 
         db = object_session(w)
-        out["deployment_id"] = db.scalar(select(Deployment.id).where(Deployment.workload_id == w.id)) if db else None
+        dep = db.execute(select(Deployment.id, Deployment.name).where(Deployment.workload_id == w.id)).first() if db else None
+        out["deployment_id"] = dep.id if dep else None
+        # 1.4: the deployment that created this workload, for "created by deployment X" on its pages.
+        out["deployment"] = {"id": dep.id, "name": dep.name} if dep else None
     return out
 
 
