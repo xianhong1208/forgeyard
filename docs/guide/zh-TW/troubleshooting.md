@@ -147,6 +147,15 @@ sudo forgeyard agent config
 - 停止再啟動這個部署：它會依照當下的可用記憶體重新放置；
 - 或降低它的需求：縮短 **Context length**、減少 **Concurrent requests**，或換一個較小的模型。部署頁面會在你部署前顯示新的估算。
 
+## llama.cpp 用 FP8 KV cache 時無法啟動
+
+**你會看到：** *KV cache type* 設為 `f8_e4m3` 的 `llama-cpp` 部署一啟動就失敗，輸出的最後是
+`FP8 cache is not supported for architecture '…'`；或是部署到 AMD APU 時回應 *vulkan: kv_cache f8_e4m3 is not available on this variant*。
+
+**原因：** llama.cpp 1.0.0 對某些架構不接受 FP8 cache（MLA 模型，例如 DeepSeek，以及少數其他架構），而且完全沒有 Vulkan 的 FP8（llama-server 會直接中止），所以 Forgeyard 不會把 FP8 部署放到 `vulkan` variant 上。
+
+**做法：** 把 *KV cache type* 改回 `f16`（在部署頁面按 **Edit**，在 **Advanced** 裡）。在 ROCm 映像檔有編譯的 AMD 卡上，FP8 會用 `rocm` 執行。
+
 ## 部署放不下
 
 **你會看到：** *Deploy* 回應 *Nothing can take a replica that needs … GiB per GPU*，接著每台機器一行說明。

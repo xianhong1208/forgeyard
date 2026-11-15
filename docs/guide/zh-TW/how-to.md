@@ -47,17 +47,17 @@ Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）
 
 **從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
 
-**連不到 `ghcr.io` 的機器**用檔案拿到映像檔。在連得到的機器上，用 tag 拉取，並確認它就是釘選的那一個（這個 tag 的 `DIGEST` 必須是配方裡的 `sha256:28a56d03…`）：
+**連不到 `ghcr.io` 的機器**用檔案拿到映像檔。在連得到的機器上，用 tag 拉取，並確認它就是釘選的那一個（這個 tag 的 `DIGEST` 必須是配方裡的 `sha256:784bb87c…`）：
 
 ```bash
-sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242
+sudo docker pull ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d
 sudo docker images --digests ghcr.io/ggml-org/llama.cpp
-sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama-vulkan.tar.gz
+sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama-vulkan.tar.gz
 ```
 
 把檔案複製過去，在那裡用 `gunzip -c llama-vulkan.tar.gz | sudo docker load` 載入。配方寫的映像檔是 `tag@sha256:digest`，Docker 會用 digest 找它。Docker 用傳統的映像檔儲存方式時（`docker info` 顯示的 storage driver 是 `overlay2` 之類），載入的映像檔保留 tag，但不保留拉取時的 digest（`docker images --digests` 顯示 `<none>`）：`docker run` 找不到它，會試著從 `ghcr.io` 拉取，副本就帶著這個錯誤失敗。用 containerd 映像檔儲存時（`docker info` 裡有 `driver-type: io.containerd.snapshotter.v1`），載入後用 `docker images --digests` 檢查。沒有 digest 的話，就用一個自訂配方，映像檔寫載入的 tag、不加 digest：Docker 會在本機找到它，不會去拉取。
 
-> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本（build b11977）作為自訂配方部署模型、透過 `/v1` 呼叫。還沒在實際硬體上檢查的：內建的 Vulkan variant（b12242）、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔，以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
+> AMD 的支援已經在實際的 Strix Halo（Radeon 8060S，gfx1151）、ROCm 7.0.2 上檢查過：硬體偵測（透過 `amdsmi` 函式庫、`amd-smi` 和 `rocm-smi`）、加入伺服器、GPU 允許清單，以及用 llama.cpp 的 Vulkan 版本透過 `/v1` 提供模型：先是自訂配方（build b11977），後來是內建的 Vulkan variant（build b12242），映像檔從檔案載入。還沒在實際硬體上檢查的：llama.cpp 1.0.0 上的內建 Vulkan variant、`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔，以及獨立 AMD 顯示卡（目前只用錄下來的資料驗證過）。如果看到任何看起來不對的地方，請附上 `forgeyard agent inventory --json --raw` 的輸出回報。
 
 ## 加入純 CPU 機器
 
@@ -227,8 +227,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
    ```bash
    sudo docker pull ghcr.io/ggml-org/llama.cpp@sha256:<digest> && \
-     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 && \
-     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-b12242 | gzip > llama.cpp-server-vulkan-b12242.tar.gz
+     sudo docker tag ghcr.io/ggml-org/llama.cpp@sha256:<digest> ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d && \
+     sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d | gzip > llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz
    ```
 
    用 digest 拉，檔案裡就正好是 recipe 釘住的映像檔；`docker load` 會保留 tag，agent 就是靠 tag 找到它。
@@ -237,7 +237,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 3. **把檔案複製到**離線機器（`scp`、USB 隨身碟），在那裡載入（Podman 用 `podman load`）：
 
    ```bash
-   gunzip -c llama.cpp-server-vulkan-b12242.tar.gz | sudo docker load
+   gunzip -c llama.cpp-server-vulkan-v1.0.0-b12359-b1b770d.tar.gz | sudo docker load
    ```
 
 4. 照平常一樣**部署**。

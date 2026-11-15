@@ -224,6 +224,19 @@ between placing and starting, there is no longer enough.
 - or lower what it needs: a shorter **Context length**, fewer **Concurrent requests**, or a
   smaller model. The deploy page shows the new estimate before you deploy.
 
+## llama.cpp does not start with the FP8 KV cache
+
+**You see:** a `llama-cpp` deployment whose *KV cache type* is `f8_e4m3` fails right after it starts,
+and its output ends with `FP8 cache is not supported for architecture '…'`; or deploying it on an AMD
+APU answers *vulkan: kv_cache f8_e4m3 is not available on this variant*.
+
+**Why:** llama.cpp 1.0.0 refuses the FP8 cache for some architectures (MLA models such as DeepSeek, and
+a few others), and it has no FP8 for Vulkan at all (llama-server would abort), so Forgeyard never
+places an FP8 deployment on the `vulkan` variant.
+
+**Do:** set *KV cache type* back to `f16` (**Edit** on the deployment's page, under **Advanced**). On
+an AMD card the ROCm image is built for, FP8 runs on `rocm`.
+
 ## A deployment does not fit
 
 **You see:** *Deploy* answers *Nothing can take a replica that needs … GiB per GPU*, followed by one

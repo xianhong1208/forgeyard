@@ -41,7 +41,7 @@ from forgeyard.machines.protocol import FEATURE_ENGINE_ZIP, FEATURE_MODELS, FEAT
 from forgeyard.models import render, sources
 from forgeyard.models.catalog import Context, context_for, deployment_of, model_block
 from forgeyard.models.estimate import EstimateError, gib
-from forgeyard.models.recipes import Variant, variant_matches
+from forgeyard.models.recipes import Variant, variant_matches, variant_params_problem
 from forgeyard.workloads import placement
 from forgeyard.workloads.placement import Hold
 
@@ -194,7 +194,7 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
             if not compatible:
                 continue
             matched_hw = True
-            rt = _runtime_problem(node, variant)
+            rt = variant_params_problem(variant, ctx.params) or _runtime_problem(node, variant)
             if rt:
                 problems.append(f"{variant.name}: {rt}")
                 continue
@@ -239,7 +239,7 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
                 problems.append(f"{variant.name}: {why}")
                 continue
             matched_hw = True
-            rt = _runtime_problem(node, variant)
+            rt = variant_params_problem(variant, ctx.params) or _runtime_problem(node, variant)
             if rt:
                 problems.append(f"{variant.name}: {rt}")
                 continue

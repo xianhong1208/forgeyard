@@ -8,6 +8,21 @@ version until 1.0.
 
 ### Added
 
+- **FP8 KV cache on llama.cpp** (#48): the `llama-cpp` recipe's *KV cache type* (`kv_cache`, under
+  **Advanced**, default `f16`) can be `f8_e4m3`, llama.cpp 1.0.0's FP8 cache (`-ctk f8_e4m3 -ctv
+  f8_e4m3`, K and V both). The estimate follows it: 1 byte a value instead of 2 (`… x 1 B (f8_e4m3)`),
+  so Qwen3-4B at a context of 8,192 needs 576 MiB less a concurrent request (1.125 GiB of KV cache
+  becomes 0.5625). The estimate also knows llama.cpp's other cache types for custom recipes (`q8_0` is
+  34 bytes for 32 values, …) and refuses a type it does not know rather than guessing. Measured on the
+  CPU process variant with Qwen3-1.7B Q4_K_M, a context of 8,192 and 8 threads: peak RSS 2.81 GiB in
+  f16 and 2.35 GiB in FP8 (0.46 GiB less; the estimate says 0.44), but generation at 30 tokens/s
+  instead of 42. `f16` passes no flag, so every existing deployment runs as before.
+- **A recipe variant can refuse parameter values** (`unsupported: {kv_cache: [f8_e4m3]}`): a deployment
+  with one of them is never placed on that variant, and the placement says why (`vulkan: kv_cache
+  f8_e4m3 is not available on this variant`). The built-in `vulkan` variant refuses FP8: llama.cpp 1.0.0
+  has no FP8 code for Vulkan, and llama-server aborted at startup with it (`cannot run the operation
+  (SET_ROWS)`, the release's Vulkan build on Mesa's lavapipe). An FP8 deployment on an AMD APU is
+  refused (409); a card the ROCm image is built for runs it on `rocm`.
 - **Image pull progress** (#28). The agent pulls an engine image itself before `docker run`, through
   the engine's API on its socket (`POST /images/create`, Docker or Podman), and reports it like a model
   download: `pulling the image: 0.80 of 1.90 GiB (42%)`, each layer counted once ("Already exists"
@@ -72,6 +87,33 @@ version until 1.0.
 
 ### Changed
 
+- **llama.cpp b12242 → 1.0.0** (#48) in every variant of the `llama-cpp` recipe: llama.cpp's first
+  release with a semantic version (2026-11-13). Its tag is the commit of nightly build b12359, whose
+  images and archives are the release's: the CUDA (still `server-cuda` = CUDA 12.8, driver ≥ 570),
+  ROCm (7.2.1), Vulkan and CPU images are tagged `server-*-v1.0.0-b12359-b1b770d` and pinned by digest
+  (their recorded ids are in `images.lock.json`), and the CPU process variant downloads
+  `llama-b12359-bin-ubuntu-x64.tar.gz`, pinned by its SHA-256 (built on Ubuntu 22.04: glibc 2.34 and
+  GLIBCXX_3.4.30 at most, as before, so it runs on Ubuntu 24.04 and Debian 13). The Dockerfiles are
+  unchanged. Every flag Forgeyard passes is unchanged (checked against the release binary's
+  `llama-server --help`, now a test fixture); the removed C API and `--defrag-thold` were never used.
+  Text to speech keeps llama-server's own `/v1/audio/speech`, which it already used since b12242 (the
+  release notes list it as new since 0.9.0): its request handling is the same at 1.0.0, which only adds
+  the server-wide `--tts-lang` and `--tts-voice` defaults (the gateway still sets `lang` per request),
+  so the formats (wav, pcm), streaming (`audio` only), the voices from `/props` and the voice-cloning
+  refusals at the gateway are unchanged. The MoE expert cache is not used (every layer is offloaded).
+  **The 1.0.0 server security fixes** (media URLs to private addresses refused unless
+  `--media-allow-private-urls`, CORS and DNS rebinding, MCP tools) **are a further layer here, not the
+  protection**: the engine listens on loopback behind the agent's key guard, and the gateway fetches
+  media URLs itself and sends only `data:` URIs. `--cors-origins` stays `*`, which keeps the new Host
+  check off for the key guard's requests. Measured on the CPU process variant (8 pinned threads),
+  b12242 against 1.0.0 with Qwen3-1.7B Q4_K_M: `llama-bench` generates 43.2 and 43.0 against 43.2 and
+  43.0 tokens/s (prompt 287 to 305 against 302 to 303); the same chat prompt through llama-server with
+  the recipe's flags, 38.6 to 41.5 against 41.5 to 42.6 tokens/s, peak RSS 2.82 against 2.81 GiB.
+  Accepted on the CPU process variant (`scripts/accept_all.py` models, gateway and tts groups, with
+  balancing over two agents and failover when an engine is killed;
+  `accept_mm.py` Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF with image, video and audio; `accept_tts.py`
+  Qwen3-TTS 1.7B GGUF and Chatterbox Turbo GGUF); the NVIDIA and AMD Vulkan variants on 1.0.0 are
+  still to be accepted on real hardware (they were on b12242).
 - **A pull no longer fails after a fixed 30 minutes** (#28). Seen for real: a 1.86 GB image at under
   1 MB/s timed out twice and never started. Only a stall fails it now; `docker run` itself, on the local
   image, has 10 minutes.

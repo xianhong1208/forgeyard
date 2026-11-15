@@ -276,7 +276,7 @@ local_dirs = ["/data/models"]
 |---|---|---|
 | `images`（*Images per request*） | `4` | 一個請求最多可帶的圖片與音訊片段數；0 表示關閉。以 `--limit-mm-per-prompt` 傳給 vLLM |
 | `videos`（*Videos per request*） | `0` | 設為 1 以上才接受影片。在 vLLM 上，啟動時會為一段長影片預留記憶體 |
-| `video_fps`（*Video frames per second*，僅 `llama-cpp`） | `1` | 影片每秒讀取幾格（`--video-fps`），用於沒有自己取樣率的模型；每一格大約和一張圖片一樣花 token。Qwen3-VL 不管這個值，固定每秒讀 2 格（llama.cpp b12242）：一段 6 秒的影片在 Qwen3-VL 2B 上用了 5,345 token。開啟影片的部署，上下文請設 8,192 以上 |
+| `video_fps`（*Video frames per second*，僅 `llama-cpp`） | `1` | 影片每秒讀取幾格（`--video-fps`），用於沒有自己取樣率的模型；每一格大約和一張圖片一樣花 token。Qwen3-VL 不管這個值，固定每秒讀 2 格（llama.cpp b12242 與 1.0.0）：一段 6 秒的影片在 Qwen3-VL 2B 上用了 5,345 token。開啟影片的部署，上下文請設 8,192 以上 |
 | `max_body_mb`（*Largest request*） | `64` | 閘道送給這個部署的最大請求，單位 MiB（超過回 413） |
 | `image_tokens`（*Largest image*） | `1024` | 每張圖片最多縮成這麼多 token：Qwen3-VL 約 1024 × 1024 像素。`llama-cpp` 透過 `--image-max-tokens`；`vllm` 透過 `--mm-processor-kwargs` 的 `max_pixels`，適用於圖片 token 數會隨解析度增加的模型（Qwen-VL；Gemma 每張圖的 token 數固定）。不設的話，一張 5 MB 的照片在 llama.cpp 約 4,000 token（8 個 CPU 執行緒要 125 秒），在 vLLM 約 16,000 token，超過 8,192 token 的上下文。在這個設定出現之前加入的模型，要重新加入後 vLLM 才會套用上限 |
 
@@ -766,10 +766,10 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | 配方 | Variant | 執行在 | 映像檔或 release |
 |---|---|---|---|
 | `vllm`、`vllm-pooling` | `cuda`、`cuda-12.9`、`rocm` | NVIDIA（compute capability 7.0 以上，driver 580 以上；`cuda-12.9` 為 575 以上）；AMD `gfx90a`、`gfx942`、`gfx950`、`gfx1100`、`gfx1101`、`gfx1150`、`gfx1151`、`gfx1200`、`gfx1201` | `vllm/vllm-openai:v0.32.0`、`-cu129`、`vllm/vllm-openai-rocm:v0.32.0` |
-| `llama-cpp` | `cuda` | NVIDIA，compute capability 5.0 以上，driver 570 以上 | `ghcr.io/ggml-org/llama.cpp:server-cuda-b12242`（CUDA 12.8） |
-| | `rocm` | AMD `gfx908`、`gfx90a`、`gfx942`、`gfx1030`、`gfx1100`、`gfx1101`、`gfx1102`、`gfx1200`、`gfx1201` | `…:server-rocm-b12242`（ROCm 7.2.1） |
-| | `vulkan` | 其他所有 AMD GPU：APU（`gfx1151`、`gfx1150`、`gfx1103`…）與 ROCm 映像檔沒有編譯的卡。只給那張卡的 render node，不給 `/dev/kfd` | `…:server-vulkan-b12242`（Mesa RADV） |
-| | `cpu`、`cpu-process` | x86_64 與 aarch64 用容器；x86_64 沒有 Docker 時用行程 | `…:server-b12242`；release `b12242` 的 `llama-b12242-bin-ubuntu-x64.tar.gz`，用它的 SHA-256 檢查 |
+| `llama-cpp` | `cuda` | NVIDIA，compute capability 5.0 以上，driver 570 以上 | `ghcr.io/ggml-org/llama.cpp:server-cuda-v1.0.0-b12359-b1b770d`（CUDA 12.8） |
+| | `rocm` | AMD `gfx908`、`gfx90a`、`gfx942`、`gfx1030`、`gfx1100`、`gfx1101`、`gfx1102`、`gfx1200`、`gfx1201` | `…:server-rocm-v1.0.0-b12359-b1b770d`（ROCm 7.2.1） |
+| | `vulkan` | 其他所有 AMD GPU：APU（`gfx1151`、`gfx1150`、`gfx1103`…）與 ROCm 映像檔沒有編譯的卡。只給那張卡的 render node，不給 `/dev/kfd` | `…:server-vulkan-v1.0.0-b12359-b1b770d`（Mesa RADV） |
+| | `cpu`、`cpu-process` | x86_64 與 aarch64 用容器；x86_64 沒有 Docker 時用行程 | `…:server-v1.0.0-b12359-b1b770d`；release `v1.0.0`（它的封存檔就是 build `b12359` 的）的 `llama-b12359-bin-ubuntu-x64.tar.gz`，用它的 SHA-256 檢查（glibc 2.34 以上：Ubuntu 22.04 以後、Debian 12 以後） |
 | `faster-whisper` | `cuda`、`cuda-12.4`、`cpu` | NVIDIA、CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
 | `speaches-tts`（1.3） | `cpu` | CPU（容器），任何機器都可以 | 與 faster-whisper 相同的 `ghcr.io/speaches-ai/speaches:0.8.3-cpu` 映像檔。只用 CPU：Kokoro 和 Piper 跑在 ONNX Runtime 上，用 CPU 產生語音的速度就比播放還快；在 CUDA 映像檔裡 Kokoro 其實也是用 CPU 跑 |
 | `vllm-omni-tts`（1.3） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU） | `vllm/vllm-omni:v0.32.0`（CUDA 13.0） |
@@ -781,12 +781,21 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
+`llama-cpp` 跑的是 llama.cpp **1.0.0**（1.3.1），這是它第一個使用語意化版本號的 release。這個 release
+的映像檔與封存檔就是同一個 commit 的每日建置 `b12359`，所以映像檔 tag 同時寫出版本、build 和 commit
+（`server-vulkan-v1.0.0-b12359-b1b770d`），`llama-server --version` 顯示 `1.0.0-dev (build 12359)`。1.3.0
+以前跑的是 build `b12242`。配方傳的每個參數在兩者都一樣。它的 *KV cache type*（`kv_cache`，在
+**Advanced** 裡）預設是 `f16`；`f8_e4m3`（FP8，llama.cpp 1.0.0 新增）讓 KV cache 每個值只用一個位元組而不是兩個，
+所以估算的 KV cache 減半：Qwen3-4B 在上下文 8,192 時，每個序列從 1.125 GiB 變成 0.5625 GiB（每多一個同時請求少
+576 MiB）。FP8 在 CPU、CUDA 和 ROCm 上有對應的 kernel；llama.cpp 沒有 Vulkan 的版本，所以在 Vulkan 上請保持 `f16`。
+有些架構不接受它（MLA 模型，例如 DeepSeek），這時副本會啟動失敗：改回 `f16` 即可。
+
 stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`master-cuda`）發布映像檔。配方用 digest 釘住檢查過的那些 build；`scripts/pin_images.py` 會保留它們（tag 已經移動只會當成資訊回報），除非執行時加上 `--move-rolling`。它之後的 Linux release 是在 Ubuntu 26.04（glibc 2.43）上建置的，所以 CPU 行程用的是較早的 build；它的 OpenAI API 是一樣的。`sd-server` 沒有 API 金鑰：沒有金鑰守門的 agent（1.1 之前）不會分到 `sd-cpp` 副本。第一個釘選的 CUDA build（`465adf3`）在 A100 上跑 Z-Image-Turbo 會當掉（[#43](https://github.com/xianhong1208/forgeyard/issues/43)），已換成 build `3bad892`。
 
 每個映像檔也都用 digest 釘選（`tag@sha256:…`）；頁面上顯示的是 tag。
 `scripts/pin_images.py` 會在 `forgeyard/recipes/images.lock.json` 記錄每個映像檔的正確副本可能顯示的 id（index、manifest 和 config 的 digest，以及每個平台的內容 id），所以在連不到 registry 的機器上用 `docker load` 載入的副本會被檢查並使用：[離線機器](how-to.md#offline-machines)。
 
-Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎）。
+Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 

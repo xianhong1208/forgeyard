@@ -329,7 +329,7 @@ The deployment parameters, under **Advanced** in the deploy form (recipes `vllm`
 |---|---|---|
 | `images` (*Images per request*) | `4` | The most images, and audio clips, one request may carry; 0 turns them off. Passed to vLLM in `--limit-mm-per-prompt` |
 | `videos` (*Videos per request*) | `0` | Video is off until this is 1 or more. On vLLM it reserves memory for a long video at startup |
-| `video_fps` (*Video frames per second*, `llama-cpp` only) | `1` | Frames read from each second of a video (`--video-fps`), for models without a rate of their own; each frame costs about as much as an image. Qwen3-VL reads 2 frames a second whatever this says (llama.cpp b12242): a 6-second clip took 5,345 tokens on Qwen3-VL 2B. Give video deployments a context of 8,192 or more |
+| `video_fps` (*Video frames per second*, `llama-cpp` only) | `1` | Frames read from each second of a video (`--video-fps`), for models without a rate of their own; each frame costs about as much as an image. Qwen3-VL reads 2 frames a second whatever this says (llama.cpp b12242 and 1.0.0): a 6-second clip took 5,345 tokens on Qwen3-VL 2B. Give video deployments a context of 8,192 or more |
 | `max_body_mb` (*Largest request*) | `64` | The largest request the gateway sends this deployment, in MiB (413 above) |
 | `image_tokens` (*Largest image*) | `1024` | Each image is scaled down to at most this many tokens: about 1024 × 1024 pixels on Qwen3-VL. On `llama-cpp` through `--image-max-tokens`; on `vllm` through `--mm-processor-kwargs` `max_pixels`, for models whose image tokens grow with the resolution (Qwen-VL; Gemma takes a fixed number per image). Without it a 5 MB photo became about 4,000 tokens on llama.cpp (125 s on 8 CPU threads) and about 16,000 on vLLM, more than an 8,192-token context. A model added before this setting existed is not capped on vLLM until it is added again |
 
@@ -918,10 +918,10 @@ recipe with only the variants you want can.
 | Recipe | Variant | Runs on | Image or release |
 |---|---|---|---|
 | `vllm`, `vllm-pooling` | `cuda`, `cuda-12.9`, `rocm` | NVIDIA (compute capability 7.0+, driver 580+, or 575+ for `cuda-12.9`); AMD `gfx90a`, `gfx942`, `gfx950`, `gfx1100`, `gfx1101`, `gfx1150`, `gfx1151`, `gfx1200`, `gfx1201` | `vllm/vllm-openai:v0.32.0`, `-cu129`, `vllm/vllm-openai-rocm:v0.32.0` |
-| `llama-cpp` | `cuda` | NVIDIA, compute capability 5.0+, driver 570+ | `ghcr.io/ggml-org/llama.cpp:server-cuda-b12242` (CUDA 12.8) |
-| | `rocm` | AMD `gfx908`, `gfx90a`, `gfx942`, `gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1200`, `gfx1201` | `…:server-rocm-b12242` (ROCm 7.2.1) |
-| | `vulkan` | any other AMD GPU: APUs (`gfx1151`, `gfx1150`, `gfx1103`, …) and cards the ROCm image lacks. Only the card's render node, no `/dev/kfd` | `…:server-vulkan-b12242` (Mesa RADV) |
-| | `cpu`, `cpu-process` | x86_64 and aarch64 in a container; x86_64 as a process without Docker | `…:server-b12242`; release `b12242`, `llama-b12242-bin-ubuntu-x64.tar.gz`, checked against its SHA-256 |
+| `llama-cpp` | `cuda` | NVIDIA, compute capability 5.0+, driver 570+ | `ghcr.io/ggml-org/llama.cpp:server-cuda-v1.0.0-b12359-b1b770d` (CUDA 12.8) |
+| | `rocm` | AMD `gfx908`, `gfx90a`, `gfx942`, `gfx1030`, `gfx1100`, `gfx1101`, `gfx1102`, `gfx1200`, `gfx1201` | `…:server-rocm-v1.0.0-b12359-b1b770d` (ROCm 7.2.1) |
+| | `vulkan` | any other AMD GPU: APUs (`gfx1151`, `gfx1150`, `gfx1103`, …) and cards the ROCm image lacks. Only the card's render node, no `/dev/kfd` | `…:server-vulkan-v1.0.0-b12359-b1b770d` (Mesa RADV) |
+| | `cpu`, `cpu-process` | x86_64 and aarch64 in a container; x86_64 as a process without Docker | `…:server-v1.0.0-b12359-b1b770d`; release `v1.0.0` (its archives are build `b12359`'s), `llama-b12359-bin-ubuntu-x64.tar.gz`, checked against its SHA-256 (glibc 2.34 or newer: Ubuntu 22.04 and later, Debian 12 and later) |
 | `faster-whisper` | `cuda`, `cuda-12.4`, `cpu` | NVIDIA, CPU | `ghcr.io/speaches-ai/speaches:0.8.3-*` |
 | `speaches-tts` (1.3) | `cpu` | CPU (in a container), on any machine | the same `ghcr.io/speaches-ai/speaches:0.8.3-cpu` image as faster-whisper. CPU only: Kokoro and Piper run on ONNX Runtime and make speech faster than it plays there; in the CUDA image Kokoro still used the CPU |
 | `vllm-omni-tts` (1.3) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU) | `vllm/vllm-omni:v0.32.0` (CUDA 13.0) |
@@ -932,6 +932,17 @@ recipe with only the variants you want can.
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
+
+`llama-cpp` runs llama.cpp **1.0.0** (1.3.1), its first release with a semantic version. The release's
+images and archives are those of the nightly build of the same commit, `b12359`, so the image tags
+name the version, the build and the commit (`server-vulkan-v1.0.0-b12359-b1b770d`), and
+`llama-server --version` says `1.0.0-dev (build 12359)`. Until 1.3.0 it ran build `b12242`. Every flag
+the recipe passes is the same in both. Its *KV cache type* (`kv_cache`, under **Advanced**) is `f16`
+by default; `f8_e4m3` (FP8, new in llama.cpp 1.0.0) stores the KV cache in one byte a value instead of
+two, so the estimate's KV cache halves: for Qwen3-4B at a context of 8,192, 1.125 GiB a sequence
+becomes 0.5625 GiB (576 MiB less a concurrent request). FP8 has kernels for the CPU, CUDA and ROCm;
+llama.cpp has none for Vulkan, so leave it at `f16` there. Some architectures refuse it (MLA models
+such as DeepSeek), and the replica then fails to start: set it back to `f16`.
 
 stable-diffusion.cpp publishes its images only under tags that move with every build (`master-vulkan`,
 `master-cuda`). The recipe pins the builds that were checked by digest; `scripts/pin_images.py` keeps
@@ -952,7 +963,9 @@ CPU architectures; `compute_capability` and `driver`: comparisons such as `>=8.0
 (`container` or `process`), `image` and `entrypoint` (container), `engine` (`url`, `sha256`,
 `binary`: a release the agent downloads) or `command` (an installed program) for a process, `args`
 and `env` to replace the recipe's, and `amd_kfd` (AMD containers; `true` by default: `/dev/kfd` and
-the card's render node; `false`: the render node only, for engines that use only Vulkan).
+the card's render node; `false`: the render node only, for engines that use only Vulkan), and `unsupported` (1.3.1: parameter
+values the variant cannot run, such as `{kv_cache: [f8_e4m3]}`; a deployment with one of them is never
+placed on it, and the placement says why).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as

@@ -3,7 +3,8 @@ rewrites them, and how it fetches media URLs itself.
 
 Engines must never fetch a URL from a request: vLLM 0.32 and llama-server (b11977, b12242) both
 download any http(s) URL they find in a media part, with no private-address filter (vLLM also follows
-redirects), from inside the machine's network. So the gateway
+redirects), from inside the machine's network (llama-server 1.0.0 refuses private addresses, a further
+layer only). So the gateway
 
 - walks `messages[].content[]` and **rebuilds every media part** in one canonical shape, keeping only
   the fields it checked: `image_url` (also from `input_image`), `video_url` (also from
