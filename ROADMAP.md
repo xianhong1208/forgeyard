@@ -194,11 +194,18 @@ The owner's decisions for 1.3 (2026-11-11):
 1. ✅ **`minimatch` ≥ 11.0.1** (#63, for #31): the web build's lint tools no longer use `minimatch` < 11.0.1
    (eslint 10.15, and an npm override for typescript-eslint until it moves).
 
+## Shipped: 1.3.3 (2026-11-15), README
+
+1. ✅ **The READMEs rewritten** (#67, for #32): what Forgeyard does, how to install it and a quick start;
+   the developer layout moved to `docs/development.md`.
+2. ✅ **Python examples and console snippets for the current OpenAI SDK** (#67, #68): `DefaultHttpxClient`,
+   since openai 3.51 no longer installs httpx.
+3. ✅ **Tests fail fast instead of hanging CI** (#69).
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.3.3: README** | The READMEs rewritten around what Forgeyard does, how to install it and a quick start; the developer layout moves to `docs/development.md`. |
 | **1.4: easier to see** | **Charts:** usage and cost over time as line charts on **Usage**, split by key, model, provider or person, with the day, week and month view. **Machines and models, redesigned:** each machine shows what it is at a glance (an icon per kind: NVIDIA, AMD, APU, CPU), and its page lists the models, workloads and memory on it; models are grouped by kind (chat, multimodal, speech, images, embeddings, rerank) with an icon each; the other pages follow the same layout. **Download to…:** download a model to chosen machines before deploying it, with progress on the model's and each machine's page; each machine lists the models in its cache and their size, and can remove them. A machine that cannot reach the internet gets the model, and engine images, **relayed** by the server or by another machine that has them, checked by SHA-256, with progress too. **Clearer pages:** a model workload says which deployment created it and links to it; revoked keys leave the budget lists and alerts; the *Routes and cloud* and *Catalog and recipes* tabs are renamed after trying a few names and layouts. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |

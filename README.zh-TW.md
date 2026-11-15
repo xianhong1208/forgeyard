@@ -31,7 +31,7 @@
 ## 1.3 的新功能
 
 1.3 加入對話中的圖片、音訊與影片、文字轉語音、圖片與影片生成、`/x/` 的工作負載與視覺範本，伺服器與 agent 映像檔也發布到 Docker
-Hub。1.3.1 可以直接修改部署。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+Hub。1.3.1 可以直接修改部署；1.3.2 與 1.3.3 是修正版。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
 
 ## 🚀 安裝
 
@@ -44,7 +44,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.2
+  docker.io/tonyhuang1101/forgeyard:1.3.3
 sudo docker logs forgeyard
 ```
 
@@ -86,7 +86,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

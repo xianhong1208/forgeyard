@@ -6,6 +6,11 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-11-15
+
+The READMEs rewritten (what Forgeyard does, how to install it, a quick start), and the Python examples
+and console snippets working with the current OpenAI SDK (3.51 and later).
+
 ### Changed
 
 - **Both READMEs rewritten** (#32): badges (licence, CI, release, Docker Hub pulls), a one-line pitch,
