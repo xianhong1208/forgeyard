@@ -1,11 +1,13 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import { BudgetMeter } from "../components/BudgetMeter";
+import { LineChart } from "../components/LineChart";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { alerting, budgetInput, LEVEL_LABEL, parseBudget, resetText, type BudgetPerson, type BudgetsResponse } from "../lib/budgets";
 import { ms, num } from "../lib/gateway";
+import { assignSlots, isSeries, metricChoices, metricKind, METRICS, SPLITS, VIEWS, type SeriesResponse, type Split, type Step } from "../lib/charts";
 import { bytes } from "../lib/machines";
 import { share, usd } from "../lib/prices";
 import type { UsageResponse, UsageRow } from "../lib/types";
@@ -55,6 +57,9 @@ export function UsagePage() {
   const busy = images || traffic || video;
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
   const setBy = tab === "cost" ? setCostGroup : setGroup;
+  // The chart's view stays when switching tabs.
+  const [chartView, setChartView] = useState<ChartView>({ step: "day", split: "none", metric: "requests" });
+  const chart = <UsageChart cost={tab === "cost"} everyone={everyone} admin={!!data?.is_admin} view={chartView} onChange={setChartView} />;
   // The last step of the users' Get started list is opening this page.
   useEffect(() => {
     api("/onboarding/seen", { method: "POST", body: { step: "usage" } }).catch(() => undefined);
@@ -97,7 +102,7 @@ export function UsagePage() {
       </div>
       <div id="usage-panel" role="tabpanel" aria-labelledby={`usage-tab-${tab}`}>
       {tab === "cost" && <Budgets everyone={everyone} />}
-      {tab === "cost" && data && <CostView data={data} />}
+      {tab === "cost" && data && <CostView data={data} chart={chart} />}
       {tab === "requests" && t && (
         <dl className="fleet usage-totals" aria-label="Totals">
           <div><dt>Requests</dt><dd>{num(t.requests)}</dd></div>
@@ -112,6 +117,7 @@ export function UsagePage() {
           <div><dt>Latency p95</dt><dd>{ms(t.latency_p95_ms)}</dd></div>
         </dl>
       )}
+      {tab === "requests" && data && chart}
       {tab === "requests" && data && (
         data.rows.length === 0 ? (
           <div className="panel usage-empty">
@@ -163,7 +169,7 @@ export function UsagePage() {
   );
 }
 
-function CostView({ data }: { data: UsageResponse }) {
+function CostView({ data, chart }: { data: UsageResponse; chart: ReactNode }) {
   const t = data.total;
   const cloud = t.split?.cloud;
   const local = t.split?.local;
@@ -186,6 +192,7 @@ function CostView({ data }: { data: UsageResponse }) {
           {data.is_admin ? <Link to="/providers">Set prices on the provider's models</Link> : "An admin sets the prices of cloud models."}
         </Notice>
       )}
+      {chart}
       {data.rows.length === 0 ? (
         <div className="panel usage-empty"><p className="muted">No requests in this period. Requests to local replicas cost nothing; cloud requests are priced from their provider model's prices.</p></div>
       ) : (
@@ -220,6 +227,86 @@ function CostView({ data }: { data: UsageResponse }) {
         {" "}An estimate of what the providers charge, not their invoice.
       </p>
     </>
+  );
+}
+
+// Usage over time (1.4): one metric per day, week or month as a line chart, in total or per key, model, provider
+// or person (admins, Everyone). The Cost tab charts cost; the Requests tab chooses what to chart.
+type ChartView = { step: Step; split: Split; metric: string };
+
+function UsageChart({ cost, everyone, admin, view: { step, split, metric: chosen }, onChange }: {
+  cost: boolean; everyone: boolean; admin: boolean; view: ChartView; onChange: (v: ChartView) => void;
+}) {
+  const set = (v: Partial<ChartView>) => onChange({ step, split, metric: chosen, ...v });
+  const metric = cost ? "cost_micros" : chosen;
+  const span = VIEWS.find((v) => v.step === step)!;
+  const people = admin && everyone;
+  const by = split === "user" && !people ? "none" : split;
+  const { data: raw, error, reload } = useApi<SeriesResponse>(
+    `/usage/series?step=${step}&periods=${span.periods}&split=${by}&metric=${metric}${everyone ? "&everyone=true" : ""}`);
+  usePoll(reload, 10000);
+  const data = isSeries(raw) ? raw : null;
+  // Colours follow each line while it stays on the chart (another metric or view re-ranks them): worked out
+  // once per answer, from the slots of the answer before when the split is the same.
+  const [colours, setColours] = useState<{ data: SeriesResponse | null; slots: Map<string, number> }>({ data: null, slots: new Map() });
+  let slots = colours.slots;
+  if (data && colours.data !== data) {
+    const kept = colours.data?.split === data.split ? new Map(colours.slots) : new Map<string, number>();
+    slots = assignSlots(data.series.filter((l) => !l.other).map((l) => l.id), kept);
+    setColours({ data, slots });
+  }
+  const lines = (data?.series ?? []).map((l) => ({ ...l, slot: slots.get(l.id) ?? 0 }));
+  const label = METRICS.find((m) => m.id === metric)?.label ?? metric;
+  // The title names what is drawn: until the next answer arrives, the one before stays, dimmed.
+  const drawn = data ? METRICS.find((m) => m.id === data.metric) : undefined;
+  const title = data ? `${data.metric === "cost_micros" ? "Cost" : drawn?.label ?? data.metric} per ${data.step}${data.split === "none" ? ""
+    : `, by ${(SPLITS.find((s) => s.id === data.split)?.label ?? data.split).toLowerCase()}`}` : "";
+  const shown = data && data.metric === metric && data.step === step && data.split === by;
+  return (
+    <section className="panel usage-chart" aria-labelledby="usage-chart-title">
+      <div className="usage-chart-head">
+        <h2 id="usage-chart-title">{cost ? "Cost over time" : "Over time"}</h2>
+        <div className="usage-chart-controls">
+          {!cost && (
+            <label className="field-inline small">Show
+              <select value={metric} onChange={(e) => set({ metric: e.target.value })} aria-label="Show">
+                {metricChoices(data?.totals, metric).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </label>
+          )}
+          <label className="field-inline small">Split by
+            <select value={by} onChange={(e) => set({ split: e.target.value as Split })} aria-label="Split by">
+              {SPLITS.filter((s) => !s.admin || people).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </label>
+          <div className="segmented" role="group" aria-label="Chart view">
+            {VIEWS.map((v) => (
+              <button key={v.step} type="button" className={step === v.step ? "on" : ""} aria-pressed={step === v.step} onClick={() => set({ step: v.step })}>{v.label}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+      {data && lines.length === 0 && (
+        <p className="muted usage-chart-empty">
+          {cost ? `No cost in ${span.range}: local replicas cost nothing, and no request went to a priced cloud model.`
+            : `No ${label.toLowerCase()} in ${span.range}${data.everyone ? "" : " with your keys or in the Playground"}.`} The chart fills in as requests come through the gateway.
+        </p>
+      )}
+      {data && lines.length > 0 && (
+        <div className={shown ? "" : "usage-chart-stale"}>
+          <LineChart title={title} periods={data.periods} step={data.step} lines={lines} total={data.total} kind={metricKind(data.metric)}
+            legend={data.split !== "none"} />
+        </div>
+      )}
+      {data && lines.length > 0 && (
+        <p className="muted small usage-foot">
+          {span.range[0].toUpperCase() + span.range.slice(1)}, {data.from} to {data.to} (UTC){step === "week" ? ", weeks from Monday" : ""}. The latest {step} is still going on (dashed).
+          {data.series.some((l) => l.other) && " Past the five largest, the rest are added up as Other."}
+          {data.omitted > 0 && ` ${data.omitted} with none ${data.omitted === 1 ? "is" : "are"} left out.`}
+        </p>
+      )}
+    </section>
   );
 }
 

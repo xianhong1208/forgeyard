@@ -23,7 +23,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
-  usage per key, model and person, and failover between replicas.
+  usage and cost per key, model and person (charted by day, week and month), and failover between
+  replicas.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.

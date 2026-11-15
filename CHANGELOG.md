@@ -8,6 +8,21 @@ version until 1.0.
 
 ### Added
 
+- **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
+  time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
+  line per key, model, provider or person (admins, with **Everyone**). The Requests tab charts
+  requests, tokens (in + out, in, out) or errors, and each unit of the newer model kinds once some
+  was counted (media items, characters, images, audio and video length, busy time, workload bytes);
+  the Cost tab charts cost in US dollars. The five largest lines are drawn by name and the rest
+  added up as *Other*; groups with none are left out. A line keeps its colour when another metric
+  re-ranks the lines. Hover or the arrow keys read a period's values aloud and in a tooltip, the
+  legend gives each line's total, and **Show the numbers** lists them as a table. The latest period,
+  still going on, is drawn dashed.
+  - `GET /api/usage/series?step=day|week|month&periods=N&split=none|key|model|provider|user&metric=…`
+    sums the same daily usage rows as the tables, so no data changes: at most 366 days, 104 weeks or
+    36 months. Whose usage follows `GET /api/usage`: your own, everyone's for admins with
+    `everyone=true`.
+
 - **Placement knows what a machine can fetch** (#56). Among the machines that fit, a machine that
   could not reach a source a replica would download from there in the last hour (the model's host,
   the engine archive's, the image registry) comes last; then replicas spread over machines; then a

@@ -226,7 +226,8 @@ when a request leaves for them.
 ## Cost and prices
 
 **Usage → Cost** shows what requests cost, in US dollars, per day, key, person (admins), model or
-provider, with the share served locally and the requests that have no price. It is Forgeyard's
+provider, with the share served locally and the requests that have no price, and **Cost over time**
+charts it per day, week or month, in total or per key, model, provider or person. It is Forgeyard's
 estimate of what the providers charge, not their invoice.
 
 ### How a request's cost is worked out
