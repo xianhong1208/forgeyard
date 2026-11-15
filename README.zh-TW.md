@@ -5,13 +5,13 @@
 
 [English](README.md)
 
-> **狀態：1.3.1。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的機器上驗收過）。1.1 加入首次使用清單與推薦模型、開箱即用的
+> **狀態：1.3.2。** 1.0.0 是 MVP（里程碑 M0 到 M4，每一個都在真實的機器上驗收過）。1.1 加入首次使用清單與推薦模型、開箱即用的
 > HTTPS、單行安裝 agent、agent 容器映像檔，以及這份使用指南。1.2 讓雲端供應商走同一個閘道、本機優先：模型的副本忙碌或停擺時，
 > 可以溢出到 OpenAI、Anthropic、Gemini、Azure 或 OpenRouter，而且只限允許把資料送出去的金鑰；每個雲端請求的費用以美元計算，
 > 並可依金鑰、人和供應商設定每月預算，請求送出前先預留。1.3 加入更多種類的模型：對話中的圖片、音訊與影片、文字轉語音、圖片生成，
 > 以及以非同步工作產生的影片；任何服務型工作負載的 HTTP API 也能放在閘道後面的 `/x/<name>`，並附現成的視覺範本；llama.cpp
 > 內建給 AMD APU 用的 Vulkan variant，伺服器與 agent 映像檔也發布在 Docker Hub。1.3.1 可以直接修改部署，並顯示它在等什麼
-> （共用就放得下的 GPU、一直沒被機器接手的副本、引擎映像檔拉取的進度），同時簡化設定，並把 llama.cpp 升到 1.0.0。見
+> （共用就放得下的 GPU、一直沒被機器接手的副本、引擎映像檔拉取的進度），同時簡化設定，並把 llama.cpp 升到 1.0.0；1.3.2 修正網頁建置所用 lint 工具的相依套件。見
 > [CHANGELOG.md](CHANGELOG.md) 與 [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
 
 ## 使用指南
@@ -50,7 +50,7 @@ HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 
 ```bash
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard -p 7860:7860 \
-  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.1
+  -v forgeyard-data:/data -e PUBLIC_URL=https://192.168.1.20:7860 docker.io/tonyhuang1101/forgeyard:1.3.2
 sudo docker logs forgeyard      # the one-time setup token
 ```
 
