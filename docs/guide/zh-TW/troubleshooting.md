@@ -258,7 +258,7 @@ sudo forgeyard agent config
 | 程式 | 方式 |
 |---|---|
 | curl | `curl --cacert forgeyard-ca.pem …`，或把 CA 裝進系統（見下方） |
-| Python、OpenAI SDK、`httpx` | 在程式碼裡：`httpx.Client(verify=ssl.create_default_context(cafile="forgeyard-ca.pem"))`，如[快速入門](quick-start.md#python-with-the-openai-sdk)所示；或用 `SSL_CERT_FILE` |
+| Python、OpenAI SDK、`httpx` | 在程式碼裡：SDK 用 `http_client=DefaultHttpxClient(verify=ssl.create_default_context(cafile="forgeyard-ca.pem"))`（`httpx` 也是同樣的 `verify=`），如[快速入門](quick-start.md#python-with-the-openai-sdk)所示；或用 `SSL_CERT_FILE` |
 | Python、`requests` | `REQUESTS_CA_BUNDLE` |
 | Node.js | `NODE_EXTRA_CA_CERTS=forgeyard-ca.pem`：加進 Node 自己的清單，原本的清單仍保留 |
 | 其他程式 | 它自己指定 CA 檔案的設定，如果有的話 |

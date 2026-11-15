@@ -193,11 +193,10 @@ Python, with the official OpenAI SDK, through its `http_client`:
 ```python
 import ssl
 
-import httpx
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 
 ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
-client = OpenAI(base_url="https://forge.lan:7860/v1", api_key="fyk_…", http_client=httpx.Client(verify=ca))
+client = OpenAI(base_url="https://forge.lan:7860/v1", api_key="fyk_…", http_client=DefaultHttpxClient(verify=ca))
 print(client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hello"}]).choices[0].message.content)
 ```
 

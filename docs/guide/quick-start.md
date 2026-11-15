@@ -253,12 +253,11 @@ Save as `hello.py`, next to `forgeyard-ca.pem`:
 import os
 import ssl
 
-import httpx
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 
 ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
 client = OpenAI(base_url="https://192.168.1.20:7860/v1", api_key=os.environ["FORGEYARD_API_KEY"],
-                http_client=httpx.Client(verify=ca))
+                http_client=DefaultHttpxClient(verify=ca))
 reply = client.chat.completions.create(
     model="qwen",
     messages=[{"role": "user", "content": "Say hello in five words. /no_think"}],
