@@ -13,7 +13,7 @@
 **[使用指南](docs/guide/zh-TW/README.md)** · **[English](README.md)** · **[發展藍圖](ROADMAP.zh-TW.md)** ·
 **[變更紀錄](CHANGELOG.md)**（英文）
 
-![Models 頁面：一台 CPU 機器上的四個部署（對話、看圖對話、圖片生成、文字轉語音），都是 healthy，可以在 /v1 呼叫](docs/images/console-models.png)
+![Models 頁面：一台 CPU 機器上的四個部署，依種類分組（對話、多模態對話、文字轉語音、圖片），都已就緒，可以在各自的 /v1 路徑呼叫](docs/images/console-models.png)
 
 ## ✨ 主要功能
 

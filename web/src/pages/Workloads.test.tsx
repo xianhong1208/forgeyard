@@ -309,6 +309,24 @@ describe("workloads and deployments (1.4, #36)", () => {
     expect(screen.queryByRole("region", { name: "Created by a deployment" })).toBeNull();
   });
 
+  it("FY-WEB-232 a model workload's spec gives the GPUs its deployment chose, not 'none'", async () => {
+    const onGpu = { ...model(1), deployment: { id: 201, name: "dep1", gpus: 1 } };
+    const onCpu = { ...model(2), deployment: { id: 202, name: "dep2", gpus: 0 }, replica_list: [replica({ gpus: [] })] };
+    const old = { ...model(3), deployment: { id: 203, name: "dep3" } }; // a server before this field: from the replicas
+    server((url) => url === "/api/workloads/101" ? { status: 200, body: { workload: onGpu, events: [], server_time: "", can_manage: true } }
+      : url === "/api/workloads/102" ? { status: 200, body: { workload: onCpu, events: [], server_time: "", can_manage: true } }
+        : url === "/api/workloads/103" ? { status: 200, body: { workload: old, events: [], server_time: "", can_manage: true } }
+          : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } } : undefined);
+    const fact = async () => (await screen.findByText("GPUs", { selector: "dt" })).nextElementSibling?.textContent;
+    for (const [path, want] of [["/workloads/101", "1 per replica, from the deployment; holding #4"],
+      ["/workloads/102", "none: the deployment runs it on the CPU"], ["/workloads/103", "from the deployment; holding #4"],
+      ["/workloads/7", "1 per replica"]] as const) {
+      const view = mount(path);
+      expect(await fact()).toBe(want);
+      view.unmount();
+    }
+  });
+
   it("FY-WEB-229 'New workload here' opens the form with the machine chosen (Deploy here: FY-WEB-230)", async () => {
     const data = structuredClone(machinesFixture);
     (data.machines[0] as Record<string, unknown>).features = ["workloads", "models"];

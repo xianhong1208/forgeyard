@@ -211,7 +211,8 @@ export type Workload = {
   replica_list: Replica[];
   deployment_id?: number | null;
   // 1.4: the deployment that created this (model) workload.
-  deployment?: { id: number; name: string } | null;
+  // and the GPUs it gives each replica (0: the CPU); a model workload's own spec asks for none.
+  deployment?: { id: number; name: string; gpus?: number } | null;
   // 1.3: exposed behind the gateway at /x/<name> (null for a model deployment's workload).
   gateway?: WorkloadGateway | null;
 };

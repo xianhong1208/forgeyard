@@ -119,7 +119,8 @@ def workload_out(w: Workload, caller: Caller, *, detail: bool = False) -> dict:
         dep = deployment_of(w)
         out["deployment_id"] = dep.id if dep else None
         # 1.4: the deployment that created this workload, for "created by deployment X" on its pages.
-        out["deployment"] = {"id": dep.id, "name": dep.name} if dep else None
+        # The GPUs per replica come from the deployment (its spec's own count stays 0): 0 means the CPU.
+        out["deployment"] = {"id": dep.id, "name": dep.name, "gpus": int((dep.params or {}).get("gpus") or 0)} if dep else None
     return out
 
 
@@ -132,7 +133,7 @@ def _get(db: DbSession, workload_id: int) -> Workload:
 
 
 def deployment_of(w: Workload):
-    """(id, name) of the deployment that created this model workload, or None."""
+    """(id, name, params) of the deployment that created this model workload, or None."""
     if w.runtime != "model":
         return None
     from sqlalchemy.orm import object_session
@@ -140,7 +141,8 @@ def deployment_of(w: Workload):
     from forgeyard.db import Deployment
 
     db = object_session(w)
-    return db.execute(select(Deployment.id, Deployment.name).where(Deployment.workload_id == w.id)).first() if db else None
+    return db.execute(select(Deployment.id, Deployment.name, Deployment.params)
+                      .where(Deployment.workload_id == w.id)).first() if db else None
 
 
 def _not_a_deployments(w: Workload, verb: str) -> None:

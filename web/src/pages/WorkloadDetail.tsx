@@ -11,7 +11,7 @@ import { downloadFraction, downloadText } from "../lib/models";
 import { buildGateway, gatewayForm, xCurl, xUrl, type GatewayForm } from "../lib/passthrough";
 import type { LogsResponse, Replica, Workload, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { STATE_TONE, STATUS_TONE, duration, gpuLabel, portUrl, stateLabel } from "../lib/workloads";
+import { STATE_TONE, STATUS_TONE, duration, gpuLabel, gpusText, portUrl, stateLabel } from "../lib/workloads";
 import { GatewayPanel } from "./WorkloadNew";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
@@ -275,7 +275,6 @@ export function Output({ w }: { w: Workload }) {
 function Spec({ w }: { w: Workload }) {
   const s = w.spec;
   const rt = s.runtime;
-  const gpus = s.resources.gpus;
   const facts: [string, ReactNode][] = [["Runtime", rt.type]];
   if (rt.type === "model") {
     facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
@@ -288,7 +287,7 @@ function Spec({ w }: { w: Workload }) {
   }
   if (rt.type === "process" && rt.workdir) facts.push(["Working directory", <code key="w">{rt.workdir}</code>]);
   facts.push(["Placement", s.machine_id ? `machine ${w.replica_list[0]?.machine?.name ?? `#${s.machine_id}`}` : "any online machine with room"]);
-  facts.push(["GPUs", gpus.indices ? `cards ${gpus.indices.map((i) => `#${i}`).join(", ")}` : gpus.count ? `${gpus.count}${gpus.vendor ? ` ${gpus.vendor}` : ""} per replica` : "none"]);
+  facts.push(["GPUs", gpusText(w)]);
   facts.push(["CPU and memory", s.resources.cpu === null && s.resources.memory === null ? "not declared"
     : `${s.resources.cpu ?? "—"} core${s.resources.cpu === 1 ? "" : "s"} · ${s.resources.memory ? bytes(s.resources.memory) : "—"}`]);
   facts.push(["Replicas", String(s.replicas)]);

@@ -42,8 +42,10 @@ version until 1.0.
   `modalities`, so a chat model that reads images is listed as multimodal chat.
 - **Workloads made by deployments are listed apart** (#36): **Your workloads**, then **Created by
   model deployments**, each with *created by deployment X →* (eight shown, then *… and N more*). A
-  deployment's workload page opens with *Created by deployment X* and **Open the deployment**; the
-  deployment's page says *Runs as workload X*.
+  deployment's workload page opens with *Created by deployment X* and **Open the deployment**, and
+  its spec gives the GPUs the deployment chose (*1 per replica, from the deployment; holding #3*)
+  rather than *none*; the deployment's page says *Runs as workload X*. `GET /api/workloads` gives
+  `deployment: {id, name, gpus}`.
 
 ### Changed
 
@@ -59,6 +61,11 @@ version until 1.0.
   month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
+
+### Fixed
+
+- **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model
+  library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
 
 ## [1.3.3] — 2026-11-15
 
@@ -76,8 +83,6 @@ and console snippets working with the current OpenAI SDK (3.51 and later).
 
 ### Fixed
 
-- **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model
-  library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
 - **The Python examples with the OpenAI SDK work with openai 3.51 and later.** That release builds the
   SDK on `httpx2` and no longer installs `httpx`, so `import httpx` in the quick start failed after a
   plain `pip install openai`. The quick start, the troubleshooting page, `docs/https-and-trust.md` and

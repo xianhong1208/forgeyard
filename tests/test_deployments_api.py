@@ -330,10 +330,10 @@ def test_fy_dep_009_a_model_workload_names_the_deployment_that_created_it(owner)
         "type": "process", "command": "python3", "args": ["-m", "http.server", "${PORT}"]}, "ports": [{"name": "http"}]})
     assert plain.status_code == 201, plain.text
     listed = {w["name"]: w for w in owner.get("/api/workloads").json()["workloads"]}
-    assert listed["embed"]["deployment"] == {"id": d["id"], "name": "embed"} and listed["embed"]["deployment_id"] == d["id"]
+    assert listed["embed"]["deployment"] == {"id": d["id"], "name": "embed", "gpus": 1} and listed["embed"]["deployment_id"] == d["id"]
     assert "deployment" not in listed["web"]
     one = owner.get(f"/api/workloads/{d['workload']['id']}").json()["workload"]
-    assert one["deployment"] == {"id": d["id"], "name": "embed"}
+    assert one["deployment"] == {"id": d["id"], "name": "embed", "gpus": 1}
 
 
 def test_fy_dep_010_a_deployments_workload_is_stopped_started_and_deleted_through_the_deployment(owner):
@@ -387,3 +387,17 @@ def test_fy_dep_011_a_deployment_says_what_its_model_takes_besides_text(owner):
     assert listed["embed"]["model"]["modalities"] == ["image", "video"]
     one = owner.get(f"/api/deployments/{listed['embed']['id']}").json()["deployment"]
     assert one["model"]["modalities"] == ["image", "video"]
+
+
+def test_fy_dep_012_a_model_workload_says_how_many_gpus_its_deployment_gives_each_replica(owner):
+    """FY-DEP-012 (1.4): the workload's own spec asks for no GPU (the deployment chooses them), so the
+    workload API gives the deployment's GPUs per replica: 1 on a GPU, 0 on the CPU."""
+    seed_catalog()
+    make_node("a100", allowlist=[4], features=MODELS)
+    gpu = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
+    cpu = deploy(owner, "small", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})["deployment"]
+    listed = {w["name"]: w for w in owner.get("/api/workloads").json()["workloads"]}
+    assert listed["embed"]["deployment"]["gpus"] == 1 and not listed["embed"]["spec"]["resources"]["gpus"]["count"]
+    assert listed["small"]["deployment"]["gpus"] == 0
+    assert owner.get(f"/api/workloads/{gpu['workload']['id']}").json()["workload"]["deployment"]["gpus"] == 1
+    assert owner.get(f"/api/workloads/{cpu['workload']['id']}").json()["workload"]["deployment"]["gpus"] == 0

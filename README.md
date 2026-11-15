@@ -13,7 +13,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
 **[Guide](docs/guide/README.md)** · **[繁體中文](README.zh-TW.md)** · **[Roadmap](ROADMAP.md)** ·
 **[Changelog](CHANGELOG.md)**
 
-![The Models page: four deployments on one CPU machine (chat, chat with images, image generation, text to speech), each healthy and answering at /v1](docs/images/console-models.png)
+![The Models page: four deployments on one CPU machine, grouped by kind (chat, multimodal chat, text to speech, images), each ready and answering at its /v1 path](docs/images/console-models.png)
 
 ## ✨ Key features
 

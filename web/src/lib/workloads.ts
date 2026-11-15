@@ -197,3 +197,20 @@ export function formFromSpec(spec: Record<string, unknown>): WorkloadForm {
     healthInterval: String(health?.interval ?? 10), healthStartPeriod: health?.start_period ? String(health.start_period) : "",
   };
 }
+
+// The GPUs line of a workload's spec. A model workload's own spec asks for none: its deployment
+// chooses them, so say what the deployment gives each replica and which cards the replicas hold.
+export function gpusText(w: Workload): string {
+  const g = w.spec.resources.gpus;
+  if (w.runtime === "model") {
+    const held = w.replica_list.flatMap((r) => r.gpus.map((x) => `#${x.index}`));
+    const holding = held.length ? `; holding ${held.join(", ")}` : "";
+    const n = w.deployment?.gpus;
+    if (n === 0) return "none: the deployment runs it on the CPU";
+    if (n) return `${n} per replica, from the deployment${holding}`;
+    return held.length ? `from the deployment; holding ${held.join(", ")}` : "chosen by the deployment";
+  }
+  if (g.indices) return `cards ${g.indices.map((i) => `#${i}`).join(", ")}`;
+  if (g.count) return `${g.count}${g.vendor ? ` ${g.vendor}` : ""} per replica`;
+  return "none";
+}
