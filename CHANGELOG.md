@@ -6,6 +6,16 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-11-15
+
+Change a deployment in place (GPU sharing, context, requests at once, the machine), and see what it
+waits for: GPU sharing is pointed out when it would fit, a replica that its machine never picks up
+says so, and pulling an engine image shows its progress like a model download, failing only when it
+stops making progress. Removing a deployment stops its pull or download at once and says it was
+cancelled. Simpler settings: one cloud policy, one server-wide Hugging Face token, agent defaults
+that match the installer, and the settings removed in 1.4 deprecated. Also llama.cpp 1.0.0 in every
+variant of the `llama-cpp` recipe, with an optional FP8 KV cache.
+
 ### Added
 
 - **FP8 KV cache on llama.cpp** (#48): the `llama-cpp` recipe's *KV cache type* (`kv_cache`, under
