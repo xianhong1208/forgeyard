@@ -25,6 +25,9 @@ A machine without GPUs can still act as one with made-up hardware, for developme
 `FORGEYARD_AGENT_SIMULATION=1 uv run python -m forgeyard agent --simulate-inventory nvidia-a100x8 …`
 (fixtures in `forgeyard/agent/fixtures/`; see *Simulated inventory* in [docs/design.md](docs/design.md)).
 
+Every development command (tests on SQLite and PostgreSQL, the UI's dev server, the container
+images) and a map of the code are in [docs/development.md](docs/development.md).
+
 ## Making a change
 
 1. Branch off `dev`; open the pull request into `dev`. `main` only moves at a release.

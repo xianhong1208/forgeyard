@@ -362,11 +362,10 @@ port: `GET /v1/models`, `POST /v1/chat/completions` and `/v1/completions` (strea
 ```python
 import ssl
 
-import httpx
-from openai import OpenAI
+from openai import DefaultHttpxClient, OpenAI
 
 ca = ssl.create_default_context(cafile="forgeyard-ca.pem")   # the server's CA, from "Trust this server"
-client = OpenAI(base_url="https://<server>:7860/v1", api_key="fyk_…", http_client=httpx.Client(verify=ca))
+client = OpenAI(base_url="https://<server>:7860/v1", api_key="fyk_…", http_client=DefaultHttpxClient(verify=ca))
 client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "content": "Hi"}])
 ```
 
