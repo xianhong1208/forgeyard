@@ -9,7 +9,7 @@
 伺服器啟動時會檢查它的設定：
 
 - **無法使用的值會讓伺服器停止啟動**，並指出是哪個設定、可以填哪些值：`TLS`、`REGISTRATION`、`COOKIE_SECURE`、`GATEWAY_CLOUD_DEFAULT`、`GATEWAY_CLOUD_MAX`、不是數字的數字設定，以及 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個。
-- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定，以及有風險的組合。
+- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定、有風險的組合，以及[已淘汰的設定](#deprecated-settings)（並指出改用什麼）。
 
 ### 常用設定
 
@@ -48,7 +48,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰。請和資料庫分開備份 |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰（Hugging Face 權杖、供應商金鑰、副本金鑰、工作負載環境變數的值）。請和資料庫分開備份 |
 | `FORGEYARD_SECRET_KEY` | — | 直接給金鑰本身（32 位元組的 base64），取代檔案。兩者只設一個：兩個都設的話，會使用這一個，並忽略檔案 |
 
 ### 帳號與登入
@@ -56,7 +56,6 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | 在第一次啟動時建立擁有者，取代設定頁面。只在那時讀取：之後請移除 |
-| `FORGEYARD_SETUP_TOKEN` | — | 使用這個設定權杖，而不是隨機產生的（設定完成後就沒有作用） |
 | `SESSION_IDLE_MINUTES` | `120` | 超過這段時間沒有任何請求就自動登出 |
 | `SESSION_MAX_DAYS` | `7` | 無論如何，超過這段時間就自動登出 |
 | `COOKIE_SECURE` | `auto` | `auto`：瀏覽器使用 HTTPS 時就使用 `Secure` cookie；設成 `true` 或 `false` 可強制指定。其他任何值都會停止啟動 |
@@ -68,8 +67,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `AGENT_HEARTBEAT_SECONDS` | `10` | agent 送出心跳的頻率 |
-| `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。請至少設為心跳間隔的 2.5 倍，否則機器會在上線和離線之間反覆跳動 |
+| `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
 | `AGENT_IMAGE` | — | **Add a machine** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
 ### 模型
@@ -77,7 +75,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
-| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準 |
+| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
 | `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
 | `VRAM_HEADROOM_MIB` | `512` | 放置副本時，每張卡一律保留不用的記憶體 |
@@ -91,7 +89,6 @@
 | `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的）。部署的配方有 *Largest request* 參數（`max_body_mb`，vLLM 與 llama.cpp 預設 64）時，改以該值為上限 |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API keys** 修改 |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
-| `USAGE_FLUSH_SECONDS` | `5` | 把記憶體中統計的用量寫入資料庫的頻率 |
 
 ### 對話中的媒體
 
@@ -114,12 +111,23 @@
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | 讓標示為在你網路外的供應商也能使用私有或 loopback 位址和純 http。只用於以替身伺服器測試；link-local 和 metadata 位址仍然一律拒絕 |
 | `PROVIDER_CONNECT_TIMEOUT` | `10` | 連線到供應商的秒數上限，超過就改試下一個目標 |
 | `PROVIDER_READ_TIMEOUT` | `300` | 供應商回傳回應標頭或串流下一段內容的秒數上限（每個供應商可以另外設定） |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | 回應 429 或 5xx、或連不上的供應商目標，在這段時間內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | 沒有其他目標可試時，不超過這個秒數的 `Retry-After` 會等一次再試 |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | **Refresh prices from OpenRouter** 讀取價格的位置（只在管理員要求時讀取，不送出金鑰）。只有在用替身伺服器測試時才需要修改 |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | 預算會在雲端請求送出前先預留它的估計費用。沒有 `max_tokens` 的請求，以這個 token 數估計它的回應 |
 
-`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud for keys** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。
+`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud policy** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。在管理員儲存之前，這些面板會把來自環境的值標示為 *from .env*。
+
+### 已淘汰的設定
+
+這些設定在 1.3 仍然有效，**在 1.4 移除**。只要設了其中一個，伺服器啟動時會記下一則警告，指出改用什麼，Setup health 也會列出（`setting-deprecated`）。設著它們時，其他行為都不變。
+
+| 變數 | 預設值 | 改用 |
+|---|---|---|
+| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`：同樣的值，名稱和 `FORGEYARD_SECRET_KEY` 一致。兩者都設時使用 `FORGEYARD_SECRET_KEY_FILE` |
+| `AGENT_HEARTBEAT_SECONDS` | — | 不需要：agent 每隔 `AGENT_OFFLINE_SECONDS` 的三分之一送出心跳（至少每 2 秒一次），預設是 10 秒。設了的話仍由它決定心跳間隔 |
+| `FORGEYARD_SETUP_TOKEN` | — | 不需要：伺服器會印出一個隨機的設定權杖（設定完成前存在 `data/secrets.json`）。無人值守的第一次啟動請用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` |
+| `USAGE_FLUSH_SECONDS` | `5` | 不需要：記憶體中統計的用量每 5 秒寫入資料庫一次 |
+| `PROVIDER_COOLDOWN_SECONDS` | `30` | 不需要：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
+| `PROVIDER_RETRY_AFTER_CAP` | `2` | 不需要：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試 |
+| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | 不需要：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰） |
 
 ### 單位、零與空白
 
@@ -156,7 +164,7 @@
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info，或 debug 以顯示所有訊息（-v）。 |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | 顯示在 Machines 頁面上的標籤，例如 { rack = "a" }。環境變數格式：rack=a,room=2。逐個 key 合併：旗標優先於環境變數，環境變數優先於檔案。 |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false：只回報硬體，不執行任何東西。 |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | — | agent 以 root 執行時，行程類工作負載使用的無特權帳號（此時為必填）。 |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run`（以 root 執行且帳號存在時） | agent 以 root 執行時，行程類工作負載使用的無特權帳號。預設：forgeyard-run 帳號存在時就用它（agent 不會自己建立）；沒有的話，以 root 執行的 agent 會拒絕行程類工作負載。 |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | 每個行程副本一個目錄。預設：放在狀態目錄旁邊（<state_dir>-work）。 |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | 服務和模型副本使用的主機連接埠。 |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | 公開的連接埠監聽的位址。預設：這台機器連往伺服器時使用的位址。 |
@@ -164,9 +172,11 @@
 | `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | 行程類工作負載的資源限制方式：systemd（有 CPU 和記憶體上限的 scope；需要在有 systemd 的主機上以 root 執行）、rlimit（沒有 systemd，例如在容器裡），或 auto。 |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | 每個副本保留的輸出量，單位 MB。 |
 | `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | 連續這麼多分鐘沒有收到新的位元組時，拉取映像檔就算失敗（解開各層時是三倍）。持續有進度的慢速拉取絕不會被中止。 |
-| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | — | 下載並保存模型和引擎的位置。沒有設定的話，這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
+| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models`（以 root 執行時） | 下載並保存模型和引擎的位置。預設：以 root 執行時是 /srv/forgeyard-models，否則是 ~/.local/share/forgeyard-models。設成空白（""）：這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
 | `[models]` `local_dirs` | `FORGEYARD_MODEL_LOCAL_DIRS` | `--model-local-dir` | — | 這台機器上 local:// 模型可以使用的目錄。環境變數格式：以逗號分隔。 |
 | `[models]` `allow_private_hosts` | `FORGEYARD_ALLOW_PRIVATE_MODEL_HOSTS` | `--allow-private-model-hosts` | `false` | 允許從私有位址和純 http 下載模型（僅限區域網路內的鏡像站）。 |
+
+**有兩個預設值取決於機器**，和 `install.sh` 的設定一致：agent 以 root 執行時，模型快取是 `/srv/forgeyard-models`（否則是 `~/.local/share/forgeyard-models`）；agent 以 root 執行且 `forgeyard-run` 帳號存在時，行程類工作負載以它執行。agent 不會自己建立這個帳號，`install.sh` 和 agent 映像檔會。`forgeyard agent config` 會把它們標示為 `(default)`。不想讓某台機器提供模型，就把快取設成空白（`--model-cache ""`、`FORGEYARD_MODEL_CACHE=` 或 `cache = ""`）。
 
 `server`、`ca_fingerprint`、`ca_file` 和 `name` 是加入時使用的。機器加入之後，它的狀態目錄會記錄要連哪台伺服器、信任哪個 CA：檔案或環境變數裡如果有不同的值，會被回報並忽略；要更改請用 `forgeyard agent trust`。
 
@@ -662,8 +672,9 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 |---|---|---|
 | `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`PROVIDER_`、`EGRESS_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
 | `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
-| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `SECRET_KEY_FILE` 都有設定 |
-| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `setting-deprecated` | 警告 | 設了一個[已淘汰的設定](#deprecated-settings)。它在 1.4 之前仍然有效；這項發現會指出改用什麼 |
+| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和金鑰檔（`FORGEYARD_SECRET_KEY_FILE` 或 `SECRET_KEY_FILE`）都有設定，或兩個檔案設定指向不同的檔案 |
+| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 次心跳（`AGENT_HEARTBEAT_SECONDS`，或最短的 2 秒心跳） |
 | `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS`、`PROVIDER_ALLOW_PRIVATE_HOSTS` 或 `MEDIA_ALLOW_PRIVATE_HOSTS` 已開啟 |
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
@@ -686,6 +697,7 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
+| `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |
 | `cloud-model-unpriced` | 錯誤 | 已經有預算存在時，某條路由的雲端模型沒有輸入或輸出價格：它的請求會回應 402 `budget_unpriced` |
 | `cloud-model-cost-unknown` | 提示 | 同樣的情況但沒有預算：它的費用未知 |

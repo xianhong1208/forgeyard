@@ -260,7 +260,7 @@ def test_fy_init_002_a_container_a_cpu_machine_and_no_root(tmp_path, monkeypatch
     assert cli_main(["agent", "init", "--print", "--simulate-inventory", str(_cpu_fixture(tmp_path))]) == 0
     data = tomllib.loads(capsys.readouterr().out)
     assert "user" not in data["workloads"] and data["workloads"]["limits"] == "rlimit"
-    assert data["models"]["cache"].endswith("/.cache/forgeyard-models")
+    assert data["models"]["cache"].endswith("/.local/share/forgeyard-models")  # the agent's own default (D6)
     # values given in the environment are kept as they are (the Docker image sets these)
     monkeypatch.setenv("FORGEYARD_LIMITS", "auto")
     monkeypatch.setenv("FORGEYARD_MODEL_CACHE", "/srv/m")

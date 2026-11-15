@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
@@ -146,18 +146,78 @@ def _served_name(body: DeploymentIn) -> str:
     return name
 
 
-@router.post("/deployments/estimate")
-def estimate(body: DeploymentIn, _: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
-    """The estimate and where the replicas would go right now, before anything is created."""
-    ctx, recipe, m = build_context(db, body)
+def _previewing(ctx: Context, body: DeploymentIn, m: CatalogModel) -> None:
+    """A context for a deployment that does not exist yet: rendering it needs a served name only."""
     served = (body.served_name or body.name or m.name).strip() or m.name
 
-    class _Dep:  # render needs a served name only
+    class _Dep:
         served_name = served
 
     ctx.deployment = _Dep()  # type: ignore[assignment]
+
+
+# The deploy form's context hint (D9) rounds the largest context that fits down to this many tokens.
+CONTEXT_STEP = 1024
+
+
+def model_max_context(m: CatalogModel) -> Optional[int]:
+    """The longest context the model itself supports (config.json or the GGUF metadata), if known."""
+    meta = m.meta or {}
+    n = (meta.get("config") or {}).get("max_context") or (meta.get("gguf") or {}).get("context_length")
+    try:
+        return int(n) if n and int(n) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def context_hint(db: DbSession, body: DeploymentIn, recipe: Recipe, m: CatalogModel) -> Optional[dict]:
+    """For a recipe with a `context` parameter: the model's maximum, and the largest context (a multiple
+    of CONTEXT_STEP, at most the model's maximum) with which every replica still fits right now, on
+    the chosen machine or anywhere. The default context stays as it is (D9); the form offers these as
+    one click. `fits_max` is None when nothing fits at the smallest step, or the memory is overridden
+    (then the context does not change what is reserved)."""
+    p = recipe.params.get("context")
+    if p is None or p.type != "int":
+        return None
+    top = model_max_context(m)
+    out = {"param": "context", "model_max": top, "fits_max": None}
+    if p.max is not None:
+        top = min(top, int(p.max)) if top else None
+    if not top or (body.params or {}).get("vram") not in (None, "", 0):
+        return out
+    low = max(int(p.min or 1), 1)
+
+    def fits(n: int) -> bool:
+        trial = body.model_copy(update={"params": {**(body.params or {}), "context": n}})
+        try:
+            c, _, _ = build_context(db, trial)
+        except HTTPException:  # the estimate refuses this size: it does not fit
+            return False
+        _previewing(c, body, m)
+        return bool(scheduler.preview(db, c)["fits"])
+
+    if fits(top):
+        out["fits_max"] = top
+        return out
+    lo, hi = 0, top // CONTEXT_STEP          # in steps: lo fits (0 = nothing yet), hi does not
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if mid * CONTEXT_STEP >= low and fits(mid * CONTEXT_STEP):
+            lo = mid
+        else:
+            hi = mid
+    out["fits_max"] = lo * CONTEXT_STEP if lo else None
+    return out
+
+
+@router.post("/deployments/estimate")
+def estimate(body: DeploymentIn, _: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+    """The estimate and where the replicas would go right now, before anything is created; for a model
+    with a context length, also the model's maximum and the largest context that fits now."""
+    ctx, recipe, m = build_context(db, body)
+    _previewing(ctx, body, m)
     return {"estimate": ctx.estimate.as_dict(), "placement": scheduler.preview(db, ctx), "params": ctx.params,
-            "recipe": recipe.name, "model": m.name}
+            "recipe": recipe.name, "model": m.name, "context_hint": context_hint(db, body, recipe, m)}
 
 
 def _endpoints(w: Workload) -> list[dict]:

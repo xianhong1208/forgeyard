@@ -48,7 +48,7 @@ def test_fy_setup_005_setup_enforces_password_policy(client):
 
 def test_fy_setup_006_generated_token_is_logged_stored_0600_and_discarded(monkeypatch, caplog):
     """FY-SETUP-006: without FORGEYARD_SETUP_TOKEN one is generated, logged and kept in a 0600 file."""
-    monkeypatch.delenv("FORGEYARD_SETUP_TOKEN")
+    get_settings().secrets_path.unlink()  # the suite's own token (conftest)
     get_settings.cache_clear()
     with caplog.at_level(logging.WARNING, logger="forgeyard"), make_client() as c:
         path = get_settings().secrets_path

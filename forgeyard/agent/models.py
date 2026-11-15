@@ -294,7 +294,8 @@ class ModelCache:
                     if resp.status >= 400:
                         if resp.status in (401, 403):
                             raise CacheError(f"{label}: access refused (HTTP {resp.status}); a gated model needs a "
-                                             "Hugging Face token on the deployment")
+                                             "Hugging Face token (the server's, under Models -> Model sources, "
+                                             "or the deployment's own)")
                         raise fetch.FetchError(f"HTTP {resp.status}", resp.status)
                     if have and resp.status != 206:
                         have = 0  # the server ignored Range: start over

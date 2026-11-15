@@ -8,7 +8,6 @@ for process workloads. What was given as a flag or an environment variable is ke
 from __future__ import annotations
 
 import os
-import pwd
 import socket
 from pathlib import Path
 from typing import Optional
@@ -16,8 +15,8 @@ from typing import Optional
 from forgeyard import __version__
 from forgeyard.agent import config, state
 
-WORKLOAD_USER = "forgeyard-run"
-ROOT_MODEL_CACHE = "/srv/forgeyard-models"
+WORKLOAD_USER = config.WORKLOAD_USER
+ROOT_MODEL_CACHE = config.ROOT_MODEL_CACHE
 
 
 def in_container() -> bool:
@@ -25,11 +24,7 @@ def in_container() -> bool:
 
 
 def _user_exists(name: str) -> bool:
-    try:
-        pwd.getpwnam(name)
-        return True
-    except KeyError:
-        return False
+    return config.user_exists(name)
 
 
 def _gpus(simulate: Optional[str]) -> tuple[list[dict], dict]:
@@ -116,6 +111,6 @@ def detect(args, res: config.Resolved) -> tuple[dict, dict, list[str]]:
             notes["workloads.user"] = "The agent is not root: process workloads run as its own user."
 
     if "models.cache" not in given:
-        values["models.cache"] = ROOT_MODEL_CACHE if root else str(Path.home() / ".cache" / "forgeyard-models")
+        values["models.cache"] = config.default_model_cache()
         notes["models.cache"] = "Put it on a disk with room: models take from 1 to over 100 GB each."
     return values, {k: v for k, v in notes.items() if v}, header

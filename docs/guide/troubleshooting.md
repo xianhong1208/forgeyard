@@ -480,7 +480,7 @@ local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 
 **Do:** on **API keys**, open the key's **Limits** and set *Cloud providers* to **Only to spill**
 (or **Allowed**, for cloud-only models too), then **Save limits**. People can choose at most what an
-admin allows under **Cloud for keys**. In the Playground, admins may use the cloud and everyone else
+admin allows under **Cloud policy**. In the Playground, admins may use the cloud and everyone else
 gets that most. Details: [When a request spills](cloud-providers.md#when-a-request-spills).
 
 ## An image is refused

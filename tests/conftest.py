@@ -1,3 +1,4 @@
+import json
 import os
 import re
 
@@ -80,16 +81,25 @@ def isolated(tmp_path, monkeypatch):
     """Each test gets its own data dir (SQLite + secrets file) and fresh settings."""
     for key in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "FORGEYARD_SETUP_TOKEN", "DATABASE_URL", "PUBLIC_URL",
                 "ALLOWED_HOSTS", "TRUSTED_PROXIES", "REGISTRATION", "RATE_LIMIT_PER_MINUTE", "TLS", "TLS_CERT_FILE",
-                "TLS_KEY_FILE", "TLS_CA_FILE", "TLS_EXTRA_NAMES", "SECRET_KEY_FILE", crypto.KEY_ENV):
+                "TLS_KEY_FILE", "TLS_CA_FILE", "TLS_EXTRA_NAMES", "SECRET_KEY_FILE", "FORGEYARD_SECRET_KEY_FILE",
+                "AGENT_HEARTBEAT_SECONDS", crypto.KEY_ENV):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", SETUP_TOKEN)
+    # The setup token, where the server keeps the one it generates (FORGEYARD_SETUP_TOKEN, which used
+    # to pin it, is deprecated).
+    (tmp_path / "data").mkdir(exist_ok=True)
+    secrets_file = tmp_path / "data" / "secrets.json"
+    secrets_file.write_text(json.dumps({"SETUP_TOKEN": SETUP_TOKEN}))
+    secrets_file.chmod(0o600)
     # The agent's settings: never this machine's /etc/forgeyard/agent.toml or FORGEYARD_* variables.
     for setting in agent_config.SETTINGS:
         monkeypatch.delenv(setting.env, raising=False)
     monkeypatch.delenv(agent_config.CONFIG_ENV, raising=False)
     monkeypatch.delenv(agent_config.JOIN_TOKEN_ENV, raising=False)
     monkeypatch.setattr(agent_config, "DEFAULT_PATH", tmp_path / "etc" / "forgeyard" / "agent.toml")
+    # Nor this machine's defaults (/srv/forgeyard-models, a forgeyard-run account): tests that are
+    # about them put them back (test_agent_defaults.py).
+    monkeypatch.setattr(agent_config, "MACHINE_DEFAULTS", {})
     if PG_URL:
         _wipe(PG_URL)
         monkeypatch.setenv("DATABASE_URL", PG_URL)

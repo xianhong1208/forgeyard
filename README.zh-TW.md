@@ -156,6 +156,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送：副本、供應商、溢出、串流 |
 | `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API 金鑰檢查與雲端設定；每分鐘請求數與 token 數；副本順序與供應商冷卻 |
 | `forgeyard/gateway/quirks.py` | 各種供應商的差異：金鑰怎麼送、拿掉或改名的參數、怎麼讀回用量 |
+| `forgeyard/gateway/where.py` | 依種類和位址判斷新的供應商是否在你的網路外 |
 | `forgeyard/gateway/egress.py` | 供應商用的 HTTP client：TLS、不跟隨重新導向、位址檢查、`EGRESS_*` |
 | `forgeyard/gateway/pricing.py` | 依用量與價格計算請求的費用；OpenRouter 的清單與價格對應 |
 | `forgeyard/gateway/budgets.py` | 預算帳本：預留、結算、釋放、80% 與 100% 警示、402 |
@@ -167,7 +168,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
-| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單 |
+| `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單、伺服器的 Hugging Face 權杖 |
 | `forgeyard/recipes/` | 內建的引擎 recipe（YAML），映像檔以 digest 固定 |
 | `forgeyard/security/` | 密碼、工作階段、速率限制、host／CSRF middleware、HTTPS 與 CA、靜態加密的機密、`secrets reset` |
 | `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`） |

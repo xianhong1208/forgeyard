@@ -308,7 +308,7 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 5. **預算**用完了：回應會帶 `X-Forgeyard-Budget-Exhausted`。
 6. 供應商，或它在路由裡的目標，已被**停用**。
 
-**做法：** 到 **API keys**，打開金鑰的 **Limits**，把 *Cloud providers* 設為 **Only to spill**（或 **Allowed**，連只有雲端的模型也能用），再按 **Save limits**。一般人最多只能選到管理員在 **Cloud for keys** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
+**做法：** 到 **API keys**，打開金鑰的 **Limits**，把 *Cloud providers* 設為 **Only to spill**（或 **Allowed**，連只有雲端的模型也能用），再按 **Save limits**。一般人最多只能選到管理員在 **Cloud policy** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
 
 ## 圖片被拒絕
 

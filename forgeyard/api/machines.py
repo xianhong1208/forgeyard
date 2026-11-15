@@ -68,7 +68,7 @@ def list_machines(caller: Caller = Depends(current), db: DbSession = Depends(get
     return {
         "machines": [machine_out(n, db) for n in nodes],
         "server_time": utcnow(),
-        "heartbeat_interval": settings.agent_heartbeat_seconds,
+        "heartbeat_interval": settings.heartbeat_seconds,
         "offline_after": settings.agent_offline_seconds,
         "can_manage": caller.user.role == "admin",
     }

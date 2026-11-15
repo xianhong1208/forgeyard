@@ -11,6 +11,7 @@ import { budgetInput, LEVEL_LABEL, parseBudget, resetText } from "../lib/budgets
 import { exact, when } from "../lib/format";
 import { keyModels, num, snippets } from "../lib/gateway";
 import { ACCESS_HELP, ACCESS_LABEL, ACCESS_LEVELS, keyWorkloads } from "../lib/passthrough";
+import { CLOUD_POLICIES, CUSTOM_HELP, policyOf, policyValue, type CloudPolicy } from "../lib/cloudPolicy";
 import { CLOUD_HELP, CLOUD_LABEL, CLOUD_LEVELS, cloudAbove } from "../lib/routing";
 import type { ApiKey, CloudLevel, CloudSettings, KeyLimits, KeysResponse, NewKeyResponse, WorkloadAccess, WorkloadChoice } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -196,8 +197,8 @@ export function ApiKeysPage() {
         </section>
       )}
 
-      {data?.is_admin && <LimitsPanel limits={data.limits} onSaved={() => { setMessage({ tone: "ok", text: "Limits for keys saved." }); reload(); }} />}
-      {data?.is_admin && <CloudPanel cloud={data.cloud ?? NO_CLOUD} onSaved={() => { setMessage({ tone: "ok", text: "Cloud setting for keys saved." }); reload(); }} />}
+      {data?.is_admin && <LimitsPanel limits={data.limits} envSeeds={data.env_seeds?.limits} onSaved={() => { setMessage({ tone: "ok", text: "Limits for keys saved." }); reload(); }} />}
+      {data?.is_admin && <CloudPanel cloud={data.cloud ?? NO_CLOUD} envSeeds={data.env_seeds?.cloud} onSaved={() => { setMessage({ tone: "ok", text: "Cloud policy saved." }); reload(); }} />}
     </>
   );
 }
@@ -564,8 +565,20 @@ function CopyText({ value }: { value: string }) {
   );
 }
 
-function CloudPanel({ cloud, onSaved }: { cloud: CloudSettings; onSaved: () => void }) {
+function FromEnv({ names }: { names?: string[] }) {
+  if (!names?.length) return null;
+  return (
+    <p className="from-env small" role="note">
+      <span className="chip chip-tone-wait">from .env</span>
+      <span>The values below come from {names.map((n, i) => <span key={n}>{i ? ", " : ""}<code>{n}</code></span>)}: nobody has saved this
+        panel yet. Saving it replaces them, and the environment is then ignored.</span>
+    </p>
+  );
+}
+
+function CloudPanel({ cloud, envSeeds, onSaved }: { cloud: CloudSettings; envSeeds?: string[]; onSaved: () => void }) {
   const [f, setF] = useState<CloudSettings>(cloud);
+  const [policy, setPolicy] = useState<CloudPolicy>(() => policyOf(cloud));
   const [error, setError] = useState<string | null>(null);
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -577,38 +590,56 @@ function CloudPanel({ cloud, onSaved }: { cloud: CloudSettings; onSaved: () => v
       setError(errorText(err));
     }
   };
+  const choose = (id: CloudPolicy) => {
+    setPolicy(id);
+    setF((cur) => policyValue(id, cur));
+  };
+  const preset = CLOUD_POLICIES.find((p) => p.id === policy);
   return (
     <section className="panel" aria-labelledby="cloud-title">
-      <h2 id="cloud-title">Cloud for keys</h2>
+      <h2 id="cloud-title">Cloud policy</h2>
       <p className="muted small">
-        Whether requests with a key may reach cloud providers. Keys made before 1.2 are “Never”, and changing the default here changes no existing
-        key. People may set their own keys up to the most allowed; admins may set any key, which locks it for its owner. Lowering the most allowed
-        applies at once to people's keys set higher (not to values an admin set, nor to admins' own keys); raising it again gives them their
-        setting back. In the playground, admins may use the cloud and others get the most allowed.
+        Whether requests with a key may reach cloud providers: what new keys get, and the most people may give their own keys. Keys made
+        before 1.2 are “Never”, and changing the policy changes no key's own setting; a lower maximum applies at once to people's keys set
+        higher (not to values an admin set, nor to admins' own keys). Admins may set any key, which locks it for its owner.
       </p>
+      <FromEnv names={envSeeds} />
       <form onSubmit={save}>
-        <div className="grid-2">
-          <div className="field">
-            <label htmlFor="cloud-default">New keys get</label>
-            <select id="cloud-default" value={f.default} onChange={(e) => setF({ ...f, default: e.target.value as CloudLevel })}>
-              {CLOUD_LEVELS.map((c) => <option key={c} value={c}>{CLOUD_LABEL[c]}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="cloud-max">The most people may give their own keys</label>
-            <select id="cloud-max" value={f.max} onChange={(e) => setF({ ...f, max: e.target.value as CloudLevel })}>
-              {CLOUD_LEVELS.map((c) => <option key={c} value={c}>{CLOUD_LABEL[c]}</option>)}
-            </select>
-          </div>
+        <div className="field cloud-policy">
+          <label htmlFor="cloud-policy">Policy</label>
+          <select id="cloud-policy" value={policy} onChange={(e) => choose(e.target.value as CloudPolicy)}>
+            {CLOUD_POLICIES.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            <option value="custom">Custom</option>
+          </select>
+          <p className="field-hint">
+            {preset ? preset.help : CUSTOM_HELP}
+          </p>
         </div>
+        {policy === "custom" && (
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="cloud-default">New keys get</label>
+              <select id="cloud-default" value={f.default} onChange={(e) => setF({ ...f, default: e.target.value as CloudLevel })}>
+                {CLOUD_LEVELS.map((c) => <option key={c} value={c}>{CLOUD_LABEL[c]}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="cloud-max">The most people may give their own keys</label>
+              <select id="cloud-max" value={f.max} onChange={(e) => setF({ ...f, max: e.target.value as CloudLevel })}>
+                {CLOUD_LEVELS.map((c) => <option key={c} value={c}>{CLOUD_LABEL[c]}</option>)}
+              </select>
+              {cloudAbove(f.default, f.max) && <p className="field-hint">New keys get at most this: {CLOUD_LABEL[f.max]}.</p>}
+            </div>
+          </div>
+        )}
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
-        <button type="submit" className="btn" style={{ marginTop: 14 }}>Save cloud setting</button>
+        <button type="submit" className="btn" style={{ marginTop: 14 }}>Save cloud policy</button>
       </form>
     </section>
   );
 }
 
-function LimitsPanel({ limits, onSaved }: { limits: KeyLimits; onSaved: () => void }) {
+function LimitsPanel({ limits, envSeeds, onSaved }: { limits: KeyLimits; envSeeds?: string[]; onSaved: () => void }) {
   const show = (n: number | null) => (n ? String(n) : "");
   const [f, setF] = useState({ default_rpm: show(limits.default_rpm), default_tpm: show(limits.default_tpm),
     max_rpm: show(limits.max_rpm), max_tpm: show(limits.max_tpm) });
@@ -632,6 +663,7 @@ function LimitsPanel({ limits, onSaved }: { limits: KeyLimits; onSaved: () => vo
         A key without its own limit gets the default. People may give their own keys lower limits, never more than the cap; admins may set any
         key to anything. Empty means no limit. Counted per key over a sliding minute on this server.
       </p>
+      <FromEnv names={envSeeds} />
       <form onSubmit={save}>
         <div className="grid-4">
           <Field label="Default requests/min" name="default_rpm" type="number" min={0} value={f.default_rpm} onChange={set("default_rpm")} placeholder="no limit" />

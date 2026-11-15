@@ -4,6 +4,10 @@ Admins add, change, test, clone and delete providers and their models. A provide
 write-only: it is stored encrypted, never returned (only its last four characters are shown), never
 logged or audited, and never copied when a provider is cloned. Everyone signed in may list the
 providers (without their keys), so the route pages can name them.
+
+A new provider's "outside your network" defaults to what its kind and its base URL's address say
+(1.3.1, forgeyard/gateway/where.py); `POST /api/providers/where` gives the form that suggestion and
+its reason while an admin types.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import GatewayRoute, Provider, ProviderModel, RouteTarget, get_db, utcnow
-from forgeyard.gateway import budgets as gbudgets, egress, quirks
+from forgeyard.gateway import budgets as gbudgets, egress, quirks, where
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.pricing import PRICE_FIELDS
 
@@ -225,6 +229,19 @@ def get_provider(provider_id: int, caller: Caller = Depends(current), db: DbSess
             "egress": egress_out(), "is_admin": admin}
 
 
+class WhereIn(BaseModel):
+    kind: str = Field(max_length=24)
+    base_url: Optional[str] = Field(default=None, max_length=512)
+
+
+@router.post("/providers/where")
+def provider_where(body: WhereIn, _: Caller = Depends(require_admin)):
+    """Whether a provider with this kind and base URL looks outside your network, and why (D4)."""
+    if body.kind not in quirks.KINDS:
+        raise fail(422, "bad_kind", f"kind: one of {', '.join(quirks.KINDS)}")
+    return where.classify(body.kind, body.base_url).out()
+
+
 @router.post("/providers", status_code=201)
 def create_provider(body: ProviderIn, caller: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     if body.kind not in quirks.KINDS:
@@ -235,7 +252,8 @@ def create_provider(body: ProviderIn, caller: Caller = Depends(require_admin), d
     base_url = (body.base_url or "").strip().rstrip("/") or kind.base_url
     if not base_url:
         raise fail(422, "bad_base_url", f"{kind.label} needs your own base URL, like {kind.base_url_hint}.")
-    external = kind.default_external if body.external is None else body.external
+    # Not given: what the kind and the address say (an unknown address keeps the kind's default).
+    external = where.classify(body.kind, base_url).external if body.external is None else body.external
     _check_destination(body.kind, base_url, external, body.allow_http)
     key = _clean_key(body.api_key)
     p = Provider(name=name, kind=body.kind, base_url=base_url, api_key=key, key_last4=key[-4:] if key else None,

@@ -15,7 +15,8 @@ The server checks its settings when it starts:
   that is not a number, and only one of `TLS_CERT_FILE` and `TLS_KEY_FILE`.
 - **Anything surprising is logged as a warning** and shown to admins under
   [Setup health](#setup-health-checks): a name that is not a setting ("did you mean"), a setting
-  that another one makes useless, and risky combinations.
+  that another one makes useless, risky combinations, and a
+  [deprecated setting](#deprecated-settings), named with what replaces it.
 
 ### Common settings
 
@@ -55,7 +56,7 @@ are fine for almost everyone.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets. Back it up apart from the database |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets (Hugging Face tokens, provider keys, replica keys, workload environment values). Back it up apart from the database |
 | `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file. Set one of the two: with both, this one is used and the file is ignored |
 
 ### Accounts and sign-in
@@ -63,7 +64,6 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | — | Create the owner on the first start, instead of the setup page. Read only then: remove them afterwards |
-| `FORGEYARD_SETUP_TOKEN` | — | Use this setup token instead of a random one (no use once setup is done) |
 | `SESSION_IDLE_MINUTES` | `120` | Signed out after this long without a request |
 | `SESSION_MAX_DAYS` | `7` | Signed out after this long in any case |
 | `COOKIE_SECURE` | `auto` | `auto`: `Secure` cookies whenever the browser talks HTTPS; `true` or `false` to force. Any other value stops the start |
@@ -75,8 +75,7 @@ are fine for almost everyone.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `AGENT_HEARTBEAT_SECONDS` | `10` | How often agents send a heartbeat |
-| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Keep it at least 2.5 heartbeats long, or machines flap |
+| `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Agents send a heartbeat every third of it (at least every 2 seconds) |
 | `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
 ### Models
@@ -84,7 +83,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
-| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins |
+| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins. Until then the panel marks it *from .env* |
 | `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
 | `VRAM_HEADROOM_MIB` | `512` | Memory always left free on a card when placing replicas |
@@ -98,7 +97,6 @@ are fine for almost everyone.
 | `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
-| `USAGE_FLUSH_SECONDS` | `5` | How often usage counted in memory is written to the database |
 
 ### Media in chat
 
@@ -121,15 +119,29 @@ Media URLs also follow `EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS` and `EGRESS_CA_FIL
 | `PROVIDER_ALLOW_PRIVATE_HOSTS` | `false` | Let providers outside your network use private or loopback addresses and plain http. For testing with a stand-in only; link-local and metadata addresses stay refused |
 | `PROVIDER_CONNECT_TIMEOUT` | `10` | Seconds to connect to a provider before trying the next target |
 | `PROVIDER_READ_TIMEOUT` | `300` | Seconds a provider may take for its answer's headers or the next piece of a stream (a provider can set its own) |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | A provider target that answered 429 or 5xx, or could not be reached, is tried last for this long (longer if its `Retry-After` says so, up to 5 minutes) |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | When no other target is left, a `Retry-After` up to this many seconds is waited for once |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Where **Refresh prices from OpenRouter** reads prices (only when an admin asks; no key is sent). Change it only to test against a stand-in |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | Budgets reserve a cloud request's estimated cost before it is sent. A request without `max_tokens` is estimated with an answer of this many tokens |
 
 `EGRESS_PROXY` is under [Common settings](#common-settings). `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`,
 `GATEWAY_CLOUD_DEFAULT` and `GATEWAY_CLOUD_MAX` are only first values too: once an admin saves
-**API keys → Limits for keys** or **Cloud for keys**, the database wins, and Setup health says so
-when the environment still holds another value.
+**API keys → Limits for keys** or **Cloud policy**, the database wins, and Setup health says so
+when the environment still holds another value. Until an admin saves, those panels mark the values
+that came from the environment as *from .env*.
+
+### Deprecated settings
+
+These still work in 1.3 and are **removed in 1.4**. When one is set, the server logs a warning at
+start that names what replaces it, and Setup health lists it (`setting-deprecated`). Nothing else
+changes while they are set.
+
+| Variable | Default | Replaced by |
+|---|---|---|
+| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`, the same value under a name that matches `FORGEYARD_SECRET_KEY`. With both set, `FORGEYARD_SECRET_KEY_FILE` is used |
+| `AGENT_HEARTBEAT_SECONDS` | — | Nothing: agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS` (at least every 2 seconds), 10 seconds by default. Set, it still decides the heartbeat |
+| `FORGEYARD_SETUP_TOKEN` | — | Nothing: the server prints a random setup token (and keeps it in `data/secrets.json` until setup). For an unattended first start use `ADMIN_USERNAME` and `ADMIN_PASSWORD` |
+| `USAGE_FLUSH_SECONDS` | `5` | Nothing: usage counted in memory is written to the database every 5 seconds |
+| `PROVIDER_COOLDOWN_SECONDS` | `30` | Nothing: a provider target that answered 429 or 5xx, or could not be reached, is tried last for 30 seconds (longer if its `Retry-After` says so, up to 5 minutes) |
+| `PROVIDER_RETRY_AFTER_CAP` | `2` | Nothing: when no other target is left, a `Retry-After` of up to 2 seconds is waited for once |
+| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Nothing: **Refresh prices from OpenRouter** always reads OpenRouter's public list (only when an admin asks; no key is sent) |
 
 ### Units, zero and empty
 
@@ -172,7 +184,7 @@ wrong type; a bad value).
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info, or debug for every message (-v). |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | Labels shown on the Machines page, e.g. { rack = "a" }. Environment: rack=a,room=2. Merged key by key: a flag wins over the environment, the environment over the file. |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false: only report hardware, run nothing. |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | — | The unprivileged account process workloads run as when the agent runs as root (required then). |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run` if it exists (as root) | The unprivileged account process workloads run as when the agent runs as root. Default: forgeyard-run if that account exists (never created by the agent); without one, a root agent refuses process workloads. |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | One directory per process replica. Default: next to the state directory (<state_dir>-work). |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | Host ports for services and model replicas. |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | The address published ports listen on. Default: this machine's address towards the server. |
@@ -180,9 +192,16 @@ wrong type; a bad value).
 | `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | How process workloads are limited: systemd (a scope with CPU and memory caps; root on a systemd host), rlimit (no systemd, e.g. in a container), or auto. |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | Output kept per replica, in MB. |
 | `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | An image pull fails when no new bytes arrive for this many minutes (three times as long while it unpacks). A slow pull that keeps moving is never stopped. |
-| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | — | Where models and engines are downloaded and kept. Without it this machine serves no models. In the Docker image it must be the same path inside and outside the container. |
+| `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models` (as root) | Where models and engines are downloaded and kept. Default: /srv/forgeyard-models as root, else ~/.local/share/forgeyard-models. Empty (""): this machine serves no models. In the Docker image it must be the same path inside and outside the container. |
 | `[models]` `local_dirs` | `FORGEYARD_MODEL_LOCAL_DIRS` | `--model-local-dir` | — | Directories local:// models may come from on this machine. Environment: comma-separated. |
 | `[models]` `allow_private_hosts` | `FORGEYARD_ALLOW_PRIVATE_MODEL_HOSTS` | `--allow-private-model-hosts` | `false` | Allow model downloads from private addresses and plain http (a LAN mirror only). |
+
+**Two defaults depend on the machine** and match what `install.sh` sets up: the model cache is
+`/srv/forgeyard-models` when the agent runs as root (`~/.local/share/forgeyard-models` otherwise),
+and process workloads run as `forgeyard-run` when the agent runs as root and that account exists.
+The agent never creates the account; `install.sh` and the agent image do. `forgeyard agent config`
+shows these as `(default)`. To keep a machine from serving models, set the cache to an empty value
+(`--model-cache ""`, `FORGEYARD_MODEL_CACHE=` or `cache = ""`).
 
 `server`, `ca_fingerprint`, `ca_file` and `name` are used to join. Once the machine has joined, its
 state directory says which server it talks to and which CA it trusts: a different value in the file
@@ -795,8 +814,9 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 |---|---|---|
 | `setting-unknown` | warning | A name in `.env`, or one in the environment that starts like a setting (`GATEWAY_`, `PROVIDER_`, `EGRESS_`…) or is very close to one, is not a setting. It says which setting you probably meant |
 | `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
-| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `SECRET_KEY_FILE` are set |
-| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 × `AGENT_HEARTBEAT_SECONDS` |
+| `setting-deprecated` | warning | A [deprecated setting](#deprecated-settings) is set. It still works until 1.4; the finding names what replaces it |
+| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and a key file (`FORGEYARD_SECRET_KEY_FILE` or `SECRET_KEY_FILE`) are set, or the two file settings name different files |
+| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 heartbeats (`AGENT_HEARTBEAT_SECONDS`, or the shortest heartbeat of 2 seconds) |
 | `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS`, `PROVIDER_ALLOW_PRIVATE_HOSTS` or `MEDIA_ALLOW_PRIVATE_HOSTS` is on |
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
@@ -819,6 +839,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
 | `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
+| `gated-model-no-token` | note | A deployment of a gated Hugging Face model has no token of its own, and the server has none. An error once its download was refused |
 | `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
 | `cloud-model-unpriced` | error | A route's cloud model has no input or output price while any budget exists: its requests answer 402 `budget_unpriced` |
 | `cloud-model-cost-unknown` | note | The same without budgets: its cost is unknown |

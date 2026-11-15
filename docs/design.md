@@ -864,7 +864,7 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   what and from where.
 - **Secrets at rest:** Hugging Face tokens, replicas' internal keys, workload environment values and
   cloud providers' API keys are stored encrypted (AES-256-GCM) with a server key that is not in the database
-  (`data/secret.key`, mode 0600, or `SECRET_KEY_FILE` / `FORGEYARD_SECRET_KEY`). The server refuses
+  (`data/secret.key`, mode 0600, or `FORGEYARD_SECRET_KEY_FILE` / `FORGEYARD_SECRET_KEY`). The server refuses
   to start with a missing or wrong key, instead of making a new one over the old secrets. If the
   key is lost, `python -m forgeyard secrets reset --yes` starts over: the tokens and provider keys are
   entered again, and the replicas restart with new keys. Passwords, sessions, API keys and join tokens are

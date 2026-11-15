@@ -689,14 +689,66 @@ the offline machine's cache. The deployment there finds it cached and downloads 
 **How long:** minutes per video, one at a time per replica; the others wait their turn on it.
 Raise *Longest job* under **Advanced** for long or large videos.
 
+## Use gated Hugging Face models
+
+Some models (Llama, Gemma 3, FLUX.1-schnell…) are *gated*: Hugging Face serves them only to an
+account that accepted their licence. Forgeyard needs a token of such an account to inspect them and
+to download them, and one token for the whole server is enough:
+
+1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
+   **Settings → Access Tokens**, make a token with *Read* access.
+2. Admins: open **Models → Catalog**. Under **Model sources**, paste it into **Hugging Face token**
+   and choose **Save token**. It is stored encrypted with the server's secret key and never shown
+   again, only its last four characters.
+3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
+   downloads it gets the token with the download (it never stores it).
+
+A deployment can still bring its own token: **Deploy a model → Advanced → Hugging Face token**. It
+wins over the server's for that deployment only, and deployments made before 1.3.1 keep theirs. The
+same goes for the token field in **Add a model**, which is used for that one inspection.
+**Remove token** takes the server's token away; deployments with their own keep working.
+
+A token is only ever sent to Hugging Face (`HF_ENDPOINT`), never to an `https://` GGUF host. Setup
+health says when a deployment of a gated model has no token to use (`gated-model-no-token`).
+
 ## Add a cloud provider
 
 Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
 OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test connection**. Add the
 models you want, then put one in a route: open a deployment, choose **Routing and cloud spill**, add
 a tier with the cloud model, and save. Give the keys that may use it a cloud setting other than
-**Never** on **API keys**. [Cloud providers](cloud-providers.md#add-a-provider) has the steps for
-each provider, and what each one's endpoint cannot do.
+**Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
+[Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
+one's endpoint cannot do.
+
+**Outside your network (cloud)** is ticked for you: always for OpenAI, Anthropic, Gemini, Azure and
+OpenRouter, and for an *OpenAI-compatible server* when its base URL is a public address (or a name
+that resolves to one). A private address (`10.x`, `172.16–31.x`, `192.168.x`, `100.64–127.x`,
+loopback, link-local, IPv6 `fc00::/7`) or a name such as `gpu-box`, `*.local`, `*.lan` or
+`*.internal` leaves it unticked. The form says why; change the tick if it is wrong. When the name
+does not resolve from the server, the box stays unticked and the form says it could not tell.
+
+## Choose the cloud policy for keys
+
+Admins: **API keys → Cloud policy** decides what new keys get and how far people may open their own
+keys to cloud providers. Pick one and choose **Save cloud policy**:
+
+| Policy | New keys get | People may set their own keys to |
+|---|---|---|
+| **No cloud** (the default) | Never | Never |
+| **People may opt in to spill** | Never | Only to spill |
+| **Spill by default** | Only to spill | Only to spill |
+| **Cloud allowed** | Only to spill | Allowed |
+| **Custom** | your choice | your choice |
+
+*Only to spill* sends a request to a cloud tier only when the local deployment is unavailable, busy or
+answers 429 or 503; *Allowed* also uses cloud tiers placed before local ones. Changing the policy
+changes no existing key's own setting, but a lower maximum applies at once to keys people set
+higher. Admins may give any key any setting, which locks it for its owner. Budgets still apply:
+[Track and limit cloud spend](#track-and-limit-cloud-spend).
+
+When `GATEWAY_CLOUD_DEFAULT` or `GATEWAY_CLOUD_MAX` is set and nobody has saved a policy yet, the
+panel marks the values as *from .env*. Saving replaces them for good.
 
 ## Track and limit cloud spend
 
@@ -781,8 +833,8 @@ To keep a model on one card next to other programs, deploy it with **GPU sharing
 
 Admins, on **Users**:
 
-1. **Add user**: a **Username**, an optional **Email (optional)**, and a **Role** (`user`,
-   `operator` or `admin`; see [Roles](concepts.md#roles)). Choose **Create and get link**.
+1. **Add user**: a **Username** and a **Role** (`user`, `operator` or `admin`; see
+   [Roles](concepts.md#roles)). Choose **Create and get link**.
 2. Send them the one-time link. It sets their password, works once, and expires in 72 hours. You never
    see their password.
 
@@ -1143,9 +1195,9 @@ key is really lost, stop the server and start over with:
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-It makes a new key and drops what the old one encrypted: enter the Hugging Face tokens of gated
-models again, model replicas restart with new internal keys, and workloads with lost environment
-values have to be created again (their events say so).
+It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
+(and any deployment's own), model replicas restart with new internal keys, and workloads with lost
+environment values have to be created again (their events say so).
 
 ## Move a model cache
 

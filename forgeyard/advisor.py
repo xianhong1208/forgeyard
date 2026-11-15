@@ -483,8 +483,10 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
         gpus = any(placement.is_gpu(a) for a in n.accelerators)
         if FEATURE_MODELS not in (n.features or []):
             yield Finding("machine-no-models", "warning" if gpus else "info", f"{n.name} serves no models",
-                          f"The agent on {n.name} has no model cache (models.cache, FORGEYARD_MODEL_CACHE or "
-                          "--model-cache), so no deployment is placed there" + (" although it has GPUs." if gpus else "."),
+                          f"The agent on {n.name} has no model cache, so no deployment is placed there"
+                          + (" although it has GPUs" if gpus else "") + ". Its models.cache (FORGEYARD_MODEL_CACHE, "
+                          "--model-cache) is empty, or the agent is older than 1.3.1, which had no default: set "
+                          "it, or update the agent (the default is /srv/forgeyard-models).",
                           "/guide/en/reference#agent-settings", "Open the reference", scope=f"machine:{n.id}",
                           pages=("machines",))
         process = (n.runtime_info or {}).get("process") or {}
@@ -648,6 +650,32 @@ def extra_args_override(ctx: Context) -> Iterator[Finding]:
                           pages=("models", f"deployment:{d.id}"))
 
 
+REFUSED = re.compile(r"access refused|HTTP 40[13]\b", re.I)
+
+
+@check
+def gated_without_token(ctx: Context) -> Iterator[Finding]:
+    """V33: a deployment of a gated Hugging Face model with no token of its own while the server has
+    none either. An error once a replica's download was refused, information before."""
+    from forgeyard.models import hf_token
+
+    if not ctx.deployments or hf_token.info(ctx.db)["set"]:
+        return
+    for d in ctx.deployments:
+        m = d.model
+        if m is None or m.kind != "hf" or not (m.meta or {}).get("gated") or d.hf_token:
+            continue
+        refused = any(r.reason and REFUSED.search(r.reason) for r in d.workload.replicas if not r.final)
+        yield Finding("gated-model-no-token", "error" if refused else "info",
+                      f"{d.name} needs a Hugging Face token" if refused else f"{d.name} may not download: no Hugging Face token",
+                      f"{m.name} is gated on Hugging Face, and neither the server nor this deployment has a token"
+                      + (", so its download was refused." if refused else ": its download will be refused.")
+                      + " Set the server's token under Models → Model sources (after accepting the model's licence on "
+                      "Hugging Face with that account), or give the deployment its own.",
+                      "/models?tab=catalog", "Set the token", scope=f"deployment:{d.id}",
+                      pages=("models", f"deployment:{d.id}"))
+
+
 # --- gateway, cloud and money
 def _reach(ctx: Context, providers: set[int]) -> dict[str, list[str]]:
     """Route name -> names of the given providers it can send requests to."""
@@ -767,13 +795,13 @@ def cloud_defaults(ctx: Context) -> Iterator[Finding]:
                          "a route has one.")
         yield Finding("cloud-default-open", "info", "Keys may use cloud providers by default",
                       " ".join(parts) + " Check that this is what you want: it costs money and sends prompts outside "
-                      "your network.", "/keys", "Open Cloud for keys", pages=("keys",))
+                      "your network.", "/keys", "Open Cloud policy", pages=("keys",))
     elif not any(gkeys.effective_cloud(k, k.user, c["max"]) != "off" for k in ctx.active_keys):
         names = sorted({r.served_name for r in ctx.routes if ctx.usable_cloud_targets(r)})
         yield Finding("cloud-unreachable", "info", "Cloud routes exist, but no key may use them",
                       f"{_names(names)} {'has' if len(names) == 1 else 'have'} cloud targets, but every key's cloud "
                       "setting is Never and new keys get Never too, so only the playground reaches them. Give a key "
-                      "Only to spill or Allowed, or change Cloud for keys.", "/keys", "Open API keys", pages=("keys",))
+                      "Only to spill or Allowed, or change the cloud policy.", "/keys", "Open API keys", pages=("keys",))
 
 
 @check

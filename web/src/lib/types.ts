@@ -300,9 +300,19 @@ export type ImageModel = {
   pipeline: string | null; parts: Record<string, { class: string | null; params: number | null }>;
 };
 
-export type ModelSources = { url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean };
+// 1.3.1: the server's Hugging Face token, as the UI may see it (never the token itself).
+export type HfTokenInfo = { set: boolean; last4: string | null; updated_by: string | null; updated_at: string | null };
 
-export type CatalogResponse = { models: CatalogModel[]; recipes: Recipe[]; can_manage: boolean; can_deploy: boolean; sources?: ModelSources };
+export type ModelSources = {
+  url_hosts: string[]; local_dirs: string[]; hf_endpoint: string; allow_private_hosts: boolean;
+  // Environment variables the lists still come from (nobody saved them yet), and the server's token.
+  env_seeds?: string[]; hf_token?: HfTokenInfo;
+};
+
+export type CatalogResponse = {
+  models: CatalogModel[]; recipes: Recipe[]; can_manage: boolean; can_deploy: boolean; sources?: ModelSources;
+  hf_token_set?: boolean;
+};
 
 export type EstimatePart = { label: string; bytes: number; detail: string };
 
@@ -325,7 +335,13 @@ export type ShareHint = { need: number; card_total: number; card_model: string |
 
 export type Placement = { fits: boolean; placed: PlacedReplica[]; machines: MachineVerdict[]; summary?: string; failed_replica?: number; share_hint?: ShareHint | null };
 
-export type EstimateResponse = { estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string };
+// 1.3.1 (D9): the model's longest context and the largest that fits right now, offered as one click.
+export type ContextHint = { param: string; model_max: number | null; fits_max: number | null };
+
+export type EstimateResponse = {
+  estimate: Estimate; placement: Placement; params: Record<string, unknown>; recipe: string; model: string;
+  context_hint?: ContextHint | null;
+};
 
 export type Endpoint = {
   replica: number; machine: string | null; state: string; ready: boolean; url: string;
@@ -391,6 +407,8 @@ export type WorkloadChoice = { name: string; exposed: boolean; path: string };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
+  // Admins: environment variables the panels' values still come from (D1).
+  env_seeds?: { limits: string[]; cloud: string[] };
   models: { name: string; api: string; kind?: RouteKind }[];
   workloads?: WorkloadChoice[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
@@ -441,6 +459,9 @@ export type RouteOptions = {
   deployments: { id: number; name: string; served_name: string; api: string | null }[];
   provider_models: { id: number; upstream_model: string; display_name: string | null; api: string; provider: ProviderRef }[];
 };
+
+// 1.3.1 (D4): whether a provider looks outside your network, and why.
+export type ProviderWhere = { external: boolean; basis: "kind" | "address" | "name" | "resolved" | "unknown"; reason: string };
 
 export type ProviderKind = {
   kind: string; label: string; base_url: string; base_url_hint: string; auth: string; embeddings: boolean; models_endpoint: boolean;

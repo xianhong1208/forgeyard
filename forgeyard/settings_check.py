@@ -5,8 +5,9 @@ COOKIE_SECURE, the cloud levels), and so does an own certificate with only one o
 (forgeyard/security/tls.py). What is left is found here, without refusing anything:
 
 - a name in the environment or in `.env` that is not a setting but looks like one ("did you mean");
+- a deprecated setting (still read in 1.3, removed in 1.4), named with what replaces it;
 - a setting that another one makes useless (TLS_CA_FILE without an own certificate, any TLS_* with
-  TLS=off, SECRET_KEY_FILE next to FORGEYARD_SECRET_KEY);
+  TLS=off, a key file next to FORGEYARD_SECRET_KEY);
 - values that work but are risky (heartbeat against offline time, the private-address switches,
   non-Secure cookies over HTTPS);
 - with the database: setup values left behind after setup, and env seeds that the database
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
 
-from forgeyard.config import Settings
+from forgeyard.config import REMOVED_IN, Settings
 
 REFERENCE = "/guide/en/reference"
 
@@ -58,7 +59,7 @@ SEEDS = (
 )
 SEED_PAGE = {"model_sources": ("/models?tab=catalog", "Models → Model sources"),
              "gateway_limits": ("/keys", "API keys → Limits for keys"),
-             "gateway_cloud": ("/keys", "API keys → Cloud for keys")}
+             "gateway_cloud": ("/keys", "API keys → Cloud policy")}
 
 
 @dataclass
@@ -124,6 +125,12 @@ def static_problems(s: Settings, environ: Optional[Mapping[str, str]] = None,
         out.append(Problem("setting-unknown", "warning", f"{name} is not a setting",
                            f"{name} is set in {where}, but Forgeyard has no such setting, so it is ignored."
                            + (f" Did you mean {hint}?" if hint else ""), scope=f"setting:{name.upper()}"))
+    for name, instead, how in s.deprecated_in_use():
+        then = (f"Use {instead} instead ({how}), and remove {name}." if instead else
+                f"Nothing replaces it: {how}. Remove {name}.")
+        out.append(Problem("setting-deprecated", "warning", f"{name} is deprecated",
+                           f"{name} still works in this version and is removed in {REMOVED_IN}. {then}",
+                           fix_url=f"{REFERENCE}#deprecated-settings", scope=f"setting:{name}"))
     tls_files = [n for n in ("tls_cert_file", "tls_key_file", "tls_ca_file", "tls_extra_names")
                  if getattr(s, n).strip()]
     if not s.tls_on and tls_files:
@@ -143,15 +150,24 @@ def static_problems(s: Settings, environ: Optional[Mapping[str, str]] = None,
                                "TLS_EXTRA_NAMES only adds names to Forgeyard's own server certificate. With your own "
                                "certificate, the names are the ones it was issued for.",
                                fix_url=f"{REFERENCE}#https", scope="setting:TLS_EXTRA_NAMES"))
-    if s.forgeyard_secret_key.strip() and s.secret_key_file.strip():
-        out.append(Problem("secret-key-both", "warning", "FORGEYARD_SECRET_KEY and SECRET_KEY_FILE are both set",
-                           "FORGEYARD_SECRET_KEY is used and the file named by SECRET_KEY_FILE is ignored. "
+    key_file = next((n.upper() for n in ("forgeyard_secret_key_file", "secret_key_file") if getattr(s, n).strip()), None)
+    if s.forgeyard_secret_key.strip() and key_file:
+        out.append(Problem("secret-key-both", "warning", f"FORGEYARD_SECRET_KEY and {key_file} are both set",
+                           f"FORGEYARD_SECRET_KEY is used and the file named by {key_file} is ignored. "
                            "Keep only one of them.", fix_url=f"{REFERENCE}#data-and-secrets"))
-    if s.agent_offline_seconds < HEARTBEATS_PER_OFFLINE * s.agent_heartbeat_seconds:
+    elif (s.forgeyard_secret_key_file.strip() and s.secret_key_file.strip()
+          and s.forgeyard_secret_key_file.strip() != s.secret_key_file.strip()):
+        out.append(Problem("secret-key-both", "warning", "FORGEYARD_SECRET_KEY_FILE and SECRET_KEY_FILE name different files",
+                           "FORGEYARD_SECRET_KEY_FILE is used and SECRET_KEY_FILE (its old name) is ignored. "
+                           "Remove SECRET_KEY_FILE.", fix_url=f"{REFERENCE}#data-and-secrets"))
+    if s.agent_offline_seconds < HEARTBEATS_PER_OFFLINE * s.heartbeat_seconds:
+        own = (f"AGENT_HEARTBEAT_SECONDS ({s.agent_heartbeat_seconds})" if s.agent_heartbeat_seconds
+               else f"the heartbeat ({s.heartbeat_seconds} s, its shortest)")
         out.append(Problem("heartbeat-flapping", "warning", "Machines may flap between online and offline",
                            f"AGENT_OFFLINE_SECONDS ({s.agent_offline_seconds}) is less than {HEARTBEATS_PER_OFFLINE} × "
-                           f"AGENT_HEARTBEAT_SECONDS ({s.agent_heartbeat_seconds}): one late heartbeat marks a machine "
-                           "offline. Keep it at least three heartbeats long.", fix_url=f"{REFERENCE}#machines"))
+                           f"{own}: one late heartbeat marks a machine offline. Keep it at least three heartbeats "
+                           "long" + (", or remove AGENT_HEARTBEAT_SECONDS." if s.agent_heartbeat_seconds else "."),
+                           fix_url=f"{REFERENCE}#machines"))
     if s.model_allow_private_hosts:
         out.append(Problem("private-hosts-allowed", "warning", "Model sources may use private addresses",
                            "MODEL_ALLOW_PRIVATE_HOSTS=true lets model downloads reach addresses on your network and "
@@ -188,6 +204,16 @@ def _seed_value(kind: str, raw) -> object:
             return None
         return n if n > 0 else None
     return str(raw or "off")
+
+
+def env_seeds(s: Settings, db, key: str) -> list[str]:
+    """The environment variables whose values a database setting is using right now: the setting
+    was never saved, and the variable is set (D1). The web UI marks those values as from .env."""
+    from forgeyard.db import ServerSetting
+
+    if db.get(ServerSetting, key) is not None:
+        return []
+    return [env.upper() for k, _, env, _ in SEEDS if k == key and env in s.model_fields_set]
 
 
 def database_problems(s: Settings, db) -> list[Problem]:

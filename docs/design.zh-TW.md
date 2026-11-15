@@ -481,7 +481,7 @@ Kong 與 GPUStack 之後決定。
 - **稽核紀錄：** 登入、登入失敗、所有帳號變更，以及機器、模型、配方、部署、workload、key、供應商、路由與價格的變更，還有預算
   警示，含操作者、對象與來源 IP。
 - **靜態加密的機密：** Hugging Face token、replica 內部金鑰、workload 環境變數的值與雲端供應商的 API key 以 AES-256-GCM 加密儲存，金鑰不在資料庫裡
-  （`data/secret.key`，權限 0600；或 `SECRET_KEY_FILE`／`FORGEYARD_SECRET_KEY`）。金鑰不見或不對時 server 拒絕啟動，
+  （`data/secret.key`，權限 0600；或 `FORGEYARD_SECRET_KEY_FILE`／`FORGEYARD_SECRET_KEY`）。金鑰不見或不對時 server 拒絕啟動，
   而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 與供應商金鑰要重新輸入，
   replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。
