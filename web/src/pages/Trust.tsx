@@ -177,7 +177,7 @@ export function TrustPage() {
               <CopyBox label="curl" value={`curl --cacert forgeyard-ca.pem ${info.server_url}/api/health`} />
               <CopyBox label="Python" value="SSL_CERT_FILE=forgeyard-ca.pem python app.py" />
               <p className="muted small">
-                Or in code, with the official OpenAI SDK: <code>OpenAI(base_url=…, http_client=httpx.Client(verify=ssl.create_default_context(cafile="forgeyard-ca.pem")))</code>.
+                Or in code, with the official OpenAI SDK: <code>OpenAI(base_url=…, http_client=DefaultHttpxClient(verify=ssl.create_default_context(cafile="forgeyard-ca.pem")))</code>.
                 The API keys page shows complete examples.
               </p>
             </section>

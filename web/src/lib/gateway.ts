@@ -30,8 +30,10 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
   const caLines = trustUrl
     ? `# forgeyard-ca.pem: this server's certificate authority, from ${trustUrl}\nca = ssl.create_default_context(cafile="forgeyard-ca.pem")\n`
     : "";
-  const sdk = trustUrl ? "import ssl\n\nimport httpx\nfrom openai import OpenAI\n\n" : "from openai import OpenAI\n\n";
-  const client = `${caLines}client = OpenAI(base_url="${base}", api_key="${key}"${trustUrl ? ", http_client=httpx.Client(verify=ca)" : ""})`;
+  // openai 3.51 and later are built on httpx2 and no longer install httpx: the SDK's own client class takes
+  // the CA with either.
+  const sdk = trustUrl ? "import ssl\n\nfrom openai import DefaultHttpxClient, OpenAI\n\n" : "from openai import OpenAI\n\n";
+  const client = `${caLines}client = OpenAI(base_url="${base}", api_key="${key}"${trustUrl ? ", http_client=DefaultHttpxClient(verify=ca)" : ""})`;
   if (api === "openai-embeddings") {
     return {
       curl: `${curl} ${base}/embeddings \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "input": "Forgeyard runs models on your own machines."}'`,
@@ -41,7 +43,7 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
   if (api === "rerank") {
     return {
       curl: `${curl} ${base}/rerank \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "query": "capital of France", "documents": ["Paris is in France.", "Berlin is in Germany."]}'`,
-      python: `${trustUrl ? "import ssl\n\n" : ""}import httpx  # rerank is not part of the OpenAI SDK\n\n${caLines}r = httpx.post("${base}/rerank", headers={"Authorization": "Bearer ${key}"},\n               json={"model": "${model}", "query": "capital of France",\n                     "documents": ["Paris is in France.", "Berlin is in Germany."]}${trustUrl ? ",\n               verify=ca" : ""})\nprint(r.json()["results"])`,
+      python: `${trustUrl ? "import ssl\n\n" : ""}import httpx  # pip install httpx: rerank is not part of the OpenAI SDK\n\n${caLines}r = httpx.post("${base}/rerank", headers={"Authorization": "Bearer ${key}"},\n               json={"model": "${model}", "query": "capital of France",\n                     "documents": ["Paris is in France.", "Berlin is in Germany."]}${trustUrl ? ",\n               verify=ca" : ""})\nprint(r.json()["results"])`,
     };
   }
   if (api === "openai-speech") {

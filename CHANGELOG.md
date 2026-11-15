@@ -21,7 +21,9 @@ version until 1.0.
   SDK on `httpx2` and no longer installs `httpx`, so `import httpx` in the quick start failed after a
   plain `pip install openai`. The quick start, the troubleshooting page, `docs/https-and-trust.md` and
   the design notes now pass `http_client=DefaultHttpxClient(verify=ca)`, the SDK's own client class,
-  which every SDK version since 1.17 has.
+  which every SDK version since 1.17 has. The console's own snippets (Playground → Code, and the
+  *Trust this server* page) do the same; the rerank snippet, which calls `httpx` directly, says to
+  `pip install httpx`.
 
 ## [1.3.2] — 2026-11-15
 
