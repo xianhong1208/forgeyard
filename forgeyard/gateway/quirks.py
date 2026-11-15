@@ -92,7 +92,7 @@ KINDS: dict[str, Kind] = {k.name: k for k in (
     Kind("openai_compatible", "OpenAI-compatible server", "", "https://llm.example.org/v1", "bearer",
          default_external=False, key_required=False,
          note="Any server with the OpenAI API: a vLLM or llama.cpp of your own elsewhere, Together, Groq… Nothing "
-              "is dropped. Mark it as outside your network if it is a third party."),
+              "is dropped. Outside your network is suggested from its address: check it for a third party."),
 )}
 
 

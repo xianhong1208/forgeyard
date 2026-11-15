@@ -304,7 +304,7 @@ describe("cloud setting of keys (1.2)", () => {
     fireEvent.click(within(group).getByLabelText(/Only to spill/));
     fireEvent.click(screen.getByRole("button", { name: "Create key" }));
     await waitFor(() => expect(posted[0]).toMatchObject({ name: "batch", cloud: "fallback" }));
-    expect(screen.getByRole("heading", { name: "Cloud for keys" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Cloud policy" })).toBeTruthy();
   });
 
   it("a user cannot go above the cap, and an admin's value is locked", async () => {
@@ -319,7 +319,7 @@ describe("cloud setting of keys (1.2)", () => {
     const group = screen.getByRole("radiogroup", { name: "May this key use cloud providers?" });
     expect((within(group).getByLabelText(/Allowed/) as HTMLInputElement).disabled).toBe(true);
     expect((within(group).getByLabelText(/Only to spill/) as HTMLInputElement).disabled).toBe(false);
-    expect(screen.queryByRole("heading", { name: "Cloud for keys" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Cloud policy" })).toBeNull();
   });
 });
 

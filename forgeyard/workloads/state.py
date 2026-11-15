@@ -107,8 +107,16 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
     key_envs: dict[int, Optional[str]] = {}
     ids = {r.workload_id for r in reps if r.model}
     if ids:
+        from forgeyard.models import hf_token
+
+        server: Optional[str] = None  # the server's token, read once when a deployment needs it
         for dep in db.scalars(select(Deployment).where(Deployment.workload_id.in_(ids))).all():
-            tokens[dep.workload_id] = dep.hf_token
+            # The deployment's own token, else the server's (1.3.1), and only for Hugging Face models:
+            # an https:// GGUF host never gets one.
+            hf = dep.model is not None and dep.model.kind == "hf"
+            if hf and not dep.hf_token and server is None:
+                server = hf_token.get(db) or ""
+            tokens[dep.workload_id] = hf_token.choose(dep.hf_token, server if hf else None)
             if keys:
                 recipe = get_recipe(db, dep.recipe)
                 key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None

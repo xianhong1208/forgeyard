@@ -86,7 +86,7 @@ export function AccountPage() {
           <dl className="facts">
             <dt>Username</dt><dd className="mono">{user?.username}</dd>
             <dt>Role</dt><dd>{user && <RoleChip role={user.role} />}{user?.is_owner && <span className="chip chip-owner">owner</span>}</dd>
-            <dt>Email</dt><dd>{user?.email || <span className="muted">none</span>}</dd>
+            {user?.email && <><dt>Email</dt><dd>{user.email}</dd></>}
             <dt>Last sign-in</dt><dd title={exact(user?.last_login_at)}>{when(user?.last_login_at)}</dd>
           </dl>
           <h2 className="panel-gap">Change password</h2>

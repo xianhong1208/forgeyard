@@ -5,7 +5,15 @@
     --flags                        the command line
 
 Each setting comes from the first of: a flag, an environment variable, the file, the built-in
-default. Labels are merged key by key in the same order. `forgeyard agent init` writes a file from
+default. Labels are merged key by key in the same order.
+
+Two defaults match the installer (1.3.1, decision D6) and depend on the machine:
+
+- `models.cache`: /srv/forgeyard-models as root, else ~/.local/share/forgeyard-models. An empty value
+  (`--model-cache ""`, `FORGEYARD_MODEL_CACHE=`, `cache = ""`) means this machine serves no models.
+- `workloads.user`: forgeyard-run when the agent runs as root and that account exists. It is never
+  created here (install.sh and the agent image create it); without it, a root agent refuses process
+  workloads, as before. `forgeyard agent init` writes a file from
 what it detects on this machine; `forgeyard agent config` prints the settings in effect and where
 each one came from.
 
@@ -19,6 +27,7 @@ from __future__ import annotations
 import difflib
 import ipaddress
 import os
+import pwd
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +39,9 @@ JOIN_TOKEN_ENV = "FORGEYARD_JOIN_TOKEN"
 ENGINES = ("auto", "docker", "podman", "none")
 LIMITS = ("auto", "systemd", "rlimit")
 LOG_LEVELS = ("info", "debug")
+WORKLOAD_USER = "forgeyard-run"
+ROOT_MODEL_CACHE = "/srv/forgeyard-models"
+USER_MODEL_CACHE = "~/.local/share/forgeyard-models"
 
 
 class ConfigError(Exception):
@@ -153,8 +165,9 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("workloads.enabled", "workloads_enabled", "FORGEYARD_WORKLOADS", "bool", True, "--no-workloads",
             "false: only report hardware, run nothing."),
     Setting("workloads.user", "workload_user", "FORGEYARD_WORKLOAD_USER", "str", None, "--workload-user",
-            "The unprivileged account process workloads run as when the agent runs as root (required then).",
-            None, '"forgeyard-run"'),
+            "The unprivileged account process workloads run as when the agent runs as root. Default: "
+            "forgeyard-run if that account exists (never created by the agent); without one, a root agent "
+            "refuses process workloads.", None, '"forgeyard-run"'),
     Setting("workloads.work_dir", "work_dir", "FORGEYARD_WORK_DIR", "str", None, "--work-dir",
             "One directory per process replica. Default: next to the state directory (<state_dir>-work).", None),
     Setting("workloads.port_range", "port_range", "FORGEYARD_PORT_RANGE", "str", "30000-32767", "--port-range",
@@ -175,8 +188,9 @@ SETTINGS: tuple[Setting, ...] = (
             "An image pull fails when no new bytes arrive for this many minutes (three times as long while "
             "it unpacks). A slow pull that keeps moving is never stopped.", _stall_minutes),
     Setting("models.cache", "model_cache", "FORGEYARD_MODEL_CACHE", "str", None, "--model-cache",
-            "Where models and engines are downloaded and kept. Without it this machine serves no models. "
-            "In the Docker image it must be the same path inside and outside the container.", None,
+            "Where models and engines are downloaded and kept. Default: /srv/forgeyard-models as root, else "
+            "~/.local/share/forgeyard-models. Empty (\"\"): this machine serves no models. In the Docker image "
+            "it must be the same path inside and outside the container.", None,
             '"/srv/forgeyard-models"'),
     Setting("models.local_dirs", "model_local_dir", "FORGEYARD_MODEL_LOCAL_DIRS", "list", [], "--model-local-dir",
             "Directories local:// models may come from on this machine. Environment: comma-separated.", None),
@@ -186,6 +200,36 @@ SETTINGS: tuple[Setting, ...] = (
 )
 
 BY_KEY = {s.key: s for s in SETTINGS}
+# Settings whose empty value means "none" rather than "not set".
+EMPTY_MEANS_NONE = {"models.cache"}
+
+
+def user_exists(name: str) -> bool:
+    try:
+        pwd.getpwnam(name)
+        return True
+    except KeyError:
+        return False
+
+
+def default_model_cache(euid: Optional[int] = None) -> str:
+    """Where models go when nothing says (the installer's default)."""
+    root = (os.geteuid() if euid is None else euid) == 0
+    return ROOT_MODEL_CACHE if root else str(Path(USER_MODEL_CACHE).expanduser())
+
+
+def default_workload_user(euid: Optional[int] = None) -> Optional[str]:
+    """forgeyard-run when the agent runs as root and the account exists; otherwise none (a non-root
+    agent runs process workloads as itself)."""
+    root = (os.geteuid() if euid is None else euid) == 0
+    return WORKLOAD_USER if root and user_exists(WORKLOAD_USER) else None
+
+
+# The defaults that depend on the machine, worked out when nothing else gives a value.
+MACHINE_DEFAULTS: dict[str, Callable[[], Optional[str]]] = {
+    "models.cache": lambda: default_model_cache(),
+    "workloads.user": lambda: default_workload_user(),
+}
 SECTIONS = {"": "", "workloads": "Workloads: services, tasks and model replicas on this machine",
             "models": "Models"}
 PATH_KEYS = {"state_dir", "workloads.work_dir", "models.cache"}
@@ -248,6 +292,8 @@ def _typed(s: Setting, value: Any) -> Any:
 def _check(s: Setting, value: Any, *, in_file: bool) -> Any:
     if value is None:
         return None
+    if s.key in EMPTY_MEANS_NONE and isinstance(value, str) and not value.strip():
+        return ""
     if s.kind == "list" and in_file:
         return [_abs_path(v) for v in value]
     if s.check is not None and not (s.kind == "list"):
@@ -369,7 +415,7 @@ def resolve(args, env: Mapping[str, str] = os.environ, *, read: bool = True) -> 
             continue
         env_raw = env.get(s.env)
         env_value = None
-        if env_raw is not None and (env_raw.strip() or s.kind == "bool"):
+        if env_raw is not None and (env_raw.strip() or s.kind == "bool" or s.key in EMPTY_MEANS_NONE):
             try:
                 env_value = _check(s, _from_env(s, env_raw), in_file=False)
             except ValueError as e:
@@ -391,6 +437,8 @@ def resolve(args, env: Mapping[str, str] = os.environ, *, read: bool = True) -> 
             value, src = file_values[s.key], "file"
         else:
             value, src = (list(s.default) if isinstance(s.default, list) else s.default), "default"
+            if value is None and s.key in MACHINE_DEFAULTS:
+                value = MACHINE_DEFAULTS[s.key]()
         out.values[s.key] = value
         out.sources[s.key] = src
     if out.values.get("ca_fingerprint") and out.values.get("ca_file"):
@@ -432,7 +480,8 @@ def describe(res: Resolved) -> str:
     lines = [f"Config file: {res.path or f'none ({DEFAULT_PATH} does not exist)'}", ""]
     width = max(len(s.key) for s in SETTINGS)
     for s in SETTINGS:
-        shown = plain(res.values.get(s.key)) or "-"
+        value = res.values.get(s.key)
+        shown = plain(value) or ("- (serves no models)" if s.key == "models.cache" and value == "" else "-")
         lines.append(f"{s.key:<{width}}  {shown}   ({res.source(s.key)})")
     return "\n".join(lines)
 

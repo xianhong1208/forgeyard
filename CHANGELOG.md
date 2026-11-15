@@ -44,6 +44,32 @@ version until 1.0.
   update the agent*, or, for an agent of the server's version, to restart it and look at its log
   (`not_picked_up` per replica in the API).
 
+- **Simpler settings** (#30). One **Cloud policy** on **API keys** instead of two selects: *No cloud*,
+  *People may opt in to spill*, *Spill by default*, *Cloud allowed*, or *Custom* (which shows the two
+  selects). It stores the same two values as before. A pair that is no preset opens as *Custom*.
+- **One Hugging Face token for the server** (#30): admins set it under **Models → Model sources**
+  (`PUT`/`DELETE /api/hf-token`, audited as `hf_token.set` / `hf_token.cleared`). It is stored
+  encrypted with the secret key like the other secrets and never returned, only whether it is set and
+  its last four characters. Inspecting a Hugging Face model uses it, and the agent that downloads a
+  Hugging Face model gets it with the download, unless the inspection or the deployment brings its
+  own token. A deployment's own token stays an override under **Advanced**, and existing deployments
+  keep theirs. It is never sent to an `https://` GGUF host. `secrets reset` drops it when the key is
+  lost. Setup health: `gated-model-no-token` (V33).
+- **Where a new provider is** (#30): *Outside your network (cloud)* is ticked from the kind and the
+  base URL. OpenAI, Anthropic, Gemini, Azure and OpenRouter are outside. An OpenAI-compatible server
+  is inside for a private address (RFC 1918, 100.64.0.0/10, loopback, link-local, IPv6 ULA) or a
+  local name (a single label, `.local`, `.lan`, `.internal`, `.home.arpa`), outside for a public
+  address, and otherwise judged by what its name resolves to on the server. When that cannot be told,
+  it stays inside and the form says so. The form shows the reason and admins may change the tick;
+  `POST /api/providers/where` gives it, and a provider created through the API without `external` gets
+  it. Existing providers are untouched.
+- **The deploy form's context length** shows *model max N · largest that fits here M* (#30), each a
+  one-click value; the default context stays as it was. `context_hint` in
+  `POST /api/deployments/estimate`.
+- **Values from `.env` are marked** (#30): until an admin saves **Limits for keys**, **Cloud policy**
+  or **Model sources**, those panels say which variables their values come from (`env_seeds` in the
+  API).
+
 ### Changed
 
 - **A pull no longer fails after a fixed 30 minutes** (#28). Seen for real: a 1.86 GB image at under
@@ -59,6 +85,29 @@ version until 1.0.
   workloads too. A stopped, unpinned deployment no longer restarts on a machine that cannot reach its
   model while its old machine has room. The server keeps this in memory; a replica still waiting when
   the server restarts is placed by the usual rules.
+
+- **Agent defaults match the installer** (#30): the model cache is `/srv/forgeyard-models` when the
+  agent runs as root (`~/.local/share/forgeyard-models` otherwise), so a machine started without
+  `models.cache` now serves models. Process workloads run as `forgeyard-run` when the agent runs as
+  root and that account exists; the agent never creates it. `forgeyard agent config` shows both as
+  `(default)`. An empty value (`--model-cache ""`, `FORGEYARD_MODEL_CACHE=`, `cache = ""`) still means
+  "serve no models". `agent init` writes `~/.local/share/forgeyard-models` for a non-root agent
+  (before: `~/.cache/forgeyard-models`).
+- **Agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS`** (at least every 2 seconds), 10
+  seconds with the default 30, as before (#30).
+- **The New user and Register forms ask for no email** (#30): nothing sends mail. The API still takes
+  one and the column stays; Account shows it only when there is one.
+
+### Deprecated
+
+These still work in 1.3 and are **removed in 1.4**. The server logs a warning at start naming what
+replaces each one, and Setup health lists it (`setting-deprecated`):
+
+- `SECRET_KEY_FILE`: renamed `FORGEYARD_SECRET_KEY_FILE` (with both set, the new name wins).
+- `AGENT_HEARTBEAT_SECONDS`: the heartbeat follows `AGENT_OFFLINE_SECONDS`.
+- `FORGEYARD_SETUP_TOKEN`: use the printed setup token, or `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+- `USAGE_FLUSH_SECONDS`, `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and
+  `OPENROUTER_MODELS_URL`: fixed at their defaults (5 s, 30 s, 2 s, OpenRouter's public list).
 
 ### Fixed
 
