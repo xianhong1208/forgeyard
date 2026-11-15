@@ -112,8 +112,9 @@ describe("trust this server", () => {
   it("FY-WEB-117 /v1 snippets trust the CA file when the server has its own CA", () => {
     const s = snippets("https://forge.lan:7860/v1", "fyk_x", "qwen", "openai-chat", "https://forge.lan:7860/trust");
     expect(s.python).toContain('ca = ssl.create_default_context(cafile="forgeyard-ca.pem")');
-    expect(s.python).toContain('OpenAI(base_url="https://forge.lan:7860/v1", api_key="fyk_x", http_client=httpx.Client(verify=ca))');
-    expect(s.python.startsWith("import ssl\n\nimport httpx\nfrom openai import OpenAI\n")).toBe(true);
+    expect(s.python).toContain('OpenAI(base_url="https://forge.lan:7860/v1", api_key="fyk_x", http_client=DefaultHttpxClient(verify=ca))');
+    expect(s.python.startsWith("import ssl\n\nfrom openai import DefaultHttpxClient, OpenAI\n")).toBe(true);
+    expect(s.python).not.toContain("httpx.Client");
     expect(s.curl).toContain("curl --cacert forgeyard-ca.pem https://forge.lan:7860/v1/chat/completions");
     const rr = snippets("https://h/v1", "fyk_x", "r", "rerank", "https://h/trust");
     expect(rr.python).toContain("verify=ca)");
