@@ -82,8 +82,10 @@ proxy's CA with `--ca-file` if you trust it.
 `~/.docker/config.json`) that cannot run where the agent runs: a desktop keychain without a session,
 a helper missing in the agent's container.
 
-**What Forgeyard does:** when a pull fails this way, the agent pulls again anonymously, without the
-helpers. That is enough for every built-in engine image, since they are all public.
+**What Forgeyard does:** the agent pulls an engine image through Docker's API on its socket, which
+needs no helper. When it has to use the `docker` CLI instead (no socket, a registry that wants your
+credentials) and the pull fails this way, it pulls again anonymously, without the helpers. That is
+enough for every built-in engine image, since they are all public.
 
 **Do,** if it still fails (a private image, or no internet on the machine):
 
@@ -123,7 +125,8 @@ pulled; on an offline machine, docker load the image (Forgeyard checks it by its
 followed by Docker's error (`lookup ghcr.io … no such host`, a timeout, `pull access denied`).
 
 **Why:** the engine image is not on the machine, neither by its pinned digest nor by its tag, and the
-machine cannot reach the registry.
+machine cannot reach the registry. When the pull got under way first, the message also says where it
+stopped: `at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`.
 
 **Do:** carry the image over as a file and load it: [Offline machines](how-to.md#offline-machines).
 The recipe's page lists the commands for each of its images. The agent tries again by itself; the
@@ -147,6 +150,44 @@ pinned image, and asks the registry for the pinned one, which this machine canno
 **Do:** load the image the recipe names, pulled by its digest as in
 [Offline machines](how-to.md#offline-machines); `docker load` replaces the tag. `docker image inspect
 <tag>` shows what is loaded now.
+
+## An image pull is slow, or fails with "made no progress"
+
+**You see:** a replica shows `pulling the image: 0.80 of 1.90 GiB (42%)` for a long time (or
+`3 of 7 layers`, or `unpacking`), or it fails with `the image pull made no progress for 5 minutes (at
+layer …)`.
+
+**Why:** before it starts a container, the agent pulls the engine image itself and reports how much
+has arrived, layer by layer. Engine images are large (vLLM's is several GB), so at under 1 MB/s a pull
+takes an hour or more. A pull fails only when **no new bytes arrive for 5 minutes** (15 while the
+layers are unpacked): a slow pull that keeps moving is never stopped, however long it takes. The
+total can grow at first: Docker learns a layer's size only when it starts downloading it, and until
+every size is known the page shows the layers instead of a percentage.
+
+**Do:**
+
+- wait: a failed or stalled pull is tried again, and Docker keeps the layers it finished;
+- on a network that stalls for long stretches, raise the limit on that machine:
+  `FORGEYARD_PULL_STALL_MINUTES=15` (or `pull_stall_minutes = 15` under `[workloads]` in
+  `agent.toml`), then restart the agent;
+- or pull it there yourself once (`sudo docker pull <image>`, the recipe's page lists it), or carry it
+  over as a file: [Offline machines](how-to.md#offline-machines). A local image is never pulled again.
+
+The progress needs Docker's (or Podman's) API socket: the agent's container mounts
+`/var/run/docker.sock`. Without it, the agent pulls with the CLI, which reports layers but no bytes.
+`forgeyard agent runtimes` says which one it uses (`image pulls through the engine API`).
+
+## A replica says "cancelled: the deployment was removed"
+
+**You see:** in the agent's log, or as the last word of a replica, `cancelled: the deployment was
+removed` (`… was stopped`, `… was changed`).
+
+**Why:** the deployment was deleted, stopped or edited while that replica was still downloading its
+model or pulling its image. The agent ends the download or the pull at once and releases the model,
+so another deployment of the same model starts from what is already on disk. Nothing is wrong with the
+machine or the image; it is not an offline machine's "could not be pulled".
+
+**Do:** nothing. Deploy again to go on: the model download resumes where it stopped.
 
 ## Hugging Face downloads are slow
 

@@ -31,6 +31,7 @@ bind_address = "192.168.1.21"
 container_engine = "podman"
 limits = "rlimit"
 log_max_mb = 25
+pull_stall_minutes = 12
 
 [models]
 cache = "/srv/forgeyard-models"
@@ -61,6 +62,7 @@ def test_fy_acfg_001_every_setting_comes_from_the_file(tmp_path):
     assert args.no_workloads is False and args.workload_user == "forgeyard-run" and args.work_dir == "/var/lib/fy-test-work"
     assert args.port_range == "31000-31999" and args.bind_address == "192.168.1.21"
     assert args.container_engine == "podman" and args.limits == "rlimit" and args.log_max_mb == 25
+    assert args.pull_stall_minutes == 12
     assert args.model_cache == "/srv/forgeyard-models" and args.model_local_dir == ["/data/models", "/mnt/models"]
     assert args.allow_private_model_hosts is True
     assert res.path == path and {k for k, v in res.sources.items() if v != "file"} == {"ca_file"}

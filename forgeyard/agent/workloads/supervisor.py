@@ -12,8 +12,10 @@ whenever that list changes, the supervisor:
 5. reports every change in a `status` message (all replicas after each new desired list).
 
 Model replicas (M3) first get their model (and, for a process variant, their engine) into the
-machine's model cache, reporting download progress; a download nobody wants any more is
-cancelled. Replicas that share a GPU are launched one at a time: the next starts once the one
+machine's model cache, reporting download progress. Container replicas then get their image, pulled
+before `run` with progress per layer (1.3.1). A download or pull nobody wants any more is cancelled
+the moment a desired list without it arrives, and the replica's last reason says so ("cancelled: the
+deployment was removed"). Replicas that share a GPU are launched one at a time: the next starts once the one
 before has loaded (passed its health check), so two engines never size themselves against the
 same free memory at once.
 
@@ -45,7 +47,7 @@ from forgeyard.agent.workloads import health, plan, ports as portlib
 from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
-from forgeyard.machines.protocol import PROTOCOL_VERSION
+from forgeyard.machines.protocol import FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
 from forgeyard.workloads import images
 from forgeyard.workloads.spec import WorkloadSpec
 
@@ -103,7 +105,12 @@ class Supervisor:
         # key before a request reaches the program, and their health checks never carry it.
         self.strip: set[str] = set()
         self.cancels: dict[str, threading.Event] = {}
+        # Why a download or pull in flight was cancelled ({replica id: "cancelled: …"}), for its last report.
+        self.cancelled: dict[str, str] = {}
         self.stopping: set[str] = set()
+        # What the server speaks (its `welcome` features): pull progress goes only to a server that
+        # shows it, an older one gets the plain "pulling the image" it knows.
+        self.server_features: set[str] = set()
         self.cache_dirty = models is not None
         self.gate_poll = gate_poll
 
@@ -121,9 +128,10 @@ class Supervisor:
     def model_cache_info(self) -> Optional[dict]:
         return self.models.info() if self.models is not None else None
 
-    def new_connection(self) -> None:
+    def new_connection(self, features=()) -> None:
         """Revisions order the desired lists of one connection: a new one starts its own order."""
         self.revision = -1
+        self.server_features = set(features or ())
 
     def set_desired(self, msg: dict) -> None:
         revision = int(msg.get("revision") or 0)
@@ -156,8 +164,28 @@ class Supervisor:
                 r = {**r, "image_ids": images.parse_check(r["image_ids"])}
             desired[r["id"]] = r
         self.desired = desired
+        self._cancel_unwanted()
         self.full_due = True
         self._wake.set()
+
+    def _cancel_unwanted(self) -> None:
+        """Cancel every download and pull in flight whose replica the desired list no longer wants, now:
+        not after the next round has looked at every running replica (on a machine with many, that
+        took seconds, while the download kept writing and held the model's lock)."""
+        if self.desired is None:
+            return
+        for rid, event in list(self.cancels.items()):
+            rec = self.records.get(rid)
+            want = self.desired.get(rid)
+            if rec is None or (want is not None and want.get("generation") == rec.generation):
+                continue
+            if not event.is_set():
+                what = "deployment" if rec.model is not None or rec.engine is not None else "workload"
+                why = f"cancelled: the {what} was removed" if want is None else f"cancelled: the {what} was changed"
+                self.cancelled[rid] = why
+                log.info("Replica %s of %s: %s; stopping its %s.", rid[:12], rec.workload, why,
+                         "image pull" if rec.download is None or rec.download.get("phase") == "image" else "download")
+                event.set()
 
     def _notify(self, rec: Optional[Record] = None) -> None:
         if rec is not None:
@@ -208,7 +236,11 @@ class Supervisor:
 
     async def close(self) -> None:
         """The agent stops: operations end, and the guards close (their replicas are unreachable
-        from outside until an agent runs again: the safe direction)."""
+        from outside until an agent runs again: the safe direction). Downloads and pulls in flight are
+        cancelled first: their threads would otherwise go on (and hold the model's lock) after their
+        tasks are gone."""
+        for event in self.cancels.values():
+            event.set()
         tasks = list(self.ops.values()) + list(self.probes.values())
         for t in tasks:
             t.cancel()
@@ -294,7 +326,7 @@ class Supervisor:
             unwanted = want is None or want.get("generation") != rec.generation
             if rec.id in self.ops:
                 if unwanted and rec.id in self.cancels:
-                    self.cancels[rec.id].set()  # a download nobody wants any more
+                    self._cancel_unwanted()  # a download or pull nobody wants any more
                 continue
             if unwanted:
                 self.stopping.add(rec.id)
@@ -380,8 +412,10 @@ class Supervisor:
 
     def _progress(self, rec_id: str, phase: str, done: int, total: int, file: Optional[str]) -> None:
         rec = self.records.get(rec_id)
-        if rec is None:
-            return
+        if rec is None or rec.id not in self.cancels:
+            return  # a late report from a download that is over
+        if total:
+            done = min(done, total)  # never "14.54 of 12.93 GiB": a safety net, the cache counts each byte once
         rec.download = {"phase": phase, "done": done, "total": total, **({"file": file} if file else {})}
         what = "the model" if phase == "model" else "the engine"
         if total:
@@ -412,16 +446,77 @@ class Supervisor:
                 rec.paths = await asyncio.to_thread(self.models.ensure_model, rec.model, token=self.tokens.get(rec.id),
                                                     progress=progress, cancel=cancel)
         except Cancelled:
-            rec.state, rec.reason, rec.download = "pending", None, None
+            rec.state, rec.reason, rec.download = "pending", self.cancelled.get(rec.id, "cancelled"), None
             return False
         except CacheError as e:
             rec.download = None
             await self._ended(rec, None, reason=str(e)[:300])
             return False
+        except asyncio.CancelledError:
+            cancel.set()  # the agent stops: the thread must stop too, and release the model's lock
+            raise
         finally:
             self.cancels.pop(rec.id, None)
             self.cache_dirty = True
         rec.download = None
+        return True
+
+    def _pull_progress(self, rec_id: str, snap: dict) -> None:
+        rec = self.records.get(rec_id)
+        if rec is None or rec.id not in self.cancels:
+            return
+        if FEATURE_PULL_PROGRESS not in self.server_features:
+            # An older server knows no image progress, and records every new reason as an event.
+            reason, download = "pulling the image", None
+        else:
+            from forgeyard.agent.workloads.pull import describe
+
+            total = int(snap.get("total") or 0)
+            download = {"phase": "image", "done": min(int(snap.get("done") or 0), total) if total else
+                        int(snap.get("done") or 0), "total": total, "layers": int(snap.get("layers") or 0),
+                        "layers_done": int(snap.get("layers_done") or 0)}
+            if snap.get("unpacking"):
+                download["unpacking"] = True
+            reason = describe(snap)
+        if (rec.reason, rec.download) != (reason, download):
+            rec.reason, rec.download = reason, download
+            self._notify(rec)
+
+    async def _pull(self, rec: Record, rt) -> bool:
+        """The image onto this machine (pulled when it is not local), with progress. False when it
+        cannot (the replica has ended) or was cancelled."""
+        from forgeyard.agent.workloads.pull import PullCancelled
+        from forgeyard.agent.workloads.runtime import StartError
+
+        loop = asyncio.get_running_loop()
+        cancel = self.cancels.setdefault(rec.id, threading.Event())
+        self._cancel_unwanted()  # unwanted since the model was ready: never start pulling for it
+
+        def progress(snap: dict) -> None:
+            loop.call_soon_threadsafe(self._pull_progress, rec.id, dict(snap))
+
+        try:
+            await asyncio.to_thread(rt.pull, rec, progress, cancel)
+        except PullCancelled:
+            rec.state, rec.reason, rec.download = "pending", self.cancelled.get(rec.id, "cancelled"), None
+            log.info("Replica %s of %s: image pull %s.", rec.id[:12], rec.workload, rec.reason)
+            self._save(rec)
+            self._notify(rec)
+            return False
+        except StartError as e:
+            rec.download = None
+            reason = str(e) or type(e).__name__
+            log.warning("Replica %s of %s could not get its image: %s", rec.id[:12], rec.workload, reason)
+            await self._ended(rec, None, reason=reason[:300])
+            return False
+        except asyncio.CancelledError:
+            cancel.set()  # the agent stops: end the pull's thread too
+            raise
+        finally:
+            self.cancels.pop(rec.id, None)
+        if rec.download is not None or rec.reason != "starting the container":
+            rec.download, rec.reason = None, "starting the container"
+            self._notify(rec)
         return True
 
     def _gate_blockers(self, rec: Record) -> list[Record]:
@@ -495,7 +590,7 @@ class Supervisor:
                 for p, internal in zip(rec.ports, got):
                     p["internal"] = internal
         rec.state = "starting"
-        rec.reason = "pulling the image and starting the container" if rec.runtime == "container" else None
+        rec.reason = "checking the image" if rec.runtime == "container" else None
         rec.exit_code = None
         rec.started_at, rec.finished_at, rec.next_start_at = now, None, None
         rec.deadline_hit = rec.stop_requested = rec.healthy_seen = rec.loading = False
@@ -521,10 +616,15 @@ class Supervisor:
                     waited = True
                 await asyncio.sleep(self.gate_poll)
             rec.loading = bool(rec.gpus) and bool(spec.health)
-            rec.reason = "pulling the image and starting the container" if rec.runtime == "container" else None
+            rec.reason = "checking the image" if rec.runtime == "container" else None
             rec.started_at = self.clock()
             self._save(rec)
             self._notify(rec)
+        if hasattr(rt, "pull"):
+            if not await self._pull(rec, rt):
+                return
+            if rec.id not in self.records:
+                return
         if guard and rec.ports:
             # The guard first: if the published port cannot be held, the engine is not started.
             problem = await self._open_guard(rec)
@@ -625,9 +725,13 @@ class Supervisor:
             await self._remove_inner(rec)
         finally:
             self.stopping.discard(rec.id)
-            self.tokens.pop(rec.id, None)
-            self.keys.pop(rec.id, None)
-            self.strip.discard(rec.id)
+            if self.desired is None or rec.id not in self.desired:
+                # Its key and token go with it. Not when the desired list wants the same replica id in
+                # a new generation (an edit restarts it): what set_desired stored is that generation's,
+                # and dropping it left the new replica waiting for the server for good.
+                self.tokens.pop(rec.id, None)
+                self.keys.pop(rec.id, None)
+                self.strip.discard(rec.id)
 
     async def _remove_inner(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
@@ -651,9 +755,11 @@ class Supervisor:
         probe = self.probes.pop(rec.id, None)
         if probe is not None:
             probe.cancel()
+        cancelled = self.cancelled.pop(rec.id, None)
         if not rec.final:
             entry = rec.public(with_tail=tail)
-            entry.update(state="stopped", reason=None, pid=None, finished_at=self.clock())
+            entry.update(state="stopped", reason=cancelled, pid=None, finished_at=self.clock())
+            entry.pop("download", None)
             self.removed.append(entry)
             self._notify()
         log.info("Stopped and removed replica %s of %s.", rec.id[:12], rec.workload)

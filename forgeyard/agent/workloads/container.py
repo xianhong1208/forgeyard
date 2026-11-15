@@ -13,9 +13,14 @@ what to run (choose_image), so a machine that cannot reach the registry can use 
     the pinned digest is local                      run it as pinned
     the tag is local and matches the recorded ids   run that image by its local Id (checked, no pull)
     the tag is local and does not match             never run it; pull the pinned digest
-    neither                                         pull the pinned digest (`run` does)
+    neither                                         pull the pinned digest
 
-A failed pull then says why the image is missing and how to load it (pull_failed_reason).
+An image named by tag only is pulled when it is not local (what `run` would do).
+
+The pull comes before `run` and is the agent's own (pull.py): through the engine's API on its socket
+when it can, with progress per layer ("pulling the image: 0.80 of 1.90 GiB (42%)"), else through the
+CLI. It fails when it stops making progress, not after a fixed time, and ends at once when the replica
+is cancelled. A failed pull says why the image is missing and how to load it (pull_failed_reason).
 """
 
 from __future__ import annotations
@@ -25,10 +30,12 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from forgeyard.agent.workloads import plan
+from forgeyard.agent.workloads import pull as pulling
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.runtime import Observation, StartError
 from forgeyard.workloads import images
@@ -38,7 +45,12 @@ log = logging.getLogger("forgeyard.agent")
 
 ENGINES = ("docker", "podman")
 CDI_DIRS = ("/etc/cdi", "/var/run/cdi")
-PULL_TIMEOUT = 1800.0
+# `run` of an image that is local (the agent pulled it first): creating and starting the container.
+RUN_TIMEOUT = 600.0
+# A pull fails when nothing moved for this long (FORGEYARD_PULL_STALL_MINUTES).
+PULL_STALL = 300.0
+DOCKER_SOCKET = "/var/run/docker.sock"
+PODMAN_SOCKETS = ("/run/podman/podman.sock",)
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -108,6 +120,46 @@ def pull_failed_reason(engine: str, image: str, found: str, detail: str) -> str:
     return f"{why}. {detail}"[:300]
 
 
+def _unix_path(host: str) -> Optional[str]:
+    return host[len("unix://"):] if host.startswith("unix://") and len(host) > len("unix://") else None
+
+
+def engine_socket(kind: str, raw: Mapping, environ: Mapping[str, str] = os.environ) -> Optional[str]:
+    """The engine API's Unix socket the agent pulls through, or None (then it pulls with the CLI).
+
+    Docker: DOCKER_HOST when it is unix://, none when it points elsewhere (tcp://, ssh://) or another
+    context is in use, else /var/run/docker.sock. Podman: CONTAINER_HOST likewise, else the socket
+    `podman info` reports (it exists only while podman.socket is enabled)."""
+    if kind == "docker":
+        host = environ.get("DOCKER_HOST")
+        if host:
+            return _unix_path(host)
+        if environ.get("DOCKER_CONTEXT") not in (None, "", "default"):
+            return None
+        conf = Path(environ.get("DOCKER_CONFIG") or Path(environ.get("HOME", "/root")) / ".docker") / "config.json"
+        try:
+            context = json.loads(conf.read_text()).get("currentContext")
+        except (OSError, ValueError, AttributeError):
+            context = None
+        if context not in (None, "", "default"):
+            return None
+        return DOCKER_SOCKET if os.path.exists(DOCKER_SOCKET) else None
+    host = environ.get("CONTAINER_HOST")
+    if host:
+        return _unix_path(host)
+    remote = ((raw.get("host") or {}).get("remoteSocket") or {}) if isinstance(raw.get("host"), dict) else {}
+    found = remote.get("path") if isinstance(remote, dict) else None
+    if isinstance(found, str) and found:
+        path = _unix_path(found) or found
+        if os.path.exists(path):
+            return path
+    runtime = environ.get("XDG_RUNTIME_DIR")
+    for path in ([f"{runtime}/podman/podman.sock"] if runtime else []) + list(PODMAN_SOCKETS):
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def anonymous_config(src_dir: Optional[str], dest: Path) -> Path:
     """A copy of the CLI's config.json without its credential helpers, for an anonymous pull.
 
@@ -173,7 +225,7 @@ def detect(engine: str = "auto", run: Runner = _run, which=shutil.which, cdi=nvi
         except ValueError:
             info = {}
         kind = "podman" if "podman" in Path(path).name or "host" in info and "version" in info else "docker"
-        out = {"ok": True, "engine": kind, "path": path}
+        out = {"ok": True, "engine": kind, "path": path, "socket": engine_socket(kind, info)}
         if kind == "docker":
             out["version"] = info.get("ServerVersion")
             runtimes = sorted((info.get("Runtimes") or {}).keys())
@@ -215,16 +267,23 @@ class ContainerRuntime:
     name = "container"
 
     def __init__(self, store: RecordStore, *, agent_id: str, engine: str = "auto", log_max_bytes: int = 10 * 1024**2,
-                 run: Runner = _run, which=shutil.which, cdi=nvidia_cdi_present, info: Optional[dict] = None):
+                 run: Runner = _run, which=shutil.which, cdi=nvidia_cdi_present, info: Optional[dict] = None,
+                 pull_stall: float = PULL_STALL):
         self.store = store
         self.agent_id = agent_id
         self.log_max_bytes = log_max_bytes
+        self.pull_stall = pull_stall
         self._run = run
         self._info = info if info is not None else detect(engine, run=run, which=which, cdi=cdi)
         self.engine = self._info.get("path") or "docker"
+        self.socket: Optional[str] = self._info.get("socket")
+        self._chosen: dict[str, tuple[str, str]] = {}  # replica id -> what pull() decided, for start()
 
     def info(self) -> dict:
-        return {k: v for k, v in self._info.items() if k != "path"}
+        out = {k: v for k, v in self._info.items() if k not in ("path", "socket")}
+        if self._info.get("ok"):
+            out["pulls"] = "engine API" if self.socket else "CLI"
+        return out
 
     def _cli(self, *args: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
         return self._run([self.engine, *args], timeout=timeout)
@@ -268,7 +327,7 @@ class ContainerRuntime:
         devices = render_devices(rec.gpus) if amd else []
         kfd = ["/dev/kfd"] if plan.needs_kfd(rec.gpus) else []
         gids = sorted({os.stat(d).st_gid for d in [*kfd, *devices] if os.path.exists(d)}) if amd else []
-        image, found = choose_image(rt.image, rec.image_ids, self._image)
+        image, found = self._chosen.pop(rec.id, None) or choose_image(rt.image, rec.image_ids, self._image)
         argv = plan.container_run_argv(
             self.engine, name=name, image=image, command=rt.command,
             args=plan.substitute(rt.args, {}, extra) if extra else rt.args, env_file=str(env_file),
@@ -276,18 +335,20 @@ class ContainerRuntime:
             memory=spec.resources.memory, gpus=rec.gpus, gpu_mode=self._info.get("gpu_mode"),
             render_devices=devices, render_gids=gids, log_max_bytes=self.log_max_bytes, mounts=mounts)
         try:
-            r = self._run(argv, timeout=PULL_TIMEOUT)
+            r = self._run(argv, timeout=RUN_TIMEOUT)
             if r.returncode != 0 and CREDENTIAL_HELPER_FAILED in (r.stderr or ""):
-                # The image is not here and the CLI's credential helper is broken under the agent:
-                # pull it anonymously with the helpers left out, then start it again (it is local now).
-                pulled = self._pull_anonymously(rt.image)
-                if pulled.returncode == 0:
+                # `run` pulled after all (the image went away since pull()) and the CLI's credential
+                # helper is broken under the agent: pull it anonymously, then start it again.
+                code, out = self._cli_pull(rt.image, anonymous=True)
+                if code == 0:
                     self._cli("rm", "-f", name)
-                    r = self._run(argv, timeout=PULL_TIMEOUT)
+                    r = self._run(argv, timeout=RUN_TIMEOUT)
                 else:
-                    r = pulled
+                    r = subprocess.CompletedProcess(argv, code, "", out)
         except subprocess.TimeoutExpired:
-            raise StartError("the container did not start within 30 minutes (image pull?)") from None
+            raise StartError(f"the container did not start within {RUN_TIMEOUT / 60:.0f} minutes") from None
+        except pulling.PullError as e:
+            raise StartError(str(e)[:300]) from None
         finally:
             env_file.unlink(missing_ok=True)
         if r.returncode != 0:
@@ -314,12 +375,78 @@ class ContainerRuntime:
             return None
         return items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
 
-    def _pull_anonymously(self, image: str) -> subprocess.CompletedProcess:
-        """`docker pull` with a config that has no credential helpers (see anonymous_config)."""
-        log.warning("%s's credential helper failed; pulling %s without it",
-                    Path(self.engine).name, image)
-        conf = anonymous_config(os.environ.get("DOCKER_CONFIG"), self.store.dir.parent / "docker-anonymous")
-        return self._run(["env", f"DOCKER_CONFIG={conf}", self.engine, "pull", image], timeout=PULL_TIMEOUT)
+    # ------------------------------------------------------------------ pulling, before run
+    def pull(self, rec: Record, progress: Optional[pulling.Report] = None,
+             cancel: Optional[threading.Event] = None) -> None:
+        """Make the replica's image local, if it is not: pulled by the pinned reference, with progress.
+        Raises StartError (the pull failed: why, which layer, how to load it on an offline machine) or
+        pull.PullCancelled. An image chosen by its recorded ids (#10) is never pulled."""
+        if not self._info.get("ok"):
+            return  # start() says why
+        spec = WorkloadSpec.model_validate(rec.spec)
+        rt = spec.runtime
+        assert isinstance(rt, ContainerSpec)
+        image = rt.image
+        target, found = choose_image(image, rec.image_ids, self._image)
+        self._chosen[rec.id] = (target, found)
+        pinned = tag_of(image) is not None
+        if found == LOADED or (found == PINNED and (pinned or self._image(image) is not None)):
+            return  # local: the pinned digest, a loaded copy that matches, or a tag-only image
+        engine = Path(self.engine).name
+        log.info("Pulling %s for replica %s of %s.", image, rec.id[:12], rec.workload)
+        try:
+            self._pull(image, progress, cancel)
+        except pulling.PullStalled as e:
+            self._chosen.pop(rec.id, None)
+            raise StartError(str(e)[:300]) from None  # it was reaching the registry: no offline advice
+        except pulling.PullError as e:
+            self._chosen.pop(rec.id, None)
+            if pinned:
+                raise StartError(pull_failed_reason(engine, image, found, str(e))) from None
+            raise StartError(f"{engine} could not pull {image}: {e}"[:300]) from None
+        except pulling.PullCancelled:
+            self._chosen.pop(rec.id, None)
+            raise
+        if pinned and self._image(digest_ref(image)) is None:
+            self._chosen.pop(rec.id, None)
+            raise StartError(f"the pull of {image} finished, but {engine} does not show the pinned digest")
+        if pinned:
+            self._chosen[rec.id] = (image, PINNED)
+        log.info("Pulled %s.", image)
+
+    def _pull(self, image: str, progress: Optional[pulling.Report], cancel: Optional[threading.Event]) -> None:
+        """Through the engine API when it answers; else (or when the registry wants credentials the
+        API pull did not carry) through the CLI, which has the user's."""
+        if self.socket:
+            try:
+                pulling.api_pull(self.socket, image, report=progress, cancel=cancel, stall=self.pull_stall)
+                return
+            except pulling.Unreachable as e:
+                log.info("The engine API is not reachable (%s); pulling %s with the CLI.", e, image)
+            except pulling.NeedsCredentials as e:
+                log.info("The registry wants credentials for %s (%s); pulling with the CLI.", image, e)
+        code, out = self._cli_pull(image, progress=progress, cancel=cancel)
+        if code != 0 and CREDENTIAL_HELPER_FAILED in out:
+            # The image is not here and the CLI's credential helper is broken under the agent: pull
+            # it anonymously, with the helpers left out (enough for every public image).
+            code, out = self._cli_pull(image, progress=progress, cancel=cancel, anonymous=True)
+        if code != 0:
+            raise pulling.PullError(out.strip()[-200:] or f"{Path(self.engine).name} pull exited with {code}")
+
+    def _cli_pull(self, image: str, *, progress: Optional[pulling.Report] = None,
+                  cancel: Optional[threading.Event] = None, anonymous: bool = False) -> tuple[int, str]:
+        """`docker pull` (with a config without credential helpers when anonymous, see
+        anonymous_config); (exit code, the end of its output)."""
+        env = {"PATH": os.environ.get("PATH", plan.BASIC_PATH), "HOME": os.environ.get("HOME", "/root")}
+        for key in ("DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "CONTAINER_HOST", "XDG_RUNTIME_DIR"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
+        argv = [self.engine, "pull", image]
+        if anonymous:
+            log.warning("%s's credential helper failed; pulling %s without it", Path(self.engine).name, image)
+            conf = anonymous_config(os.environ.get("DOCKER_CONFIG"), self.store.dir.parent / "docker-anonymous")
+            argv = ["env", f"DOCKER_CONFIG={conf}", *argv]
+        return pulling.cli_pull(argv, env, report=progress, cancel=cancel, stall=self.pull_stall)
 
     def _inspect(self, name: str) -> Optional[dict]:
         r = self._cli("inspect", "--format", "{{json .State}}", name)

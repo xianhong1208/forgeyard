@@ -12,6 +12,8 @@
 > 以及以非同步工作產生的影片；任何服務型工作負載的 HTTP API 也能放在閘道後面的 `/x/<name>`，並附現成的視覺範本；llama.cpp
 > 內建給 AMD APU 用的 Vulkan variant，伺服器與 agent 映像檔也發布在 Docker Hub。見 [CHANGELOG.md](CHANGELOG.md) 與
 > [ROADMAP.zh-TW.md](ROADMAP.zh-TW.md)。
+>
+> 1.3.1 即將加入：副本會像模型下載一樣顯示引擎映像檔拉取的進度，而拉取只有在停止進展時才會失敗；刪除部署會立刻停止它的下載或拉取。
 
 ## 使用指南
 

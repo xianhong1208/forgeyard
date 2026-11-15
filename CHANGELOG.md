@@ -8,6 +8,17 @@ version until 1.0.
 
 ### Added
 
+- **Image pull progress** (#28). The agent pulls an engine image itself before `docker run`, through
+  the engine's API on its socket (`POST /images/create`, Docker or Podman), and reports it like a model
+  download: `pulling the image: 0.80 of 1.90 GiB (42%)`, each layer counted once ("Already exists"
+  layers count as done), `3 of 7 layers` while some sizes are not known yet, `unpacking` at the end.
+  The deployment and workload pages show a bar. Without the socket (a remote `DOCKER_HOST`, another
+  Docker context) it pulls with the CLI, which reports layers only, and keeps the anonymous retry for a
+  broken credential helper. A loaded image that matches its recorded ids (#10) is never pulled. A
+  failed pull says which layer it was at and how far it got. `forgeyard agent runtimes` says which way
+  the agent pulls.
+- **`pull_stall_minutes`** (`FORGEYARD_PULL_STALL_MINUTES`, `--pull-stall-minutes`, default 5): an
+  image pull fails when no new bytes arrive for that long (three times as long while it unpacks).
 - **Change a deployment** (#26): **Edit** on a deployment's page, and `PATCH /api/deployments/{id}`
   for admins and operators. GPU sharing, GPUs per replica, context length, concurrency and the
   recipe's other parameters, the memory override, extra engine arguments, the number of replicas and
@@ -35,11 +46,44 @@ version until 1.0.
 
 ### Changed
 
+- **A pull no longer fails after a fixed 30 minutes** (#28). Seen for real: a 1.86 GB image at under
+  1 MB/s timed out twice and never started. Only a stall fails it now; `docker run` itself, on the local
+  image, has 10 minutes.
+- **Protocol:** the server lists the feature `pull_progress`; only then does an agent send an image
+  pull as a `download` with phase `image` (`layers`, `layers_done`, `unpacking`) and a reason per
+  step. To an older server it says only `pulling the image`, so that server records no event per
+  progress report. An older agent works as before, with "starting the container" while it pulls. **The
+  agent image must be rebuilt** for real agents to get any of this.
 - **A restarted replica goes back to the machine it ran on** (#26) when that machine still takes it,
   instead of the best fit elsewhere: after **Stop** then **Start**, after an edit, and for plain
   workloads too. A stopped, unpinned deployment no longer restarts on a machine that cannot reach its
   model while its old machine has room. The server keeps this in memory; a replica still waiting when
   the server restarts is placed by the usual rules.
+
+### Fixed
+
+- **A cancelled pull says so** (#28): when a deployment is removed (stopped, changed) while its image
+  pulls or its model downloads, the replica's last reason is `cancelled: the deployment was removed`
+  (`… stopped`, `… changed`), never the offline advice "the image is not on this machine and could not
+  be pulled".
+- **Removing a deployment stops its model download at once and releases the model's lock.** Seen for
+  real: the download went on writing for some seconds, and a new deployment of the same model waited on
+  the lock. The cancel was only set by the next reconcile round, after the agent had looked at every
+  running replica (one `docker inspect` each); it is now set as soon as the desired list arrives. It
+  also ends a read waiting on a stalled connection (before: up to the 60 s socket timeout; the abort
+  also works when the answer closes the connection), a retry's pause (up to 30 s), the checksum of a
+  finished file, and a replica's wait for another one's download of the same model. When the agent
+  stops, its downloads are cancelled too, instead of running on in their threads.
+- **A replica restarted under the same id in a new generation keeps its internal key.** Found with
+  #55 on a real run: an edit restarts a replica; the agent stored the new generation's key from the
+  desired list, then dropped it while removing the old generation, so the new one waited ("waiting for
+  the server …") for good. The agent now forgets a key (and a Hugging Face token) only when the
+  replica id is no longer wanted at all. #55 also gives a restarted replica a new id on the server.
+- **Model download progress never passes 100%.** Seen for real: `14.54 of 12.93 GiB (112%)` on a
+  resume, with 11.66 GiB on disk. The files already complete were counted twice, once in the starting
+  total and again as the loop passed them. Progress is now the bytes of that model on disk (finished
+  and partial files), each counted once, and the agent, the server and the page also clamp it to the
+  total.
 
 ## [1.3.0] — 2026-11-14
 

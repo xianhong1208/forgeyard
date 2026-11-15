@@ -142,7 +142,9 @@ A **deployment** runs one model with one recipe, as one or more replicas. Forgey
    for big models), on machines that already have the model cached when it can, and replicas of
    one deployment on **different machines** when it can;
 2. refuses a deployment that fits nowhere, and says, machine by machine, why and by how much;
-3. downloads the model on that machine, starts the engine and waits until it is healthy.
+3. downloads the model on that machine (and pulls the engine's image, if it is not there yet), starts
+   the engine and waits until it is healthy. The deployment's page shows how far the download and the
+   pull have got; deleting the deployment stops both at once.
 
 Every ready deployment answers at **`https://<server>:7860/v1`**, the **gateway**, under its model
 name, with the OpenAI API: `/v1/models`, `/v1/chat/completions`, `/v1/completions`,

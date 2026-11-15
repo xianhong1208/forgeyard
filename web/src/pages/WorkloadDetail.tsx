@@ -7,6 +7,7 @@ import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact, imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
+import { downloadFraction, downloadText } from "../lib/models";
 import { buildGateway, gatewayForm, xCurl, xUrl, type GatewayForm } from "../lib/passthrough";
 import type { LogsResponse, Replica, Workload, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -140,12 +141,18 @@ export function NotPickedUpNotice({ w }: { w: Workload }) {
 function ReplicaRow({ r, w, guarded }: { r: Replica; w: Workload; guarded: boolean }) {
   const tone = STATE_TONE[r.state];
   const health = w.spec.health;
+  const frac = downloadFraction(r);
   return (
     <tr>
       <td data-label="Replica" className="mono">#{r.ordinal}</td>
       <td data-label="State">
         <span className={`chip chip-tone-${tone}`}>{stateLabel(r)}</span>
-        {r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
+        {frac !== null ? (
+          <div className="dl" aria-label="Download progress">
+            <span className="bar bar-dl"><span style={{ width: `${Math.round(frac * 100)}%` }} /></span>
+            <span className="small">{downloadText(r)} ({Math.round(frac * 100)}%)</span>
+          </div>
+        ) : r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
       </td>
       <td data-label="Machine">
         {r.machine ? (

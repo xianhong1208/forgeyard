@@ -195,6 +195,25 @@ describe("workloads", () => {
     expect(await screen.findByRole("button", { name: "Start" })).toBeTruthy();
   });
 
+  it("FY-WEB-207 the detail page shows an image pull's progress bar, and the reason while sizes are unknown", async () => {
+    const pulling = (download: Replica["download"], reason: string) => ({ ...web, status: "starting",
+      replica_list: [replica({ state: "starting", pid: null, reason, download })] });
+    let body = pulling({ phase: "image", done: 858993459, total: 2040109466, layers: 7, layers_done: 2 },
+                       "pulling the image: 0.80 of 1.90 GiB (42%)");
+    server((url) => url === "/api/workloads/7"
+      ? { status: 200, body: { workload: body, events: [], server_time: "", can_manage: false } } : undefined);
+    const { unmount } = mount("/workloads/7");
+    const bar = await screen.findByLabelText("Download progress");
+    expect(bar.textContent).toBe("Pulling the image: 819 MiB of 1.9 GiB (42%)");
+    expect(screen.queryByText("pulling the image: 0.80 of 1.90 GiB (42%)")).toBeNull();
+    unmount();
+    cleanup();
+    body = pulling({ phase: "image", done: 0, total: 0, layers: 7, layers_done: 3 }, "pulling the image: 3 of 7 layers");
+    mount("/workloads/7");
+    expect(await screen.findByText("pulling the image: 3 of 7 layers")).toBeTruthy();
+    expect(screen.queryByLabelText("Download progress")).toBeNull();
+  });
+
   it("FY-WEB-044 delete asks, then goes back to the list; users see no output or actions", async () => {
     const fetch = server((url, init) => {
       if (url === "/api/workloads/8" && init?.method === "DELETE") return { status: 200, body: { ok: true } };

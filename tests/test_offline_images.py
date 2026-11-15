@@ -187,7 +187,7 @@ def test_fy_off_007_offline_nothing_loaded_says_how_to_load_it(tmp_path):
     assert rec.reason.startswith("the image is not on this machine and could not be pulled; on an offline "
                                  "machine, docker load the image (Forgeyard checks it by its recorded ids)")
     assert "no such host" in rec.reason
-    assert fake.runs() and all(VULKAN in r for r in fake.runs())
+    assert fake.pulls() and all(VULKAN in r for r in fake.pulls()) and fake.runs() == []
 
 
 def test_fy_off_008_a_different_image_under_the_tag_is_never_run(tmp_path):

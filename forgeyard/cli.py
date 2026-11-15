@@ -146,7 +146,8 @@ def _make_supervisor(args, state_dir: Path):
     runtimes = {
         "process": ProcessRuntime(store, work_root, workload_user=args.workload_user, limits=args.limits),
         "container": ContainerRuntime(store, agent_id=state.agent_id(state_dir), engine=args.container_engine,
-                                      log_max_bytes=log_max),
+                                      log_max_bytes=log_max,
+                                      pull_stall=60.0 * int(getattr(args, "pull_stall_minutes", None) or 5)),
     }
     models = None
     if getattr(args, "model_cache", None):
@@ -168,7 +169,8 @@ def _describe_runtimes(info: dict) -> list[str]:
     c = info.get("container", {})
     if c.get("ok"):
         gpu = f"NVIDIA GPUs via {c.get('gpu_mode')}" if c.get("nvidia") else "no NVIDIA GPU support (no nvidia runtime or CDI)"
-        lines.append(f"container ok: {c.get('engine')} {c.get('version') or ''}; {gpu}")
+        pulls = f"; image pulls through the {c['pulls']}" if c.get("pulls") else ""
+        lines.append(f"container ok: {c.get('engine')} {c.get('version') or ''}; {gpu}{pulls}")
     else:
         lines.append(f"container unavailable: {c.get('reason')}")
     return lines
@@ -565,6 +567,9 @@ def _agent_args(p: argparse.ArgumentParser, *, sub: bool = False) -> None:
     p.add_argument("--limits", choices=("auto", "systemd", "rlimit"), default=d(),
                    help="process CPU/memory limits: a systemd scope (root on systemd hosts) or rlimits (default auto)")
     p.add_argument("--log-max-mb", type=int, default=d(), help="output kept per replica, in MB (default 10)")
+    p.add_argument("--pull-stall-minutes", type=int, default=d(), metavar="N",
+                   help="an image pull fails when no new bytes arrive for N minutes (default 5); a slow pull that "
+                        "keeps moving is never stopped")
     p.add_argument("--model-cache", default=d(), metavar="DIR",
                    help="serve models: where models and engines are downloaded and kept, shared by every replica "
                         "on this machine (containers get their model mounted read-only from here)")

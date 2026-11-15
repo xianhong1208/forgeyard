@@ -27,18 +27,27 @@ export function params(n: number | undefined): string {
   return n >= 1e9 ? `${(n / 1e9).toFixed(2)} B` : `${Math.round(n / 1e6)} M`;
 }
 
-// "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar.
+// "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar (never past the end).
 export function downloadFraction(r: Replica): number | null {
   const d = r.download;
   if (!d || !d.total) return null;
-  return Math.min(1, d.done / d.total);
+  return Math.max(0, Math.min(1, d.done / d.total));
 }
 
+// What the bar says: a model or engine download, or an image pull (1.3.1). Never more than the total.
 export function downloadText(r: Replica): string | null {
   const d = r.download;
   if (!d) return null;
+  const done = d.total ? Math.min(d.done, d.total) : d.done;
+  if (d.phase === "image") {
+    const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
+    if (d.unpacking) return `Pulling the image: unpacking, ${layers}`;
+    if (d.total) return `Pulling the image: ${bytes(done)} of ${bytes(d.total)}`;
+    if (done && layers) return `Pulling the image: ${bytes(done)}, ${layers}`;
+    return layers ? `Pulling the image: ${layers}` : "Pulling the image";
+  }
   const what = d.phase === "engine" ? "engine" : "model";
-  return d.total ? `Downloading the ${what}: ${bytes(d.done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(d.done)}`;
+  return d.total ? `Downloading the ${what}: ${bytes(done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(done)}`;
 }
 
 export function compatibleRecipes(model: CatalogModel | undefined, recipes: Recipe[]): Recipe[] {
