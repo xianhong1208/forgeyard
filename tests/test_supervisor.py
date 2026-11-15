@@ -4,6 +4,9 @@ import asyncio
 import json
 import os
 import signal
+import time
+
+import pytest
 
 from forgeyard.agent.workloads.container import ContainerRuntime
 from forgeyard.agent.workloads.process import ProcessRuntime
@@ -413,6 +416,41 @@ def test_fy_sup_015_a_new_connection_starts_its_own_order_of_revisions(tmp_path,
         await converge(sup, lambda s: "r2" in s.records and s.records["r2"].state == "running")
         sup.set_desired(desired(revision=2))
         await converge(sup, lambda s: not s.records)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        reap_all(rt)
+
+
+def test_fy_sup_016_settle_fails_instead_of_waiting_for_ever(tmp_path):
+    """FY-SUP-016: settle() (tests' wait for operations in flight) gives up after its timeout and names
+    each operation still running with the line it waits on; a finished operation left in `ops` fails
+    at once instead of turning the loop for ever; with nothing in flight it returns."""
+    sup, rt = make(tmp_path)
+
+    async def stuck_forever():
+        await asyncio.Event().wait()
+
+    async def scenario():
+        await sup.settle(timeout=0.5)  # nothing in flight
+        sup._launch("r9", stuck_forever())
+        started = time.monotonic()
+        with pytest.raises(TimeoutError) as caught:
+            await sup.settle(timeout=0.3)
+        assert time.monotonic() - started < 2
+        text = str(caught.value)
+        assert "still running after 0.3 s" in text and "operation r9:" in text and "stuck_forever" in text
+        sup.ops["r9"].cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert "r9" not in sup.ops
+        done = asyncio.get_running_loop().create_future()
+        done.set_result(None)
+        sup.ops["r8"] = done  # finished, but never taken off the list
+        with pytest.raises(RuntimeError, match=r"finished operations are still listed: \['r8'\]"):
+            await sup.settle(timeout=5)
+        del sup.ops["r8"]
 
     try:
         asyncio.run(scenario())

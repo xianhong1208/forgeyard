@@ -35,6 +35,7 @@ Stopping the agent leaves workloads running. They are stopped from the server.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import threading
 import time
@@ -59,6 +60,18 @@ TAIL_CHARS = 8000
 TASK_BACKOFF_CAP = 300
 SERVICE_BACKOFF_CAP = 60
 
+
+
+def _where(ops: dict, probes: dict) -> str:
+    """Each unfinished operation and probe, with the lines it is waiting on."""
+    out = io.StringIO()
+    for kind, tasks in (("operation", ops), ("probe", probes)):
+        for rid, task in tasks.items():
+            if task.done():
+                continue
+            out.write(f"{kind} {rid}:\n")
+            task.print_stack(limit=8, file=out)
+    return out.getvalue()
 
 class Supervisor:
     def __init__(self, state_dir: Path, runtimes: dict, *, port_range: tuple[int, int] = (30000, 32767),
@@ -248,10 +261,26 @@ class Supervisor:
         for rid in list(self.guards):
             await self._close_guard(rid)
 
-    async def settle(self) -> None:
-        """Wait for every operation in flight (tests)."""
-        while self.ops or any(not p.done() for p in self.probes.values()):
-            await asyncio.gather(*self.ops.values(), *self.probes.values(), return_exceptions=True)
+    async def settle(self, timeout: float = 60.0) -> None:
+        """Wait for every operation in flight (tests). It fails instead of waiting for ever: after
+        `timeout` seconds with the operations still running and where each one is, and at once when a
+        finished operation stays listed (it would keep this loop turning)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            pending = [t for t in (*self.ops.values(), *self.probes.values()) if not t.done()]
+            if not pending:
+                for _ in range(3):  # the done callbacks that take finished operations off self.ops
+                    await asyncio.sleep(0)
+                if any(not t.done() for t in (*self.ops.values(), *self.probes.values())):
+                    continue
+                if self.ops:
+                    raise RuntimeError(f"settle: finished operations are still listed: {sorted(self.ops)}")
+                return
+            left = deadline - loop.time()
+            if left <= 0:
+                raise TimeoutError(f"settle: still running after {timeout:g} s:\n" + _where(self.ops, self.probes))
+            await asyncio.wait(pending, timeout=left)
 
     def _save(self, rec: Record) -> None:
         if rec.id in self.records:
