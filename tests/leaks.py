@@ -79,6 +79,37 @@ def kill(found: list[tuple[int, str]], wait: float = 3.0) -> None:
         time.sleep(0.02)
 
 
+def group_members(pgid: int) -> list[int]:
+    """The live (not zombie) processes in process group `pgid`."""
+    out = []
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = Path(entry.path, "stat").read_text().rsplit(")", 1)[-1].split()
+        except OSError:
+            continue
+        if int(fields[2]) == pgid and fields[0] != "Z":
+            out.append(int(entry.name))
+    return out
+
+
+def kill_group(proc, wait: float = 5.0) -> None:
+    """SIGKILL the process group `proc` (a subprocess.Popen that leads its own session) leads, reap it, and
+    wait until every member is gone. Killing is not instant: on a busy machine a member that was killed (say
+    the wrapper's fork that had not yet run its command) can still be listed for a moment, and the per-test
+    check then reported it as left running."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait(wait)
+    deadline = time.monotonic() + wait
+    while group_members(proc.pid):
+        assert time.monotonic() < deadline, f"process group {proc.pid} still alive {wait} s after SIGKILL"
+        time.sleep(0.01)
+
+
 def _not_zombie(pid: int) -> bool:
     try:
         return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[-1].split()[0] != "Z"

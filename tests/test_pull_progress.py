@@ -22,6 +22,7 @@ from forgeyard.machines.messages import ReplicaStatusIn
 from forgeyard.machines.protocol import FEATURE_PULL_PROGRESS, SERVER_FEATURES
 from forgeyard.workloads.spec import WorkloadSpec
 from tests.pull_helpers import MIB, FakeEngineAPI, layer_events, pull_script
+from tests.waits import wait_until
 from tests.workload_helpers import FakeDocker, container, converge, desired, replica
 
 ENGINE_IMAGE = "acme/engine:v1"
@@ -390,8 +391,13 @@ def test_fy_pull_013_a_stalled_cli_pull_is_ended(tmp_path):
     with pytest.raises(StartError, match="made no progress for 0.6 s"):
         rt.pull(_record("acme/quiet:1"))
     pid = int((tmp_path / "silent.pid").read_text())
-    time.sleep(0.2)
-    assert not Path(f"/proc/{pid}").exists() or "Z" in Path(f"/proc/{pid}/stat").read_text().split()[2]
+
+    def ended():
+        try:
+            return Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z"
+        except FileNotFoundError:
+            return True
+    wait_until(ended, "the silent CLI to be ended", timeout=5)
 
 
 def test_fy_pull_014_cli_lines_count_layers():

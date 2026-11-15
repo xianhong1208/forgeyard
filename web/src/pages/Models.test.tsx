@@ -277,7 +277,8 @@ describe("models", () => {
     await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=library"));
     fireEvent.click(screen.getByRole("tab", { name: "Serving" }));
     expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving");
-    fireEvent.click(screen.getByRole("tab", { name: "Deployments (0)" }));
+    // The count in the tab's name comes with /api/deployments, which may answer after the catalog.
+    fireEvent.click(await screen.findByRole("tab", { name: "Deployments (0)" }));
     expect(screen.getByTestId("where").dataset.search).toBe("");
   });
 });

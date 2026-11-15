@@ -28,6 +28,7 @@ from forgeyard.cli import main as cli_main
 from forgeyard.config import get_settings
 from forgeyard.machines.hub import hub
 from tests.conftest import OWNER, SETUP_TOKEN
+from tests.leaks import kill_group
 
 
 # ------------------------------------------------------------------ backoff
@@ -370,13 +371,10 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
         try:
             asyncio.run(scenario())
         finally:  # never leave a server process behind, even when an assertion failed
-            import signal
-
             for rt in made:
                 for proc in rt.children.values():
                     if proc.poll() is None:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                        proc.wait(5)
+                        kill_group(proc)
 
 
 @pytest.mark.parametrize("server_clock_back", [False, True])

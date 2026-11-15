@@ -206,7 +206,8 @@ describe("workloads", () => {
     expect(within(table).getByText("pid 4321")).toBeTruthy();
     expect(within(table).getByRole("link", { name: "http://10.0.0.5:31000/" })).toBeTruthy();
     expect(screen.getByText("Replica 0 placed on a100-box with GPU #4.")).toBeTruthy();
-    expect((await screen.findByLabelText("Output of replica 0")).textContent).toBe("Serving HTTP on 0.0.0.0 port 31000");
+    // The output panel is there before the replica's logs have arrived (empty until then).
+    await waitFor(() => expect(screen.getByLabelText("Output of replica 0").textContent).toBe("Serving HTTP on 0.0.0.0 port 31000"));
     expect(screen.getByText(/Live from the agent/)).toBeTruthy();
     expect(screen.getByText("GREETING")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));

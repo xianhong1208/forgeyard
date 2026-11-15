@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from forgeyard.agent.inventory.amd import ROCM_SMI, AmdCollector
-from forgeyard.db import Accelerator, AuditEvent, Node, Replica, get_db, new_session
+from forgeyard.db import Accelerator, AuditEvent, Node, Replica, get_db, new_session, utcnow
 from forgeyard.machines import store
 from forgeyard.machines.messages import InventoryIn
 from tests.conftest import add_user, sign_in
@@ -200,6 +200,7 @@ def _strix_as_110_saw_it(name="strix") -> int:
         store.apply_inventory(db, node, InventoryIn.model_validate({"accelerators": data["accelerators"],
                                                                     "collectors": data["collectors"]}))
         node.status, node.features, node.runtime_info = "online", ["workloads"], PROCESS_OK
+        node.last_heartbeat_at = utcnow()  # heard from just now (make_node says why)
         node.runtimes = ["process", "container"]
         db.commit()
         return node.id

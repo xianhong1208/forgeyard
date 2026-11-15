@@ -17,6 +17,7 @@ from forgeyard.gateway.usage import recorder
 from tests.conftest import add_user, sign_in
 from tests.gateway_helpers import (FakeEngine, LiveServer, api_client, free_port, make_ready, new_key, set_state)
 from tests.test_scheduler import MODELS, deploy, seed_catalog
+from tests.waits import wait_until
 from tests.workload_helpers import make_node
 
 PW = "quiet-meadow-4821"
@@ -103,9 +104,7 @@ def test_fy_gw_003_least_in_flight_wins(gw):
     results = {}
     t = threading.Thread(target=lambda: results.setdefault("slow", chat(gw.api)))
     t.start()
-    deadline = time.monotonic() + 5
-    while sum(balancer.inflight.values()) < 1 and time.monotonic() < deadline:
-        time.sleep(0.01)
+    wait_until(lambda: sum(balancer.inflight.values()) >= 1, "the slow request in flight")
     during = [chat(gw.api).headers["x-forgeyard-replica"] for _ in range(4)]
     t.join()
     assert results["slow"].headers["x-forgeyard-replica"] == slow_replica

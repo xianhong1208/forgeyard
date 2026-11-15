@@ -279,7 +279,8 @@ describe("machines page", () => {
 
     // An address the certificate does not cover: a warning naming TLS_EXTRA_NAMES; the command stays.
     type("Server address, as that machine reaches it", "https://192.168.1.21:7860");
-    expect(screen.getByText(/is not in this server's certificate/).textContent).toContain("192.168.1.21");
+    // The certificate's names come from /api/tls, which may answer after the join command.
+    expect((await screen.findByText(/is not in this server's certificate/)).textContent).toContain("192.168.1.21");
     expect(screen.getByText("TLS_EXTRA_NAMES")).toBeTruthy();
     expect(docker()).toContain("-e FORGEYARD_SERVER=https://192.168.1.21:7860");
     fireEvent.click(screen.getByRole("button", { name: "Use this server's address, https://forge.lan:7860" }));
@@ -394,9 +395,9 @@ describe("what runs on a machine (1.4)", () => {
     server(route(true));
     mount("/machines/1");
     const four = await screen.findByRole("group", { name: "GPU #4" });
-    await waitFor(() => expect(within(four).getAllByRole("link")).toHaveLength(6));
-    expect(within(four).getAllByRole("link").map((a) => a.textContent)).toEqual(
-      ["dep-chat1 GiB", "dep-embed2 GiB", "dep-rerank3 GiB", "dep-asr4 GiB", "dep-tts5 GiB", "dep-image6 GiB"]);
+    // Each holder is named by its workload first, then by its deployment once /api/deployments has answered.
+    await waitFor(() => expect(within(four).getAllByRole("link").map((a) => a.textContent)).toEqual(
+      ["dep-chat1 GiB", "dep-embed2 GiB", "dep-rerank3 GiB", "dep-asr4 GiB", "dep-tts5 GiB", "dep-image6 GiB"]));
     const bar = within(four).getAllByRole("img").find((x) => x.classList.contains("membar"))!;
     expect(bar.getAttribute("aria-label")).toMatch(/^21 GiB reserved by Forgeyard, .* free of 80 GiB$/);
     expect(bar.querySelector('[title="dep-image: 6 GiB"]')).toBeTruthy();

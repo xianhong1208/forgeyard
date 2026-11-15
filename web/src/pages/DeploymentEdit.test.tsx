@@ -147,7 +147,9 @@ describe("changing a deployment (1.3.1)", () => {
       return undefined;
     });
     mount("/models/deployments/3/edit");
-    fireEvent.change(await screen.findByLabelText("Machine"), { target: { value: "2" } });
+    // The machines come from /api/machines, which may answer after the deployment: pick one once it is listed.
+    await screen.findByRole("option", { name: /Pinned to gpu-01/ });
+    fireEvent.change(screen.getByLabelText("Machine"), { target: { value: "2" } });
     expect(screen.getByText(/Its replicas run on this machine only/)).toBeTruthy();
     expect(await screen.findByText(/It does not fit with these settings right now/, {}, { timeout: 3000 })).toBeTruthy();
     expect(screen.getByText(/fits if both share VRAM: #0 has 60.00 GiB available, held by embed/)).toBeTruthy();

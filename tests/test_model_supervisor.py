@@ -4,8 +4,6 @@ at a time, cancel unwanted downloads, keep tokens off disk (FY-MSUP-*)."""
 
 import asyncio
 import hashlib
-import os
-import signal
 import io
 import json
 import tarfile
@@ -19,6 +17,7 @@ from forgeyard.agent.workloads.container import ContainerRuntime
 from forgeyard.agent.workloads.process import ProcessRuntime
 from forgeyard.agent.workloads.records import RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
+from tests.leaks import kill_group
 from tests.model_helpers import TINY_REV, FakeHF, Repo, tiny_repo
 from tests.workload_helpers import FakeDocker, converge, desired, gpus_of
 
@@ -140,11 +139,7 @@ def test_fy_msup_001_process_engine_and_model_are_fetched_then_started(tmp_path,
         rec, seen = asyncio.run(scenario())
     finally:
         for p in list(rt.children.values()):
-            try:
-                os.killpg(p.pid, signal.SIGKILL)  # the wrapper and the engine it started
-            except ProcessLookupError:
-                pass
-            p.wait(5)
+            kill_group(p)  # the wrapper and the engine it started
     snap = tmp_path / "cache" / "hub" / "models--acme--tiny-gguf" / "snapshots" / GGUF_REV
     assert seen["model"] == str(snap / "tiny.gguf") and seen["head"] == "GGUF"
     assert seen["cache"] == str(tmp_path / "cache" / "hub")

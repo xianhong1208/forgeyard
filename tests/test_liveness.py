@@ -8,6 +8,7 @@ from datetime import timedelta
 from forgeyard.db import Node, get_db, utcnow
 from forgeyard.machines import liveness
 from tests.machines_helpers import expect_close, connect, hello, joined, machine
+from tests.waits import until
 
 
 def _db():
@@ -100,7 +101,7 @@ def test_fy_liv_007_the_background_sweep_runs(monkeypatch):
 
     async def run():
         task = asyncio.create_task(liveness.run_forever(interval=0.01))
-        await asyncio.sleep(0.1)
+        await until(lambda: len(calls) >= 3, "three sweeps", timeout=5)
         task.cancel()
 
     asyncio.run(run())
