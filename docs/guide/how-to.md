@@ -1060,6 +1060,11 @@ the journal: `journalctl -u forgeyard -f`.
    Then restart it (`sudo systemctl restart forgeyard`). Database changes run by themselves on
    start. Read the CHANGELOG for anything that needs a step. In Docker: pull the new tag and start
    the same `docker run` with it ([how](#run-the-server-in-docker)).
+
+   **To 1.4:** seven settings deprecated in 1.3.1 are no longer read
+   ([the list](reference.md#removed-settings)). Before you restart, rename `SECRET_KEY_FILE` to
+   `FORGEYARD_SECRET_KEY_FILE` if you set it (otherwise the server refuses to start), and remove
+   the others; Setup health lists any that are left.
 3. **The agents**, one by one. Running agents keep their workloads while they restart.
    - **Installed** with the one-line install: run it again, without `--join`. It installs the
      server's new version and keeps the settings and the credential:

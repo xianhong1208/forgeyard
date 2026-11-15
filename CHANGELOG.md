@@ -62,6 +62,25 @@ version until 1.0.
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
 
+### Removed
+
+- **The seven settings deprecated in 1.3.1 are no longer read** (#78): `SECRET_KEY_FILE`,
+  `AGENT_HEARTBEAT_SECONDS`, `FORGEYARD_SETUP_TOKEN`, `USAGE_FLUSH_SECONDS`,
+  `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and `OPENROUTER_MODELS_URL`. The behaviour
+  is the fixed one they already documented: the heartbeat is a third of `AGENT_OFFLINE_SECONDS` (at
+  least 2 s), usage is written every 5 s, a failed provider target is tried last for 30 s (its
+  `Retry-After` up to 5 min), a `Retry-After` up to 2 s is waited for once, prices come from
+  OpenRouter's public list, the key file is `FORGEYARD_SECRET_KEY_FILE` and the setup token is the
+  generated one.
+  - One still set, in the environment or `.env`, is not ignored silently: the server logs
+    *X is no longer read. X was removed in 1.4, so its value is ignored. Use Y instead …* at start,
+    and Setup health lists it (`setting-removed`, which replaces `setting-deprecated`;
+    `setup-token-left` is gone with its setting).
+  - **Upgrade step:** rename `SECRET_KEY_FILE` to `FORGEYARD_SECRET_KEY_FILE`. Set alone to a key
+    file other than `data/secret.key`, it now stops the start with a message that says so, and
+    `secrets reset` refuses too, rather than the server looking for (or making) another key and
+    calling the real one lost.
+
 ### Fixed
 
 - **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model

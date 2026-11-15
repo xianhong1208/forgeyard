@@ -30,12 +30,12 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
 from forgeyard.api.deps import Caller, fail, require_admin
-from forgeyard.config import get_settings
 from forgeyard.db import Provider, ProviderModel, get_db, utcnow
 from forgeyard.gateway import egress, pricing, quirks
 
 router = APIRouter(prefix="/api/prices", tags=["prices"])
 
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"   # public, read without a key
 FETCH_TIMEOUT = 30.0
 MAX_BYTES = 32 * 1024**2
 REF_MAX = 256
@@ -65,7 +65,7 @@ class ApplyIn(BaseModel):
 async def fetch_catalog() -> dict[str, pricing.Prices]:
     """OpenRouter's prices, {model id: Prices}. No key, through the egress rules (https, the host
     allowlist, the proxy); failures are 4xx/5xx with a message to show."""
-    url = get_settings().openrouter_models_url.strip()
+    url = OPENROUTER_MODELS_URL
     base, _, last = url.rpartition("/")
     try:
         full, host_headers, extensions = await egress.prepare(base, last, external=True, allow_http=False)
