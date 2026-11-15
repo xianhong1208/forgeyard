@@ -34,7 +34,7 @@ from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, N
 from forgeyard.gateway import imagegen, proxy
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
-from forgeyard.models import catalog, routes, scheduler
+from forgeyard.models import catalog, modalities, routes, scheduler
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -265,7 +265,9 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
         "id": d.id, "name": d.name, "recipe": d.recipe, "served_name": d.served_name, "params": d.params,
         "model": {"id": d.model.id, "name": d.model.name, "source": d.model.source, "task": d.model.task,
                   "format": d.model.format, "revision": d.model.revision, "file": d.model.file,
-                  "size_bytes": d.model.size_bytes},
+                  "size_bytes": d.model.size_bytes,
+                  # 1.4: what it takes besides text, so the pages list a chat model as multimodal chat.
+                  "modalities": modalities.of_model(d.model.meta or {}, d.model.format)},
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
         "route": {"served_name": route.served_name, "api": route.api,
                   "upstream_model": own.upstream_model if own else d.served_name}

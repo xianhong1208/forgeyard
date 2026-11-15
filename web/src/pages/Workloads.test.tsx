@@ -93,19 +93,20 @@ describe("workloads", () => {
       spec: { ...web.spec, name: "chat", runtime: { type: "model", recipe: "llama-cpp", model: "qwen3-1.7b-gguf" } },
       replica_list: [replica({ machine: { id: 2, name: "cpu-02", status: "online", connected: true }, gpus: [], placement_note: note })] };
     server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web, model], server_time: "", can_manage: true } }
-      : url === "/api/workloads/9" ? { status: 200, body: { workload: model, events: [], server_time: "", can_manage: false } } : undefined);
+      : url === "/api/workloads/9" ? { status: 200, body: { workload: model, events: [], server_time: "", can_manage: true } } : undefined);
     mount("/workloads");
-    const card = await screen.findByRole("article", { name: "Workload chat" });
-    expect(within(card).getByText(/created by deployment/)).toBeTruthy();
-    expect(within(card).getByRole("link", { name: "chat-dep" }).getAttribute("href")).toBe("/models/deployments/3");
-    expect(within(card).getByText(note)).toBeTruthy();
+    const group = await screen.findByRole("region", { name: /Created by model deployments/ });
+    expect(within(group).getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/workloads/9");
+    expect(within(group).getByText(/created by deployment/)).toBeTruthy();
+    expect(within(group).getByRole("link", { name: "chat-dep" }).getAttribute("href")).toBe("/models/deployments/3");
     expect(within(screen.getByRole("article", { name: "Workload web" })).queryByText(/created by deployment/)).toBeNull();
     cleanup();
     mount("/workloads/9");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
     const links = screen.getAllByRole("link", { name: "chat-dep" });
-    expect(links.length).toBe(2);  // the status line and the spec's "Created by"
+    expect(links.length).toBe(2);  // the banner and the spec's "Created by"
     expect(links.every((a) => a.getAttribute("href") === "/models/deployments/3")).toBe(true);
+    expect(screen.getByRole("link", { name: "Open the deployment" }).getAttribute("href")).toBe("/models/deployments/3");
     expect(screen.getByText("Created by")).toBeTruthy();
     expect(within(screen.getByRole("table")).getByText(note)).toBeTruthy();
   });
@@ -266,7 +267,77 @@ describe("workloads", () => {
   });
 });
 
-describe("GPU access on the Machines page", () => {
+describe("workloads and deployments (1.4, #36)", () => {
+  const model = (n: number): Workload => ({ ...web, id: 100 + n, name: `m${n}`, runtime: "model", deployment_id: 200 + n,
+    deployment: { id: 200 + n, name: `dep${n}` }, spec: { ...web.spec, name: `m${n}`, runtime: { type: "model", recipe: "vllm", model: "qwen3-4b" } } });
+
+  it("FY-WEB-227 the list has your workloads, then the ones deployments created: eight, then '… and N more'", async () => {
+    const models = Array.from({ length: 10 }, (_, i) => model(i));
+    server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [web, ...models, job], server_time: "", can_manage: true } } : undefined));
+    mount("/workloads");
+    const own = await screen.findByRole("region", { name: "Your workloads · 2" });
+    expect(within(own).getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["Workload web", "Workload job"]);
+    const made = screen.getByRole("region", { name: "Created by model deployments · 10" });
+    expect(within(made).getAllByRole("listitem")).toHaveLength(8);
+    expect(within(made).getAllByRole("link", { name: /^dep\d$/ }).map((a) => a.getAttribute("href"))[0]).toBe("/models/deployments/200");
+    const more = within(made).getByRole("button", { name: "… and 2 more" });
+    fireEvent.click(more);
+    expect(within(made).getAllByRole("listitem")).toHaveLength(10);
+    fireEvent.click(within(made).getByRole("button", { name: "Show fewer" }));
+    expect(within(made).getAllByRole("listitem")).toHaveLength(8);
+  });
+
+  it("FY-WEB-228 a deployment's workload has no Stop, Start or Delete: its banner sends you to the deployment", async () => {
+    const m = model(1);
+    const stopped = { ...model(2), desired_state: "stopped" as const, status: "stopped" as const };
+    server((url) => url === "/api/workloads/101" ? { status: 200, body: { workload: m, events: [], server_time: "", can_manage: true } }
+      : url === "/api/workloads/102" ? { status: 200, body: { workload: stopped, events: [], server_time: "", can_manage: true } }
+        : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } } : undefined);
+    const view = mount("/workloads/101");
+    const banner = await screen.findByRole("region", { name: "Created by a deployment" });
+    expect(within(banner).getByRole("link", { name: "dep1" }).getAttribute("href")).toBe("/models/deployments/201");
+    expect(screen.getByText("Stop and delete are on the deployment")).toBeTruthy();
+    for (const name of ["Stop", "Start", "Delete"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    view.unmount();
+    const again = mount("/workloads/102");
+    await screen.findByRole("region", { name: "Created by a deployment" });
+    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+    again.unmount();
+    mount("/workloads/7"); // a plain workload keeps its buttons
+    expect(await screen.findByRole("button", { name: "Stop" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Created by a deployment" })).toBeNull();
+  });
+
+  it("FY-WEB-232 a model workload's spec gives the GPUs its deployment chose, not 'none'", async () => {
+    const onGpu = { ...model(1), deployment: { id: 201, name: "dep1", gpus: 1 } };
+    const onCpu = { ...model(2), deployment: { id: 202, name: "dep2", gpus: 0 }, replica_list: [replica({ gpus: [] })] };
+    const old = { ...model(3), deployment: { id: 203, name: "dep3" } }; // a server before this field: from the replicas
+    server((url) => url === "/api/workloads/101" ? { status: 200, body: { workload: onGpu, events: [], server_time: "", can_manage: true } }
+      : url === "/api/workloads/102" ? { status: 200, body: { workload: onCpu, events: [], server_time: "", can_manage: true } }
+        : url === "/api/workloads/103" ? { status: 200, body: { workload: old, events: [], server_time: "", can_manage: true } }
+          : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } } : undefined);
+    const fact = async () => (await screen.findByText("GPUs", { selector: "dt" })).nextElementSibling?.textContent;
+    for (const [path, want] of [["/workloads/101", "1 per replica, from the deployment; holding #4"],
+      ["/workloads/102", "none: the deployment runs it on the CPU"], ["/workloads/103", "from the deployment; holding #4"],
+      ["/workloads/7", "1 per replica"]] as const) {
+      const view = mount(path);
+      expect(await fact()).toBe(want);
+      view.unmount();
+    }
+  });
+
+  it("FY-WEB-229 'New workload here' opens the form with the machine chosen (Deploy here: FY-WEB-230)", async () => {
+    const data = structuredClone(machinesFixture);
+    (data.machines[0] as Record<string, unknown>).features = ["workloads", "models"];
+    server((url) => url === "/api/machines" ? { status: 200, body: data } : undefined);
+    mount("/workloads/new?machine=1");
+    const pick = await screen.findByLabelText(/^Machine/) as HTMLSelectElement;
+    await waitFor(() => expect(pick.value).toBe("1"));
+  });
+});
+
+describe("GPU access on a machine's page", () => {
   it("FY-WEB-046 an admin restricts a machine to GPU #4, after confirming", async () => {
     const data = structuredClone(machinesFixture);
     const box = data.machines[0] as Record<string, unknown> & { accelerators: Record<string, unknown>[] };
@@ -282,8 +353,8 @@ describe("GPU access on the Machines page", () => {
     });
     const confirm = vi.fn(() => true);
     vi.stubGlobal("confirm", confirm);
-    mount("/machines");
-    const card = await screen.findByRole("article", { name: "Machine a100-box" });
+    mount("/machines/1");
+    const card = await screen.findByRole("region", { name: "GPU access and runtimes" });
     expect(within(card).getByText("all 8 GPUs")).toBeTruthy();
     expect(within(card).getByText(/process as nobody \(rlimits\) · container: docker not found/)).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Change GPU access" }));
@@ -304,11 +375,11 @@ describe("GPU access on the Machines page", () => {
     box.gpu_allowlist = [String(box.accelerators[4].key)];
     box.accelerators.forEach((a, i) => { a.allowed = a.vendor !== "cpu" && i === 4; a.assigned_to = i === 4 ? "gpu-probe" : null; });
     server((url) => (url === "/api/machines" ? { status: 200, body: { ...data, can_manage: false } } : undefined), { ...OWNER, role: "operator", is_owner: false });
-    mount("/machines");
-    const card = await screen.findByRole("article", { name: "Machine a100-box" });
+    mount("/machines/1");
+    const card = await screen.findByRole("region", { name: "GPU access and runtimes" });
     expect(within(card).getByText("only #4")).toBeTruthy();
-    expect(within(card).getAllByText("not for Forgeyard")).toHaveLength(7);
-    expect(within(card).getByText("in use: gpu-probe")).toBeTruthy();
+    expect(screen.getAllByText("not for Forgeyard")).toHaveLength(7);
+    expect(within(screen.getByRole("group", { name: "GPU #4" })).getByText("in use: gpu-probe")).toBeTruthy();
     expect(within(card).queryByRole("button", { name: "Change GPU access" })).toBeNull();
   });
 });

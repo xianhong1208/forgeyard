@@ -107,7 +107,7 @@ def model_step(db: DbSession, admin: bool) -> dict:
     detail = f"{_plural(count, 'model')} in the catalog." if count else "The catalog is empty."
     return _step("model", "Add a model",
                  "The catalog lists the models you may deploy, each pinned to an exact version on Hugging Face.",
-                 count > 0, detail, to="/models?tab=catalog", label="Add a model" if admin else "Open the catalog",
+                 count > 0, detail, to="/models?tab=library", label="Add a model" if admin else "Open the catalog",
                  who=None if admin else "An admin adds models.")
 
 

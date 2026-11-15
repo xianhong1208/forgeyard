@@ -140,14 +140,14 @@ Next, on https://192.168.1.20:7860:
 
 預設情況下，Forgeyard 可以使用機器上的每一張 GPU。如果是和別人共用的機器：
 
-1. 在 **Machines** 找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
+1. 在 **Machines** 點進這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
 2. 勾選 Forgeyard 可以使用的卡，然後儲存。
 
 不在清單上的卡，絕不會分配給 Forgeyard 執行的任何東西；頁面上會把它們標成 *not for Forgeyard*。就算允許所有的卡，只要儲存一次選擇，這個步驟就會打勾。
 
 ## 5. 加入一個推薦的模型
 
-1. 開啟 **Models** → **Catalog and recipes**（目錄與 recipe）→ **Add a model**。
+1. 開啟 **Models** → **Model library**（模型庫）→ **Add a model**。
 2. **Recommended** 列出已知可以正常運作的模型。挑一個適合你機器的：
    - GPU 至少有 8 GB 可用記憶體：**Qwen3 0.6B**（下載 1.4 GB）；
    - 只有 CPU：**Qwen3 1.7B (GGUF, for the CPU)**（下載 1.2 GB，約需 3 GB RAM）。

@@ -218,7 +218,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
 引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
 
-1. **找出映像檔。** 在 **Models → Catalog and recipes**，打開 recipe 上的 **Machine without registry access:
+1. **找出映像檔。** 在 **Models → Model library**，打開 recipe 上的 **Machine without registry access:
    load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
    上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
@@ -486,7 +486,7 @@ media: {inputs: [image, audio, video], files: false}
 有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
 
 1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
-2. 管理員：打開 **Models → Catalog**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+2. 管理員：打開 **Models → Model library**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
 3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
 
 部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
@@ -552,7 +552,7 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 在共用機器上限制 GPU
 
-1. 開啟 **Machines**，找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
+1. 開啟 **Machines**，點進這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
 2. 只勾選 Forgeyard 可以使用的卡，例如第 2 和第 3 張，然後選擇 **Save**。
 
 從此之後：

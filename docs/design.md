@@ -176,7 +176,7 @@ or downloaded. A deployment is one service workload (it also appears under Workl
 gateway route: programs reach it at `/v1` with its **model name** (see *Gateway and API keys*). Its
 page shows that name, its usage, each replica and a small **Try it** that checks one replica directly.
 
-- **Adding a model** (admins), three ways on **Models → Catalog and recipes → Add a model**:
+- **Adding a model** (admins), three ways on **Models → Model library → Add a model**:
   - **Recommended**: a curated list ([forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml),
     easy to edit) of models known to work with the built-in recipes, grouped: Qwen3 (chat 0.6B to
     32B, two GGUF builds for the CPU, Embedding and Reranker 0.6B / 4B), other open chat models

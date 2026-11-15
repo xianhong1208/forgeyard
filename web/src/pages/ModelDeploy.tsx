@@ -21,6 +21,7 @@ export function ModelDeployPage() {
   const { data: machines } = useApi<MachinesResponse>("/machines");
   // ?model=…&recipe=…&device=… from "Deploy it" after adding a model (its suggested recipe and device).
   const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "", recipe: search.get("recipe") ?? "",
+    machine: search.get("machine") ?? "",
     device: search.get("device") === "cpu" ? "cpu" : "gpu" }));
   const [est, setEst] = useState<EstimateResponse | null>(null);
   const [estError, setEstError] = useState<string | null>(null);
@@ -94,7 +95,7 @@ export function ModelDeployPage() {
       {cat && cat.models.length === 0 && (
         <Notice>
           The catalog is empty, so there is nothing to deploy yet.{" "}
-          {cat.can_manage ? <Link to="/models?tab=catalog">Add a model to the catalog</Link> : "An admin adds models to the catalog."}
+          {cat.can_manage ? <Link to="/models?tab=library">Add a model to the catalog</Link> : "An admin adds models to the catalog."}
         </Notice>
       )}
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label="Deploy a model">
@@ -180,7 +181,7 @@ export function ModelDeployPage() {
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />
                     <p className="field-hint">{cat?.hf_token_set
                       ? "Gated models use the server's token; one here replaces it for this deployment only."
-                      : "Gated models only (or set one for the server under Models → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
+                      : "Gated models only (or set one for the server under Models → Model library → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
                 </div>
               </details>
             </section>

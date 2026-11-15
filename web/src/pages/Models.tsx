@@ -1,21 +1,23 @@
 import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
+import { KindMark, ModelKindIcon } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
 import { engineCarry } from "../lib/engineImages";
-import { exact, imageTag, when } from "../lib/format";
+import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
+import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { API_KIND } from "../lib/gateway";
-import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
+import { TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
 import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, targetName, targetWhere, tiers } from "../lib/routing";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, ModelSources, Recipe, RecipeVariant, RoutesResponse } from "../lib/types";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelSources, Recipe, RecipeVariant, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
+import { STATUS_TONE, stateLabel } from "../lib/workloads";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
 const KINDS = [
@@ -30,8 +32,14 @@ const KINDS = [
 
 export function ModelsPage() {
   const [search, setSearch] = useSearchParams();
-  const tab = search.get("tab") === "catalog" ? "catalog" : search.get("tab") === "routes" ? "routes" : "deployments";
+  const tab = modelsTab(search.get("tab"));
+  // 1.4: the tabs were renamed; links to the old names (?tab=routes, ?tab=catalog) land on the new ones.
+  const legacy = search.get("tab") !== null && search.get("tab") !== tab && tab !== "deployments";
+  useEffect(() => {
+    if (legacy) setSearch({ tab }, { replace: true });
+  }, [legacy, tab, setSearch]);
   const deps = useApi<DeploymentsResponse>("/deployments");
+  const { data: machines } = useApi<MachinesResponse>("/machines");
   const cat = useApi<CatalogResponse>("/models");
   usePoll(deps.reload, WORKLOADS_POLL_MS);
   const canDeploy = cat.data?.can_deploy ?? false;
@@ -41,7 +49,7 @@ export function ModelsPage() {
       <PageHeader
         index="03 · Models"
         title="Models"
-        lead="Models run here as deployments: a model from the catalog, served by an engine on a machine where it fits. Every ready deployment answers at /v1 with an API key, and in the Playground."
+        lead="Models run here as deployments, grouped by what they do. Serving decides which names answer at /v1, and the model library is what you can deploy. Every ready deployment answers at /v1 with an API key, and in the Playground."
         actions={canDeploy && (
           <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
@@ -55,12 +63,12 @@ export function ModelsPage() {
       <div className="tabs" role="tablist" aria-label="Models">
         <button type="button" role="tab" aria-selected={tab === "deployments"} className={tab === "deployments" ? "on" : ""}
           onClick={() => setSearch({})}>Deployments{deps.data ? ` (${deps.data.deployments.length})` : ""}</button>
-        <button type="button" role="tab" aria-selected={tab === "routes"} className={tab === "routes" ? "on" : ""}
-          onClick={() => setSearch({ tab: "routes" })}>Routes and cloud</button>
-        <button type="button" role="tab" aria-selected={tab === "catalog"} className={tab === "catalog" ? "on" : ""}
-          onClick={() => setSearch({ tab: "catalog" })}>Catalog and recipes</button>
+        <button type="button" role="tab" aria-selected={tab === "serving"} className={tab === "serving" ? "on" : ""}
+          onClick={() => setSearch({ tab: "serving" })}>Serving</button>
+        <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "on" : ""}
+          onClick={() => setSearch({ tab: "library" })}>Model library</button>
       </div>
-      {tab === "routes" ? <Routes /> : tab === "deployments" ? (
+      {tab === "serving" ? <Routes /> : tab === "deployments" ? (
         <>
           {deps.error && <Notice tone="error">{deps.error}</Notice>}
           {deps.data && deps.data.deployments.length === 0 && (
@@ -80,7 +88,7 @@ export function ModelsPage() {
                   <p className="empty-actions">
                     {cat.data && cat.data.models.length === 0
                       ? (cat.data.can_manage
-                        ? <button type="button" className="btn btn-primary" onClick={() => setSearch({ tab: "catalog" })}><IconPlus size={16} aria-hidden="true" /> Add a model</button>
+                        ? <button type="button" className="btn btn-primary" onClick={() => setSearch({ tab: "library" })}><IconPlus size={16} aria-hidden="true" /> Add a model</button>
                         : <span className="muted">The catalog is empty: an admin adds models.</span>)
                       : <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>}
                   </p>
@@ -94,7 +102,7 @@ export function ModelsPage() {
             </section>
           )}
           {deps.data && deps.data.deployments.length > 0 && (
-            <div className="workloads">{deps.data.deployments.map((d) => <DeploymentCard key={d.id} d={d} />)}</div>
+            <ByKind list={deps.data.deployments} machines={machines?.machines ?? []} canDeploy={canDeploy} />
           )}
         </>
       ) : (
@@ -156,42 +164,87 @@ function Routes() {
   );
 }
 
-function DeploymentCard({ d }: { d: Deployment }) {
+export type ModelsTab = "deployments" | "serving" | "library";
+
+// The tab in the address; the names before 1.4 ("routes", "catalog") still work.
+export function modelsTab(raw: string | null): ModelsTab {
+  if (raw === "serving" || raw === "routes") return "serving";
+  if (raw === "library" || raw === "catalog") return "library";
+  return "deployments";
+}
+
+// 1.4 (#34): the deployments in one section per kind, each with its icon, what it does and its path
+// at /v1; one row per deployment with where it runs, its memory and its state. Kinds with none are
+// named once at the end.
+function ByKind({ list, machines, canDeploy }: { list: Deployment[]; machines: Machine[]; canDeploy: boolean }) {
+  const groups = groupByKind(list);
+  const none = groups.filter(([, l]) => l.length === 0).map(([k]) => k);
+  return (
+    <>
+      {groups.filter(([, l]) => l.length > 0).map(([k, l]) => {
+        const K = MODEL_KIND[k];
+        return (
+          <section key={k} className="panel kindsec" aria-labelledby={`kind-${k}`}>
+            <div className="kindsec-head">
+              <span className="kindicon"><ModelKindIcon kind={k} size={18} /></span>
+              <div className="kindsec-title">
+                <h2 id={`kind-${k}`}>{K.label} <span className="muted small">· {l.length}</span></h2>
+                <span className="muted">{K.hint}</span>
+              </div>
+              <span className="kindsec-api mono">{K.api}</span>
+            </div>
+            {l.map((d) => <DeploymentRow key={d.id} d={d} machines={machines} />)}
+          </section>
+        );
+      })}
+      {none.length > 0 && (
+        <p className="kinds-none small">
+          <span className="muted">None deployed yet:</span>
+          {none.map((k) => <span key={k} className="kinds-none-item"><ModelKindIcon kind={k} size={14} /> {MODEL_KIND[k].label}</span>)}
+          {canDeploy && <Link to="/models/deploy">Deploy a model</Link>}
+        </p>
+      )}
+    </>
+  );
+}
+
+function DeploymentRow({ d, machines }: { d: Deployment; machines: Machine[] }) {
   const w = d.workload;
   const tone = STATUS_TONE[w.status];
+  const placed = w.replica_list.filter((r) => r.machine);
+  // What needs saying about a replica: a download in progress, why it waits, why it is where it is.
+  const notes = w.replica_list.flatMap((r) => {
+    const frac = downloadFraction(r);
+    const tag = w.replica_list.length > 1 ? `#${r.ordinal} ` : "";
+    if (frac !== null) return [<span key={r.ordinal} className="deprow-note"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {tag}{downloadText(r)}</span>];
+    const text = r.not_picked_up ?? r.reason ?? r.placement_note;
+    return text && w.status !== "stopped" ? [<span key={r.ordinal} className={`deprow-note${r.not_picked_up ? " rep-stuck" : ""}`}>{tag}{text}</span>] : [];
+  });
   return (
-    <article className={`wl wl-${tone}`} aria-label={`Deployment ${d.name}`}>
-      <header className="wl-head">
-        <div className="wl-title">
+    <div className="deprow" role="group" aria-label={`Deployment ${d.name}`}>
+      <div className="deprow-main">
+        <div className="deprow-name">
           <span className={`dot dot-tone-${tone}`} aria-hidden="true" />
-          <h2 className="mono"><Link to={`/models/deployments/${d.id}`}>{d.name}</Link></h2>
-          <span className={`chip chip-tone-${tone}`}>{w.status}</span>
-          <span className="chip">{TASK_LABEL[d.model.task]}</span>
-          <span className="chip">{d.recipe}</span>
-          <span className="muted small">{w.ready}/{w.replicas} ready</span>
+          <Link to={`/models/deployments/${d.id}`}>{d.name}</Link>
         </div>
-        <span className="muted small" title={exact(d.created_at)}>{d.created_by ? `${d.created_by} · ` : ""}{when(d.created_at)}</span>
-      </header>
-      <p className="wl-cmd mono">{d.model.name} as “{d.served_name}” · {d.estimate.device === "gpu" ? `${gib(d.estimate.per_gpu)} per GPU` : `${gib(d.estimate.ram)} RAM`}{d.route ? ` · ${API_LABEL[d.route.api] ?? d.route.api}` : ""}</p>
-      <ul className="reps">
-        {w.replica_list.map((r) => {
-          const frac = downloadFraction(r);
-          const ep = d.endpoints.find((e) => e.replica === r.ordinal);
+        <div className="deprow-model">{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
+      </div>
+      <div className="where">
+        {placed.length ? placed.map((r) => {
+          const m = machines.find((x) => x.id === r.machine!.id);
           return (
-            <li key={r.ordinal} className="rep">
-              <span className="rep-id mono">#{r.ordinal}</span>
-              <span className={`chip chip-tone-${STATE_TONE[r.state]}`}>{stateLabel(r)}</span>
-              <span className="rep-machine">{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}</span>
-              <span className="rep-gpus mono">{r.gpus.length ? `GPU ${gpuLabel(r)}` : r.machine ? "CPU" : "—"}</span>
-              <span className="rep-ports">{ep && <a className="mono" href={ep.url} target="_blank" rel="noreferrer">{ep.url.replace(/^http:\/\//, "").replace(/\/$/, "")}</a>}</span>
-              {frac !== null ? (
-                <span className="rep-reason"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {downloadText(r)}</span>
-              ) : r.not_picked_up ? <span className="rep-reason rep-stuck">{r.not_picked_up}</span> : r.reason && <span className="rep-reason">{r.reason}</span>}
-            </li>
+            <Link key={r.ordinal} to={`/machines/${r.machine!.id}`} className="where-chip" title={`Replica #${r.ordinal}: ${stateLabel(r)}`}>
+              {m && <KindMark kind={machineKind(m)} size={20} />}
+              <span className="mono">{r.machine!.name}</span>
+              <span>{whereOnMachine(r)}</span>
+            </Link>
           );
-        })}
-      </ul>
-    </article>
+        }) : <span className="small muted">{w.status === "stopped" ? "stopped" : "waiting for a machine"}</span>}
+      </div>
+      <span className="deprow-mem">{d.estimate.device === "gpu" ? `${gib(d.estimate.per_gpu)} / GPU` : `${gib(d.estimate.ram)} RAM`}</span>
+      <span className={`chip chip-tone-${tone} deprow-state`}>{w.status === "running" ? `${w.ready}/${w.replicas} ready` : w.status}</span>
+      {notes.length > 0 && <div className="deprow-notes">{notes}</div>}
+    </div>
   );
 }
 
@@ -208,7 +261,7 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
             ? "The catalog lists the models that can be deployed. It is empty: pick one of the recommended models above, or search Hugging Face."
             : "The catalog lists the models that can be deployed. It is empty: an admin adds models."}</p>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap catalog-wrap">
             <table className="table catalog-table">
               <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Recipes</th><th /></tr></thead>
               <tbody>{data.models.map((m) => <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload} />)}</tbody>

@@ -20,9 +20,11 @@ agent 連線中時，機器顯示 **online**；超過 30 秒沒有收到任何�
 
 agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列旗標讀取設定（[完整列表](reference.md#agent-settings)）。
 
+**Machines** 頁面每台機器一張卡片，並用圖示標出它的種類：**NVIDIA GPU**、**AMD GPU**、**AMD APU**（和系統共用記憶體的 AMD GPU，例如 Radeon 8060S）或 **CPU only**。它的每張顯示卡是一排由下往上填的格子：先是 Forgeyard 保留的量，再來是其他用量（顯示卡上的其他程式，以及沒有宣告記憶體的 Forgeyard 工作負載），最後是可用的量。卡片也會顯示可用記憶體、在上面執行的部署和工作負載數量，以及它們的名稱。點進一台機器就是它自己的頁面：**記憶體配置圖**（memory map）把每張卡依佔用者分段，標出名稱和保留量；另外還有在這台機器上執行的東西、GPU 存取權與 runtime，以及 agent 的資訊。管理員也在這裡撤銷或移除機器。
+
 ## GPU 存取權
 
-預設情況下，Forgeyard 可以使用機器上的每一張 GPU。如果機器要和其他人或其他程式共用，管理員可以在 **Machines** → **Change GPU access** 選擇 Forgeyard 可以用哪些卡。不在清單上的卡，絕不會分配給 Forgeyard 執行的任何東西。
+預設情況下，Forgeyard 可以使用機器上的每一張 GPU。如果機器要和其他人或其他程式共用，管理員可以在機器的頁面（**Machines** → 該機器）→ **Change GPU access** 選擇 Forgeyard 可以用哪些卡。不在清單上的卡，絕不會分配給 Forgeyard 執行的任何東西。
 
 - 分配給獨占副本的 GPU 只屬於那個副本。
 - 共用一張卡的副本（嵌入模型、重排序模型、語音轉文字預設都是）只能使用自己保留的記憶體量，所以一張卡可以放好幾個。
@@ -59,6 +61,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - 容器以容器引擎的預設值加上 `no-new-privileges` 執行，絕不使用 `--privileged`。
 - 資源限制：容器使用 `--cpus` 和 `--memory`；行程在有 systemd 的主機上使用 systemd scope，否則使用 rlimit。
 
+**Workloads** 頁面先列出 **Your workloads**（你的工作負載），再列出 **Created by model deployments**（由模型部署建立）：後者每一項都會標出建立它的部署並連過去（先顯示八個，其餘收在 *… and N more*）。部署的工作負載要透過它的部署來修改、停止、啟動和刪除：它自己的頁面沒有 **Stop** 或 **Delete**，API 也會以 `409 managed_by_deployment` 拒絕，這樣部署就不會在路由還留著的時候失去它的工作負載。
+
 只有管理員和 operator 可以建立工作負載，因為能建立工作負載的人，就能在機器上執行程式碼。模型部署也是一種工作負載；大部分的人只需要部署模型。
 
 ## 在 /x/ 的工作負載
@@ -76,6 +80,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 模型、recipe 與估算
 
+**Models** 頁面有三個分頁。**Deployments** 依種類（chat、多模態 chat、嵌入、重排序、語音轉文字、文字轉語音、圖片、影片）把執行中的模型分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**Serving** 是用戶端送到 `/v1` 的模型名稱，以及它們背後的雲端層級（[路由](#cloud-providers-and-tiers)）。**Model library**（模型庫）是可以部署的東西：目錄、recipe，以及（管理員才有的）模型來源。1.4 之前的舊連結（`?tab=routes`、`?tab=catalog`）仍會打開對應的分頁。
+
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。
 - **recipe**（配方）描述某一類模型要怎麼執行：用哪個引擎、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
@@ -84,7 +90,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 部署與閘道
 
-**部署**用一個 recipe 執行一個模型，包含一個或多個副本。它的副本以 runtime 為 `model` 的 workload 執行，Workloads 清單會把它顯示為 *created by deployment X*；部署和它的 workload 會互相連結。Forgeyard 會：
+**部署**用一個 recipe 執行一個模型，包含一個或多個副本。它的副本以 runtime 為 `model` 的 workload 執行，Workloads 清單會把它顯示為 *created by deployment X*；部署頁面會寫出它以哪個 workload 執行（*Runs as workload*），而 workload 頁面最上方會顯示 *Created by deployment X* 和回到部署的按鈕。Forgeyard 會：
 
 1. 把每個副本放到放得下的地方。在放得下的機器之間，依序比較：
    - 過去一小時內**連不到**這個副本在那裡要下載的來源（模型的主機，例如 huggingface.co；引擎壓縮檔的主機，例如 github.com；或映像檔的 registry，例如 ghcr.io）的機器排在最後：只有其他機器都放不下時才會用它。名稱解析失敗、連線被拒或逾時、網路無法連線，才算「連不到」；HTTP 錯誤、權杖被拒或磁碟已滿則不算；

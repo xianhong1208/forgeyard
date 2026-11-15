@@ -168,6 +168,14 @@ describe("changing a deployment (1.3.1)", () => {
     expect(screen.queryByRole("note", { name: "GPU sharing hint" })).toBeNull();
   });
 
+  it("FY-WEB-230: Deploy here on a machine's page opens the deploy form with that machine chosen (1.4)", async () => {
+    const est: EstimateResponse = { estimate, params: {}, recipe: "vllm", model: "qwen3-4b", placement: fits({}) };
+    server((url) => url === "/api/models" ? { status: 200, body: catalog } : url === "/api/machines" ? { status: 200, body: machines }
+      : url === "/api/deployments/estimate" ? { status: 200, body: est } : undefined);
+    mount("/models/deploy?model=qwen3-4b&machine=2");
+    await waitFor(() => expect((screen.getByLabelText("Machine") as HTMLSelectElement).value).toBe("2"), { timeout: 3000 });
+  });
+
   it("FY-WEB-201: a replica its agent never took says so on the deployment and the workload, with what to do", async () => {
     const text = "gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)";
     const stuck = rep({ state: "pending", started_at: null, container: null, not_picked_up: text });

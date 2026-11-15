@@ -75,7 +75,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
-| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
+| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model library → Model sources** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
 | `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
 | `VRAM_HEADROOM_MIB` | `512` | 放置副本時，每張卡一律保留不用的記憶體 |

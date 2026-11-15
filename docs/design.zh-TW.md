@@ -132,7 +132,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
 會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
 （見「Gateway 與 API key」）。部署頁顯示這個名稱、用量、每個 replica，並有一個直接檢查單一 replica 的小小 **Try it**。
 
-- **加入模型**（admin），在 **Models → Catalog and recipes → Add a model** 有三種方式：
+- **加入模型**（admin），在 **Models → Model library → Add a model** 有三種方式：
   - **Recommended（推薦清單）**：一份精選清單（[forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml)，容易修改），
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與

@@ -211,7 +211,8 @@ export type Workload = {
   replica_list: Replica[];
   deployment_id?: number | null;
   // 1.4: the deployment that created this (model) workload.
-  deployment?: { id: number; name: string } | null;
+  // and the GPUs it gives each replica (0: the CPU); a model workload's own spec asks for none.
+  deployment?: { id: number; name: string; gpus?: number } | null;
   // 1.3: exposed behind the gateway at /x/<name> (null for a model deployment's workload).
   gateway?: WorkloadGateway | null;
 };
@@ -358,7 +359,9 @@ export type LiveCard = { replica: number; machine: string | null; key: string; i
 
 export type Deployment = {
   id: number; name: string; recipe: string; served_name: string; params: Record<string, unknown>;
-  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number };
+  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number;
+    // 1.4: what it takes in chat besides text (null: unknown), so a chat model can be listed as multimodal.
+    modalities?: Medium[] | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];

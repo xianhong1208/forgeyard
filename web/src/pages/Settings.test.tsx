@@ -178,7 +178,7 @@ describe("the server's Hugging Face token (D2)", () => {
       if (url === "/api/deployments") return { status: 200, body: { deployments: [], server_time: "", can_manage: true } };
       if (url === "/api/routes") return { status: 200, body: { routes: [], is_admin: true } };
     });
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     expect(await screen.findByText(/Gated models need a token/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Save token" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Token"), { target: { value: "  hf_example_token_WXYZ \n" } });  // pasted with spaces
@@ -196,7 +196,7 @@ describe("the server's Hugging Face token (D2)", () => {
       if (url === "/api/models") return { status: 200, body: catalog({ sources: { ...catalog().sources!, url_hosts: ["mirror.example.org"], env_seeds: ["MODEL_URL_HOSTS"] } }) };
       if (url === "/api/deployments") return { status: 200, body: { deployments: [], server_time: "", can_manage: true } };
     });
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     const note = await screen.findByRole("note");
     expect(note.textContent).toMatch(/from \.env.*MODEL_URL_HOSTS/);
   });

@@ -62,10 +62,11 @@ export function WorkloadNewPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { data: machines } = useApi<MachinesResponse>("/machines");
-  const [f, setF] = useState<WorkloadForm>(emptyForm);
-  const [g, setG] = useState<GatewayForm>(() => gatewayForm());
   // A ready-made template (1.3): /workloads/new?template=<id>&gpu=1 fills the form; everything stays editable.
+  // ?machine=<id> (1.4, "New workload here" on a machine's page) picks the machine.
   const [params] = useSearchParams();
+  const [f, setF] = useState<WorkloadForm>(() => ({ ...emptyForm(), machine: params.get("machine") ?? "" }));
+  const [g, setG] = useState<GatewayForm>(() => gatewayForm());
   const templateId = params.get("template");
   const onGpu = params.get("gpu") === "1";
   const { data: templates } = useApi<{ templates: WorkloadTemplate[] }>(templateId ? "/workloads/templates" : null);

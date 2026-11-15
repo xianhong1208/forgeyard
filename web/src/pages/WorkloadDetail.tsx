@@ -1,4 +1,4 @@
-import { IconArrowLeft, IconPlayerPause, IconPlayerPlay, IconPlayerStop, IconTrash } from "@tabler/icons-react";
+import { IconArrowLeft, IconArrowRight, IconLock, IconPlayerPause, IconPlayerPlay, IconPlayerStop, IconTrash } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -11,7 +11,7 @@ import { downloadFraction, downloadText } from "../lib/models";
 import { buildGateway, gatewayForm, xCurl, xUrl, type GatewayForm } from "../lib/passthrough";
 import type { LogsResponse, Replica, Workload, WorkloadResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { STATE_TONE, STATUS_TONE, duration, gpuLabel, portUrl, stateLabel } from "../lib/workloads";
+import { STATE_TONE, STATUS_TONE, duration, gpuLabel, gpusText, portUrl, stateLabel } from "../lib/workloads";
 import { GatewayPanel } from "./WorkloadNew";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
@@ -58,7 +58,11 @@ export function WorkloadDetailPage() {
       <p className="crumb"><Link to="/workloads"><IconArrowLeft size={14} aria-hidden="true" /> Workloads</Link></p>
       <PageHeader index={`02 · ${w?.kind ?? "workload"}`} title={w?.name ?? "Workload"}
         lead={w ? `${w.kind === "service" ? "Service" : "Task"} · ${w.runtime} · created by ${w.created_by ?? "?"} ${when(w.created_at)}` : undefined}
-        actions={w && canManage && (
+        actions={w && canManage && w.deployment ? (
+          <span className="locked" title="Stop, start and delete the deployment instead">
+            <IconLock size={14} aria-hidden="true" /> Stop and delete are on the deployment
+          </span>
+        ) : w && canManage && (
           <>
             {w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}>
@@ -77,6 +81,7 @@ export function WorkloadDetailPage() {
       />
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      {w?.deployment && <CreatedBy w={w} dep={w.deployment} />}
       {w && <NotPickedUpNotice w={w} />}
       {w && (
         <>
@@ -84,9 +89,6 @@ export function WorkloadDetailPage() {
             <span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
             {w.kind === "service" && <span>{w.ready} of {w.replicas} ready</span>}
             {w.generation > 1 && <span className="muted small">generation {w.generation}</span>}
-            {w.deployment && (
-              <span className="small">Created by deployment <Link className="mono" to={`/models/deployments/${w.deployment.id}`}>{w.deployment.name}</Link></span>
-            )}
           </div>
           <section className="panel" aria-labelledby="replicas-title">
             <h2 id="replicas-title">Replicas</h2>
@@ -123,6 +125,24 @@ export function WorkloadDetailPage() {
         </>
       )}
     </>
+  );
+}
+
+// 1.4 (#36): a model deployment's workload says so first, and sends you to the deployment for
+// changing, scaling, stopping and deleting it.
+function CreatedBy({ w, dep }: { w: Workload; dep: { id: number; name: string } }) {
+  const model = w.spec.runtime.type === "model" ? w.spec.runtime.model : null;
+  return (
+    <section className="panel panel-link created-by" aria-label="Created by a deployment">
+      <div>
+        <p className="created-by-title">Created by deployment <Link className="mono" to={`/models/deployments/${dep.id}`}>{dep.name}</Link></p>
+        <p className="small">
+          This workload runs {model ? <span className="mono">{model}</span> : "a model"} for that deployment. Change, scale, stop or delete it
+          there; here you see its replicas, output and events.
+        </p>
+      </div>
+      <Link to={`/models/deployments/${dep.id}`} className="btn">Open the deployment <IconArrowRight size={15} aria-hidden="true" /></Link>
+    </section>
   );
 }
 
@@ -255,7 +275,6 @@ export function Output({ w }: { w: Workload }) {
 function Spec({ w }: { w: Workload }) {
   const s = w.spec;
   const rt = s.runtime;
-  const gpus = s.resources.gpus;
   const facts: [string, ReactNode][] = [["Runtime", rt.type]];
   if (rt.type === "model") {
     facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
@@ -268,7 +287,7 @@ function Spec({ w }: { w: Workload }) {
   }
   if (rt.type === "process" && rt.workdir) facts.push(["Working directory", <code key="w">{rt.workdir}</code>]);
   facts.push(["Placement", s.machine_id ? `machine ${w.replica_list[0]?.machine?.name ?? `#${s.machine_id}`}` : "any online machine with room"]);
-  facts.push(["GPUs", gpus.indices ? `cards ${gpus.indices.map((i) => `#${i}`).join(", ")}` : gpus.count ? `${gpus.count}${gpus.vendor ? ` ${gpus.vendor}` : ""} per replica` : "none"]);
+  facts.push(["GPUs", gpusText(w)]);
   facts.push(["CPU and memory", s.resources.cpu === null && s.resources.memory === null ? "not declared"
     : `${s.resources.cpu ?? "—"} core${s.resources.cpu === 1 ? "" : "s"} · ${s.resources.memory ? bytes(s.resources.memory) : "—"}`]);
   facts.push(["Replicas", String(s.replicas)]);

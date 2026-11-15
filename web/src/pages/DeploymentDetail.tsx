@@ -5,11 +5,12 @@ import { Link, useNavigate, useParams } from "react-router";
 import { AdvisorBanner } from "../components/Advisor";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
+import { MODEL_KIND, modelKind } from "../lib/fleet";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
 import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, spillRules, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
-import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
+import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
 import type { Deployment, DeploymentResponse, LiveCard, TryResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
@@ -56,7 +57,7 @@ export function DeploymentDetailPage() {
   return (
     <>
       <p className="crumb"><Link to="/models"><IconArrowLeft size={14} aria-hidden="true" /> Models</Link></p>
-      <PageHeader index={`03 · ${d ? TASK_LABEL[d.model.task] : "deployment"}`} title={d?.name ?? "Deployment"}
+      <PageHeader index={`03 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
         lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
         actions={d && w && canManage && (
           <>
@@ -84,7 +85,7 @@ export function DeploymentDetailPage() {
             <span className="small">{d.pinned ? <>Pinned to <span className="mono">{d.pinned.name ?? `machine ${d.pinned.id}`}</span></> : <span className="muted">Machine: automatic</span>}</span>
             {d.estimate.device === "gpu" && <span className="small">{d.params.share === "vram" ? "Shares VRAM" : <span className="muted">Exclusive GPU</span>}</span>}
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
-            <span className="small">Workload <Link className="mono" to={`/workloads/${w.id}`}>{w.name}</Link></span>
+            <span className="small">Runs as workload <Link className="mono" to={`/workloads/${w.id}`}>{w.name}</Link></span>
           </div>
           <Gateway d={d} />
           <section className="panel" aria-labelledby="replicas-title">

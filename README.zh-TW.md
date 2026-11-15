@@ -13,12 +13,12 @@
 **[使用指南](docs/guide/zh-TW/README.md)** · **[English](README.md)** · **[發展藍圖](ROADMAP.zh-TW.md)** ·
 **[變更紀錄](CHANGELOG.md)**（英文）
 
-![Models 頁面：一台 CPU 機器上的四個部署（對話、看圖對話、圖片生成、文字轉語音），都是 healthy，可以在 /v1 呼叫](docs/images/console-models.png)
+![Models 頁面：一台 CPU 機器上的四個部署，依種類分組（對話、多模態對話、文字轉語音、圖片），都已就緒，可以在各自的 /v1 路徑呼叫](docs/images/console-models.png)
 
 ## ✨ 主要功能
 
 - **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本、服務與任務；AMD
-  顯示卡使用 ROCm 或 Vulkan 版本。
+  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署和工作負載佔用。
 - **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。
 - **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量，副本之間會自動容錯移轉。
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
@@ -98,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 
 1. 開啟 `https://192.168.1.20:7860/setup`，輸入設定權杖，建立擁有者。接著開啟 **Trust this server**，在你的裝置上安裝 CA。
 2. **Machines → Add a machine**，在機器上執行那行指令。幾秒內它就會出現。
-3. **Models → Catalog and recipes → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
+3. **Models → Model library → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
 4. **API keys → New key**。在要呼叫模型的電腦上取得 CA 檔案和 SDK：
 
    ```bash

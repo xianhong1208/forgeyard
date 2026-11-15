@@ -13,6 +13,7 @@ import { DeploymentDetailPage } from "./pages/DeploymentDetail";
 import { DeploymentEditPage } from "./pages/DeploymentEdit";
 import { GetStartedPage, HomePage } from "./pages/GetStarted";
 import { GuidePage, GuideRedirect } from "./pages/Guide";
+import { MachineDetailPage } from "./pages/MachineDetail";
 import { MachinesPage } from "./pages/Machines";
 import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
@@ -67,6 +68,7 @@ export default function App() {
         <Route index element={<HomePage />} />
         <Route path="/start" element={<GetStartedPage />} />
         <Route path="/machines" element={<MachinesPage />} />
+        <Route path="/machines/:id" element={<MachineDetailPage />} />
         <Route path="/workloads" element={<WorkloadsPage />} />
         <Route path="/workloads/new" element={<WorkloadNewPage />} />
         <Route path="/workloads/:id" element={<WorkloadDetailPage />} />
