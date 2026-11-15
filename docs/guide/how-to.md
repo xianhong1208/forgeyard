@@ -311,7 +311,7 @@ A machine that cannot reach the registry (no internet access, or a DNS filter th
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
 the deployment stay as they are.
 
-1. **Find the image.** On **Models → Catalog and recipes**, open **Machine without registry access:
+1. **Find the image.** On **Models → Model library**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
    ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
@@ -697,7 +697,7 @@ to download them, and one token for the whole server is enough:
 
 1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
    **Settings → Access Tokens**, make a token with *Read* access.
-2. Admins: open **Models → Catalog**. Under **Model sources**, paste it into **Hugging Face token**
+2. Admins: open **Models → Model library**. Under **Model sources**, paste it into **Hugging Face token**
    and choose **Save token**. It is stored encrypted with the server's secret key and never shown
    again, only its last four characters.
 3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
@@ -812,7 +812,7 @@ From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-
 
 ## Restrict GPUs on a shared machine
 
-1. Open **Machines**, find the machine, choose **Change GPU access**.
+1. Open **Machines**, open the machine, choose **Change GPU access**.
 2. Tick only the cards Forgeyard may use, for example cards 2 and 3, and choose **Save**.
 
 From then on:

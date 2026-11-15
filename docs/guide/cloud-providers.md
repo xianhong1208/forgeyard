@@ -86,11 +86,11 @@ Forgeyard drops nothing from requests to it.
 To let a deployment spill to the cloud when it is busy or down:
 
 1. Open the deployment and choose **Routing and cloud spill**. You can also go to **Models**, then
-   **Routes and cloud**.
+   **Serving**.
 2. **Add a tier**, and add the provider's model to it.
 3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save routing**.
 
-To serve a cloud model under a name of its own, choose **Models**, then **Routes and cloud**, then
+To serve a cloud model under a name of its own, choose **Models**, then **Serving**, then
 **New route**. Give it the name clients will send as `model`, and add the provider's model. Only
 keys whose cloud setting is **Allowed** see such a route.
 

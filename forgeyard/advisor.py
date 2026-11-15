@@ -670,9 +670,9 @@ def gated_without_token(ctx: Context) -> Iterator[Finding]:
                       f"{d.name} needs a Hugging Face token" if refused else f"{d.name} may not download: no Hugging Face token",
                       f"{m.name} is gated on Hugging Face, and neither the server nor this deployment has a token"
                       + (", so its download was refused." if refused else ": its download will be refused.")
-                      + " Set the server's token under Models → Model sources (after accepting the model's licence on "
+                      + " Set the server's token under Models → Model library → Model sources (after accepting the model's licence on "
                       "Hugging Face with that account), or give the deployment its own.",
-                      "/models?tab=catalog", "Set the token", scope=f"deployment:{d.id}",
+                      "/models?tab=library", "Set the token", scope=f"deployment:{d.id}",
                       pages=("models", f"deployment:{d.id}"))
 
 

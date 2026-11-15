@@ -50,11 +50,11 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 讓某個部署在忙碌或停擺時溢出到雲端：
 
-1. 打開這個部署，選 **Routing and cloud spill**。也可以到 **Models** 的 **Routes and cloud** 分頁。
+1. 打開這個部署，選 **Routing and cloud spill**。也可以到 **Models** 的 **Serving** 分頁。
 2. 按 **Add a tier**，把供應商的模型加進去。
 3. 選好規則（請見[請求何時溢出](#when-a-request-spills)），按 **Save routing**。
 
-要用自己的名稱提供雲端模型，請到 **Models** 的 **Routes and cloud**，選 **New route**。填入用戶端會以 `model` 送出的名稱，再加入供應商的模型。只有雲端設定為 **Allowed** 的金鑰看得到這種路由。
+要用自己的名稱提供雲端模型，請到 **Models** 的 **Serving**，選 **New route**。填入用戶端會以 `model` 送出的名稱，再加入供應商的模型。只有雲端設定為 **Allowed** 的金鑰看得到這種路由。
 
 每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
 

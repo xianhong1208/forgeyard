@@ -1,5 +1,5 @@
-import { IconBox, IconPlayerPlay, IconPlus, IconTemplate } from "@tabler/icons-react";
-import { useEffect } from "react";
+import { IconArrowRight, IconBox, IconPlayerPlay, IconPlus, IconTemplate } from "@tabler/icons-react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import { HelpLink } from "../components/HelpLink";
@@ -80,12 +80,71 @@ export function WorkloadsPage() {
       {list && list.length > 0 && (
         <>
           <Totals list={list} />
-          <div className="workloads">
-            {list.map((w) => <WorkloadCard key={w.id} w={w} />)}
-          </div>
+          <Groups list={list} />
         </>
       )}
     </>
+  );
+}
+
+// How many model workloads show before "… and N more".
+export const MODEL_WORKLOADS_SHOWN = 8;
+
+// 1.4 (#36): the workloads people made, then the ones model deployments made (managed from Models,
+// listed so everything that holds a card is here).
+function Groups({ list }: { list: Workload[] }) {
+  const own = list.filter((w) => !w.deployment);
+  const models = list.filter((w) => w.deployment);
+  const [all, setAll] = useState(false);
+  const shown = all ? models : models.slice(0, MODEL_WORKLOADS_SHOWN);
+  return (
+    <>
+      <section className="wl-group" aria-labelledby="wl-own">
+        <div className="wl-group-head">
+          <h2 id="wl-own"><IconBox size={16} aria-hidden="true" /> Your workloads <span className="muted">· {own.length}</span></h2>
+        </div>
+        {own.length ? (
+          <div className="workloads">{own.map((w) => <WorkloadCard key={w.id} w={w} />)}</div>
+        ) : (
+          <p className="muted small wl-group-empty">None yet: the workloads below were created by model deployments.</p>
+        )}
+      </section>
+      {models.length > 0 && (
+        <section className="wl-group" aria-labelledby="wl-models">
+          <div className="wl-group-head">
+            <h2 id="wl-models">Created by model deployments <span className="muted">· {models.length}</span></h2>
+          </div>
+          <p className="small muted wl-group-lead">Managed from Models: stop, change or delete them through their deployment. They are listed so you can see everything that holds a card.</p>
+          <ul className="wl-rows">
+            {shown.map((w) => <ModelWorkloadRow key={w.id} w={w} />)}
+          </ul>
+          {models.length > MODEL_WORKLOADS_SHOWN && (
+            <button type="button" className="btn btn-quiet btn-small" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+              {all ? "Show fewer" : `… and ${models.length - MODEL_WORKLOADS_SHOWN} more`}
+            </button>
+          )}
+        </section>
+      )}
+    </>
+  );
+}
+
+function ModelWorkloadRow({ w }: { w: Workload }) {
+  const tone = STATUS_TONE[w.status];
+  const where = w.replica_list.filter((r) => r.machine).map((r) => `${r.machine!.name} ${r.gpus.length ? `GPU ${gpuLabel(r)}` : "CPU"}`);
+  return (
+    <li className="wl-row">
+      <span className="wl-row-name">
+        <span className={`dot dot-tone-${tone}`} aria-hidden="true" />
+        <Link to={`/workloads/${w.id}`} className="mono">{w.name}</Link>
+        <span className={`chip chip-tone-${tone}`}>{w.status === "running" ? `${w.ready}/${w.replicas} ready` : w.status}</span>
+        {where.length > 0 && <span className="small muted">{where.join(", ")}</span>}
+      </span>
+      <span className="wl-from">
+        created by deployment <Link className="mono" to={`/models/deployments/${w.deployment!.id}`}>{w.deployment!.name}</Link>
+        <IconArrowRight size={13} aria-hidden="true" />
+      </span>
+    </li>
   );
 }
 
@@ -117,9 +176,6 @@ function WorkloadCard({ w }: { w: Workload }) {
           <span className="chip">{w.runtime}</span>
           {w.gateway?.exposed && <span className="chip chip-tone-run mono" title="Exposed behind the gateway">{w.gateway.path}</span>}
           {w.kind === "service" && <span className="muted small">{w.ready}/{w.replicas} ready</span>}
-          {w.deployment && (
-            <span className="small wl-origin">created by deployment <Link className="mono" to={`/models/deployments/${w.deployment.id}`}>{w.deployment.name}</Link></span>
-          )}
         </div>
         <span className="muted small" title={exact(w.created_at)}>
           {w.created_by ? `${w.created_by} · ` : ""}{when(w.created_at)}

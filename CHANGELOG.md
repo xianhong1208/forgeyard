@@ -28,9 +28,33 @@ version until 1.0.
 - **A model workload names the deployment that created it** (part of #36): *created by deployment
   X* with a link on the Workloads list and on the workload's page, and the deployment links to its
   workload. `GET /api/workloads` gives `deployment: {id, name}`.
+- **Machines and Models redesigned** (#34). **Machines** is one tile per machine with a mark for its
+  kind (NVIDIA GPU, AMD GPU, AMD APU, CPU only), its cards as slots filled from the bottom (what
+  Forgeyard reserved, other use, free), free memory, how many deployments and workloads run there
+  and their names, heartbeat and agent version, under a count of machines per kind. A machine has
+  its own page (`/machines/<id>`): a memory map that splits each card by what holds it, named and
+  with what it reserved; what runs there, with **Deploy here** and **New workload here**; GPU access
+  and runtimes; the agent's details; **Revoke** and **Remove**; and only that machine's setup-health
+  findings. **Models → Deployments** groups deployments by kind (chat, multimodal chat, embeddings,
+  rerank, speech to text, text to speech, images, video), each with its icon, a line on what it does
+  and its path at `/v1`; a row says where the deployment runs (machine and cards), its memory and its
+  state, and any download, wait or placement note. `GET /api/deployments` gives the model's
+  `modalities`, so a chat model that reads images is listed as multimodal chat.
+- **Workloads made by deployments are listed apart** (#36): **Your workloads**, then **Created by
+  model deployments**, each with *created by deployment X →* (eight shown, then *… and N more*). A
+  deployment's workload page opens with *Created by deployment X* and **Open the deployment**; the
+  deployment's page says *Runs as workload X*.
 
 ### Changed
 
+- **The Models tabs are Deployments, Serving and Model library** (#34): *Routes and cloud* is now
+  **Serving** and *Catalog and recipes* is **Model library**. Links to the old tabs
+  (`/models?tab=routes`, `/models?tab=catalog`) open the new ones.
+- **A deployment's workload is stopped, started and deleted only through its deployment** (#36):
+  `POST /api/workloads/<id>/stop`, `…/start` and `DELETE /api/workloads/<id>` answer `409
+  managed_by_deployment` (naming the deployment) for a model deployment's workload, and its page has
+  no such buttons. Deleting the workload used to delete the deployment and its route with it;
+  stopping it left the deployment's page out of step.
 - **Revoked keys leave the budget lists and alerts** (part of #36): Usage → Cost (*Budgets this
   month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
@@ -45,6 +69,8 @@ version until 1.0.
 
 ### Fixed
 
+- **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model
+  library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
 - **The Python examples with the OpenAI SDK work with openai 3.51 and later.** That release builds the
   SDK on `httpx2` and no longer installs `httpx`, so `import httpx` in the quick start failed after a
   plain `pip install openai`. The quick start, the troubleshooting page, `docs/https-and-trust.md` and

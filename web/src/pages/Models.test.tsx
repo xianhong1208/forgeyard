@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router";
 
 import App from "../App";
+import machinesFixture from "../test/machines.json";
 import { AuthProvider } from "../auth";
 import type { CatalogResponse, Deployment, EstimateResponse, Replica, Workload } from "../lib/types";
 
@@ -23,7 +24,7 @@ function server(route: (url: string, init?: RequestInit) => Reply | undefined, u
 
 function Where() {
   const l = useLocation();
-  return <div data-testid="where">{l.pathname}</div>;
+  return <div data-testid="where" data-search={l.search}>{l.pathname}</div>;
 }
 
 function mount(path: string) {
@@ -85,16 +86,31 @@ afterEach(() => {
 });
 
 describe("models", () => {
-  it("FY-WEB-048 deployments list a replica's download progress, machine, GPU and address", async () => {
-    server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [dep(rep())], server_time: "", can_manage: true } }
+  it("FY-WEB-048 deployments are grouped by kind; a row says where it runs, its memory, its state and its download", async () => {
+    const vl: Deployment = { ...dep(rep({ state: "healthy", reason: null, download: null })), id: 4, name: "vision",
+      model: { ...dep(rep()).model, name: "qwen3-vl-8b", modalities: ["image", "video"] } };
+    vl.workload = { ...vl.workload, id: 12 };
+    server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [dep(rep()), vl], server_time: "", can_manage: true } }
+      : url === "/api/machines" ? { status: 200, body: { ...machinesFixture, machines: [{ ...machinesFixture.machines[0], id: 2, name: "a100" }] } }
       : url === "/api/models" ? { status: 200, body: catalog } : undefined);
     mount("/models");
-    const card = await screen.findByRole("article", { name: "Deployment chat" });
-    expect(within(card).getByText("Downloading the model: 2 GiB of 8 GiB")).toBeTruthy();
-    expect(within(card).getByText("GPU #4")).toBeTruthy();
-    expect(within(card).getByRole("link", { name: "10.0.0.5:31800" })).toBeTruthy();
-    expect(within(card).getByText(/14.38 GiB per GPU/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Deploy a model" })).toBeTruthy();
+    const chat = await screen.findByRole("region", { name: "Chat · 1" });
+    expect(within(chat).getByText("/v1/chat/completions")).toBeTruthy();
+    expect(within(chat).getByText("Text in, text out")).toBeTruthy();
+    const row = within(chat).getByRole("group", { name: "Deployment chat" });
+    expect(within(row).getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/models/deployments/3");
+    expect(within(row).getByText("Downloading the model: 2 GiB of 8 GiB")).toBeTruthy();
+    const where = within(row).getByRole("link", { name: /a100/ });
+    expect(where.getAttribute("href")).toBe("/machines/2");
+    expect(where.textContent).toContain("#4");
+    expect(within(where).getByRole("img", { name: "NVIDIA GPU" })).toBeTruthy();
+    expect(within(row).getByText("14.38 GiB / GPU")).toBeTruthy();
+    expect(within(row).getByText("starting")).toBeTruthy();
+    // A chat model that reads images is multimodal chat; kinds with none are named once.
+    const mm = screen.getByRole("region", { name: "Multimodal chat · 1" });
+    expect(within(mm).getByText("1/1 ready")).toBeTruthy();
+    expect(screen.getByText("None deployed yet:").parentElement?.textContent).toContain("Embeddings");
+    expect(screen.getAllByRole("link", { name: "Deploy a model" }).length).toBe(2);
   });
 
   it("FY-WEB-049 the deploy form shows the live estimate and refuses what does not fit, by how much", async () => {
@@ -167,7 +183,7 @@ describe("models", () => {
       placement_note: note })), events: [], server_time: "", can_manage: true } } : undefined);
     mount("/models/deployments/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
-    expect(screen.getByText("Workload").closest("span")?.querySelector("a")?.getAttribute("href")).toBe("/workloads/11");
+    expect(screen.getByText("Runs as workload").closest("span")?.querySelector("a")?.getAttribute("href")).toBe("/workloads/11");
     const row = within(screen.getByRole("table")).getByText("a100").closest("td") as HTMLElement;
     expect(within(row).getByText(note)).toBeTruthy();
   });
@@ -195,7 +211,7 @@ describe("models", () => {
         task_hint: "chat", size_bytes: 8 * GIB, file_count: 12, config: { layers: 36, kv_heads: 8, max_context: 40960, dtype: "bfloat16" }, weights: { params: { BF16: 4022468096 } } } } };
       return undefined;
     });
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     // An empty catalog opens Add a model by itself; a source can still be typed in.
     fireEvent.click(await screen.findByRole("button", { name: "Enter a source" }));
     fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Qwen/Qwen3-4B" } });
@@ -222,7 +238,7 @@ describe("models", () => {
     ] };
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
       : url === "/api/models" ? { status: 200, body: { ...catalog, recipes: [recipe] } } : undefined);
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     const card = await screen.findByRole("article", { name: "Recipe vllm" });
     fireEvent.click(within(card).getByText("Machine without registry access: load the image"));
     const save = within(card).getByLabelText("Save command for cuda, pooling");
@@ -242,5 +258,26 @@ describe("models", () => {
     expect(within(card).getByText(/No ids are recorded for this image/)).toBeTruthy();
     expect(within(card).queryByText(/so this recipe works offline as it is/)).toBeNull();
     expect(within(card).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
+  });
+
+  it("FY-WEB-226 the tabs are Deployments, Serving and Model library; the old addresses land on the new tabs", async () => {
+    server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
+      : url === "/api/models" ? { status: 200, body: catalog }
+        : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes: [] } } : undefined);
+    const view = mount("/models?tab=routes");
+    expect((await screen.findByRole("tab", { name: "Serving" })).getAttribute("aria-selected")).toBe("true");
+    await screen.findByRole("tab", { name: "Deployments (0)" });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (0)", "Serving", "Model library"]);
+    expect(await screen.findByText("Model names at /v1")).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving"));
+    view.unmount();
+    mount("/models?tab=catalog");
+    expect((await screen.findByRole("tab", { name: "Model library" })).getAttribute("aria-selected")).toBe("true");
+    expect(await screen.findByRole("heading", { name: "Recipes" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=library"));
+    fireEvent.click(screen.getByRole("tab", { name: "Serving" }));
+    expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving");
+    fireEvent.click(screen.getByRole("tab", { name: "Deployments (0)" }));
+    expect(screen.getByTestId("where").dataset.search).toBe("");
   });
 });

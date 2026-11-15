@@ -33,10 +33,20 @@ takes them over. That is why the installed service uses `KillMode=process`.
 The agent reads its settings from `/etc/forgeyard/agent.toml`, `FORGEYARD_*` environment variables
 and flags ([all of them](reference.md#agent-settings)).
 
+The **Machines** page shows one tile per machine, with a mark for its kind: **NVIDIA GPU**,
+**AMD GPU**, **AMD APU** (an AMD GPU that shares the system memory, such as the Radeon 8060S) or
+**CPU only**. Its cards are a row of slots filled from the bottom: what Forgeyard reserved, then
+other use (other programs on the card, and Forgeyard workloads that declare no memory), then free.
+The tile also says how much memory is free, how many deployments and workloads run there, and their
+names. Choose a machine for its own page: a **memory map** that splits each card by what holds it
+(named, with what it reserved), what runs there, its GPU access and runtimes, and its agent. Admins
+revoke or remove a machine there.
+
 ## GPU access
 
 By default Forgeyard may use every GPU of a machine. On a machine you share with other people or
-programs, an admin chooses on **Machines** → **Change GPU access** which cards Forgeyard may use. A
+programs, an admin chooses on the machine's page (**Machines** → the machine) → **Change GPU access**
+which cards Forgeyard may use. A
 card outside the list is never given to anything Forgeyard runs.
 
 - A GPU given to an exclusive replica belongs to it alone.
@@ -90,6 +100,12 @@ Isolation, in short:
 Only admins and operators create workloads, because whoever can create one can run code on the
 machines. Model deployments are workloads too; most people only deploy models.
 
+The **Workloads** page lists **Your workloads** first, then **Created by model deployments**: each
+of those names the deployment that made it and links to it (eight are shown, then *… and N more*).
+A deployment's workload is changed, stopped, started and deleted through its deployment: its own
+page has no **Stop** or **Delete**, and the API refuses them with `409 managed_by_deployment`, so a
+deployment never loses its workload while its route stays behind.
+
 ## Workloads at /x/
 
 A service workload can be **exposed** behind the gateway: programs then call its own HTTP API at
@@ -119,6 +135,14 @@ segmentation, depth), on Forgeyard's own image with permissively licensed models
 
 ## Models, recipes and estimates
 
+The **Models** page has three tabs. **Deployments** groups what runs by kind (chat, multimodal
+chat, embeddings, rerank, speech to text, text to speech, images, video), each with the path it
+answers at under `/v1`, and one line per deployment: where it runs (machine and cards), its memory
+and its state. **Serving** is the model names clients send to `/v1` and the cloud tiers behind them
+([routes](#cloud-providers-and-tiers)). **Model library** is what you can deploy: the catalog, the
+recipes and, for admins, the model sources. Links to the names before 1.4 (`?tab=routes`,
+`?tab=catalog`) still open the right tab.
+
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
@@ -141,7 +165,8 @@ segmentation, depth), on Forgeyard's own image with permissively licensed models
 
 A **deployment** runs one model with one recipe, as one or more replicas. Its replicas run as a
 workload of runtime `model`, which the Workloads list shows as *created by deployment X*; the
-deployment and its workload link to each other. Forgeyard:
+deployment says which workload it runs as, and the workload's page opens with *Created by
+deployment X* and a way back. Forgeyard:
 
 1. places each replica where it fits. Among the machines that fit, in this order:
    - a machine that **could not reach** a source the replica would download from there (the model's

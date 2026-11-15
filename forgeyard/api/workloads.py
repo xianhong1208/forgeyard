@@ -116,12 +116,7 @@ def workload_out(w: Workload, caller: Caller, *, detail: bool = False) -> dict:
         "replica_list": [replica_out(r) for r in w.replicas], "gateway": gateway_out(w),
     }
     if w.runtime == "model":
-        from sqlalchemy.orm import object_session
-
-        from forgeyard.db import Deployment
-
-        db = object_session(w)
-        dep = db.execute(select(Deployment.id, Deployment.name).where(Deployment.workload_id == w.id)).first() if db else None
+        dep = deployment_of(w)
         out["deployment_id"] = dep.id if dep else None
         # 1.4: the deployment that created this workload, for "created by deployment X" on its pages.
         out["deployment"] = {"id": dep.id, "name": dep.name} if dep else None
@@ -134,6 +129,28 @@ def _get(db: DbSession, workload_id: int) -> Workload:
     if w is None:
         raise fail(404, "not_found", "No such workload.")
     return w
+
+
+def deployment_of(w: Workload):
+    """(id, name) of the deployment that created this model workload, or None."""
+    if w.runtime != "model":
+        return None
+    from sqlalchemy.orm import object_session
+
+    from forgeyard.db import Deployment
+
+    db = object_session(w)
+    return db.execute(select(Deployment.id, Deployment.name).where(Deployment.workload_id == w.id)).first() if db else None
+
+
+def _not_a_deployments(w: Workload, verb: str) -> None:
+    """1.4: a deployment's workload is stopped, started and deleted through its deployment, which also
+    keeps its route; here it is refused, saying where to go."""
+    dep = deployment_of(w)
+    if dep is not None:
+        raise fail(409, "managed_by_deployment",
+                   f"{w.name} was created by the deployment {dep.name}: {verb} the deployment instead (Models, {dep.name}).",
+                   deployment={"id": dep.id, "name": dep.name})
 
 
 def _events(db: DbSession, w: Workload, limit: int = 100) -> list[dict]:
@@ -248,7 +265,13 @@ def set_gateway(workload_id: int, body: Any = Body(...), caller: Caller = Depend
 
 
 @router.post("/{workload_id}/stop")
-def stop_workload(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+def stop_workload_route(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+    _not_a_deployments(_get(db, workload_id), "stop")
+    return stop_workload(workload_id, caller, db)
+
+
+def stop_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
+    """Stop it (also for its deployment: /api/deployments/{id}/stop)."""
     w = _get(db, workload_id)
     if w.desired_state != "running":
         raise fail(409, "already_stopped", "This workload is already stopped.")
@@ -262,7 +285,13 @@ def stop_workload(workload_id: int, caller: Caller = Depends(require_operator), 
 
 
 @router.post("/{workload_id}/start")
-def start_workload(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+def start_workload_route(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+    _not_a_deployments(_get(db, workload_id), "start")
+    return start_workload(workload_id, caller, db)
+
+
+def start_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
+    """Start it again (also for its deployment: /api/deployments/{id}/start)."""
     w = _get(db, workload_id)
     if w.desired_state == "running":
         raise fail(409, "already_running", "This workload is already running.")
@@ -286,6 +315,7 @@ def start_workload(workload_id: int, caller: Caller = Depends(require_operator),
 @router.delete("/{workload_id}")
 def delete_workload(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
     w = _get(db, workload_id)
+    _not_a_deployments(w, "delete")  # deleting only the workload would leave the deployment and its route behind
     nodes = {r.node_id for r in w.replicas if r.node_id is not None and not r.final}
     name = w.name
     db.delete(w)

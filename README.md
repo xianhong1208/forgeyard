@@ -18,7 +18,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
 ## ✨ Key features
 
 - **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas, services
-  and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds.
+  and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps
+  every card's memory to the deployments and workloads that hold it.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
@@ -112,7 +113,7 @@ The join token works once, within 15 minutes. AMD and CPU-only machines:
 1. Open `https://192.168.1.20:7860/setup`, enter the setup token and create the owner. Then open
    **Trust this server** and install the CA on your device.
 2. **Machines → Add a machine**, and run the command on the machine. It shows up within seconds.
-3. **Models → Catalog and recipes → Add a model**, pick a recommended model (for a CPU:
+3. **Models → Model library → Add a model**, pick a recommended model (for a CPU:
    *Qwen3 1.7B (GGUF, for the CPU)*), then **Deploy it** with the name `qwen`.
 4. **API keys → New key**. On the computer that calls the model, get the CA file and the SDK:
 

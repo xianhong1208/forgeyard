@@ -165,7 +165,7 @@ the **Manual** tab uses a Forgeyard checkout and a config file. AMD and CPU-only
 
 By default Forgeyard may use every GPU of the machine. On a machine you share with others:
 
-1. On **Machines**, find the machine and choose **Change GPU access**.
+1. On **Machines**, open the machine and choose **Change GPU access**.
 2. Tick the cards Forgeyard may use, and save.
 
 Cards outside the list are never given to anything Forgeyard runs; the page marks them *not for
@@ -173,7 +173,7 @@ Forgeyard*. Even with all cards allowed, saving the choice once ticks this step 
 
 ## 5. Add a recommended model
 
-1. Open **Models** → **Catalog and recipes** → **Add a model**.
+1. Open **Models** → **Model library** → **Add a model**.
 2. **Recommended** lists models known to work. Pick one that fits your machine:
    - a GPU with at least 8 GB free: **Qwen3 0.6B** (1.4 GB download);
    - only a CPU: **Qwen3 1.7B (GGUF, for the CPU)** (1.2 GB download, about 3 GB of RAM).

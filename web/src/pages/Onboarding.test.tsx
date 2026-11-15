@@ -197,7 +197,7 @@ describe("add a model", () => {
       if (url === "/api/models" && init?.method === "POST") return { status: 201, body: { model: { name: "qwen3-reranker-0.6b" } } };
       return undefined;
     });
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     expect(await screen.findByRole("heading", { name: "Qwen3" })).toBeTruthy();
     expect(screen.getByText("In the catalog as qwen-cpu")).toBeTruthy();
     const gemma = screen.getByText("Gemma 3 4B").closest("li")!;
@@ -230,7 +230,7 @@ describe("add a model", () => {
       }
       return undefined;
     });
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     const gemma = (await screen.findByText("Gemma 3 4B")).closest("li")!;
     await act(async () => fireEvent.click(within(gemma).getByRole("button", { name: "Choose" })));
     expect(await screen.findByText(/is gated or private/)).toBeTruthy();
@@ -258,7 +258,7 @@ describe("add a model", () => {
         if (url === "/api/models/inspect") return { status: 200, body: { ...inspected, meta: { ...inspected.meta, task_hint: "chat" } } };
         return undefined;
       });
-      mount("/models?tab=catalog");
+      mount("/models?tab=library");
       fireEvent.click(await screen.findByRole("button", { name: "Search Hugging Face" }));
       const searches = () => fetch.mock.calls.filter(([u]) => String(u).startsWith("/api/models/search")).map(([u]) => u);
       fireEvent.change(screen.getByLabelText("Search Hugging Face"), { target: { value: "q" } });
@@ -285,7 +285,7 @@ describe("add a model", () => {
     catalogServer((url) => (url.startsWith("/api/models/search")
       ? { status: 503, body: { detail: { code: "hub_unreachable", message: "Cannot reach Hugging Face from the server (no route). The recommended models still work; a model can also be added by its source." } } }
       : undefined));
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     fireEvent.click(await screen.findByRole("button", { name: "Search Hugging Face" }));
     fireEvent.change(screen.getByLabelText("Search Hugging Face"), { target: { value: "whisper" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Search" })));
@@ -298,7 +298,7 @@ describe("add a model", () => {
     catalogServer((url) => (url === "/api/models/inspect" ? { status: 200, body: { ...inspected, suggestion: { ...suggestion, fits: false,
       machines: [{ name: "a100", status: "online", fits: false, reason: "short", gpus: [], short_by: GIB }], summary: "Nothing can take a replica that needs 3.38 GiB per GPU. a100: short" } } }
       : undefined));
-    mount("/models?tab=catalog");
+    mount("/models?tab=library");
     const rr = (await screen.findByText("Qwen3 Reranker 0.6B")).closest("li")!;
     await act(async () => fireEvent.click(within(rr).getByRole("button", { name: "Choose" })));
     expect(await screen.findByText(/Nothing can take a replica that needs 3.38 GiB per GPU/)).toBeTruthy();
@@ -348,6 +348,6 @@ describe("empty pages say what to do", () => {
     catalogServer((url) => (url === "/api/machines" ? { status: 200, body: { machines: [], server_time: "", heartbeat_interval: 10, offline_after: 30, can_manage: true } } : undefined));
     mount("/models/deploy");
     expect(await screen.findByText(/The catalog is empty, so there is nothing to deploy yet/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Add a model to the catalog" }).getAttribute("href")).toBe("/models?tab=catalog");
+    expect(screen.getByRole("link", { name: "Add a model to the catalog" }).getAttribute("href")).toBe("/models?tab=library");
   });
 });

@@ -41,8 +41,11 @@ export const SEVERITY_LABEL: Record<Severity, string> = { error: "Error", warnin
 
 // The findings a page shows as its banner: those tagged with the page ("keys") or with one of its
 // objects ("route:4").
+// A machine's own page ("machine:3", 1.4) shows the findings about that machine and its cards.
 export function forPage(findings: Finding[], pages: string[]): Finding[] {
-  return findings.filter((f) => f.pages.some((p) => pages.includes(p)));
+  const machines = pages.filter((p) => p.startsWith("machine:")).map((p) => p.slice("machine:".length));
+  return findings.filter((f) => f.pages.some((p) => pages.includes(p))
+    || machines.some((id) => f.scope === `machine:${id}` || f.scope.startsWith(`gpu:${id}:`)));
 }
 
 // The worst severity among them, for the banner's tone.

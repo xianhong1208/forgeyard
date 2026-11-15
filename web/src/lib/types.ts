@@ -358,7 +358,9 @@ export type LiveCard = { replica: number; machine: string | null; key: string; i
 
 export type Deployment = {
   id: number; name: string; recipe: string; served_name: string; params: Record<string, unknown>;
-  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number };
+  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number;
+    // 1.4: what it takes in chat besides text (null: unknown), so a chat model can be listed as multimodal.
+    modalities?: Medium[] | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];

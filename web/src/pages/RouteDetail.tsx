@@ -35,7 +35,7 @@ export function RouteDetailPage() {
   if (!isNew && !r) {
     return (
       <>
-        <p className="crumb"><Link to="/models?tab=routes"><IconArrowLeft size={14} aria-hidden="true" /> Routes</Link></p>
+        <p className="crumb"><Link to="/models?tab=serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>
         {route.error ? <Notice tone="error">{route.error}</Notice> : <p className="muted">Loading…</p>}
       </>
     );
@@ -100,14 +100,14 @@ function RouteEditor({ r, admin, opts, reload }: { r: RouteInfo | null; admin: b
     if (!r || !window.confirm(`Delete the route ${r.served_name}? Requests for it get 404 from then on.`)) return;
     try {
       await api(`/routes/${r.id}`, { method: "DELETE" });
-      navigate("/models?tab=routes", { replace: true });
+      navigate("/models?tab=serving", { replace: true });
     } catch (err) { setMsg({ tone: "error", text: errorText(err) }); }
   };
 
   const title = isNew ? "New route" : r?.served_name ?? "Route";
   return (
     <>
-      <p className="crumb"><Link to="/models?tab=routes"><IconArrowLeft size={14} aria-hidden="true" /> Routes</Link></p>
+      <p className="crumb"><Link to="/models?tab=serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>
       <PageHeader index="03 · Models · Route" title={title}
         lead={isNew ? "A model name of its own: a cloud model behind Forgeyard's keys and limits, or several deployments and providers in tiers."
           : r ? `${API_KIND[r.api] ?? r.api}${r.deployment_id ? " · the route of a deployment" : " · made by an admin"}` : undefined}
@@ -224,7 +224,7 @@ function RouteEditor({ r, admin, opts, reload }: { r: RouteInfo | null; admin: b
               <button type="submit" className="btn btn-primary" disabled={busy || (isNew && !served.trim()) || draft.flat().length === 0}>
                 {busy ? "Saving…" : isNew ? "Create route" : "Save routing"}
               </button>
-              <Link className="btn btn-quiet" to="/models?tab=routes">Cancel</Link>
+              <Link className="btn btn-quiet" to="/models?tab=serving">Cancel</Link>
             </div>
           )}
         </form>
