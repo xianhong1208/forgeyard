@@ -11,7 +11,8 @@
 
 ```bash
 uv sync
-uv run --no-sync python -m pytest -q          # 後端測試（SQLite）
+uv run --no-sync python -m pytest -q          # 後端測試（SQLite）；卡住的測試 5 分鐘後失敗，
+                                               # 並印出每個執行緒的 stack（pytest-timeout）
 uv run --no-sync ruff check .
 TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db uv run --no-sync python -m pytest -q
                                                # 同一套測試跑在 PostgreSQL 上——會清空該資料庫

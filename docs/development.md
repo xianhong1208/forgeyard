@@ -13,7 +13,8 @@ build the container images.
 
 ```bash
 uv sync
-uv run --no-sync python -m pytest -q          # backend tests (SQLite)
+uv run --no-sync python -m pytest -q          # backend tests (SQLite); a test that hangs fails after 5 min
+                                               # with every thread's stack (pytest-timeout)
 uv run --no-sync ruff check .
 TEST_DATABASE_URL=postgresql+psycopg://user:pw@host/db uv run --no-sync python -m pytest -q
                                                # same suite on PostgreSQL — WIPES that database
