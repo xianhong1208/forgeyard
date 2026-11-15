@@ -166,7 +166,8 @@ describe("a key's workloads setting", () => {
     });
     mount("/keys");
     fireEvent.click(await screen.findByRole("button", { name: /New key/ }));
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "vision" } });
+    // The button is in the page header at once; the form opens once the keys have arrived.
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "vision" } });
     const more = screen.getByText(/Workloads at \/x\//, { selector: "summary" }).closest("details")!;
     expect(more.open).toBe(false);
     expect(within(more).getByLabelText(/^None/)).toHaveProperty("checked", true);
@@ -199,8 +200,11 @@ describe("a key's workloads setting", () => {
     fireEvent.click(within(form).getByLabelText(/^None/));
     fireEvent.click(within(form).getByRole("button", { name: "Save limits" }));
     await waitFor(() => expect(patches).toEqual([{ workloads: "none", workload_list: null }]));
+    // Saving closes the form when the answer comes; reopen it only then (a click before it would toggle the
+    // still-open form shut).
+    expect(await screen.findByText("Limits, cloud, budget and workloads of laptop saved.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Limits" }));
-    fireEvent.click(screen.getByRole("button", { name: /Unlock workloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Unlock workloads/ }));
     await waitFor(() => expect(patches).toEqual([{ workloads: "none", workload_list: null }, { workloads: null }]));
   });
 });

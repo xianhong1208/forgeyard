@@ -20,6 +20,7 @@ from forgeyard.security import crypto, tls
 from tests.conftest import OWNER, SETUP_TOKEN
 from tests.test_agent import LiveServer, _http
 from tests.tls_helpers import LiveTLS, ca_of, free_port, https
+from tests.waits import until
 
 
 def test_fy_trust_001_fingerprint_formats():
@@ -145,7 +146,8 @@ def test_fy_trust_003_a_machine_in_the_middle_with_another_ca_is_refused(tls_ser
             agent = Agent(mitm.url, "fym_x", SimulatedInventory("nvidia-a100x8"), backoff=Backoff(base=0.05, cap=0.1),
                           ca_pem=real_ca)
             run = asyncio.create_task(agent.run())
-            await asyncio.sleep(0.6)
+            # At least one attempt refused (it keeps trying with a short backoff), not a fixed time.
+            await until(lambda: "is not the server this agent trusts" in caplog.text, "the refusal in the log")
             agent.stop()
             await asyncio.wait_for(run, 5)
             return agent.sessions
@@ -190,7 +192,7 @@ def test_fy_trust_004_an_http_agent_upgrades_with_trust_and_keeps_its_credential
             agent = Agent(plain_url, joined["credential"], SimulatedInventory("nvidia-a100x8"),
                           backoff=Backoff(base=0.05, cap=0.1))
             run = asyncio.create_task(agent.run())
-            await asyncio.sleep(0.8)
+            await until(lambda: "forgeyard agent trust --server" in caplog.text, "the advice in the log")
             agent.stop()
             await asyncio.wait_for(run, 5)
             return agent.sessions

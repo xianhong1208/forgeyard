@@ -23,6 +23,7 @@ from tests.conftest import add_user, sign_in
 from tests.gateway_helpers import api_client, new_key, set_state
 from tests.test_cost import GPT
 from tests.test_routing import _Fixed, background, chat, in_flight_soon, mixed  # noqa: F401  (the fixture)
+from tests.waits import wait_until
 
 PW = "quiet-meadow-4821"
 P = pricing.PICOS_PER_MICRO
@@ -553,19 +554,22 @@ def test_fy_bdg_019_a_failed_cloud_attempt_holds_nothing_while_waiting_for_local
     after all, and its reservation is released at once, not held while it waits."""
     m = priced
     m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": 1_000_000})
-    m.engine.hold = 1.2
+    m.engine.hold = 2.0
     t, first = background(lambda: send(m))
     in_flight_soon()
     m.cloud.status = 500
     t2, second = background(lambda: send(m))
-    deadline = time.monotonic() + 5
-    while len(m.cloud.posts()) < 1 and time.monotonic() < deadline:
+    wait_until(lambda: m.cloud.posts(), "the cloud attempt")
+    # The cloud answers 500 and the request goes back to wait for the local replica, still busy with the
+    # first: its reservation must be gone while it waits (a fixed 0.2 s was sometimes too short to see it go
+    # on a busy machine). Held until the first request is done would fail here.
+    deadline = time.monotonic() + 10
+    while ledger._held and t.is_alive() and time.monotonic() < deadline:
         time.sleep(0.01)
-    time.sleep(0.2)
-    held_while_waiting = dict(ledger._held)
+    held_while_waiting, still_waiting = dict(ledger._held), t.is_alive()
     t.join()
     t2.join()
-    assert held_while_waiting == {}
+    assert held_while_waiting == {} and still_waiting
     assert second["r"].status_code == 200 and second["r"].headers["x-forgeyard-target"] == "local:chat#0"
 
 

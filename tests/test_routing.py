@@ -18,6 +18,7 @@ from tests.cloud_helpers import (CLOUD_KEY, FakeCloud, add_provider, cloud_key, 
                                  set_tiers)
 from tests.gateway_helpers import FakeEngine, api_client, free_port, make_ready, set_state
 from tests.test_scheduler import MODELS, deploy, seed_catalog
+from tests.waits import wait_until
 from tests.workload_helpers import make_node
 
 KEYS = MODELS + ("replica_keys",)
@@ -62,9 +63,7 @@ def events(text: str) -> list:
 
 
 def in_flight_soon(n: int = 1) -> None:
-    deadline = time.monotonic() + 5
-    while sum(balancer.inflight.values()) < n and time.monotonic() < deadline:
-        time.sleep(0.01)
+    wait_until(lambda: sum(balancer.inflight.values()) >= n, f"{n} request(s) in flight")
 
 
 def background(fn):

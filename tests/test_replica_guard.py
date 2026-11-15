@@ -23,6 +23,7 @@ from forgeyard.agent.workloads.records import RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
 from tests.gateway_helpers import free_port
 from tests.guard_helpers import KEY, GuardThread, OpenEngine
+from tests.waits import wait_until
 from tests.workload_helpers import FakeDocker, container, converge, desired, replica, cleanup_world, world_dir
 
 OPEN_PATHS = ["/invocations", "/rerank", "/pooling", "/score", "/classify", "/tokenize", "/v1/chat/completions",
@@ -167,8 +168,7 @@ def test_fy_rg_005_a_client_that_goes_away_closes_the_engines_connection(guarded
     s.close()
     assert engine.gone.wait(5)
     assert time.monotonic() - t0 < 3
-    time.sleep(0.2)
-    assert g.call(_conns(g.guard)) == 0
+    wait_until(lambda: g.call(_conns(g.guard)) == 0, "the guard to drop the connection", timeout=5)
 
 
 async def _conns(guard):
@@ -532,10 +532,10 @@ def test_fy_rg_014_threads_do_not_leak():
     port = g.port
     g.close()
     engine.close()
-    time.sleep(0.2)
+    # Threads that were told to end may take a moment to do so on a busy machine; one that never ends fails.
+    wait_until(lambda: threading.active_count() <= before + 1, "the guard's threads to end", timeout=5)
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
-    assert threading.active_count() <= before + 1
 
 
 # ------------------------------------------------------------------ the server's side

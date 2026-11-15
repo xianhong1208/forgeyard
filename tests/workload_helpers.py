@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from forgeyard.db import new_session
+from forgeyard.db import new_session, utcnow
 from forgeyard.machines import store
 from forgeyard.machines.messages import InventoryIn
 from tests.leaks import cleanup as cleanup_world, world_dir  # noqa: F401 (the tests import them from here)
@@ -31,7 +31,9 @@ def gpus_of(name: str) -> list[dict]:
 
 def make_node(name: str = "box", inv: str = "nvidia-a100x8", *, status: str = "online", allowlist=None,
               runtime_info: Optional[dict] = None, features=("workloads",)) -> int:
-    """A machine straight in the database, as if its agent had said hello."""
+    """A machine straight in the database, as if its agent had said hello (just now: the app's liveness
+    sweep, every 2 s, takes an online machine never heard from offline, which made tests that took a few
+    seconds on a busy CI machine fail with 409 "does not fit")."""
     db = new_session()
     try:
         _, node = store.create_node(db, name=name, hostname=name, agent_version="0.1.0", protocol=1, ip="10.0.0.9")
@@ -39,6 +41,7 @@ def make_node(name: str = "box", inv: str = "nvidia-a100x8", *, status: str = "o
         store.apply_inventory(db, node, InventoryIn.model_validate({"accelerators": data["accelerators"],
                                                                     "collectors": data["collectors"]}))
         node.status = status
+        node.last_heartbeat_at = utcnow()
         node.features = list(features)
         node.runtime_info = PROCESS_OK if runtime_info is None else runtime_info
         node.runtimes = [k for k, v in node.runtime_info.items() if v.get("ok")]

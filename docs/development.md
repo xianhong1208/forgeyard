@@ -31,6 +31,37 @@ Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrad
 test fails when the models and migrations drift apart. Test IDs (`FY-…`) are unique across the
 project.
 
+## Writing tests that do not flake
+
+CI runs on small machines (two cores, often busy; the PostgreSQL job the slowest), so a test that
+passes here can fail there now and then. Almost every such failure so far was a test that waited a
+fixed time for something to happen, or read a page before the data it needed had arrived.
+
+- **Wait for the state, not for time.** `tests/waits.py` has `wait_until(predicate, what, timeout=10)`
+  and, in async tests, `await until(...)`: they return as soon as the state is reached and fail naming
+  `what` after the deadline, so the deadline can be generous. To have one request in flight before the
+  next, start it in a thread and wait until the fake engine or app has received it (FY-IGEN-007,
+  FY-X-014, FY-PGV-008), not `time.sleep(0.2)`.
+- **Set up the state before the step that could race past it.** A fake job that must still be at work:
+  make the fake engines hang before asking for it, not after (FY-VID-005).
+- **Fixtures must look current.** The app's liveness sweep runs every 2 s during the tests, so
+  `make_node` says its machine was heard from just now; a machine with no heartbeat went offline
+  under a slow test and the next deploy got 409.
+- **Stopping a process is not instant.** End process groups with `tests/leaks.py`'s `kill_group()`,
+  which waits until every member is gone; the per-test leak check otherwise sees one still dying.
+- **A sleep is fine when time is what the test is about**: a timeout, a stall, "nothing happens
+  within 0.5 s".
+- **UI tests: everything from the API arrives later, and in any order.** Use `await screen.findBy…` or
+  `waitFor` for anything that comes from a fetch (a form shown once its data is there, a select's
+  options from another endpoint, a value set when an answer arrives), and `getBy…` only for what is
+  already known to be on the page. After a save, wait for its message before the next click.
+  `npm run test:jitter` runs the UI tests with every fake fetch answering after a random 0–150 ms
+  (`web/src/test/fetchJitter.ts`): run it a few times after writing UI tests.
+- **Try it under load before CI does**: pin the run to two cores and keep them busy, for example
+  `for i in 1 2 3 4; do taskset -c 2,3 sh -c 'while :; do :; done' & done`, then
+  `taskset -c 2,3 uv run --no-sync python -m pytest -q` (or `npx vitest run`), and kill the four
+  loops afterwards.
+
 ## Layout
 
 | Path | What |

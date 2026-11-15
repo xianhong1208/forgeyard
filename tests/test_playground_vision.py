@@ -22,6 +22,7 @@ from tests.conftest import OWNER, add_user, sign_in
 from tests.gateway_helpers import LiveServer, api_client, new_key
 from tests.guard_helpers import GuardThread
 from tests.test_passthrough import GUARDED, ready_behind, set_gateway
+from tests.waits import wait_until
 from tests.workload_helpers import make_node, service
 
 PW = "quiet-meadow-4821"
@@ -253,17 +254,22 @@ def test_fy_pgv_008_concurrency_per_replica_and_per_person(vw):
         def call(c):
             return c.post("/api/playground/vision/detector/detect", **image_form())
 
+        def in_flight(c):
+            # The slots are taken before the image is passed on, so once the app has it they are held (a fixed
+            # sleep is not enough on a busy CI machine: the second call could get in first).
+            before = len(vw.app.seen)
+            t = threading.Thread(target=call, args=(c,))
+            t.start()
+            wait_until(lambda: len(vw.app.seen) > before, "the first image at the app")
+            return t
+
         set_gateway(o, "detector", expose=True, concurrency=1)
-        t = threading.Thread(target=call, args=(me,))
-        t.start()
-        time.sleep(0.4)
+        t = in_flight(me)
         r = call(alice)
         assert r.status_code == 429 and r.json()["error"]["code"] == "workload_busy" and r.headers["retry-after"] == "1"
         t.join()
         set_gateway(o, "detector", expose=True, key_concurrency=1)
-        t = threading.Thread(target=call, args=(me,))
-        t.start()
-        time.sleep(0.4)
+        t = in_flight(me)
         r = call(me)
         assert r.status_code == 429 and r.json()["error"]["code"] == "key_busy"
         assert r.json()["error"]["message"].startswith("You already have 1 request in flight")

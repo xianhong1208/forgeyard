@@ -68,6 +68,12 @@ version until 1.0.
   library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
 - **A long command no longer fills the Workloads list on a phone**: at narrow widths it shows three lines
   and an ellipsis; the whole command is in its tooltip.
+- **Tests that failed now and then on CI** wait for the state they need instead of a fixed time, or
+  for the data a page fetches instead of reading it at once (image queue, video jobs, the route editor,
+  Speak, a workload's output, and others found the same way). Test machines are heard from when made,
+  so the liveness sweep no longer takes them offline in a slow test, and a killed process group is
+  waited for until it is gone. `npm run test:jitter` runs the UI tests with every faked API answer
+  late and out of order; docs/development.md says how to write tests that do not flake.
 
 ## [1.3.3] — 2026-11-15
 

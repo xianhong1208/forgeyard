@@ -2,8 +2,6 @@
 
 import asyncio
 import json
-import os
-import signal
 import time
 
 import pytest
@@ -12,6 +10,7 @@ from forgeyard.agent.workloads.container import ContainerRuntime
 from forgeyard.agent.workloads.process import ProcessRuntime
 from forgeyard.agent.workloads.records import RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
+from tests.leaks import kill_group
 from tests.workload_helpers import FakeDocker, alive, container, converge, desired, gpus_of, replica, service, task
 
 A100 = gpus_of("nvidia-a100x8")
@@ -40,11 +39,7 @@ def sleeper(name="svc", **over):
 def reap_all(*runtimes):
     for rt in runtimes:
         for p in list(rt.children.values()):
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            p.wait(5)
+            kill_group(p)
 
 
 def test_fy_sup_001_converges_and_is_idempotent(tmp_path):

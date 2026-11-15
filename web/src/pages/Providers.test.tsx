@@ -102,7 +102,8 @@ describe("Route editor", () => {
     mount("/models/routes/5");
     expect(await screen.findByText("1/1 ready · 2 at once each")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Add a tier/ }));
-    fireEvent.change(screen.getByLabelText("Add to tier 2"), { target: { value: "provider:8" } });
+    // The picker shows once /api/route-options has answered too, which may be after the route itself.
+    fireEvent.change(await screen.findByLabelText("Add to tier 2"), { target: { value: "provider:8" } });
     expect(screen.getByText("openai/gpt-4o-mini")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Wait for a free local slot (ms)"), { target: { value: "250" } });
     fireEvent.click(screen.getByLabelText(/Spill a prompt that is too long/));
