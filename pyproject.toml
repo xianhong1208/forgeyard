@@ -36,6 +36,7 @@ nvidia = ["nvidia-ml-py>=12.535"]
 [dependency-groups]
 dev = [
     "pytest>=8.4",
+    "pytest-timeout>=2.3",
     "ruff>=0.12",
     # The official OpenAI SDK, to test the gateway the way its users call it (M4).
     "openai>=2.0",
@@ -55,3 +56,7 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A test that hangs fails after 5 minutes and prints every thread's stack, instead of holding CI until
+# GitHub's 6-hour limit with nothing to show for it.
+timeout = 300
+timeout_method = "thread"
