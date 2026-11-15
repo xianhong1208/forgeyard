@@ -83,7 +83,8 @@ version until 1.0.
   b12242 against 1.0.0 with Qwen3-1.7B Q4_K_M: `llama-bench` generates 43.2 and 43.0 against 43.2 and
   43.0 tokens/s (prompt 287 to 305 against 302 to 303); the same chat prompt through llama-server with
   the recipe's flags, 38.6 to 41.5 against 41.5 to 42.6 tokens/s, peak RSS 2.82 against 2.81 GiB.
-  Accepted on the CPU process variant (`scripts/accept_all.py` models, gateway and tts groups;
+  Accepted on the CPU process variant (`scripts/accept_all.py` models, gateway and tts groups, with
+  balancing over two agents and failover when an engine is killed;
   `accept_mm.py` Qwen3-VL-2B and Qwen2.5-Omni-3B GGUF with image, video and audio; `accept_tts.py`
   Qwen3-TTS 1.7B GGUF and Chatterbox Turbo GGUF); the NVIDIA and AMD Vulkan variants on 1.0.0 are
   still to be accepted on real hardware (they were on b12242).
