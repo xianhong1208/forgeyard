@@ -239,6 +239,10 @@ version until 1.0.
 
 ### Fixed
 
+- **`agent init` and `install.sh` no longer write an invalid `agent.toml` when a tool's message has several
+  lines.** A note in the file quoted, for example, `podman info`'s multi-line error on a host without a shared
+  mount; its second line was not a comment, so the file was not valid TOML and the install stopped at
+  "writing … agent.toml failed". Every note and header line is now folded into comment lines.
 - **Stopping a replica's key guard no longer waits for a client that stopped reading.** Closing a guard
   (the agent stops, a replica is removed) used to close each stream gracefully, up to 2 s per side plus 5 s
   for the listener; it now aborts every open stream first, so it takes well under a second.
