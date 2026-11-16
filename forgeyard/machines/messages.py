@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from forgeyard.machines.protocol import MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
+from forgeyard.machines.protocol import DOWNLOAD_STATES, MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
 from forgeyard.models.cache_keys import parse
 
 
@@ -91,6 +91,7 @@ def _download(value: Any) -> Optional[dict]:
 
 
 _ENGINE_ID = re.compile(r"^[0-9a-f]{16}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _model_cache(value: Any) -> Optional[dict]:
@@ -156,6 +157,11 @@ def _cache_model(value: Any) -> Optional[dict]:
             out["parts"] = parts
     else:
         out["file"] = _text(value.get("file"), 200)
+        # 1.4 (D8): the SHA-256 the agent computed after it downloaded a URL model; the server records the
+        # first one in the catalog entry, and every later download must match it.
+        sha = value.get("sha256")
+        if isinstance(sha, str) and _SHA256.match(sha):
+            out["sha256"] = sha
     return out
 
 
@@ -281,6 +287,15 @@ class ReplicaStatusIn(_Msg):
     download: Annotated[Optional[dict], BeforeValidator(_download)] = None
 
 
+class DownloadStatusIn(_Msg):
+    """1.4 (prefetch): one download asked for in `desired.downloads`, as the agent has it."""
+
+    id: Annotated[str, _short(32)]
+    state: Literal[DOWNLOAD_STATES]  # type: ignore[valid-type]
+    reason: Annotated[Optional[str], _short(400)] = None
+    download: Annotated[Optional[dict], BeforeValidator(_download)] = None
+
+
 class StatusIn(_Msg):
     v: int
     type: Literal["status"]
@@ -289,6 +304,8 @@ class StatusIn(_Msg):
     replicas: list[ReplicaStatusIn] = Field(default_factory=list, max_length=512)
     # M3: the agent's model cache, when it changed.
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
+    # 1.4 (prefetch): the downloads that changed (all of them in a full report).
+    downloads: list[DownloadStatusIn] = Field(default_factory=list, max_length=256)
 
 
 class LogsIn(_Msg):

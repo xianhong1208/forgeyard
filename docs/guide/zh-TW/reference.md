@@ -726,6 +726,35 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含機器、key、模型和 `freed_bytes`。背後是 agent 協定的 feature `cache_admin`（1.4 起的 agent）：agent 列出快取和大小、依要求刪除，並在那台機器上有副本使用這些檔案、或這些檔案正在下載時拒絕。
 
+## 透過 API 先下載模型
+
+與其他 `/api` 請求一樣，用 console 的登入工作階段（寫入時也要送 `X-Forgeyard: 1` header）。所有登入的人都可以查看；admin 和 operator 可以開始和取消下載。
+
+| 請求 | 作用 |
+|---|---|
+| `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | 每台機器，以及它能不能下載這個模型（和配方的引擎） |
+| `POST /api/downloads` 加上 `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | 在每台能下載的機器上開始下載；`engine` 預設開啟，`recipe` 預設是第一個能跑這個模型的配方 |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>` | 先列出進行中的下載，再列出已結束的（最近 100 筆） |
+| `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
+| `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器下載時怎麼連到網路，`auto`、`server` 或 `direct`（為之後的「經由伺服器轉送」預留；在那之前每台機器都直接下載） |
+
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+
+一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同）、`reason`、`via`（轉送推出前都是 `direct`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+
+| 狀態碼 | `code` | 何時 |
+|---|---|---|
+| 409 | `nothing_to_download` | 沒有機器能下載；`skipped` 列出每台機器的 `state` 和 `reason` |
+| 409 | `download_finished` | 取消一個已經結束的下載 |
+| 422 | `local_model` | 本機模型是機器上的目錄：沒有東西要下載 |
+| 422 | `recipe_not_compatible`、`bad_fetch_via` | 配方不能跑這個模型；`fetch_via` 不是這三個之一 |
+| 404 | `not_found` | 沒有這個模型、機器或下載 |
+| 403 | | 不是 admin 或 operator（`fetch-via` 要 admin） |
+
+稽核事件：`model.download_requested`（每台機器一筆，含模型和引擎）、`model.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
+
+背後是 agent 協定的 feature `prefetch`（1.4 起的 agent 和伺服器）。伺服器把每筆排隊中或下載中的列放在 `desired.downloads`，與副本並列：`{id, model, engine?, image?, image_ids?}`（Hugging Face 模型的區塊會帶伺服器用於受限 repository 的 token，和副本一樣只存在記憶體）。agent 用副本下載的同一套程式抓取（相同的鎖、從部分檔案續傳、checksum 和取消；映像檔用 1.3.1 的 pull 進度），不啟動任何東西，同時最多跑兩個，並回報 `status.downloads`（`{id, state, reason, download}`）；下一份清單裡沒有的下載會被取消。Migration `0015` 新增資料表 `model_downloads` 和欄位 `nodes.fetch_via`（所有既有機器都是 `auto`）。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。

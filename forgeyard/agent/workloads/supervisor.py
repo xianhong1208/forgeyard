@@ -48,7 +48,8 @@ from forgeyard.agent.workloads import health, plan, ports as portlib
 from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
-from forgeyard.machines.protocol import FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
+from forgeyard.agent.workloads.prefetch import Prefetcher
+from forgeyard.machines.protocol import FEATURE_PREFETCH, FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
 from forgeyard.workloads import images
 from forgeyard.workloads.spec import WorkloadSpec
 
@@ -126,6 +127,8 @@ class Supervisor:
         self.server_features: set[str] = set()
         self.cache_dirty = models is not None
         self.gate_poll = gate_poll
+        # 1.4 ("prefetch"): downloads into the model cache asked for ahead of a deployment.
+        self.prefetch = Prefetcher(self)
 
     # ------------------------------------------------------------------ what the agent tells the server
     def runtime_info(self) -> dict:
@@ -178,6 +181,8 @@ class Supervisor:
             desired[r["id"]] = r
         self.desired = desired
         self._cancel_unwanted()
+        # 1.4: the downloads asked for ahead of a deployment (none from a server without "prefetch").
+        self.prefetch.set_wanted(msg.get("downloads") or [])
         self.full_due = True
         self._wake.set()
 
@@ -209,10 +214,13 @@ class Supervisor:
         return rec.public(with_tail=self.tails.get(rec.id) if rec.final else None)
 
     def take_report(self) -> Optional[dict]:
+        prefetch = FEATURE_PREFETCH in self.server_features
+        if not prefetch:
+            self.prefetch.changed.clear()  # a server without "prefetch" asks for none and hears of none
         if self.full_ready:
             entries = [self._public(r) for r in self.records.values()] + self.removed
             full, self.full_ready = True, False
-        elif self.changed or self.removed:
+        elif self.changed or self.removed or self.prefetch.changed:
             entries = [self._public(self.records[i]) for i in sorted(self.changed) if i in self.records] + self.removed
             full = False
         else:
@@ -220,6 +228,10 @@ class Supervisor:
         self.changed.clear()
         self.removed = []
         msg = {"v": PROTOCOL_VERSION, "type": "status", "full": full, "replicas": entries}
+        if prefetch:
+            downloads = self.prefetch.take(full)
+            if downloads:
+                msg["downloads"] = downloads
         if self.cache_dirty and self.models is not None:
             self.cache_dirty = False
             msg["model_cache"] = self.models.info()
@@ -294,6 +306,7 @@ class Supervisor:
         tasks are gone."""
         for event in self.cancels.values():
             event.set()
+        await self.prefetch.close()
         tasks = list(self.ops.values()) + list(self.probes.values())
         for t in tasks:
             t.cancel()
@@ -308,18 +321,19 @@ class Supervisor:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
-            pending = [t for t in (*self.ops.values(), *self.probes.values()) if not t.done()]
+            pending = [t for t in (*self.ops.values(), *self.probes.values(), *self.prefetch.tasks()) if not t.done()]
             if not pending:
                 for _ in range(3):  # the done callbacks that take finished operations off self.ops
                     await asyncio.sleep(0)
-                if any(not t.done() for t in (*self.ops.values(), *self.probes.values())):
+                if any(not t.done() for t in (*self.ops.values(), *self.probes.values(), *self.prefetch.tasks())):
                     continue
                 if self.ops:
                     raise RuntimeError(f"settle: finished operations are still listed: {sorted(self.ops)}")
                 return
             left = deadline - loop.time()
             if left <= 0:
-                raise TimeoutError(f"settle: still running after {timeout:g} s:\n" + _where(self.ops, self.probes))
+                raise TimeoutError(f"settle: still running after {timeout:g} s:\n"
+                               + _where(self.ops, {**self.probes, **{f"download {j.id}": j.task for j in self.prefetch.jobs.values() if j.task is not None}}))
             await asyncio.wait(pending, timeout=left)
 
     def _save(self, rec: Record) -> None:

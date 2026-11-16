@@ -38,6 +38,34 @@ version until 1.0.
   - `scripts/accept_vision.py` and a `vision` group in `scripts/accept_all.py` check them on real
     machines. Apps made from the templates keep running as they are.
 
+- **Download to…: a model, and its engine, on chosen machines before you deploy it** (part of #35).
+  From **Models → Library** (a model's row) or a machine's page (**Download a model here…**), pick the
+  machines: each says whether it fits (what it downloads, the free disk, the engine), is already there,
+  is offline, has an agent too old for it, or lacks the disk. **Also the engine** (on by default)
+  fetches, for the chosen recipe, what that machine would run: the engine archive of a process variant,
+  or the image of a container variant with the 1.3.1 pull progress. Nothing is started.
+  - Progress shows under the model's row and on each machine's page, with the words and bar of a
+    deployment's download; **Cancel** stops it at once on the agent and keeps what is on disk, so asking
+    again resumes. A download on a machine that goes offline goes on when its agent is back. Once done,
+    the machine lists the model in its cache and placement prefers it (#71).
+  - Admins and operators start and cancel (D9), audited as `model.download_requested` and
+    `model.download_cancelled`. API: `GET /api/downloads/targets`, `POST /api/downloads`,
+    `GET /api/downloads`, `POST /api/downloads/{id}/cancel`.
+  - **URL models are checked (D8):** a single GGUF file from a URL has no published checksum, so the
+    SHA-256 the agent computes after its first complete download is recorded in the catalog entry
+    (`meta.files[0].sha256`, with the machine and time; audited as `model.checksum_recorded`), and
+    every later download must match it.
+  - **Internet access per machine** (`nodes.fetch_via`: `auto`, `server`, `direct`; admins only,
+    `PUT /api/machines/{id}/fetch-via`, audited as `node.fetch_via_changed`). Stored for the relay
+    through the server, which comes in a later 1.4 change; until then every machine downloads
+    directly.
+  - Agent protocol feature `prefetch`: `desired.downloads` beside the replicas, `status.downloads` back.
+    The agent uses the code a replica's download uses (locks, resume, checksums, cancel) and runs at most
+    two at a time. Agents before 1.4 are listed as "update the agent" (rebuild the agent image); an agent
+    that comes back without the feature fails what it was asked, saying so.
+  - Migration `0015`: table `model_downloads` (what, where, state, progress, who asked, when, why it
+    failed), and `nodes.fetch_via`, `auto` for every machine. Finished downloads are kept 30 days, at
+    most 20 per machine. The downgrade drops both.
 - **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
   time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
   line per key, model, provider or person (admins, with **Everyone**). The Requests tab charts

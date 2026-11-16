@@ -30,6 +30,7 @@ from forgeyard.machines.protocol import (
     FEATURE_ENGINE_ZIP,
     FEATURE_IMAGE_IDS,
     FEATURE_MODELS,
+    FEATURE_PREFETCH,
     FEATURE_REPLICA_GUARD,
     FEATURE_REPLICA_KEYS,
     FEATURE_WORKLOAD_GUARD,
@@ -155,7 +156,7 @@ class Agent:
             msg["runtime_info"] = self.supervisor.runtime_info()
             cache = self.supervisor.model_cache_info()
             if cache is not None:
-                msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN]
+                msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
                 msg["model_cache"] = cache
         return msg
 

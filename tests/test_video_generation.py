@@ -782,7 +782,8 @@ def test_fy_vid_026_the_migration_adds_only_the_jobs_table(owner):
     with get_engine().begin() as conn:
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, "0013_passthrough")
-    assert tables() == before - {"video_jobs"} and keys() == n
+    # model_downloads comes with a later migration (0015), so going down to 0013 drops it too.
+    assert tables() == before - {"video_jobs", "model_downloads"} and keys() == n
     upgrade()
     assert tables() == before and keys() == n
     with get_engine().connect() as conn:
