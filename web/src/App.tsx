@@ -19,15 +19,15 @@ import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
 import { PlaygroundPage } from "./pages/Playground";
-import { ProviderDetailPage, ProvidersPage } from "./pages/Providers";
-import { RouteDetailPage } from "./pages/RouteDetail";
+import { CloudPage, ProviderDetailPage } from "./pages/Providers";
+import { OldProviders, OldRoute, RouteDetailPage } from "./pages/RouteDetail";
 import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
 import { SetupPage } from "./pages/Setup";
 import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
 import { UsersPage } from "./pages/Users";
-import { WorkloadDetailPage } from "./pages/WorkloadDetail";
+import { OldWorkloads, WorkloadDetailPage } from "./pages/WorkloadDetail";
 import { WorkloadNewPage } from "./pages/WorkloadNew";
 import { WorkloadsPage } from "./pages/Workloads";
 
@@ -69,16 +69,22 @@ export default function App() {
         <Route path="/start" element={<GetStartedPage />} />
         <Route path="/machines" element={<MachinesPage />} />
         <Route path="/machines/:id" element={<MachineDetailPage />} />
-        <Route path="/workloads" element={<WorkloadsPage />} />
-        <Route path="/workloads/new" element={<WorkloadNewPage />} />
-        <Route path="/workloads/:id" element={<WorkloadDetailPage />} />
+        {/* 1.4 (#81): Workloads became Apps; a model deployment's workload is seen under Models only. */}
+        <Route path="/apps" element={<WorkloadsPage />} />
+        <Route path="/apps/new" element={<WorkloadNewPage />} />
+        <Route path="/apps/:id" element={<WorkloadDetailPage />} />
+        <Route path="/workloads/*" element={<OldWorkloads />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/models/deploy" element={<ModelDeployPage />} />
         <Route path="/models/deployments/:id" element={<DeploymentDetailPage />} />
         <Route path="/models/deployments/:id/edit" element={<DeploymentEditPage />} />
-        <Route path="/models/routes/:id" element={<RouteDetailPage />} />
-        <Route path="/providers" element={<AdminOnly><ProvidersPage /></AdminOnly>} />
-        <Route path="/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />
+        {/* 1.4 (#81): routes live where they belong (a deployment's page, or Cloud → Cloud models), and
+            Providers became Cloud. The old addresses open the new places. */}
+        <Route path="/models/routes/:id" element={<OldRoute />} />
+        <Route path="/cloud" element={<AdminOnly><CloudPage /></AdminOnly>} />
+        <Route path="/cloud/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />
+        <Route path="/cloud/models/:id" element={<RouteDetailPage />} />
+        <Route path="/providers/*" element={<OldProviders />} />
         {/* M0-M2 sent "Deployments" to the workloads; model deployments live under Models since M3. */}
         <Route path="/deployments" element={<Navigate to="/models" replace />} />
         <Route path="/playground" element={<PlaygroundPage />} />

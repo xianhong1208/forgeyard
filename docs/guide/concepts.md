@@ -27,7 +27,7 @@ A machine shows **online** while its agent is connected, and **offline** when no
 for 30 seconds (the agent sends a heartbeat every 10). The agent reconnects by itself. An admin can
 **revoke** a machine (its credential stops working at once) or **remove** it.
 
-Stopping or restarting the agent **leaves its workloads running**: a restarted agent finds them and
+Stopping or restarting the agent **leaves its models and apps running**: a restarted agent finds them and
 takes them over. That is why the installed service uses `KillMode=process`.
 
 The agent reads its settings from `/etc/forgeyard/agent.toml`, `FORGEYARD_*` environment variables
@@ -36,8 +36,8 @@ and flags ([all of them](reference.md#agent-settings)).
 The **Machines** page shows one tile per machine, with a mark for its kind: **NVIDIA GPU**,
 **AMD GPU**, **AMD APU** (an AMD GPU that shares the system memory, such as the Radeon 8060S) or
 **CPU only**. Its cards are a row of slots filled from the bottom: what Forgeyard reserved, then
-other use (other programs on the card, and Forgeyard workloads that declare no memory), then free.
-The tile also says how much memory is free, how many deployments and workloads run there, and their
+other use (other programs on the card, and apps that declare no memory), then free.
+The tile also says how much memory is free, how many models and apps run there, and their
 names. Choose a machine for its own page: a **memory map** that splits each card by what holds it
 (named, with what it reserved), what runs there, its GPU access and runtimes, and its agent. Admins
 revoke or remove a machine there.
@@ -79,46 +79,39 @@ when sharing would help:
 
 Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
 
-## Workloads
+## Apps (advanced)
 
-A **workload** is something to run on your machines:
+**Apps are not in the menu.** Most people only deploy models: to use a model, deploy it under
+**Models**. Admins and operators who need more open `/apps` on the server (for example
+`https://<server>:7860/apps`).
 
-- a **service** runs until you stop it. It is health-checked and restarted when it exits;
-- a **task** runs to the end, with retries and a time limit.
+An **app** is a program you run on your machines yourself, as a container (Docker or Podman on the
+machine) or a process. It fits what is not a model Forgeyard runs: a model's own server image,
+exposed at [`/x/<name>`](#apps-at-x) with API keys, or a one-off GPU **task** (a batch job, with
+retries and a time limit) next to the **services** that run until stopped. Each has 1 to 16
+replicas, each on one machine, with only the cards it was given. A process runs as the unprivileged
+account `forgeyard-run` and a container never `--privileged`; both start from an empty environment.
+The API calls apps *workloads* (`/api/workloads`).
 
-Each one has 1 to 16 **replicas**, each on one machine. A workload runs as a **container** (Docker
-or Podman on the machine) or as a **process** (a program started by the agent).
+The **Apps** page lists only apps. A model deployment also runs as a workload (of runtime `model`),
+but a model is seen under **Models** only, and an old link to its workload's page opens the
+deployment; the API refuses to stop, start or delete it (`409 managed_by_deployment`). **Machines**
+shows both, models and apps, since both hold cards.
 
-Isolation, in short:
+## Apps at /x/
 
-- A process runs as an unprivileged account (`forgeyard-run`), never as root, with an empty
-  environment: only what the workload declares, plus its GPU and port variables.
-- A container runs with the engine's defaults plus `no-new-privileges`, never `--privileged`.
-- Limits: containers get `--cpus` and `--memory`; processes get a systemd scope on a systemd host,
-  else rlimits.
-
-Only admins and operators create workloads, because whoever can create one can run code on the
-machines. Model deployments are workloads too; most people only deploy models.
-
-The **Workloads** page lists **Your workloads** first, then **Created by model deployments**: each
-of those names the deployment that made it and links to it (eight are shown, then *… and N more*).
-A deployment's workload is changed, stopped, started and deleted through its deployment: its own
-page has no **Stop** or **Delete**, and the API refuses them with `409 managed_by_deployment`, so a
-deployment never loses its workload while its route stays behind.
-
-## Workloads at /x/
-
-A service workload can be **exposed** behind the gateway: programs then call its own HTTP API at
+A service app can be **exposed** behind the gateway: programs then call its own HTTP API at
 `https://<server>:7860/x/<name>/…` with an API key, as they call models at `/v1`. Use it for what is
 not a chat, embedding, speech or image model: object detection, segmentation, depth, Triton or KServe
 models, a FastAPI or BentoML service.
 
-- **Behind the key guard.** An exposed workload runs behind the agent's key guard, like a model
+- **Behind the key guard.** An exposed app runs behind the agent's key guard, like a model
   replica: the program listens on loopback, the guard holds the published port, and only the gateway
   gets through. The guard removes the gateway's internal key before the request reaches the program.
-  Every port of the workload is guarded, not only the exposed one.
-- **Keys opt in.** A key's **Workloads** setting says which exposed workloads it may call: *None*
-  (the default, and every key from before 1.3), *Listed workloads* or *Every exposed workload*.
+  Every port of the app is guarded, not only the exposed one.
+- **Keys opt in.** A key's **Apps** setting says which exposed apps it may call: *None*
+  (the default, and every key from before 1.3), *Listed apps* or *Every exposed app* (`workloads` in
+  the API).
 - **APIs, not web pages.** Answers are sandboxed (`Content-Security-Policy: sandbox`), cookies and
   CORS headers are removed, and redirects are rewritten under `/x/<name>`. A browser UI (Gradio,
   Jupyter) does not work at `/x/`. WebSockets and gRPC are not passed on in 1.3, and nothing spills
@@ -126,22 +119,23 @@ models, a FastAPI or BentoML service.
 - **Counted.** Requests, errors, bytes in and out, busy time and latency go to **Usage** as the
   model `x:<name>`; the key's requests per minute apply.
 
-Admins and operators expose a workload, when they create it or later on its page. See
-[Expose a workload at /x/](how-to.md#expose-a-workload-at-x).
+Admins and operators expose an app, when they create it or later on its page. See
+[Expose an app at /x/](how-to.md#expose-an-app-at-x).
 
 Three **templates** start the most common vision APIs this way in one step (object detection,
 segmentation, depth), on Forgeyard's own image with permissively licensed models only. See
-[Start a workload from a template](how-to.md#start-a-workload-from-a-template).
+[Start an app from a template](how-to.md#start-an-app-from-a-template).
 
 ## Models, recipes and estimates
 
-The **Models** page has three tabs. **Deployments** groups what runs by kind (chat, multimodal
+The **Models** page has two tabs. **Deployments** groups what runs by kind (chat, multimodal
 chat, embeddings, rerank, speech to text, text to speech, images, video), each with the path it
 answers at under `/v1`, and one line per deployment: where it runs (machine and cards), its memory
-and its state. **Serving** is the model names clients send to `/v1` and the cloud tiers behind them
-([routes](#cloud-providers-and-tiers)). **Model library** is what you can deploy: the catalog, the
-recipes and, for admins, the model sources. Links to the names before 1.4 (`?tab=routes`,
-`?tab=catalog`) still open the right tab.
+and its state. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its provider,
+such as *→ Gemini*; the fallback itself is on the deployment's page. **Library** is what you can
+deploy: the catalog, the recipes and, for admins, the model sources. Cloud models and providers are
+on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=routes`,
+`?tab=catalog`, `/providers`) open the new places.
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
@@ -165,9 +159,7 @@ recipes and, for admins, the model sources. Links to the names before 1.4 (`?tab
 ## Deployments and the gateway
 
 A **deployment** runs one model with one recipe, as one or more replicas. Its replicas run as a
-workload of runtime `model`, which the Workloads list shows as *created by deployment X*; the
-deployment says which workload it runs as, and the workload's page opens with *Created by
-deployment X* and a way back. Forgeyard:
+workload of runtime `model`, seen only on the deployment's page (not on **Apps**). Forgeyard:
 
 1. places each replica where it fits. Among the machines that fit, in this order:
    - a machine that **could not reach** a source the replica would download from there (the model's
@@ -202,7 +194,7 @@ that only the gateway knows, and the agent refuses every other request on the re
 
 The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
 streaming, and images for models that read them), embeddings, rerank and speech to text. Its **Vision**
-tab sends a picture to an exposed vision workload (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
+tab sends a picture to an exposed vision app (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
 cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
 
 ## Images, audio and video in chat
@@ -327,9 +319,11 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - A **provider** is a model API outside Forgeyard (OpenAI, Anthropic, Gemini, Azure OpenAI,
   OpenRouter, or an OpenAI-compatible server of yours). Admins add it with its key, which is stored
   encrypted and never shown again.
-- Each model name at `/v1` is a **route**. A route has **targets** in **tiers**: local deployments
-  and providers' models. A deployment's own route starts with one tier, the deployment. An admin
-  can add a cloud model as a second tier, or make a route that is only a cloud model.
+- Each model name at `/v1` is a **route** (in the API). A route has **targets** in **tiers**: local
+  deployments and providers' models. A deployment's own route starts with one tier, the deployment.
+  An admin can add a cloud model as a later tier: the deployment's **cloud fallback**, on its page.
+  An admin can also make a **cloud model**, a name of its own for a provider's model, on
+  **Cloud → Cloud models**.
 - **Local first.** A request goes to the next tier only before its answer starts, and only when the
   local tier is unavailable, **busy** (every replica at its deployment's *Concurrent requests*), or
   answers 429 or 503. A prompt too long for the local context spills only if the route says so.
@@ -372,7 +366,7 @@ have the details.
 | Role | Can |
 |---|---|
 | `admin` | everything: users, machines and their GPU access, the model catalog and recipes, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
-| `operator` | run workloads and deploy models; everything a user can |
+| `operator` | run apps and deploy models; everything a user can |
 | `user` | look around, use deployed models in the Playground and with their own API keys, see their own usage |
 
 The **owner** is the first account. It is always an admin and cannot be demoted, disabled or

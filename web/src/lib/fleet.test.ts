@@ -65,8 +65,8 @@ describe("fleet: what runs where (1.4)", () => {
     expect(p.holders.map((h) => [h.name, h.href, h.kind, h.reserved])).toEqual([
       ["chat", "/models/deployments/5", "chat", 12 * GIB],
       ["chat", "/models/deployments/5", "chat", 9 * GIB],    // no reading yet: the estimate per GPU
-      ["notebook", "/workloads/11", "workload", null],      // a GPU workload declares no card memory
-      ["etl", "/workloads/12", "workload", 2 * GIB],        // a CPU workload: its declared RAM
+      ["notebook", "/apps/11", "workload", null],      // a GPU app declares no card memory
+      ["etl", "/apps/12", "workload", 2 * GIB],        // a CPU app: its declared RAM
     ]);
     expect(uniqueHolders(p.onMachine(1)).map((h) => h.name)).toEqual(["chat", "notebook", "etl"]);
     expect(p.onRow(1, card()).map((h) => h.name)).toEqual(["chat", "notebook"]);

@@ -1,6 +1,8 @@
 import { IconAdjustments, IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
+
+import { useAuth } from "../auth";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { Notice, PageHeader } from "../components/ui";
@@ -8,12 +10,13 @@ import { api, errorText } from "../lib/api";
 import { MODEL_KIND, modelKind } from "../lib/fleet";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
-import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, spillRules, targetName, tiers } from "../lib/routing";
+import { FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
 import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
-import type { Deployment, DeploymentResponse, LiveCard, TryResponse } from "../lib/types";
+import type { Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions, RoutesResponse, TryResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
+import { RoutingEditor } from "./RouteDetail";
 import { NotPickedUpNotice, Output } from "./WorkloadDetail";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
@@ -57,7 +60,7 @@ export function DeploymentDetailPage() {
   return (
     <>
       <p className="crumb"><Link to="/models"><IconArrowLeft size={14} aria-hidden="true" /> Models</Link></p>
-      <PageHeader index={`03 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
+      <PageHeader index={`02 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
         lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
         actions={d && w && canManage && (
           <>
@@ -85,7 +88,6 @@ export function DeploymentDetailPage() {
             <span className="small">{d.pinned ? <>Pinned to <span className="mono">{d.pinned.name ?? `machine ${d.pinned.id}`}</span></> : <span className="muted">Machine: automatic</span>}</span>
             {d.estimate.device === "gpu" && <span className="small">{d.params.share === "vram" ? "Shares VRAM" : <span className="muted">Exclusive GPU</span>}</span>}
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
-            <span className="small">Runs as workload <Link className="mono" to={`/workloads/${w.id}`}>{w.name}</Link></span>
           </div>
           <Gateway d={d} />
           <section className="panel" aria-labelledby="replicas-title">
@@ -126,6 +128,7 @@ export function DeploymentDetailPage() {
             <Memory d={d} />
             <TryIt d={d} />
           </div>
+          {d.routing && <Fallback key={d.routing.id} routing={d.routing} reload={reload} />}
           {canManage && <Output w={w} />}
           <section className="panel" aria-labelledby="events-title">
             <h2 id="events-title">Events</h2>
@@ -153,15 +156,21 @@ function Gateway({ d }: { d: Deployment }) {
         <dt>Endpoint</dt><dd className="mono small">{base}{path}</dd>
         {d.routing && (
           <>
-            <dt>Routing</dt>
+            <dt>Cloud fallback</dt>
             <dd>
-              <span className={`chip chip-tone-${ROUTE_KIND_TONE[d.routing.kind]}`}>{ROUTE_KIND_LABEL[d.routing.kind]}</span>{" "}
-              {tiers(d.routing).map((tier, i) => (
-                <span key={i} className="small">{i === 0 ? "" : " → then "}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
-              ))}
-              <div className="muted small">{spillRules(d.routing)} <Link to={`/models/routes/${d.routing.id}`}>Routing and cloud spill</Link></div>
-              {d.also_in && d.also_in.length > 0 && <div className="muted small">Also a target of: {d.also_in.map((n) => <code key={n}>{n}</code>)}</div>}
+              {tiers(d.routing).length > 1 ? (
+                <span className="small">{tiers(d.routing).slice(1).map((tier, i) => (
+                  <span key={i}>{i === 0 ? "then " : " → then "}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
+                ))}</span>
+              ) : <span className="muted small">none</span>}{" "}
+              <a className="small" href={`#${FALLBACK_ANCHOR}`}>{d.routing.kind === "local" ? "Add one" : "Change"}</a>
             </dd>
+          </>
+        )}
+        {d.also_in && d.also_in.length > 0 && (
+          <>
+            <dt>Also answers as</dt>
+            <dd><AlsoIn names={d.also_in} /></dd>
           </>
         )}
       </dl>
@@ -199,6 +208,37 @@ function Gateway({ d }: { d: Deployment }) {
         </>
       )}
     </section>
+  );
+}
+
+// The deployment's own route, as its cloud fallback (1.4, #81: it was on Models → Serving). Admins
+// change it here; everyone else sees it.
+function Fallback({ routing, reload }: { routing: RouteInfo; reload: () => void }) {
+  const { user } = useAuth();
+  const admin = user?.role === "admin";
+  const opts = useApi<RouteOptions>(admin ? "/route-options" : null);
+  const { hash } = useLocation();
+  // A link to #cloud-fallback (the Deployments list's mark, the advisor) opens the page at it, once
+  // the section is there.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (hash !== `#${FALLBACK_ANCHOR}` || scrolled.current) return;
+    scrolled.current = true;
+    document.getElementById(FALLBACK_ANCHOR)?.scrollIntoView?.({ block: "start" });
+  }, [hash]);
+  return <RoutingEditor r={routing} admin={admin} opts={admin ? opts.data : null} reload={reload} embedded />;
+}
+
+// Other names an admin made that this deployment answers under: links to them where they live.
+function AlsoIn({ names }: { names: string[] }) {
+  const { data } = useApi<RoutesResponse>("/routes");
+  return (
+    <span className="also-in">
+      {names.map((n) => {
+        const r = data?.routes.find((x) => x.served_name === n);
+        return r ? <Link key={n} className="mono small" to={routeHome(r)}>{n}</Link> : <code key={n}>{n}</code>;
+      })}
+    </span>
   );
 }
 

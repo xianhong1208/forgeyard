@@ -107,10 +107,10 @@ fixed time for something to happen, or read a page before the data it needed had
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | a release tag publishes both images on Docker Hub |
 | `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
-| `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
+| `scripts/gpu_probe.py` | checks which NVIDIA GPU an app sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
-| `images/vision/` | the vision server behind the workload templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
+| `images/vision/` | the vision server behind the app templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
 | `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

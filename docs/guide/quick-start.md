@@ -145,8 +145,8 @@ What happened, in order:
 2. Only then was the installer downloaded, over a connection checked against that CA.
 3. The installer downloaded the agent from your server (always the server's own version), checked
    it, and installed it with its own Python in `/opt/forgeyard`.
-4. It created the account `forgeyard-run` that process workloads run as. Workloads never run as
-   root.
+4. It created the account `forgeyard-run` that processes (apps and engines) run as. They never run
+   as root.
 5. It wrote `/etc/forgeyard/agent.toml` from what it found: GPUs, Docker, systemd. Every setting is
    explained in the file.
 6. It traded the join token for this machine's own credential, kept in
@@ -173,7 +173,7 @@ Forgeyard*. Even with all cards allowed, saving the choice once ticks this step 
 
 ## 5. Add a recommended model
 
-1. Open **Models** → **Model library** → **Add a model**.
+1. Open **Models** → **Library** → **Add a model**.
 2. **Recommended** lists models known to work. Pick one that fits your machine:
    - a GPU with at least 8 GB free: **Qwen3 0.6B** (1.4 GB download);
    - only a CPU: **Qwen3 1.7B (GGUF, for the CPU)** (1.2 GB download, about 3 GB of RAM).

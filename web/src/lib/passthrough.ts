@@ -6,14 +6,14 @@ export const ACCESS_LEVELS: WorkloadAccess[] = ["none", "listed", "all"];
 
 export const ACCESS_LABEL: Record<WorkloadAccess, string> = {
   none: "None",
-  listed: "Listed workloads",
-  all: "Every exposed workload",
+  listed: "Listed apps",
+  all: "Every exposed app",
 };
 
 export const ACCESS_HELP: Record<WorkloadAccess, string> = {
-  none: "This key cannot call workloads at /x/ (the default).",
-  listed: "Only the workloads you tick, at /x/<name>.",
-  all: "Every workload an admin or operator exposes at /x/, now and later.",
+  none: "This key cannot call apps at /x/ (the default).",
+  listed: "Only the apps you tick, at /x/<name>.",
+  all: "Every app an admin or operator exposes at /x/, now and later.",
 };
 
 export function keyWorkloads(k: ApiKey): string {

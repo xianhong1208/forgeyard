@@ -60,37 +60,61 @@ version until 1.0.
   - Agents list the engine archives they unpacked (`model_cache.engines`); an engine image or
     archive also counts as on a machine once a replica started from it there. Older agents work
     as before.
-- **A model workload names the deployment that created it** (part of #36): *created by deployment
-  X* with a link on the Workloads list and on the workload's page, and the deployment links to its
-  workload. `GET /api/workloads` gives `deployment: {id, name}`.
+- **A model workload names the deployment that created it** (part of #36): `GET /api/workloads`
+  gives `deployment: {id, name, gpus}`. In the console a model is seen under Models only (#81).
 - **Machines and Models redesigned** (#34). **Machines** is one tile per machine with a mark for its
   kind (NVIDIA GPU, AMD GPU, AMD APU, CPU only), its cards as slots filled from the bottom (what
-  Forgeyard reserved, other use, free), free memory, how many deployments and workloads run there
+  Forgeyard reserved, other use, free), free memory, how many models and apps run there
   and their names, heartbeat and agent version, under a count of machines per kind. A machine has
   its own page (`/machines/<id>`): a memory map that splits each card by what holds it, named and
-  with what it reserved; what runs there, with **Deploy here** and **New workload here**; GPU access
+  with what it reserved; what runs there, with **Deploy here**; GPU access
   and runtimes; the agent's details; **Revoke** and **Remove**; and only that machine's setup-health
   findings. **Models → Deployments** groups deployments by kind (chat, multimodal chat, embeddings,
   rerank, speech to text, text to speech, images, video), each with its icon, a line on what it does
   and its path at `/v1`; a row says where the deployment runs (machine and cards), its memory and its
   state, and any download, wait or placement note. `GET /api/deployments` gives the model's
   `modalities`, so a chat model that reads images is listed as multimodal chat.
-- **Workloads made by deployments are listed apart** (#36): **Your workloads**, then **Created by
-  model deployments**, each with *created by deployment X →* (eight shown, then *… and N more*). A
-  deployment's workload page opens with *Created by deployment X* and **Open the deployment**, and
-  its spec gives the GPUs the deployment chose (*1 per replica, from the deployment; holding #3*)
-  rather than *none*; the deployment's page says *Runs as workload X*. `GET /api/workloads` gives
-  `deployment: {id, name, gpus}`.
 
 ### Changed
 
-- **The Models tabs are Deployments, Serving and Model library** (#34): *Routes and cloud* is now
-  **Serving** and *Catalog and recipes* is **Model library**. Links to the old tabs
-  (`/models?tab=routes`, `/models?tab=catalog`) open the new ones.
+- **One thing in one place: Models has Deployments and Library, Workloads are Apps, cloud settings
+  are on Cloud** (#34, #36, #81). The console only; the API and the data are unchanged.
+  - **Models** has two tabs, **Deployments** and **Library** (*Catalog and recipes* before). The
+    Serving tab (*Routes and cloud* before 1.4) is gone: most of its routes only repeated a
+    deployment.
+  - **A deployment's page holds its cloud fallback**: the tiers and the spill rules that were
+    *Routing and cloud spill*, edited in place by admins and read-only for everyone else, plus the
+    other names it also answers as. In the Deployments list, a deployment with a cloud tier shows
+    *→ <provider>*.
+  - **Providers is now Cloud** (`/cloud`), with two tabs: **Providers**, and **Cloud models**, the
+    names an admin made for a provider's model (*New cloud model*). A name an admin made for
+    deployments only (several behind one name, or one under a second name) is listed there too, under
+    *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
+    `/cloud/providers/<id>`.
+  - **Workloads is now Apps** (`/apps`), an advanced page that is **not in the menu**; it says first
+    that models are deployed under Models. It lists only the programs people run themselves (services and
+    tasks: vision templates, notebooks, batch jobs, any image or command), with **New app** and
+    **Start from a template**. Workloads made by model deployments are not listed there, and its
+    counts (*Apps*, *Running*, *Waiting*, *Failing*, *GPUs used by apps*) are the apps' alone. The
+    console says *app* for them everywhere (a key's **Apps at /x/** setting, the Playground's Vision
+    tab, the audit filter); the API keeps `workloads`.
+  - **A model is seen under Models only**: its deployment's page has its replicas, output and events,
+    and no longer says *Runs as workload X*; an old link to a model's workload page opens the
+    deployment. **Machines** still shows everything that holds a card: its tiles, memory map and
+    *Running here* name models (linked to the deployment) and apps (linked to the app).
+  - The menu is Machines, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit log
+    (admins); the pages' numbers follow it, and the Apps pages say *Advanced · Apps*. A machine's page
+    no longer offers **New app here**; its memory map and *Running here* still list apps. "Serving", "route" and "workload" left the
+    console's navigation.
+  - Old links open the new places, without a step in the history: `/models?tab=serving` and
+    `?tab=routes` (with `&route=<id or name>`: that route's place), `?tab=catalog`,
+    `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads`, `/workloads/<id>` and
+    `/workloads/new` (to the same place under `/apps`). Setup-health findings link to a deployment's
+    cloud fallback, a cloud model or `/cloud/providers/<id>`, and show on those pages.
 - **A deployment's workload is stopped, started and deleted only through its deployment** (#36):
   `POST /api/workloads/<id>/stop`, `…/start` and `DELETE /api/workloads/<id>` answer `409
-  managed_by_deployment` (naming the deployment) for a model deployment's workload, and its page has
-  no such buttons. Deleting the workload used to delete the deployment and its route with it;
+  managed_by_deployment` (naming the deployment) for a model deployment's workload, which the console
+  shows only as its deployment. Deleting the workload used to delete the deployment and its route with it;
   stopping it left the deployment's page out of step.
 - **Revoked keys leave the budget lists and alerts** (part of #36): Usage → Cost (*Budgets this
   month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%

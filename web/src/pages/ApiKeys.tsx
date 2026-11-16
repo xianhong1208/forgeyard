@@ -47,7 +47,7 @@ function WorkloadPicks({ id, level, picked, choices, disabled, onLevel, onPicked
   const toggle = (n: string) => onPicked(picked.includes(n) ? picked.filter((x) => x !== n) : [...picked, n]);
   return (
     <>
-      <div className="cloud-picks" role="radiogroup" aria-label="Which workloads at /x/ may this key call?">
+      <div className="cloud-picks" role="radiogroup" aria-label="Which apps at /x/ may this key call?">
         {ACCESS_LEVELS.map((l) => (
           <label key={l} className="card-pick">
             <input type="radio" name={`wl-${id}`} checked={level === l} disabled={disabled} onChange={() => onLevel(l)} />
@@ -56,8 +56,8 @@ function WorkloadPicks({ id, level, picked, choices, disabled, onLevel, onPicked
         ))}
       </div>
       {level === "listed" && (
-        <div className="allowlist-cards" role="group" aria-label="Allowed workloads">
-          {choices.length === 0 && <span className="muted small">No service workloads yet.</span>}
+        <div className="allowlist-cards" role="group" aria-label="Allowed apps">
+          {choices.length === 0 && <span className="muted small">No service apps yet.</span>}
           {choices.map((c) => (
             <label key={c.name} className="card-pick">
               <input type="checkbox" checked={picked.includes(c.name)} disabled={disabled} onChange={() => toggle(c.name)} />
@@ -255,7 +255,7 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
       onEdit();
       return;
     }
-    await send(body, `Limits, cloud, budget and workloads of ${k.name} saved.`);
+    await send(body, `Limits, cloud, budget and apps of ${k.name} saved.`);
   };
   const lockHint = (n: LimitName, base: string) => {
     const by = lockedBy[n];
@@ -274,7 +274,7 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
         </td>
         {everyone && <td data-label="Owner" className="mono small">{k.user.username ?? "—"}</td>}
         <td data-label="Models" className="small">{keyModels(k)}
-          <div className="muted">Workloads: {keyWorkloads(k)}{wlLock && <> <LockChip by={wlLock} /></>}</div></td>
+          <div className="muted">Apps: {keyWorkloads(k)}{wlLock && <> <LockChip by={wlLock} /></>}</div></td>
         <td data-label="Limits" className="small">
           <div><span className="muted">Requests</span> {k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"}
             {lockedBy.rpm && <> <LockChip by={lockedBy.rpm} /></>}</div>
@@ -336,7 +336,7 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
                     : isAdmin && !own ? `Cloud spend per calendar month (UTC). Saving it locks it for ${k.user.username ?? "the owner"}.`
                       : "Cloud spend per calendar month (UTC). When it is used up, this key stays local. $0 blocks all cloud spend; leave it empty for no budget."} />
               <fieldset className="allowlist key-workloads">
-                <legend>Workloads at /x/</legend>
+                <legend>Apps at /x/</legend>
                 <WorkloadPicks id={k.id} level={wlLevel} picked={wlPicked} choices={choices} disabled={!isAdmin && !!wlLock}
                   onLevel={setWlLevel} onPicked={setWlPicked} />
                 <p className="field-hint">{wlLock && !isAdmin ? <>Set by the admin <strong>{wlLock}</strong>; only an admin can change it.</>
@@ -348,8 +348,8 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
                   disabled={(!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock && !!budgetLock && !!wlLock) || (wlLevel === "listed" && wlPicked.length === 0)}>Save limits</button>
                 {isAdmin && wlLock && (
                   <button type="button" className="btn btn-quiet btn-small"
-                    onClick={() => void send({ workloads: null }, `Workloads setting of ${k.name} unlocked; it is none again.`)}>
-                    <IconLock size={14} aria-hidden="true" /> Unlock workloads
+                    onClick={() => void send({ workloads: null }, `Apps setting of ${k.name} unlocked; it is none again.`)}>
+                    <IconLock size={14} aria-hidden="true" /> Unlock apps
                   </button>
                 )}
                 {isAdmin && budgetLock && (
@@ -487,7 +487,7 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
           </div>
         )}
         <details className="key-workloads-more">
-          <summary>Workloads at /x/ <span className="muted small">· {ACCESS_LABEL[wlLevel].toLowerCase()}{exposed ? ` · ${exposed} exposed` : ""}</span></summary>
+          <summary>Apps at /x/ <span className="muted small">· {ACCESS_LABEL[wlLevel].toLowerCase()}{exposed ? ` · ${exposed} exposed` : ""}</span></summary>
           <WorkloadPicks id="new" level={wlLevel} picked={wlPicked} choices={data.workloads ?? []} onLevel={setWlLevel} onPicked={setWlPicked} />
         </details>
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}

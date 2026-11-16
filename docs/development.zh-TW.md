@@ -95,10 +95,10 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | 推送版本 tag 時，把兩個映像檔發布到 Docker Hub |
 | `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](guide/zh-TW/how-to.md#從頭到尾檢查一台伺服器)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
-| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
+| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查應用程式看到哪張 NVIDIA GPU |
 | `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
-| `images/vision/` | 工作負載範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
+| `images/vision/` | 應用程式範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
 | `scripts/accept_x.py` | `/x/` 直通在真實硬體上的驗收（也是 `accept_all.py` 的 `passthrough` 群組） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

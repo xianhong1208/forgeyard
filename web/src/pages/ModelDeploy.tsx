@@ -60,7 +60,7 @@ export function ModelDeployPage() {
   }, [bodyKey, recipe, hintKey]);
 
   if (user && user.role === "user") {
-    return (<><PageHeader index="03 · Models" title="Deploy a model" /><Notice>Only admins and operators deploy models: a deployment runs code on a machine.</Notice></>);
+    return (<><PageHeader index="02 · Models" title="Deploy a model" /><Notice>Only admins and operators deploy models: a deployment runs code on a machine.</Notice></>);
   }
 
   const set = <K extends keyof DeployForm>(k: K, v: DeployForm[K]) => setF((cur) => ({ ...cur, [k]: v }));
@@ -90,7 +90,7 @@ export function ModelDeployPage() {
   return (
     <>
       <p className="crumb"><Link to="/models">← Models</Link></p>
-      <PageHeader index="03 · Models" title="Deploy a model"
+      <PageHeader index="02 · Models" title="Deploy a model"
         lead="Pick a model and a recipe; the estimate and where it would go update as you change the parameters. Nothing is downloaded until it is placed." />
       {cat && cat.models.length === 0 && (
         <Notice>
@@ -181,7 +181,7 @@ export function ModelDeployPage() {
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />
                     <p className="field-hint">{cat?.hf_token_set
                       ? "Gated models use the server's token; one here replaces it for this deployment only."
-                      : "Gated models only (or set one for the server under Models → Model library → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
+                      : "Gated models only (or set one for the server under Models → Library → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
                 </div>
               </details>
             </section>
