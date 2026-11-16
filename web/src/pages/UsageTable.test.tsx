@@ -71,7 +71,7 @@ const bodyRows = (table: HTMLElement) => within(table).getAllByRole("row").slice
 const names = (table: HTMLElement) => bodyRows(table).map((r) => r.cells[0].textContent);
 
 describe("Usage breakdown tables (1.4, #82)", () => {
-  it("FY-WEB-241 the top 15 rows by requests, the rest added up in one row; Show all and back", async () => {
+  it("FY-WEB-258 the top 15 rows by requests, the rest added up in one row; Show all and back", async () => {
     screenWidth(false);
     routes();
     mount();
@@ -97,7 +97,7 @@ describe("Usage breakdown tables (1.4, #82)", () => {
     expect(bodyRows(table).length).toBe(16);
   });
 
-  it("FY-WEB-242 a column heading sorts by it, again the other way round; Day starts with the latest", async () => {
+  it("FY-WEB-259 a column heading sorts by it, again the other way round; Day starts with the latest", async () => {
     screenWidth(false);
     const fetch = routes();
     mount();
@@ -127,7 +127,7 @@ describe("Usage breakdown tables (1.4, #82)", () => {
     expect(names(days)[0]).toBe("2026-11-20");                            // back to days: the latest first again
   });
 
-  it("FY-WEB-243 a narrow screen: one line per row with the number, the other columns behind a button", async () => {
+  it("FY-WEB-260 a narrow screen: one line per row with the number, the other columns behind a button", async () => {
     const width = screenWidth(true);
     routes();
     mount();
@@ -170,7 +170,7 @@ describe("Usage breakdown tables (1.4, #82)", () => {
     expect(names(table)[0]).toContain("model-20");
   });
 
-  it("FY-WEB-244 the Cost tab ranks by cost, its last row adds up the rest's cost and share", async () => {
+  it("FY-WEB-261 the Cost tab ranks by cost, its last row adds up the rest's cost and share", async () => {
     const width = screenWidth(false);
     routes();
     mount();
@@ -191,7 +191,7 @@ describe("Usage breakdown tables (1.4, #82)", () => {
     expect(within(within(list).getAllByRole("listitem")[0]).getByRole("button").textContent).toContain("$20.00");
   });
 
-  it("FY-WEB-245 sorting and cutting: ties by name, no value last both ways, nothing cut at the limit", () => {
+  it("FY-WEB-262 sorting and cutting: ties by name, no value last both ways, nothing cut at the limit", () => {
     const rows = [
       { id: "a", name: "b", v: 2 }, { id: "b", name: "a", v: 2 }, { id: "c", name: "c", v: null }, { id: "d", name: "d", v: 5 },
     ];
