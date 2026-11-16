@@ -393,12 +393,22 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .catalog-table td[data-label="Format"], .catalog-table td[data-label="Size"] { white-space: nowrap; }
 .catalog-table .mono.small { overflow-wrap: anywhere; }
 .inspect-facts { margin: 16px 0 4px; }
-.recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
 .recipe { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; background: var(--surface-2); min-width: 0; }
 .recipe header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .recipe header .chip + .chip { margin-left: 0; }
 .recipe h3 { margin: 0 4px 0 0; font-size: 14px; }
 .recipe p { margin: 6px 0; }
+/* 1.4 (#92): an engine card at a glance; the variants are behind Details. */
+.engine-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.engine-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.engine-facts .vendor { display: inline-flex; align-items: center; gap: 3px; }
+.recipe .engine-serves { margin: 4px 0 0; }
+.engine-details { margin-top: 8px; }
+.engine-details > summary { cursor: pointer; color: var(--ink-2); width: max-content; }
+.engine-details[open] > summary { margin-bottom: 4px; }
+.engine-actions { margin-top: 10px; }
+.engine-form textarea { width: 100%; }
 .variants { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .variants li { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; }
 .variants .vendor { display: inline-flex; align-items: center; gap: 3px; justify-self: start; }

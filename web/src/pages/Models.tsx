@@ -12,7 +12,8 @@ import { isActive, recentDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { TASK_LABEL, mediaText, params } from "../lib/models";
+import { HARDWARE_LABEL, engineHardware, freeName, renameRecipe } from "../lib/engines";
+import { TASK_LABEL, mediaText, params, shortSource } from "../lib/models";
 import type { CatalogModel, CatalogResponse, DownloadsResponse, ModelDownload, ModelSources, Recipe, RecipeVariant } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -124,13 +125,33 @@ function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }
 }
 
 // The engines (recipes in the API and in recipe files): how each kind of model runs, per hardware.
+// Admins add one (from scratch or from a copy of a built-in engine), and change or delete their own.
+type EngineFormFor = { mode: "add" } | { mode: "edit"; name: string };
+
 function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }) {
+  const [form, setForm] = useState<EngineFormFor | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const done = (text: string) => { setForm(null); setNote(text); reload(); };
   return (
-    <section className="panel" aria-labelledby="engines-title">
-      <div className="panel-head"><h2 id="engines-title">Engines</h2><span className="muted small">how each kind of model runs, per hardware</span></div>
-      <div className="recipes">{data.recipes.map((r) => <RecipeCard key={r.name} r={r} />)}</div>
-      {data.can_manage && <AddRecipe onAdded={reload} />}
-    </section>
+    <>
+      {note && <Notice tone="ok">{note}</Notice>}
+      {data.can_manage && !form && (
+        <p className="add-model-open">
+          <button type="button" className="btn" onClick={() => { setNote(null); setForm({ mode: "add" }); }}>
+            <IconPlus size={16} aria-hidden="true" /> Add an engine
+          </button>
+        </p>
+      )}
+      {form && <EngineForm key={form.mode === "edit" ? form.name : "add"} edit={form.mode === "edit" ? form.name : null}
+        recipes={data.recipes} onDone={done} onCancel={() => setForm(null)} />}
+      <section className="panel" aria-labelledby="engines-title">
+        <div className="panel-head"><h2 id="engines-title">Engines</h2><span className="muted small">how each kind of model runs, per hardware</span></div>
+        <div className="recipes">{data.recipes.map((r) => (
+          <EngineCard key={r.name} r={r} canManage={data.can_manage}
+            onEdit={() => { setNote(null); setForm({ mode: "edit", name: r.name }); }} onDeleted={done} />
+        ))}</div>
+      </section>
+    </>
   );
 }
 
@@ -139,6 +160,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
   onDownload: () => void; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const src = shortSource(m);
   const remove = async () => {
     if (!window.confirm(`Remove ${m.name} from the catalog? Machines keep their cached copy.`)) return;
     try {
@@ -154,8 +176,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
       <td data-label="Model">
         <div className="cell-stack">
         <div className="strong">{m.title ?? m.name}</div>
-        <div className="mono small muted" title={m.revision ?? undefined}>{m.source}{m.file ? ` · ${m.file}` : ""}{m.revision ? ` @ ${m.revision.slice(0, 10)}` : ""}</div>
-        {m.mmproj && <div className="mono small muted" title="Projector file (llama.cpp --mmproj)">+ {m.mmproj.path}</div>}
+        <div className="mono small muted catalog-src" title={src.full}>{src.text}{m.mmproj ? " + projector" : ""}</div>
         {error && <div className="field-error">{error}</div>}
         </div>
       </td>
@@ -205,27 +226,54 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
   );
 }
 
-function RecipeCard({ r }: { r: Recipe }) {
+// 1.4 (#92): a short card (name, version, what it is, the hardware it runs on, what it serves); the
+// variants, their images and requirements, and the offline commands are behind Details.
+function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage: boolean; onEdit: () => void; onDeleted: (text: string) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    if (!window.confirm(`Delete the engine ${r.name}? A deployment that uses it must be deleted first.`)) return;
+    setError(null);
+    try {
+      await api(`/recipes/${encodeURIComponent(r.name)}`, { method: "DELETE" });
+      onDeleted(`Engine ${r.name} deleted.`);
+    } catch (e) { setError(errorText(e)); }
+  };
   return (
     <article className="recipe" aria-label={`Engine ${r.name}`}>
       <header>
         <h3 className="mono">{r.name}</h3>
         <span className="chip">{r.engine} {r.version}</span>
         {!r.builtin && <span className="chip chip-tone-run">custom</span>}
-        {r.share === "vram" && <span className="chip chip-tone-wait">shares a GPU</span>}
       </header>
-      <p className="small">{r.description}</p>
-      <p className="small muted">{r.tasks.map((t) => TASK_LABEL[t]).join(", ")} · {r.formats.join(", ")} · estimate: {r.estimate}</p>
-      <ul className="variants">
-        {r.variants.map((v) => (
-          <li key={v.name}>
-            <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
-            <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
-            <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
-          </li>
+      <p className="small engine-desc" title={r.description}>{r.description}</p>
+      <div className="engine-facts" aria-label={`Runs on: ${engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ")}`}>
+        {engineHardware(r).map((h) => (
+          <span key={h} className={`vendor vendor-${h}`}>{h === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{HARDWARE_LABEL[h]}</span>
         ))}
-      </ul>
-      <OfflineImages name={r.name} variants={r.variants} />
+        {r.share === "vram" && <span className="chip chip-tone-wait">shares a GPU</span>}
+      </div>
+      <p className="small muted engine-serves">Serves {r.tasks.map((t) => TASK_LABEL[t]).join(", ")}</p>
+      <details className="engine-details">
+        <summary className="small">Details</summary>
+        <p className="small muted">Formats: {r.formats.join(", ")} · estimate: {r.estimate}</p>
+        <ul className="variants" aria-label={`Variants of ${r.name}`}>
+          {r.variants.map((v) => (
+            <li key={v.name}>
+              <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
+              <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
+              <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
+            </li>
+          ))}
+        </ul>
+        <OfflineImages name={r.name} variants={r.variants} />
+      </details>
+      {canManage && !r.builtin && (
+        <div className="row-gap engine-actions">
+          <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>Edit</button>
+          <button type="button" className="btn btn-quiet btn-small" onClick={() => void remove()}>Delete</button>
+        </div>
+      )}
+      {error && <p className="field-error" role="alert">{error}</p>}
     </article>
   );
 }
@@ -279,26 +327,77 @@ function OfflineImages({ name, variants }: { name: string; variants: RecipeVaria
   );
 }
 
-function AddRecipe({ onAdded }: { onAdded: () => void }) {
+// Add an engine, or change a custom one: its recipe as YAML. A new one can start from a copy of a
+// built-in engine under a free name. The server checks the YAML; its message is shown here.
+function EngineForm({ edit, recipes, onDone, onCancel }: {
+  edit: string | null; recipes: Recipe[]; onDone: (text: string) => void; onCancel: () => void;
+}) {
   const [text, setText] = useState("");
-  const [open, setOpen] = useState(false);
+  const [start, setStart] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(edit !== null);
   const [error, setError] = useState<string | null>(null);
-  const save = async () => {
+  const builtins = recipes.filter((r) => r.builtin);
+  useEffect(() => {
+    if (edit === null) return;
+    let alive = true;
+    api<{ recipe: Recipe }>(`/recipes/${encodeURIComponent(edit)}`).then(
+      (r) => { if (alive) { setText(r.recipe.yaml ?? ""); setLoading(false); } },
+      (e) => { if (alive) { setError(errorText(e)); setLoading(false); } },
+    );
+    return () => { alive = false; };
+  }, [edit]);
+  const copy = async (name: string) => {
+    setStart(name);
     setError(null);
+    if (!name) { setText(""); return; }
     try {
-      await api("/recipes", { method: "POST", body: { yaml: text } });
-      setOpen(false); setText(""); onAdded();
+      const r = await api<{ recipe: Recipe }>(`/recipes/${encodeURIComponent(name)}`);
+      setText(renameRecipe(r.recipe.yaml ?? "", freeName(`${name}-custom`, recipes.map((x) => x.name))));
     } catch (e) { setError(errorText(e)); }
   };
-  if (!open) return <p><button type="button" className="btn btn-quiet btn-small" onClick={() => setOpen(true)}><IconPlus size={14} aria-hidden="true" /> Add a custom engine</button></p>;
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ recipe: Recipe }>(edit === null ? "/recipes" : `/recipes/${encodeURIComponent(edit)}`,
+        { method: edit === null ? "POST" : "PUT", body: { yaml: text } });
+      onDone(edit === null ? `Engine ${r.recipe.name} added.` : `Engine ${r.recipe.name} saved.`);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
   return (
-    <div className="field" style={{ marginTop: 14 }}>
-      <label htmlFor="r-yaml">Engine recipe (YAML, like the built-in ones)</label>
-      <textarea id="r-yaml" className="mono" rows={10} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
-      {error && <p className="field-error">{error}</p>}
-      <div className="row-gap"><button type="button" className="btn" onClick={() => void save()}>Save engine</button>
-        <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>Cancel</button></div>
-    </div>
+    <section className="panel engine-form" aria-labelledby="engine-form-title">
+      <div className="panel-head">
+        <h2 id="engine-form-title">{edit === null ? "Add an engine" : `Change ${edit}`}</h2>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>Close</button>
+      </div>
+      <p className="muted small">
+        An engine is a recipe in YAML, like the built-in ones: the program or container image per hardware, its parameters and its
+        memory estimate. <HelpLink page="reference" anchor="built-in-recipes">Built-in recipes</HelpLink>
+      </p>
+      {edit === null && (
+        <div className="field">
+          <label htmlFor="engine-start">Start from a built-in engine</label>
+          <select id="engine-start" value={start} onChange={(e) => void copy(e.target.value)}>
+            <option value="">Empty: write the YAML yourself</option>
+            {builtins.map((r) => <option key={r.name} value={r.name}>{r.name} ({r.engine} {r.version})</option>)}
+          </select>
+          <p className="field-hint">The copy gets a name of its own; change the variants or parameters you need.</p>
+        </div>
+      )}
+      <div className={`field${error ? " has-error" : ""}`}>
+        <label htmlFor="engine-yaml">Engine recipe (YAML)</label>
+        <textarea id="engine-yaml" className="mono" rows={16} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
+          disabled={loading} aria-invalid={error ? true : undefined} aria-describedby={error ? "engine-yaml-error" : undefined} />
+        {error && <p className="field-error" id="engine-yaml-error" role="alert">{error}</p>}
+      </div>
+      <div className="row-gap">
+        <button type="button" className="btn btn-primary" disabled={busy || loading || !text.trim()} onClick={() => void save()}>
+          {busy ? "Saving…" : edit === null ? "Add engine" : "Save changes"}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button>
+      </div>
+    </section>
   );
 }
 

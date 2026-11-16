@@ -62,8 +62,9 @@ of the carve-out and GTT. The deployment's events say which variant it got (`…
 …)`).
 
 A deployment cannot choose the variant itself. To run a card with the other one, add a custom
-recipe (**Models**, *Engines*, **Add a custom engine**): a copy of `llama-cpp` under another name, with only the variant you
-want under `variants`.
+engine (**Models → Engines → Add an engine**, *Start from a built-in engine*: `llama-cpp`): the copy
+gets another name; keep only the variant you want under `variants` and save. A custom engine's card
+has **Edit** and **Delete** (refused while a deployment uses it).
 
 **From a custom `llama-cpp-vulkan` recipe.** Before 1.3, Vulkan needed a custom recipe; the built-in
 one replaces it. A deployment keeps the recipe it was made with, so deploy the model again with

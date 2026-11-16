@@ -243,6 +243,7 @@ describe("models", () => {
       : url === "/api/models" ? { status: 200, body: { ...catalog, recipes: [recipe] } } : undefined);
     mount("/models?tab=engines");
     const card = await screen.findByRole("article", { name: "Engine vllm" });
+    fireEvent.click(within(card).getByText("Details"));  // 1.4 (#92): the variants are behind Details
     fireEvent.click(within(card).getByText("Machine without registry access: load the image"));
     const save = within(card).getByLabelText("Save command for cuda, pooling");
     expect(save.textContent).toBe(`sudo docker pull vllm/vllm-openai@${digest} && \\\n` +
@@ -271,6 +272,8 @@ describe("models", () => {
     expect(screen.getByRole("heading", { name: "Catalog" })).toBeTruthy();
     // Download to… and Deploy stay on a catalog row; the engines and sources are on their own tabs.
     const row = screen.getByText("Qwen3 4B").closest("tr")!;
+    // The short source (the repository); everything, revision included, in its tooltip.
+    expect(within(row).getByText("Qwen/Qwen3-4B").getAttribute("title")).toBe("hf://Qwen/Qwen3-4B @ 1cfa9a72");
     // The row's actions are one group (stacked in one column at desktop widths, so none is clipped).
     const actions = within(row).getByRole("group", { name: "Actions for qwen3-4b" });
     expect(within(actions).getAllByRole("link").concat(within(actions).getAllByRole("button")).map((e) => e.textContent))
@@ -282,7 +285,7 @@ describe("models", () => {
     expect(screen.getByTestId("where").dataset.search).toBe("?tab=engines");
     expect(await screen.findByRole("heading", { name: "Engines" })).toBeTruthy();
     expect(screen.getByRole("article", { name: "Engine vllm" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add a custom engine" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add an engine" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Catalog" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
     expect(screen.getByTestId("where").dataset.search).toBe("?tab=sources");
