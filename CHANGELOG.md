@@ -230,6 +230,9 @@ version until 1.0.
 
 ### Fixed
 
+- **Stopping a replica's key guard no longer waits for a client that stopped reading.** Closing a guard
+  (the agent stops, a replica is removed) used to close each stream gracefully, up to 2 s per side plus 5 s
+  for the listener; it now aborts every open stream first, so it takes well under a second.
 - **Usage's tables no longer go on for pages** (#82). With about 100 models the page was some 48,000
   px tall on a phone: every row wrapped its name over three or four lines and kept every column.
   - Every table on Usage (by model, key, person, day, source, local or cloud; on **Cost** by day,
