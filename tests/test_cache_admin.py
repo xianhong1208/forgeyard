@@ -389,8 +389,8 @@ def test_fy_cache_012_targets_and_keys():
     assert not cache_keys.engine_uses({"sha256": "cd" * 32}, cache_keys.parse("engine/" + "ab" * 8))
 
 
-def test_fy_cache_013_an_engine_being_downloaded_is_not_removed(tmp_path):
-    """FY-CACHE-013: an engine archive's download holds its directory's lock: removing that engine meanwhile
+def test_fy_cache_020_an_engine_being_downloaded_is_not_removed(tmp_path):
+    """FY-CACHE-020: an engine archive's download holds its directory's lock: removing that engine meanwhile
     is refused as busy (not "not found"), and works once it is unpacked."""
     import io
     import tarfile
