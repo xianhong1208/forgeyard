@@ -176,7 +176,7 @@ or downloaded. A deployment is one service workload (it also appears under Workl
 gateway route: programs reach it at `/v1` with its **model name** (see *Gateway and API keys*). Its
 page shows that name, its usage, each replica and a small **Try it** that checks one replica directly.
 
-- **Adding a model** (admins), three ways on **Models → Model library → Add a model**:
+- **Adding a model** (admins), three ways on **Models → Library → Add a model**:
   - **Recommended**: a curated list ([forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml),
     easy to edit) of models known to work with the built-in recipes, grouped: Qwen3 (chat 0.6B to
     32B, two GGUF builds for the CPU, Embedding and Reranker 0.6B / 4B), other open chat models
@@ -675,7 +675,7 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   was compromised on PyPI twice in 2026 (1.82.7/1.82.8 in March through a compromised CI tool; 1.107.0
   and its Docker images in October, which read a proxy's credential tables), and its key and budget
   system would duplicate Forgeyard's.
-- **Providers** (`providers`, `provider_models`; page **Providers**, admins only). A provider is a
+- **Providers** (`providers`, `provider_models`; page **Cloud → Providers**, admins only). A provider is a
   kind, a base URL, an encrypted key, up to 16 extra headers (not secret; the names that carry keys,
   `Host` and `Cookie` are refused), an optional answer timeout (1–3600 s), whether it is **outside
   your network** (the kind's default: every kind but *OpenAI-compatible server*) and, only then not,
@@ -714,6 +714,12 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   (`route.created`, `route.changed`, `route.deleted` in the audit log). Migration 0009 turned every
   existing route into one tier-0 target with the same upstream model name, so they behave exactly as
   before.
+- **Where the console shows them** (1.4, #81). A deployment's own route is its **cloud fallback**, edited
+  on the deployment's page, and the Deployments list marks one with a cloud tier (*→ Gemini*). A route an
+  admin made is on **Cloud → Cloud models**: a *cloud model* when a provider's model is in it, else
+  under *Other names for deployments*; each deployment's page links the names it also answers as. The
+  console says "cloud fallback" and "cloud model"; "route" stays the API's word (`/api/routes`). The
+  old addresses (`/models?tab=serving`, `?tab=routes`, `/models/routes/<id>`, `/providers…`) redirect.
 - **Spill rules, only before the first byte.** The next tier is used when this one is *unavailable*
   (no ready replica, every connection failed), *busy* (every ready replica has as many requests in
   flight through this server as its deployment's `concurrency`; the slot is taken atomically, so two
@@ -925,8 +931,8 @@ Two images, both built from this repository and published on Docker Hub by
   rest. The list of checks is in the guide's reference (*Setup health checks*); a test keeps it
   complete.
 - **Where it shows** (decision D8): **Get started → Setup health** lists everything, the top bar
-  shows the number of errors and warnings, and each page (Machines, API keys, Providers, Models, a
-  route, a deployment, Users) shows its own as a banner. Plain users and operators see none of it.
+  shows the number of errors and warnings, and each page (Machines, API keys, Cloud, Models, a
+  cloud model, a deployment, Users) shows its own as a banner. Plain users and operators see none of it.
 - **Snoozing** is per admin and per finding (`id@scope`), for 30 days, in the user's `preferences`
   JSON (`advisor_snoozed`), so no migration. Errors cannot be snoozed. A snoozed finding that still
   applies comes back after 30 days.

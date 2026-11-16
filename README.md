@@ -114,7 +114,7 @@ The join token works once, within 15 minutes. AMD and CPU-only machines:
 1. Open `https://192.168.1.20:7860/setup`, enter the setup token and create the owner. Then open
    **Trust this server** and install the CA on your device.
 2. **Machines → Add a machine**, and run the command on the machine. It shows up within seconds.
-3. **Models → Model library → Add a model**, pick a recommended model (for a CPU:
+3. **Models → Library → Add a model**, pick a recommended model (for a CPU:
    *Qwen3 1.7B (GGUF, for the CPU)*), then **Deploy it** with the name `qwen`.
 4. **API keys → New key**. On the computer that calls the model, get the CA file and the SDK:
 

@@ -101,7 +101,7 @@ export function MachinesPage() {
   return (
     <>
       <PageHeader
-        index="01 · Machines"
+        index="03 · Machines"
         title="Machines"
         lead="Every computer Forgeyard can run work on: what kind it is, how much memory each card has left, and what runs there. Each one runs the Forgeyard agent, which keeps a connection to this server."
         actions={

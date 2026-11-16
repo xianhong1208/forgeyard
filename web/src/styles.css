@@ -149,7 +149,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .eyebrow { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-family: var(--mono); font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--heat-ink); }
 .eyebrow::before { content: ""; width: 18px; height: 3px; background: var(--heat); border-radius: 2px; }
-.lead { margin: 8px 0 0; max-width: 62ch; color: var(--ink-2); }
+.lead { margin: 8px 0 0; max-width: 62ch; color: var(--ink-2); overflow-wrap: anywhere; }
 .page-actions { display: flex; gap: 8px; flex: none; }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; margin-bottom: 20px; min-width: 0; }
@@ -1036,7 +1036,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .route-target { overflow-wrap: anywhere; min-width: 0; }
 .route-target.off { text-decoration: line-through; color: var(--muted); }
 .tier-n { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--heat-ink); min-width: 52px; }
-.tiers { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 4px; }
+.tiers { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .tier { position: relative; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
 .tier-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
 .tier-targets { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -1045,7 +1045,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .tier-edit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-left: auto; }
 .tier-edit input[type="number"] { width: 64px; min-height: 30px; margin-left: 4px; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); font: inherit; }
 .tier-add { margin-top: 8px; }
-.tier-add select { max-width: 100%; min-height: 36px; }
+.tier-add select { max-width: 100%; min-width: 0; min-height: 36px; }
 .tier-arrow { display: block; margin: 6px auto -8px; color: var(--muted); }
 .key-cloud { margin-bottom: 4px; }
 .cloud-picks .card-pick { align-items: baseline; }
@@ -1305,6 +1305,18 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .deprow-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .deprow-name a { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .deprow-name a:hover { text-decoration: underline; }
+/* 1.4 (#81): "→ Gemini": the deployment has a cloud fallback (on its page). */
+.deprow-name { flex-wrap: wrap; row-gap: 2px; }
+.deprow-name a.fallback-mark { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px;
+  font-family: var(--font); font-size: 11.5px; font-weight: 500; color: var(--heat-ink); background: var(--heat-soft); border-color: #f3d39b; white-space: nowrap; }
+.deprow-name a.fallback-mark:hover { color: var(--ink); text-decoration: none; border-color: var(--line-strong); }
+#cloud-fallback { scroll-margin-top: 72px; }
+.fallback-form { margin-top: 6px; }
+.fallback-rules { margin: 18px 0 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.fallback-rules h3, .fallback-form .panel-head h3 { margin: 0; font-size: 15px; }
+.also-in { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.fallback-list { margin-top: 4px; }
+.fallback-delete { margin-left: auto; }
 .deprow-model { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .deprow-mem { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
 .deprow-state { justify-self: start; }

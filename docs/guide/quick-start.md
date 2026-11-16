@@ -173,7 +173,7 @@ Forgeyard*. Even with all cards allowed, saving the choice once ticks this step 
 
 ## 5. Add a recommended model
 
-1. Open **Models** → **Model library** → **Add a model**.
+1. Open **Models** → **Library** → **Add a model**.
 2. **Recommended** lists models known to work. Pick one that fits your machine:
    - a GPU with at least 8 GB free: **Qwen3 0.6B** (1.4 GB download);
    - only a CPU: **Qwen3 1.7B (GGUF, for the CPU)** (1.2 GB download, about 3 GB of RAM).

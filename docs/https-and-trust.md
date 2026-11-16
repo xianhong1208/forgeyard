@@ -344,7 +344,7 @@ It makes a new key (the old file, if any, is kept as `secret.key.lost-<time>`) a
 - places model replicas again, so they restart with new internal keys;
 - empties lost workload environment values (the names stay), and says so in each workload's
   events: delete such a workload and create it again with its values;
-- drops cloud providers' keys: enter them again on the **Providers** page.
+- drops cloud providers' keys: enter them again on **Cloud → Providers**.
 
 It refuses to run when the key is not actually lost.
 

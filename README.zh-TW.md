@@ -98,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 
 1. 開啟 `https://192.168.1.20:7860/setup`，輸入設定權杖，建立擁有者。接著開啟 **Trust this server**，在你的裝置上安裝 CA。
 2. **Machines → Add a machine**，在機器上執行那行指令。幾秒內它就會出現。
-3. **Models → Model library → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
+3. **Models → Library → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
 4. **API keys → New key**。在要呼叫模型的電腦上取得 CA 檔案和 SDK：
 
    ```bash

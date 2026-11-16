@@ -49,9 +49,26 @@ version until 1.0.
 
 ### Changed
 
-- **The Models tabs are Deployments, Serving and Model library** (#34): *Routes and cloud* is now
-  **Serving** and *Catalog and recipes* is **Model library**. Links to the old tabs
-  (`/models?tab=routes`, `/models?tab=catalog`) open the new ones.
+- **Fewer places for one model: Models has Deployments and Library, cloud settings are on Cloud**
+  (#34, #81). The console only; the API and the data are unchanged.
+  - **Models** has two tabs, **Deployments** and **Library** (*Catalog and recipes* before). The
+    Serving tab (*Routes and cloud* before 1.4) is gone: most of its routes only repeated a
+    deployment.
+  - **A deployment's page holds its cloud fallback**: the tiers and the spill rules that were
+    *Routing and cloud spill*, edited in place by admins and read-only for everyone else, plus the
+    other names it also answers as. In the Deployments list, a deployment with a cloud tier shows
+    *→ <provider>*.
+  - **Providers is now Cloud** (`/cloud`), with two tabs: **Providers**, and **Cloud models**, the
+    names an admin made for a provider's model (*New cloud model*). A name an admin made for
+    deployments only (several behind one name, or one under a second name) is listed there too, under
+    *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
+    `/cloud/providers/<id>`.
+  - The menu is Models, Workloads, Machines, Cloud (admins), Playground, API keys, Usage, Users,
+    Audit log. "Serving" and "route" left the console's navigation.
+  - Old links open the new places, without a step in the history: `/models?tab=serving` and
+    `?tab=routes` (with `&route=<id or name>`: that route's place), `?tab=catalog`,
+    `/models/routes/<id>`, `/providers` and `/providers/<id>`. Setup-health findings link to a
+    deployment's cloud fallback, a cloud model or `/cloud/providers/<id>`, and show on those pages.
 - **A deployment's workload is stopped, started and deleted only through its deployment** (#36):
   `POST /api/workloads/<id>/stop`, `…/start` and `DELETE /api/workloads/<id>` answer `409
   managed_by_deployment` (naming the deployment) for a model deployment's workload, and its page has

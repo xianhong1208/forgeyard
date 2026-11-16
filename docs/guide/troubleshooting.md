@@ -387,12 +387,12 @@ reached or refused its internal key: usually its agent restarted; it recovers wi
 A model that goes to a cloud provider adds these. The answer's `X-Forgeyard-Target` says whether a
 provider answered.
 
-- `404 model_not_found` for a model listed on **Models**: it is cloud-only, and the key's cloud
+- `404 model_not_found` for a model listed on **Cloud models**: it is cloud-only, and the key's cloud
   setting is not **Allowed**.
 - `400 cloud_only_model`: the request had `X-Forgeyard-Local-Only: 1` (or the route is
   **Local only**), but the model is served only by a cloud provider.
 - `502 provider_auth_failed`: the provider refused Forgeyard's key for it; an admin fixes it on
-  **Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
+  **Cloud → Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
   `502 provider_redirect`: the provider answered with a redirect, which is never followed; check its
   base URL.
 - `429 provider_rate_limited`: every target of the cloud tier was rate limited; wait for
@@ -489,11 +489,11 @@ offline. The message gives each replica's state, for example
 **Do:** open the deployment's page. Wait while it downloads or starts (the page shows the progress).
 If a replica keeps failing, its output on that page says why; a machine that is offline is in
 [An agent shows offline](#an-agent-shows-offline). To have such requests go to a cloud provider
-meanwhile, add a cloud tier to the model's route ([Cloud providers](cloud-providers.md#route-a-model-to-the-cloud)).
+meanwhile, give the deployment a cloud fallback on its page ([Cloud providers](cloud-providers.md#give-a-deployment-a-cloud-fallback)).
 
 ## A request does not spill to the cloud
 
-**You see:** a model's route has a cloud tier, but requests still fail (503, 429) or wait while the
+**You see:** a deployment has a cloud fallback, but requests still fail (503, 429) or wait while the
 local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 
 **Why**, in the order to check:

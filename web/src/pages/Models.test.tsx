@@ -260,25 +260,24 @@ describe("models", () => {
     expect(within(card).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
   });
 
-  it("FY-WEB-226 the tabs are Deployments, Serving and Model library; the old addresses land on the new tabs", async () => {
+  it("FY-WEB-226 the tabs are Deployments and Library (1.4, #81: no Serving); the old addresses land on Deployments or the Library", async () => {
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
       : url === "/api/models" ? { status: 200, body: catalog }
         : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes: [] } } : undefined);
     const view = mount("/models?tab=routes");
-    expect((await screen.findByRole("tab", { name: "Serving" })).getAttribute("aria-selected")).toBe("true");
-    await screen.findByRole("tab", { name: "Deployments (0)" });
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (0)", "Serving", "Model library"]);
-    expect(await screen.findByText("Model names at /v1")).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving"));
+    expect((await screen.findByRole("tab", { name: "Deployments (0)" })).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (0)", "Library"]);
+    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe(""));
     view.unmount();
     mount("/models?tab=catalog");
-    expect((await screen.findByRole("tab", { name: "Model library" })).getAttribute("aria-selected")).toBe("true");
+    expect((await screen.findByRole("tab", { name: "Library" })).getAttribute("aria-selected")).toBe("true");
     expect(await screen.findByRole("heading", { name: "Recipes" })).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=library"));
-    fireEvent.click(screen.getByRole("tab", { name: "Serving" }));
-    expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving");
     // The count in the tab's name comes with /api/deployments, which may answer after the catalog.
     fireEvent.click(await screen.findByRole("tab", { name: "Deployments (0)" }));
     expect(screen.getByTestId("where").dataset.search).toBe("");
+    fireEvent.click(screen.getByRole("tab", { name: "Library" }));
+    expect(screen.getByTestId("where").dataset.search).toBe("?tab=library");
   });
+
 });

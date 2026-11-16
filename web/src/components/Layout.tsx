@@ -29,16 +29,18 @@ export function Layout() {
     };
   }, [menu]);
 
+  // 1.4 (#81): Models first; Cloud (cloud providers and cloud models) for admins, as Providers was.
+  const admin = user?.role === "admin";
   const links = [
-    { to: "/machines", label: "Machines" },
-    { to: "/workloads", label: "Workloads" },
     { to: "/models", label: "Models" },
+    { to: "/workloads", label: "Workloads" },
+    { to: "/machines", label: "Machines" },
+    ...(admin ? [{ to: "/cloud", label: "Cloud" }] : []),
     { to: "/playground", label: "Playground" },
     { to: "/keys", label: "API keys" },
     { to: "/usage", label: "Usage" },
-    ...(user?.role === "admin"
+    ...(admin
       ? [
-          { to: "/providers", label: "Providers" },
           { to: "/users", label: "Users" },
           { to: "/audit", label: "Audit log" },
         ]

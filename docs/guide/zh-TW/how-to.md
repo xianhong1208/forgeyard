@@ -218,7 +218,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
 引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
 
-1. **找出映像檔。** 在 **Models → Model library**，打開 recipe 上的 **Machine without registry access:
+1. **找出映像檔。** 在 **Models → Library**，打開 recipe 上的 **Machine without registry access:
    load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
    上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
@@ -486,7 +486,7 @@ media: {inputs: [image, audio, video], files: false}
 有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
 
 1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
-2. 管理員：打開 **Models → Model library**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+2. 管理員：打開 **Models → Library**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
 3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
 
 部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
@@ -495,7 +495,7 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 加入雲端供應商
 
-管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+管理員：打開 **Cloud → Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後使用其中一個：打開一個部署，在 **Cloud fallback** 新增雲端層並放入雲端模型，再儲存；或用 **Cloud → Cloud models → New cloud model** 以自己的名稱提供它。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
 
 **Outside your network (cloud)** 會自動幫你勾好：OpenAI、Anthropic、Gemini、Azure 和 OpenRouter 一律勾選；*OpenAI-compatible server* 則在它的 base URL 是公開位址（或解析成公開位址的名稱）時勾選。私有位址（`10.x`、`172.16–31.x`、`192.168.x`、`100.64–127.x`、loopback、link-local、IPv6 `fc00::/7`），或像 `gpu-box`、`*.local`、`*.lan`、`*.internal` 這樣的名稱則不勾選。表單會說明原因；判斷錯了就自己改。名稱在伺服器上解析不出來時，維持不勾選，並說明無法判斷。
 
@@ -519,7 +519,7 @@ media: {inputs: [image, audio, video], files: false}
 
 管理員在開始使用供應商之後：
 
-1. **設定價格。** 在 **Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
+1. **設定價格。** 在 **Cloud → Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
 2. **查看費用。** **Usage** → **Cost** 依日期、金鑰、個人、模型或供應商顯示費用，以及有多少由本機處理。
 3. **設定預算**，以日曆月（UTC）計，單位是美元：
    - 金鑰：**API keys** → 金鑰的 **Limits** → **Monthly budget (USD)** → **Save limits**。管理員在別人金鑰上設定的值會對擁有者鎖定；**Unlock budget** 會移除它；
@@ -777,7 +777,7 @@ Forgeyard 會檢查自己的設定，找出壞掉、有風險或沒有作用的�
 
 - **Get started → Setup health** 列出每一項檢查結果，附上該怎麼做，以及到修正位置的連結。
 - **頂端列的數字**顯示錯誤和警告的數量。沒有的時候就不會出現。
-- **相關頁面上的橫幅**（Machines、API keys、Providers、Models、路由、部署、Users）顯示那個頁面的檢查結果。
+- **相關頁面上的橫幅**（Machines、API keys、Cloud、Models、雲端模型、部署、Users）顯示那個頁面的檢查結果。
 
 一般使用者和 operator 都看不到這些。
 

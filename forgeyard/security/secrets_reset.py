@@ -8,7 +8,7 @@ secret.key.lost-<time>), then for every stored secret the new key cannot read:
 - model replicas lose their internal key and are placed again, so they restart with a new one;
 - workload environment values are emptied (the names stay), and the workload's events say which:
   delete the workload and create it again with the values;
-- provider keys (1.2) are dropped: enter them again on the Providers page.
+- provider keys (1.2) are dropped: enter them again on Cloud → Providers.
 
 Nothing else changes: accounts, sessions, API keys and machines are hashed, not encrypted.
 """

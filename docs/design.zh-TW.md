@@ -132,7 +132,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
 會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
 （見「Gateway 與 API key」）。部署頁顯示這個名稱、用量、每個 replica，並有一個直接檢查單一 replica 的小小 **Try it**。
 
-- **加入模型**（admin），在 **Models → Model library → Add a model** 有三種方式：
+- **加入模型**（admin），在 **Models → Library → Add a model** 有三種方式：
   - **Recommended（推薦清單）**：一份精選清單（[forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml)，容易修改），
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
@@ -356,7 +356,7 @@ Kong 與 GPUStack 之後決定。
   寫在文件裡（docs/guide/cloud-providers.md），而不是藏起來。**不用 LiteLLM**，不論當函式庫或 sidecar：它在 2026 年兩度在 PyPI
   上被植入惡意程式（3 月的 1.82.7/1.82.8，經由被入侵的 CI 工具；10 月的 1.107.0 與其 Docker 映像，會讀取 proxy 的憑證資料表），
   而且它自己的金鑰與預算系統會和 Forgeyard 的重疊。
-- **供應商**（`providers`、`provider_models`；**Providers** 頁，只有 admin）。供應商包含種類、base URL、加密的金鑰、最多 16 個額外
+- **供應商**（`providers`、`provider_models`；**Cloud → Providers** 頁，只有 admin）。供應商包含種類、base URL、加密的金鑰、最多 16 個額外
   header（不是機密；用來帶金鑰的名稱、`Host` 與 `Cookie` 會被拒絕）、可選的回應逾時（1–3600 秒）、是否**在你的網路外**（依種類預設：
   除了 *OpenAI-compatible server* 都是），以及（只有在網路內時）是否允許純 http。它的每個模型提供 `openai-chat` 或
   `openai-embeddings`，可以額外拿掉參數（`drop_params`），並帶有價格。**Test connection** 帶著金鑰呼叫 `GET {base}/models`；
@@ -385,6 +385,10 @@ Kong 與 GPUStack 之後決定。
   embeddings 路由，模型也要相符。每個登入的人都能讀路由（含是否可用，以及種類：local、mixed 或 cloud）；admin 才能修改（稽核紀錄
   `route.created`、`route.changed`、`route.deleted`）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
   名稱不變，所以行為完全和以前一樣。
+- **在 console 的位置**（1.4，#81）。部署自己的路由就是它的**雲端備援**，在部署的頁面上編輯；Deployments 清單會標出有雲端層的部署
+  （*→ Gemini*）。admin 自己建立的路由在 **Cloud → Cloud models**：裡面有供應商模型的是*雲端模型*，其他列在 *Other names for
+  deployments*；每個部署的頁面會連到它另外回應的名稱。console 用「雲端備援」和「雲端模型」，「路由」只留作 API 的用語
+  （`/api/routes`）。舊網址（`/models?tab=serving`、`?tab=routes`、`/models/routes/<id>`、`/providers…`）會轉址。
 - **溢出規則，只在第一個 byte 之前。** 這一層 *unavailable*（沒有就緒的副本、每個連線都失敗）、*busy*（每個就緒副本經由這台
   server 處理中的請求數都達到部署的 `concurrency`；名額是原子地取得的，兩個請求不會同時拿到最後一個；`wait_ms` 會先等名額）或
   *refusing*（429 或 503）時，才用下一層。*too long*（估計的提示加上 `max_tokens` 超過部署的 `context`）只有路由選擇時才算。
@@ -526,7 +530,7 @@ Kong 與 GPUStack 之後決定。
   *warning* 是可能會花錢、外洩或壞掉，*info* 是沒有作用或出乎意料。拋出例外的檢查會被記錄並略過，所以一個 bug 絕不會蓋掉其他結果。
   檢查清單在指南的參考資料（*Setup health checks*）；有測試確保它完整。
 - **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、API keys、
-  Providers、Models、路由、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
+  Cloud、Models、雲端模型、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
 - **延後提醒**是每位 admin、每項結果（`id@scope`）各自的，為期 30 天，存在使用者的 `preferences` JSON（`advisor_snoozed`），
   所以不需要 migration。error 不能延後。延後的結果如果仍然成立，30 天後會再出現。
 - **機密金鑰備份**（決策 D5）：在 admin 勾選 *I have a backup of key id X* 之前一直是警告。勾選是一筆 `server_settings`

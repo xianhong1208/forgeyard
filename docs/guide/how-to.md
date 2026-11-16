@@ -311,7 +311,7 @@ A machine that cannot reach the registry (no internet access, or a DNS filter th
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
 the deployment stay as they are.
 
-1. **Find the image.** On **Models → Model library**, open **Machine without registry access:
+1. **Find the image.** On **Models → Library**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
    ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
@@ -697,7 +697,7 @@ to download them, and one token for the whole server is enough:
 
 1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
    **Settings → Access Tokens**, make a token with *Read* access.
-2. Admins: open **Models → Model library**. Under **Model sources**, paste it into **Hugging Face token**
+2. Admins: open **Models → Library**. Under **Model sources**, paste it into **Hugging Face token**
    and choose **Save token**. It is stored encrypted with the server's secret key and never shown
    again, only its last four characters.
 3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
@@ -713,10 +713,11 @@ health says when a deployment of a gated model has no token to use (`gated-model
 
 ## Add a cloud provider
 
-Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
-OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test connection**. Add the
-models you want, then put one in a route: open a deployment, choose **Routing and cloud spill**, add
-a tier with the cloud model, and save. Give the keys that may use it a cloud setting other than
+Admins: open **Cloud → Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google
+Gemini, Azure OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test
+connection**. Add the models you want, then use one: open a deployment, and under **Cloud fallback**
+add a cloud tier with the cloud model and save; or serve it under a name of its own with **Cloud →
+Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
 **Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
 [Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
 one's endpoint cannot do.
@@ -754,7 +755,7 @@ panel marks the values as *from .env*. Saving replaces them for good.
 
 Admins, once providers are in use:
 
-1. **Set prices.** On **Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
+1. **Set prices.** On **Cloud → Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
    matches, tick the rows to take, and choose **Apply ticked**. For a model OpenRouter does not list,
    open its provider, choose **Prices** on the model, type the prices from the provider's pricing
    page (US dollars per million tokens), and **Save prices**. A cloud model without a price is counted
@@ -1090,8 +1091,8 @@ local tier. Admins see the results in three places:
 - **Get started → Setup health** lists every finding, with what to do and a link to where it is
   fixed.
 - **A count in the top bar** shows errors and warnings. It disappears when there are none.
-- **A banner on the page concerned** (Machines, API keys, Providers, Models, a route, a
-  deployment, Users) shows that page's findings.
+- **A banner on the page concerned** (Machines, API keys, Cloud, Models, a cloud model,
+  a deployment, Users) shows that page's findings.
 
 Users and operators see none of it.
 

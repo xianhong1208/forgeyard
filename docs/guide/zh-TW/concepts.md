@@ -80,7 +80,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 模型、recipe 與估算
 
-**Models** 頁面有三個分頁。**Deployments** 依種類（chat、多模態 chat、嵌入、重排序、語音轉文字、文字轉語音、圖片、影片）把執行中的模型分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**Serving** 是用戶端送到 `/v1` 的模型名稱，以及它們背後的雲端層級（[路由](#cloud-providers-and-tiers)）。**Model library**（模型庫）是可以部署的東西：目錄、recipe，以及（管理員才有的）模型來源。1.4 之前的舊連結（`?tab=routes`、`?tab=catalog`）仍會打開對應的分頁。
+**Models** 頁面有兩個分頁。**Deployments** 依種類（chat、多模態 chat、嵌入、重排序、語音轉文字、文字轉語音、圖片、影片）把執行中的模型分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。**Library**（模型庫）是可以部署的東西：目錄、recipe，以及（管理員才有的）模型來源。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.4 之前的連結（`?tab=serving`、`?tab=routes`、`?tab=catalog`、`/providers`）會打開新的位置。
 
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。
 - **recipe**（配方）描述某一類模型要怎麼執行：用哪個引擎、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
@@ -174,7 +174,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 ## 雲端供應商與分層
 
 - **供應商**是 Forgeyard 以外的模型 API（OpenAI、Anthropic、Gemini、Azure OpenAI、OpenRouter，或你自己相容 OpenAI 的伺服器）。管理員連同金鑰一起新增；金鑰加密儲存，之後不會再顯示。
-- `/v1` 上的每個模型名稱都是一條**路由**。路由有分成好幾**層**的**目標**：本機部署和供應商的模型。部署自己的路由一開始只有一層，就是這個部署。管理員可以加上雲端模型作為第二層，或建立只有雲端模型的路由。
+- `/v1` 上的每個模型名稱（在 API 裡）都是一條**路由**。路由有分成好幾**層**的**目標**：本機部署和供應商的模型。部署自己的路由一開始只有一層，就是這個部署。管理員可以在後面加上雲端模型，也就是部署的**雲端備援**，在它的頁面上設定。管理員也可以建立**雲端模型**：替供應商的模型取一個自己的名稱，在 **Cloud → Cloud models**。
 - **本機優先。**只有在回答開始之前，而且本機這層無法使用、**忙碌**（每個副本都達到部署的 *Concurrent requests*）或回應 429 或 503 時，請求才會移到下一層。對本機 context 來說太長的提示，只有路由有設定時才會溢出。
 - 每把 API 金鑰的**雲端**設定決定它的請求能不能離開你的網路：**Never**（預設值，1.2 以前的金鑰也都是）、**Only to spill**，或 **Allowed**（也包括只有雲端的模型）。勾選 **Local only** 的路由，以及帶著 `X-Forgeyard-Local-Only: 1` 的請求，也都不會離開。
 - **雲端政策**（管理員在 **API keys** 的選擇）是把兩個值合成一個：新金鑰拿到什麼，以及大家最多能給自己的金鑰什麼。*No cloud*、*People may opt in to spill*、*Spill by default* 和 *Cloud allowed* 是常用的組合；*Custom* 會顯示兩個值。

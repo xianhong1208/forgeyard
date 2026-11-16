@@ -62,7 +62,7 @@ export function UsagePage() {
 
   return (
     <>
-      <PageHeader index="06 · Usage" title="Usage"
+      <PageHeader index="07 · Usage" title="Usage"
         lead={data?.everyone ? "Everyone's requests through the gateway and the playground." : "Your requests through the gateway, with your API keys and in the playground."} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="tabs" role="tablist" aria-label="Usage">
@@ -183,7 +183,7 @@ function CostView({ data }: { data: UsageResponse }) {
       {unpriced > 0 && (
         <Notice tone="error">
           {num(unpriced)} cloud request{unpriced === 1 ? " has" : "s have"} no price, so the cost above leaves {unpriced === 1 ? "it" : "them"} out.{" "}
-          {data.is_admin ? <Link to="/providers">Set prices on the provider's models</Link> : "An admin sets the prices of cloud models."}
+          {data.is_admin ? <Link to="/cloud">Set prices on the provider's models</Link> : "An admin sets the prices of cloud models."}
         </Notice>
       )}
       {data.rows.length === 0 ? (
@@ -281,7 +281,7 @@ function Budgets({ everyone }: { everyone: boolean }) {
           <div className="budget-grid">
             {providers.map((p) => (
               <div key={p.id} className="budget-item">
-                <div className="budget-who"><Link className="strong" to={`/providers/${p.id}`}>{p.name}</Link></div>
+                <div className="budget-who"><Link className="strong" to={`/cloud/providers/${p.id}`}>{p.name}</Link></div>
                 <BudgetMeter b={p} label={`Budget of the provider ${p.name}`} />
               </div>
             ))}

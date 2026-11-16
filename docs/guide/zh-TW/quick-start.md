@@ -147,7 +147,7 @@ Next, on https://192.168.1.20:7860:
 
 ## 5. 加入一個推薦的模型
 
-1. 開啟 **Models** → **Model library**（模型庫）→ **Add a model**。
+1. 開啟 **Models** → **Library**（模型庫）→ **Add a model**。
 2. **Recommended** 列出已知可以正常運作的模型。挑一個適合你機器的：
    - GPU 至少有 8 GB 可用記憶體：**Qwen3 0.6B**（下載 1.4 GB）；
    - 只有 CPU：**Qwen3 1.7B (GGUF, for the CPU)**（下載 1.2 GB，約需 3 GB RAM）。

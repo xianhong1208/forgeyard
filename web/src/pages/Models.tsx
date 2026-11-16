@@ -1,6 +1,6 @@
 import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { KindMark, ModelKindIcon } from "../components/Fleet";
@@ -12,10 +12,9 @@ import { engineCarry } from "../lib/engineImages";
 import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { API_KIND } from "../lib/gateway";
 import { TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
-import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, targetName, targetWhere, tiers } from "../lib/routing";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelSources, Recipe, RecipeVariant, RoutesResponse } from "../lib/types";
+import { FALLBACK_ANCHOR, fallbackProviders, routeHome } from "../lib/routing";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelSources, Recipe, RecipeVariant, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATUS_TONE, stateLabel } from "../lib/workloads";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
@@ -32,24 +31,38 @@ const KINDS = [
 
 export function ModelsPage() {
   const [search, setSearch] = useSearchParams();
-  const tab = modelsTab(search.get("tab"));
-  // 1.4: the tabs were renamed; links to the old names (?tab=routes, ?tab=catalog) land on the new ones.
-  const legacy = search.get("tab") !== null && search.get("tab") !== tab && tab !== "deployments";
+  const navigate = useNavigate();
+  const raw = search.get("tab");
+  const tab = modelsTab(raw);
+  // Old addresses: the Serving tab (1.4, before that "routes") is gone; a link that names a route
+  // opens where that route lives now, any other lands on Deployments. "catalog" was the Library.
+  const routeRef = tab === "serving" ? search.get("route") : null;
+  const legacy = useApi<RoutesResponse>(routeRef ? "/routes" : null);
   useEffect(() => {
-    if (legacy) setSearch({ tab }, { replace: true });
-  }, [legacy, tab, setSearch]);
+    if (tab === "serving") {
+      if (!routeRef) setSearch({}, { replace: true });
+      else if (legacy.data || legacy.error) {
+        const r = legacy.data?.routes.find((x) => String(x.id) === routeRef || x.served_name === routeRef);
+        if (r) navigate(routeHome(r), { replace: true });
+        else setSearch({}, { replace: true });
+      }
+    } else if (raw !== null && raw !== tab && tab === "library") setSearch({ tab }, { replace: true });
+  }, [tab, raw, routeRef, legacy.data, legacy.error, navigate, setSearch]);
   const deps = useApi<DeploymentsResponse>("/deployments");
   const { data: machines } = useApi<MachinesResponse>("/machines");
   const cat = useApi<CatalogResponse>("/models");
+  // For the "→ provider" mark of a deployment with a cloud fallback.
+  const routes = useApi<RoutesResponse>("/routes");
   usePoll(deps.reload, WORKLOADS_POLL_MS);
   const canDeploy = cat.data?.can_deploy ?? false;
+  const library = tab === "library";
 
   return (
     <>
       <PageHeader
-        index="03 · Models"
+        index="01 · Models"
         title="Models"
-        lead="Models run here as deployments, grouped by what they do. Serving decides which names answer at /v1, and the model library is what you can deploy. Every ready deployment answers at /v1 with an API key, and in the Playground."
+        lead="Models run here as deployments, grouped by what they do; a deployment's page also holds its cloud fallback. The library is what you can deploy. Every ready deployment answers at /v1 with an API key, and in the Playground."
         actions={canDeploy && (
           <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
@@ -61,14 +74,12 @@ export function ModelsPage() {
         <HelpLink page="troubleshooting" anchor="a-deployment-does-not-fit">A deployment does not fit</HelpLink>
       </HelpLinks>
       <div className="tabs" role="tablist" aria-label="Models">
-        <button type="button" role="tab" aria-selected={tab === "deployments"} className={tab === "deployments" ? "on" : ""}
+        <button type="button" role="tab" aria-selected={!library} className={!library ? "on" : ""}
           onClick={() => setSearch({})}>Deployments{deps.data ? ` (${deps.data.deployments.length})` : ""}</button>
-        <button type="button" role="tab" aria-selected={tab === "serving"} className={tab === "serving" ? "on" : ""}
-          onClick={() => setSearch({ tab: "serving" })}>Serving</button>
-        <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "on" : ""}
-          onClick={() => setSearch({ tab: "library" })}>Model library</button>
+        <button type="button" role="tab" aria-selected={library} className={library ? "on" : ""}
+          onClick={() => setSearch({ tab: "library" })}>Library</button>
       </div>
-      {tab === "serving" ? <Routes /> : tab === "deployments" ? (
+      {!library ? (
         <>
           {deps.error && <Notice tone="error">{deps.error}</Notice>}
           {deps.data && deps.data.deployments.length === 0 && (
@@ -102,7 +113,7 @@ export function ModelsPage() {
             </section>
           )}
           {deps.data && deps.data.deployments.length > 0 && (
-            <ByKind list={deps.data.deployments} machines={machines?.machines ?? []} canDeploy={canDeploy} />
+            <ByKind list={deps.data.deployments} machines={machines?.machines ?? []} canDeploy={canDeploy} routes={routes.data?.routes ?? []} />
           )}
         </>
       ) : (
@@ -112,71 +123,20 @@ export function ModelsPage() {
   );
 }
 
-function Routes() {
-  const { data, error } = useApi<RoutesResponse>("/routes");
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!data) return <p className="muted">Loading…</p>;
-  return (
-    <>
-      <section className="panel routes-intro">
-        <div className="panel-head">
-          <h2>Model names at /v1</h2>
-          {data.is_admin && <Link to="/models/routes/new" className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> New route</Link>}
-        </div>
-        <p className="muted small">
-          Each name clients send as <code>model</code> has targets in tiers: its deployment first, and, if an admin adds one, a cloud provider's model
-          to spill to when local is busy or down. A route can also serve a cloud model only. API keys decide whether a request may use the cloud at all.{" "}
-          {data.is_admin && <Link to="/providers">Cloud providers</Link>}
-        </p>
-      </section>
-      {data.routes.length === 0 ? <p className="muted">No routes yet: deploy a model, or add a provider and a route.</p> : (
-        <div className="workloads">
-          {data.routes.map((r) => (
-            <article key={r.id} className="wl" aria-label={`Route ${r.served_name}`}>
-              <header className="wl-head">
-                <div className="wl-title">
-                  {r.kind !== "local" && <IconCloud size={16} aria-hidden="true" />}
-                  <h2 className="mono"><Link to={`/models/routes/${r.id}`}>{r.served_name}</Link></h2>
-                  <span className={`chip chip-tone-${ROUTE_KIND_TONE[r.kind]}`}>{ROUTE_KIND_LABEL[r.kind]}</span>
-                  <span className="chip">{API_KIND[r.api] ?? r.api}</span>
-                  {r.local_only && <span className="chip chip-tone-ok">local only</span>}
-                  {r.usable === false && <span className="chip chip-tone-off" title="Your keys and the playground cannot use cloud-only models">not for you</span>}
-                </div>
-                <Link className="btn btn-quiet btn-small" to={`/models/routes/${r.id}`}>{data.is_admin ? "Edit routing" : "Details"}</Link>
-              </header>
-              <ol className="route-tiers">
-                {tiers(r).map((tier, i) => (
-                  <li key={i}>
-                    <span className="tier-n">{i === 0 ? "First" : "Then"}</span>
-                    {tier.map((t) => (
-                      <span key={t.id} className={`route-target${t.enabled ? "" : " off"}`}>
-                        <span className="mono">{targetName(t)}</span> <span className="muted small">{targetWhere(t)}</span>
-                      </span>
-                    ))}
-                  </li>
-                ))}
-              </ol>
-            </article>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
+export type ModelsTab = "deployments" | "library" | "serving";
 
-export type ModelsTab = "deployments" | "serving" | "library";
-
-// The tab in the address; the names before 1.4 ("routes", "catalog") still work.
+// The tab in the address. "serving" is an old address only (the tab is gone in 1.4, #81); the names
+// before 1.4 ("routes", "catalog") still work.
 export function modelsTab(raw: string | null): ModelsTab {
   if (raw === "serving" || raw === "routes") return "serving";
-  if (raw === "library" || raw === "catalog") return "library";
+  if (raw === "library" || raw === "catalog" || raw === "model-library") return "library";
   return "deployments";
 }
 
 // 1.4 (#34): the deployments in one section per kind, each with its icon, what it does and its path
 // at /v1; one row per deployment with where it runs, its memory and its state. Kinds with none are
 // named once at the end.
-function ByKind({ list, machines, canDeploy }: { list: Deployment[]; machines: Machine[]; canDeploy: boolean }) {
+function ByKind({ list, machines, canDeploy, routes }: { list: Deployment[]; machines: Machine[]; canDeploy: boolean; routes: RouteInfo[] }) {
   const groups = groupByKind(list);
   const none = groups.filter(([, l]) => l.length === 0).map(([k]) => k);
   return (
@@ -193,7 +153,7 @@ function ByKind({ list, machines, canDeploy }: { list: Deployment[]; machines: M
               </div>
               <span className="kindsec-api mono">{K.api}</span>
             </div>
-            {l.map((d) => <DeploymentRow key={d.id} d={d} machines={machines} />)}
+            {l.map((d) => <DeploymentRow key={d.id} d={d} machines={machines} cloud={fallbackProviders(routes, d.id)} />)}
           </section>
         );
       })}
@@ -208,7 +168,7 @@ function ByKind({ list, machines, canDeploy }: { list: Deployment[]; machines: M
   );
 }
 
-function DeploymentRow({ d, machines }: { d: Deployment; machines: Machine[] }) {
+function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machine[]; cloud: string[] }) {
   const w = d.workload;
   const tone = STATUS_TONE[w.status];
   const placed = w.replica_list.filter((r) => r.machine);
@@ -226,6 +186,12 @@ function DeploymentRow({ d, machines }: { d: Deployment; machines: Machine[] }) 
         <div className="deprow-name">
           <span className={`dot dot-tone-${tone}`} aria-hidden="true" />
           <Link to={`/models/deployments/${d.id}`}>{d.name}</Link>
+          {cloud.length > 0 && (
+            <Link className="fallback-mark" to={`/models/deployments/${d.id}#${FALLBACK_ANCHOR}`}
+              title={`When ${d.name} is busy or down, requests may move on to ${cloud.join(", ")}`}>
+              <IconCloud size={12} aria-hidden="true" /> → {cloud.join(", ")}
+            </Link>
+          )}
         </div>
         <div className="deprow-model">{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
       </div>

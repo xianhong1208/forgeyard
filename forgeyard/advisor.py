@@ -670,7 +670,7 @@ def gated_without_token(ctx: Context) -> Iterator[Finding]:
                       f"{d.name} needs a Hugging Face token" if refused else f"{d.name} may not download: no Hugging Face token",
                       f"{m.name} is gated on Hugging Face, and neither the server nor this deployment has a token"
                       + (", so its download was refused." if refused else ": its download will be refused.")
-                      + " Set the server's token under Models → Model library → Model sources (after accepting the model's licence on "
+                      + " Set the server's token under Models → Library → Model sources (after accepting the model's licence on "
                       "Hugging Face with that account), or give the deployment its own.",
                       "/models?tab=library", "Set the token", scope=f"deployment:{d.id}",
                       pages=("models", f"deployment:{d.id}"))
@@ -731,13 +731,13 @@ def cloud_models_unpriced(ctx: Context) -> Iterator[Finding]:
             yield Finding("cloud-model-unpriced", "error", f"{pm.upstream_model} has no price, and budgets are set",
                           f"Requests to {pm.upstream_model} ({p.name}) are refused with 402 budget_unpriced whenever a "
                           "budget applies, because their cost cannot be reserved. Set its input and output prices, or "
-                          "refresh them from OpenRouter.", f"/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
+                          "refresh them from OpenRouter.", f"/cloud/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
                           pages=("providers", f"provider:{p.id}"))
         else:
             yield Finding("cloud-model-cost-unknown", "info", f"The cost of {pm.upstream_model} is unknown",
                           f"{pm.upstream_model} ({p.name}) has no price, so Usage cannot say what it costs, and it will "
                           "be refused as soon as a budget is set. Set its prices, or refresh them from OpenRouter.",
-                          f"/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
+                          f"/cloud/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
                           pages=("providers", f"provider:{p.id}"))
 
 
@@ -757,7 +757,7 @@ def providers_setup(ctx: Context) -> Iterator[Finding]:
         if kind.key_required and not p.key_last4:
             yield Finding("provider-no-key", "error", f"{p.name} has no API key",
                           f"{kind.label} needs an API key, and {p.name} has none: every request to it fails.",
-                          f"/providers/{p.id}", "Add the key", scope=f"provider:{p.id}", pages=pages)
+                          f"/cloud/providers/{p.id}", "Add the key", scope=f"provider:{p.id}", pages=pages)
         host = host_of(p.base_url)
         if not host:
             continue
@@ -773,7 +773,7 @@ def providers_setup(ctx: Context) -> Iterator[Finding]:
                               f"{p.name} is marked as inside your network, but its address is public",
                               f"{host} resolves to {_names(found, 2)}. A provider inside your network is used by every "
                               "key, whatever its cloud setting, and no budget applies to it. If it is a third party, "
-                              "tick Outside your network (cloud).", f"/providers/{p.id}", "Open the provider",
+                              "tick Outside your network (cloud).", f"/cloud/providers/{p.id}", "Open the provider",
                               scope=f"provider:{p.id}", pages=pages)
 
 
@@ -804,17 +804,26 @@ def cloud_defaults(ctx: Context) -> Iterator[Finding]:
                       "Only to spill or Allowed, or change the cloud policy.", "/keys", "Open API keys", pages=("keys",))
 
 
+def route_place(r: GatewayRoute) -> tuple[str, tuple[str, ...], str]:
+    """Where the console shows a route (1.4, #81): a deployment's own route is its cloud fallback, on
+    the deployment's page; a name an admin made is on Cloud -> Cloud models."""
+    if r.deployment_id is not None:
+        return (f"/models/deployments/{r.deployment_id}#cloud-fallback",
+                ("models", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its cloud fallback")
+    return f"/cloud/models/{r.id}", ("cloud-models", f"route:{r.id}"), "Open the model name"
+
+
 @check
 def routes_setup(ctx: Context) -> Iterator[Finding]:
     """V41: a cloud tier before the first local one. V42: a cloud tier or spill rule that is never used.
     V43: no usable target. V44: a mixed route whose local deployments are stopped."""
     for r in ctx.routes:
-        url, pages = f"/models/routes/{r.id}", ("models", f"route:{r.id}")
+        url, pages, label = route_place(r)
         usable = [t for t in r.targets if target_usable(t)]
         if not usable:
             yield Finding("route-no-target", "error", f"{r.served_name} has no target that can answer",
                           f"Every target of {r.served_name} is disabled (or its provider is), so it answers 503 "
-                          "no_target.", url, "Open the route", scope=f"route:{r.id}", pages=pages)
+                          "no_target.", url, label, scope=f"route:{r.id}", pages=pages)
             continue
         local = [t for t in usable if is_local(t)]
         cloud = [t for t in usable if is_cloud(t)]
@@ -822,25 +831,25 @@ def routes_setup(ctx: Context) -> Iterator[Finding]:
             yield Finding("route-cloud-before-local", "warning", f"{r.served_name} tries the cloud before local",
                           f"A cloud tier of {r.served_name} comes before its first local tier: keys set to Allowed go "
                           "to the cloud first even when the local replicas are idle, and keys set to Only to spill "
-                          "skip that tier. Move the local tier first unless that is what you want.", url, "Open the route",
+                          "skip that tier. Move the local tier first unless that is what you want.", url, label,
                           scope=f"route:{r.id}", pages=pages)
         if r.local_only and cloud:
             yield Finding("route-cloud-never-used", "info", f"{r.served_name}'s cloud tier is never used",
-                          f"{r.served_name} is Local only, so its cloud targets never get a request.", url, "Open the route",
+                          f"{r.served_name} is Local only, so its cloud targets never get a request.", url, label,
                           scope=f"route:{r.id}", pages=pages)
         elif local and (r.spill_on_long_prompt or (r.wait_ms or 0) > 0) \
                 and not any(t.tier > min(x.tier for x in local) for t in usable):
             rule = "Spill a prompt that is too long" if r.spill_on_long_prompt else "Wait for a free local slot"
             yield Finding("route-cloud-never-used", "info", f"{r.served_name}: {rule} has no effect",
                           f"{r.served_name} has no tier after its local one, so there is nothing to spill to.",
-                          url, "Open the route", scope=f"route:{r.id}", pages=pages)
+                          url, label, scope=f"route:{r.id}", pages=pages)
         if local and cloud:
             deps = [t.deployment for t in local if t.kind == "local" and t.deployment is not None]
             if deps and all(d.workload is not None and d.workload.desired_state == "stopped" for d in deps):
                 yield Finding("route-local-stopped", "warning", f"{r.served_name}'s local deployment is stopped",
                               f"{_names(d.name for d in deps)} {'is' if len(deps) == 1 else 'are'} stopped, so every "
                               f"request to {r.served_name} from a key that may use the cloud goes to the cloud.",
-                              url, "Open the route", scope=f"route:{r.id}", pages=pages)
+                              url, label, scope=f"route:{r.id}", pages=pages)
 
 
 @check
@@ -848,7 +857,7 @@ def budgets_zero(ctx: Context) -> Iterator[Finding]:
     """V45: a budget of $0 blocks every cloud request (empty means no budget)."""
     zero = ([("key", k.id, f"the key {k.name}", "/keys", ("keys",)) for k in ctx.active_keys if k.budget_micros == 0]
             + [("person", u.id, u.username, "/usage?tab=cost", ()) for u in ctx.users if u.budget_micros == 0]
-            + [("provider", p.id, p.name, f"/providers/{p.id}", ("providers", f"provider:{p.id}"))
+            + [("provider", p.id, p.name, f"/cloud/providers/{p.id}", ("providers", f"provider:{p.id}"))
                for p in ctx.providers if p.budget_micros == 0])
     for scope, sid, name, url, pages in zero:
         yield Finding("budget-zero", "info", f"The budget of {name} is $0",
@@ -866,7 +875,7 @@ def prices_stale(ctx: Context) -> Iterator[Finding]:
         yield Finding("prices-stale", "info", f"Prices of {_plural(len(old), 'model')} are over {PRICES_STALE_DAYS} days old",
                       f"{_names(pm.upstream_model for pm in old)} were last refreshed from OpenRouter on "
                       f"{oldest:%Y-%m-%d}. Refresh them so costs and budgets use current prices.",
-                      "/providers", "Refresh prices", pages=("providers",))
+                      "/cloud", "Refresh prices", pages=("providers",))
 
 
 @check

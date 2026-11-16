@@ -135,13 +135,14 @@ segmentation, depth), on Forgeyard's own image with permissively licensed models
 
 ## Models, recipes and estimates
 
-The **Models** page has three tabs. **Deployments** groups what runs by kind (chat, multimodal
+The **Models** page has two tabs. **Deployments** groups what runs by kind (chat, multimodal
 chat, embeddings, rerank, speech to text, text to speech, images, video), each with the path it
 answers at under `/v1`, and one line per deployment: where it runs (machine and cards), its memory
-and its state. **Serving** is the model names clients send to `/v1` and the cloud tiers behind them
-([routes](#cloud-providers-and-tiers)). **Model library** is what you can deploy: the catalog, the
-recipes and, for admins, the model sources. Links to the names before 1.4 (`?tab=routes`,
-`?tab=catalog`) still open the right tab.
+and its state. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its provider,
+such as *→ Gemini*; the fallback itself is on the deployment's page. **Library** is what you can
+deploy: the catalog, the recipes and, for admins, the model sources. Cloud models and providers are
+on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=routes`,
+`?tab=catalog`, `/providers`) open the new places.
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
@@ -315,9 +316,11 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - A **provider** is a model API outside Forgeyard (OpenAI, Anthropic, Gemini, Azure OpenAI,
   OpenRouter, or an OpenAI-compatible server of yours). Admins add it with its key, which is stored
   encrypted and never shown again.
-- Each model name at `/v1` is a **route**. A route has **targets** in **tiers**: local deployments
-  and providers' models. A deployment's own route starts with one tier, the deployment. An admin
-  can add a cloud model as a second tier, or make a route that is only a cloud model.
+- Each model name at `/v1` is a **route** (in the API). A route has **targets** in **tiers**: local
+  deployments and providers' models. A deployment's own route starts with one tier, the deployment.
+  An admin can add a cloud model as a later tier: the deployment's **cloud fallback**, on its page.
+  An admin can also make a **cloud model**, a name of its own for a provider's model, on
+  **Cloud → Cloud models**.
 - **Local first.** A request goes to the next tier only before its answer starts, and only when the
   local tier is unavailable, **busy** (every replica at its deployment's *Concurrent requests*), or
   answers 429 or 503. A prompt too long for the local context spills only if the route says so.

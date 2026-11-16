@@ -248,9 +248,9 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 送往雲端供應商的模型會多出這些錯誤。回應的 `X-Forgeyard-Target` 會說明是不是由供應商回答的。
 
-- 模型明明列在 **Models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
+- 模型明明列在 **Cloud models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
 - `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **Local only**），但這個模型只由雲端供應商提供。
-- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
+- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Cloud → Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
 - `429 provider_rate_limited`：雲端層的每個目標都達到速率限制；請依 `Retry-After` 等待。
 - `402 budget_exhausted`、`402 budget_unpriced`：每月預算；請見 [402](#402)。
 - 其他 4xx 會保留供應商的狀態碼、代碼和訊息，並在訊息前加上供應商的名稱。
@@ -312,11 +312,11 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **原因：** 部署應該在執行，但還沒有就緒的副本：模型還在下載、引擎還在啟動、某個副本失敗後正在重新啟動，或它所在的機器離線。訊息會列出每個副本的狀態，例如 `replica 0 on gpu-01: downloading`。如果你還是呼叫已停止的部署，也會得到同樣的回應（`The deployment is stopped.`）。
 
-**做法：** 打開部署的頁面。下載或啟動中就等待（頁面會顯示進度）。如果副本一直失敗，頁面上的輸出會說明原因；機器離線請見[agent 顯示離線](#an-agent-shows-offline)。如果想讓這段期間的請求改送雲端供應商，請在模型的路由加上雲端層（[雲端供應商](cloud-providers.md#route-a-model-to-the-cloud)）。
+**做法：** 打開部署的頁面。下載或啟動中就等待（頁面會顯示進度）。如果副本一直失敗，頁面上的輸出會說明原因；機器離線請見[agent 顯示離線](#an-agent-shows-offline)。如果想讓這段期間的請求改送雲端供應商，請在部署的頁面替它設定雲端備援（[雲端供應商](cloud-providers.md#give-a-deployment-a-cloud-fallback)）。
 
 ## 請求沒有溢出到雲端
 
-**你會看到：** 模型的路由有雲端層，但本機副本忙碌或停擺時，請求仍然失敗（503、429）或在等待。回應沒有 `X-Forgeyard-Spilled`。
+**你會看到：** 部署有雲端備援，但本機副本忙碌或停擺時，請求仍然失敗（503、429）或在等待。回應沒有 `X-Forgeyard-Spilled`。
 
 **原因**，依序檢查：
 
