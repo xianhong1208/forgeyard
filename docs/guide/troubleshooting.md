@@ -254,7 +254,7 @@ counted: another machine would get the same answer.
 - *download failed: through the server: the server could not reach huggingface.co: …*: the server
   cannot reach the source either. Fix the server's network, or use a mirror (`HF_ENDPOINT`).
 - *through the server: huggingface.co refused access (HTTP 401) …*: a gated model; set the server's
-  Hugging Face token under **Models → Model sources** (the machine's own token is not used through the
+  Hugging Face token under **Models → Sources** (the machine's own token is not used through the
   server), or give the deployment its own.
 - *through the server: … does not download through the server*: the machine was set to **Direct
   only** while it downloaded.

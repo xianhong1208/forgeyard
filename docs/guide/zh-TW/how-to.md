@@ -842,13 +842,13 @@ uv run --no-sync python -m forgeyard secrets reset --yes
    - **Auto**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
    - **Always through the server**：給完全沒有網路的機器。它不會先直接試，所以不用先等一次失敗。
    - **Direct only**：永遠不經由伺服器。
-2. 照常部署，或使用 **Download to…**。進度會在部署的頁面、Library 裡模型的下方和機器的頁面上顯示 *Downloading the model via the server: … of …*，完成的下載會顯示 *Downloaded … via the server*。對設成一律經由伺服器的機器，**Download to…** 對話框會標示 *via the server*。
+2. 照常部署，或使用 **Download to…**。進度會在部署的頁面、Catalog 裡模型的下方和機器的頁面上顯示 *Downloading the model via the server: … of …*，完成的下載會顯示 *Downloaded … via the server*。對設成一律經由伺服器的機器，**Download to…** 對話框會標示 *via the server*。
 
 不變的部分：中斷後 agent 會從磁碟上已有的部分繼續下載（伺服器會把 `Range` 轉給來源）、會重試、按 **Cancel** 會立刻停止，而且每個檔案都像直接下載一樣檢查（大檔的 SHA-256、小檔的 git blob id、引擎壓縮檔釘選的 SHA-256、URL 模型記下的 SHA-256）。在路上被改過的檔案會被拒絕並刪除，所以伺服器並沒有因此多了任何它原本做不到的權限。
 
 不同的部分：
 
-- 受限模型由伺服器用它自己的 Hugging Face 權杖（**Models → Model sources**），或部署自己的權杖下載。設成 **Always through the server** 的機器完全不會收到權杖。
+- 受限模型由伺服器用它自己的 Hugging Face 權杖（**Models → Sources**），或部署自己的權杖下載。設成 **Always through the server** 的機器完全不會收到權杖。
 - 套用伺服器自己的模型來源規則：只限 https 和公開位址（除非設了 `MODEL_ALLOW_PRIVATE_HOSTS`），URL 模型只限允許的主機。
 - 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **Download to…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
 - 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。

@@ -1192,7 +1192,7 @@ machine or in the tunnel changes.
      directly, so there is no wait for a failure first.
    - **Direct only**: never through the server.
 2. Deploy, or use **Download to…**, as usual. The progress says *Downloading the model via the server:
-   … of …* on the deployment's page, under the model in the Library and on the machine's page, and a
+   … of …* on the deployment's page, under the model in the Catalog and on the machine's page, and a
    finished download says *Downloaded … via the server*. The **Download to…** dialog says *via the
    server* for a machine set to always use it.
 
@@ -1204,7 +1204,7 @@ deleted, so the server is trusted with nothing it could not already do.
 
 What is different:
 
-- The server uses its own Hugging Face token (**Models → Model sources**), or the deployment's own,
+- The server uses its own Hugging Face token (**Models → Sources**), or the deployment's own,
   for gated models. Set to **Always through the server**, the machine is never sent a token at all.
 - The server's own rules for model sources apply: https and public addresses only (unless
   `MODEL_ALLOW_PRIVATE_HOSTS`), and URL models only from the allowed hosts.

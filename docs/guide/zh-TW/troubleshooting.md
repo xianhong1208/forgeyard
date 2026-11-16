@@ -160,7 +160,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 **經由伺服器仍然失敗：**
 
 - *download failed: through the server: the server could not reach huggingface.co: …*：伺服器也連不到來源。請修好伺服器的網路，或使用鏡像站（`HF_ENDPOINT`）。
-- *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Model sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
+- *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
 - *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
 - *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
 - 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-strix: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。
