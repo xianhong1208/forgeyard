@@ -1513,6 +1513,18 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .dlg-target-name strong { font-size: 12.5px; font-weight: 600; }
 .dlg-target-main small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .dlg-target .bar-dl { width: 100%; max-width: 260px; }
+/* 1.4: uploading an image file to a machine. */
+.img-lead { margin: 0; overflow-wrap: anywhere; }
+.img-lead code { white-space: normal; }
+.upl-progress { display: grid; gap: 4px; }
+.upl-progress .bar-dl { width: 100%; }
+.upl-progress small { font-size: 12px; color: var(--muted); }
+.upl-result { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.upl-result li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.upl-result-main { display: grid; gap: 3px; min-width: 0; }
+.upl-result-main strong { font-size: 12.5px; overflow-wrap: anywhere; }
+.upl-result-main small { font-size: 12px; overflow-wrap: anywhere; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .dllist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .dlrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 6px 12px; align-items: center; padding: 8px 11px;

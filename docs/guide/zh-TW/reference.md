@@ -68,6 +68,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
+| `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**Engine images** → **Upload an image**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
 | `AGENT_IMAGE` | — | **Add a machine** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
 ### 模型
@@ -782,6 +783,37 @@ agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出�
 | 502 | `source_unreachable`、`source_failed` | 伺服器連不到來源，或來源回了錯誤 |
 
 agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇到 429 會等待且不算一次重試，其餘的則像網路錯誤一樣重試。這時它的進度會帶 `download.via: "server"`。
+
+**引擎映像檔**（協定 feature `relay_images`，1.4 起的 agent 和伺服器）。對同時列出它的 agent，desired 裡的副本（在 `spec` 旁邊）或下載，如果引擎映像檔以 digest 釘選、並記錄在 `forgeyard/recipes/images.lock.json`，就會帶 `image_relay: {path, mode}`，模式相同；`path` 是 `/agent/v1/relay/{replica|download}/{id}/image`。只用 tag 指定的映像檔永遠不會有。
+
+| 請求 | 回傳內容 |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/manifest` | 機器平台（依它的 agent 回報的 `platform.arch`）記錄的 manifest，也就是 registry 原本的位元組，附 `Docker-Content-Digest` 和 `Forgeyard-Platform`（`linux/amd64`） |
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/blobs/{digest}` | 那份 manifest 的 config 或其中一層，依 digest；`Range` 同上 |
+
+伺服器依記錄的 digest 取得 manifest，只有位元組的雜湊等於它、而且列的是記錄的 config 時才接受，並把它留在記憶體。blob 從 registry 的 API 取得，使用匿名 pull token（Docker Hub、GHCR、quay.io 和其他會發 token 的 registry），套用和模型檔相同的對外連線規則；registry 轉址到 CDN 時不會帶 token。完整的 blob 經過時會計算雜湊，最後一段要雜湊相符才會送出。agent 會把 manifest 的 digest 和記錄的 id 比對、每個 blob 和它的 digest 比對、config 的 content id 和記錄的比對、它的架構和機器的比對，然後載入一個同時含 OCI image layout（`oci-layout`、`index.json`、`blobs/sha256/…`）和傳統 `manifest.json` 的封存檔，加上 `repo:tag`，再對它執行 `image_ids` 檢查。它的進度是 `phase: "image"` 的 `download`，帶 `layers`、`layers_done`、`via: "server"`，載入時另有 `unpacking`。
+
+| 狀態 | `code` | 何時 |
+|---|---|---|
+| 403 | `relay_off` | 機器設成 `direct`，或它的 agent 不支援 `relay_images` |
+| 404 | `relay_not_in_image` | 那個 digest 不是那份 manifest 的 config 或任何一層 |
+| 409 | `relay_image_not_pinned` | 映像檔沒有以 digest 釘選並記錄 id：請改用上傳 |
+| 409 | `relay_no_platform` | 映像檔沒有那台機器架構的版本 |
+| 502 | `source_failed` | registry 的 manifest 雜湊不等於記錄的 digest，或列的是別的 config |
+
+### 把映像檔上傳到機器
+
+`POST /api/machines/{id}/images`（admin）。內容是 `docker save` 或 `podman save` 寫出的檔案，可以用 gzip 壓縮，必須有 `Content-Length`（沒有時回 411），最大為 `IMAGE_UPLOAD_MAX_GB`（超過回 413）；`X-Filename`（URL 編碼）是稽核紀錄裡的檔名。伺服器送給 agent `image_load {request_id, path, size, name}`（協定 feature `image_load`）；agent 用它的憑證取得 `GET /agent/v1/image-upload/{ticket}`（只能一次；其他機器的憑證得到 404），把它串流進 `docker load` / `podman load`，再回覆 `image_loaded {request_id, ok, reason, images: [{id, tags, content, os, architecture}]}`。回給瀏覽器的是 `{ok, bytes, images}`，每個映像檔帶 `matches: [{recipe, variant, image, how}]`：`how` 是 `checked`（它的 id 或 content id 是那個 recipe 釘選映像檔記錄的）或 `tag`（名稱和只用 tag 指定的 recipe 映像檔相同）。
+
+| 狀態 | `code` | 何時 |
+|---|---|---|
+| 409 | `machine_offline`、`agent_cannot_load` | agent 沒有連線，或沒有 container 引擎、或比 1.4 舊 |
+| 409 | `upload_busy` | 那台機器已經有上傳在進行（全部兩個時回 429） |
+| 400 | `upload_short`、`upload_broken` | 內容提早結束或中斷 |
+| 504 | `agent_no_fetch`、`agent_stalled` | agent 30 秒內沒有開始取得，或 2 分鐘都沒有再取 |
+| 422 | `image_load_failed` | 引擎無法載入（附 agent 的說明） |
+
+稽核事件 `node.image_uploaded`（檔名、大小、`ok`、載入的映像檔或失敗原因）。
 
 ## Setup health 檢查
 

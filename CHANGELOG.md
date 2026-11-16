@@ -103,6 +103,41 @@ version until 1.0.
     not relayed yet (the next #35 change) and still count against it.
   - Agent protocol feature `relay`: listed by both sides; model and engine blocks carry `relay: {path,
     mode}`. Older agents are never sent it and download directly as before. Rebuild the agent image.
+- **Engine images through the server, and image uploads** (part of #35, D4). A machine that cannot reach
+  the registry gets a **pinned** engine image through the server too, layer by layer, the way it gets
+  model files; and an admin can upload any image file to a machine from its page.
+  - `GET /agent/v1/relay/{replica|download}/{id}/image/manifest` and `…/image/blobs/{digest}`: the
+    manifest recorded for the machine's platform in `forgeyard/recipes/images.lock.json` (fetched by that
+    digest, refused unless its bytes hash to it and it names the recorded config), and its config and
+    layers by digest, never a digest the manifest does not name. From the registry's API with an
+    anonymous pull token (Docker Hub, GHCR, quay.io), the server's egress rules, `Range` passed through,
+    the token dropped at the CDN redirect; a whole blob is hashed on the way and its last piece held back
+    unless it matches. Images named by a tag only are refused (*upload it instead*), and so is a machine
+    whose architecture the image has no build for. The same desired-state rule, limits and log lines as
+    model files.
+  - The agent pulls first (**Auto**) and switches to the server when the pull cannot reach the registry
+    (remembering the registry for an hour), or goes straight to the server (**Always through the
+    server**). It checks the manifest against the recorded digests, every blob against its digest (a
+    break resumes the layer from what is on disk, under `.partial/image-…` in the model cache), the
+    config's content id and architecture, then streams an archive both Docker stores and Podman load (an
+    OCI image layout plus the classic `manifest.json`, layers as the registry serves them) into `docker
+    load` / `podman load`, tags it with the recipe's tag, runs it only when the #10 id check recognises it,
+    and deletes the pieces. Progress: *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7
+    layers*, then *loading it*.
+  - Placement (#71): a machine whose agent relays images is no longer avoided for a pinned image's
+    registry it could not reach (*… could not reach ghcr.io (for the engine image) just now; the engine
+    image comes through the server*). A tag-only image still counts against it.
+  - **Engine images** on a machine's page, with **Upload an image** (admins): a `docker save` file,
+    gzip-compressed or not, sent with progress through the server, which keeps only a small buffer, into
+    the agent's `docker load` / `podman load` as it arrives (a file that breaks off is never loaded). The
+    dialog lists what was loaded and which recipe's image it is: checked by its recorded ids, named like a
+    tag-only recipe image, or neither. `POST /api/machines/{id}/images`; one upload per machine and two in
+    all; `IMAGE_UPLOAD_MAX_GB` (64); audited as `node.image_uploaded`.
+  - Agent protocol features `relay_images` and `image_load` (listed by both sides; `image_load` /
+    `image_loaded` messages). Older agents pull directly and cannot take uploads, and the machine's page
+    says to update them. Rebuild the agent image.
+  - The registry client that `scripts/pin_images.py` names images with moved into the package
+    (`forgeyard/workloads/registry.py`).
 - **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
   time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
   line per key, model, provider or person (admins, with **Everyone**). The Requests tab charts

@@ -311,6 +311,13 @@ A machine that cannot reach the registry (no internet access, or a DNS filter th
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
 the deployment stay as they are.
 
+Since 1.4 there are two easier ways, with a 1.4 agent: the built-in recipes' images (all pinned) come
+**through the server** by themselves, layer by layer
+([Give an offline machine models through the server](#give-an-offline-machine-models-through-the-server)),
+and any image file can be **uploaded** from the machine's page
+([Upload an engine image to a machine](#upload-an-engine-image-to-a-machine)). The steps below still
+work, for an older agent or without the server.
+
 1. **Find the image.** On **Models → Library**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
@@ -1311,7 +1318,8 @@ next section.
 ## Give an offline machine models through the server
 
 A machine with no internet access of its own (behind a firewall, on a DNS filter, or reached only
-through an SSH tunnel) can still download models and engine archives: **the server fetches them and
+through an SSH tunnel) can still download models, engine archives and pinned engine images: **the
+server fetches them and
 passes the bytes on**, storing nothing. The agent asks the server the way it already talks to it,
 outbound, over HTTPS with the CA it pins and its machine credential, so it works through whatever
 already carries the agent's connection (for example an `ssh -R 7860:…` tunnel). Nothing on the
@@ -1354,10 +1362,58 @@ What is different:
   the server*, or *amd-strix downloads the model and the engine through the server (its internet
   access setting)*.
 
-**Engine images** (container variants) are not relayed yet: carry them over as files
-([Offline machines](#offline-machines)), or use a process variant (llama.cpp's archive comes through
-the server). The machine's agent must be 1.4 or later; an older one downloads directly whatever the
-setting says, and the setting tells you to update it.
+**Engine images** (container variants) come through the server too, when the recipe pins them by
+digest, as every built-in recipe does:
+
+- When the image is not on the machine, the agent pulls it as usual (**Auto**); a pull that cannot reach
+  the registry (`lookup ghcr.io: no such host`, a timeout) switches to the server, and so do the next
+  images from that registry for an hour. Set to **Always through the server**, it never tries the
+  registry.
+- The server reads the image's manifest **for that machine's platform** (amd64, arm64) by the digest
+  Forgeyard recorded for it (`forgeyard/recipes/images.lock.json`), with an anonymous pull token from
+  the registry, and serves that manifest, its config and each of its layers, by digest. It serves no
+  digest that manifest does not name, and checks each whole layer on its way through.
+- The agent checks every piece against its digest, keeps them in its model cache under
+  `.partial/image-…` (a break resumes the layer it was in; **Remove partial downloads** clears them),
+  builds an archive `docker load` and `podman load` both accept, loads it, gives it the recipe's tag,
+  and runs it only when the loaded image matches the recorded ids, as for an image loaded by hand. Then
+  it deletes the pieces.
+- The progress says *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*, then *loading
+  it*. Every layer crosses the server's network twice, like a model file.
+- An image named by a tag only (a custom recipe's, Forgeyard's own vision image of this release)
+  cannot come through the server: there is no recorded digest to check it against. Upload it instead
+  (next section).
+
+The machine's agent must be 1.4 or later; an older one downloads directly whatever the setting says,
+and the setting tells you to update it (also when it relays models but not yet images).
+
+## Upload an engine image to a machine
+
+An admin can put an image on a machine from the console: an image that cannot come through the server
+(a custom recipe's image named by a tag only, an image you built yourself), or one the machine would
+take a long time to pull.
+
+1. On a machine that has the image (or can pull it), save it to a file:
+
+   ```bash
+   sudo docker save ghcr.io/example/engine:1.2 | gzip > engine.tar.gz
+   ```
+
+   `podman save` works too. For a pinned image, pull it by its digest and tag it first, as in
+   [Offline machines](#offline-machines), so the file holds exactly that image under the recipe's tag.
+2. Open the target machine's page → **Engine images** → **Upload an image**, choose the file, and
+   **Upload**. The dialog shows how much has been sent, then *Loading it into …'s container engine*.
+3. When it is loaded, the dialog lists each image the file held: its tags, its id, and which recipe's
+   image it is. *The pinned image of llama-cpp (vulkan), checked by its recorded ids*: deployments
+   there use it with no pull. *Named as the image of …*: a recipe that names it by a tag only uses it
+   as it is. *Not the image of any recipe*: a custom recipe can name it by its tag.
+
+The file goes from your browser through the server straight into the agent, which streams it into
+`docker load` (or `podman load`) as it arrives: the server keeps only a small buffer, and the machine
+needs no other route to your computer. The container engine checks each layer as it loads it; a file
+that breaks off is never loaded. One upload at a time per machine, two in all; the largest file is
+`IMAGE_UPLOAD_MAX_GB` (64 GiB unless set). The machine's agent must be 1.4 or later, with a container
+engine, and online. Every upload, and why one failed, is in the audit log (`node.image_uploaded`).
 
 ## Free disk space on a machine
 

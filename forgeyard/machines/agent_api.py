@@ -28,7 +28,8 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import CacheRemovedIn, HeartbeatIn, HelloIn, InventoryMsgIn, LogsIn, StatusIn
+from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageLoadedIn, InventoryMsgIn, LogsIn,
+                                         StatusIn)
 from forgeyard.machines.protocol import (
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
@@ -349,6 +350,10 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     if removed.model_cache is not None:
                         ok = await run_in_threadpool(_db_call, _cache, node_id, removed.model_cache)
                     conn.answer(removed.request_id, removed.model_dump())
+                elif kind == "image_loaded" and workloads:
+                    loaded = _parse(text, ImageLoadedIn)
+                    ok = True
+                    conn.answer(loaded.request_id, loaded.model_dump())
                 else:
                     raise ValueError(f"unknown message type {kind!r}")
             except _ProtocolMismatch:

@@ -14,6 +14,10 @@ model cache's (forgeyard.agent.models), so bytes changed on the way are refused 
   would get too. The host is then remembered for UNREACHABLE_TTL, so the next files and downloads go through
   the server at once;
 - no `relay` (a machine set to "direct only", or a server without the feature): directly, as before.
+
+Engine images (#35 PR 4, "relay_images") come the same way, as `image_relay: {path, mode}` beside the spec
+(parse_image); agent/imagerelay.py fetches and loads them. An uploaded image file (an admin's, "image_load")
+is read from IMAGE_UPLOAD_PATH/<ticket> with the same client.
 """
 
 from __future__ import annotations
@@ -32,6 +36,8 @@ from forgeyard import __version__
 from forgeyard.models import fetch
 
 PATH_RE = re.compile(r"^/agent/v1/relay/(replica|download)/[A-Za-z0-9_-]{1,64}/(model|engine)$")
+IMAGE_PATH_RE = re.compile(r"^/agent/v1/relay/(replica|download)/[A-Za-z0-9_-]{1,64}/image$")
+UPLOAD_PATH_RE = re.compile(r"^/agent/v1/image-upload/[A-Za-z0-9_-]{16,64}$")
 MODES = ("auto", "server")
 UNREACHABLE_TTL = 3600.0
 
@@ -56,6 +62,17 @@ def parse(block) -> Optional[dict]:
         return None
     path, mode = r.get("path"), r.get("mode")
     if not isinstance(path, str) or not PATH_RE.match(path) or mode not in MODES:
+        return None
+    return {"path": path, "mode": mode}
+
+
+def parse_image(item) -> Optional[dict]:
+    """The `image_relay` of a desired replica or download, checked: {path, mode}, or None."""
+    r = item.get("image_relay") if isinstance(item, dict) else None
+    if not isinstance(r, dict):
+        return None
+    path, mode = r.get("path"), r.get("mode")
+    if not isinstance(path, str) or not IMAGE_PATH_RE.match(path) or mode not in MODES:
         return None
     return {"path": path, "mode": mode}
 

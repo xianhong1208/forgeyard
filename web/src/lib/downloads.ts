@@ -84,7 +84,7 @@ export const FETCH_VIA_LABEL: Record<FetchVia, string> = {
 
 // What each choice does (1.4, "relay"): shown under the machine's Internet access setting.
 export const FETCH_VIA_HINT: Record<FetchVia, string> = {
-  auto: "Downloads models and engine archives directly, and through the server once the source cannot be reached from here.",
-  server: "Every model file and engine archive comes through the server, which stores nothing: for a machine with no internet access of its own.",
+  auto: "Downloads models, engine archives and pinned engine images directly, and through the server once the source cannot be reached from here.",
+  server: "Every model file, engine archive and pinned engine image comes through the server, which stores nothing: for a machine with no internet access of its own.",
   direct: "Always downloads directly, never through the server.",
 };

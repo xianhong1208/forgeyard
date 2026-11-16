@@ -143,11 +143,13 @@ def _fetches(node: Node, ctx: Context, variant: Variant, cached: bool) -> list[t
 def _option(node: Node, ctx: Context, variant: Variant, cards: list[Accelerator], left: int) -> Option:
     """A machine that relays (1.4: its agent speaks "relay" and its `fetch_via` is "auto" or "server") is not
     avoided for a host it could not reach when what comes from there comes through the server instead: the
-    model and the engine archive (images still are, until they can be relayed too)."""
+    model, the engine archive, and (an agent that also speaks "relay_images", #35 PR 4) a pinned engine image.
+    A tag-only image still counts: only an upload brings it to a machine that cannot pull it."""
     cached = _cached(node, ctx)
     needs = _fetches(node, ctx, variant, cached)
-    direct = [(phase, host) for phase, host in needs if not relay.relays(node, phase)]
-    relayed = [(phase, host) for phase, host in needs if relay.relays(node, phase)]
+    image = variant.image if variant.runtime == "container" else None
+    direct = [(phase, host) for phase, host in needs if not relay.relays(node, phase, image)]
+    relayed = [(phase, host) for phase, host in needs if relay.relays(node, phase, image)]
     via_server = [phase for phase, host in relayed if relay.mode(node, host) == "server"]
     return Option(node, variant, cards, left, cached, needs, reach.blocked(node, direct), via_server,
                   reach.blocked(node, relayed))

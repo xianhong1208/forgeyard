@@ -172,7 +172,18 @@ def _int(value) -> int:
 
 
 def describe(s: dict) -> str:
-    """'pulling the image: 0.80 of 1.90 GiB (42%)', and the forms for what is not known yet."""
+    """'pulling the image: 0.80 of 1.90 GiB (42%)', and the forms for what is not known yet. Through the
+    server (1.4): 'pulling the image via the server: 0.80 of 1.90 GiB (42%), layer 3 of 7', then 'pulling the
+    image via the server: loading it'."""
+    if s.get("via") == "server":
+        if s.get("unpacking"):
+            return f"pulling the image via the server: loading it, {s.get('layers', 0)} layers"
+        total = int(s.get("total") or 0)
+        done = min(int(s.get("done") or 0), total) if total else int(s.get("done") or 0)
+        where = f", layer {s['layer']} of {s['layers']}" if s.get("layer") and s.get("layers") else ""
+        if total:
+            return f"pulling the image via the server: {gib(done)} of {gib(total)} GiB ({100 * done // total}%){where}"
+        return f"pulling the image via the server{where}"
     if s.get("unpacking"):
         return f"pulling the image: unpacking, {s['layers_done']} of {s['layers']} layers"
     if s.get("total"):

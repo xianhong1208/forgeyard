@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { AdvisorBanner } from "../components/Advisor";
 import { HolderChips, HolderIcon, KindMark, MemBar, MemLegend, StatusDot, usePlacement } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
+import { EngineImagesSection } from "../components/ImageUpload";
 import { ModelCacheSection } from "../components/ModelCache";
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
@@ -158,6 +159,8 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
 
       {m.status !== "revoked" && <ModelCacheSection m={m} poll={POLL_MS} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
+      {m.status !== "revoked" && <EngineImagesSection m={m} canManage={canManage} onChanged={onChanged} />}
+
       {m.status !== "revoked" && <GpuAccess m={m} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
       <section className="panel mk-section" aria-labelledby="mk-agent">
@@ -180,6 +183,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
       <HelpLinks>
         <HelpLink page="how-to" anchor="restrict-gpus-on-a-shared-machine">Restrict GPUs on a shared machine</HelpLink>
         <HelpLink page="how-to" anchor="free-disk-space-on-a-machine">Free disk space on a machine</HelpLink>
+        <HelpLink page="how-to" anchor="upload-an-engine-image-to-a-machine">Upload an engine image to a machine</HelpLink>
         <HelpLink page="troubleshooting" anchor="an-agent-shows-offline">An agent shows offline</HelpLink>
       </HelpLinks>
     </>

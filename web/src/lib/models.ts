@@ -48,6 +48,13 @@ export function downloadText(r: WithDownload): string | null {
   const d = r.download;
   if (!d) return null;
   const done = d.total ? Math.min(d.done, d.total) : d.done;
+  if (d.phase === "image" && d.via === "server") {
+    // 1.4: a pinned image through the server's relay, layer by layer, then loaded into the engine.
+    const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
+    if (d.unpacking) return `Pulling the image via the server: loading it${d.layers ? `, ${d.layers} layers` : ""}`;
+    if (d.total) return `Pulling the image via the server: ${bytes(done)} of ${bytes(d.total)}${layers ? `, ${layers}` : ""}`;
+    return layers ? `Pulling the image via the server: ${layers}` : "Pulling the image via the server";
+  }
   if (d.phase === "image") {
     const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
     if (d.unpacking) return `Pulling the image: unpacking, ${layers}`;
