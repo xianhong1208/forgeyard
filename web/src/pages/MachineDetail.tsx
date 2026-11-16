@@ -7,6 +7,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { AdvisorBanner } from "../components/Advisor";
 import { HolderChips, HolderIcon, KindMark, MemBar, MemLegend, StatusDot, usePlacement } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
+import { ModelCacheSection } from "../components/ModelCache";
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import {
@@ -156,6 +157,8 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
         )}
       </section>
 
+      {m.status !== "revoked" && <ModelCacheSection m={m} poll={POLL_MS} onChanged={onChanged} onError={onError} />}
+
       {m.status !== "revoked" && <GpuAccess m={m} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
       <section className="panel mk-section" aria-labelledby="mk-agent">
@@ -166,7 +169,6 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
           {m.hostname && <div className="fact"><dt>Host name</dt><dd className="mono">{m.hostname}</dd></div>}
           {m.ip && <div className="fact"><dt>Address</dt><dd className="mono">{m.ip}</dd></div>}
           {drivers.length > 0 && <div className="fact"><dt>{kind === "nvidia" ? "Driver" : "ROCm"}</dt><dd>{drivers.map((d) => (kind === "nvidia" ? `driver ${d}` : `ROCm ${d}`)).join(", ")}</dd></div>}
-          {m.model_cache?.free_bytes != null && <div className="fact"><dt>Model cache</dt><dd>{bytes(m.model_cache.free_bytes)} free</dd></div>}
           <div className="fact"><dt>Joined</dt><dd title={exact(m.joined_at)}>{exact(m.joined_at)}</dd></div>
         </dl>
         {failed.length > 0 && (
@@ -178,6 +180,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
       </section>
       <HelpLinks>
         <HelpLink page="how-to" anchor="restrict-gpus-on-a-shared-machine">Restrict GPUs on a shared machine</HelpLink>
+        <HelpLink page="how-to" anchor="free-disk-space-on-a-machine">Free disk space on a machine</HelpLink>
         <HelpLink page="troubleshooting" anchor="an-agent-shows-offline">An agent shows offline</HelpLink>
       </HelpLinks>
     </>

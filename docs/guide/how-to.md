@@ -1205,6 +1205,25 @@ It makes a new key and drops what the old one encrypted: set the server's Huggin
 (and any deployment's own), model replicas restart with new internal keys, and workloads with lost
 environment values have to be created again (their events say so).
 
+## Free disk space on a machine
+
+A machine's page lists **Models in cache**: what its agent has downloaded, with sizes. Each Hugging
+Face revision is a row; a revision with several GGUF files has a row for each file under it. Single
+GGUF files from a URL and the engine archives of process engines are listed too. Above the list are
+how much the cache takes on that disk and how much of the disk is free.
+
+- **Remove** deletes one entry from that machine. Admins and operators can do it. It is refused
+  while a deployment there uses the model, and the row says which deployment: stop it first. Files
+  that another revision of the same repository shares stay, as `hf cache rm` does. The next
+  deployment that needs the model there downloads it again.
+- **Remove partial downloads** deletes what unfinished downloads left behind. A download resumes from
+  those files, so remove them only when you do not want that download back. It is refused while a
+  download runs on that machine.
+- An agent older than 1.4 lists its models without sizes and cannot remove them. Update the agent.
+
+Each removal is in the audit log as `model.cache_removed`, with what was removed and how much was
+freed. The API is in [the reference](reference.md#a-machines-model-cache-through-the-api).
+
 ## Move a model cache
 
 For example from `/srv/forgeyard-models` to a bigger disk at `/data/forgeyard-models`:

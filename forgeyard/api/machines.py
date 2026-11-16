@@ -1,5 +1,6 @@
 """Machines: everyone signed in can look; admins add (join tokens), revoke and remove, and choose
-which GPUs Forgeyard may assign on each machine."""
+which GPUs Forgeyard may assign on each machine. Operators and admins remove models from a machine's
+model cache (1.4)."""
 
 from __future__ import annotations
 
@@ -11,12 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
-from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
+from forgeyard.api.deps import Caller, current, fail, public_base, require_admin, require_operator
 from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, JoinToken, Node, get_db, utcnow
 from forgeyard.install import commands as install_commands
-from forgeyard.machines import store
+from forgeyard.machines import cache, store
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED
 from forgeyard.security import tls
@@ -45,7 +46,8 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "ip": n.ip, "joined_at": n.joined_at, "connected_at": n.connected_at,
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [], "runtime_info": n.runtime_info or {},
-        "model_cache": n.model_cache or {},
+        # The per-model listing (1.4) is served by /api/machines/{id}/cache, not with every machine.
+        "model_cache": {k: v for k, v in (n.model_cache or {}).items() if k not in ("models", "engines_detail")},
         "accelerators": [accelerator_out(a, n, assigned) for a in n.accelerators],
     }
 
@@ -181,3 +183,51 @@ def set_gpu_allowlist(machine_id: int, body: AllowlistIn, caller: Caller = Depen
     db.expire_all()
     node = db.scalar(select(Node).where(Node.id == machine_id).options(selectinload(Node.accelerators)))
     return {"machine": machine_out(node, db)}
+
+
+# ---------------------------------------------------------------------------- the model cache (1.4)
+@router.get("/{machine_id}/cache")
+def machine_cache(machine_id: int, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+    """The models in this machine's model cache, with their sizes, the catalog models they are, and
+    the deployments there that use them (as its agent last reported)."""
+    return cache.view(db, _get(db, machine_id), caller.user)
+
+
+class CacheRemoveIn(BaseModel):
+    key: str = Field(min_length=1, max_length=800)
+
+
+@router.post("/{machine_id}/cache/remove")
+def remove_from_cache(machine_id: int, body: CacheRemoveIn, caller: Caller = Depends(require_operator),
+                      db: DbSession = Depends(get_db)):
+    """Delete one model (or engine) from this machine's cache. Refused while a deployment there uses
+    it: stop that first. Its agent checks again before it deletes anything."""
+    node = _get(db, machine_id)
+    found = cache.find(node.model_cache or {}, body.key)
+    if found is None:
+        raise fail(404, "not_in_cache", f"{node.name} does not report that model in its cache (any more).")
+    users = cache.users_of(db, node.id, found.target)
+    if users:
+        names = ", ".join(u["name"] for u in users)
+        raise fail(409, "model_in_use", f"{found.title} is in use by {names} on {node.name}. Stop "
+                                        f"{'it' if len(users) == 1 else 'them'} first.", in_use=users)
+    answer = cache.ask(node, {"type": "cache_remove", "key": body.key})
+    audit.record(db, "model.cache_removed", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                 key=body.key, model=found.title, freed_bytes=answer.get("freed_bytes") or 0)
+    db.commit()
+    db.expire_all()
+    return {"ok": True, "freed_bytes": answer.get("freed_bytes") or 0, "cache": cache.view(db, _get(db, machine_id), caller.user)}
+
+
+@router.post("/{machine_id}/cache/remove-partial")
+def remove_partial_downloads(machine_id: int, caller: Caller = Depends(require_operator),
+                             db: DbSession = Depends(get_db)):
+    """Delete what unfinished downloads left in this machine's cache (refused by the agent while a
+    download runs there)."""
+    node = _get(db, machine_id)
+    answer = cache.ask(node, {"type": "cache_prune"})
+    audit.record(db, "model.cache_removed", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                 key=None, model="partial downloads", freed_bytes=answer.get("freed_bytes") or 0)
+    db.commit()
+    db.expire_all()
+    return {"ok": True, "freed_bytes": answer.get("freed_bytes") or 0, "cache": cache.view(db, _get(db, machine_id), caller.user)}

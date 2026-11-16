@@ -15,6 +15,14 @@ machine and shared by every replica there.
   directory mounted read-only, and nothing else of the host.
 - A Hugging Face token arrives with the desired state, is used for these requests only and is
   never written to disk or logged.
+- **Listing and removing** (1.4, "cache_admin"): `info()` reports each model with its size (a
+  revision, and each GGUF file of it; a single-file model; an engine archive) and the partial
+  downloads. `remove()` deletes one, like `hf cache rm`: the revision's links, its marker and its refs,
+  and only the blobs no other revision links to; `prune_partial()` the partial downloads. Neither
+  runs while a download of the same files is in progress (a download holds a shared lock that a
+  removal takes exclusively, without waiting), nor while a replica here uses them (asked of the
+  supervisor while that lock is held). The key from the server is only looked up among what this
+  agent found on its own disk: no path is ever made from it.
 """
 
 from __future__ import annotations
@@ -39,7 +47,7 @@ from typing import Callable, Optional
 from urllib.parse import quote
 
 from forgeyard.agent.watchdog import Watchdog
-from forgeyard.models import fetch, sources
+from forgeyard.models import cache_keys, fetch, sources
 
 log = logging.getLogger("forgeyard.agent")
 
@@ -56,6 +64,61 @@ Progress = Callable[[str, int, int, Optional[str]], None]   # phase, done, total
 
 class CacheError(Exception):
     """The model or engine cannot be made available; the message is shown on the replica."""
+
+
+class CacheRefused(CacheError):
+    """A removal that was not done: `code` is "not_found", "busy" or "in_use" (with the users)."""
+
+    def __init__(self, code: str, message: str, users=()):
+        super().__init__(message)
+        self.code = code
+        self.users = list(users)
+
+
+# What the cache listing may take of a status message (the server accepts 512 KiB in all): the
+# biggest models are kept, the rest summarised as "truncated".
+DETAIL_BUDGET = 192 * 1024
+MAX_ENTRIES = 256
+MAX_PARTS = 64
+URL_DIR_RE = re.compile(r"^[0-9a-f]{24}$")
+
+
+def tree_bytes(path: Path) -> int:
+    """Bytes of the files under a directory (links counted as links, never followed)."""
+    total = 0
+    for top, dirs, files in os.walk(path):
+        for name in files + [d for d in dirs if os.path.islink(os.path.join(top, d))]:
+            try:
+                total += os.lstat(os.path.join(top, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _inside(path: Path, root: Path) -> bool:
+    """`path` (not followed if it is a link) is below `root`, through no linked directory."""
+    parent = os.path.realpath(path.parent)
+    top = os.path.realpath(root)
+    return (parent == top or parent.startswith(top + os.sep)) and path.name not in ("", ".", "..")
+
+
+def _fit(detail: dict) -> dict:
+    """The listing, within DETAIL_BUDGET once serialised: the biggest models first, at most
+    MAX_ENTRIES of them and MAX_PARTS files each; `truncated` when something was left out."""
+    models = sorted(detail["models"], key=lambda e: (-e["bytes"], e["key"]))
+    cut = len(models) > MAX_ENTRIES
+    models = models[:MAX_ENTRIES]
+    for e in models:
+        if len(e.get("parts") or []) > MAX_PARTS:
+            e["parts"] = sorted(e["parts"], key=lambda p: (-p["bytes"], p["file"]))[:MAX_PARTS]
+            cut = True
+    detail = {**detail, "models": models, "engines_detail": detail["engines_detail"][:MAX_ENTRIES]}
+    while models and len(json.dumps(detail)) > DETAIL_BUDGET:
+        models.pop()
+        cut = True
+    if cut:
+        detail["truncated"] = True
+    return detail
 
 
 MAX_UNZIPPED = 16 * 1024**3
@@ -206,7 +269,119 @@ class ModelCache:
         except OSError:
             free = total = None
         return {"ok": True, "free_bytes": free, "total_bytes": total, "cached": self.cached_keys(),
-                "engines": self.cached_engines()}
+                "engines": self.cached_engines(), **self.detail()}
+
+    def detail(self) -> dict:
+        """Per model, its size on disk (1.4): what the machine page lists, and what Remove offers.
+
+        - `models`: a Hugging Face revision (`bytes` = its files, as `hf cache ls` counts them: a blob
+          shared with another revision counts in both), with `parts` for its GGUF files when it has
+          any (each removable alone; split files once, with all their parts); a single-file model.
+        - `engines_detail`: the engine archives unpacked here.
+        - `used_bytes`: what the cache really takes on disk (shared blobs once), `partial_bytes` and
+          `partial_files`: what unfinished downloads left behind.
+        """
+        models = []
+        for e in self._entries():
+            out = {k: v for k, v in e.items() if not k.startswith("_")}
+            if "parts" in out:
+                out["parts"] = [{k: v for k, v in p.items() if k != "paths"} for p in out["parts"]]
+            models.append(out)
+        engines = [{"key": cache_keys.engine_key(sha16), "id": sha16, "name": name[:64], "bytes": tree_bytes(d)}
+                   for d, sha16, name in self._engine_dirs()]
+        partial = self._partials()
+        partial_bytes = sum(n for _, n in partial)
+        used = sum(tree_bytes(self.root / d) for d in ("hub", "url", "engines")) + sum(
+            n for p, n in partial if p.parent == self.root / ".partial")
+        return _fit({"models": models, "engines_detail": engines, "used_bytes": used, "partial_bytes": partial_bytes,
+                     "partial_files": len(partial)})
+
+    def _entries(self) -> list[dict]:
+        """The models with a marker, found on this disk (the only list a removal key is looked up in).
+        Keys starting with "_" are the agent's own paths and never leave it."""
+        out = []
+        for marker in sorted((self.root / "hub").glob(f"models--*/{MANIFEST_DIR}/*.json")):
+            rev, base = marker.stem, marker.parent.parent
+            if not sources.REVISION_RE.match(rev) or base.is_symlink():
+                continue
+            try:
+                data = json.loads(marker.read_text())
+            except (OSError, ValueError):
+                continue
+            snap = base / "snapshots" / rev
+            sizes: dict[str, int] = {}
+            missing = 0
+            for f in data.get("files") or []:
+                try:
+                    path = sources.safe_relpath(str(f.get("path")))
+                except (sources.SourceError, AttributeError):
+                    continue
+                try:
+                    sizes[path] = (snap / path).stat().st_size
+                except OSError:
+                    sizes[path], missing = 0, missing + 1
+            key = f"hub/{base.name}@{rev}"
+            repo = data.get("repo") if isinstance(data.get("repo"), str) else None
+            if not repo or _hf_dir_or_none(repo) != f"hub/{base.name}":
+                repo = base.name.removeprefix("models--").replace("--", "/", 1)
+            entry = {"key": key, "kind": "hf", "repo": repo[:200], "revision": rev, "bytes": sum(sizes.values()),
+                     "files": len(sizes), "completed_at": _number(data.get("completed_at")),
+                     "_base": base, "_marker": marker}
+            if missing:
+                entry["missing"] = missing
+            parts = []
+            for c in sources.gguf_choices([{"path": p, "size": n} for p, n in sizes.items()]):
+                paths = sorted(p for p in sizes if cache_keys.same_choice(p, c["path"]))
+                parts.append({"key": f"{key}/{c['path']}", "file": c["path"], "bytes": sum(sizes[p] for p in paths),
+                              "paths": paths})
+            if parts:
+                entry["parts"] = parts
+            out.append(entry)
+        for marker in sorted((self.root / "url").glob(f"*/{MANIFEST_DIR}.json")):
+            d = marker.parent
+            if not URL_DIR_RE.match(d.name) or d.is_symlink():
+                continue
+            try:
+                data = json.loads(marker.read_text())
+            except (OSError, ValueError):
+                continue
+            files = [p for p in d.iterdir() if p.name != marker.name and (p.is_file() or p.is_symlink())]
+            name = data.get("file") if isinstance(data.get("file"), str) else None
+            out.append({"key": f"url/{d.name}", "kind": "url", "file": (name or "")[:200] or None,
+                        "bytes": sum(p.lstat().st_size for p in files), "files": len(files),
+                        "completed_at": _number(data.get("completed_at")), "_dir": d})
+        return out
+
+    def _engine_dirs(self) -> list[tuple[Path, str, str]]:
+        """(directory, first 16 hex digits of the archive's SHA-256, name) of each unpacked engine."""
+        try:
+            dirs = sorted(p for p in (self.root / "engines").iterdir() if p.is_dir() and not p.is_symlink())
+        except OSError:
+            return []
+        out = []
+        for d in dirs:
+            m = ENGINE_DIR_RE.match(d.name)
+            if m:
+                out.append((d, m.group(1), d.name[: -len(m.group(1)) - 1]))
+        return out
+
+    def _partials(self) -> list[tuple[Path, int]]:
+        """What unfinished downloads left: files in .partial, and engine directories half unpacked."""
+        out = []
+        roots = [(self.root / ".partial", lambda p: True), (self.root / "engines", lambda p: p.name.startswith(".tmp-"))]
+        for root, wanted in roots:
+            try:
+                items = sorted(root.iterdir())
+            except OSError:
+                continue
+            for p in items:
+                if not wanted(p):
+                    continue
+                try:
+                    out.append((p, tree_bytes(p) if p.is_dir() and not p.is_symlink() else p.lstat().st_size))
+                except OSError:
+                    pass
+        return out
 
     def cached_engines(self) -> list[str]:
         """The engine archives unpacked here, by the first 16 hex digits of their SHA-256 (1.4: placement
@@ -248,6 +423,50 @@ class ModelCache:
         with self._guard:
             lock = self._locks.get(key)
         return bool(lock and lock.locked())
+
+    def _rw_path(self, name: str) -> Path:
+        return self.root / ".locks" / (hashlib.sha256(name.encode()).hexdigest()[:24] + ".rw")
+
+    @contextmanager
+    def _shared(self, name: str, cancel: Optional[threading.Event] = None):
+        """Held by a download for as long as it runs (a flock, so it also holds against another agent
+        sharing this directory, and between this agent's threads). A removal of the same files takes
+        it exclusively; it never waits for one, so a removal only ever delays a download a moment."""
+        with open(self._rw_path(name), "a") as fh:
+            while True:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    _check(cancel)
+                    time.sleep(LOCK_POLL)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    @contextmanager
+    def _exclusive(self, name: str):
+        """The removal's side of `_shared`: True when no download holds it, without waiting."""
+        with open(self._rw_path(name), "a") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    @staticmethod
+    def _files_lock(model: dict) -> str:
+        """The lock over one repository's (or one URL model's) files on disk: every revision of a
+        repository shares its blobs, so a removal of one revision must not run beside a download of
+        another."""
+        if model["kind"] == "hf":
+            return "repo:" + sources.hf_dir(model["repo"])
+        return "url:" + sources.url_dir(model["url"])
 
     # ------------------------------------------------------------------ paths
     def paths(self, model: dict) -> dict:
@@ -382,7 +601,7 @@ class ModelCache:
                 raise CacheError(f"{p / model['file']} does not exist on this machine")
             return self.paths(model)
         key = sources.cache_key(model)
-        with self._locked(key, cancel):
+        with self._locked(key, cancel), self._shared("partial", cancel), self._shared(self._files_lock(model), cancel):
             if not self.is_cached(model):
                 if model["kind"] == "hf":
                     self._download_hf(model, token, progress, cancel)
@@ -498,7 +717,8 @@ class ModelCache:
         if self.error:
             raise CacheError(self.error)
         final = self.root / "engines" / f"{name}-{sha[:16]}"
-        with self._locked(f"engine:{sha}", cancel):
+        with (self._locked(f"engine:{sha}", cancel), self._shared("partial", cancel),
+              self._shared(f"engine-dir:{sha[:16]}", cancel)):
             if not (final / binary).is_file():
                 part = self.root / ".partial" / f"engine-{sha}.part"
                 self._check_space(512 * 1024**2)
@@ -535,3 +755,178 @@ class ModelCache:
         if not exe.is_file() or not os.access(exe, os.X_OK):
             raise CacheError(f"the engine archive has no program {binary}")
         return exe
+
+    # ------------------------------------------------------------------ removing (1.4, cache_admin)
+    def remove(self, key: str, in_use: Callable[[dict], list[str]] = lambda target: []) -> int:
+        """Remove one model or engine from the cache; the bytes freed on disk. `in_use(target)` names
+        the replicas here that need what the target would delete (asked while the lock is held, so no
+        download can start using it in between); any name refuses the removal."""
+        if self.error:
+            raise CacheError(self.error)
+        target = cache_keys.parse(key)
+        if target is None:
+            raise CacheRefused("not_found", "That is not a model in this machine's cache.")
+        if target["kind"] == "engine":
+            lock = f"engine-dir:{target['id']}"
+        else:
+            lock = ("repo:" if target["kind"] == "hf" else "url:") + target["dir"]
+        with self._exclusive(lock) as free:
+            if not free:
+                raise CacheRefused("busy", "A download of this model is in progress on this machine. Try again "
+                                           "once it has finished or been cancelled.")
+            if target["kind"] == "engine":
+                dirs = [d for d, sha16, _ in self._engine_dirs() if sha16 == target["id"]]
+                if not dirs:
+                    raise CacheRefused("not_found", "That engine is not in this machine's cache (any more).")
+                self._refuse_if_used(in_use, target)
+                freed = 0
+                for d in dirs:
+                    freed += tree_bytes(d)
+                    shutil.rmtree(d)
+            elif target["kind"] == "url":
+                entry = next((e for e in self._entries() if e["key"] == key), None)
+                if entry is None:
+                    raise CacheRefused("not_found", "That model is not in this machine's cache (any more).")
+                self._refuse_if_used(in_use, target)
+                freed = tree_bytes(entry["_dir"])
+                shutil.rmtree(entry["_dir"])
+            else:
+                base_key = f"{target['dir']}@{target['revision']}"
+                entry = next((e for e in self._entries() if e["key"] == base_key), None)
+                part = None
+                if entry is not None and target.get("file"):
+                    part = next((p for p in entry.get("parts") or [] if p["key"] == key), None)
+                if entry is None or (target.get("file") and part is None):
+                    raise CacheRefused("not_found", "That model is not in this machine's cache (any more).")
+                # One GGUF file of a revision with others; the last one takes the revision with it (what
+                # is left, a projector or a README, serves nothing on its own).
+                paths = set(part["paths"]) if part is not None and len(entry["parts"]) > 1 else None
+                self._refuse_if_used(in_use, {"kind": "hf", "dir": target["dir"], "revision": target["revision"],
+                                              "paths": paths})
+                freed = self._remove_hf(entry, paths)
+        log.info("Removed %s from the model cache (%.2f GiB freed).", key, freed / 1024**3)
+        return freed
+
+    @staticmethod
+    def _refuse_if_used(in_use: Callable[[dict], list[str]], target: dict) -> None:
+        users = sorted(set(in_use(target)))
+        if users:
+            raise CacheRefused("in_use", f"In use by {', '.join(users)} on this machine. Stop it first.", users)
+
+    def _remove_hf(self, entry: dict, paths: Optional[set[str]]) -> int:
+        """Like `hf cache rm`: the revision's links (all, or `paths`), its marker and refs when it goes
+        whole, and each blob they pointed at that no link of another revision (or of the files kept)
+        still points at."""
+        base: Path = entry["_base"]
+        rev = entry["revision"]
+        snap = base / "snapshots" / rev
+        blobs = os.path.realpath(base / "blobs")
+        if paths is None:
+            links = [p for p in snap.rglob("*") if p.is_symlink() or p.is_file()] if snap.is_dir() and not snap.is_symlink() else []
+        else:
+            links = [snap / p for p in sorted(paths)]
+        candidates: set[str] = set()
+        freed = 0
+        for link in links:
+            if not _inside(link, snap):
+                continue
+            if link.is_symlink():
+                real = os.path.realpath(link)
+                if os.path.dirname(real) == blobs:
+                    candidates.add(real)
+                link.unlink()
+            elif link.is_file():
+                freed += link.lstat().st_size
+                link.unlink()
+        marker: Path = entry["_marker"]
+        if paths is None:
+            if snap.is_dir() and not snap.is_symlink():
+                shutil.rmtree(snap)
+            marker.unlink(missing_ok=True)
+            refs = base / "refs"
+            for ref in sorted(refs.rglob("*")) if refs.is_dir() else []:
+                try:
+                    if ref.is_file() and not ref.is_symlink() and ref.read_text().strip() == rev:
+                        ref.unlink()
+                except OSError:
+                    pass
+        else:
+            try:
+                data = json.loads(marker.read_text())
+            except (OSError, ValueError):
+                data = {}
+            data["files"] = [f for f in data.get("files") or [] if isinstance(f, dict) and f.get("path") not in paths]
+            tmp = marker.with_name(f".{marker.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(data))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, marker)
+            for d in sorted({link.parent for link in links}, key=lambda p: len(p.parts), reverse=True):
+                while d != snap and _inside(d, snap):
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        break
+                    d = d.parent
+        still = {os.path.realpath(p) for p in (base / "snapshots").rglob("*") if p.is_symlink()} \
+            if (base / "snapshots").is_dir() else set()
+        for blob in sorted(candidates - still):
+            try:
+                freed += os.lstat(blob).st_size
+                os.unlink(blob)
+            except FileNotFoundError:
+                pass
+        self._drop_if_empty(base)
+        return freed
+
+    @staticmethod
+    def _drop_if_empty(base: Path) -> None:
+        """A repository with nothing left in it goes too (only empty directories are removed)."""
+        for top, dirs, files in os.walk(base, topdown=False):
+            if top == str(base):
+                continue
+            if not files:
+                try:
+                    os.rmdir(top)
+                except OSError:
+                    pass
+        try:
+            base.rmdir()
+        except OSError:
+            pass
+
+    def prune_partial(self) -> int:
+        """Remove what unfinished downloads left behind (they would resume from it); the bytes freed.
+        Refused while any download runs here: one of them may be writing to it."""
+        if self.error:
+            raise CacheError(self.error)
+        with self._exclusive("partial") as free:
+            if not free:
+                raise CacheRefused("busy", "A download is in progress on this machine. Remove the partial "
+                                           "downloads once it has finished or been cancelled.")
+            freed = 0
+            for p, n in self._partials():
+                try:
+                    if p.is_dir() and not p.is_symlink():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+                    freed += n
+                except FileNotFoundError:
+                    pass
+        log.info("Removed the partial downloads from the model cache (%.2f GiB freed).", freed / 1024**3)
+        return freed
+
+
+def _hf_dir_or_none(repo: str) -> Optional[str]:
+    try:
+        return sources.hf_dir(repo)
+    except sources.SourceError:
+        return None
+
+
+def _number(value) -> Optional[float]:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n == n and 0 <= n < 1e11 else None

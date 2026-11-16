@@ -818,6 +818,50 @@ deployment's `workload` (as in `GET /api/workloads/{id}`) names it back: `deploy
 `model`, `engine`, `image`) and, when that machine could not reach one of those sources in the last
 hour, `unreachable`.
 
+## A machine's model cache through the API
+
+For a console session, like the other `/api` requests (writes also send the `X-Forgeyard: 1`
+header). Everyone signed in can look; admins and operators can remove.
+
+| Request | What it does |
+|---|---|
+| `GET /api/machines/{id}/cache` | The models in that machine's cache, as its agent last reported them |
+| `POST /api/machines/{id}/cache/remove` with `{"key": "<key>"}` | Removes one entry: a revision, one GGUF file of it, a URL model or an engine |
+| `POST /api/machines/{id}/cache/remove-partial` | Removes what unfinished downloads left |
+
+The listing has `free_bytes` and `total_bytes` (the cache's disk), `used_bytes` (what the cache takes
+on it, counting shared files once), `partial_bytes` and `partial_files`, `sizes` (false for an agent
+older than 1.4, which lists only keys) and `remove_note` (why nothing can be removed now, or `null`).
+`models` lists each entry:
+
+| Field | What it is |
+|---|---|
+| `key` | What to send to remove it: `hub/models--<org>--<name>@<commit>` for a Hugging Face revision, `url/<id>` for a single file from a URL |
+| `kind` | `hf` or `url` |
+| `repo`, `revision`, `file` | The repository and commit, or the file name of a URL model |
+| `bytes`, `files` | Its size and number of files. A file that two revisions share counts in both |
+| `parts` | For a revision with GGUF files: each file (a split model once, with all its parts) with its own `key`, `bytes`, `catalog` and `used_by`. Removing the last one removes the revision |
+| `catalog` | The catalog models it is |
+| `used_by` | The deployments (or workloads) on that machine that use it |
+
+`engines` lists the engine archives (`key` `engine/<first 16 hex digits of the archive's SHA-256>`,
+`name`, `bytes`, `used_by`). A removal answers `freed_bytes` (what was freed on the disk) and the
+listing afterwards (`cache`).
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `model_in_use` | A deployment on that machine uses it; `in_use` names them. The agent checks again before it deletes anything |
+| 409 | `cache_busy` | A download of that model (or, for partial downloads, any download) is in progress there |
+| 409 | `machine_offline`, `agent_too_old`, `agent_no_answer` | The agent is not connected, does not support removing (before 1.4), or did not answer within a minute |
+| 409 | `cache_remove_failed` | The agent could not delete it; the message says why |
+| 404 | `not_in_cache` | The machine does not report that key |
+| 403 | | Not an admin or an operator |
+
+Each removal is audited as `model.cache_removed` with the machine, the key, the model and
+`freed_bytes`. Behind it is the agent protocol feature `cache_admin` (agents from 1.4): the agent
+lists its cache with sizes, removes on request, and refuses while a replica there uses the files or
+while one of their downloads runs.
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and

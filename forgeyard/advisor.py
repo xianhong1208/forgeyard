@@ -500,8 +500,10 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
         if isinstance(free, int) and isinstance(total, int) and total > 0 and free < CACHE_FREE_MIN * total:
             yield Finding("model-cache-full", "warning", f"The model cache on {n.name} is nearly full",
                           f"{_size(free)} of {_size(total)} free. New models cannot be downloaded there once it is "
-                          "full: remove models that are no longer deployed, or move the cache to a larger disk.",
-                          "/guide/en/how-to#move-a-model-cache", "How to move a cache", scope=f"machine:{n.id}",
+                          "full: remove models that are no longer deployed (the machine's page, Models in cache), "
+                          "or move the cache to a larger disk.",
+                          "/guide/en/how-to#free-disk-space-on-a-machine", "How to free disk space",
+                          scope=f"machine:{n.id}",
                           pages=("machines",))
 
 

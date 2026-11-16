@@ -17,6 +17,9 @@ agent -> server
              `model_cache.engines` lists the engine archives unpacked there (first 16 hex digits of
              their SHA-256); older servers ignore it
   logs       (M2) answer to a logs_request: the last lines of a replica's output
+  cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
+             model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
+             (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
 
 server -> agent
   welcome    answer to hello: machine id and name, heartbeat interval, offline threshold,
@@ -25,6 +28,8 @@ server -> agent
              right after welcome and whenever it changes. The agent converges on it; it is
              idempotent, so a restart or reconnect just converges again
   logs_request (M2) the last N lines of one replica's output
+  cache_remove / cache_prune (1.4, "cache_admin") remove one model, or the partial downloads, from
+             the agent's model cache; answered by `cache_removed` (agent -> server)
   error      a refused message; the server closes the connection after it
 
 Models (M3) extend it the same way: an agent started with a model cache lists "models"; only
@@ -106,7 +111,15 @@ FEATURE_WORKLOAD_GUARD = "workload_guard"
 # reason "pulling the image: …"). To an older server, which records every new reason as an event, the
 # agent says only "pulling the image".
 FEATURE_PULL_PROGRESS = "pull_progress"
-SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS)
+# 1.4: the agent lists the models in its cache with their sizes (`model_cache.models`, `engines_detail`,
+# `used_bytes`, `partial_bytes`) and removes one on request: `cache_remove {request_id, key}` or
+# `cache_prune {request_id}` (the partial downloads), answered by `cache_removed {request_id, ok,
+# freed_bytes, code, reason, in_use, model_cache}`. Listed by both sides; only an agent that lists it is
+# asked. The agent refuses ("in_use") while a replica there uses the files, and ("busy") while one of
+# their downloads runs.
+FEATURE_CACHE_ADMIN = "cache_admin"
+SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
+                   FEATURE_CACHE_ADMIN)
 RUNTIMES = ("process", "container")
 
 # What the agent reports per replica. Server-only states: "stopping" (asked, not confirmed yet).

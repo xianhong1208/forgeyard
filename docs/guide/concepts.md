@@ -157,7 +157,8 @@ on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=rou
   part by part, and where it fits, before anything is downloaded.
 - The **model cache** on each machine (`/srv/forgeyard-models` by default, for an agent run as root)
   keeps the downloaded files, checked against their checksums, shared by every replica there.
-  Containers get their model mounted read-only.
+  Containers get their model mounted read-only. The machine's page lists what is in it, with sizes,
+  and removes what no deployment there uses ([Free disk space on a machine](how-to.md#free-disk-space-on-a-machine)).
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
   keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
   inspecting and downloading them; a deployment may bring its own, which wins for it.
