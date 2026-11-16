@@ -35,6 +35,10 @@ server -> agent
              the agent's model cache; answered by `cache_removed` (agent -> server)
   error      a refused message; the server closes the connection after it
 
+HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
+the machine credential as a Bearer token and an optional `Range`: the bytes of a model file or engine
+archive the machine's desired state names, streamed from their source by the server, stored nowhere.
+
 Models (M3) extend it the same way: an agent started with a model cache lists "models"; only
 then does the server place model deployments there, and its desired replicas carry a rendered
 `spec`, the `model` to fetch (with a token for gated repositories, never stored by the agent) and
@@ -129,8 +133,23 @@ FEATURE_CACHE_ADMIN = "cache_admin"
 # Listed by both sides; only an agent that lists it is sent downloads, and only to a server that lists it
 # does the agent report them.
 FEATURE_PREFETCH = "prefetch"
+# 1.4 (issue #35, D1/D3): the server relays model files and engine archives to a machine that cannot reach
+# their source, storing nothing. To an agent that lists it, on a machine whose `fetch_via` is "auto" or
+# "server", a desired replica's or download's `model` and `engine` blocks carry `relay: {path, mode}`: the
+# path on the server (RELAY_PATH/<replica|download>/<id>/<model|engine>; a Hugging Face file is
+# `<path>/<file path>`) and the mode, "server" (always through the server: the model block then carries no
+# `token`, the server adds its own) or "auto" (directly first, through the server after a network failure).
+# The agent GETs `<its own server URL><path>` with its machine credential and the CA it pins, sending only
+# `Range`; the server serves only what that machine's desired state names, from the source the catalog or
+# recipe gives (never a URL from the agent). The agent's resume, retries, cancel and checks are unchanged.
+# Progress through the server says `download.via` "server". Listed by both sides.
+FEATURE_RELAY = "relay"
+RELAY_PATH = "/agent/v1/relay"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
-                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH)
+                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY)
+# How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
+# a network failure; always through the server; never through the server.
+FETCH_VIA = ("auto", "server", "direct")
 # What an agent reports of a download (1.4, prefetch). "queued": waiting for another download on that machine.
 DOWNLOAD_STATES = ("queued", "downloading", "done", "failed", "cancelled")
 RUNTIMES = ("process", "container")

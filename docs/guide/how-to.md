@@ -1305,8 +1305,59 @@ Each request and each cancel is in the audit log (`model.download_requested`,
 recorded after its first complete download, and every later download must match it
 (`model.checksum_recorded`). The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
 
-**Internet access for downloads** on a machine's page (admins) is kept for the relay through the
-server, which comes in a later 1.4 update; until then every machine downloads directly.
+A machine that cannot reach Hugging Face or GitHub itself gets the files through the server: see the
+next section.
+
+## Give an offline machine models through the server
+
+A machine with no internet access of its own (behind a firewall, on a DNS filter, or reached only
+through an SSH tunnel) can still download models and engine archives: **the server fetches them and
+passes the bytes on**, storing nothing. The agent asks the server the way it already talks to it,
+outbound, over HTTPS with the CA it pins and its machine credential, so it works through whatever
+already carries the agent's connection (for example an `ssh -R 7860:…` tunnel). Nothing on the
+machine or in the tunnel changes.
+
+1. Open the machine's page (admins). Under **Models in cache**, set **Internet access for downloads**:
+   - **Auto** (the default): downloads directly; once the source cannot be reached from that machine
+     (the name does not resolve, the connection is refused, reset or times out, the network is
+     unreachable), the rest of that download, and the next ones from that host for an hour, come
+     through the server. An HTTP error (a missing file, a refused token) or a checksum mismatch never
+     switches: the server would get the same answer.
+   - **Always through the server**: for a machine that has no internet access at all. It never tries
+     directly, so there is no wait for a failure first.
+   - **Direct only**: never through the server.
+2. Deploy, or use **Download to…**, as usual. The progress says *Downloading the model via the server:
+   … of …* on the deployment's page, under the model in the Library and on the machine's page, and a
+   finished download says *Downloaded … via the server*. The **Download to…** dialog says *via the
+   server* for a machine set to always use it.
+
+What stays the same: the agent resumes a download from what is on disk after a break (the server
+passes `Range` on to the source), retries, stops at once on **Cancel**, and checks every file as a
+direct download does (the SHA-256 of large files, the git blob id of small ones, the pinned SHA-256
+of engine archives, the recorded SHA-256 of a URL model). A file changed on the way is refused and
+deleted, so the server is trusted with nothing it could not already do.
+
+What is different:
+
+- The server uses its own Hugging Face token (**Models → Model sources**), or the deployment's own,
+  for gated models. Set to **Always through the server**, the machine is never sent a token at all.
+- The server's own rules for model sources apply: https and public addresses only (unless
+  `MODEL_ALLOW_PRIVATE_HOSTS`), and URL models only from the allowed hosts.
+- The server serves only what that machine is meant to download right now (its deployment's replicas
+  and its **Download to…** requests); cancelling a download, or removing the deployment, closes it
+  within seconds. At most two downloads per machine and four in all go through the server at a
+  time; the others wait their turn.
+- Every byte crosses the server's network twice (in from the source, out to the machine), so keep
+  machines that can reach the internet on **Auto** or **Direct only**.
+- Placement no longer avoids such a machine for a model it could not download itself: the
+  deployment's page says *amd-strix could not reach huggingface.co just now; the model comes through
+  the server*, or *amd-strix downloads the model and the engine through the server (its internet
+  access setting)*.
+
+**Engine images** (container variants) are not relayed yet: carry them over as files
+([Offline machines](#offline-machines)), or use a process variant (llama.cpp's archive comes through
+the server). The machine's agent must be 1.4 or later; an older one downloads directly whatever the
+setting says, and the setting tells you to update it.
 
 ## Free disk space on a machine
 

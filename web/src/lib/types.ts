@@ -202,6 +202,8 @@ export type Replica = {
   download?: {
     phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
     layers?: number; layers_done?: number; unpacking?: boolean;
+    // 1.4: "server" while the bytes come through the server's relay.
+    via?: "direct" | "server";
   } | null;
   ready_at?: string | null;
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
@@ -560,6 +562,8 @@ export type FetchVia = "auto" | "server" | "direct";
 export type DownloadProgress = {
   phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
   layers?: number; layers_done?: number; unpacking?: boolean;
+  // 1.4 ("relay"): "server" while the bytes come through the server.
+  via?: "direct" | "server";
 };
 
 export type ModelDownload = {
@@ -589,6 +593,9 @@ export type DownloadTarget = {
   engine: { kind: "archive" | "image"; name: string; cached: boolean | null } | null;
   engine_note: string | null;
   download: ModelDownload | null;
+  // 1.4 ("relay"): how the model would come: "server" (through the server), "auto" (directly, through the
+  // server after a network failure) or "direct". Absent from older servers.
+  via?: FetchVia;
 };
 
 export type DownloadTargets = {

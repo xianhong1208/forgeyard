@@ -39,6 +39,10 @@ class Job:
     image: Optional[str] = None
     image_ids: Optional[dict] = None
     label: str = ""
+    # 1.4 ("relay"): {"model"|"engine": {path, mode}} when this machine may fetch them through the server, and
+    # whether the bytes come that way right now (the progress says so).
+    relays: dict = field(default_factory=dict)
+    via_server: bool = False
     state: str = "queued"              # queued | downloading | done | failed | cancelled
     reason: Optional[str] = None
     download: Optional[dict] = None
@@ -50,6 +54,18 @@ class Job:
         if self.download is not None:
             out["download"] = dict(self.download)
         return out
+
+
+def _relays(item: dict) -> dict:
+    """The `relay` of the item's model and engine blocks (agent/relay.py), checked."""
+    from forgeyard.agent import relay
+
+    out = {}
+    for part in ("model", "engine"):
+        found = relay.parse(item.get(part)) if isinstance(item, dict) else None
+        if found is not None:
+            out[part] = found
+    return out
 
 
 class Prefetcher:
@@ -81,6 +97,8 @@ class Prefetcher:
             if jid not in self.jobs:
                 self.jobs[jid] = self._job(jid, item)
                 self.changed.add(jid)
+            else:
+                self.jobs[jid].relays = _relays(item)  # the machine's setting may have changed
         self._start_queued()
         self.sup._notify()
 
@@ -89,7 +107,7 @@ class Prefetcher:
         from forgeyard.models.sources import SourceError
         from forgeyard.workloads import images
 
-        job = Job(jid)
+        job = Job(jid, relays=_relays(item))
         try:
             if self.sup.models is None:
                 raise CacheError("this agent has no model cache (start it with --model-cache DIR)")
@@ -101,7 +119,7 @@ class Prefetcher:
                 job.model = validate_model(model, self.sup.models.local_dirs)
                 job.label = job.model.get("repo") or job.model.get("url") or job.model.get("path") or jid[:12]
             if isinstance(item.get("engine"), dict):
-                job.engine = dict(item["engine"])
+                job.engine = {k: v for k, v in item["engine"].items() if k != "relay"}
             image = item.get("image")
             if isinstance(image, str) and image:
                 job.image = image[:255]
@@ -136,6 +154,9 @@ class Prefetcher:
             done = min(done, total)
         job.download = {"phase": phase, "done": done, "total": total, **({"file": file} if file else {})}
         what = "the model" if phase == "model" else "the engine"
+        if job.via_server:
+            job.download["via"] = "server"
+            what += " through the server"
         job.reason = (f"downloading {what}: {done / 1024**3:.2f} of {total / 1024**3:.2f} GiB ({100 * done // total}%)"
                       if total else f"downloading {what}: {done / 1024**2:.0f} MiB")
         self._changed(job)
@@ -175,15 +196,21 @@ class Prefetcher:
         def pulled(snap: dict) -> None:
             loop.call_soon_threadsafe(self._pull_progress, job, dict(snap))
 
+        def via(how: str) -> None:
+            if how == "server":
+                loop.call_soon_threadsafe(setattr, job, "via_server", True)
+
         try:
             if job.model is not None:
                 if not cache.is_cached(job.model) and cache.busy(cache_key(job.model)):
                     job.reason = "waiting for another download of the same model on this machine"
                     self._changed(job)
                 await asyncio.to_thread(cache.ensure_model, job.model, token=self.tokens.get(job.id),
-                                        progress=progress, cancel=job.cancel)
+                                        progress=progress, cancel=job.cancel, relay=job.relays.get("model"), via=via)
+            job.via_server = False  # the engine may come another way
             if job.engine is not None:
-                await asyncio.to_thread(cache.ensure_engine, job.engine, progress=progress, cancel=job.cancel)
+                await asyncio.to_thread(cache.ensure_engine, job.engine, progress=progress, cancel=job.cancel,
+                                        relay=job.relays.get("engine"), via=via)
             if job.image is not None:
                 rt = self.sup.runtimes.get("container")
                 if rt is None or not hasattr(rt, "ensure_image"):

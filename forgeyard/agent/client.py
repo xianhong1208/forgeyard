@@ -21,6 +21,7 @@ from forgeyard import __version__
 from forgeyard.agent import trust
 from forgeyard.agent.backoff import Backoff
 from forgeyard.agent.inventory import Inventory, fingerprint
+from forgeyard.agent.relay import RelayClient
 from forgeyard.machines.protocol import (
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
@@ -31,6 +32,7 @@ from forgeyard.machines.protocol import (
     FEATURE_IMAGE_IDS,
     FEATURE_MODELS,
     FEATURE_PREFETCH,
+    FEATURE_RELAY,
     FEATURE_REPLICA_GUARD,
     FEATURE_REPLICA_KEYS,
     FEATURE_WORKLOAD_GUARD,
@@ -138,6 +140,11 @@ class Agent:
         self.sessions = 0  # connections that got a welcome (tests and logs)
         # Runs workloads (M2). None: an inventory-only agent, as in M1.
         self.supervisor = supervisor
+        models = getattr(supervisor, "models", None) if supervisor is not None else None
+        if models is not None:
+            # 1.4 ("relay"): model files and engine archives through this server, with this credential and the
+            # same TLS trust as the connection.
+            models.relay_client = RelayClient(server, self.ssl_context, credential)
         self.server_features: set[str] = set()
         self._answers: set[asyncio.Task] = set()
 
@@ -157,6 +164,8 @@ class Agent:
             cache = self.supervisor.model_cache_info()
             if cache is not None:
                 msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
+                if getattr(self.supervisor.models, "relay_client", None) is not None:
+                    msg["features"].append(FEATURE_RELAY)
                 msg["model_cache"] = cache
         return msg
 

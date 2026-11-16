@@ -214,7 +214,11 @@ failed: cannot resolve huggingface.co: …* (or *github.com* for a llama.cpp eng
 image that *could not be pulled*), then its deployment's page says *cpu-01 could not reach
 huggingface.co; placed on cpu-02 instead*.
 
-**Why:** the agent tries a download five times, a minute in all; when it still could not reach the
+**Why:** the machine is set to **Direct only**, or its agent is older than 1.4 (it cannot download
+through the server). Set to **Auto** (the default) or **Always through the server**, a 1.4 agent gets
+the model and the engine archive through the server instead, and none of this happens (see below).
+
+The agent tries a download five times, a minute in all; when it still could not reach the
 source (the name did not resolve, the connection was refused or timed out, the network was
 unreachable), the server remembers for an hour that this machine cannot reach that host. A replica
 of a deployment that is not pinned to the machine is then placed again on another machine that
@@ -232,6 +236,10 @@ counted: another machine would get the same answer.
 
 **Do:**
 
+- let the server download it for the machine: on the machine's page set **Internet access for
+  downloads** to **Auto** or **Always through the server**, and update its agent to 1.4 if the page
+  says so ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server)).
+  The replica's progress then says *via the server*. Engine images are not relayed yet;
 - let the machine reach the host (DNS, a firewall rule, a proxy route); Forgeyard tries it again
   for new placements an hour after the last failure, or at once after a server restart;
 - or bring the files to it: copy a model cache from a machine that has the model
@@ -240,6 +248,20 @@ counted: another machine would get the same answer.
   or add the model from a local directory as a `local://` model;
 - or use a mirror the machine can reach (`HF_ENDPOINT`, see
   [Hugging Face downloads are slow](#hugging-face-downloads-are-slow)).
+
+**Through the server, it still fails:**
+
+- *download failed: through the server: the server could not reach huggingface.co: …*: the server
+  cannot reach the source either. Fix the server's network, or use a mirror (`HF_ENDPOINT`).
+- *through the server: huggingface.co refused access (HTTP 401) …*: a gated model; set the server's
+  Hugging Face token under **Models → Model sources** (the machine's own token is not used through the
+  server), or give the deployment its own.
+- *through the server: … does not download through the server*: the machine was set to **Direct
+  only** while it downloaded.
+- *SHA-256 mismatch*: the bytes changed on the way (a proxy that rewrites them, a broken disk). The
+  file was deleted; the next try starts it again.
+- The server's log has a line per file it passed on: *Relayed <repo>@<revision>/<file> to amd-strix:
+  812.3 MiB in 41.0 s (19.8 MiB/s), finished.*, or why it ended.
 
 ## vLLM does not start on a shared card
 

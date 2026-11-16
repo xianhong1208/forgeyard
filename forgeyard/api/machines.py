@@ -19,7 +19,7 @@ from forgeyard.db import Accelerator, JoinToken, Node, get_db, utcnow
 from forgeyard.install import commands as install_commands
 from forgeyard.machines import cache, store
 from forgeyard.machines.hub import hub
-from forgeyard.machines.protocol import CLOSE_REVOKED
+from forgeyard.machines.protocol import CLOSE_REVOKED, FETCH_VIA
 from forgeyard.models import prefetch
 from forgeyard.security import tls
 from forgeyard.workloads import placement, state as wstate
@@ -188,7 +188,6 @@ def set_gpu_allowlist(machine_id: int, body: AllowlistIn, caller: Caller = Depen
     return {"machine": machine_out(node, db)}
 
 
-FETCH_VIA = ("auto", "server", "direct")
 FETCH_VIA_TEXT = {"auto": "Auto (directly, through the server after a network failure)",
                   "server": "Always through the server", "direct": "Direct only"}
 
@@ -200,8 +199,10 @@ class FetchViaIn(BaseModel):
 @router.put("/{machine_id}/fetch-via")
 def set_fetch_via(machine_id: int, body: FetchViaIn, caller: Caller = Depends(require_admin),
                   db: DbSession = Depends(get_db)):
-    """How this machine fetches models, engines and images (1.4, D3/D9: admins only). Stored now; relaying
-    through the server comes in a later 1.4 change, until then every machine downloads directly."""
+    """How this machine fetches models and engine archives (1.4, D3/D9: admins only): "auto" (directly, and
+    through the server after a network failure), "server" (always through the server) or "direct" (never
+    through it). Its agent gets the new way with its next desired state, sent now; placement no longer
+    avoids a machine that relays for a host it could not reach."""
     if body.fetch_via not in FETCH_VIA:
         raise fail(422, "bad_fetch_via", f"fetch_via is one of: {', '.join(FETCH_VIA)}.")
     node = _get(db, machine_id)
@@ -211,6 +212,8 @@ def set_fetch_via(machine_id: int, body: FetchViaIn, caller: Caller = Depends(re
         audit.record(db, "node.fetch_via_changed", actor=caller.user, target=node.name, ip=caller.ip,
                      machine_id=node.id, before=before, after=body.fetch_via)
         db.commit()
+        hub.poke(node.id)  # its replicas' and downloads' blocks say how to fetch them
+        placement.place_and_poke(db)  # a replica waiting for a machine that can fetch it may now go here
     db.expire_all()
     node = db.scalar(select(Node).where(Node.id == machine_id).options(selectinload(Node.accelerators)))
     return {"machine": machine_out(node, db)}

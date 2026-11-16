@@ -45,6 +45,25 @@ class BlockedAddress(FetchError):
     pass
 
 
+# What a download or pull says when it could not reach the source at all (matched in lower case): the
+# name did not resolve, the connection was refused, reset or timed out, the network or host was
+# unreachable. HTTP errors (a gated model, a missing file), checksum mismatches and a full disk are not
+# network errors: from anywhere else the answer would be the same. Placement remembers these per machine
+# and source host (forgeyard.models.reach); an agent whose machine may relay (1.4, "auto") switches to the
+# server on them.
+NETWORK_ERRORS = (
+    "cannot resolve", "temporary failure in name resolution", "name or service not known", "no such host",
+    "server misbehaving", "nodename nor servname", "connection refused", "timed out", "i/o timeout",
+    "tls handshake timeout", "context deadline exceeded", "network is unreachable", "no route to host",
+    "host is unreachable", "connection reset",
+)
+
+
+def network_error(text) -> bool:
+    t = str(text or "").lower()
+    return any(p in t for p in NETWORK_ERRORS)
+
+
 def system_resolver(host: str, port: int) -> list[str]:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -180,6 +199,10 @@ class Response:
     def read1(self, n: int) -> bytes:
         """Up to n bytes of what has arrived (at least one, or b"" at the end)."""
         return self._resp.read1(n)
+
+    def remaining(self) -> Optional[int]:
+        """Bytes of the announced Content-Length not read yet (None when no length was announced)."""
+        return getattr(self._resp, "length", None)
 
     def abort(self) -> None:
         """From another thread: end a read that is waiting on the network (a cancel)."""

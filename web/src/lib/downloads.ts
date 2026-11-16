@@ -30,6 +30,7 @@ export function targetDetail(t: DownloadTarget): string {
   } else if (t.engine_note) {
     parts.push(`no engine: ${t.engine_note}`);
   }
+  if (t.via === "server" && !t.model_cached) parts.push("via the server");
   return parts.join(" · ");
 }
 
@@ -51,7 +52,9 @@ export function downloadLine(d: ModelDownload): string {
     const text = progress ? `${progress}${frac !== null ? ` (${Math.round(frac * 100)}%)` : ""}` : d.reason || (d.state === "queued" ? "Waiting to start" : "Starting");
     return d.waiting ? `${text} · ${d.waiting}` : text;
   }
-  if (d.state === "done") return `Downloaded ${when(d.finished_at)}${d.recipe ? `, with the ${d.recipe} engine` : ""}`;
+  if (d.state === "done") {
+    return `Downloaded ${when(d.finished_at)}${d.via === "server" ? " via the server" : ""}${d.recipe ? `, with the ${d.recipe} engine` : ""}`;
+  }
   if (d.state === "cancelled") return `${capital(d.reason || "cancelled")} ${when(d.finished_at)}`.trim();
   return `Failed: ${d.reason || "unknown reason"}`;
 }
@@ -77,4 +80,11 @@ export function recentDownloads(list: ModelDownload[], key: "machine" | "model",
 
 export const FETCH_VIA_LABEL: Record<FetchVia, string> = {
   auto: "Auto", server: "Always through the server", direct: "Direct only",
+};
+
+// What each choice does (1.4, "relay"): shown under the machine's Internet access setting.
+export const FETCH_VIA_HINT: Record<FetchVia, string> = {
+  auto: "Downloads models and engine archives directly, and through the server once the source cannot be reached from here.",
+  server: "Every model file and engine archive comes through the server, which stores nothing: for a machine with no internet access of its own.",
+  direct: "Always downloads directly, never through the server.",
 };

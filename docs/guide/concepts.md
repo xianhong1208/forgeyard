@@ -153,7 +153,9 @@ on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=rou
   Containers get their model mounted read-only. The machine's page lists what is in it, with sizes,
   and removes what no deployment there uses ([Free disk space on a machine](how-to.md#free-disk-space-on-a-machine)).
   **Download to…** fills it ahead of a deployment, with the engine too
-  ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). Whether a
+  ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). A machine
+  that cannot reach Hugging Face or GitHub gets the files **through the server**, which passes them on
+  and stores nothing; the agent checks them as it checks any download. Whether a
   model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
   keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
@@ -170,7 +172,10 @@ workload of runtime `model`, seen only on the deployment's page (not on **Apps**
      such as ghcr.io) in the last hour comes last: it is used only when nothing else fits. A
      download counts as "could not reach" when the name did not resolve, the connection was refused
      or timed out, or the network was unreachable; an HTTP error, a refused token or a full disk does
-     not;
+     not. A machine whose agent can download **through the server** (1.4; its **Internet access for
+     downloads** is **Auto** or **Always through the server**) gets the model and the engine archive
+     that way instead, so it is not avoided for them
+     ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server));
    - replicas of one deployment go on **different machines** when they can;
    - a machine that already has the **model in its cache** wins, then one that also has the engine
      (the archive a process engine runs, or the image a container engine runs);

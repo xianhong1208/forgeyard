@@ -736,11 +736,11 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `POST /api/downloads` 加上 `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | 在每台能下載的機器上開始下載；`engine` 預設開啟，`recipe` 預設是第一個能跑這個模型的配方 |
 | `GET /api/downloads?model_id=<id>&machine_id=<id>` | 先列出進行中的下載，再列出已結束的（最近 100 筆） |
 | `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
-| `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器下載時怎麼連到網路，`auto`、`server` 或 `direct`（為之後的「經由伺服器轉送」預留；在那之前每台機器都直接下載） |
+| `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和引擎壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
 
-`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`）。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
 
-一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同）、`reason`、`via`（轉送推出前都是 `direct`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
 
 | 狀態碼 | `code` | 何時 |
 |---|---|---|
@@ -754,6 +754,34 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 稽核事件：`model.download_requested`（每台機器一筆，含模型和引擎）、`model.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
 
 背後是 agent 協定的 feature `prefetch`（1.4 起的 agent 和伺服器）。伺服器把每筆排隊中或下載中的列放在 `desired.downloads`，與副本並列：`{id, model, engine?, image?, image_ids?}`（Hugging Face 模型的區塊會帶伺服器用於受限 repository 的 token，和副本一樣只存在記憶體）。agent 用副本下載的同一套程式抓取（相同的鎖、從部分檔案續傳、checksum 和取消；映像檔用 1.3.1 的 pull 進度），不啟動任何東西，同時最多跑兩個，並回報 `status.downloads`（`{id, state, reason, download}`）；下一份清單裡沒有的下載會被取消。Migration `0015` 新增資料表 `model_downloads` 和欄位 `nodes.fetch_via`（所有既有機器都是 `auto`）。
+
+### 經由伺服器下載（轉送）
+
+agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出它的 agent，在 `fetch_via` 為 `auto` 或 `server` 的機器上，desired 副本或下載的每個模型區塊（Hugging Face 或 URL）和引擎壓縮檔區塊都會帶 `relay: {path, mode}`：`mode` 為 `server`（一律經由伺服器；設成這樣，或是 `auto` 且過去一小時內記得連不到那個主機）或 `auto`（先直接下載，遇到網路錯誤後改經由伺服器）。`server` 的模型區塊不帶 `token`。agent 之後向它自己的伺服器下載，絕不會連到伺服器指定的其他主機：
+
+| 請求 | 回傳 |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/model/{檔案路徑}` | Hugging Face 模型的一個檔案 |
+| `GET /agent/v1/relay/{replica\|download}/{id}/model` | URL 模型的檔案 |
+| `GET /agent/v1/relay/{replica\|download}/{id}/engine` | process 變體的引擎壓縮檔 |
+
+`{id}` 是 desired 清單裡副本或下載的 id。請求帶機器憑證（`Authorization: Bearer …`），以及最多一個 `Range: bytes=N-`（或 `N-M`），會轉給來源；回應是來源的 200 或 206，含 `Content-Length` 和 `Content-Range`，以串流傳送，不會存在任何地方。瀏覽器（帶 `Origin` 的請求）一律拒絕。
+
+伺服器只轉送那台機器**目前** desired 狀態裡有的東西：放在那裡且應該執行的副本，或排隊中、下載中的那台機器的下載，而且只限那個模型列出的檔案。來源網址由伺服器自己從目錄項目或配方組出來，使用它自己的 Hugging Face 權杖（或部署的權杖）和它自己的模型來源規則（`MODEL_ALLOW_PRIVATE_HOSTS`、URL 主機）。它每 2 秒檢查一次轉送是否還需要，不需要時就關閉。
+
+| 狀態碼 | `code` | 什麼時候 |
+|---|---|---|
+| 401 | `credential_refused` | 沒有憑證，或憑證已撤銷 |
+| 403 | `relay_off` | 機器設成 `direct`，或它的 agent 不支援 `relay` |
+| 403 | `browser_refused` | 請求帶有 `Origin` |
+| 403 | `source_refused` | 來源拒絕存取（受限模型，而且沒有可用的權杖） |
+| 403 | `source_blocked` | 伺服器的規則不允許來源的位址 |
+| 404 | `relay_not_wanted` | 機器的 desired 狀態裡沒有那個 id、檔案或引擎 |
+| 416 | `bad_range`、`range_not_satisfiable` | 超過一個範圍，或超過結尾 |
+| 429 | `relay_busy` | 那台機器已經有兩個轉送，或全部已有四個；`Retry-After: 5` |
+| 502 | `source_unreachable`、`source_failed` | 伺服器連不到來源，或來源回了錯誤 |
+
+agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇到 429 會等待且不算一次重試，其餘的則像網路錯誤一樣重試。這時它的進度會帶 `download.via: "server"`。
 
 ## Setup health 檢查
 
