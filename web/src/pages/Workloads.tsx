@@ -34,7 +34,7 @@ export function WorkloadsPage() {
   return (
     <>
       <PageHeader
-        index="02 · Workloads"
+        index="03 · Workloads"
         title="Workloads"
         lead="Services and tasks on your machines. Each replica runs on one machine, with only the GPUs it was given and an environment that starts empty."
         actions={canManage && (

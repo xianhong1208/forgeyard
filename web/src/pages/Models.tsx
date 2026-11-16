@@ -60,7 +60,7 @@ export function ModelsPage() {
   return (
     <>
       <PageHeader
-        index="01 · Models"
+        index="02 · Models"
         title="Models"
         lead="Models run here as deployments, grouped by what they do; a deployment's page also holds its cloud fallback. The library is what you can deploy. Every ready deployment answers at /v1 with an API key, and in the Playground."
         actions={canDeploy && (

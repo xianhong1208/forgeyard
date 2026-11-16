@@ -78,7 +78,7 @@ version until 1.0.
     deployments only (several behind one name, or one under a second name) is listed there too, under
     *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
     `/cloud/providers/<id>`.
-  - The menu is Models, Workloads, Machines, Cloud (admins), Playground, API keys, Usage, Users,
+  - The menu is Machines, Models, Workloads, Cloud (admins), Playground, API keys, Usage, Users,
     Audit log. "Serving" and "route" left the console's navigation.
   - Old links open the new places, without a step in the history: `/models?tab=serving` and
     `?tab=routes` (with `&route=<id or name>`: that route's place), `?tab=catalog`,

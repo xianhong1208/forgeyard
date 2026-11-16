@@ -60,7 +60,7 @@ export function DeploymentDetailPage() {
   return (
     <>
       <p className="crumb"><Link to="/models"><IconArrowLeft size={14} aria-hidden="true" /> Models</Link></p>
-      <PageHeader index={`01 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
+      <PageHeader index={`02 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
         lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
         actions={d && w && canManage && (
           <>

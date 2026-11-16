@@ -86,7 +86,7 @@ export function WorkloadNewPage() {
   if (user && user.role === "user") {
     return (
       <>
-        <PageHeader index="02 · Workloads" title="New workload" />
+        <PageHeader index="03 · Workloads" title="New workload" />
         <Notice>Only admins and operators start workloads: creating one runs code on a machine.</Notice>
       </>
     );
@@ -117,7 +117,7 @@ export function WorkloadNewPage() {
 
   return (
     <>
-      <PageHeader index="02 · Workloads" title="New workload"
+      <PageHeader index="03 · Workloads" title="New workload"
         lead="A container or a process, on a machine you pick or the first online machine with room. It starts as soon as it is placed." />
       {template && (
         <div className="tpl-from" role="status">

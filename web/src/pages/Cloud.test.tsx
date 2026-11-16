@@ -131,7 +131,7 @@ describe("navigation", () => {
     const view = mount("/models");
     const nav = await screen.findByRole("navigation", { name: "Main" });
     const top = () => within(nav).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent);
-    expect(top()).toEqual(["Models", "Workloads", "Machines", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
+    expect(top()).toEqual(["Machines", "Models", "Workloads", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
     expect(within(nav).getByRole("link", { name: "Cloud" }).getAttribute("href")).toBe("/cloud");
     expect(within(nav).queryByRole("link", { name: /Providers|Serving/ })).toBeNull();
     view.unmount();
@@ -139,7 +139,7 @@ describe("navigation", () => {
     mount("/models");
     const nav2 = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav2).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent))
-      .toEqual(["Models", "Workloads", "Machines", "Playground", "API keys", "Usage"]);
+      .toEqual(["Machines", "Models", "Workloads", "Playground", "API keys", "Usage"]);
   });
 
   it("FY-WEB-252 old addresses open the new places, replacing the history entry", async () => {

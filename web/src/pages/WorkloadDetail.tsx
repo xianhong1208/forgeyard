@@ -56,7 +56,7 @@ export function WorkloadDetailPage() {
   return (
     <>
       <p className="crumb"><Link to="/workloads"><IconArrowLeft size={14} aria-hidden="true" /> Workloads</Link></p>
-      <PageHeader index={`02 · ${w?.kind ?? "workload"}`} title={w?.name ?? "Workload"}
+      <PageHeader index={`03 · ${w?.kind ?? "workload"}`} title={w?.name ?? "Workload"}
         lead={w ? `${w.kind === "service" ? "Service" : "Task"} · ${w.runtime} · created by ${w.created_by ?? "?"} ${when(w.created_at)}` : undefined}
         actions={w && canManage && w.deployment ? (
           <span className="locked" title="Stop, start and delete the deployment instead">
