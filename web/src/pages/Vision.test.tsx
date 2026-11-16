@@ -84,12 +84,12 @@ afterEach(() => {
 });
 
 describe("Playground: Vision (1.3)", () => {
-  it("FY-WEB-189: with no exposed vision workload, says how to start one from a template (operators get the link)", async () => {
+  it("FY-WEB-189: with no exposed vision app, says how to start one from a template (operators get the link)", async () => {
     server((url) => (url === "/api/playground/vision/options" ? options([]) : undefined));
     mount();
-    expect(await screen.findByRole("heading", { name: "No vision workload to try yet" })).toBeTruthy();
-    expect(screen.getByText(/Start one from a template on the Workloads page/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Start from a template/ }).getAttribute("href")).toBe("/workloads");
+    expect(await screen.findByRole("heading", { name: "No vision app to try yet" })).toBeTruthy();
+    expect(screen.getByText(/Start one from a template on the Apps page/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Start from a template/ }).getAttribute("href")).toBe("/apps");
     expect(screen.getByText("facebook/sam2.1-hiera-tiny")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Vision" }).getAttribute("aria-selected")).toBe("true");
     cleanup();
@@ -112,7 +112,7 @@ describe("Playground: Vision (1.3)", () => {
     });
     mount();
     const panel = await panelFor("Object detection");
-    const select = screen.getByLabelText("Workload") as HTMLSelectElement;
+    const select = screen.getByLabelText("App") as HTMLSelectElement;
     expect([...select.options].map((o) => o.text)).toEqual([
       "detector · Object detection · rtdetr_v2_r18vd", "segmenter · Segmentation · sam2.1-hiera-tiny",
       "depth · Depth estimation · Depth-Anything-V2-Small-hf"]);
@@ -155,7 +155,7 @@ describe("Playground: Vision (1.3)", () => {
     });
     mount();
     await screen.findByRole("heading", { name: "Object detection" });
-    fireEvent.change(screen.getByLabelText("Workload"), { target: { value: "segmenter" } });
+    fireEvent.change(screen.getByLabelText("App"), { target: { value: "segmenter" } });
     const panel = await panelFor("Segmentation");
     const img = await pick(panel, photo());
     loaded(img, [640, 480], [320, 240]);
@@ -190,7 +190,7 @@ describe("Playground: Vision (1.3)", () => {
     });
     mount();
     await screen.findByRole("heading", { name: "Object detection" });
-    fireEvent.change(screen.getByLabelText("Workload"), { target: { value: "depth" } });
+    fireEvent.change(screen.getByLabelText("App"), { target: { value: "depth" } });
     const panel = await panelFor("Depth estimation");
     expect(within(panel).getByText("PNG, JPEG or WebP, at most 4 MiB.")).toBeTruthy();
     await pick(panel, photo("street.png", "image/png"));
@@ -220,15 +220,15 @@ describe("Playground: Vision (1.3)", () => {
     fireEvent.change(within(panel).getByLabelText("Image"), { target: { files: [photo("notes.pdf", "application/pdf")] } });
     expect(await within(panel).findByText("notes.pdf is not a PNG, JPEG or WebP image.")).toBeTruthy();
     fireEvent.change(within(panel).getByLabelText("Image"), { target: { files: [photo("huge.jpg", "image/jpeg", 25 * 1024 * 1024)] } });
-    expect(await within(panel).findByText("huge.jpg is 25.0 MiB: the most this workload takes is 20 MiB.")).toBeTruthy();
+    expect(await within(panel).findByText("huge.jpg is 25.0 MiB: the most this app takes is 20 MiB.")).toBeTruthy();
     expect(within(panel).queryByRole("button", { name: "Detect objects" })).toBeNull();
     await pick(panel, photo());
     fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
-    expect(await within(panel).findByText("The workload is busy with other images right now. Try again in a moment.")).toBeTruthy();
+    expect(await within(panel).findByText("The app is busy with other images right now. Try again in a moment.")).toBeTruthy();
     expect(calls).toBe(1);
-    expect(visionError(413, { error: { code: "request_too_large", message: "x" } }, 4)).toBe("The image is too large for this workload: it takes at most 4 MiB.");
+    expect(visionError(413, { error: { code: "request_too_large", message: "x" } }, 4)).toBe("The image is too large for this app: it takes at most 4 MiB.");
     expect(visionError(400, { error: { code: "invalid_image", message: "x" } }, 4)).toMatch(/could not read this image/);
-    expect(visionError(503, { error: { code: "no_ready_replica", message: "The workload 'd' is stopped." } }, 4)).toBe("The workload is not ready: The workload 'd' is stopped.");
+    expect(visionError(503, { error: { code: "no_ready_replica", message: "The workload 'd' is stopped." } }, 4)).toBe("The app is not ready: The workload 'd' is stopped.");
     expect(visionError(500, null, 4)).toBe("500: the server had a problem.");
   });
 

@@ -19,7 +19,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
 
 - **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas, services
   and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps
-  every card's memory to the deployments and workloads that hold it, and lists the models in its
+  every card's memory to the models and apps that hold it, and lists the models in its
   cache with their sizes, to remove the ones no deployment there uses.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
@@ -31,7 +31,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
   budgets.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
   speech, image generation, and video generation as jobs.
-- **Any HTTP service behind the same keys.** A workload's API at `/x/<name>/…` gets keys, limits and
+- **Any HTTP service behind the same keys.** An app's API at `/x/<name>/…` gets keys, limits and
   usage, and templates start object detection, segmentation and depth APIs in one step.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted.
@@ -42,7 +42,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
 
 ## What's new in 1.3
 
-1.3 adds images, audio and video in chat, text to speech, image and video generation, workloads at
+1.3 adds images, audio and video in chat, text to speech, image and video generation, apps at
 `/x/` with vision templates, and the server and agent images on Docker Hub. 1.3.1 lets you change a
 deployment in place; 1.3.2 and 1.3.3 are fixes. Every change is in the
 [CHANGELOG](CHANGELOG.md).
@@ -166,7 +166,7 @@ Forgeyard itself at `/guide`:
 | Page | What it covers |
 |---|---|
 | [Quick start](docs/guide/quick-start.md) | from nothing to your first `/v1` call in about ten minutes |
-| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, workloads, models, deployments and the gateway, keys, roles |
+| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, apps, models, deployments and the gateway, keys, roles |
 | [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the server and the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
 | [Cloud providers](docs/guide/cloud-providers.md) | OpenAI, Anthropic, Gemini, Azure, OpenRouter or your own server behind `/v1`; when a request spills; which keys may use the cloud |
 | [Troubleshooting](docs/guide/troubleshooting.md) | problems seen on real machines, with their fix |

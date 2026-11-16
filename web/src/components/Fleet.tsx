@@ -85,14 +85,14 @@ export function MemLegend() {
   );
 }
 
-// What runs on a machine: one chip per deployment or workload, linking to it; "+N more" past `max`.
+// What runs on a machine: one chip per deployment or app, linking to it; "+N more" past `max`.
 export function HolderChips({ list, max, empty = "Nothing runs here yet.", link = true }: { list: Holder[]; max?: number; empty?: string; link?: boolean }) {
   const u = uniqueHolders(list);
   const shown = max === undefined ? u : u.slice(0, max);
   return (
     <div className="holder-chips">
       {shown.map((h) => {
-        const title = h.kind === "workload" ? `Workload ${h.name}` : `${h.deployment?.model.name ?? h.name}`;
+        const title = h.kind === "workload" ? `App ${h.name}` : `${h.deployment?.model.name ?? h.name}`;
         return link ? (
           <Link key={h.href} to={h.href} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></Link>
         ) : (

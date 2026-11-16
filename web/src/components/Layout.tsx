@@ -29,13 +29,13 @@ export function Layout() {
     };
   }, [menu]);
 
-  // 1.4 (#81): Machines, Models, Workloads; Cloud (cloud providers and cloud models) for admins, as
+  // 1.4 (#81): Machines, Models, Apps; Cloud (cloud providers and cloud models) for admins, as
   // Providers was.
   const admin = user?.role === "admin";
   const links = [
     { to: "/machines", label: "Machines" },
     { to: "/models", label: "Models" },
-    { to: "/workloads", label: "Workloads" },
+    { to: "/apps", label: "Apps" },
     ...(admin ? [{ to: "/cloud", label: "Cloud" }] : []),
     { to: "/playground", label: "Playground" },
     { to: "/keys", label: "API keys" },

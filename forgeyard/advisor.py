@@ -302,7 +302,7 @@ def secret_key_backup(ctx: Context) -> Iterator[Finding]:
     where = (f"the value of {crypto.KEY_ENV}" if crypto.key_from_env() else str(crypto.key_path()))
     yield Finding("secret-key-backup", "warning", f"Back up the secret key (key id {kid})",
                   f"Keep a copy of {where} apart from the database. Without it, the stored Hugging Face tokens, "
-                  "provider keys and workload environment values cannot be read after a restore. "
+                  "provider keys and apps' environment values cannot be read after a restore. "
                   f"Confirm here once you have a backup of key id {kid}.",
                   "/guide/en/how-to#back-up-and-restore", "How to back up", scope=f"secret-key:{kid}")
 
@@ -491,8 +491,8 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
                           pages=("machines",))
         process = (n.runtime_info or {}).get("process") or {}
         if process and not process.get("ok"):
-            yield Finding("process-workloads-off", "info", f"Process workloads are off on {n.name}",
-                          f"The agent refuses process workloads: {process.get('reason') or 'no reason given'}.",
+            yield Finding("process-workloads-off", "info", f"Processes are off on {n.name}",
+                          f"The agent refuses to run apps and engines as processes: {process.get('reason') or 'no reason given'}.",
                           "/guide/en/reference#agent-settings", "Open the reference", scope=f"machine:{n.id}",
                           pages=("machines",))
         cache = n.model_cache or {}

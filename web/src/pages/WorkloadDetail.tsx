@@ -1,6 +1,6 @@
-import { IconArrowLeft, IconArrowRight, IconLock, IconPlayerPause, IconPlayerPlay, IconPlayerStop, IconTrash } from "@tabler/icons-react";
+import { IconArrowLeft, IconPlayerPause, IconPlayerPlay, IconPlayerStop, IconTrash } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router";
 
 import { HelpLink } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
@@ -17,6 +17,15 @@ import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
 export const LOGS_POLL_MS = 2000;
 
+// /workloads… before 1.4 (#81): the same page under /apps.
+export function OldWorkloads() {
+  const rest = useParams()["*"] ?? "";
+  const { search, hash } = useLocation();
+  return <Navigate to={`/apps${rest ? `/${rest}` : ""}${search}${hash}`} replace />;
+}
+
+// An app's page. A model deployment's workload is seen under Models only (1.4, #81): an old link to
+// its page opens the deployment.
 export function WorkloadDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -40,7 +49,7 @@ export function WorkloadDetailPage() {
     try {
       if (what === "delete") {
         await api(`/workloads/${w.id}`, { method: "DELETE" });
-        navigate("/workloads", { replace: true });
+        navigate("/apps", { replace: true });
         return;
       }
       await api(`/workloads/${w.id}/${what}`, { method: "POST" });
@@ -53,16 +62,14 @@ export function WorkloadDetailPage() {
     }
   };
 
+  const deploymentId = w?.deployment?.id ?? w?.deployment_id;
+  if (deploymentId) return <Navigate to={`/models/deployments/${deploymentId}`} replace />;
   return (
     <>
-      <p className="crumb"><Link to="/workloads"><IconArrowLeft size={14} aria-hidden="true" /> Workloads</Link></p>
-      <PageHeader index={`03 · ${w?.kind ?? "workload"}`} title={w?.name ?? "Workload"}
+      <p className="crumb"><Link to="/apps"><IconArrowLeft size={14} aria-hidden="true" /> Apps</Link></p>
+      <PageHeader index={`03 · ${w?.kind ?? "app"}`} title={w?.name ?? "App"}
         lead={w ? `${w.kind === "service" ? "Service" : "Task"} · ${w.runtime} · created by ${w.created_by ?? "?"} ${when(w.created_at)}` : undefined}
-        actions={w && canManage && w.deployment ? (
-          <span className="locked" title="Stop, start and delete the deployment instead">
-            <IconLock size={14} aria-hidden="true" /> Stop and delete are on the deployment
-          </span>
-        ) : w && canManage && (
+        actions={w && canManage && (
           <>
             {w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}>
@@ -81,7 +88,6 @@ export function WorkloadDetailPage() {
       />
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
-      {w?.deployment && <CreatedBy w={w} dep={w.deployment} />}
       {w && <NotPickedUpNotice w={w} />}
       {w && (
         <>
@@ -125,24 +131,6 @@ export function WorkloadDetailPage() {
         </>
       )}
     </>
-  );
-}
-
-// 1.4 (#36): a model deployment's workload says so first, and sends you to the deployment for
-// changing, scaling, stopping and deleting it.
-function CreatedBy({ w, dep }: { w: Workload; dep: { id: number; name: string } }) {
-  const model = w.spec.runtime.type === "model" ? w.spec.runtime.model : null;
-  return (
-    <section className="panel panel-link created-by" aria-label="Created by a deployment">
-      <div>
-        <p className="created-by-title">Created by deployment <Link className="mono" to={`/models/deployments/${dep.id}`}>{dep.name}</Link></p>
-        <p className="small">
-          This workload runs {model ? <span className="mono">{model}</span> : "a model"} for that deployment. Change, scale, stop or delete it
-          there; here you see its replicas, output and events.
-        </p>
-      </div>
-      <Link to={`/models/deployments/${dep.id}`} className="btn">Open the deployment <IconArrowRight size={15} aria-hidden="true" /></Link>
-    </section>
   );
 }
 
@@ -278,8 +266,6 @@ function Spec({ w }: { w: Workload }) {
   const facts: [string, ReactNode][] = [["Runtime", rt.type]];
   if (rt.type === "model") {
     facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
-    if (w.deployment) facts.push(["Created by", <span key="d">deployment <Link className="mono" to={`/models/deployments/${w.deployment.id}`}>{w.deployment.name}</Link></span>]);
-    else if (w.deployment_id) facts.push(["Deployment", <Link key="d" to={`/models/deployments/${w.deployment_id}`}>open the deployment</Link>]);
   } else {
     facts.push(rt.type === "container" ? ["Image", <code key="i" title={rt.image}>{imageTag(rt.image)}</code>] : ["Command", <code key="c">{rt.command}</code>]);
     if (rt.type === "container" && rt.command) facts.push(["Entrypoint", <code key="e">{rt.command.join(" ")}</code>]);
@@ -346,7 +332,7 @@ function Gateway({ w, base, trustUrl, canManage, onSaved, onError }: {
       <div className="panel-head">
         <h2 id="gateway-title">Gateway</h2>
         <div className="row-gap">
-          <HelpLink page="how-to" anchor="expose-a-workload-at-x">How do I call it?</HelpLink>
+          <HelpLink page="how-to" anchor="expose-an-app-at-x">How do I call it?</HelpLink>
           {canManage && !editing && (
             <button type="button" className="btn btn-quiet btn-small" onClick={() => { setG(gatewayForm(gw)); setEditing(true); }}>
               {gw.exposed ? "Change" : "Expose"}
@@ -356,14 +342,14 @@ function Gateway({ w, base, trustUrl, canManage, onSaved, onError }: {
       </div>
       {gw.exposed ? (
         <>
-          <p className="small">Exposed to API keys whose Workloads setting allows <code>{w.name}</code>. Answers are sandboxed: an API, not a web page.</p>
+          <p className="small">Exposed to API keys whose Apps setting allows <code>{w.name}</code>. Answers are sandboxed: an API, not a web page.</p>
           <CopyBox value={xUrl(base, w.name)} label={`Address of ${w.name}`} />
           <p className="muted small gw-limits">{limits.join(" · ")}</p>
           {gw.unguarded.length > 0 && (
             <Notice tone="error">
               Replica{gw.unguarded.length > 1 ? "s" : ""} {gw.unguarded.map((n) => `#${n}`).join(", ")} {gw.unguarded.length > 1 ? "are" : "is"} not
               behind the agent's key guard yet, so the gateway does not send {gw.unguarded.length > 1 ? "them" : "it"} requests. Update
-              the agent, or stop and start the workload.
+              the agent, or stop and start the app.
             </Notice>
           )}
           <CopyBlock value={xCurl(base, w.name, trustUrl)} label={`curl call to ${w.name}`} />

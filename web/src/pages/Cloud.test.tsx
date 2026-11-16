@@ -131,7 +131,7 @@ describe("navigation", () => {
     const view = mount("/models");
     const nav = await screen.findByRole("navigation", { name: "Main" });
     const top = () => within(nav).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent);
-    expect(top()).toEqual(["Machines", "Models", "Workloads", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
+    expect(top()).toEqual(["Machines", "Models", "Apps", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
     expect(within(nav).getByRole("link", { name: "Cloud" }).getAttribute("href")).toBe("/cloud");
     expect(within(nav).queryByRole("link", { name: /Providers|Serving/ })).toBeNull();
     view.unmount();
@@ -139,7 +139,7 @@ describe("navigation", () => {
     mount("/models");
     const nav2 = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav2).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent))
-      .toEqual(["Machines", "Models", "Workloads", "Playground", "API keys", "Usage"]);
+      .toEqual(["Machines", "Models", "Apps", "Playground", "API keys", "Usage"]);
   });
 
   it("FY-WEB-252 old addresses open the new places, replacing the history entry", async () => {
@@ -165,6 +165,37 @@ describe("navigation", () => {
       const view = render(<MemoryRouter initialEntries={["/start", from]} initialIndex={1}><AuthProvider><App /><Where /><Back /></AuthProvider></MemoryRouter>);
       await waitFor(() => expect([from, where()]).toEqual([from, to]));
       // Replaced, not pushed: one step back is the page before the old link.
+      fireEvent.click(screen.getByTestId("back"));
+      await waitFor(() => expect([from, where()]).toEqual([from, "/start"]));
+      view.unmount();
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("Apps (1.4, #81: Workloads before)", () => {
+  it("FY-WEB-268 /workloads and everything under it opens the same place under /apps, and a model's workload its deployment, replacing the history entry", async () => {
+    const cases: [string, string][] = [
+      ["/workloads", "/apps"],
+      ["/workloads/new", "/apps/new"],
+      ["/workloads/new?template=vision-detect&gpu=1", "/apps/new?template=vision-detect&gpu=1"],
+      ["/workloads/new?machine=2", "/apps/new?machine=2"],
+      ["/workloads/7", "/apps/7"],
+      // a model deployment's workload: its page is the deployment's
+      ["/workloads/9", "/models/deployments/1"],
+      ["/apps/9", "/models/deployments/1"],
+    ];
+    const app = { ...workload(7, "notebook"), runtime: "container" };
+    const model = { ...workload(9, "chat"), deployment_id: 1, deployment: { id: 1, name: "chat" } };
+    for (const [from, to] of cases) {
+      server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "", can_manage: true } }
+        : url === "/api/workloads/7" ? { status: 200, body: { workload: app, events: [], server_time: "", can_manage: true } }
+          : url === "/api/workloads/9" ? { status: 200, body: { workload: model, events: [], server_time: "", can_manage: true } }
+            : url === "/api/deployments/1" ? { status: 200, body: { deployment: { ...DEPLOYMENTS[0], routing: MIXED, also_in: [] }, events: [], server_time: "", can_manage: true } }
+              : undefined);
+      const view = render(<MemoryRouter initialEntries={["/start", from]} initialIndex={1}><AuthProvider><App /><Where /><Back /></AuthProvider></MemoryRouter>);
+      await waitFor(() => expect([from, where()]).toEqual([from, to]));
       fireEvent.click(screen.getByTestId("back"));
       await waitFor(() => expect([from, where()]).toEqual([from, "/start"]));
       view.unmount();

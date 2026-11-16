@@ -103,14 +103,15 @@ describe("models", () => {
     const where = within(row).getByRole("link", { name: /a100/ });
     expect(where.getAttribute("href")).toBe("/machines/2");
     expect(where.textContent).toContain("#4");
-    expect(within(where).getByRole("img", { name: "NVIDIA GPU" })).toBeTruthy();
+    // The machine's mark comes with /api/machines, the header's Deploy with the catalog: either may answer last.
+    expect(await within(where).findByRole("img", { name: "NVIDIA GPU" })).toBeTruthy();
     expect(within(row).getByText("14.38 GiB / GPU")).toBeTruthy();
     expect(within(row).getByText("starting")).toBeTruthy();
     // A chat model that reads images is multimodal chat; kinds with none are named once.
     const mm = screen.getByRole("region", { name: "Multimodal chat · 1" });
     expect(within(mm).getByText("1/1 ready")).toBeTruthy();
     expect(screen.getByText("None deployed yet:").parentElement?.textContent).toContain("Embeddings");
-    expect(screen.getAllByRole("link", { name: "Deploy a model" }).length).toBe(2);
+    await waitFor(() => expect(screen.getAllByRole("link", { name: "Deploy a model" }).length).toBe(2));
   });
 
   it("FY-WEB-049 the deploy form shows the live estimate and refuses what does not fit, by how much", async () => {
@@ -177,13 +178,15 @@ describe("models", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ input: "Hi" });
   });
 
-  it("FY-WEB-216 the deployment links to its workload and says why a replica is on its machine (1.4)", async () => {
+  it("FY-WEB-216 the deployment says why a replica is on its machine, and links to no workload (1.4, #81)", async () => {
     const note = "cpu-01 could not reach huggingface.co; placed on cpu-02 instead";
     server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null,
       placement_note: note })), events: [], server_time: "", can_manage: true } } : undefined);
     mount("/models/deployments/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
-    expect(screen.getByText("Runs as workload").closest("span")?.querySelector("a")?.getAttribute("href")).toBe("/workloads/11");
+    // 1.4 (#81): a model is seen under Models only; its page no longer sends you to a workload.
+    expect(screen.queryByText(/Runs as workload/)).toBeNull();
+    expect(screen.queryAllByRole("link").filter((a) => /^\/(workloads|apps)\//.test(a.getAttribute("href") ?? ""))).toHaveLength(0);
     const row = within(screen.getByRole("table")).getByText("a100").closest("td") as HTMLElement;
     expect(within(row).getByText(note)).toBeTruthy();
   });

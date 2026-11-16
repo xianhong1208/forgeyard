@@ -127,7 +127,7 @@ Next, on https://192.168.1.20:7860:
 1. 前三行先**不經檢查**下載伺服器的 CA（過程中不會送出任何機密），把它轉回二進位格式，再把它的 SHA-256 和指令裡的指紋比對。如果拿到的是另一個 CA（例如中間有別的機器攔截），一切會在這裡停下，並顯示 `forgeyard-ca.der: FAILED`。
 2. 比對通過後，才透過以這個 CA 驗證的連線下載安裝程式。
 3. 安裝程式從你的伺服器下載 agent（代理程式，版本一律和伺服器相同），檢查後連同它自己的 Python 一起裝到 `/opt/forgeyard`。
-4. 它建立了 `forgeyard-run` 帳號，行程類工作負載都以這個帳號執行。工作負載絕不會以 root 執行。
+4. 它建立了 `forgeyard-run` 帳號，行程（應用程式和引擎）都以這個帳號執行，絕不會以 root 執行。
 5. 它根據偵測到的 GPU、Docker、systemd 寫出 `/etc/forgeyard/agent.toml`。檔案裡每個設定都有說明。
 6. 它用加入權杖（join token）換到這台機器自己的憑據，存放在 `/var/lib/forgeyard-agent`（權限 0600）。
 7. 它安裝並啟動了 `forgeyard-agent` 服務，這個服務會隨開機啟動，停止時也會自動重新啟動。

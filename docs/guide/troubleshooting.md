@@ -297,9 +297,9 @@ until room appears (the API's `"wait": true`).
 
 ## A replica stays pending
 
-**You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
+**You see:** a deployment or app was placed on a machine (*Replica 0 placed on …*), the machine
 is online, and the replica stays **pending**: nothing is downloaded or started. After 2 minutes the
-deployment and workload pages say *Replica #0 was never picked up*, with the machine, its agent's
+deployment and app pages say *Replica #0 was never picked up*, with the machine, its agent's
 version and what to do, for example *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
 update the agent (the server is 1.3.1)*. An agent gets its work list within a second of a placement
 (or of connecting) and answers every list with the state of each replica, so two minutes of silence
@@ -404,13 +404,13 @@ More in [Cloud providers](cloud-providers.md#troubleshooting).
 
 ## Errors from /x/
 
-- **403 `workloads_not_allowed`:** the key's **Workloads at /x/** is *None*, the default. Change it
+- **403 `workloads_not_allowed`:** the key's **Apps at /x/** is *None*, the default. Change it
   on **API keys**.
-- **404 `workload_not_found`:** the name is wrong, the workload is not exposed (its page, **Gateway**),
-  or the key lists other workloads.
+- **404 `workload_not_found`:** the name is wrong, the app is not exposed (its page, **Gateway**),
+  or the key lists other apps.
 - **503 `no_ready_replica` and "runs without the agent's key guard":** the replica's agent is older
-  than 1.3, or the workload was exposed while running and has not restarted behind the guard yet.
-  Update the agent, or stop and start the workload.
+  than 1.3, or the app was exposed while running and has not restarted behind the guard yet.
+  Update the agent, or stop and start the app.
 - **The replica stops with "listens beyond loopback":** behind the key guard a process must listen on
   `127.0.0.1`. Use `${BIND_ADDRESS}` in its arguments instead of `0.0.0.0`.
 - **A page, its links or its redirects are wrong:** the prefix is stripped, so the service sees `/`.
@@ -646,7 +646,7 @@ price. Under a budget, a model without a price is refused (`402 budget_unpriced`
 
 ## Agent in a container without systemd
 
-**You see:** process workloads fail to start, and the agent's log mentions `systemd-run` or
+**You see:** processes (apps or engines) fail to start, and the agent's log mentions `systemd-run` or
 `Failed to connect to bus`.
 
 **Why:** with `limits = "auto"` the agent uses a systemd scope when it runs as root and finds
@@ -661,7 +661,7 @@ limits = "rlimit"
 ```
 
 or `--limits rlimit`, or `FORGEYARD_LIMITS=rlimit` (the agent's Docker image sets this already).
-Process workloads then get resource limits per process, and their CPU is counted, not capped.
+Processes then get resource limits, and their CPU is counted, not capped.
 
 ## The server refuses a setting, or warns about one
 

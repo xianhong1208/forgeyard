@@ -65,8 +65,15 @@ agent dials out to the server, so the server never needs to reach the machine.
 
 A **workload** is something to run on your machines: a **service** (runs until stopped, is
 health-checked and restarted) or a **task** (runs to the end, with retries and a time limit).
-Each one has 1 to 16 **replicas**; each replica runs on one machine. Open **Workloads → New
-workload**, or `POST /api/workloads` with the spec:
+Each one has 1 to 16 **replicas**; each replica runs on one machine. Open **Apps → New app**, or
+`POST /api/workloads` with the spec.
+
+**In the console they are apps** (1.4, #81): the **Apps** page (`/apps`; `/workloads…` redirects)
+lists only the workloads people run themselves. A model deployment's workload (runtime `model`) is
+seen under **Models** only: its deployment's page has the replicas, output and events, and an old
+link to its workload page opens the deployment. The API keeps the name `workloads` and still refuses
+stop, start and delete of a deployment's workload (409 `managed_by_deployment`). **Machines** shows
+both, since both hold cards. The spec:
 
 ```json
 {"name": "web", "kind": "service",

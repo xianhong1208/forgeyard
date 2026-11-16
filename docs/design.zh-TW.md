@@ -49,7 +49,12 @@ server 不需要能連到機器。
 
 **workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
 可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。在
-**Workloads → New workload** 建立，或用 `POST /api/workloads` 送出 spec：
+**Apps → New app** 建立，或用 `POST /api/workloads` 送出 spec。
+
+**在 console 裡它們叫 app**（1.4，#81）：**Apps** 頁面（`/apps`；`/workloads…` 會轉址）只列出使用者自己執行的
+workload。模型部署的 workload（runtime 為 `model`）只在 **Models** 底下看得到：部署的頁面有副本、輸出和事件，舊的
+workload 頁面連結會打開它的部署。API 仍然叫 `workloads`，也仍然拒絕停止、啟動或刪除部署的 workload（409
+`managed_by_deployment`）。**Machines** 兩者都顯示，因為兩者都佔用顯示卡。spec：
 
 ```json
 {"name": "web", "kind": "service",

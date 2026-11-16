@@ -88,7 +88,6 @@ export function DeploymentDetailPage() {
             <span className="small">{d.pinned ? <>Pinned to <span className="mono">{d.pinned.name ?? `machine ${d.pinned.id}`}</span></> : <span className="muted">Machine: automatic</span>}</span>
             {d.estimate.device === "gpu" && <span className="small">{d.params.share === "vram" ? "Shares VRAM" : <span className="muted">Exclusive GPU</span>}</span>}
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
-            <span className="small">Runs as workload <Link className="mono" to={`/workloads/${w.id}`}>{w.name}</Link></span>
           </div>
           <Gateway d={d} />
           <section className="panel" aria-labelledby="replicas-title">

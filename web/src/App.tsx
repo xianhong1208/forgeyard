@@ -27,7 +27,7 @@ import { SetupPage } from "./pages/Setup";
 import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
 import { UsersPage } from "./pages/Users";
-import { WorkloadDetailPage } from "./pages/WorkloadDetail";
+import { OldWorkloads, WorkloadDetailPage } from "./pages/WorkloadDetail";
 import { WorkloadNewPage } from "./pages/WorkloadNew";
 import { WorkloadsPage } from "./pages/Workloads";
 
@@ -69,9 +69,11 @@ export default function App() {
         <Route path="/start" element={<GetStartedPage />} />
         <Route path="/machines" element={<MachinesPage />} />
         <Route path="/machines/:id" element={<MachineDetailPage />} />
-        <Route path="/workloads" element={<WorkloadsPage />} />
-        <Route path="/workloads/new" element={<WorkloadNewPage />} />
-        <Route path="/workloads/:id" element={<WorkloadDetailPage />} />
+        {/* 1.4 (#81): Workloads became Apps; a model deployment's workload is seen under Models only. */}
+        <Route path="/apps" element={<WorkloadsPage />} />
+        <Route path="/apps/new" element={<WorkloadNewPage />} />
+        <Route path="/apps/:id" element={<WorkloadDetailPage />} />
+        <Route path="/workloads/*" element={<OldWorkloads />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/models/deploy" element={<ModelDeployPage />} />
         <Route path="/models/deployments/:id" element={<DeploymentDetailPage />} />

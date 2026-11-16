@@ -1,5 +1,5 @@
-import { IconArrowRight, IconBox, IconPlayerPlay, IconPlus, IconTemplate } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { IconBox, IconPlayerPlay, IconPlus, IconTemplate } from "@tabler/icons-react";
+import { useEffect } from "react";
 import { Link } from "react-router";
 
 import { HelpLink } from "../components/HelpLink";
@@ -25,21 +25,27 @@ const KINDS = [
   { icon: IconPlayerPlay, name: "Tasks", detail: "Run to the end, with retries and a time limit: a batch job" },
 ];
 
+// Apps (1.4, #81; Workloads before): the programs people run themselves. The workloads model
+// deployments create are seen under Models (and on Machines), not here.
+export function appsOnly(list: Workload[]): Workload[] {
+  return list.filter((w) => !w.deployment && !w.deployment_id);
+}
+
 export function WorkloadsPage() {
   const { data, error, reload } = useApi<WorkloadsResponse>("/workloads");
   usePoll(reload, WORKLOADS_POLL_MS);
-  const list = data?.workloads ?? null;
+  const list = data ? appsOnly(data.workloads) : null;
   const canManage = data?.can_manage ?? false;
 
   return (
     <>
       <PageHeader
-        index="03 · Workloads"
-        title="Workloads"
-        lead="Services and tasks on your machines. Each replica runs on one machine, with only the GPUs it was given and an environment that starts empty."
+        index="03 · Apps"
+        title="Apps"
+        lead="The programs you run on your machines yourself: services and tasks, such as a vision API, a notebook or a batch job. Each replica runs on one machine, with only the GPUs it was given and an environment that starts empty. Models are under Models."
         actions={canManage && (
-          <Link to="/workloads/new" className="btn btn-primary">
-            <IconPlus size={16} aria-hidden="true" /> New workload
+          <Link to="/apps/new" className="btn btn-primary">
+            <IconPlus size={16} aria-hidden="true" /> New app
           </Link>
         )}
       />
@@ -53,15 +59,15 @@ export function WorkloadsPage() {
             <span className="lane" />
           </div>
           <div className="empty-copy">
-            <h2>No workloads yet</h2>
+            <h2>No apps yet</h2>
             <p>
-              A workload is a program you run on your machines: a container or a command, kept running as a service or run
+              An app is a program you run on your machines: a container or a command, kept running as a service or run
               once as a task. To serve a model, use Models instead: it sets up the engine for you.{" "}
-              {canManage ? "" : "Admins and operators start workloads; they show up here with their status."}
+              {canManage ? "" : "Admins and operators start apps; they show up here with their status."}
             </p>
             {canManage && (
               <p className="empty-actions">
-                <Link to="/workloads/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> New workload</Link>
+                <Link to="/apps/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> New app</Link>
                 <Link to="/models" className="btn btn-quiet">Serve a model</Link>
               </p>
             )}
@@ -80,71 +86,10 @@ export function WorkloadsPage() {
       {list && list.length > 0 && (
         <>
           <Totals list={list} />
-          <Groups list={list} />
+          <div className="workloads">{list.map((w) => <WorkloadCard key={w.id} w={w} />)}</div>
         </>
       )}
     </>
-  );
-}
-
-// How many model workloads show before "… and N more".
-export const MODEL_WORKLOADS_SHOWN = 8;
-
-// 1.4 (#36): the workloads people made, then the ones model deployments made (managed from Models,
-// listed so everything that holds a card is here).
-function Groups({ list }: { list: Workload[] }) {
-  const own = list.filter((w) => !w.deployment);
-  const models = list.filter((w) => w.deployment);
-  const [all, setAll] = useState(false);
-  const shown = all ? models : models.slice(0, MODEL_WORKLOADS_SHOWN);
-  return (
-    <>
-      <section className="wl-group" aria-labelledby="wl-own">
-        <div className="wl-group-head">
-          <h2 id="wl-own"><IconBox size={16} aria-hidden="true" /> Your workloads <span className="muted">· {own.length}</span></h2>
-        </div>
-        {own.length ? (
-          <div className="workloads">{own.map((w) => <WorkloadCard key={w.id} w={w} />)}</div>
-        ) : (
-          <p className="muted small wl-group-empty">None yet: the workloads below were created by model deployments.</p>
-        )}
-      </section>
-      {models.length > 0 && (
-        <section className="wl-group" aria-labelledby="wl-models">
-          <div className="wl-group-head">
-            <h2 id="wl-models">Created by model deployments <span className="muted">· {models.length}</span></h2>
-          </div>
-          <p className="small muted wl-group-lead">Managed from Models: stop, change or delete them through their deployment. They are listed so you can see everything that holds a card.</p>
-          <ul className="wl-rows">
-            {shown.map((w) => <ModelWorkloadRow key={w.id} w={w} />)}
-          </ul>
-          {models.length > MODEL_WORKLOADS_SHOWN && (
-            <button type="button" className="btn btn-quiet btn-small" aria-expanded={all} onClick={() => setAll((v) => !v)}>
-              {all ? "Show fewer" : `… and ${models.length - MODEL_WORKLOADS_SHOWN} more`}
-            </button>
-          )}
-        </section>
-      )}
-    </>
-  );
-}
-
-function ModelWorkloadRow({ w }: { w: Workload }) {
-  const tone = STATUS_TONE[w.status];
-  const where = w.replica_list.filter((r) => r.machine).map((r) => `${r.machine!.name} ${r.gpus.length ? `GPU ${gpuLabel(r)}` : "CPU"}`);
-  return (
-    <li className="wl-row">
-      <span className="wl-row-name">
-        <span className={`dot dot-tone-${tone}`} aria-hidden="true" />
-        <Link to={`/workloads/${w.id}`} className="mono">{w.name}</Link>
-        <span className={`chip chip-tone-${tone}`}>{w.status === "running" ? `${w.ready}/${w.replicas} ready` : w.status}</span>
-        {where.length > 0 && <span className="small muted">{where.join(", ")}</span>}
-      </span>
-      <span className="wl-from">
-        created by deployment <Link className="mono" to={`/models/deployments/${w.deployment!.id}`}>{w.deployment!.name}</Link>
-        <IconArrowRight size={13} aria-hidden="true" />
-      </span>
-    </li>
   );
 }
 
@@ -154,23 +99,23 @@ function Totals({ list }: { list: Workload[] }) {
   const failed = list.filter((w) => ["failed", "degraded"].includes(w.status)).length;
   const gpus = list.flatMap((w) => w.replica_list.filter((r) => !r.final && r.state !== "stopped").flatMap((r) => r.gpus)).length;
   return (
-    <dl className="fleet" aria-label="Workloads">
-      <div><dt>Workloads</dt><dd>{list.length}</dd></div>
+    <dl className="fleet" aria-label="Apps">
+      <div><dt>Apps</dt><dd>{list.length}</dd></div>
       <div><dt>Running</dt><dd className="fleet-online">{running}</dd></div>
       <div><dt>Waiting</dt><dd>{waiting}</dd></div>
       <div><dt>Failing</dt><dd className={failed ? "fleet-bad" : undefined}>{failed}</dd></div>
-      <div><dt>GPUs in use</dt><dd>{gpus}</dd></div>
+      <div><dt title="GPUs held by apps; models' GPUs are on Models and Machines">GPUs used by apps</dt><dd>{gpus}</dd></div>
     </dl>
   );
 }
 
 function WorkloadCard({ w }: { w: Workload }) {
   return (
-    <article className={`wl wl-${STATUS_TONE[w.status]}`} aria-label={`Workload ${w.name}`}>
+    <article className={`wl wl-${STATUS_TONE[w.status]}`} aria-label={`App ${w.name}`}>
       <header className="wl-head">
         <div className="wl-title">
           <span className={`dot dot-tone-${STATUS_TONE[w.status]}`} aria-hidden="true" />
-          <h2 className="mono"><Link to={`/workloads/${w.id}`}>{w.name}</Link></h2>
+          <h2 className="mono"><Link to={`/apps/${w.id}`}>{w.name}</Link></h2>
           <span className={`chip chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
           <span className="chip">{w.kind}</span>
           <span className="chip">{w.runtime}</span>
@@ -219,7 +164,7 @@ function Templates() {
     <section className="panel tpl-panel" aria-labelledby="tpl-title">
       <div className="panel-head">
         <h2 id="tpl-title"><IconTemplate size={18} stroke={1.7} aria-hidden="true" /> Start from a template</h2>
-        <HelpLink page="how-to" anchor="start-a-workload-from-a-template">What they are</HelpLink>
+        <HelpLink page="how-to" anchor="start-an-app-from-a-template">What they are</HelpLink>
       </div>
       <p className="muted small">A vision API on Forgeyard's own image, exposed at <code>/x/&lt;name&gt;</code> for API keys you allow.
         Permissively licensed models only; the model is in the image, so it also runs without the network.</p>
@@ -233,8 +178,8 @@ function Templates() {
             <p className="small">{t.summary}</p>
             <p className="small muted"><a href={t.model_url} target="_blank" rel="noreferrer" className="mono">{t.model}</a> · <code>POST /x/{t.name}{t.endpoint}</code></p>
             <div className="row-gap">
-              <Link className="btn btn-small" to={`/workloads/new?template=${t.id}&gpu=1`}>On an NVIDIA GPU</Link>
-              <Link className="btn btn-quiet btn-small" to={`/workloads/new?template=${t.id}`}>On the CPU</Link>
+              <Link className="btn btn-small" to={`/apps/new?template=${t.id}&gpu=1`}>On an NVIDIA GPU</Link>
+              <Link className="btn btn-quiet btn-small" to={`/apps/new?template=${t.id}`}>On the CPU</Link>
             </div>
           </li>
         ))}

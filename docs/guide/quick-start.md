@@ -145,8 +145,8 @@ What happened, in order:
 2. Only then was the installer downloaded, over a connection checked against that CA.
 3. The installer downloaded the agent from your server (always the server's own version), checked
    it, and installed it with its own Python in `/opt/forgeyard`.
-4. It created the account `forgeyard-run` that process workloads run as. Workloads never run as
-   root.
+4. It created the account `forgeyard-run` that processes (apps and engines) run as. They never run
+   as root.
 5. It wrote `/etc/forgeyard/agent.toml` from what it found: GPUs, Docker, systemd. Every setting is
    explained in the file.
 6. It traded the join token for this machine's own credential, kept in

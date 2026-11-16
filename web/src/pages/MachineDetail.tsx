@@ -136,7 +136,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
       <section className="panel mk-section" aria-labelledby="mk-running">
         <div className="panel-head">
           <h2 id="mk-running">Running here <span className="muted small">· {uniqueHolders(here).length}</span></h2>
-          {canPlace && <Link to={`/workloads/new?machine=${m.id}`} className="btn btn-small"><IconBox size={14} aria-hidden="true" /> New workload here</Link>}
+          {canPlace && <Link to={`/apps/new?machine=${m.id}`} className="btn btn-small"><IconBox size={14} aria-hidden="true" /> New app here</Link>}
         </div>
         {!p.loaded ? <p className="muted small">Loading…</p> : here.length === 0 ? <p className="empty-line">Nothing runs here yet.</p> : (
           <ul className="runlist">
@@ -147,7 +147,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
                   <span className="runlist-k"><HolderIcon h={h} size={16} /></span>
                   <span className="runlist-name">
                     <Link to={h.href}>{h.name}</Link>
-                    <small>{h.kind === "workload" ? `workload · ${h.workload.kind} · ${h.workload.runtime}` : h.deployment?.model.name}</small>
+                    <small>{h.kind === "workload" ? `app · ${h.workload.kind} · ${h.workload.runtime}` : h.deployment?.model.name}</small>
                   </span>
                   <span className="runlist-where">{all.map((x) => whereOnMachine(x.replica)).join(" ")}</span>
                 </li>
@@ -253,8 +253,8 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
     const text = all
       ? `Let Forgeyard assign every GPU of ${m.name}?`
       : picked.length
-        ? `Let Forgeyard assign only GPU ${names} on ${m.name}? No workload will ever get another card of this machine.`
-        : `Let Forgeyard assign no GPU on ${m.name}? Only CPU workloads will run there.`;
+        ? `Let Forgeyard assign only GPU ${names} on ${m.name}? No model or app will ever get another card of this machine.`
+        : `Let Forgeyard assign no GPU on ${m.name}? Only models and apps on the CPU will run there.`;
     if (!window.confirm(text)) return;
     setBusy(true);
     try {
@@ -280,7 +280,7 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
         <span className="muted">
           {workloads
             ? `Runs ${runtimeLine(runtimes.process, "process")} · ${runtimeLine(runtimes.container, "container")}`
-            : "Its agent does not run workloads yet (update it)."}
+            : "Its agent does not run apps yet (update it)."}
         </span>
         {canManage && cards.length > 0 && !editing && (
           <button type="button" className="btn btn-quiet btn-small" onClick={open}>Change GPU access</button>
@@ -307,7 +307,7 @@ function GpuAccess({ m, canManage, onChanged, onError }: {
             <button type="button" className="btn btn-quiet btn-small" onClick={() => setEditing(false)}>Cancel</button>
             <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void save()}>Save</button>
           </div>
-          <p className="field-hint">A card in use cannot be taken off; stop its workload first. Every change is in the audit log.</p>
+          <p className="field-hint">A card in use cannot be taken off; stop the model or app on it first. Every change is in the audit log.</p>
         </fieldset>
       )}
     </section>

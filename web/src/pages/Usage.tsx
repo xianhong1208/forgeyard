@@ -112,7 +112,7 @@ export function UsagePage() {
           {speech && <div><dt>Speech</dt><dd>{num(t.characters)} <span className="muted small">characters · {audioLength(t.media_ms)} of audio</span></dd></div>}
           {video && <div><dt>Video</dt><dd>{audioLength(t.media_ms)} <span className="muted small">made{speech ? " (with the audio)" : ""} · {busyTime(t.busy_ms)} busy</span></dd></div>}
           {images && <div><dt>Images</dt><dd>{num(t.images)} <span className="muted small">{megapixels(t.kilopixels)} · {busyTime(t.busy_ms)} busy</span></dd></div>}
-          {traffic && <div><dt>Workload traffic</dt><dd>{bytes(t.bytes_in)} <span className="muted small">in · {bytes(t.bytes_out)} out</span></dd></div>}
+          {traffic && <div><dt>App traffic</dt><dd>{bytes(t.bytes_in)} <span className="muted small">in · {bytes(t.bytes_out)} out</span></dd></div>}
           <div><dt>Latency p50</dt><dd>{ms(t.latency_p50_ms)}</dd></div>
           <div><dt>Latency p95</dt><dd>{ms(t.latency_p95_ms)}</dd></div>
         </dl>
@@ -151,7 +151,7 @@ export function UsagePage() {
                     {speech && <td data-label="Characters" className="num" title="Characters turned into speech">{num(r.characters ?? 0)}</td>}
                     {length && <td data-label={lengthLabel} className="num" title="Length of the speech or video made (speech: where its format says it)">{audioLength(r.media_ms)}</td>}
                     {images && <td data-label="Images" className="num" title="Images made, and their megapixels">{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</td>}
-                    {traffic && <td data-label="Bytes" className="num" title="Request and answer bodies of workloads at /x/">{r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—"}</td>}
+                    {traffic && <td data-label="Bytes" className="num" title="Request and answer bodies of apps at /x/">{r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—"}</td>}
                     {busy && <td data-label="Busy" className="num" title="Time replicas worked on these requests (images and videos: times the GPUs each holds)">{busyTime(r.busy_ms)}</td>}
                     <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
                     <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
