@@ -183,7 +183,7 @@ function VisionPanel({ w }: { w: VisionTarget }) {
     <section className="panel play vision" aria-labelledby="vis-title">
       <div className="panel-head">
         <h2 id="vis-title"><IconEye size={18} stroke={1.7} aria-hidden="true" /> {w.title}</h2>
-        <HelpLink page="how-to" anchor="try-a-vision-app-in-the-playground">How it works</HelpLink>
+        <HelpLink page="how-to" anchor="try-vision-in-the-playground">How it works</HelpLink>
       </div>
       <p className="muted small vis-about">
         {TASK_HELP[w.task]} <span className="mono">{w.model}</span>{w.licence && <> <span className="chip mono" title="The model's licence">{w.licence}</span></>}

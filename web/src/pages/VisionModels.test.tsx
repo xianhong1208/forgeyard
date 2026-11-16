@@ -70,7 +70,7 @@ describe("vision models (1.4, #86)", () => {
     expect(within(sec).getByText("Object detection, segmentation and depth")).toBeTruthy();
     const det = within(sec).getByRole("group", { name: "Deployment det" });
     expect(within(det).getByText("/v1/vision/detect")).toBeTruthy();
-    expect(within(det).getByText(/Object detection ·/)).toBeTruthy();
+    expect(within(det).getByText("Object detection")).toBeTruthy();
     expect(within(within(sec).getByRole("group", { name: "Deployment seg" })).getByText("/v1/vision/segment")).toBeTruthy();
     expect(within(within(sec).getByRole("group", { name: "Deployment dav2" })).getByText("/v1/vision/depth")).toBeTruthy();
     expect(within(det).getByText("1.33 GiB RAM")).toBeTruthy();

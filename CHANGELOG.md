@@ -37,6 +37,14 @@ version until 1.0.
     depth*), at the same pinned revisions, on the CPU by default.
   - `scripts/accept_vision.py` and a `vision` group in `scripts/accept_all.py` check them on real
     machines. Apps made from the templates keep running as they are.
+- **Vision models in the console** (#86, part 2). **Models → Deployments** groups detection,
+  segmentation and depth in one **Vision** section, each row with its task and `/v1/vision/…` path;
+  the **Library** shows a vision model's architecture and classes, a search result its licence, and
+  says before adding why a vision model cannot be added (another task, a licence that is not
+  permissive, a timm backbone), with **Add** disabled. **Playground → Vision** picks a vision
+  deployment and sends it the picture as you; a vision model chosen on the Playground's Models tab opens
+  the same panel. **Try it** on a vision deployment sends the test image. The example calls (Get
+  started, API keys, a deployment's page) are curl and httpx with the image as a file field.
 
 - **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
   time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
@@ -106,6 +114,11 @@ version until 1.0.
   `modalities`, so a chat model that reads images is listed as multimodal chat.
 
 ### Changed
+
+- **Apps no longer offers the vision templates** (#86): the *Start from a template* panel is gone, and
+  **Playground → Vision** lists vision models only (Apps leave the console in 1.4, #88). Apps already
+  made from a template keep running at `/x/`; `/apps/new?template=…` and `GET /api/workloads/templates`
+  still work, and the vision image keeps its baked-in models for them.
 
 - **One thing in one place: Models has Deployments and Library, Workloads are Apps, cloud settings
   are on Cloud** (#34, #36, #81). The console only; the API and the data are unchanged.

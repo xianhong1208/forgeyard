@@ -194,7 +194,7 @@ function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machin
             </Link>
           )}
         </div>
-        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <span className="chip deprow-task">{TASK_LABEL[d.model.task]} · <span className="mono">/v1/vision/{d.model.task}</span></span>}{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
+        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task}</code> · </>}{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
       </div>
       <div className="where">
         {placed.length ? placed.map((r) => {
