@@ -29,11 +29,13 @@ export function Layout() {
     };
   }, [menu]);
 
-  // 1.4 (#81): Machines, Models, Cloud (cloud providers and cloud models, admins only, as Providers
-  // was), the everyday pages, then the admin pages. Apps (/apps) is an advanced feature, not in the menu.
+  // 1.4 (#81, #92): Machines, Serving (what runs now), Models (the library), Cloud (cloud providers and
+  // cloud models, admins only, as Providers was), the everyday pages, then the admin pages. Apps (/apps)
+  // is an advanced feature, not in the menu.
   const admin = user?.role === "admin";
   const links = [
     { to: "/machines", label: "Machines" },
+    { to: "/serving", label: "Serving" },
     { to: "/models", label: "Models" },
     ...(admin ? [{ to: "/cloud", label: "Cloud" }] : []),
     { to: "/playground", label: "Playground" },

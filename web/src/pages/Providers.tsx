@@ -94,7 +94,7 @@ export function CloudPage() {
 
   return (
     <>
-      <PageHeader index="03 · Cloud" title="Cloud"
+      <PageHeader index="04 · Cloud" title="Cloud"
         lead="Model APIs outside Forgeyard: OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible server. A deployment can send requests there when its replicas are busy or down (its cloud fallback, on the deployment's page), and a cloud model can be served under a name of its own."
         actions={admin && (tab === "providers" ? data && (
           <>
@@ -334,7 +334,7 @@ export function ProviderDetailPage() {
   return (
     <>
       <p className="crumb"><Link to="/cloud"><IconArrowLeft size={14} aria-hidden="true" /> Cloud providers</Link></p>
-      <PageHeader index={`03 · ${p?.kind_label ?? "Provider"}`} title={p?.name ?? "Provider"}
+      <PageHeader index={`04 · ${p?.kind_label ?? "Provider"}`} title={p?.name ?? "Provider"}
         lead={p ? `${p.base_url} · added by ${p.created_by ?? "?"} ${when(p.created_at)}` : undefined}
         actions={p && admin && (
           <>

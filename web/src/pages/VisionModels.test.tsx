@@ -59,12 +59,12 @@ afterEach(() => {
 });
 
 describe("vision models (1.4, #86)", () => {
-  it("FY-WEB-300 Deployments: detection, segmentation and depth share one Vision section, each row with its task and path", async () => {
+  it("FY-WEB-300 Serving: detection, segmentation and depth share one Vision section, each row with its task and path", async () => {
     const deps = [visionDep(3, "det", "detect", "rtdetr-v2-r18"), visionDep(4, "seg", "segment", "sam2.1-hiera-tiny"),
       visionDep(5, "dav2", "depth", "depth-anything-v2-small")];
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: deps, server_time: "", can_manage: true } }
       : url === "/api/machines" ? { status: 200, body: { machines: [] } } : undefined);
-    mount("/models");
+    mount("/serving");
     const sec = await screen.findByRole("region", { name: "Vision · 3" });
     expect(within(sec).getByText("/v1/vision/…")).toBeTruthy();
     expect(within(sec).getByText("Object detection, segmentation and depth")).toBeTruthy();
@@ -85,7 +85,7 @@ describe("vision models (1.4, #86)", () => {
       if (url.startsWith("/api/workloads/103/replicas/0/logs")) return { status: 200, body: { source: "live", text: "", truncated: false, state: "healthy" } };
       return undefined;
     });
-    mount("/models/deployments/3");
+    mount("/serving/3");
     const tryIt = (await screen.findByRole("heading", { name: "Try it" })).closest("section") as HTMLElement;
     expect(within(tryIt).getByText(/a small test image \(two coloured squares\)/)).toBeTruthy();
     expect(within(tryIt).queryByLabelText("Input")).toBeNull();
@@ -123,7 +123,7 @@ describe("vision models (1.4, #86)", () => {
         vision: { task: "depth", architecture: "DepthAnythingForDepthEstimation" } }, suggestion: { recipe: "vision", recipes: ["vision"] } } };
       return undefined;
     });
-    mount("/models?tab=library");
+    mount("/models");
     fireEvent.click(await screen.findByRole("button", { name: "Enter a source" }));
     fireEvent.change(screen.getByLabelText("Source"), { target: { value: "depth-anything/Depth-Anything-V2-Large-hf" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Look it up" })));
@@ -173,7 +173,7 @@ describe("vision models (1.4, #86)", () => {
     mount("/apps");
     expect(await screen.findByRole("heading", { name: "No apps yet" })).toBeTruthy();
     expect(screen.queryByText("Start from a template")).toBeNull();
-    expect(screen.getByRole("link", { name: "add them from the Library" }).getAttribute("href")).toBe("/models?tab=library");
+    expect(screen.getByRole("link", { name: "add them from the Catalog" }).getAttribute("href")).toBe("/models");
     expect(fetch.mock.calls.some(([u]) => u === "/api/workloads/templates")).toBe(false);
   });
 });

@@ -107,7 +107,7 @@ def model_step(db: DbSession, admin: bool) -> dict:
     detail = f"{_plural(count, 'model')} in the catalog." if count else "The catalog is empty."
     return _step("model", "Add a model",
                  "The catalog lists the models you may deploy, each pinned to an exact version on Hugging Face.",
-                 count > 0, detail, to="/models?tab=library", label="Add a model" if admin else "Open the catalog",
+                 count > 0, detail, to="/models", label="Add a model" if admin else "Open the catalog",
                  who=None if admin else "An admin adds models.")
 
 
@@ -126,8 +126,8 @@ def deploy_step(db: DbSession, can_deploy: bool, has_model: bool) -> dict:
         detail = "Nothing is deployed yet." if has_model else "Add a model first."
     return _step("deploy", "Deploy it",
                  "A deployment runs the model with an engine on a machine where it fits, and gives it a name for the API.",
-                 bool(ready), detail, to="/models/deploy" if can_deploy else "/models",
-                 label="Deploy a model" if can_deploy else "Open Models", blocked_by=None if has_model else "model",
+                 bool(ready), detail, to="/serving/deploy" if can_deploy else "/serving",
+                 label="Deploy a model" if can_deploy else "Open Serving", blocked_by=None if has_model else "model",
                  who=None if can_deploy else "Admins and operators deploy models.")
 
 

@@ -446,7 +446,7 @@ def test_fy_adv_014_a_deployment_waiting_for_room(owner):
     did = deployment("big", replica={"state": "pending", "reason": "needs 70 GiB per card",
                                      "updated_at": utcnow() - timedelta(minutes=20)})
     f = findings()["deployment-waiting"][0]
-    assert f.scope == f"deployment:{did}" and "needs 70 GiB per card" in f.detail and f.fix_url == f"/models/deployments/{did}"
+    assert f.scope == f"deployment:{did}" and "needs 70 GiB per card" in f.detail and f.fix_url == f"/serving/{did}"
     deployment("fresh", replica={"state": "pending", "updated_at": utcnow() - timedelta(minutes=5)})
     deployment("halted", desired="stopped", replica={"state": "pending", "updated_at": utcnow() - timedelta(hours=1)})
     assert [f.scope for f in findings()["deployment-waiting"]] == [f"deployment:{did}"]
@@ -698,8 +698,8 @@ def test_fy_adv_026_findings_link_where_the_console_shows_a_route_or_provider(ow
     edit(Provider, pid, budget_micros=0)
     f = findings()
     own = f["route-cloud-never-used"][0]
-    assert own.fix_url == f"/models/deployments/{did}#cloud-fallback" and own.fix_label == "Open its cloud fallback"
-    assert own.pages == ("models", f"deployment:{did}", f"route:{rid}")
+    assert own.fix_url == f"/serving/{did}#cloud-fallback" and own.fix_label == "Open its cloud fallback"
+    assert own.pages == ("serving", f"deployment:{did}", f"route:{rid}")
     dead = f["route-no-target"][0]
     assert dead.fix_url == f"/cloud/models/{named}" and dead.pages == ("cloud-models", f"route:{named}")
     budget = [x for x in f["budget-zero"] if x.scope == f"provider:{pid}"][0]

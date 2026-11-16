@@ -106,7 +106,7 @@ describe("changing a deployment (1.3.1)", () => {
       if (url === "/api/machines") return { status: 200, body: machines };
       return undefined;
     });
-    mount("/models/deployments/3/edit");
+    mount("/serving/3/edit");
     expect(await screen.findByRole("heading", { name: "Change chat" })).toBeTruthy();
     expect((screen.getByLabelText("Context length (tokens)") as HTMLInputElement).value).toBe("8192");
     expect((screen.getByLabelText("GPU sharing") as HTMLSelectElement).value).toBe("exclusive");
@@ -128,7 +128,7 @@ describe("changing a deployment (1.3.1)", () => {
     const saved = fetch.mock.calls.filter(([u, i]) => u === "/api/deployments/3" && i?.method === "PATCH").map(([, i]) => JSON.parse(String(i?.body)))
       .find((b) => !b.dry_run);
     expect(saved).toEqual({ params: { context: 16384, concurrency: 4, gpus: 1, share: "vram", vram: null, extra_args: null }, replicas: 1, machine_id: null });
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/3"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
   it("FY-WEB-199: a change that does not fit cannot be saved, and the machines say that it fits if both share VRAM", async () => {
@@ -146,7 +146,7 @@ describe("changing a deployment (1.3.1)", () => {
       if (url === "/api/machines") return { status: 200, body: machines };
       return undefined;
     });
-    mount("/models/deployments/3/edit");
+    mount("/serving/3/edit");
     // The machines come from /api/machines, which may answer after the deployment: pick one once it is listed.
     await screen.findByRole("option", { name: /Pinned to gpu-01/ });
     fireEvent.change(screen.getByLabelText("Machine"), { target: { value: "2" } });
@@ -162,7 +162,7 @@ describe("changing a deployment (1.3.1)", () => {
     const est: EstimateResponse = { estimate, params: {}, recipe: "vllm", model: "qwen3-4b", placement: fits({ share_hint: HINT }) };
     server((url) => url === "/api/models" ? { status: 200, body: catalog } : url === "/api/machines" ? { status: 200, body: machines }
       : url === "/api/deployments/estimate" ? { status: 200, body: est } : undefined);
-    mount("/models/deploy?model=qwen3-4b");
+    mount("/serving/deploy?model=qwen3-4b");
     const hint = await screen.findByRole("note", { name: "GPU sharing hint" }, { timeout: 3000 });
     expect(hint.textContent).toContain("They will share compute.");
     fireEvent.click(within(hint).getByRole("button", { name: "Use Share VRAM" }));
@@ -174,7 +174,7 @@ describe("changing a deployment (1.3.1)", () => {
     const est: EstimateResponse = { estimate, params: {}, recipe: "vllm", model: "qwen3-4b", placement: fits({}) };
     server((url) => url === "/api/models" ? { status: 200, body: catalog } : url === "/api/machines" ? { status: 200, body: machines }
       : url === "/api/deployments/estimate" ? { status: 200, body: est } : undefined);
-    mount("/models/deploy?model=qwen3-4b&machine=2");
+    mount("/serving/deploy?model=qwen3-4b&machine=2");
     await waitFor(() => expect((screen.getByLabelText("Machine") as HTMLSelectElement).value).toBe("2"), { timeout: 3000 });
   });
 
@@ -188,13 +188,13 @@ describe("changing a deployment (1.3.1)", () => {
       if (url.startsWith("/api/workloads/11/replicas")) return { status: 200, body: { source: "stored", text: "", truncated: false, state: "pending" } };
       return undefined;
     });
-    mount("/models/deployments/3");
+    mount("/serving/3");
     const banner = await screen.findByRole("alert");
     expect(within(banner).getByText("Replica #0 was never picked up.")).toBeTruthy();
     expect(within(banner).getByText(`#0: ${text}.`)).toBeTruthy();
     expect(within(banner).getByRole("link", { name: "Why a replica stays pending" })).toBeTruthy();
     expect(screen.getByText(text, { selector: ".cell-stuck" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Edit" }).getAttribute("href")).toBe("/models/deployments/3/edit");
+    expect(screen.getByRole("link", { name: "Edit" }).getAttribute("href")).toBe("/serving/3/edit");
     expect(screen.getByText("updating: 1 of 2 on the new settings")).toBeTruthy();
     expect(screen.getByText(/Pinned to/).textContent).toBe("Pinned to gpu-01");
     cleanup();

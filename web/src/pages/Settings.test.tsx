@@ -147,7 +147,7 @@ describe("deploy form: context hint (D9) and the token (D2)", () => {
         return { status: 200, body: r };
       }
     });
-    mount("/models/deploy?model=qwen3-4b");
+    mount("/serving/deploy?model=qwen3-4b");
     const input = await screen.findByLabelText("Context length (tokens)") as HTMLInputElement;
     expect(input.value).toBe("8192");
     const hint = await screen.findByLabelText("Context hint", {}, { timeout: 3000 });
@@ -178,7 +178,7 @@ describe("the server's Hugging Face token (D2)", () => {
       if (url === "/api/deployments") return { status: 200, body: { deployments: [], server_time: "", can_manage: true } };
       if (url === "/api/routes") return { status: 200, body: { routes: [], is_admin: true } };
     });
-    mount("/models?tab=library");
+    mount("/models?tab=sources");
     expect(await screen.findByText(/Gated models need a token/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Save token" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Token"), { target: { value: "  hf_example_token_WXYZ \n" } });  // pasted with spaces
@@ -191,12 +191,12 @@ describe("the server's Hugging Face token (D2)", () => {
     expect(await screen.findByText("Token removed.")).toBeTruthy();
   });
 
-  it("FY-WEB-214 Model sources marks lists that still come from .env", async () => {
+  it("FY-WEB-214 Models → Sources marks lists that still come from .env", async () => {
     server((url) => {
       if (url === "/api/models") return { status: 200, body: catalog({ sources: { ...catalog().sources!, url_hosts: ["mirror.example.org"], env_seeds: ["MODEL_URL_HOSTS"] } }) };
       if (url === "/api/deployments") return { status: 200, body: { deployments: [], server_time: "", can_manage: true } };
     });
-    mount("/models?tab=library");
+    mount("/models?tab=sources");
     const note = await screen.findByRole("note");
     expect(note.textContent).toMatch(/from \.env.*MODEL_URL_HOSTS/);
   });

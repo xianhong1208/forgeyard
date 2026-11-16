@@ -224,3 +224,13 @@ def test_fy_onb_008_offline_and_unready_explain_themselves(owner):
         assert db.scalar(select(Node)) is None
     finally:
         db.close()
+
+
+def test_fy_onb_009_steps_open_serving_and_the_catalog(owner):
+    """FY-ONB-009 (1.4, #92): "Add a model" opens Models (its Catalog tab is the default) and "Deploy it"
+    opens Deploy a model under Serving, or Serving itself for people who cannot deploy."""
+    s = steps(owner)
+    assert s["model"]["action"] == {"to": "/models", "label": "Add a model"}
+    assert s["deploy"]["action"] == {"to": "/serving/deploy", "label": "Deploy a model"}
+    add_user(owner, "olga", role="operator")
+    assert steps(sign_in(owner, "olga", PW))["deploy"]["action"]["to"] == "/serving/deploy"

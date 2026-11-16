@@ -79,5 +79,5 @@ export function diskShares(c: MachineCache): { cache: number; other: number } | 
 }
 
 export function userHref(u: CacheUser): string {
-  return u.kind === "deployment" ? `/models/deployments/${u.id}` : `/apps/${u.id}`;
+  return u.kind === "deployment" ? `/serving/${u.id}` : `/apps/${u.id}`;
 }

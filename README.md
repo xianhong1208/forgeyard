@@ -13,7 +13,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
 **[Guide](docs/guide/README.md)** · **[繁體中文](README.zh-TW.md)** · **[Roadmap](ROADMAP.md)** ·
 **[Changelog](CHANGELOG.md)**
 
-![The Models page: four deployments on one CPU machine, grouped by kind (chat, multimodal chat, text to speech, images), each ready and answering at its /v1 path](docs/images/console-models.png)
+![The Serving page: four deployments on one CPU machine, grouped by kind (chat, multimodal chat, text to speech, images), each ready and answering at its /v1 path](docs/images/console-serving.png)
 
 ## ✨ Key features
 
@@ -32,7 +32,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
   budgets.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
   speech, image generation, video generation as jobs, and vision models: object detection,
-  segmentation and depth at `/v1/vision/…` (1.4), deployed from Models like any other.
+  segmentation and depth at `/v1/vision/…` (1.4), deployed like any other model.
 - **Any HTTP service behind the same keys.** An app's API at `/x/<name>/…` gets keys, limits and
   usage.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
@@ -118,7 +118,7 @@ The join token works once, within 15 minutes. AMD and CPU-only machines:
 1. Open `https://192.168.1.20:7860/setup`, enter the setup token and create the owner. Then open
    **Trust this server** and install the CA on your device.
 2. **Machines → Add a machine**, and run the command on the machine. It shows up within seconds.
-3. **Models → Library → Add a model**, pick a recommended model (for a CPU:
+3. **Models → Add a model**, pick a recommended model (for a CPU:
    *Qwen3 1.7B (GGUF, for the CPU)*), then **Deploy it** with the name `qwen`.
 4. **API keys → New key**. On the computer that calls the model, get the CA file and the SDK:
 

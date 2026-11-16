@@ -82,7 +82,7 @@ Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-
 ## Apps (advanced)
 
 **Apps are not in the menu.** Most people only deploy models: to use a model, deploy it under
-**Models**. Admins and operators who need more open `/apps` on the server (for example
+**Serving**. Admins and operators who need more open `/apps` on the server (for example
 `https://<server>:7860/apps`).
 
 An **app** is a program you run on your machines yourself, as a container (Docker or Podman on the
@@ -94,7 +94,7 @@ account `forgeyard-run` and a container never `--privileged`; both start from an
 The API calls apps *workloads* (`/api/workloads`).
 
 The **Apps** page lists only apps. A model deployment also runs as a workload (of runtime `model`),
-but a model is seen under **Models** only, and an old link to its workload's page opens the
+but a model is seen under **Serving** only, and an old link to its workload's page opens the
 deployment; the API refuses to stop, start or delete it (`409 managed_by_deployment`). **Machines**
 shows both, models and apps, since both hold cards.
 
@@ -123,27 +123,35 @@ Admins and operators expose an app, when they create it or later on its page. Se
 [Expose an app at /x/](how-to.md#expose-an-app-at-x).
 
 In 1.3 three **templates** started the most common vision APIs this way (object detection,
-segmentation, depth). In 1.4 those are [vision models](#vision-models), deployed from Models; apps
+segmentation, depth). In 1.4 those are [vision models](#vision-models), deployed like any other model; apps
 already made from a template keep running. See [Apps made from a template](how-to.md#apps-made-from-a-template-13).
 
-## Models, recipes and estimates
+## Models, engines and estimates
 
-The **Models** page has two tabs. **Deployments** groups what runs by kind (chat, multimodal
-chat, embeddings, rerank, speech to text, text to speech, images, video), each with the path it
-answers at under `/v1`, and one line per deployment: where it runs (machine and cards), its memory
-and its state. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its provider,
-such as *→ Gemini*; the fallback itself is on the deployment's page. **Library** is what you can
-deploy: the catalog, the recipes and, for admins, the model sources. Cloud models and providers are
-on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=routes`,
-`?tab=catalog`, `/providers`) open the new places.
+Two pages hold the models. **Serving** is what runs now: the deployments grouped by kind (chat,
+multimodal chat, embeddings, rerank, speech to text, text to speech, images, video, vision), each
+with the path it answers at under `/v1`, and one line per deployment: where it runs (machine and
+cards), its memory and its state. **Deploy a model** is there too, and each deployment has its page
+at `/serving/<id>`. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its
+provider, such as *→ Gemini*; the fallback itself is on the deployment's page.
+
+**Models** is the library, what you can deploy, in three tabs: **Catalog** (the default), **Engines**
+and, for admins, **Sources**. Cloud models and providers are on the **Cloud** page (admins). Links
+from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/models/routes/<id>`,
+`/providers`) open the new places.
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
-- A **recipe** says how to run a kind of model: which engine, which container image (pinned by
-  digest) or release, which parameters, and how much memory it needs. Built in: `vllm` (chat on
+  Each row has **Deploy** and **Download to…**.
+- An **engine** says how to run a kind of model: which program, which container image (pinned by
+  digest) or release, which parameters, and how much memory it needs. The API and the YAML files
+  call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
+  **Engines** tab. Built in: `vllm` (chat on
   NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
+- **Sources** (admins) say where models may come from: the hosts allowed for GGUF URLs, the
+  directories for `local://` models, and the server's Hugging Face token.
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
@@ -156,12 +164,12 @@ on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=rou
   ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). Whether a
   model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
-  keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
+  keeps **one Hugging Face token** (an admin sets it under **Models → Sources**, stored encrypted) for
   inspecting and downloading them; a deployment may bring its own, which wins for it.
 
 ## Deployments and the gateway
 
-A **deployment** runs one model with one recipe, as one or more replicas. Its replicas run as a
+A **deployment** runs one model with one engine (recipe), as one or more replicas. Its replicas run as a
 workload of runtime `model`, seen only on the deployment's page (not on **Apps**). Forgeyard:
 
 1. places each replica where it fits. Among the machines that fit, in this order:
@@ -297,8 +305,8 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 Vision models (1.4) look at a picture: **object detection** (boxes, labels and scores: RT-DETR, D-FINE,
 DETR…), **segmentation** (the mask of what a point or a box shows: SAM 2 and 2.1) and **depth
 estimation** (how near every pixel is: Depth Anything, DPT…). They are model kinds like the others: added
-to the Library from Hugging Face (three are recommended), deployed from Models, listed under
-**Deployments → Vision**, tried in **Playground → Vision**, called with an API key.
+to the catalog from Hugging Face (three are recommended), deployed and listed under
+**Serving → Vision**, tried in **Playground → Vision**, called with an API key.
 
 - **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
   PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,

@@ -55,7 +55,7 @@ export function targets(o: VisionOptions | null | undefined): VisionTarget[] {
     kind: "model", id: `model:${m.name}`, name: m.name, task: m.task, title: m.title, model: m.model ?? m.name,
     licence: m.licence, ready: m.ready, reason: m.reason, url: `/api/playground/vision/${m.task}`,
     call: `POST /v1/vision/${m.task} with model=${m.name}`,
-    link: m.deployment_id ? { to: `/models/deployments/${m.deployment_id}`, label: "Deployment" } : null,
+    link: m.deployment_id ? { to: `/serving/${m.deployment_id}`, label: "Deployment" } : null,
   }));
   return models;
 }

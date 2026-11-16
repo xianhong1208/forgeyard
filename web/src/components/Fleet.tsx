@@ -1,4 +1,4 @@
-// The pieces the Machines and Models pages share (1.4): kind icons, memory bars, what runs where.
+// The pieces the Machines and Serving pages share (1.4): kind icons, memory bars, what runs where.
 import {
   IconBox,
   IconBrain,

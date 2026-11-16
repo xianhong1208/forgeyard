@@ -151,12 +151,12 @@ CUDA_IMAGE = "nvidia/cuda:12.4.1-base-ubuntu22.04"
 CLOUD_PROMPT = "Count from 1 to 20, separated by spaces."
 # Pages the console group opens: (path, the tab title it must have; None: the page's own name).
 CONSOLE_PAGES = [
-    ("/start", None), ("/machines", "Machines"), ("/workloads", "Workloads"), ("/workloads/new", "New workload"),
-    ("/models", "Models"), ("/models/deploy", "Deploy a model"), ("/providers", "Cloud providers"),
+    ("/start", None), ("/machines", "Machines"), ("/apps", "Apps"), ("/apps/new", "New app"),
+    ("/serving", "Serving"), ("/serving/deploy", "Deploy a model"), ("/models", "Models"), ("/cloud", "Cloud"),
     ("/playground", "Playground"), ("/keys", "API keys"), ("/usage", "Usage"), ("/account", None),
     ("/users", "Users"), ("/audit", "Audit log"), ("/trust", "Trust this server"), ("/guide/en/how-to", "How-to"),
 ]
-ADMIN_PAGES = ("/providers", "/users", "/audit")
+ADMIN_PAGES = ("/cloud", "/users", "/audit")
 PUBLIC_PAGES = [("/login", "Sign in"), ("/trust", "Trust this server"), ("/guide/en/quick-start", "Quick start")]
 
 PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
@@ -2236,7 +2236,7 @@ def group_console(run: Run) -> None:
     dep = next(iter(run.deps.values()), None)
     pages = list(CONSOLE_PAGES)
     if dep:
-        pages.insert(6, (f"/models/deployments/{dep['id']}", dep["name"]))
+        pages.insert(6, (f"/serving/{dep['id']}", dep["name"]))
     u = run.user()
     with sync_playwright() as pw:
         try:

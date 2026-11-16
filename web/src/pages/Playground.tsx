@@ -54,7 +54,7 @@ export function PlaygroundPage() {
 
   return (
     <>
-      <PageHeader index="04 · Playground" title="Playground"
+      <PageHeader index="05 · Playground" title="Playground"
         lead="Try a deployed model through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “console” in Usage." />
       <div className="tabs" role="tablist" aria-label="Playground">
         <button type="button" role="tab" aria-selected={tab === "models"} className={tab === "models" ? "on" : ""}
@@ -71,7 +71,7 @@ export function PlaygroundPage() {
             The Playground sends messages to a deployed model, as you, without an API key. No model is deployed yet.{" "}
             {canDeploy ? "Deploy one from the catalog; it shows up here once it is ready." : "Admins and operators deploy models; ask one to deploy the model you need."}
           </p>
-          {canDeploy && <Link to="/models/deploy" className="btn btn-primary">Deploy a model</Link>}
+          {canDeploy && <Link to="/serving/deploy" className="btn btn-primary">Deploy a model</Link>}
         </section>
       )}
       {routes.length > 0 && (
@@ -90,7 +90,7 @@ export function PlaygroundPage() {
             <p className="muted small play-ready">
               {route.kind === "cloud" ? "Served by a cloud provider." : route.endpoints.length ? `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}` : "No replica is ready yet."}
               {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
-              {route.deployment_id ? <Link to={`/models/deployments/${route.deployment_id}`}>Deployment</Link>
+              {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>Deployment</Link>
                 : route.id ? <Link to={`/cloud/models/${route.id}`}>Details</Link> : null}
             </p>
           )}

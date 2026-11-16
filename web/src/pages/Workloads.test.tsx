@@ -102,18 +102,18 @@ describe("workloads", () => {
     cleanup();
     for (const old of ["/apps/9", "/workloads/9"]) {
       const view = mount(old);
-      await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/3"));
+      await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
       view.unmount();
     }
   });
 
-  it("FY-WEB-040 users can look but not start; the old Deployments link lands on Models (M3)", async () => {
+  it("FY-WEB-040 users can look but not start; the old Deployments link lands on Serving (M3; Models until 1.3)", async () => {
     server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "", can_manage: false } }
       : url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: false } } : undefined),
       { ...OWNER, role: "user", is_owner: false });
     mount("/deployments");
     expect(await screen.findByText("No deployments yet")).toBeTruthy();
-    expect(screen.getByTestId("where").textContent).toBe("/models");
+    expect(screen.getByTestId("where").textContent).toBe("/serving");
     cleanup();
     mount("/apps");
     expect(await screen.findByText("No apps yet")).toBeTruthy();
@@ -292,10 +292,10 @@ describe("workloads and deployments (1.4, #36)", () => {
       : url === "/api/workloads/102" ? { status: 200, body: { workload: stopped, events: [], server_time: "", can_manage: true } }
         : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } } : undefined);
     const view = mount("/apps/101");
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/201"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/201"));
     view.unmount();
     const again = mount("/apps/102");
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/202"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/202"));
     again.unmount();
     mount("/apps/7");
     expect(await screen.findByRole("button", { name: "Stop" })).toBeTruthy();
@@ -333,7 +333,7 @@ describe("Apps, an advanced page (1.4, #81)", () => {
     expect(screen.getByText("Advanced · Apps")).toBeTruthy();
     const nav = screen.getByRole("navigation", { name: "Main" });
     expect(within(nav).queryByRole("link", { name: /Apps|Workloads/ })).toBeNull();
-    expect(screen.getByRole("link", { name: "Deploy it under Models" }).getAttribute("href")).toBe("/models");
+    expect(screen.getByRole("link", { name: "Deploy it under Serving" }).getAttribute("href")).toBe("/serving/deploy");
     // The list and New app come with /api/workloads, after the page itself.
     expect(await screen.findByRole("article", { name: "App web" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "New app" }).getAttribute("href")).toBe("/apps/new");

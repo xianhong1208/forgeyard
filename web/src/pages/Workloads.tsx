@@ -26,7 +26,7 @@ const KINDS = [
 ];
 
 // Apps (1.4, #81; Workloads before): the programs people run themselves. The workloads model
-// deployments create are seen under Models (and on Machines), not here.
+// deployments create are seen under Serving (and on Machines), not here.
 export function appsOnly(list: Workload[]): Workload[] {
   return list.filter((w) => !w.deployment && !w.deployment_id);
 }
@@ -50,9 +50,9 @@ export function WorkloadsPage() {
         )}
       />
       <p className="apps-note">
-        Just want to use a model? <Link to="/models">Deploy it under Models</Link>. Apps fit a program that is not a model Forgeyard
+        Just want to use a model? <Link to="/serving/deploy">Deploy it under Serving</Link>. Apps fit a program that is not a model Forgeyard
         runs: a model's own server image exposed at <code>/x/</code>, or a one-off GPU task. Object detection, segmentation and
-        depth are models too (1.4): <Link to="/models?tab=library">add them from the Library</Link>; apps made from the 1.3
+        depth are models too (1.4): <Link to="/models">add them from the Catalog</Link>; apps made from the 1.3
         templates keep running as they are.{" "}
         <HelpLink page="concepts" anchor="apps-advanced">About apps</HelpLink>
       </p>
@@ -109,7 +109,7 @@ function Totals({ list }: { list: Workload[] }) {
       <div><dt>Running</dt><dd className="fleet-online">{running}</dd></div>
       <div><dt>Waiting</dt><dd>{waiting}</dd></div>
       <div><dt>Failing</dt><dd className={failed ? "fleet-bad" : undefined}>{failed}</dd></div>
-      <div><dt title="GPUs held by apps; models' GPUs are on Models and Machines">GPUs used by apps</dt><dd>{gpus}</dd></div>
+      <div><dt title="GPUs held by apps; models. GPUs are on Serving and Machines">GPUs used by apps</dt><dd>{gpus}</dd></div>
     </dl>
   );
 }

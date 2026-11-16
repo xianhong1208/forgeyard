@@ -56,14 +56,14 @@ export function Vision({ canCreate }: { canCreate: boolean }) {
         <p className="muted">
           The Vision tab sends a picture to a vision model: object detection, segmentation or depth estimation.
           None is deployed yet.{" "}
-          {canCreate ? "Deploy one from Models (the Library recommends three); it shows up here once it is ready."
+          {canCreate ? "Add one from Models (the Catalog recommends three) and deploy it; it shows up here once it is ready."
             : "Admins and operators deploy models; ask one to deploy the one you need."}
         </p>
         <ul className="vis-kinds">
           {data.tasks.map((x) => <li key={x.task}><span className="strong">{x.title}</span> <span className="muted small mono">{x.model}</span></li>)}
         </ul>
         <div className="row-gap">
-          {canCreate && <Link to="/models?tab=library" className="btn btn-primary"><IconScan size={16} aria-hidden="true" /> Add a vision model</Link>}
+          {canCreate && <Link to="/models" className="btn btn-primary"><IconScan size={16} aria-hidden="true" /> Add a vision model</Link>}
           <HelpLink page="how-to" anchor="deploy-an-object-detection-model">Deploy an object-detection model</HelpLink>
         </div>
       </section>

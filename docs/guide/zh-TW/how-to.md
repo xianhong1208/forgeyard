@@ -43,7 +43,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）和擁有它的群組，不會拿到 `/dev/kfd`。它的記憶體和 ROCm 一樣，用同一個記憶體池檢查：APU 取 carve-out 和 GTT 中較大的那個。部署的事件會寫出它用哪個 variant（`… (vulkan; reserves …)`）。
 
-部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂配方（**Models**、*Recipes*、**Add a custom recipe**）：複製 `llama-cpp`、換個名字，`variants` 底下只留你要的那個。
+部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂配方（**Models**、*Engines*、**Add a custom engine**）：複製 `llama-cpp`、換個名字，`variants` 底下只留你要的那個。
 
 **從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
 
@@ -218,7 +218,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
 引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
 
-1. **找出映像檔。** 在 **Models → Library**，打開 recipe 上的 **Machine without registry access:
+1. **找出映像檔。** 在 **Models → Engines**，打開引擎上的 **Machine without registry access:
    load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
    上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
@@ -315,11 +315,11 @@ ${PORT}
 
 ## 部署物件偵測模型
 
-物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入 **Library**，再從 **Models** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
+物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**Models**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
 
-1. **Models → Library → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。
+1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。
 2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
-3. 部署會出現在 **Models → Deployments → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground → Vision** 可以用你自己的照片。
+3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground → Vision** 可以用你自己的照片。
 
 用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`：
 
@@ -361,11 +361,11 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 回應：`detections`（標籤、分數、方框）、`masks`（每個有分數、面積、方框和一張 1 位元 PNG，最好的在前）或 `depth_png`（附 `min` 和 `max`）；都附圖片的 `width` 和 `height`。它們接受的所有選項見[參考資料](reference.md#vision)。用量每個請求計一張圖片和它的千像素數；金鑰的模型清單和每分鐘請求數照常適用。
 
-連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Library → Recipes → `vision` → *Machine without registry access* 會給出指令）。
+連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
 
 ## 從範本做的應用程式（1.3）
 
-在 1.3，`/apps` 的 **Start from a template** 會把現成的視覺 API 做成應用程式；1.4 起視覺模型改從 Models 部署（[見上一節](#deploy-an-object-detection-model)），這個面板也拿掉了。已經從範本做出來的應用程式照常執行，`/apps/new?template=<id>`（或 `GET /api/workloads/templates`）也還能做一個。每個都執行 Forgeyard 自己的 vision server 映像檔，模型包在裡面，公開在 `/x/<name>`：
+在 1.3，`/apps` 的 **Start from a template** 會把現成的視覺 API 做成應用程式；1.4 起視覺模型像其他模型一樣部署（[見上一節](#deploy-an-object-detection-model)），這個面板也拿掉了。已經從範本做出來的應用程式照常執行，`/apps/new?template=<id>`（或 `GET /api/workloads/templates`）也還能做一個。每個都執行 Forgeyard 自己的 vision server 映像檔，模型包在裡面，公開在 `/x/<name>`：
 
 | 範本 | 模型（授權） | 呼叫 |
 |---|---|---|
@@ -399,9 +399,9 @@ AMD 機器請用 CPU 版本：映像檔沒有 ROCm 版本。每個端點接受�
 
 ## 在 Playground 試用視覺
 
-**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[從 Models 部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。在 Playground 的 **Models** 分頁選視覺模型，也會開出同一個面板。從 1.3 範本做的應用程式不再列在這裡（1.4 起應用程式離開主控台）：請用 API 金鑰呼叫 `/x/<name>`。
+**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。在 Playground 的 **Models** 分頁選視覺模型，也會開出同一個面板。從 1.3 範本做的應用程式不再列在這裡（1.4 起應用程式離開主控台）：請用 API 金鑰呼叫 `/x/<name>`。
 
-1. 選 **Model**：每一個都標出任務和模型。還沒有時，分頁會這樣說明；管理員和操作員會看到從 Library 加入的連結。
+1. 選 **Model**：每一個都標出任務和模型。還沒有時，分頁會這樣說明；管理員和操作員會看到加入目錄的連結。
 2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。
 3. 接著依任務而定：
    - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。
@@ -536,7 +536,7 @@ media: {inputs: [image, audio, video], files: false}
 有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
 
 1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
-2. 管理員：打開 **Models → Library**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+2. 管理員：打開 **Models → Sources**，把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
 3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
 
 部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
@@ -829,7 +829,7 @@ Forgeyard 會檢查自己的設定，找出壞掉、有風險或沒有作用的�
 
 - **Get started → Setup health** 列出每一項檢查結果，附上該怎麼做，以及到修正位置的連結。
 - **頂端列的數字**顯示錯誤和警告的數量。沒有的時候就不會出現。
-- **相關頁面上的橫幅**（Machines、API keys、Cloud、Models、雲端模型、部署、Users）顯示那個頁面的檢查結果。
+- **相關頁面上的橫幅**（Machines、Serving、API keys、Cloud、雲端模型、部署、Users）顯示那個頁面的檢查結果。
 
 一般使用者和 operator 都看不到這些。
 
@@ -911,7 +911,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 **Download to…**（下載到…）會現在就把模型，以及預設也把它的引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
 
-1. 打開 **Models → Library**，在模型那一列按 **Download to…**。或打開機器的頁面，在 **Models in cache** 上方按 **Download a model here…**，再選模型。
+1. 打開 **Models**（**Catalog** 分頁），在模型那一列按 **Download to…**。或打開機器的頁面，在 **Models in cache** 上方按 **Download a model here…**，再選模型。
 2. 勾選機器。每一行會說明那台機器能不能下載：
    - **fits**：要下載多少、可用的磁碟空間，以及會一起抓的引擎；
    - **already here**：模型（和引擎）已經在那台機器的快取裡；
@@ -921,7 +921,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 3. **Also the engine, for the recipe** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
 4. 按 **Download to N machines**。
 
-進度會顯示在 Library 裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**Cancel** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **Download to…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **Models in cache** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
+進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**Cancel** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **Download to…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **Models in cache** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
 
 每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
 
