@@ -755,6 +755,8 @@ sudo systemctl enable --now forgeyard
    ```
 
    然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。用 Docker 的話：拉取新的 tag，再用它執行同一個 `docker run`（[做法](#run-the-server-in-docker)）。
+
+   **升級到 1.4：** 1.3.1 標為淘汰的七個設定已經不再讀取（[清單](reference.md#removed-settings)）。重新啟動之前，如果你設了 `SECRET_KEY_FILE`，請把它改名為 `FORGEYARD_SECRET_KEY_FILE`（否則伺服器會拒絕啟動），其他的則移除；還留著的會列在 Setup health 裡。
 3. **agent**：一台一台來。執行中的 agent 重新啟動時，會保留它的工作負載。
    - **用單行安裝裝的**：再執行一次，但不加 `--join`。它會安裝伺服器的新版本，並保留設定和憑據：
 

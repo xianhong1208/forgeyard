@@ -33,7 +33,7 @@ from typing import Optional
 from sqlalchemy import JSON, Text, inspect as sa_inspect, text
 from sqlalchemy.types import TypeDecorator
 
-from forgeyard.config import get_settings
+from forgeyard.config import REMOVED_IN, get_settings, removed_in_use
 
 log = logging.getLogger("forgeyard")
 
@@ -41,6 +41,7 @@ PREFIX = "fy1:"
 KEY_ENV = "FORGEYARD_SECRET_KEY"
 SETTING_KEY = "secret_key"   # server_settings row: {"kid": "..."}
 KEY_BYTES = 32
+OLD_KEY_FILE_ENV = "SECRET_KEY_FILE"   # removed in 1.4; FORGEYARD_SECRET_KEY_FILE replaced it in 1.3.1
 
 
 class SecretKeyError(Exception):
@@ -74,11 +75,37 @@ def key_from_env() -> str:
     return get_settings().forgeyard_secret_key.strip()
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return a.expanduser().resolve() == b.expanduser().resolve()
+    except (OSError, RuntimeError):
+        return a == b
+
+
+def check_old_key_file(environ=None, dotenv=None) -> None:
+    """SECRET_KEY_FILE was the key file's name until 1.4. A server that still sets it, alone, would
+    now look for (or make) data_dir/secret.key instead of the key it names: refuse to start rather
+    than run with another key, or tell the admin the key is lost. Nothing changes, so nothing is
+    refused, when FORGEYARD_SECRET_KEY or FORGEYARD_SECRET_KEY_FILE is set (both already won over
+    SECRET_KEY_FILE in 1.3) or when it names the file the server uses anyway."""
+    old = removed_in_use(environ, dotenv).get(OLD_KEY_FILE_ENV)
+    if not old or key_from_env() or get_settings().forgeyard_secret_key_file.strip():
+        return
+    path = key_path()
+    if _same_file(Path(old), path):
+        return
+    raise SecretKeyError(f"{OLD_KEY_FILE_ENV} ({old}) is no longer read since {REMOVED_IN}, so this server would use "
+                         f"{path} instead of the key it names, and could not read the secrets stored with that key. "
+                         f"Rename {OLD_KEY_FILE_ENV} to FORGEYARD_SECRET_KEY_FILE (same value) and start again. "
+                         "Nothing was changed.")
+
+
 def load_key(*, create: bool) -> Optional[bytes]:
     """The key from FORGEYARD_SECRET_KEY or the key file. Missing: a new one when `create`, else None."""
     env = key_from_env()
     if env:
         return _decode_key(env, KEY_ENV)
+    check_old_key_file()  # never make or read another key than the one SECRET_KEY_FILE named
     path = key_path()
     try:
         raw = path.read_text(encoding="ascii")
@@ -242,7 +269,9 @@ def missing_key_message(kid: str) -> str:
 
 def check_database(connection) -> None:
     """Refuse to start with a missing or wrong key while the database holds secrets. Never makes a
-    key when the database already names one."""
+    key when the database already names one. First of all: a removed SECRET_KEY_FILE that would
+    now mean another key file stops the start, whatever the database holds."""
+    check_old_key_file()
     kid = recorded_kid(connection)
     if kid is None:
         return

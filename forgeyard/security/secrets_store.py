@@ -2,7 +2,8 @@
 
 The one-time setup token lives here while no owner exists: it is printed in the
 startup log and required by /api/auth/setup, so whoever reaches a fresh server first
-cannot claim it (MCP Gate 1.3.0 fixed exactly that). FORGEYARD_SETUP_TOKEN pins it.
+cannot claim it (MCP Gate 1.3.0 fixed exactly that). FORGEYARD_SETUP_TOKEN, which pinned it, was
+removed in 1.4: the token is always generated.
 """
 
 from __future__ import annotations
@@ -43,9 +44,6 @@ def _save(data: dict) -> None:
 
 def setup_token() -> str:
     """The setup token, generated and stored on first use."""
-    pinned = get_settings().forgeyard_setup_token.strip()
-    if pinned:
-        return pinned
     data = _load()
     if not data.get(SETUP_TOKEN):
         data[SETUP_TOKEN] = secrets.token_urlsafe(24)

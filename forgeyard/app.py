@@ -38,7 +38,7 @@ from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
 from forgeyard.db import get_engine, new_session
 from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy, videojobs
-from forgeyard.gateway.usage import recorder as usage_recorder
+from forgeyard.gateway.usage import FLUSH_SECONDS as USAGE_FLUSH_SECONDS, recorder as usage_recorder
 from forgeyard.machines import agent_api, liveness
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_RESTART
@@ -83,9 +83,9 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     sweeper = asyncio.create_task(liveness.run_forever())
-    usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
+    usage_writer = asyncio.create_task(usage_recorder.run_forever(USAGE_FLUSH_SECONDS))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
-    alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(get_settings().usage_flush_seconds))
+    alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(USAGE_FLUSH_SECONDS))
     videos = asyncio.create_task(videojobs.run_forever())  # follows /v1/videos jobs, expires their results (1.3)
     try:
         yield

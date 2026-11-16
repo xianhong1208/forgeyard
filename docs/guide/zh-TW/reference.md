@@ -9,7 +9,7 @@
 伺服器啟動時會檢查它的設定：
 
 - **無法使用的值會讓伺服器停止啟動**，並指出是哪個設定、可以填哪些值：`TLS`、`REGISTRATION`、`COOKIE_SECURE`、`GATEWAY_CLOUD_DEFAULT`、`GATEWAY_CLOUD_MAX`、不是數字的數字設定，以及 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個。
-- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定、有風險的組合，以及[已淘汰的設定](#deprecated-settings)（並指出改用什麼）。
+- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定、有風險的組合，以及還設著的[在 1.4 移除的設定](#removed-settings)（並指出改用什麼）。唯一的例外：已移除的 `SECRET_KEY_FILE` 如果現在會變成另一個金鑰檔，伺服器會停止啟動。
 
 ### 常用設定
 
@@ -115,19 +115,17 @@
 
 `EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud policy** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。在管理員儲存之前，這些面板會把來自環境的值標示為 *from .env*。
 
-### 已淘汰的設定
+### 已移除的設定
 
-這些設定在 1.3 仍然有效，**在 1.4 移除**。只要設了其中一個，伺服器啟動時會記下一則警告，指出改用什麼，Setup health 也會列出（`setting-deprecated`）。設著它們時，其他行為都不變。
+**在 1.4 移除。** 這些設定在 1.3.1 標為淘汰，現在已經不再讀取。如果伺服器的環境或 `.env` 裡還設著其中一個，啟動時會記下一則警告，說明它被忽略、改用什麼，Setup health 也會列出（`setting-removed`），直到你把它移除。
 
-| 變數 | 預設值 | 改用 |
-|---|---|---|
-| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`：同樣的值，名稱和 `FORGEYARD_SECRET_KEY` 一致。兩者都設時使用 `FORGEYARD_SECRET_KEY_FILE` |
-| `AGENT_HEARTBEAT_SECONDS` | — | 不需要：agent 每隔 `AGENT_OFFLINE_SECONDS` 的三分之一送出心跳（至少每 2 秒一次），預設是 10 秒。設了的話仍由它決定心跳間隔 |
-| `FORGEYARD_SETUP_TOKEN` | — | 不需要：伺服器會印出一個隨機的設定權杖（設定完成前存在 `data/secrets.json`）。無人值守的第一次啟動請用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` |
-| `USAGE_FLUSH_SECONDS` | `5` | 不需要：記憶體中統計的用量每 5 秒寫入資料庫一次 |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | 不需要：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | 不需要：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試 |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | 不需要：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰） |
+- `SECRET_KEY_FILE`：改用 `FORGEYARD_SECRET_KEY_FILE`，值不變，只是換成新名稱。如果 `SECRET_KEY_FILE` 指向 `data/secret.key` 以外的金鑰檔，而 `FORGEYARD_SECRET_KEY_FILE` 和 `FORGEYARD_SECRET_KEY` 都沒有設定，**伺服器會拒絕啟動**，而不是改用（或新建）另一把金鑰，並請你改名。你改好之前什麼都不會變動；`secrets reset` 也會拒絕執行。
+- `AGENT_HEARTBEAT_SECONDS`：agent 每隔 `AGENT_OFFLINE_SECONDS` 的三分之一送出心跳，至少每 2 秒一次（預設是 10 秒）。
+- `FORGEYARD_SETUP_TOKEN`：伺服器會印出一個隨機的設定權杖（設定完成前存在 `data/secrets.json`）。無人值守的第一次啟動請用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`。
+- `USAGE_FLUSH_SECONDS`：記憶體中統計的用量每 5 秒寫入資料庫一次。
+- `PROVIDER_COOLDOWN_SECONDS`：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘）。
+- `PROVIDER_RETRY_AFTER_CAP`：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試。
+- `OPENROUTER_MODELS_URL`：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰）。
 
 ### 單位、零與空白
 
@@ -672,13 +670,12 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 |---|---|---|
 | `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`PROVIDER_`、`EGRESS_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
 | `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
-| `setting-deprecated` | 警告 | 設了一個[已淘汰的設定](#deprecated-settings)。它在 1.4 之前仍然有效；這項發現會指出改用什麼 |
-| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和金鑰檔（`FORGEYARD_SECRET_KEY_FILE` 或 `SECRET_KEY_FILE`）都有設定，或兩個檔案設定指向不同的檔案 |
-| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 次心跳（`AGENT_HEARTBEAT_SECONDS`，或最短的 2 秒心跳） |
+| `setting-removed` | 警告 | 還設著一個[在 1.4 移除的設定](#removed-settings)，所以它被忽略。這項發現會指出改用什麼，或改成怎麼運作 |
+| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `FORGEYARD_SECRET_KEY_FILE` 都有設定 |
+| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 次心跳（小於 5 秒：最短的心跳是 2 秒） |
 | `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS`、`PROVIDER_ALLOW_PRIVATE_HOSTS` 或 `MEDIA_ALLOW_PRIVATE_HOSTS` 已開啟 |
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
-| `setup-token-left` | 提示 | 設定完成後，`FORGEYARD_SETUP_TOKEN` 還設定著 |
 | `env-seed-ignored` | 提示 | 某個初始值設定（`MODEL_URL_HOSTS`、`MODEL_LOCAL_DIRS`、`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_*`）和管理員儲存的值不同，而儲存的值優先 |
 | `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
 | `host-loopback` | 錯誤 | `HOST` 是 loopback 位址，卻有機器從其他位址加入（而且前面沒有代理） |

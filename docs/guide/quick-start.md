@@ -284,7 +284,8 @@ for what that variable replaces, and for Node.js).
 
 ## What next
 
-- **Usage** shows requests, tokens and latency per key, model and person.
+- **Usage** shows requests, tokens and latency per key, model and person, and charts them per day,
+  week or month.
 - Add people on **Users**: they get a one-time link to set their password. Roles are explained in
   [Concepts](concepts.md#roles).
 - Add more machines the same way; replicas of one deployment spread over them, and the gateway

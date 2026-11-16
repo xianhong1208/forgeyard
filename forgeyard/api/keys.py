@@ -388,6 +388,31 @@ def get_usage(days: int = Query(default=7, ge=1, le=366), group: str = Query(def
     return out
 
 
+@router.get("/usage/series")
+def get_usage_series(step: str = Query(default="day"), periods: int = Query(default=30, ge=1),
+                     split: str = Query(default="none"), metric: str = Query(default="requests"),
+                     everyone: bool = Query(default=False), caller: Caller = Depends(current),
+                     db: DbSession = Depends(get_db)):
+    """Usage over time for the Usage page's charts (1.4): one value per day, week or month, in total or
+    per key, model, provider or person. Whose usage follows GET /api/usage: your own, or everyone's
+    for admins with ?everyone=true."""
+    if step not in gusage.STEPS:
+        raise fail(422, "bad_step", f"step: one of {', '.join(gusage.STEPS)}")
+    if split not in gusage.SPLITS:
+        raise fail(422, "bad_split", f"split: one of {', '.join(gusage.SPLITS)}")
+    if metric not in gusage.SERIES_METRICS:
+        raise fail(422, "bad_metric", f"metric: one of {', '.join(gusage.SERIES_METRICS)}")
+    if periods > gusage.MAX_PERIODS[step]:
+        raise fail(422, "too_many_periods", f"periods: at most {gusage.MAX_PERIODS[step]} for step={step}")
+    gusage.recorder.flush()
+    admin = caller.user.role == "admin"
+    scope_user = None if (everyone and admin) else caller.user.id
+    out = gusage.series(db, step=step, periods=periods, split=split, metric=metric, user_id=scope_user)
+    out["everyone"] = scope_user is None
+    out["is_admin"] = admin
+    return out
+
+
 def deployment_usage(db: DbSession, d: Deployment, days: int = 7) -> dict:
     gusage.recorder.flush()
     out = gusage.summary(db, days=days, deployment_id=d.id, group_by="day")
