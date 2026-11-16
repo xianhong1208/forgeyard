@@ -38,6 +38,7 @@ from forgeyard.gateway import pricing
 log = logging.getLogger("forgeyard")
 
 # Upper bounds (ms) of the latency buckets; one more bucket holds everything slower.
+FLUSH_SECONDS = 5.0   # usage counted in memory is written to the database this often (and on shutdown)
 BUCKETS_MS = (50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400, 204800, 409600)
 
 

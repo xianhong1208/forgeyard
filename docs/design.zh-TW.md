@@ -250,7 +250,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   請求進行中先保留它的 `max_tokens`，避免同時送出的請求一起超過限制。
 - **用量**（**Usage** 頁）：請求數、錯誤、因速率限制被拒的次數、prompt／completion／快取／推理 token、溢出的請求數、延遲 p50／p95，
   可依日期、模型、key、人、來源（API key 或 playground）或本機與雲端分組；**Cost** 分頁再依日期、key、人、模型或供應商顯示費用
-  （見〈費用〉）。在記憶體裡計數，每 `USAGE_FLUSH_SECONDS`（5 秒）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
+  （見〈費用〉）。在記憶體裡計數，每 5 秒（`usage.FLUSH_SECONDS`）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
   一列。client 中途離開（499）不算錯誤。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。
 - **對話中的圖片、音訊與影片（1.3，** forgeyard/gateway/media.py**）。** vLLM 0.32 與 llama-server（b11977、b12242）會自己下載媒體區塊裡的任何 http(s) 網址，沒有私有位址過濾（vLLM 還會跟隨轉址），而且是從你的網路內部連出去；llama-server 1.0.0 會拒絕私有位址，但那只是多一層保護，不是主要的防護。所以：
   - gateway 走過 `messages[].content[]`，把每個媒體區塊**重建**成同一種形式（`image_url` 與 `video_url` 帶 `data:` URI，`input_audio` 帶 base64），只保留檢查過的欄位；接受 `input_image`、`input_video` 與 `audio_url` 並轉換。文字區塊不變；其他類型與 `*_embeds` 一律拒絕（`invalid_content_part`）；
@@ -394,8 +394,8 @@ Kong 與 GPUStack 之後決定。
   如果本機是忙碌、而之後每一層都失敗，請求最後還是會送到負載最輕的本機副本，不再受 `concurrency` 限制（由引擎排隊），
   並拿掉 `X-Forgeyard-Spilled`。沒有其他目標能取代的本機 429 或 503 會原樣轉回。
 - **雲端層**依權重（加權洗牌）嘗試目標；回應 429 或 5xx、連不上、重新導向或被對外連線規則拒絕的目標會冷卻
-  `PROVIDER_COOLDOWN_SECONDS`（30 秒，或依它的 `Retry-After`／`retry-after-ms`，最多 5 分鐘），排到最後才試，而不是跳過。沒有
-  其他目標時（最後一層），不超過 `PROVIDER_RETRY_AFTER_CAP`（2 秒）的 `Retry-After` 會等一次。供應商的回應會變成：429 → 429
+  30 秒（`balancer.PROVIDER_COOLDOWN`，或依它的 `Retry-After`／`retry-after-ms`，最多 5 分鐘），排到最後才試，而不是跳過。沒有
+  其他目標時（最後一層），不超過 2 秒（`proxy.RETRY_AFTER_CAP`）的 `Retry-After` 會等一次。供應商的回應會變成：429 → 429
   `provider_rate_limited`（附它的 `Retry-After`）；5xx → 502 `provider_error`；401、403 或 407 → 立刻回 502 `provider_auth_failed`，
   不再試其他目標（絕不回 401 讓用戶端以為是自己的金鑰有問題）；重新導向 → 502 `provider_redirect`，絕不跟隨；其他 4xx 保留狀態碼與
   供應商的 `code`，訊息前加上供應商名稱，看起來像金鑰的字串會被拿掉。送出後逾時是 504 `provider_timeout`，不會改試別的。
@@ -429,7 +429,7 @@ Kong 與 GPUStack 之後決定。
   - 費用以皮美元加總，每列用量寫入時取整到微美元，餘數帶到下一次，所以大量很小的請求加起來仍然精確。
 - **價格**存在供應商模型上：輸入、輸出、快取輸入與快取寫入，各自可選，並記錄來源（`manual` 或 `openrouter`）、時間，以及對應的
   OpenRouter id。只有網路外供應商的模型會計價。**Refresh prices from OpenRouter**（admin，`forgeyard/api/prices.py`）讀取 OpenRouter
-  的公開模型清單（`OPENROUTER_MODELS_URL`，不送金鑰，走對外連線規則），回傳預覽：每個模型、它的對應、新舊價格。對應分成 `confirmed`
+  的公開模型清單（`https://openrouter.ai/api/v1/models`，不送金鑰，走對外連線規則），回傳預覽：每個模型、它的對應、新舊價格。對應分成 `confirmed`
   （已存的 id）、`exact`（OpenRouter 供應商自己的 id）、`suggested`（種類的 OpenRouter 廠商加上原名、拿掉日期後綴的名稱，或把版本的
   `-` 換成 `.`；名稱本身有 `/` 時就用它）、`not_listed` 或 `none`；admin 可以輸入一個 id 來比較。**Apply** 會重新讀取清單，只寫入
   勾選、而且價格仍和預覽相同的列（否則以 `changed` 略過），只有要求時才覆蓋手動輸入的價格，並記錄 `provider.prices_refreshed`。
@@ -453,7 +453,7 @@ Kong 與 GPUStack 之後決定。
     OpenAI 的 SDK 會重試 429 但不重試 402，而在月底之前重試也沒有用。
   - **警示。** 預算到 80% 與 100% 時，每個範圍、月份與門檻各一次：`budget_alerts` 資料表（唯一，所以重啟後也只有一次），以及稽核
     事件 `budget.warning` 或 `budget.exhausted`（操作者 `forgeyard`）。在請求預留與結算時檢查，所以預算調低到本月花費以下時，下一個
-    請求就會警示；花費加預留已超過 80% 時被拒絕的請求，算作到達 100%。和用量一起，每 `USAGE_FLUSH_SECONDS` 以及關機時寫入。
+    請求就會警示；花費加預留已超過 80% 時被拒絕的請求，算作到達 100%。和用量一起，每 5 秒以及關機時寫入。
   - `GET /api/budgets`（admin：`?everyone=true`）回傳月份、`resets_at`，以及每個 key、個人與供應商的預算、已花費、已預留、使用比例
     與等級（`ok`、80% 起 `warning`、100% 起 `exhausted`；預算為 0 時是 exhausted）。API keys 頁、**Usage → Cost**（*Budgets this
     month*）與供應商的頁面會顯示它們。

@@ -1827,7 +1827,7 @@ def budgets(run: Run, p: dict, pm: dict, priced: bool, k_on: dict, cloud_name: s
                 break
             time.sleep(2)
         r2 = post_chat(run, k_on["key"], cloud_name, need, "x")
-        time.sleep(12)  # alerts are written every few seconds (USAGE_FLUSH_SECONDS)
+        time.sleep(12)  # alerts are written every 5 s, with the usage
         again = audit_budget_events(run, "key", k_on["api_key"]["name"])
         th = collections.Counter(e["detail"].get("threshold") for e in again)
         run.check("a key past 80% of its budget: the next request is refused (402) and alerts 80% and 100% once each",

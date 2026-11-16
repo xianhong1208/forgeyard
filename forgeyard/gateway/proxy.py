@@ -76,7 +76,7 @@ from starlette.responses import Response
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
 from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech, videogen
-from forgeyard.gateway.balancer import Target, balancer
+from forgeyard.gateway.balancer import PROVIDER_COOLDOWN, PROVIDER_COOLDOWN_MAX, Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
@@ -105,6 +105,7 @@ CLOUD_ENDPOINTS = ("chat/completions", "completions", "embeddings")
 CLIENT_CLOSED = 499  # nginx's code for "the client went away": counted, but not as an error
 LOCAL_ONLY_HEADER = "x-forgeyard-local-only"
 MAX_WAIT_MS = 10_000
+RETRY_AFTER_CAP = 2.0   # with no other target left, a provider's Retry-After up to this is waited for once
 BYTES_PER_TOKEN = 3     # a prompt's size in tokens, estimated on the high side (CJK is ~3 bytes a token)
 
 # Connecting failed, or the connection broke before the replica answered: the request did not get
@@ -1229,7 +1230,7 @@ class Job:
             if isinstance(result, Response):
                 return result
             failures.append((c, result))
-        cap = self.settings.provider_retry_after_cap
+        cap = RETRY_AFTER_CAP
         waits = [(f.retry_after, i, c) for i, (c, f) in enumerate(failures) if f.retry_after is not None
                  and f.retry_after <= cap]
         if waits and not more:
@@ -1271,7 +1272,7 @@ class Job:
                 strip = True
         obj, _dropped = quirks.outgoing(c.kind, obj, endpoint, c.drop_params)
         body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        cooldown = self.settings.provider_cooldown_seconds
+        cooldown = PROVIDER_COOLDOWN
         try:
             url, host_headers, extensions = await egress.prepare(c.base_url, endpoint, external=c.external,
                                                                  allow_http=c.allow_http)
@@ -1337,7 +1338,7 @@ class Job:
             ra = retry_after(response.headers)
             err = provider_error(c, status, data[:65536], ra)
             if status == 429 or status >= 500:
-                balancer.cool_down(c.key, max(cooldown, min(ra or 0.0, 300.0)))
+                balancer.cool_down(c.key, max(cooldown, min(ra or 0.0, PROVIDER_COOLDOWN_MAX)))
                 log.warning("Provider %s (%s) answered %s (request id %s)%s.", c.provider, c.upstream_model, status, rid,
                             "" if again else "; trying the next target")
                 return Failed("refused" if status in (429, 503) else "unavailable", err, retry_after=ra, status=status)
