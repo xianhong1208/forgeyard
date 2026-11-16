@@ -111,6 +111,43 @@ export function keyModels(k: ApiKey): string {
   return k.models === null ? "All deployments" : k.models.join(", ");
 }
 
+// A per-minute limit, short: "3 requests/min", "10k tokens/min", "1.5M tokens/min" (1.4).
+export function perMinute(n: number, unit: "request" | "token"): string {
+  const short = n < 1000 ? String(n) : new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n).replace(/K$/, "k");
+  return `${short} ${unit}${n === 1 ? "" : "s"}/min`;
+}
+
+// The limits a key works with, one line each: only the ones set, or "No limits" (1.4). Each line carries
+// the admins who locked it; a lock on a limit that is not set goes on the last line.
+export type LimitLine = { text: string; none: boolean; locks: string[] };
+export function keyLimits(k: Pick<ApiKey, "effective_rpm" | "effective_tpm" | "rpm_locked_by" | "tpm_locked_by">): LimitLine[] {
+  const lines: LimitLine[] = [];
+  const loose: string[] = [];
+  const add = (n: number | null, unit: "request" | "token", lock: string | null | undefined) => {
+    if (n) lines.push({ text: perMinute(n, unit), none: false, locks: lock ? [lock] : [] });
+    else if (lock) loose.push(lock);
+  };
+  add(k.effective_rpm, "request", k.rpm_locked_by);
+  add(k.effective_tpm, "token", k.tpm_locked_by);
+  if (!lines.length) lines.push({ text: "No limits", none: true, locks: [] });
+  lines[lines.length - 1].locks.push(...loose);
+  return lines;
+}
+
+// Keys no longer usable (revoked or expired) are folded away under one row (1.4).
+export function splitKeys<T extends Pick<ApiKey, "status">>(keys: T[]): { active: T[]; inactive: T[] } {
+  return { active: keys.filter((k) => k.status === "active"), inactive: keys.filter((k) => k.status !== "active") };
+}
+
+// "Show 163 revoked keys", "Show 1 expired key", "Show 4 revoked or expired keys".
+export function foldLabel(keys: Pick<ApiKey, "status">[], open: boolean): string {
+  const revoked = keys.some((k) => k.status === "revoked");
+  const expired = keys.some((k) => k.status === "expired");
+  const what = revoked && expired ? "revoked or expired" : expired ? "expired" : "revoked";
+  if (open) return `Hide ${what} keys`;
+  return `Show ${keys.length} ${what} key${keys.length === 1 ? "" : "s"}`;
+}
+
 // Server-sent events from a fetch() body: calls onData with each `data:` payload as it arrives.
 export async function readEvents(body: ReadableStream<Uint8Array>, onData: (data: string) => void): Promise<void> {
   const reader = body.getReader();

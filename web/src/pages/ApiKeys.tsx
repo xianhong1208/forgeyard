@@ -1,5 +1,5 @@
-import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { IconChevronDown, IconChevronUp, IconKey, IconLock, IconPlus } from "@tabler/icons-react";
+import { useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { useAuth } from "../auth";
@@ -9,7 +9,7 @@ import { CopyBox, Field, Notice, PageHeader, TrustHint } from "../components/ui"
 import { api, errorText } from "../lib/api";
 import { budgetInput, LEVEL_LABEL, parseBudget, resetText } from "../lib/budgets";
 import { exact, when } from "../lib/format";
-import { keyModels, num, snippets } from "../lib/gateway";
+import { foldLabel, keyLimits, keyModels, num, snippets, splitKeys } from "../lib/gateway";
 import { CLOUD_POLICIES, CUSTOM_HELP, policyOf, policyValue, type CloudPolicy } from "../lib/cloudPolicy";
 import { CLOUD_HELP, CLOUD_LABEL, CLOUD_LEVELS, cloudAbove } from "../lib/routing";
 import type { ApiKey, CloudLevel, CloudSettings, KeyLimits, KeysResponse, NewKeyResponse } from "../lib/types";
@@ -24,6 +24,11 @@ const EXPIRY = [
 ];
 
 const STATUS_TONE: Record<ApiKey["status"], string> = { active: "ok", revoked: "off", expired: "wait" };
+
+// The exact limits, for the tooltip of the short ones.
+function limitsTitle(k: ApiKey): string {
+  return `Requests: ${k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"} · Tokens: ${k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}`;
+}
 
 function capText(n: number | null): string {
   return n ? `at most ${num(n)}` : "no cap";
@@ -54,6 +59,12 @@ export function ApiKeysPage() {
   const [issued, setIssued] = useState<NewKeyResponse | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  // Revoked and expired keys are folded away under one row, in Mine and in Everyone's (1.4).
+  const [showOld, setShowOld] = useState(false);
+  const scope = (all: boolean) => {
+    setEveryone(all);
+    setShowOld(false);
+  };
 
   const revoke = async (k: ApiKey) => {
     const whose = everyone && k.user.username ? ` of ${k.user.username}` : "";
@@ -120,8 +131,8 @@ export function ApiKeysPage() {
             <h2 id="keys-title">{everyone ? "Everyone's keys" : "Your keys"}</h2>
             {data.is_admin && (
               <div className="segmented" role="group" aria-label="Whose keys">
-                <button type="button" className={everyone ? "" : "on"} aria-pressed={!everyone} onClick={() => setEveryone(false)}>Mine</button>
-                <button type="button" className={everyone ? "on" : ""} aria-pressed={everyone} onClick={() => setEveryone(true)}>Everyone's</button>
+                <button type="button" className={everyone ? "" : "on"} aria-pressed={!everyone} onClick={() => scope(false)}>Mine</button>
+                <button type="button" className={everyone ? "on" : ""} aria-pressed={everyone} onClick={() => scope(true)}>Everyone's</button>
               </div>
             )}
           </div>
@@ -145,27 +156,61 @@ export function ApiKeysPage() {
               )}
             </div>
           ) : (
-            <div className="table-wrap">
-              <table className="table keys-table">
-                <thead>
-                  <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Budget</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
-                </thead>
-                <tbody>
-                  {data.keys.map((k) => (
-                    <KeyRow key={k.id} k={k} everyone={everyone} isAdmin={data.is_admin} limits={data.limits} cloud={data.cloud ?? NO_CLOUD}
-                      editing={editing === k.id} onEdit={() => setEditing(editing === k.id ? null : k.id)}
-                      onSaved={(text) => { setEditing(null); setMessage({ tone: "ok", text }); reload(); }}
-                      onError={(text) => setMessage({ tone: "error", text })} onRevoke={() => void revoke(k)} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <KeysList keys={data.keys} everyone={everyone} showOld={showOld} onToggle={() => setShowOld(!showOld)} empty={(
+              <div className="panel empty-keys">
+                <IconKey size={22} aria-hidden="true" />
+                <p className="muted">
+                  {everyone ? "No active keys: every key is revoked or expired." : "No active keys: every key of yours is revoked or expired."}
+                </p>
+                {!everyone && !creating && (
+                  <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+                    <IconPlus size={16} aria-hidden="true" /> Create a key
+                  </button>
+                )}
+              </div>
+            )}>
+              {(k) => (
+                <KeyRow key={k.id} k={k} everyone={everyone} isAdmin={data.is_admin} limits={data.limits} cloud={data.cloud ?? NO_CLOUD}
+                  editing={editing === k.id} onEdit={() => setEditing(editing === k.id ? null : k.id)}
+                  onSaved={(text) => { setEditing(null); setMessage({ tone: "ok", text }); reload(); }}
+                  onError={(text) => setMessage({ tone: "error", text })} onRevoke={() => void revoke(k)} />
+              )}
+            </KeysList>
           )}
         </section>
       )}
 
       {data?.is_admin && <LimitsPanel limits={data.limits} envSeeds={data.env_seeds?.limits} onSaved={() => { setMessage({ tone: "ok", text: "Limits for keys saved." }); reload(); }} />}
       {data?.is_admin && <CloudPanel cloud={data.cloud ?? NO_CLOUD} envSeeds={data.env_seeds?.cloud} onSaved={() => { setMessage({ tone: "ok", text: "Cloud policy saved." }); reload(); }} />}
+    </>
+  );
+}
+
+// The active keys in a table, then one row that opens the revoked and expired ones below them.
+function KeysList({ keys, everyone, showOld, onToggle, empty, children }: {
+  keys: ApiKey[]; everyone: boolean; showOld: boolean; onToggle: () => void; empty: ReactNode; children: (k: ApiKey) => ReactNode;
+}) {
+  const { active, inactive } = splitKeys(keys);
+  const shown = showOld ? [...active, ...inactive] : active;
+  return (
+    <>
+      {active.length === 0 && empty}
+      {shown.length > 0 && (
+        <div className="table-wrap">
+          <table className="table keys-table">
+            <thead>
+              <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Budget</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+            </thead>
+            <tbody>{shown.map(children)}</tbody>
+          </table>
+        </div>
+      )}
+      {inactive.length > 0 && (
+        <button type="button" className="keys-fold" aria-expanded={showOld} onClick={onToggle}>
+          {showOld ? <IconChevronUp size={16} aria-hidden="true" /> : <IconChevronDown size={16} aria-hidden="true" />}
+          {foldLabel(inactive, showOld)}
+        </button>
+      )}
     </>
   );
 }
@@ -223,30 +268,40 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
     return base;
   };
   const active = k.status === "active";
+  const limitLines = keyLimits(k);
   return (
     <>
       <tr className={active ? "" : "row-off"}>
+        {/* Every value cell holds one element: on a phone the cell is a label | value grid, and a second
+            child would wrap into the label column. */}
         <td data-label="Key">
-          <div className="strong">{k.name}</div>
-          <div className="mono small muted">{k.prefix}…</div>
+          <div>
+            <div className="strong">{k.name}</div>
+            <div className="mono small muted">{k.prefix}…</div>
+          </div>
         </td>
-        {everyone && <td data-label="Owner" className="mono small">{k.user.username ?? "—"}</td>}
-        <td data-label="Models" className="small">{keyModels(k)}</td>
+        {everyone && <td data-label="Owner" className="mono small"><div>{k.user.username ?? "—"}</div></td>}
+        <td data-label="Models" className="small"><div>{keyModels(k)}</div></td>
         <td data-label="Limits" className="small">
-          <div><span className="muted">Requests</span> {k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"}
-            {lockedBy.rpm && <> <LockChip by={lockedBy.rpm} /></>}</div>
-          <div><span className="muted">Tokens</span> {k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}
-            {lockedBy.tpm && <> <LockChip by={lockedBy.tpm} /></>}</div>
-          {active && (k.this_minute.requests > 0 || k.this_minute.tokens > 0) && (
-            <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
-          )}
+          <div className="key-limits" title={limitsTitle(k)}>
+            {limitLines.map((l) => (
+              <div key={l.text} className={l.none ? "muted" : undefined}>
+                <span className="nowrap">{l.text}</span>{l.locks.map((by, i) => <span key={i}> <LockChip by={by} /></span>)}
+              </div>
+            ))}
+            {active && (k.this_minute.requests > 0 || k.this_minute.tokens > 0) && (
+              <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
+            )}
+          </div>
         </td>
-        <td data-label="Cloud" className="small"><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}
-          {k.effective_cloud && k.effective_cloud !== level && (
-            <span className="chip chip-tone-off" title="The server's current maximum for people's own keys is lower; this key works as if set to it until the maximum is raised again.">
-              now {CLOUD_LABEL[k.effective_cloud]} (server maximum)
-            </span>
-          )}</td>
+        <td data-label="Cloud" className="small">
+          <div><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}
+            {k.effective_cloud && k.effective_cloud !== level && (
+              <> <span className="chip chip-tone-off" title="The server's current maximum for people's own keys is lower; this key works as if set to it until the maximum is raised again.">
+                now {CLOUD_LABEL[k.effective_cloud]} (server maximum)
+              </span></>
+            )}</div>
+        </td>
         <td data-label="Budget" className="small">
           <div>
             {k.status === "revoked" ? <span className="muted">—</span>
@@ -254,11 +309,13 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved,
             {budgetLock && <LockChip by={budgetLock} />}
           </div>
         </td>
-        <td data-label="Last used" className="small" title={exact(k.last_used_at)}>{k.last_used_at ? when(k.last_used_at) : "never"}</td>
-        <td data-label="Expires" className="small" title={exact(k.expires_at)}>{k.expires_at ? when(k.expires_at) : "never"}</td>
+        <td data-label="Last used" className="small" title={exact(k.last_used_at)}><div>{k.last_used_at ? when(k.last_used_at) : "never"}</div></td>
+        <td data-label="Expires" className="small" title={exact(k.expires_at)}><div>{k.expires_at ? when(k.expires_at) : "never"}</div></td>
         <td data-label="Status">
-          <span className={`chip chip-tone-${STATUS_TONE[k.status]}`}>{k.status}</span>
-          {k.revoked_by && <div className="muted small">by {k.revoked_by}</div>}
+          <div>
+            <span className={`chip chip-tone-${STATUS_TONE[k.status]}`}>{k.status}</span>
+            {k.revoked_by && <div className="muted small">by {k.revoked_by}</div>}
+          </div>
         </td>
         <td className="cell-actions">
           {active && (isAdmin || !everyone) && (

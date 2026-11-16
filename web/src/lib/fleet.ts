@@ -15,6 +15,15 @@ export const MACHINE_KIND: Record<MachineKind, { label: string; short: string }>
 };
 export const MACHINE_KIND_ORDER: MachineKind[] = ["nvidia", "amd-gpu", "amd-apu", "cpu"];
 
+// The summary above the machine tiles counts machines, not cards (1.4): "1 NVIDIA machine",
+// "2 CPU-only machines". AMD GPU and APU machines are both "AMD" unless both kinds are there.
+const MACHINE_NOUN: Record<MachineKind, string> = { nvidia: "NVIDIA", "amd-gpu": "AMD", "amd-apu": "AMD", cpu: "CPU-only" };
+export function machineCount(kind: MachineKind, n: number, kinds: MachineKind[] = [kind]): string {
+  const bothAmd = kinds.includes("amd-gpu") && kinds.includes("amd-apu");
+  const noun = bothAmd && kind === "amd-gpu" ? "AMD GPU" : bothAmd && kind === "amd-apu" ? "AMD APU" : MACHINE_NOUN[kind];
+  return `${noun} machine${n === 1 ? "" : "s"}`;
+}
+
 export function cards(m: Machine): Accelerator[] {
   return m.accelerators.filter((a) => a.vendor !== "cpu");
 }

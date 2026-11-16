@@ -10,7 +10,7 @@ import { CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact } from "../lib/format";
 import {
-  MACHINE_KIND, MACHINE_KIND_ORDER, byKind, cardLine, cardMemory, cards, machineKind, machineMemory, memoryLabel, memoryRows,
+  MACHINE_KIND, MACHINE_KIND_ORDER, byKind, machineCount, cardLine, cardMemory, cards, machineKind, machineMemory, memoryLabel, memoryRows,
   share, uniqueHolders, type Placement,
 } from "../lib/fleet";
 import { ageSeconds, ago, bytes, toMs } from "../lib/machines";
@@ -268,11 +268,12 @@ function EmptyMachines({ canManage, adding, onAdd }: { canManage: boolean; addin
 function KindSummary({ machines }: { machines: Machine[] }) {
   const offline = machines.filter((m) => m.status === "offline").length;
   const revoked = machines.filter((m) => m.status === "revoked").length;
+  const kinds = machines.map(machineKind);
   return (
     <ul className="kind-summary" aria-label="Kinds of machine">
       {MACHINE_KIND_ORDER.map((k) => {
-        const n = machines.filter((m) => machineKind(m) === k).length;
-        return n ? <li key={k}><KindMark kind={k} size={26} /> <span><strong>{n}</strong> {MACHINE_KIND[k].label}</span></li> : null;
+        const n = kinds.filter((x) => x === k).length;
+        return n ? <li key={k}><KindMark kind={k} size={26} /> <span><strong>{n}</strong> {machineCount(k, n, kinds)}</span></li> : null;
       })}
       {offline > 0 && <li className="kind-summary-off"><StatusDot status="offline" /> <span><strong>{offline}</strong> offline</span></li>}
       {revoked > 0 && <li className="kind-summary-off"><StatusDot status="revoked" /> <span><strong>{revoked}</strong> revoked</span></li>}

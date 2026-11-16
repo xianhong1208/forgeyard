@@ -43,6 +43,17 @@ afterEach(() => {
 });
 
 describe("machines page", () => {
+  it("FY-WEB-398 the summary above the tiles counts machines, singular and plural", async () => {
+    const [box] = fixture.machines;
+    const cpuOnly = (id: number, name: string) => ({ ...box, id, name, accelerators: box.accelerators.filter((a) => a.vendor === "cpu") });
+    server((url) => (url === "/api/machines" ? machines({ machines: [...fixture.machines, cpuOnly(7, "cpu-a"), cpuOnly(8, "cpu-b")] as typeof fixture.machines })
+      : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } } : undefined));
+    mount();
+    await screen.findByRole("article", { name: "Machine cpu-b" });
+    const items = within(screen.getByRole("list", { name: "Kinds of machine" })).getAllByRole("listitem").map((li) => li.textContent?.trim());
+    expect(items).toEqual(["1 NVIDIA machine", "1 AMD machine", "2 CPU-only machines", "1 offline"]);
+  });
+
   it("FY-WEB-033 a tile per machine: its kind, cards as slots, free memory; its page has the cards' details", async () => {
     server((url) => (url === "/api/machines" ? machines() : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } } : undefined));
     const view = mount();
@@ -81,8 +92,8 @@ describe("machines page", () => {
     expect(within(strix).getByText(/free of .* \(shared\)/)).toBeTruthy();
     // the summary above the tiles counts the kinds and the offline ones
     const summary = screen.getByRole("list", { name: "Kinds of machine" });
-    expect(summary.textContent).toContain("1 NVIDIA GPU");
-    expect(summary.textContent).toContain("1 AMD APU");
+    expect(summary.textContent).toContain("1 NVIDIA machine");
+    expect(summary.textContent).toContain("1 AMD machine");
     expect(summary.textContent).toContain("1 offline");
     view.unmount();
 
