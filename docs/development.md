@@ -72,7 +72,7 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/db.py`, `forgeyard/migrations/` | the database models; Alembic migrations, run on start |
 | `forgeyard/api/` | the HTTP API: `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads`, `onboarding` (Get started), `tls` (the CA download), `install` (`/install.sh` and the wheel), `guide` |
 | `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground (its Vision tab through `forgeyard/gateway/vision.py`); API keys, their limits, cloud setting and budget, and usage |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground (its vision panel through `forgeyard/gateway/vision.py`); API keys, their limits, cloud setting and budget, and usage |
 | `forgeyard/api/providers.py` | cloud providers and their models: add, test, import, prices by hand, clone |
 | `forgeyard/api/routing.py` | routes and their tiers of targets |
 | `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |

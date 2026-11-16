@@ -783,9 +783,9 @@ the body is complete, so a client never takes a cut-off body for a whole one.
 
 ### From the Playground
 
-Since 1.4 the console's **Playground → Vision** tab offers vision models only, and
-`GET /api/playground/vision/options` no longer lists apps (`workloads`). The route below still reaches an
-exposed vision app until 1.5 (deprecated), the way the tab did in 1.3: through routes of its own,
+Since 1.4 the console's Playground offers vision models only (in its one model picker; the Vision tab
+is gone), and `GET /api/playground/vision/options` no longer lists apps (`workloads`). The route below
+still reaches an exposed vision app until 1.5 (deprecated), the way 1.3's Vision tab did: through routes of its own,
 never through `/x/`: they take the console's sign-in (its cookie, and on `POST` the `X-Forgeyard: 1`
 header from the console's own origin), and `/x/` keeps taking API keys only. Anyone signed in may use
 them. A vision app is an exposed service started with `--task detect`, `--task segment` or

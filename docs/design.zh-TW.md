@@ -143,7 +143,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
 *recipe*）與 **Sources**（只有 admin：GGUF 網址的主機、`local://` 目錄、Hugging Face 權杖）。選單是 Machines、Serving、Models、
 Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 09。只有發布過的版本有過的網址會轉址：1.3 的
 `/models/deployments/<id>[/edit]`、`/models/deploy`、`/models?tab=routes` 與 `?tab=deployments` 會打開 Serving；`?tab=catalog`
-就是 Catalog。只在 1.4 開發期間用過的分頁名稱（`?tab=serving`、`library`、`model-library`）不再支援。
+就是 Catalog；`/playground?tab=vision` 會打開 Playground 並選好第一個就緒的視覺模型（沒有時則打開它的選單）。只在 1.4 開發期間用過的分頁名稱（`?tab=serving`、`library`、`model-library`）不再支援。
 
 **Serving → Deploy a model**：從目錄挑模型與引擎、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
 會放到哪裡。一個部署 = 一個 service workload 加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
@@ -290,7 +290,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   - **用量**：每個工作一個請求，在結束時記錄（誰先看到結束誰記錄，只記一次）：做好的影片計入 `media_ms`（長度）與 `busy_ms`（從看到它進入製作中到結束，× 部署占用的 GPU 數）；失敗的算一個錯誤，其他什麼都不算；製作中被刪除的算 499。被拒絕的請求在被拒絕時計入。不計 token、不送雲端。
   - **不用 `/v1/videos/sync`。** vLLM-Omni 的同步路徑要把連線占住好幾分鐘，途中任何代理或用戶端的逾時都會讓它中斷；它和 OpenAI 的 remix 一樣回應 404 `endpoint_not_supported`。
   - **不用 stable-diffusion.cpp 的影片。** 它原生的 `/sdcpp/v1/vid_gen` 也是非同步的，但它產生 WebM、動態 WebP 或 MJPG AVI（沒有 MP4），而且把整段影片以 base64 放在工作的 JSON 裡、留在引擎的記憶體中：不符合同樣的工作模型（每個工作一個 MP4 檔，以 Range 取回並串流）。AMD 與 CPU 上的影片留待之後。
-- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank、語音轉文字、文字轉語音（**Speak**：模型的聲音與格式，附播放器）與圖片（**Image**：提示、部署接受的尺寸、張數，每張圖片附下載連結）、影片（**Video**：提示、部署接受的尺寸與長度、追蹤工作直到做好，然後在頁面上播放並附下載連結，以及這個人之前的影片），以及給公開視覺工作負載用的 **Vision** 分頁（框、點一下或拖一個框得到的遮罩、深度圖；透過 console 自己的路由套用 `/x/` 的規則，1.3）；走同一套路由，以登入的使用者身分
+- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank、語音轉文字、文字轉語音（**Speak**：模型的聲音與格式，附播放器）與圖片（**Image**：提示、部署接受的尺寸、張數，每張圖片附下載連結）、影片（**Video**：提示、部署接受的尺寸與長度、追蹤工作直到做好，然後在頁面上播放並附下載連結，以及這個人之前的影片），以及視覺模型（框、點一下或拖一個框得到的遮罩、深度圖；1.3 則是給公開視覺工作負載用的 **Vision** 分頁）。1.4 起（#100）沒有分頁：一個模型選單列出已就緒的模型，依種類分組，用 Serving 的名稱與圖示，選到的模型開出它那一類的面板；走同一套路由，以登入的使用者身分
   （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。它的雲端設定對 admin 是 `on`，對其他人是
   server 允許的上限；個人的預算適用，沒有 key 的預算。
 - **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；

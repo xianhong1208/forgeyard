@@ -260,7 +260,7 @@ agent；舊版 agent 會試著去拉。
 
 1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。
 2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
-3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground → Vision** 可以用你自己的照片。
+3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground**（選單 *Vision* 底下的模型）可以用你自己的照片。
 
 用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`：
 
@@ -306,9 +306,9 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 ## 在 Playground 試用視覺
 
-**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。在 Playground 的 **Models** 分頁選視覺模型，也會開出同一個面板。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
+Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在 Playground 唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
 
-1. 選 **Model**：每一個都標出任務和模型。還沒有時，分頁會這樣說明；管理員和操作員會看到加入目錄的連結。
+1. 打開 **Model** 選單，在 **Vision** 底下選一個模型：每一個都標出任務。只會列出已就緒的模型；完全沒有時，Playground 會這樣說明，管理員和操作員會看到前往目錄的連結。
 2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。
 3. 接著依任務而定：
    - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。
@@ -395,7 +395,7 @@ media: {inputs: [image, audio, video], files: false}
 
    步數、負面提示和 seed 放在 `extra_body`：
    `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`。
-4. **在 Playground 試試看：** 圖片模型會有一個 **Image** 分頁，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
+4. **在 Playground 試試看：** 圖片模型（選單的 *Images* 底下）會有一個 **Image** 面板，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
 
 **要多久：** 在 A100 上每張幾秒；在 CPU 上要幾分鐘。在一台忙碌的 x86-64 機器上用 16 到 32 個核心量測：Stable Diffusion 1.5、512x512、20 步大約 100 秒；Z-Image-Turbo（Q4_0）8 步在 512x512 大約 2 分鐘，1024x1024 大約 8.5 分鐘。機器較慢或尺寸較大時，在 **Advanced** 調高 *Timeout*。
 
