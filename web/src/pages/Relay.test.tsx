@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe("through the server", () => {
-  it("FY-WEB-340 the words: a download through the server says so, and so does how it ended and the dialog's line", () => {
+  it("FY-WEB-387 the words: a download through the server says so, and so does how it ended and the dialog's line", () => {
     const rep = (download: Replica["download"]) => ({ download }) as Replica;
     expect(downloadText(rep({ phase: "model", done: 0.5 * GIB, total: 1.25 * GIB, via: "server" })))
       .toBe("Downloading the model via the server: 512 MiB of 1.3 GiB");
@@ -74,14 +74,14 @@ describe("through the server", () => {
     expect(targetDetail(target({ via: "server", model_cached: true, need_bytes: 0 }))).toBe("model already here · 48 GiB free");
   });
 
-  it("FY-WEB-341 a machine's page shows its download coming through the server", async () => {
+  it("FY-WEB-388 a machine's page shows its download coming through the server", async () => {
     machinePage(["workloads", "models", "prefetch", "cache_admin", "relay"], "server", [dl()]);
     const bar = await screen.findByRole("progressbar", { name: "Download of qwen3-1.7b-gguf to a100-box" });
     expect(bar.getAttribute("aria-valuenow")).toBe("40");
     expect(screen.getByText("Downloading the model via the server: 512 MiB of 1.3 GiB (40%)")).toBeTruthy();
   });
 
-  it("FY-WEB-342 the Internet access setting says what each choice does; an agent that cannot relay is told to update", async () => {
+  it("FY-WEB-389 the Internet access setting says what each choice does; an agent that cannot relay is told to update", async () => {
     machinePage(["workloads", "models", "prefetch", "cache_admin", "relay"], "auto");
     const section = (await screen.findByRole("heading", { name: /Models in cache/ })).closest("section") as HTMLElement;
     const select = await within(section).findByLabelText("Internet access for downloads") as HTMLSelectElement;
