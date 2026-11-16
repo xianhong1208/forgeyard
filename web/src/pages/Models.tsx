@@ -182,6 +182,8 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
       </td>
       <td data-label="Engines" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
       <td className="cell-actions">
+        {/* One column of actions at desktop widths, so the table never clips them (1.4, #92). */}
+        <div className="catalog-actions" role="group" aria-label={`Actions for ${m.name}`}>
         {canDeploy && m.recipes.length > 0 && <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}`}>Deploy</Link>}
         {canDeploy && m.kind !== "local" && (
           <button type="button" className="btn btn-quiet btn-small" onClick={onDownload}
@@ -189,6 +191,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
         )}
         {canManage && <button type="button" className="btn btn-quiet btn-small" disabled={m.deployments > 0}
           title={m.deployments ? "Deployed: delete its deployments first" : undefined} onClick={() => void remove()}>Remove</button>}
+        </div>
       </td>
     </tr>
     {downloads.length > 0 && (

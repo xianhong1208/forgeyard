@@ -271,8 +271,11 @@ describe("models", () => {
     expect(screen.getByRole("heading", { name: "Catalog" })).toBeTruthy();
     // Download to… and Deploy stay on a catalog row; the engines and sources are on their own tabs.
     const row = screen.getByText("Qwen3 4B").closest("tr")!;
-    expect(within(row).getByRole("link", { name: "Deploy" }).getAttribute("href")).toBe("/serving/deploy?model=qwen3-4b");
-    expect(within(row).getByRole("button", { name: "Download to…" })).toBeTruthy();
+    // The row's actions are one group (stacked in one column at desktop widths, so none is clipped).
+    const actions = within(row).getByRole("group", { name: "Actions for qwen3-4b" });
+    expect(within(actions).getAllByRole("link").concat(within(actions).getAllByRole("button")).map((e) => e.textContent))
+      .toEqual(["Deploy", "Download to…", "Remove"]);
+    expect(within(actions).getByRole("link", { name: "Deploy" }).getAttribute("href")).toBe("/serving/deploy?model=qwen3-4b");
     expect(screen.queryByRole("heading", { name: "Engines" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Sources" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Engines" }));
