@@ -236,7 +236,7 @@ def test_fy_dep_007_custom_recipes(owner):
     assert owner.put("/api/recipes/my-whisper", json={"yaml": text.replace("name: my-whisper", "name: other")}).status_code == 422
     assert owner.delete("/api/recipes/vllm").status_code == 409
     names = [x["name"] for x in owner.get("/api/recipes").json()["recipes"]]
-    assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vllm", "vllm-omni-image", "vllm-omni-tts",
+    assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vision", "vllm", "vllm-omni-image", "vllm-omni-tts",
                      "vllm-omni-video",
                      "vllm-pooling", "my-whisper"]
     seed_catalog()

@@ -10,7 +10,7 @@ import json
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import fetch, gguf, modalities, safetensors, sources
+from forgeyard.models import fetch, gguf, modalities, safetensors, sources, vision
 from forgeyard.models.sources import Source, SourceError
 
 MAX_SHARDS = 256
@@ -302,6 +302,12 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
             config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=4 * 1024**2))
             out["config"] = config_summary(config)
             out["modalities"] = modalities.from_config(config, paths)
+            seen = vision.summary(config) if isinstance(config, dict) else None
+            if seen is not None:
+                # 1.4: an object-detection, SAM 2 or depth model for the vision server.
+                out["vision"] = seen
+                out["task_hint"] = seen["task"]
+                out["modalities"] = []
             if voices_of(config):
                 out["voices"] = voices_of(config)
             if modalities.vision_tile_px(config):

@@ -52,6 +52,11 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              redirects, streaming, a client that hangs up, the body limit, rpm, concurrency, the read
              timeout, the replica's port behind the key guard, usage (bytes, busy time), turning it off; with
              --x-templates, the ready-made templates on the GPU machine (an image in, boxes, masks, depth out)
+  vision     vision models (1.4, scripts/accept_vision.py's checks): RT-DETRv2 R18, SAM 2.1 tiny and Depth
+             Anything V2 Small with the built-in vision recipe, on the GPU machine (the CUDA build) and the
+             detector also on the CPU machine: two cats found in the COCO photo (multipart and JSON), the mask
+             of a square, a 16-bit depth map, the wrong endpoint, no image, no key, a key without the model,
+             the replica's port behind its key
   console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
              and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
 
@@ -2158,6 +2163,63 @@ def group_passthrough(run: Run) -> None:
             continue
         if run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running", replicas_text(w)):
             accept_x.exercise_template(c, run.args.server, w, ts[tid], tcheck, key, True, image, image_name)
+
+
+# ------------------------------------------------------------------ group: vision (1.4)
+# Vision models deployed from Models (#86): the three recommended ones on the GPU machine, and the detector
+# on the CPU machine, with scripts/accept_vision.py's checks.
+VISION_RUNS = (("gpu", "rtdetr-v2-r18"), ("gpu", "sam2.1-hiera-tiny"), ("gpu", "depth-anything-v2-small"),
+               ("cpu", "rtdetr-v2-r18"))
+
+
+@group("vision", "vision models: /v1/vision/detect, segment and depth with the vision recipe, keys, usage")
+def group_vision(run: Run) -> None:
+    sys.path.insert(0, str(HERE))
+    import accept_m3
+    import accept_vision
+
+    accept_m3.TLS = run.tls
+    c = run.admin
+    if "vision" not in {r["name"] for r in c.ok("GET", "/api/models")["recipes"]}:
+        run.skip("vision models", "the server has no vision recipe (older than 1.4)")
+        return
+    image, filename = accept_vision.photo(None)
+    key = run.new_key("vision")["key"]
+    for role, name in VISION_RUNS:
+        m = run.machine(role)
+        if m is None:
+            run.skip(f"{name}: vision on the {role}", f"no --{role}-machine given")
+            continue
+        m = run.fresh_machine(role)
+        spec = accept_vision.MODELS[name]
+        if accept_vision.ensure(c, name, spec):
+            run.cleanup.add(f"catalog entry {name}", _remove_model, c, name)
+        params = {"gpus": 1 if role == "gpu" else 0} | ({"threads": 8} if role == "cpu" else {})
+        got = deploy(run, f"vis-{role}-{spec['task']}", {"model": name, "recipe": "vision", "params": params,
+                                                          "device": role}, m)
+        if not got:
+            continue
+        d0 = got["deployment"]
+
+        def poll(dep_id=d0["id"]):
+            ready, text, _ = deployment_state(run, dep_id)
+            return ready, text
+
+        try:
+            run.wait(d0["name"], poll, run.args.timeout, every=5)
+        except Fail as e:
+            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            continue
+        run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
+        d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
+        report: dict = {}
+        other = accept_vision.other_model(c, d["name"])
+        narrow = run.new_key(f"vision-narrow-{role}-{spec['task']}", models=[other])["key"] if other else None
+        accept_vision.exercise(run.args.server, d, d["name"], spec, lambda label, ok, detail="", info=False:
+                               run.skip(label, f"information: {detail}") if info else run.check(label, ok, detail),
+                               key, narrow, image, filename, report)
+        run.report.info.setdefault("vision", {})[d["name"]] = report.get(d["name"])
+        _delete_deployment(c, d0["id"])
 
 
 @group("console", "the web console in a browser, as an admin and as a plain user")

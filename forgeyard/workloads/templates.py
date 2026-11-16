@@ -19,12 +19,13 @@ from typing import Optional
 
 from forgeyard import __version__
 from forgeyard.install import images
+from forgeyard.models import vision as vision_models
 from forgeyard.workloads.spec import WorkloadSpec
 
 MODELS_FILE = Path(__file__).resolve().parents[2] / "images" / "vision" / "models.json"
 PORT = 8000
 GPU_VRAM = "3Gi"       # what one replica reserves on a shared card (the models need well under 2 GiB)
-PERMISSIVE = ("apache-2.0", "mit", "bsd-3-clause", "bsd-2-clause")
+PERMISSIVE = vision_models.PERMISSIVE   # the licences vision models are taken with (1.4: also the catalog's)
 
 
 @dataclass(frozen=True)

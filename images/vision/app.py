@@ -1,22 +1,37 @@
-"""Forgeyard's vision server: one small HTTP API per task, for the ready-made workload templates exposed
-at /x/<name> (1.3). Each model is baked into the image at a pinned revision (models.json), so it starts
-without the network.
+"""Forgeyard's vision server: one small HTTP API per task (object detection, segmentation, depth). Two ways
+to run it:
 
-    python app.py --task detect|segment|depth [--host 0.0.0.0] [--port 8000] [--models /models]
+- **A model from the machine's model cache (1.4, the built-in `vision` recipe):** `--model <dir>` is a
+  transformers model directory (config.json, safetensors weights, the preprocessor's config), mounted
+  read-only by the agent; any `AutoModelForObjectDetection` (RT-DETR, D-FINE, DETR without timm, …),
+  SAM 2 / 2.1 (`Sam2Model`) or `AutoModelForDepthEstimation` (Depth Anything, DPT, …) model. The
+  gateway reaches it at /v1/vision/<task> by the deployment's model name.
+- **A model baked into the image (1.3, the workload templates exposed at /x/<name>):** without `--model`,
+  the task's model of models.json, fetched at a pinned revision when the image was built, so it starts
+  without the network.
+
+    python app.py --task detect|segment|depth [--model DIR --served-name NAME] [--host 0.0.0.0] [--port 8000]
+                  [--models /models] [--device cpu|cuda]
 
 Endpoints (JSON; an image is sent as a multipart file `image`, or as JSON {"image": "<base64 or data: URI>"}):
 
-    GET  /health        200 once the model is loaded
-    GET  /              the task, the model, its licence and revision, the device, the endpoints
-    POST /v1/detect     detect: {"detections": [{"label", "score", "box": [x0, y0, x1, y1]}], "width", "height"}
-                        options: threshold (0.5), max_detections (100)
-    POST /v1/segment    segment: a point ("points": [[x, y]], "labels": [1]) or a box ("box": [x0, y0, x1, y1]);
-                        {"masks": [{"score", "box", "area", "png"}]}: each mask a 1-bit PNG, base64
-    POST /v1/depth      depth: {"depth_png": <16-bit PNG, base64, near = bright>, "min", "max", "width", "height"}
-                        relative depth (Depth Anything V2 Small), not metres
+    GET  /health               200 once the model is loaded (never needs the key)
+    GET  /                     the task, the model, its licence and revision (baked models), the device, the endpoints
+    POST /v1/vision/detect     detect: {"detections": [{"label", "score", "box": [x0, y0, x1, y1]}], "width", "height"}
+    POST /v1/detect            options: threshold (0.5), max_detections (100)
+    POST /v1/vision/segment    segment: a point ("points": [[x, y]], "labels": [1]) or a box ("box": [x0, y0, x1, y1]);
+    POST /v1/segment           {"masks": [{"score", "box", "area", "png"}]}: each mask a 1-bit PNG, base64
+    POST /v1/vision/depth      depth: {"depth_png": <16-bit PNG, base64, near = bright>, "min", "max", "width", "height"}
+    POST /v1/depth             relative depth (Depth Anything V2), not metres
 
-Every answer carries "model", "revision" and "ms". Errors: {"error": {"message", "code"}} with 400 (a bad
-image or option), 413 (more than MAX_IMAGE_MB) or 500.
+Only the started task's two paths answer (404 for the others). Every answer carries "model" (the served
+name, or the baked model's repository), "ms", and for a baked model "revision". Errors:
+{"error": {"message", "code"}} with 400 (a bad image or option), 401 (a missing or wrong key), 413 (more
+than MAX_IMAGE_MB) or 500.
+
+**The key (1.4):** with VISION_API_KEY set (Forgeyard sets a random one per replica), every path but
+/health needs `Authorization: Bearer <that key>`, compared in constant time; without it, nothing is asked
+(the 1.3 templates, behind the agent's key guard). VISION_THREADS caps torch's CPU threads.
 """
 
 from __future__ import annotations
@@ -24,6 +39,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hmac
 import io
 import json
 import os
@@ -42,6 +58,10 @@ MODELS = json.loads((HERE / "models.json").read_text())
 MAX_IMAGE_MB = int(os.environ.get("MAX_IMAGE_MB", "20"))
 MAX_PIXELS = 40_000_000
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+
+
+TASK_NAMES = ("detect", "segment", "depth")
+SEGMENT_TYPES = ("sam2", "sam2_video")
 
 
 class Refused(Exception):
@@ -219,16 +239,61 @@ class Depth(Task):
 TASKS = {"detect": Detect, "segment": Segment, "depth": Depth}
 
 
+def task_of(config: dict) -> str | None:
+    """The task a transformers config.json is for (the same rule as Forgeyard's inspector,
+    forgeyard/models/vision.py): an ...ForObjectDetection or ...ForDepthEstimation architecture, or SAM 2."""
+    archs = [a for a in config.get("architectures") or [] if isinstance(a, str)]
+    if config.get("model_type") in SEGMENT_TYPES or any(a.startswith("Sam2") for a in archs):
+        return "segment"
+    if any(a.endswith("ForObjectDetection") for a in archs):
+        return "detect"
+    if any(a.endswith("ForDepthEstimation") for a in archs):
+        return "depth"
+    return None
+
+
+def check_model_dir(task: str, model_dir: Path) -> None:
+    """Refuse to start (SystemExit, with why) on a directory that is not a model for `task`."""
+    try:
+        config = json.loads((model_dir / "config.json").read_text())
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"{model_dir}: no readable config.json ({e})") from None
+    found = task_of(config if isinstance(config, dict) else {})
+    if found != task:
+        what = f"a {found} model" if found else "not a detection, SAM 2 or depth model"
+        raise SystemExit(f"{model_dir} is {what} (architectures {config.get('architectures')}), not one for {task}.")
+
+
 # ------------------------------------------------------------------ the app
-def create_app(task: str, models_dir: Path, device: str) -> FastAPI:
-    info = MODELS[task]
-    model_dir = models_dir / info["dir"]
+def create_app(task: str, models_dir: Path, device: str, *, model_dir: Path | None = None,
+               served_name: str | None = None, api_key: str | None = None, worker: Task | None = None) -> FastAPI:
+    """The app for one task: the baked model of models.json, or (`model_dir`) a model of the model cache,
+    answered as `served_name`. `worker`: an already loaded model (tests)."""
+    if model_dir is None:
+        info = MODELS[task]
+        model_dir = models_dir / info["dir"]
+        named = {"model": info["repo"], "revision": info["revision"]}
+        about = {"task": task, **named, "licence": info["licence"]}
+    else:
+        named = {"model": served_name or model_dir.name}
+        about = {"task": task, **named, "source": "model cache"}
     t0 = time.monotonic()
-    worker = TASKS[task](model_dir, device)
+    worker = worker or TASKS[task](model_dir, device)
     loaded_s = round(time.monotonic() - t0, 1)
     app = FastAPI(title=f"Forgeyard vision: {task}", docs_url=None, redoc_url=None, openapi_url=None)
-    about = {"task": task, "model": info["repo"], "revision": info["revision"], "licence": info["licence"],
-             "device": device, "endpoint": f"/v1/{task}", "loaded_s": loaded_s}
+    about.update(device=device, endpoints=[f"/v1/vision/{task}", f"/v1/{task}"], loaded_s=loaded_s)
+    want = f"Bearer {api_key}".encode() if api_key else None
+
+    @app.middleware("http")
+    async def _key(request: Request, call_next):
+        # Every path but /health needs the replica's key when one is set (1.4): its port then answers only
+        # the gateway, even without the agent's key guard in front.
+        if want is not None and request.url.path != "/health":
+            got = (request.headers.get("authorization") or "").encode()
+            if not hmac.compare_digest(got, want):
+                return JSONResponse({"error": {"message": "A valid API key is needed.", "code": "invalid_api_key"}},
+                                    status_code=401)
+        return await call_next(request)
 
     @app.exception_handler(Refused)
     async def _refused(_request, e: Refused):
@@ -242,6 +307,7 @@ def create_app(task: str, models_dir: Path, device: str) -> FastAPI:
     def root():
         return about
 
+    @app.post(f"/v1/vision/{task}")
     @app.post(f"/v1/{task}")
     async def run(request: Request):
         img, fields = await read_request(request)
@@ -256,8 +322,8 @@ def create_app(task: str, models_dir: Path, device: str) -> FastAPI:
         from starlette.concurrency import run_in_threadpool
 
         out = await run_in_threadpool(call)
-        return {"model": info["repo"], "revision": info["revision"], "width": img.width, "height": img.height,
-                **out, "ms": round((time.monotonic() - start) * 1000, 1)}
+        return {**named, "width": img.width, "height": img.height, **out,
+                "ms": round((time.monotonic() - start) * 1000, 1)}
 
     return app
 
@@ -268,13 +334,19 @@ def main() -> None:
     ap.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     ap.add_argument("--models", default=os.environ.get("VISION_MODELS", "/models"), help="where models.json's models are")
+    ap.add_argument("--model", default=None, help="a model directory (the model cache) instead of the baked model")
+    ap.add_argument("--served-name", default=None, help="the model's name in answers (with --model)")
     ap.add_argument("--device", default=os.environ.get("VISION_DEVICE", ""), help="cpu or cuda (default: cuda when present)")
     args = ap.parse_args()
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     threads = os.environ.get("VISION_THREADS")
-    if threads:
+    if threads and threads.isdigit() and int(threads) > 0:
         torch.set_num_threads(int(threads))
-    app = create_app(args.task, Path(args.models), device)
+    model_dir = Path(args.model) if args.model else None
+    if model_dir is not None:
+        check_model_dir(args.task, model_dir)
+    app = create_app(args.task, Path(args.models), device, model_dir=model_dir, served_name=args.served_name,
+                     api_key=os.environ.get("VISION_API_KEY") or None)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info", access_log=False)
 
 

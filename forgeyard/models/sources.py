@@ -418,6 +418,8 @@ TASK_FROM_PIPELINE = {
     "text-to-speech": "tts",
     "text-to-image": "image",
     "text-to-video": "video",
+    # 1.4, vision models (forgeyard/models/vision.py)
+    "object-detection": "detect", "mask-generation": "segment", "depth-estimation": "depth",
 }
 
 

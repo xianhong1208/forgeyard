@@ -318,10 +318,12 @@ def test_fy_off_013_the_agent_keeps_the_ids_with_the_replica(tmp_path):
 def test_fy_off_014_every_builtin_image_has_recorded_ids_and_nothing_else_does():
     """FY-OFF-014: the lock covers each built-in container image, under its exact pinned reference,
     with linux/amd64 among its platforms, and has no entry that no recipe uses (pin_images --write
-    makes it so; its check mode compares it with the registry)."""
+    makes it so; its check mode compares it with the registry). Forgeyard's own images (1.4, forgeyard_image)
+    are named by the server's version, not pinned, so they have none."""
     from forgeyard.models import recipes
 
-    used = {v.image for r, _ in recipes.builtin_recipes().values() for v in r.variants if v.runtime == "container"}
+    used = {v.image for r, _ in recipes.builtin_recipes().values() for v in r.variants
+            if v.runtime == "container" and v.forgeyard_image is None}
     lock = committed_lock()
     assert set(lock) == used
     for image, entry in lock.items():

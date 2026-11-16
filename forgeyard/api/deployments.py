@@ -13,6 +13,7 @@ Each replica goes back to the machine it ran on when that machine still takes it
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import urllib.error
@@ -34,7 +35,7 @@ from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, N
 from forgeyard.gateway import imagegen, proxy
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
-from forgeyard.models import catalog, modalities, routes, scheduler
+from forgeyard.models import catalog, modalities, routes, scheduler, vision
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -605,6 +606,7 @@ def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None
         return status, text[:4000]
 
 
+VISION_TRY = {api: task for task, api in vision.API.items()}
 SPEECH_CTYPE = "application/json; tts"   # marks the speech test request (sent as plain application/json)
 IMAGE_CTYPE = "application/json; image"  # and the image one (1.3)
 TRY_IMAGE_SIZE = 256                       # small, so a CPU answers within the time a test waits
@@ -613,6 +615,13 @@ TRY_IMAGE_SIZE = 256                       # small, so a CPU answers within the 
 def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[str] = None,
                 draws: Optional[imagegen.Draws] = None) -> tuple[str, bytes, str]:
     """(path, body, content type) of a small request in the route's protocol."""
+    if api in VISION_TRY:
+        # 1.4: the test image (two squares); for SAM 2, the box around the red one.
+        task = VISION_TRY[api]
+        body: dict = {"model": upstream, "image": base64.b64encode(vision.test_png()).decode("ascii")}
+        if task == "segment":
+            body["box"] = vision.TEST_BOX
+        return f"/v1/vision/{task}", json.dumps(body).encode(), "application/json"
     if api == "openai-images":
         # One small image, in the request shape this engine takes.
         side = TRY_IMAGE_SIZE if draws is None else max(draws.multiple, TRY_IMAGE_SIZE // draws.multiple * draws.multiple)
@@ -699,6 +708,8 @@ def summarise(api: str, answer) -> str:
             fmt = (answer.get("format") or "image").upper()
             return (f"{answer.get('images', 0)} image ({answer.get('width')}x{answer.get('height')} {fmt}, "
                     f"{answer.get('bytes', 0) / 1024:.0f} KiB)")
+        if api in VISION_TRY:
+            return vision.summarise(VISION_TRY[api], answer)
         if api == "openai-speech":
             ms = answer.get("audio_ms")
             return (f"{ms / 1000:.1f} s of audio" if ms else "audio of unknown length") + \
@@ -732,8 +743,15 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)
+    request = json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE) \
+        else {"model": upstream, "file": CLIP.name}
+    if route.api in VISION_TRY:
+        request["image"] = "<the test image: 256x192 PNG, base64>"
+        if isinstance(answer, dict):   # masks and depth maps are PNGs in base64: not shown
+            answer = {k: v for k, v in answer.items() if k != "depth_png"}
+            if isinstance(answer.get("masks"), list):
+                answer["masks"] = [{k: v for k, v in m.items() if k != "png"} for m in answer["masks"] if isinstance(m, dict)]
     return {"status": status, "ok": 200 <= status < 300, "api": route.api, "endpoint": target["url"] + path.lstrip("/"),
-            "request": json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE)
-            else {"model": upstream, "file": CLIP.name},
+            "request": request,
             "summary": summarise(route.api, answer) if 200 <= status < 300 else str(answer)[:500],
             "answer": answer if isinstance(answer, dict) else None, "ms": ms}
