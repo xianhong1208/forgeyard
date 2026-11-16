@@ -10,7 +10,7 @@ from sqlalchemy.orm import close_all_sessions
 from fastapi.testclient import TestClient
 
 from forgeyard.agent import config as agent_config
-from forgeyard.config import get_settings
+from forgeyard.config import REMOVED, Settings, get_settings
 from forgeyard.db import reset_engine
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.budgets import ledger
@@ -79,17 +79,24 @@ def no_process_left_by_the_test(tmp_path):
         pytest.fail(f"The test left processes running (killed now): {leaks.describe(found)}", pytrace=False)
 
 
+def fast_heartbeat(monkeypatch) -> None:
+    """Agents in this test beat every second (the shortest real heartbeat is 2 s, a third of
+    AGENT_OFFLINE_SECONDS), while machines still go offline after the usual 30 s."""
+    monkeypatch.setattr(Settings, "heartbeat_seconds", property(lambda _self: 1))
+
+
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Each test gets its own data dir (SQLite + secrets file) and fresh settings."""
     for key in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "FORGEYARD_SETUP_TOKEN", "DATABASE_URL", "PUBLIC_URL",
                 "ALLOWED_HOSTS", "TRUSTED_PROXIES", "REGISTRATION", "RATE_LIMIT_PER_MINUTE", "TLS", "TLS_CERT_FILE",
-                "TLS_KEY_FILE", "TLS_CA_FILE", "TLS_EXTRA_NAMES", "SECRET_KEY_FILE", "FORGEYARD_SECRET_KEY_FILE",
-                "AGENT_HEARTBEAT_SECONDS", crypto.KEY_ENV):
+                "TLS_KEY_FILE", "TLS_CA_FILE", "TLS_EXTRA_NAMES", "FORGEYARD_SECRET_KEY_FILE", "AGENT_OFFLINE_SECONDS",
+                crypto.KEY_ENV, *REMOVED):
+        # The settings removed in 1.4 too: set on this machine, they would be reported (and
+        # SECRET_KEY_FILE could stop the start).
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    # The setup token, where the server keeps the one it generates (FORGEYARD_SETUP_TOKEN, which used
-    # to pin it, is deprecated).
+    # The setup token, where the server keeps the one it generates.
     (tmp_path / "data").mkdir(exist_ok=True)
     secrets_file = tmp_path / "data" / "secrets.json"
     secrets_file.write_text(json.dumps({"SETUP_TOKEN": SETUP_TOKEN}))

@@ -10,6 +10,7 @@ import pytest
 from alembic import command
 from sqlalchemy import text
 
+from forgeyard.api import prices as prices_api
 from forgeyard.config import get_settings
 from forgeyard.db import ProviderModel, get_engine, new_session
 from forgeyard.gateway import egress, pricing
@@ -267,7 +268,7 @@ def catalog(owner, monkeypatch):
         or_model("meta/llama-x", "0.0000001", "0.0000002"),
         or_model("openrouter/auto", "-1", "-1"),
     ])
-    monkeypatch.setenv("OPENROUTER_MODELS_URL", cat.url)
+    monkeypatch.setattr(prices_api, "OPENROUTER_MODELS_URL", cat.url)
     get_settings.cache_clear()
     egress.reset()
     cloud = FakeCloud("stub")

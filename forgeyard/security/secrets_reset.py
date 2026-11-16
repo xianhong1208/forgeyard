@@ -51,6 +51,7 @@ class NothingToReset(Exception):
 
 def reset() -> dict:
     now = dt.datetime.now(dt.timezone.utc)
+    crypto.check_old_key_file()  # a key named by the removed SECRET_KEY_FILE is not lost: never reset it
     path = crypto.key_path()
     with get_engine().connect() as conn:
         kid = crypto.recorded_kid(conn)

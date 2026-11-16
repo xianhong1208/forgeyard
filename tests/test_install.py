@@ -25,7 +25,7 @@ from forgeyard.agent.inventory import SIMULATION_ENV
 from forgeyard.config import get_settings
 from forgeyard.install import commands, images, wheel
 from forgeyard.security import tls
-from tests.conftest import OWNER, SETUP_TOKEN, make_client
+from tests.conftest import OWNER, SETUP_TOKEN, fast_heartbeat, make_client
 from tests.tls_helpers import LiveTLS, ca_of, free_port, https
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -217,7 +217,7 @@ def _python_313() -> bool:
 @pytest.fixture()
 def live(monkeypatch, tmp_path):
     monkeypatch.setenv(SIMULATION_ENV, "1")
-    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    fast_heartbeat(monkeypatch)
     port = free_port()
     monkeypatch.setenv("HOST", "127.0.0.1")
     monkeypatch.setenv("PORT", str(port))

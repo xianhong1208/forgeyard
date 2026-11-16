@@ -475,9 +475,11 @@ def _secrets_cmd(args) -> int:
                   "tokens (enter them again), model replicas' keys (they restart with new ones) and workload "
                   "environment values (emptied). Stop the server first, then run it again with --yes.")
         return 2
+    from forgeyard.security.crypto import SecretKeyError
+
     try:
         report = secrets_reset.reset()
-    except secrets_reset.NothingToReset as e:
+    except (secrets_reset.NothingToReset, SecretKeyError) as e:
         log.error("%s", e)
         return 2
     log.info("New secret key %s in %s. %s", report["kid"], report["key_file"], report["summary"])
