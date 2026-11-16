@@ -386,33 +386,38 @@ class ContainerRuntime:
         spec = WorkloadSpec.model_validate(rec.spec)
         rt = spec.runtime
         assert isinstance(rt, ContainerSpec)
-        image = rt.image
-        target, found = choose_image(image, rec.image_ids, self._image)
-        self._chosen[rec.id] = (target, found)
+        try:
+            self._chosen[rec.id] = self.ensure_image(rt.image, rec.image_ids, progress, cancel,
+                                                     who=f"replica {rec.id[:12]} of {rec.workload}")
+        except (StartError, pulling.PullCancelled):
+            self._chosen.pop(rec.id, None)
+            raise
+
+    def ensure_image(self, image: str, check: Optional[dict], progress: Optional[pulling.Report] = None,
+                     cancel: Optional[threading.Event] = None, *, who: str = "a download") -> tuple[str, str]:
+        """The image on this machine, pulled when it is not local; (what to run, what was found). Also what
+        "Download to…" (1.4) fetches an engine image with, starting nothing. Raises StartError or
+        pull.PullCancelled."""
+        if not self._info.get("ok"):
+            raise StartError(f"no container engine: {self._info.get('reason') or 'not available'}")
+        target, found = choose_image(image, check, self._image)
         pinned = tag_of(image) is not None
         if found == LOADED or (found == PINNED and (pinned or self._image(image) is not None)):
-            return  # local: the pinned digest, a loaded copy that matches, or a tag-only image
+            return target, found  # local: the pinned digest, a loaded copy that matches, or a tag-only image
         engine = Path(self.engine).name
-        log.info("Pulling %s for replica %s of %s.", image, rec.id[:12], rec.workload)
+        log.info("Pulling %s for %s.", image, who)
         try:
             self._pull(image, progress, cancel)
         except pulling.PullStalled as e:
-            self._chosen.pop(rec.id, None)
             raise StartError(str(e)[:300]) from None  # it was reaching the registry: no offline advice
         except pulling.PullError as e:
-            self._chosen.pop(rec.id, None)
             if pinned:
                 raise StartError(pull_failed_reason(engine, image, found, str(e))) from None
             raise StartError(f"{engine} could not pull {image}: {e}"[:300]) from None
-        except pulling.PullCancelled:
-            self._chosen.pop(rec.id, None)
-            raise
         if pinned and self._image(digest_ref(image)) is None:
-            self._chosen.pop(rec.id, None)
             raise StartError(f"the pull of {image} finished, but {engine} does not show the pinned digest")
-        if pinned:
-            self._chosen[rec.id] = (image, PINNED)
         log.info("Pulled %s.", image)
+        return (image, PINNED) if pinned else (target, found)
 
     def _pull(self, image: str, progress: Optional[pulling.Report], cancel: Optional[threading.Event]) -> None:
         """Through the engine API when it answers; else (or when the registry wants credentials the

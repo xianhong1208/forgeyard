@@ -862,6 +862,57 @@ Each removal is audited as `model.cache_removed` with the machine, the key, the 
 lists its cache with sizes, removes on request, and refuses while a replica there uses the files or
 while one of their downloads runs.
 
+## Download a model ahead through the API
+
+For a console session, like the other `/api` requests (writes also send the `X-Forgeyard: 1`
+header). Everyone signed in can look; admins and operators start and cancel downloads.
+
+| Request | What it does |
+|---|---|
+| `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | Each machine, and whether it can take this model (and the recipe's engine) |
+| `POST /api/downloads` with `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | Starts a download on each machine that can take it; `engine` is on by default, and `recipe` defaults to the first recipe that serves the model |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>` | The downloads under way first, then the finished ones (the last 100) |
+| `POST /api/downloads/{id}/cancel` | Cancels one under way; its agent stops it at once and keeps what is on disk |
+| `PUT /api/machines/{id}/fetch-via` with `{"fetch_via": "auto"}` | Admins only: how that machine reaches the internet for downloads, `auto`, `server` or `direct` (kept for the relay through the server, which comes later; every machine downloads directly until then) |
+
+Each machine in `targets` has a `state`: `ok`, `cached` (already there), `downloading`, `too_old` (an
+agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB margin is more than the
+cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
+the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
+when no variant of the recipe runs there. The variant is the one the machine would run: a GPU variant
+when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
+
+A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
+`state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
+shape as a deployment replica's), `reason`, `via` (`direct` until the relay comes), `requested_by`,
+`created_at`, `finished_at` and `waiting` (the machine is offline). Finished ones are kept 30 days, at
+most 20 per machine.
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `nothing_to_download` | No machine can take it; `skipped` lists each with its `state` and `reason` |
+| 409 | `download_finished` | Cancel of a download that already ended |
+| 422 | `local_model` | A local model is a directory on the machines: there is nothing to download |
+| 422 | `recipe_not_compatible`, `bad_fetch_via` | The recipe does not serve the model; a `fetch_via` that is not one of the three |
+| 404 | `not_found` | No such model, machine or download |
+| 403 | | Not an admin or an operator (not an admin, for `fetch-via`) |
+
+Audit events: `model.download_requested` (one per machine, with the model and the engine),
+`model.download_cancelled`, `node.fetch_via_changed`, and `model.checksum_recorded` when the SHA-256 of
+a URL model is recorded: a single GGUF file from a URL has no published checksum, so the first one an
+agent computes after a complete download is kept in the catalog entry (`files[0].sha256` of the model's
+metadata, with `sha256_from`, the machine, and `sha256_at`), and every later download must match it. A
+different one reported later is logged and never replaces it.
+
+Behind it is the agent protocol feature `prefetch` (agents and servers from 1.4). The server lists each
+queued or downloading row in `desired.downloads`, beside the replicas: `{id, model, engine?, image?,
+image_ids?}` (a Hugging Face model's block carries the server's token for gated repositories, kept in
+memory only, as for replicas). The agent fetches it with the code a replica's download uses (the same
+locks, resume from partial files, checksums and cancel; an image with the pull progress of 1.3.1),
+starts nothing, runs at most two at a time and reports `status.downloads` (`{id, state, reason,
+download}`); a download missing from the next list is cancelled. Migration `0015` adds the table
+`model_downloads` and the column `nodes.fetch_via` (`auto` for every existing machine).
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and

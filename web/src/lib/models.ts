@@ -1,5 +1,8 @@
 import { bytes } from "./machines";
-import type { CatalogModel, Deployment, Medium, Recipe, Replica, Task } from "./types";
+import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task } from "./types";
+
+// Anything with a download in progress: a replica (M3, 1.3.1) or a download ahead of a deployment (1.4).
+type WithDownload = { download?: DownloadProgress | null };
 
 export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video" };
 
@@ -28,14 +31,14 @@ export function params(n: number | undefined): string {
 }
 
 // "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar (never past the end).
-export function downloadFraction(r: Replica): number | null {
+export function downloadFraction(r: WithDownload): number | null {
   const d = r.download;
   if (!d || !d.total) return null;
   return Math.max(0, Math.min(1, d.done / d.total));
 }
 
 // What the bar says: a model or engine download, or an image pull (1.3.1). Never more than the total.
-export function downloadText(r: Replica): string | null {
+export function downloadText(r: WithDownload): string | null {
   const d = r.download;
   if (!d) return null;
   const done = d.total ? Math.min(d.done, d.total) : d.done;

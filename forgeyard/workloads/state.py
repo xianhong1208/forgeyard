@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session as DbSession
 from forgeyard import __version__
 from forgeyard.db import Deployment, Node, Replica, Workload, WorkloadEvent, as_utc, utcnow
 from forgeyard.machines.messages import StatusIn
-from forgeyard.machines.protocol import (FEATURE_IMAGE_IDS, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_REPLICA_KEYS,
-                                         PROTOCOL_VERSION)
+from forgeyard.machines.protocol import (FEATURE_IMAGE_IDS, FEATURE_MODELS, FEATURE_PREFETCH, FEATURE_REPLICA_GUARD,
+                                         FEATURE_REPLICA_KEYS, PROTOCOL_VERSION)
 from forgeyard.workloads import expose, images
 
 MAX_EVENTS = 300
@@ -121,7 +121,7 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
                 recipe = get_recipe(db, dep.recipe)
                 key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None
     can_expose = expose.can_guard(node)
-    return {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
+    out = {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
             "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id),
                                          key_env=key_envs.get(r.workload_id), guard=guard,
                                          image_ids=image_ids,
@@ -129,6 +129,12 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
                                          # exposed stays guarded (and stripped) until it restarts.
                                          exposed=can_expose and r.workload.runtime != "model" and bool(r.secret))
                          for r in reps]}
+    if node is not None and FEATURE_PREFETCH in features:
+        from forgeyard.models import prefetch
+
+        # 1.4: downloads ahead of a deployment, beside the replicas (an agent without "prefetch" gets none).
+        out["downloads"] = prefetch.desired(db, node)
+    return out
 
 
 # ------------------------------------------------------------------ status from the agent
@@ -156,12 +162,15 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
     """Record what the agent reports. Only replicas placed on *this* machine and of the current
     generation are touched: an agent can never change another machine's replicas. Returns True
     when the desired state of this machine changed (a replica finished, or, 1.4, was taken off this
-    machine because it could not fetch what it needs here)."""
+    machine because it could not fetch what it needs here, or a download ahead of a deployment ended)."""
     rows = {r.uid: r for r in db.scalars(select(Replica).where(Replica.node_id == node.id)).all()}
-    desired_changed = False
     now = utcnow()
+    from forgeyard.models import prefetch
+
     if msg.model_cache is not None:
-        node.model_cache = dict(msg.model_cache)
+        prefetch.store_cache(db, node, msg.model_cache)
+    # 1.4: downloads ahead of a deployment; one that finished leaves the desired list.
+    desired_changed = prefetch.apply_status(db, node, msg.downloads)
     for st in msg.replicas:
         r = rows.get(st.id)
         if r is None or st.generation != r.generation:

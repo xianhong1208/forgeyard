@@ -156,7 +156,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
         )}
       </section>
 
-      {m.status !== "revoked" && <ModelCacheSection m={m} poll={POLL_MS} onChanged={onChanged} onError={onError} />}
+      {m.status !== "revoked" && <ModelCacheSection m={m} poll={POLL_MS} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
       {m.status !== "revoked" && <GpuAccess m={m} canManage={canManage} onChanged={onChanged} onError={onError} />}
 

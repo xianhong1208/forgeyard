@@ -1205,6 +1205,40 @@ It makes a new key and drops what the old one encrypted: set the server's Huggin
 (and any deployment's own), model replicas restart with new internal keys, and apps with lost
 environment values have to be created again (their events say so).
 
+## Download a model before deploying it
+
+**Download to…** puts a model, and by default its engine, into the model cache of the machines you
+choose now, so a deployment there starts without waiting for the download. Nothing is started.
+Admins and operators can do it.
+
+1. Open **Models → Library**, and click **Download to…** on the model's row. Or open a machine's
+   page and click **Download a model here…** above **Models in cache**, then pick the model.
+2. Tick the machines. Each line says whether that machine can take it:
+   - **fits**: how much it downloads, the free disk, and the engine it would fetch;
+   - **already here**: the model (and the engine) is in that machine's cache;
+   - **downloading**: a download of this model is already under way there;
+   - **offline**, **no model cache**, **not enough disk** (the model plus a 1 GiB margin);
+   - **update the agent**: an agent older than 1.4 cannot download ahead.
+3. **Also the engine, for the recipe** is on by default. For the recipe you choose (the first one
+   that serves the model, as on the deploy page), it fetches what that machine would run: the engine
+   archive of a process variant, or the image of a container variant, pulled as a deployment pulls
+   it. Untick it to download the model only.
+4. Click **Download to N machines**.
+
+The progress shows under the model's row in the Library and on each machine's page, with the same
+words and bar as a deployment's download. **Cancel** stops it at once on that machine; what is on
+disk is kept, and **Download to…** again goes on from there. A download on a machine that goes
+offline waits and goes on when its agent is back. When it is done, the machine's **Models in cache**
+lists the model, and placement prefers that machine for a deployment of it.
+
+Each request and each cancel is in the audit log (`model.download_requested`,
+`model.download_cancelled`). A single GGUF file from a URL has no published checksum: its SHA-256 is
+recorded after its first complete download, and every later download must match it
+(`model.checksum_recorded`). The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
+
+**Internet access for downloads** on a machine's page (admins) is kept for the relay through the
+server, which comes in a later 1.4 update; until then every machine downloads directly.
+
 ## Free disk space on a machine
 
 A machine's page lists **Models in cache**: what its agent has downloaded, with sizes. Each Hugging

@@ -3,18 +3,20 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
+import { DownloadDialog, DownloadList } from "../components/DownloadTo";
 import { KindMark, ModelKindIcon } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
+import { isActive, recentDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
 import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
 import { FALLBACK_ANCHOR, fallbackProviders, routeHome } from "../lib/routing";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelSources, Recipe, RecipeVariant, RouteInfo, RoutesResponse } from "../lib/types";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, DownloadsResponse, Machine, MachinesResponse, ModelDownload, ModelSources, Recipe, RecipeVariant, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATUS_TONE, stateLabel } from "../lib/workloads";
 import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
@@ -214,11 +216,28 @@ function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machin
   );
 }
 
+// 1.4: the downloads ahead of a deployment ("Download to…"), polled while one is under way.
+const DOWNLOADS_POLL_MS = 2000;
+
 function Catalog({ data, error, reload }: { data: CatalogResponse | null; error: string | null; reload: () => void }) {
+  const dl = useApi<DownloadsResponse>("/downloads");
+  const [dialog, setDialog] = useState<CatalogModel | null>(null);
+  const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const running = (dl.data?.downloads ?? []).some(isActive);
+  const reloadDl = dl.reload;
+  useEffect(() => {
+    if (!running) return;
+    const t = window.setInterval(() => { if (document.visibilityState !== "hidden") reloadDl(); }, DOWNLOADS_POLL_MS);
+    return () => window.clearInterval(t);
+  }, [running, reloadDl]);
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!data) return <p className="muted">Loading…</p>;
+  const byModel = (id: number): ModelDownload[] => recentDownloads((dl.data?.downloads ?? []).filter((d) => d.model?.id === id), "machine");
+  const said = (tone: "ok" | "error") => (text: string) => { setNote({ tone, text }); reloadDl(); };
   return (
     <>
+      {note && <Notice tone={note.tone}>{note.text}</Notice>}
+      {dialog && <DownloadDialog model={dialog} onClose={() => setDialog(null)} onStarted={said("ok")} />}
       {data.can_manage && <AddModel onAdded={reload} empty={data.models.length === 0} />}
       <section className="panel" aria-labelledby="catalog-title">
         <div className="panel-head"><h2 id="catalog-title">Catalog</h2><span className="muted small">{data.models.length} model{data.models.length === 1 ? "" : "s"}</span></div>
@@ -230,7 +249,10 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
           <div className="table-wrap catalog-wrap">
             <table className="table catalog-table">
               <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Recipes</th><th /></tr></thead>
-              <tbody>{data.models.map((m) => <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload} />)}</tbody>
+              <tbody>{data.models.map((m) => (
+                <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload}
+                  downloads={byModel(m.id)} onDownload={() => setDialog(m)} onChanged={said("ok")} onError={said("error")} />
+              ))}</tbody>
             </table>
           </div>
         )}
@@ -245,7 +267,10 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
   );
 }
 
-function ModelRow({ m, canManage, canDeploy, reload }: { m: CatalogModel; canManage: boolean; canDeploy: boolean; reload: () => void }) {
+function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onChanged, onError }: {
+  m: CatalogModel; canManage: boolean; canDeploy: boolean; reload: () => void; downloads: ModelDownload[];
+  onDownload: () => void; onChanged: (text: string) => void; onError: (text: string) => void;
+}) {
   const [error, setError] = useState<string | null>(null);
   const remove = async () => {
     if (!window.confirm(`Remove ${m.name} from the catalog? Machines keep their cached copy.`)) return;
@@ -257,7 +282,8 @@ function ModelRow({ m, canManage, canDeploy, reload }: { m: CatalogModel; canMan
     }
   };
   return (
-    <tr>
+    <>
+    <tr className={downloads.length ? "has-dl" : undefined}>
       <td data-label="Model">
         <div className="cell-stack">
         <div className="strong">{m.title ?? m.name}</div>
@@ -289,10 +315,22 @@ function ModelRow({ m, canManage, canDeploy, reload }: { m: CatalogModel; canMan
       <td data-label="Recipes" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
       <td className="cell-actions">
         {canDeploy && m.recipes.length > 0 && <Link className="btn btn-small" to={`/models/deploy?model=${encodeURIComponent(m.name)}`}>Deploy</Link>}
+        {canDeploy && m.kind !== "local" && (
+          <button type="button" className="btn btn-quiet btn-small" onClick={onDownload}
+            title={`Download ${m.name} to machines now, so a deployment there starts without waiting`}>Download to…</button>
+        )}
         {canManage && <button type="button" className="btn btn-quiet btn-small" disabled={m.deployments > 0}
           title={m.deployments ? "Deployed: delete its deployments first" : undefined} onClick={() => void remove()}>Remove</button>}
       </td>
     </tr>
+    {downloads.length > 0 && (
+      <tr className="dl-subrow">
+        <td colSpan={8}>
+          <DownloadList list={downloads} show="machine" canCancel={canDeploy} onChanged={onChanged} onError={onError} />
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 

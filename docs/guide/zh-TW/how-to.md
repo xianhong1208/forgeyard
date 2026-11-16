@@ -857,6 +857,26 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的應用程式則必須重新建立（它們的事件裡會說明）。
 
+## 部署之前先下載模型
+
+**Download to…**（下載到…）會現在就把模型，以及預設也把它的引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
+
+1. 打開 **Models → Library**，在模型那一列按 **Download to…**。或打開機器的頁面，在 **Models in cache** 上方按 **Download a model here…**，再選模型。
+2. 勾選機器。每一行會說明那台機器能不能下載：
+   - **fits**：要下載多少、可用的磁碟空間，以及會一起抓的引擎；
+   - **already here**：模型（和引擎）已經在那台機器的快取裡；
+   - **downloading**：那台機器上已經在下載這個模型；
+   - **offline**、**no model cache**、**not enough disk**（模型加上 1 GiB 的保留空間）；
+   - **update the agent**：1.4 以前的 agent 不能先下載。
+3. **Also the engine, for the recipe** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
+4. 按 **Download to N machines**。
+
+進度會顯示在 Library 裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**Cancel** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **Download to…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **Models in cache** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
+
+每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
+
+機器頁面上的 **Internet access for downloads**（admin）是為之後 1.4 更新的「經由伺服器轉送」預留的設定；在那之前每台機器都直接下載。
+
 ## 釋出機器上的磁碟空間
 
 機器的頁面上有 **Models in cache**：列出它的 agent 下載過的東西和大小。每個 Hugging Face revision 一列；有好幾個 GGUF 檔的 revision，底下每個檔案各一列。從 URL 下載的單一 GGUF 檔，以及 process 引擎的引擎壓縮檔也會列出。清單上方是快取在那顆磁碟上占了多少，以及磁碟還剩多少可用空間。

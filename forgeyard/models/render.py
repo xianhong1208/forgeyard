@@ -160,7 +160,13 @@ def render(ctx: Context, variant: Variant, cards: list[Accelerator], name: str, 
 
 
 def engine_block(ctx: Context, variant: Variant):
+    return engine_of(ctx.recipe, variant)
+
+
+def engine_of(recipe, variant: Variant):
+    """The engine archive the agent downloads for a process variant (None for a container variant or an
+    installed command). Also what "Download to…" fetches (1.4), so both land in the same directory."""
     if variant.runtime != "process" or variant.engine is None:
         return None
     e = variant.engine
-    return {"name": f"{ctx.recipe.engine}-{ctx.recipe.version}", "url": e.url, "sha256": e.sha256, "binary": e.binary}
+    return {"name": f"{recipe.engine}-{recipe.version}", "url": e.url, "sha256": e.sha256, "binary": e.binary}

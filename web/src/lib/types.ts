@@ -98,6 +98,8 @@ export type Machine = {
   // Accelerator keys Forgeyard may assign; null = all of them.
   gpu_allowlist?: string[] | null;
   features?: string[];
+  // 1.4: how it fetches models, engines and images (admins set it); relaying through the server comes later.
+  fetch_via?: FetchVia;
   runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
   model_cache?: { ok?: boolean; free_bytes?: number | null; cached?: string[]; reason?: string | null };
   accelerators: Accelerator[];
@@ -548,3 +550,48 @@ export type ProviderResponse = { provider: Provider; kinds: ProviderKind[]; egre
 export type TestResult = { ok: boolean; status: number; ms: number; models: number; sample: string[]; message: string | null };
 
 export type UpstreamModel = { id: string; owned_by: string | null; context_length: number | null; api: string; display_name: string | null; added: boolean };
+
+// 1.4, "Download to…" (issue #35): a model (and by default its engine) downloaded to a machine ahead of a deployment.
+export type FetchVia = "auto" | "server" | "direct";
+
+export type DownloadProgress = {
+  phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
+  layers?: number; layers_done?: number; unpacking?: boolean;
+};
+
+export type ModelDownload = {
+  id: number;
+  model: { id: number; name: string; title: string | null } | null;
+  machine: { id: number; name: string; connected: boolean } | null;
+  file: string | null;
+  recipe: string | null;
+  state: "queued" | "downloading" | "done" | "failed" | "cancelled";
+  via: string;
+  download: DownloadProgress | null;
+  reason: string | null;
+  requested_by: string;
+  created_at: string;
+  finished_at: string | null;
+  // Under way on a machine that is offline: it goes on when the agent is back.
+  waiting: string | null;
+};
+
+export type DownloadsResponse = { downloads: ModelDownload[]; can_download: boolean };
+
+export type DownloadTargetState = "ok" | "cached" | "downloading" | "too_old" | "no_cache" | "offline" | "no_space" | "revoked";
+
+export type DownloadTarget = {
+  machine_id: number; name: string; status: string; connected: boolean; state: DownloadTargetState; note: string;
+  model_cached: boolean; need_bytes: number; free_bytes: number | null; variant: string | null;
+  engine: { kind: "archive" | "image"; name: string; cached: boolean | null } | null;
+  engine_note: string | null;
+  download: ModelDownload | null;
+};
+
+export type DownloadTargets = {
+  model: { id: number; name: string; title: string | null; size_bytes: number; kind: string; file: string | null };
+  recipes: string[];
+  recipe: string | null;
+  machines: DownloadTarget[];
+  can_download: boolean;
+};

@@ -14,8 +14,9 @@ not reach where they come from:
   URL's host; of an image, its registry (docker.io when the reference names none).
 - Failures are read from the replica's reason as the agent words it (`<file>: download failed: <why>`,
   or an image that `could not be pulled`), so agents of every version take part.
-- An image counts as on a machine once a replica started from it there (since the server started); an
-  engine archive once the agent lists it in its model cache (1.4 agents) or a replica started from it.
+- An image counts as on a machine once a replica started from it there, or a "Download to…" pulled it
+  (since the server started); an engine archive once the agent lists it in its model cache (1.4 agents)
+  or a replica started from it.
 
 All of it is kept in memory: after a server restart placement starts again from what the agents
 report. Nothing here is a column.
@@ -169,6 +170,14 @@ def seen(node_id: int, r: Replica) -> None:
         if len(_seen) > MAX_ENTRIES:
             _seen.clear()
         _seen.setdefault(node_id, set()).update(things)
+
+
+def seen_image(node_id: int, image: str) -> None:
+    """A download ahead of a deployment (1.4, "Download to…") pulled this image onto the machine."""
+    with _lock:
+        if len(_seen) > MAX_ENTRIES:
+            _seen.clear()
+        _seen.setdefault(node_id, set()).add(f"image:{image}")
 
 
 def has_engine(node: Node, engine: dict) -> bool:

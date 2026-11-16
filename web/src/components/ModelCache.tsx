@@ -1,28 +1,46 @@
 // "Models in cache" on a machine's page (1.4): what its agent has downloaded, with sizes and the
-// disk around it, and Remove (refused while a deployment there uses it; partial downloads too).
-import { IconDatabase, IconFileDownload, IconPuzzle, IconTrash } from "@tabler/icons-react";
+// disk around it, and Remove (refused while a deployment there uses it; partial downloads too). Also
+// "Download a model here…" and the downloads under way (1.4, issue #35), and, for admins, how the machine
+// reaches the internet.
+import { IconDatabase, IconDownload, IconFileDownload, IconPuzzle, IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
+import { DownloadDialog, DownloadList } from "./DownloadTo";
 import { api, errorText } from "../lib/api";
+import { FETCH_VIA_LABEL, isActive, recentDownloads } from "../lib/downloads";
 import { cacheRows, diskLine, diskShares, removeBlocked, removeQuestion, userHref, type CacheRow } from "../lib/cache";
 import { bytes } from "../lib/machines";
-import type { Machine, MachineCache } from "../lib/types";
+import type { DownloadsResponse, FetchVia, Machine, MachineCache } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 type Removed = { ok: boolean; freed_bytes: number };
 
-export function ModelCacheSection({ m, poll, onChanged, onError }: {
-  m: Machine; poll: number; onChanged: (text: string) => void; onError: (text: string) => void;
+// How often the downloads under way are read again (faster than the machine's page while one runs).
+const DOWNLOADS_POLL_MS = 2000;
+
+export function ModelCacheSection({ m, poll, canManage = false, onChanged, onError }: {
+  m: Machine; poll: number; canManage?: boolean; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
   const { data, error, reload } = useApi<MachineCache>(`/machines/${m.id}/cache`);
+  const dl = useApi<DownloadsResponse>(`/downloads?machine_id=${m.id}`);
   const [busy, setBusy] = useState<string | null>(null);
+  const [dialog, setDialog] = useState(false);
+  const running = (dl.data?.downloads ?? []).some(isActive);
+  const reloadDl = dl.reload;
   useEffect(() => {
     const t = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") reload();
-    }, poll);
+      if (document.visibilityState !== "hidden") {
+        reload();
+        reloadDl();
+      }
+    }, running ? DOWNLOADS_POLL_MS : poll);
     return () => window.clearInterval(t);
-  }, [reload, poll]);
+  }, [reload, reloadDl, poll, running]);
+  const downloads = recentDownloads(dl.data?.downloads ?? [], "model");
+  const canDownload = dl.data?.can_download ?? false;
+  const prefetch = (m.features ?? []).includes("prefetch");
+  const said = (fn: (text: string) => void) => (text: string) => { fn(text); reloadDl(); reload(); };
 
   const c = data;
   const rows = c ? cacheRows(c) : [];
@@ -60,8 +78,18 @@ export function ModelCacheSection({ m, poll, onChanged, onError }: {
     <section className="panel mk-section" aria-labelledby="mk-cache">
       <div className="panel-head">
         <h2 id="mk-cache">Models in cache {c && c.reported && <span className="muted small">· {count}</span>}</h2>
-        {c && c.reported && c.ok !== false && <span className="cache-disk small">{diskLine(c)}</span>}
+        <span className="cache-head-side">
+          {c && c.reported && c.ok !== false && <span className="cache-disk small">{diskLine(c)}</span>}
+          {canDownload && c && c.reported && (
+            <button type="button" className="btn btn-small" disabled={!prefetch}
+              title={prefetch ? "Download a model into this machine's cache now, before deploying it" : "This machine's agent cannot download ahead: update the agent."}
+              onClick={() => setDialog(true)}>
+              <IconDownload size={14} aria-hidden="true" /> Download a model here…
+            </button>
+          )}
+        </span>
       </div>
+      {dialog && <DownloadDialog machineId={m.id} onClose={() => setDialog(false)} onStarted={said(onChanged)} />}
       {!c && !error && <p className="muted small">Loading…</p>}
       {!c && error && <p className="muted small">{error}</p>}
       {c && !c.reported && <p className="empty-line">This machine's agent serves no models (it has no model cache).</p>}
@@ -81,10 +109,16 @@ export function ModelCacheSection({ m, poll, onChanged, onError }: {
               </span>
             </div>
           )}
+          {downloads.length > 0 && (
+            <div className="cache-downloads">
+              <h3 className="small muted">Downloads</h3>
+              <DownloadList list={downloads} show="model" canCancel={canDownload} onChanged={said(onChanged)} onError={onError} />
+            </div>
+          )}
           {!c.sizes && <p className="field-hint cache-note">{c.remove_note}</p>}
           {c.sizes && c.remove_note && <p className="field-hint cache-note">{c.remove_note}</p>}
           {rows.length === 0 ? (
-            <p className="empty-line">Nothing is in this machine's cache yet. A model is downloaded here the first time a deployment runs here.</p>
+            <p className="empty-line">Nothing is in this machine's cache yet. A model is downloaded here the first time a deployment runs here, or ahead of it with Download a model here.</p>
           ) : (
             <ul className="cachelist">
               {rows.map((row) => <CacheItem key={row.key} row={row} c={c} busy={busy} onRemove={(r) => void remove(r)} />)}
@@ -105,7 +139,35 @@ export function ModelCacheSection({ m, poll, onChanged, onError }: {
           )}
         </>
       )}
+      {canManage && c && c.reported && <FetchViaField m={m} onChanged={onChanged} onError={onError} />}
     </section>
+  );
+}
+
+// Admins only (D9): how this machine reaches the internet for models, engines and images.
+function FetchViaField({ m, onChanged, onError }: { m: Machine; onChanged: (text: string) => void; onError: (text: string) => void }) {
+  const [saving, setSaving] = useState(false);
+  const value: FetchVia = m.fetch_via ?? "auto";
+  const save = async (next: FetchVia) => {
+    setSaving(true);
+    try {
+      await api(`/machines/${m.id}/fetch-via`, { method: "PUT", body: { fetch_via: next } });
+      onChanged(`${m.name}'s internet access for downloads: ${FETCH_VIA_LABEL[next]}.`);
+    } catch (e) {
+      onError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="field cache-fetchvia">
+      <label htmlFor={`fetch-via-${m.id}`}>Internet access for downloads</label>
+      <select id={`fetch-via-${m.id}`} value={value} disabled={saving} onChange={(e) => void save(e.target.value as FetchVia)}>
+        {(Object.keys(FETCH_VIA_LABEL) as FetchVia[]).map((k) => <option key={k} value={k}>{FETCH_VIA_LABEL[k]}</option>)}
+      </select>
+      <p className="field-hint">Auto: directly, and through the server after a network failure. Kept for the relay through the server,
+        which comes in a later 1.4 update; until then every machine downloads directly.</p>
+    </div>
   );
 }
 
