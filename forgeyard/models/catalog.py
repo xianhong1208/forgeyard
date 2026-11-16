@@ -99,7 +99,9 @@ def model_block(model: CatalogModel, endpoint: Optional[str] = None) -> dict:
                      files=[{k: f[k] for k in ("path", "size", "sha256", "oid") if k in f}
                             for f in meta.get("files") or []])
     elif model.kind == "url":
-        block.update(url=meta.get("url"), files=[{"path": f["path"], "size": f["size"]}
+        # The SHA-256 recorded after the first complete download (1.4, D8), once there is one: every later
+        # download must match it.
+        block.update(url=meta.get("url"), files=[{k: f[k] for k in ("path", "size", "sha256") if k in f}
                                                  for f in meta.get("files") or []])
     else:
         block.update(path=meta.get("path"))

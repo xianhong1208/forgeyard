@@ -1,6 +1,6 @@
 """Machines: everyone signed in can look; admins add (join tokens), revoke and remove, and choose
-which GPUs Forgeyard may assign on each machine. Operators and admins remove models from a machine's
-model cache (1.4)."""
+which GPUs Forgeyard may assign on each machine and how it reaches the internet (`fetch_via`, 1.4).
+Operators and admins remove models from a machine's model cache (1.4)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from forgeyard.install import commands as install_commands
 from forgeyard.machines import cache, store
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED
+from forgeyard.models import prefetch
 from forgeyard.security import tls
 from forgeyard.workloads import placement, state as wstate
 
@@ -46,6 +47,7 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "ip": n.ip, "joined_at": n.joined_at, "connected_at": n.connected_at,
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [], "runtime_info": n.runtime_info or {},
+        "fetch_via": n.fetch_via or "auto",
         # The per-model listing (1.4) is served by /api/machines/{id}/cache, not with every machine.
         "model_cache": {k: v for k, v in (n.model_cache or {}).items() if k not in ("models", "engines_detail")},
         "accelerators": [accelerator_out(a, n, assigned) for a in n.accelerators],
@@ -119,6 +121,7 @@ def revoke_machine(machine_id: int, caller: Caller = Depends(require_admin), db:
         raise fail(409, "already_revoked", "This machine is already revoked.")
     store.revoke(db, node, caller.user.username)
     wstate.unplace_node(db, node.id, f"{node.name} was revoked")
+    prefetch.fail_all(db, node.id, f"{node.name} was revoked")
     audit.record(db, "machine.revoked", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id)
     db.commit()
     closed = hub.close(node.id, CLOSE_REVOKED, "revoked by an admin")
@@ -180,6 +183,34 @@ def set_gpu_allowlist(machine_id: int, body: AllowlistIn, caller: Caller = Depen
                  keys=new if new is not None else "all")
     db.commit()
     placement.place_and_poke(db)
+    db.expire_all()
+    node = db.scalar(select(Node).where(Node.id == machine_id).options(selectinload(Node.accelerators)))
+    return {"machine": machine_out(node, db)}
+
+
+FETCH_VIA = ("auto", "server", "direct")
+FETCH_VIA_TEXT = {"auto": "Auto (directly, through the server after a network failure)",
+                  "server": "Always through the server", "direct": "Direct only"}
+
+
+class FetchViaIn(BaseModel):
+    fetch_via: str = Field(max_length=16)
+
+
+@router.put("/{machine_id}/fetch-via")
+def set_fetch_via(machine_id: int, body: FetchViaIn, caller: Caller = Depends(require_admin),
+                  db: DbSession = Depends(get_db)):
+    """How this machine fetches models, engines and images (1.4, D3/D9: admins only). Stored now; relaying
+    through the server comes in a later 1.4 change, until then every machine downloads directly."""
+    if body.fetch_via not in FETCH_VIA:
+        raise fail(422, "bad_fetch_via", f"fetch_via is one of: {', '.join(FETCH_VIA)}.")
+    node = _get(db, machine_id)
+    before = node.fetch_via or "auto"
+    if before != body.fetch_via:
+        node.fetch_via = body.fetch_via
+        audit.record(db, "node.fetch_via_changed", actor=caller.user, target=node.name, ip=caller.ip,
+                     machine_id=node.id, before=before, after=body.fetch_via)
+        db.commit()
     db.expire_all()
     node = db.scalar(select(Node).where(Node.id == machine_id).options(selectinload(Node.accelerators)))
     return {"machine": machine_out(node, db)}

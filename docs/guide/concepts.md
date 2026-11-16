@@ -158,6 +158,9 @@ recipes and, for admins, the model sources. Links to the names before 1.4 (`?tab
   keeps the downloaded files, checked against their checksums, shared by every replica there.
   Containers get their model mounted read-only. The machine's page lists what is in it, with sizes,
   and removes what no deployment there uses ([Free disk space on a machine](how-to.md#free-disk-space-on-a-machine)).
+  **Download to…** fills it ahead of a deployment, with the engine too
+  ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). Whether a
+  model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
   keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
   inspecting and downloading them; a deployment may bring its own, which wins for it.
