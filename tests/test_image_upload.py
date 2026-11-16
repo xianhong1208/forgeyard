@@ -240,3 +240,29 @@ def test_fy_relay_038_a_real_agent_loads_an_uploaded_file(monkeypatch, tmp_path,
     assert loaded["matches"] == [{"recipe": "relay-engine", "variant": "cpu", "image": img.ref, "how": "checked"}]
     assert fake.loads() == [data] and gzip.decompress(data)
     assert [i["Id"] for i in fake.images()] == [p.config_digest]
+
+
+def test_fy_relay_042_an_uploaded_docker_hub_image_matches_its_recipe_by_the_short_name(owner):
+    """FY-RELAY-042: Docker lists a Docker Hub image without "docker.io/" (and an official one without
+    "library/"), while a recipe may name it in full: the vision recipe's image is "docker.io/<namespace>/
+    forgeyard-vision:<version>". An upload of that image matched no recipe on a real machine; names are compared
+    in Docker's full form now. Another registry with the same path is still another image."""
+    from forgeyard import __version__
+    from forgeyard.install.images import vision_image
+    from forgeyard.workloads.registry import full_name
+
+    full = vision_image(__version__, "cpu")
+    assert full.startswith("docker.io/")
+    short = full.removeprefix("docker.io/")
+    db = new_session()
+    try:
+        got = upload.recipe_matches(db, {"id": "sha256:" + "1" * 64, "tags": [short]})
+        assert {"recipe": "vision", "variant": "cpu", "image": full, "how": "tag"} in got
+        assert any(m["recipe"] == "vision" for m in upload.recipe_matches(db, {"tags": [full]}))
+        assert not upload.recipe_matches(db, {"tags": ["ghcr.io/" + short]})
+    finally:
+        db.close()
+    assert full_name("python:3.13") == full_name("docker.io/library/python:3.13") == full_name("docker.io/python:3.13") \
+        == "docker.io/library/python:3.13"
+    assert full_name("acme/x:1") == "docker.io/acme/x:1" and full_name("ghcr.io/acme/x:1") == "ghcr.io/acme/x:1"
+    assert full_name("localhost:5000/x:1") == "localhost:5000/x:1" and full_name("python") == "docker.io/library/python"

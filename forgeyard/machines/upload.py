@@ -85,10 +85,11 @@ def recipe_matches(db: DbSession, item: dict) -> list[dict]:
     """Which recipe images a loaded image is: by its recorded ids (a pinned image: "checked"), else by a tag
     that a tag-only recipe image names ("by tag", not checked)."""
     from forgeyard.models.catalog import all_recipes
+    from forgeyard.workloads.registry import full_name
 
     lock = images.load_lock()
     content, image_id = item.get("content"), item.get("id")
-    tags = set(item.get("tags") or [])
+    tags = {full_name(t) for t in item.get("tags") or []}
     out = []
     for name, (recipe, _) in sorted(all_recipes(db).items()):
         for v in recipe.variants:
@@ -99,7 +100,7 @@ def recipe_matches(db: DbSession, item: dict) -> list[dict]:
                 check = images.entry_check(entry)
                 if (content and content in check["content"]) or (image_id and image_id in check["ids"]):
                     out.append({"recipe": name, "variant": v.name, "image": v.image, "how": "checked"})
-            elif v.image in tags:
+            elif full_name(v.image) in tags:
                 out.append({"recipe": name, "variant": v.name, "image": v.image, "how": "tag"})
     return out[:32]
 
