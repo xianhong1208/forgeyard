@@ -1,4 +1,4 @@
-import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconScan, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
@@ -14,7 +14,7 @@ import { engineCarry } from "../lib/engineImages";
 import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { TASK_LABEL, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
+import { TASK_LABEL, VISION_TASKS, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
 import { FALLBACK_ANCHOR, fallbackProviders, routeHome } from "../lib/routing";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, DownloadsResponse, Machine, MachinesResponse, ModelDownload, ModelSources, Recipe, RecipeVariant, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -29,6 +29,7 @@ const KINDS = [
   { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
   { icon: IconPhotoAi, name: "Images", detail: "diffusers pipelines on vLLM-Omni; stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA) and CPUs" },
   { icon: IconMovie, name: "Video", detail: "Wan text-to-video pipelines on vLLM-Omni (NVIDIA), as jobs at /v1/videos" },
+  { icon: IconScan, name: "Vision", detail: "Object detection, segmentation and depth on Forgeyard's vision server (CPU or NVIDIA), at /v1/vision/…" },
 ];
 
 export function ModelsPage() {
@@ -195,7 +196,7 @@ function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machin
             </Link>
           )}
         </div>
-        <div className="deprow-model">{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
+        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task}</code> · </>}{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
       </div>
       <div className="where">
         {placed.length ? placed.map((r) => {
@@ -304,6 +305,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
       <td data-label="Size" className="small">{bytes(m.size_bytes)}</td>
       <td data-label="Architecture" className="small">
         {m.summary.architecture ?? "—"}{m.summary.params ? ` · ${params(m.summary.params)} params` : ""}
+        {m.vision?.labels ? <div className="muted" title={m.vision.label_examples?.join(", ")}>{m.vision.labels} classes</div> : null}
         {m.summary.layers ? <div className="muted">{m.summary.layers} layers{m.summary.kv_heads ? `, ${m.summary.kv_heads} KV heads` : ""}{m.summary.max_context ? `, ${m.summary.max_context} ctx` : ""}</div> : null}
       </td>
       <td data-label="Licence" className="small">

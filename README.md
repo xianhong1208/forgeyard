@@ -31,9 +31,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
-  speech, image generation, and video generation as jobs.
+  speech, image generation, video generation as jobs, and vision models: object detection,
+  segmentation and depth at `/v1/vision/…` (1.4), deployed from Models like any other.
 - **Any HTTP service behind the same keys.** An app's API at `/x/<name>/…` gets keys, limits and
-  usage, and templates start object detection, segmentation and depth APIs in one step.
+  usage.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted.
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
@@ -224,6 +225,8 @@ and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Tur
 | Z-Image-Turbo GGUF | stable-diffusion.cpp (`sd-cpp`) | CPU (process); AMD Strix Halo (Vulkan); NVIDIA A100 (CUDA) |
 | **Video generation** | | |
 | Wan2.1-T2V-1.3B | vLLM-Omni (`vllm-omni-video`) | NVIDIA A100 |
+| **Vision (1.4)** | | |
+| RT-DETRv2 R18 and R50, SAM 2.1 Hiera tiny, Depth Anything V2 Small | Forgeyard's vision server (`vision`) | CPU (as a process, before the 1.4 image is published) |
 | **Cloud** | | |
 | Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
 

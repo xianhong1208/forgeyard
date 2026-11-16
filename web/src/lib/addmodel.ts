@@ -1,7 +1,8 @@
 // Adding a model: the recommended list, Hugging Face search (run by the server) and the
 // inspection with its suggestion (recipe, estimate, where it fits).
 
-import type { Estimate, Medium, Task } from "./types";
+import { PERMISSIVE, TASK_LABEL, VISION_TASKS } from "./models";
+import type { CatalogModel, Estimate, Medium, Task } from "./types";
 
 export type RecommendedGroup = { id: string; title: string; description: string };
 
@@ -22,6 +23,8 @@ export type SearchResult = {
   id: string; source: string; downloads: number; likes: number; last_modified: string | null; gated: boolean;
   gated_mode: string | null; private: boolean; pipeline_tag: string | null; library: string | null; task: Task | null;
   format: string; params: number | null; weights_bytes: number | null; in_catalog: string | null; recipes: string[];
+  // 1.4: the licence its tags state (vision models are added with a permissive licence only).
+  license?: string | null;
 };
 
 export type SearchResponse = { results: SearchResult[]; cached: boolean; endpoint: string };
@@ -43,6 +46,8 @@ export type InspectMeta = {
   // 1.3, image models: the native size and the files beside the model file (stable-diffusion.cpp), or a
   // diffusers pipeline's components.
   image?: { size: number; multiple: number; components?: Record<string, string>; single?: boolean };
+  // 1.4, vision models: the task its config.json is for, its architecture and classes.
+  vision?: CatalogModel["vision"];
   diffusers?: { pipeline: string | null; components: Record<string, { class: string; params: number; dtype: string | null }> };
   // 1.3, video models: the pipeline's own size, frame rate and the multiple its sizes take.
   video?: { size: [number, number]; multiple: number; fps: number };
@@ -100,4 +105,25 @@ export function deployLink(name: string, s: Suggestion | null | undefined): stri
   if (s?.recipe) q.set("recipe", s.recipe);
   if (s?.device) q.set("device", s.device);
   return `/models/deploy?${q.toString()}`;
+}
+
+// 1.4: why a vision model cannot be added as `task` (the server's rule, said before it is asked), or null.
+// Only for vision tasks, and only for what the inspection read (a local model is not read).
+export function visionProblem(meta: { vision?: InspectMeta["vision"]; license?: string | null }, task: Task | "" | null | undefined): string | null {
+  if (!task || !VISION_TASKS.includes(task)) return null;
+  const v = meta.vision;
+  if (!v) return `This repository is not a ${TASK_LABEL[task].toLowerCase()} model the vision server can run.`;
+  if (v.task !== task) return `This is a ${TASK_LABEL[v.task].toLowerCase()} model, not one for ${TASK_LABEL[task].toLowerCase()}.`;
+  if (v.problem) return `It cannot run on the vision server: ${v.problem}.`;
+  if (!meta.license || !PERMISSIVE.includes(meta.license)) {
+    return `Vision models are added with a permissive licence only (Apache-2.0, MIT, BSD); this one's is ${meta.license ?? "not stated"}.`;
+  }
+  return null;
+}
+
+// A search result of a vision task whose tags state a licence that is not permissive (null: fine, or not
+// known until it is inspected).
+export function searchLicenceProblem(r: SearchResult): string | null {
+  if (!r.task || !VISION_TASKS.includes(r.task) || !r.license) return null;
+  return PERMISSIVE.includes(r.license) ? null : `Licence ${r.license}: vision models need a permissive one`;
 }

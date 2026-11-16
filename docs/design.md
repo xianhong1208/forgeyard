@@ -601,6 +601,20 @@ page contain these lines whenever the server uses its own CA.
 
 Real-hardware check: `scripts/accept_m4.py`.
 
+### Vision models (1.4, #86)
+
+Object detection, segmentation and depth were 1.3 workload templates at `/x/` (an app with the model in
+its image). In 1.4 they are model kinds (`detect`, `segment`, `depth`): the catalog reads the task from
+`config.json` (`forgeyard/models/vision.py`, the same rule as the server's `task_of`), refuses licences
+that are not permissive, and the built-in `vision` recipe runs the same vision server with `--model` on
+the model-cache mount, so caching, offline machines and placement are those of every model. The gateway
+gives them their own endpoints (`/v1/vision/<task>`, routes of api `vision-<task>`) instead of `/x/`:
+multipart or JSON in, the server's JSON passed back, counted with the image units of 1.3 (`images`,
+`kilopixels`, `busy_ms`), so there is no migration. The recipe's image is Forgeyard's own, named by the
+server's version (`forgeyard_image`) rather than pinned by digest, since it is built by the same release
+and its digest is not known before. The server asks for `VISION_API_KEY` on every path but `/health`;
+the baked-in models stay for the apps made from templates until Apps go (#88).
+
 ### Workloads at /x/ (1.3, generic passthrough)
 
 Anything that is not a chat, embedding, speech or image model (detection, segmentation, depth, a

@@ -1,4 +1,4 @@
-import { IconEye, IconPhotoUp, IconPlayerStop, IconTemplate } from "@tabler/icons-react";
+import { IconEye, IconPhotoUp, IconPlayerStop, IconScan } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router";
 
@@ -7,8 +7,8 @@ import { Notice } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
 import { answerError, ms } from "../lib/gateway";
 import { DETECT_FLOOR, TASK_HELP, VISION_TYPES, boxStyle, checkImage, depthGradient, depthTables, imageLimitMb, labelColours,
-  pngUri, promptFrom, shown, toImage, workloadLabel,
-  type Prompt, type VisionAnswer, type VisionOptions, type VisionTask, type VisionWorkload } from "../lib/vision";
+  pngUri, promptFrom, shown, targetLabel, targets, toImage,
+  type Prompt, type VisionAnswer, type VisionOptions, type VisionTarget, type VisionTask } from "../lib/vision";
 import { useApi } from "../lib/useApi";
 
 type Picked = { file: File; url: string; width: number; height: number };
@@ -17,21 +17,23 @@ type Result = { task: VisionTask; answer: VisionAnswer; meta: string; prompt?: P
 const RUN_LABEL: Record<VisionTask, string> = { detect: "Detect objects", segment: "Segment", depth: "Estimate depth" };
 
 // What went wrong, in plain words: the gateway's and the vision server's {"error": {code, message}}.
-export function visionError(status: number, body: unknown, limitMb: number): string {
+export function visionError(status: number, body: unknown, limitMb: number, what: "app" | "model" = "app"): string {
   const e = (body as { error?: { code?: string; message?: string } } | null)?.error;
   switch (e?.code) {
     case "request_too_large":
     case "image_too_large":
-      return `The image is too large for this app: it takes at most ${limitMb} MiB.`;
+      return `The image is too large for this ${what}: it takes at most ${limitMb} MiB.`;
     case "invalid_image":
-      return "The app could not read this image. Send a PNG, JPEG or WebP picture.";
+      return `The ${what} could not read this image. Send a PNG, JPEG or WebP picture.`;
     case "workload_busy":
     case "key_busy":
-      return "The app is busy with other images right now. Try again in a moment.";
+      return `The ${what} is busy with other images right now. Try again in a moment.`;
     case "no_ready_replica":
-      return `The app is not ready: ${e.message ?? "no replica is running."}`;
+      return `The ${what} is not ready: ${e.message ?? "no replica is running."}`;
     case "upstream_timeout":
-      return "The app did not answer in time. A CPU can take a while on a large image; try a smaller one.";
+      return `The ${what} did not answer in time. A CPU can take a while on a large image; try a smaller one.`;
+    case "model_not_found":
+      return "This model is no longer deployed. Reload the page to see the ones that are.";
     case "workload_not_found":
       return "This app is no longer exposed. Reload the page to see the ones that are.";
   }
@@ -40,29 +42,29 @@ export function visionError(status: number, body: unknown, limitMb: number): str
 
 export function Vision({ canCreate }: { canCreate: boolean }) {
   const { data, error } = useApi<VisionOptions>("/playground/vision/options");
-  const workloads = data?.workloads ?? [];
+  const all = targets(data);
   const [picked, setPicked] = useState("");
-  const fallback = workloads.find((w) => w.ready) ?? workloads[0];
-  const w = workloads.find((x) => x.name === picked) ?? fallback;
+  const fallback = all.find((t) => t.ready) ?? all[0];
+  const t = all.find((x) => x.id === picked) ?? fallback;
 
   if (error) return <Notice tone="error">{error}</Notice>;
   if (!data) return <p className="muted">Loading…</p>;
-  if (!workloads.length) {
+  if (!all.length) {
     return (
       <section className="panel play-empty" aria-labelledby="vis-empty-title">
-        <h2 id="vis-empty-title">No vision app to try yet</h2>
+        <h2 id="vis-empty-title">No vision model to try yet</h2>
         <p className="muted">
-          The Vision tab sends a picture to an exposed vision app: object detection, segmentation or depth estimation.
-          None is exposed yet.{" "}
-          {canCreate ? "Start one from a template on the Apps page; it shows up here once it runs."
-            : "Admins and operators start them from a template; ask one to start the one you need."}
+          The Vision tab sends a picture to a vision model: object detection, segmentation or depth estimation.
+          None is deployed yet.{" "}
+          {canCreate ? "Deploy one from Models (the Library recommends three); it shows up here once it is ready."
+            : "Admins and operators deploy models; ask one to deploy the one you need."}
         </p>
         <ul className="vis-kinds">
-          {data.tasks.map((t) => <li key={t.task}><span className="strong">{t.title}</span> <span className="muted small mono">{t.model}</span></li>)}
+          {data.tasks.map((x) => <li key={x.task}><span className="strong">{x.title}</span> <span className="muted small mono">{x.model}</span></li>)}
         </ul>
         <div className="row-gap">
-          {canCreate && <Link to="/apps" className="btn btn-primary"><IconTemplate size={16} aria-hidden="true" /> Start from a template</Link>}
-          <HelpLink page="how-to" anchor="try-a-vision-app-in-the-playground">How the Vision tab works</HelpLink>
+          {canCreate && <Link to="/models?tab=library" className="btn btn-primary"><IconScan size={16} aria-hidden="true" /> Add a vision model</Link>}
+          <HelpLink page="how-to" anchor="deploy-an-object-detection-model">Deploy an object-detection model</HelpLink>
         </div>
       </section>
     );
@@ -71,24 +73,34 @@ export function Vision({ canCreate }: { canCreate: boolean }) {
     <>
       <div className="play-bar vis-bar">
         <div className="field">
-          <label htmlFor="vis-workload">App</label>
-          <select id="vis-workload" value={w?.name ?? ""} onChange={(e) => setPicked(e.target.value)}>
-            {workloads.map((x) => <option key={x.name} value={x.name}>{workloadLabel(x)}</option>)}
+          <label htmlFor="vis-target">Model</label>
+          <select id="vis-target" value={t?.id ?? ""} onChange={(e) => setPicked(e.target.value)}>
+            {all.map((x) => <option key={x.id} value={x.id}>{targetLabel(x)}</option>)}
           </select>
         </div>
-        {w && (
+        {t && (
           <p className="muted small play-ready">
-            {w.ready ? `${w.ready} ready replica${w.ready > 1 ? "s" : ""}` : (w.reason ?? "No replica is ready yet.")}{" "}
-            <Link to={`/workloads/${w.workload_id}`}>Workload</Link>
+            {t.ready ? `${t.ready} ready replica${t.ready > 1 ? "s" : ""}` : (t.reason ?? "No replica is ready yet.")}{" "}
+            {t.link && <Link to={t.link.to}>{t.link.label}</Link>}
           </p>
         )}
       </div>
-      {w && <VisionPanel key={w.name} w={w} />}
+      {t && <VisionPanel key={t.id} w={t} />}
     </>
   );
 }
 
-function VisionPanel({ w }: { w: VisionWorkload }) {
+// One vision model in the Playground's Models tab (1.4): the same panel as on the Vision tab.
+export function VisionModelPanel({ name }: { name: string }) {
+  const { data, error } = useApi<VisionOptions>("/playground/vision/options");
+  const t = targets(data).find((x) => x.kind === "model" && x.name === name);
+  if (error) return <Notice tone="error">{error}</Notice>;
+  if (!data) return <p className="muted">Loading…</p>;
+  if (!t) return <Notice tone="error">{name} is not a vision model any more. Reload the page.</Notice>;
+  return <VisionPanel key={t.id} w={t} />;
+}
+
+function VisionPanel({ w }: { w: VisionTarget }) {
   const limit = imageLimitMb(w);
   const [image, setImage] = useState<Picked | null>(null);
   const [pickErr, setPickErr] = useState<string | null>(null);
@@ -133,7 +145,8 @@ function VisionPanel({ w }: { w: VisionWorkload }) {
       if (w.task === "detect") form.append("threshold", String(DETECT_FLOOR));
       if (prompt?.kind === "point") form.append("points", JSON.stringify([prompt.point]));
       if (prompt?.kind === "box") form.append("box", JSON.stringify(prompt.box));
-      const res = await fetch(`/api/playground/vision/${encodeURIComponent(w.name)}/${w.task}`, {
+      form.append("model", w.name);
+      const res = await fetch(w.url, {
         method: "POST", credentials: "same-origin", headers: { "X-Forgeyard": "1" }, body: form, signal: ctrl.signal,
       });
       if (res.status === 401) {
@@ -142,7 +155,7 @@ function VisionPanel({ w }: { w: VisionWorkload }) {
         return;
       }
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data) { setErr(visionError(res.status, data, limit)); return; }
+      if (!res.ok || !data) { setErr(visionError(res.status, data, limit, "model")); return; }
       const answer = data as VisionAnswer;
       const target = res.headers.get("X-Forgeyard-Target");
       const count = w.task === "detect" ? `${answer.detections?.length ?? 0} objects above ${DETECT_FLOOR.toFixed(2)}` : w.task === "segment" ? `${answer.masks?.length ?? 0} masks` : null;
@@ -170,11 +183,11 @@ function VisionPanel({ w }: { w: VisionWorkload }) {
     <section className="panel play vision" aria-labelledby="vis-title">
       <div className="panel-head">
         <h2 id="vis-title"><IconEye size={18} stroke={1.7} aria-hidden="true" /> {w.title}</h2>
-        <HelpLink page="how-to" anchor="try-a-vision-app-in-the-playground">How it works</HelpLink>
+        <HelpLink page="how-to" anchor="try-vision-in-the-playground">How it works</HelpLink>
       </div>
       <p className="muted small vis-about">
-        {TASK_HELP[w.task]} <span className="mono">{w.model}</span> <span className="chip mono" title="The model's licence">{w.licence}</span>
-        {" "}Programs call it at <code>POST {w.path}{w.endpoint}</code> with an API key.
+        {TASK_HELP[w.task]} <span className="mono">{w.model}</span>{w.licence && <> <span className="chip mono" title="The model's licence">{w.licence}</span></>}
+        {" "}Programs call it at <code>{w.call}</code> with an API key.
       </p>
       <div className={`vis-drop${dragOver ? " on" : ""}${image ? " has-image" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)} onDrop={onDrop} data-testid="vis-drop">
@@ -196,8 +209,8 @@ function VisionPanel({ w }: { w: VisionWorkload }) {
             ? <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             : <button type="button" className="btn btn-primary" disabled={!w.ready} onClick={() => void run()}>{RUN_LABEL[w.task]}</button>)}
           {w.task === "segment" && <span className="small" role="note">Click a point on the picture, or drag a box around something.</span>}
-          {busy && <span className="muted small" role="status">Waiting for the app…</span>}
-          {!w.ready && <span className="muted small">The app has no ready replica.</span>}
+          {busy && <span className="muted small" role="status">Waiting for the model…</span>}
+          {!w.ready && <span className="muted small">The model has no ready replica.</span>}
         </div>
       )}
       {err && <Notice tone="error">{err}</Notice>}

@@ -122,9 +122,9 @@ models, a FastAPI or BentoML service.
 Admins and operators expose an app, when they create it or later on its page. See
 [Expose an app at /x/](how-to.md#expose-an-app-at-x).
 
-Three **templates** start the most common vision APIs this way in one step (object detection,
-segmentation, depth), on Forgeyard's own image with permissively licensed models only. See
-[Start an app from a template](how-to.md#start-an-app-from-a-template).
+In 1.3 three **templates** started the most common vision APIs this way (object detection,
+segmentation, depth). In 1.4 those are [vision models](#vision-models), deployed from Models; apps
+already made from a template keep running. See [Apps made from a template](how-to.md#apps-made-from-a-template-13).
 
 ## Models, recipes and estimates
 
@@ -291,6 +291,29 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - **The prompt is not kept**, and a key sees only its own jobs.
 - Usage counts **one request per video**, its **length** and the **busy time** (GPU time).
 - Videos stay on your own deployments; they never go to a cloud provider.
+
+## Vision models
+
+Vision models (1.4) look at a picture: **object detection** (boxes, labels and scores: RT-DETR, D-FINE,
+DETR…), **segmentation** (the mask of what a point or a box shows: SAM 2 and 2.1) and **depth
+estimation** (how near every pixel is: Depth Anything, DPT…). They are model kinds like the others: added
+to the Library from Hugging Face (three are recommended), deployed from Models, listed under
+**Deployments → Vision**, tried in **Playground → Vision**, called with an API key.
+
+- **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
+  PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,
+  one card shared by memory, or the CPU build on any machine (an AMD machine runs it on its CPU: there
+  is no ROCm build yet). The model comes from the machine's model cache, like every other model.
+- **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
+  is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
+  model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large
+  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added.
+- **Their own API:** `/v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth`, one image per
+  request (multipart, or base64 in JSON) and a JSON answer; masks and depth maps are PNGs in base64.
+  The OpenAI SDK has no such API: any HTTP client calls it.
+- **One image at a time** per replica; the rest wait their turn. More throughput is more replicas.
+- Usage counts **one image per request**, its kilopixels and the busy time. Pictures stay on your own
+  deployments: they never go to a cloud provider, and nothing keeps them.
 
 ## API keys, limits and usage
 

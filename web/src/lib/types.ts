@@ -286,7 +286,8 @@ export type WorkloadResponse = {
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
 // ---------------------------------------------------------------- models (M3)
-export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video";
+// 1.4 (#86): detect, segment and depth are vision models (Forgeyard's vision server, /v1/vision/<task>).
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "detect" | "segment" | "depth";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -330,6 +331,8 @@ export type CatalogModel = {
   voices?: string[];
   // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
   image?: ImageModel | null;
+  // 1.4, vision models: the task, architecture and (detection) the classes it knows.
+  vision?: { task: "detect" | "segment" | "depth"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string } | null;
   // 1.3, video models: the native size and frame rate, and the pipeline's components.
   video?: VideoModel | null;
 };

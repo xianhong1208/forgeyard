@@ -1,5 +1,7 @@
-// The Playground's Vision tab (1.3): exposed vision workloads (the workload templates' vision server),
-// called through /api/playground/vision/<name>/<task> as the signed-in person.
+// The Playground's Vision tab (1.4, #86): vision models, the deployments of detection, SAM 2 and depth models,
+// called through /api/playground/vision/<task> with the model's name (the /v1 gateway path) as the signed-in
+// person. The exposed vision apps of 1.3 (workload templates) are not offered any more: Apps leave the
+// console in 1.4 (#88); the options still list them, and they keep running at /x/.
 
 export type VisionTask = "detect" | "segment" | "depth";
 
@@ -8,7 +10,14 @@ export type VisionWorkload = {
   endpoint: string; path: string; ready: number; reason: string | null; max_body_mb: number;
 };
 
+// A vision model (1.4): a route of a vision task, with how many replicas are ready.
+export type VisionModel = {
+  name: string; task: VisionTask; title: string; endpoint: string; deployment_id: number | null; model: string | null;
+  licence: string | null; ready: number; running: boolean; reason: string | null;
+};
+
 export type VisionOptions = {
+  models?: VisionModel[];
   workloads: VisionWorkload[];
   tasks: { task: VisionTask; title: string; template: string; model: string }[];
 };
@@ -28,14 +37,37 @@ export const VISION_TYPES = ["image/png", "image/jpeg", "image/webp"];
 // Detection asks for everything above this score once; the slider then filters in the browser.
 export const DETECT_FLOOR = 0.1;
 
-export function imageLimitMb(w: VisionWorkload | undefined): number {
+export function imageLimitMb(w: { max_body_mb?: number } | undefined): number {
   return Math.min(VISION_MAX_MB, w?.max_body_mb ?? VISION_MAX_MB);
+}
+
+// What the tab sends an image to: a vision model.
+export type VisionTarget = {
+  kind: "model"; id: string; name: string; task: VisionTask; title: string; model: string; licence: string | null;
+  ready: number; reason: string | null; max_body_mb?: number;
+  url: string;            // where the console posts the image
+  call: string;           // what a program calls, with an API key
+  link: { to: string; label: string } | null;
+};
+
+export function targets(o: VisionOptions | null | undefined): VisionTarget[] {
+  const models: VisionTarget[] = (o?.models ?? []).map((m) => ({
+    kind: "model", id: `model:${m.name}`, name: m.name, task: m.task, title: m.title, model: m.model ?? m.name,
+    licence: m.licence, ready: m.ready, reason: m.reason, url: `/api/playground/vision/${m.task}`,
+    call: `POST /v1/vision/${m.task} with model=${m.name}`,
+    link: m.deployment_id ? { to: `/models/deployments/${m.deployment_id}`, label: "Deployment" } : null,
+  }));
+  return models;
+}
+
+export function targetLabel(t: VisionTarget): string {
+  return `${t.name} · ${t.title} · ${shortModel(t.model)}${t.ready ? "" : " (not ready)"}`;
 }
 
 // Why this file cannot be sent (null: it can). The limit leaves room for the form around the image.
 export function checkImage(file: File, limitMb: number): string | null {
   if (!VISION_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG or WebP image.`;
-  if (file.size > limitMb * 1024 * 1024 - 64 * 1024) return `${file.name || "The image"} is ${mib(file.size)}: the most this app takes is ${limitMb} MiB.`;
+  if (file.size > limitMb * 1024 * 1024 - 64 * 1024) return `${file.name || "The image"} is ${mib(file.size)}: the most it takes is ${limitMb} MiB.`;
   return null;
 }
 

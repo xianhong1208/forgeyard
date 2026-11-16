@@ -4,12 +4,18 @@ import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task }
 // Anything with a download in progress: a replica (M3, 1.3.1) or a download ahead of a deployment (1.4).
 type WithDownload = { download?: DownloadProgress | null };
 
-export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video" };
+export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video",
+  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation" };
+
+// 1.4: the tasks of vision models, and the licences they are added with (as the server checks).
+export const VISION_TASKS: Task[] = ["detect", "segment", "depth"];
+export const PERMISSIVE = ["apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause"];
 
 export const API_LABEL: Record<string, string> = {
   "openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", rerank: "/v1/rerank",
   "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
   "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
+  "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment", "vision-depth": "/v1/vision/depth",
 };
 
 export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };

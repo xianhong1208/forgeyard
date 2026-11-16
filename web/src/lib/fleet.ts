@@ -55,7 +55,7 @@ export function memoryRows(m: Machine): Accelerator[] {
 
 // ---------------------------------------------------------------- model kinds
 
-export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "asr" | "tts" | "image" | "video";
+export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "vision";
 
 export const MODEL_KIND: Record<ModelKind, { label: string; api: string; hint: string }> = {
   chat: { label: "Chat", api: "/v1/chat/completions", hint: "Text in, text out" },
@@ -66,12 +66,15 @@ export const MODEL_KIND: Record<ModelKind, { label: string; api: string; hint: s
   tts: { label: "Text to speech", api: "/v1/audio/speech", hint: "Voices" },
   image: { label: "Images", api: "/v1/images/generations", hint: "Text to image" },
   video: { label: "Video", api: "/v1/videos", hint: "Text to video, as jobs" },
+  vision: { label: "Vision", api: "/v1/vision/…", hint: "Object detection, segmentation and depth" },
 };
-export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "asr", "tts", "image", "video"];
+export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "asr", "tts", "image", "video", "vision"];
 
 // A chat model that takes images, audio or video is multimodal chat.
 export function modelKind(d: Deployment): ModelKind {
   if (d.model.task === "chat") return (d.model.modalities ?? []).length > 0 ? "multimodal" : "chat";
+  // 1.4: detection, segmentation and depth share one section, each row saying its task.
+  if (d.model.task === "detect" || d.model.task === "segment" || d.model.task === "depth") return "vision";
   return d.model.task;
 }
 

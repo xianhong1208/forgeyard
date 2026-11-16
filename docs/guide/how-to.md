@@ -444,10 +444,79 @@ Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of t
 app is restarted. What passes and what is removed is in the
 [reference](reference.md#the-passthrough-x).
 
-## Start an app from a template
+## Deploy an object-detection model
 
-On `/apps`, **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
-vision server image and is exposed at `/x/<name>` straight away:
+Object detection, segmentation and depth are model kinds of their own (1.4): you add them to the
+**Library** and deploy them from **Models** like any other model. They run on Forgeyard's own vision
+server (recipe `vision`): the CUDA build on an NVIDIA GPU (one card shared by memory), the CPU build on
+any machine, AMD ones included. The model comes from the machine's model cache, so it is downloaded once
+and an offline machine works once its cache has it.
+
+1. **Models → Library → Recommended**: *Object detection, segmentation and depth* lists RT-DETRv2 R18
+   (detection, the 80 COCO classes), SAM 2.1 Hiera tiny (segmentation) and Depth Anything V2 Small
+   (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
+   or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
+   backbone…), SAM 2 or 2.1, or depth model (Depth Anything, DPT…) with a permissive licence (Apache-2.0,
+   MIT, BSD). Another licence, or none, cannot be added.
+2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
+   half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
+3. The deployment shows up under **Models → Deployments → Vision**, with its path. **Try it** on its page
+   sends a test image; **Playground → Vision** takes your own pictures.
+
+Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
+and the picture as a file field `image`:
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=rtdetr-v2-r18 -F image=@street.jpg -F threshold=0.5
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/segment \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=sam2.1-hiera-tiny -F image=@street.jpg -F 'box=[40, 40, 320, 240]'
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/depth \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=depth-anything-v2-small -F image=@street.jpg
+```
+
+From Python (vision is Forgeyard's own API: the OpenAI SDK has none, any HTTP client works):
+
+```python
+import base64
+import os
+import ssl
+
+import httpx
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+key = os.environ["FORGEYARD_API_KEY"]
+with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=120,
+                  headers={"Authorization": f"Bearer {key}"}) as fy:
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/detect", data={"model": "rtdetr-v2-r18", "threshold": "0.5"}, files={"image": f})
+    for d in r.json()["detections"]:
+        print(d["label"], round(d["score"], 2), d["box"])  # box: [x0, y0, x1, y1] in pixels
+
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/depth", data={"model": "depth-anything-v2-small"}, files={"image": f})
+    with open("depth.png", "wb") as out:
+        out.write(base64.b64decode(r.json()["depth_png"]))  # 16-bit grey, nearer is brighter
+```
+
+The answers: `detections` (label, score, box), `masks` (score, area, box and a 1-bit PNG each, best
+first) or `depth_png` (with `min` and `max`); each with the image's `width` and `height`. Everything they
+take is in the [reference](reference.md#vision). Usage counts one image per request and its
+kilopixels; a key's model list and requests per minute apply as for any model.
+
+On a machine that cannot reach Docker Hub, load the vision image under the tag of the server's version
+(Models → Library → Recipes → `vision` → *Machine without registry access* gives the commands).
+
+## Apps made from a template (1.3)
+
+In 1.3, **Start from a template** on `/apps` made ready-made vision APIs as apps; in 1.4 vision models
+are deployed from Models instead ([above](#deploy-an-object-detection-model)) and the panel is gone.
+Apps already made from a template keep running as they are, and `/apps/new?template=<id>` (or
+`GET /api/workloads/templates`) still makes one. Each runs Forgeyard's own vision server image with its
+model baked in and is exposed at `/x/<name>`:
 
 | Template | Model (licence) | Call |
 |---|---|---|
@@ -455,8 +524,8 @@ vision server image and is exposed at `/x/<name>` straight away:
 | **Segmentation** | SAM 2.1 Hiera tiny, `facebook/sam2.1-hiera-tiny` (Apache-2.0) | `POST /x/segmenter/v1/segment` with a point or a box: masks |
 | **Depth estimation** | Depth Anything V2 Small, `depth-anything/Depth-Anything-V2-Small-hf` (Apache-2.0) | `POST /x/depth/v1/depth`: a 16-bit depth PNG |
 
-1. Choose **On an NVIDIA GPU** (the image's CUDA build, one card shared by memory, 3 GiB) or **On the
-   CPU** (the CPU build, no GPU). The form opens filled in: the image, the task, the port, the health
+1. Open `/apps/new?template=object-detection&gpu=1` (the image's CUDA build, one card shared by memory,
+   3 GiB), or without `&gpu=1` for the CPU build. The form opens filled in: the image, the task, the port, the health
    check and **Expose at** `/x/<name>`. Change anything, for example the name or the machine, then
    **Create and start**.
 2. Allow an API key to call it (**API keys** → the key's **Apps at /x/**).
@@ -484,21 +553,21 @@ docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeya
 gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
 
-On AMD machines use **On the CPU**: the image has no ROCm build. What each endpoint takes and returns
+On AMD machines use the CPU build: the image has no ROCm build. What each endpoint takes and returns
 is in the [reference](reference.md#app-templates). To try one without an API key, see
-[Try a vision app in the Playground](#try-a-vision-app-in-the-playground).
+[Try vision in the Playground](#try-vision-in-the-playground).
 
-## Try a vision app in the Playground
+## Try vision in the Playground
 
-**Playground → Vision** sends a picture to an exposed vision app (one started from a
-[template](#start-an-app-from-a-template), or any exposed service started with `--task detect`,
-`--task segment` or `--task depth`), as you, without an API key. Everyone signed in may use it; the
-requests follow the app's limits and count as `console` under `x:<name>` in **Usage**.
+**Playground → Vision** sends a picture to a vision model ([deployed from Models](#deploy-an-object-detection-model)),
+as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
+model in **Usage**. A vision model picked on the Playground's **Models** tab opens the same panel. Apps
+made from the 1.3 templates are not offered here any more (Apps leave the console in 1.4): call them at
+`/x/<name>` with an API key.
 
-1. Pick the **App**: each is listed with its task and model. With none exposed yet, the tab says
-   so; admins and operators get a link to **Start from a template**.
-2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB, or the
-   app's **Largest request** if that is smaller).
+1. Pick the **Model**: each is listed with its task and model. With none yet, the tab says so; admins
+   and operators get a link to add one from the Library.
+2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
      model found; **Score at least** hides the weaker ones without asking again.
@@ -509,9 +578,9 @@ requests follow the app's limits and count as `console` under `x:<name>` in **Us
      where it is nearer, in **Colour** or **Grey**. The depth is relative, not metres.
 
 Under the result: which replica answered, the picture's size and the time the model and the whole request
-took. A busy, stopped or too-small app is said in plain words; nothing reaches `/x/` with your
-console sign-in, which takes API keys only. The routes are in the
-[reference](reference.md#from-the-playground).
+took. A stopped model, or a picture it cannot read, is said in plain words. The console sends it to
+`/api/playground/vision/<task>`, the same as `/v1/vision/<task>` for the signed-in person
+([reference](reference.md#vision)).
 
 ## Send images to a model
 

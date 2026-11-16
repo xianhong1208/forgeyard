@@ -313,9 +313,59 @@ ${PORT}
 
 關掉 **Expose** 會立刻關閉 `/x/<name>`；守門員會一直留在副本前面，直到應用程式重新啟動。哪些東西會通過、哪些會被拿掉，請見[參考資料](reference.md#the-passthrough-x)。
 
-## 從範本開始一個應用程式
+## 部署物件偵測模型
 
-在 `/apps`，**Start from a template** 提供現成的視覺 API。每個範本都執行 Forgeyard 自己的 vision server 映像檔，並且直接公開在 `/x/<name>`：
+物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入 **Library**，再從 **Models** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
+
+1. **Models → Library → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。
+2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
+3. 部署會出現在 **Models → Deployments → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground → Vision** 可以用你自己的照片。
+
+用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`：
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=rtdetr-v2-r18 -F image=@street.jpg -F threshold=0.5
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/segment \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=sam2.1-hiera-tiny -F image=@street.jpg -F 'box=[40, 40, 320, 240]'
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/depth \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=depth-anything-v2-small -F image=@street.jpg
+```
+
+用 Python（視覺是 Forgeyard 自己的 API：OpenAI SDK 沒有，任何 HTTP 用戶端都可以）：
+
+```python
+import base64
+import os
+import ssl
+
+import httpx
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+key = os.environ["FORGEYARD_API_KEY"]
+with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=120,
+                  headers={"Authorization": f"Bearer {key}"}) as fy:
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/detect", data={"model": "rtdetr-v2-r18", "threshold": "0.5"}, files={"image": f})
+    for d in r.json()["detections"]:
+        print(d["label"], round(d["score"], 2), d["box"])  # box: [x0, y0, x1, y1] in pixels
+
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/depth", data={"model": "depth-anything-v2-small"}, files={"image": f})
+    with open("depth.png", "wb") as out:
+        out.write(base64.b64decode(r.json()["depth_png"]))  # 16-bit grey, nearer is brighter
+```
+
+回應：`detections`（標籤、分數、方框）、`masks`（每個有分數、面積、方框和一張 1 位元 PNG，最好的在前）或 `depth_png`（附 `min` 和 `max`）；都附圖片的 `width` 和 `height`。它們接受的所有選項見[參考資料](reference.md#vision)。用量每個請求計一張圖片和它的千像素數；金鑰的模型清單和每分鐘請求數照常適用。
+
+連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Library → Recipes → `vision` → *Machine without registry access* 會給出指令）。
+
+## 從範本做的應用程式（1.3）
+
+在 1.3，`/apps` 的 **Start from a template** 會把現成的視覺 API 做成應用程式；1.4 起視覺模型改從 Models 部署（[見上一節](#deploy-an-object-detection-model)），這個面板也拿掉了。已經從範本做出來的應用程式照常執行，`/apps/new?template=<id>`（或 `GET /api/workloads/templates`）也還能做一個。每個都執行 Forgeyard 自己的 vision server 映像檔，模型包在裡面，公開在 `/x/<name>`：
 
 | 範本 | 模型（授權） | 呼叫 |
 |---|---|---|
@@ -323,7 +373,7 @@ ${PORT}
 | **Segmentation** | SAM 2.1 Hiera tiny，`facebook/sam2.1-hiera-tiny`（Apache-2.0） | `POST /x/segmenter/v1/segment`，給一個點或一個框：遮罩 |
 | **Depth estimation** | Depth Anything V2 Small，`depth-anything/Depth-Anything-V2-Small-hf`（Apache-2.0） | `POST /x/depth/v1/depth`：16 位元的深度 PNG |
 
-1. 選 **On an NVIDIA GPU**（映像檔的 CUDA 版本，以記憶體共用一張卡，3 GiB）或 **On the CPU**（CPU 版本，不用 GPU）。表單會開好並填好：映像檔、任務、連接埠、健康檢查，以及 **Expose at** `/x/<name>`。可以改任何東西，例如名稱或機器，再按 **Create and start**。
+1. 開 `/apps/new?template=object-detection&gpu=1`（映像檔的 CUDA 版本，以記憶體共用一張卡，3 GiB），不加 `&gpu=1` 則是 CPU 版本。表單會開好並填好：映像檔、任務、連接埠、健康檢查，以及 **Expose at** `/x/<name>`。可以改任何東西，例如名稱或機器，再按 **Create and start**。
 2. 讓 API 金鑰可以呼叫它（**API keys** → 金鑰的 **Apps at /x/**）。
 3. 以 multipart 檔案欄位 `image` 送出圖片（或 JSON `{"image": "<base64>"}`）：
 
@@ -345,20 +395,20 @@ docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeya
 gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
 
-AMD 機器請用 **On the CPU**：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#app-templates)。不用 API 金鑰就想試試看，請見[在 Playground 試用視覺應用程式](#try-a-vision-app-in-the-playground)。
+AMD 機器請用 CPU 版本：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#app-templates)。不用 API 金鑰就想試試看，請見[在 Playground 試用視覺](#try-vision-in-the-playground)。
 
-## 在 Playground 試用視覺應用程式
+## 在 Playground 試用視覺
 
-**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給公開的視覺應用程式（從[範本](#start-an-app-from-a-template)啟動的，或任何以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務）。任何已登入的人都可以使用；請求依照應用程式的限制，並在 **Usage** 裡以 `console` 記在 `x:<name>` 底下。
+**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[從 Models 部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。在 Playground 的 **Models** 分頁選視覺模型，也會開出同一個面板。從 1.3 範本做的應用程式不再列在這裡（1.4 起應用程式離開主控台）：請用 API 金鑰呼叫 `/x/<name>`。
 
-1. 選 **App**：每一個都標出它的任務和模型。還沒有公開的應用程式時，分頁會這樣說明；管理員和操作員會看到 **Start from a template** 的連結。
-2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB；應用程式的 **Largest request** 比較小時以它為準）。
+1. 選 **Model**：每一個都標出任務和模型。還沒有時，分頁會這樣說明；管理員和操作員會看到從 Library 加入的連結。
+2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。
 3. 接著依任務而定：
    - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。
    - **Segmentation：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
    - **Depth estimation：** 按 **Estimate depth**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **Colour** 或 **Grey**。深度是相對的，不是公尺。
 
-結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。應用程式忙碌、停止或限制太小時，會用白話說明；你的 console 登入不會送到 `/x/`，那裡只接受 API 金鑰。路由請見[參考資料](reference.md#from-the-playground)。
+結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。模型停止了，或讀不了這張圖片時，會用白話說明。主控台把它送到 `/api/playground/vision/<task>`，對已登入的人來說和 `/v1/vision/<task>` 一樣（[參考資料](reference.md#vision)）。
 
 ## 把圖片送給模型
 

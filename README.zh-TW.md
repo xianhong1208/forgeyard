@@ -24,7 +24,8 @@
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
-- **任何 HTTP 服務都能用同一套金鑰。** 應用程式的 API 放在 `/x/<name>/…`，有金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API。
+- **任何 HTTP 服務都能用同一套金鑰。** 應用程式的 API 放在 `/x/<name>/…`，有金鑰、限制與用量。
+- **視覺模型（1.4）。** 物件偵測、影像分割與深度估計在 `/v1/vision/…`，像其他模型一樣從 Models 部署。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。
 - **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
@@ -197,6 +198,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | Z-Image-Turbo GGUF | stable-diffusion.cpp（`sd-cpp`） | CPU（行程）；AMD Strix Halo（Vulkan）；NVIDIA A100（CUDA） |
 | **影片生成** | | |
 | Wan2.1-T2V-1.3B | vLLM-Omni（`vllm-omni-video`） | NVIDIA A100 |
+| **視覺（1.4）** | | |
+| RT-DETRv2 R18 與 R50、SAM 2.1 Hiera tiny、Depth Anything V2 Small | Forgeyard 的視覺伺服器（`vision`） | CPU（以行程執行，1.4 映像檔發布之前） |
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
 
