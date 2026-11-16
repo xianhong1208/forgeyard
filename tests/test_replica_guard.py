@@ -524,6 +524,33 @@ def test_fy_rg_013_close_cuts_open_streams():
         engine.close()
 
 
+def test_fy_rg_020_close_does_not_wait_for_a_client_that_does_not_read():
+    """FY-RG-020: closing a guard is quick even when a client stopped reading a stream (its buffers
+    full, so a graceful close of either side would wait): every stream is aborted first."""
+    engine = OpenEngine(big=256 * 1024 * 1024)
+
+    async def scenario():
+        port = free_port()
+        g = Guard(listen=("127.0.0.1", port), upstream=("127.0.0.1", engine.port), key=KEY)
+        await g.start()
+        reader, writer = await asyncio.open_connection("127.0.0.1", port, limit=1024)
+        writer.transport.pause_reading()  # this client never reads: the guard's writes back up
+        writer.write(f"GET /big HTTP/1.1\r\nHost: r\r\nAuthorization: Bearer {KEY}\r\nContent-Length: 0\r\n\r\n".encode())
+        await writer.drain()
+        await asyncio.sleep(1.0)  # the answer fills the buffers on both sides
+        started = time.monotonic()
+        await g.close()
+        took = time.monotonic() - started
+        writer.transport.abort()
+        return took, g.listening
+
+    try:
+        took, listening = asyncio.run(scenario())
+        assert not listening and took < 1.0, f"close took {took:.2f} s"
+    finally:
+        engine.close()
+
+
 def test_fy_rg_014_threads_do_not_leak():
     """FY-RG-014: nothing of a guard outlives its close (no thread, no listening socket)."""
     before = threading.active_count()
