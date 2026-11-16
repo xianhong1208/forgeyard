@@ -26,7 +26,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from sqlalchemy import select
@@ -264,28 +264,7 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
     if deployment_id is not None:
         q = q.where(UsageDaily.deployment_id == deployment_id)
     rows = db.scalars(q).all()
-    keys = {k.id: k for k in db.scalars(select(ApiKey).where(ApiKey.id.in_({r.key_id for r in rows if r.key_id}))).all()}
-    targets = target_info(db, {r.target or "local" for r in rows})
-
-    def label(r: UsageDaily) -> tuple[str, str]:
-        if group_by == "day":
-            return r.day, r.day
-        if group_by == "key":
-            if not r.key_id:
-                return "console", "Console playground"
-            k = keys.get(r.key_id)
-            return str(r.key_id), f"{k.name} ({k.prefix}…)" if k else f"deleted key #{r.key_id}"
-        if group_by == "user":
-            return str(r.user_id), r.username or f"user #{r.user_id}"
-        if group_by == "source":
-            return r.source, "API keys" if r.source == "api" else "Console playground"
-        if group_by == "target":
-            t = r.target or "local"
-            return t, targets[t].name
-        if group_by == "provider":
-            t = targets[r.target or "local"]
-            return t.provider_id, t.provider
-        return r.model, r.model
+    label, targets = labeler(db, rows, group_by)
 
     groups: dict[str, dict] = {}
     total = _empty("total", "Total")
@@ -306,6 +285,139 @@ def summary(db: DbSession, *, days: int = 7, user_id: Optional[int] = None, depl
     totals = _finish(total)
     totals["split"] = {k: _finish(v) for k, v in split.items()}
     return {"from": first, "to": end.isoformat(), "days": days, "group_by": group_by, "total": totals, "rows": out}
+
+
+# ------------------------------------------------------------------ over time (1.4)
+STEPS = ("day", "week", "month")
+SPLITS = ("none", "key", "model", "provider", "user")
+SERIES_METRICS = ("requests", "errors", "prompt_tokens", "completion_tokens", "tokens", "cost_micros") + UNITS
+# How far back each view may reach: a year of days, two years of weeks, three years of months.
+MAX_PERIODS = {"day": 366, "week": 104, "month": 36}
+SERIES_TOP = 5   # lines drawn by name; the rest are summed into one "Other" line
+
+
+def period_start(d: date, step: str) -> date:
+    """The first day of the period `d` is in: the day itself, its week's Monday, or its month's first day."""
+    if step == "week":
+        return d - timedelta(days=d.weekday())
+    if step == "month":
+        return d.replace(day=1)
+    return d
+
+
+def _months_back(d: date, n: int) -> date:
+    m = d.year * 12 + d.month - 1 - n
+    return date(m // 12, m % 12 + 1, 1)
+
+
+def _next_start(start: date, step: str) -> date:
+    if step == "week":
+        return start + timedelta(days=7)
+    if step == "month":
+        return _months_back(start, -1)
+    return start + timedelta(days=1)
+
+
+def period_list(end: date, step: str, count: int) -> list[tuple[date, date]]:
+    """The last `count` periods up to and including the one `end` is in, oldest first, as (first day,
+    last day); the last one ends at `end` (it is still going on)."""
+    current = period_start(end, step)
+    if step == "month":
+        first = _months_back(current, count - 1)
+    else:
+        first = current - timedelta(days=(7 if step == "week" else 1) * (count - 1))
+    out = []
+    start = first
+    while start <= current:
+        nxt = _next_start(start, step)
+        out.append((start, min(nxt - timedelta(days=1), end)))
+        start = nxt
+    return out
+
+
+def _metric(r: UsageDaily, metric: str) -> int:
+    if metric == "tokens":
+        return (r.prompt_tokens or 0) + (r.completion_tokens or 0)
+    return getattr(r, metric) or 0
+
+
+def series(db: DbSession, *, step: str = "day", periods: int = 30, split: str = "none", metric: str = "requests",
+           user_id: Optional[int] = None, today: Optional[str] = None, top: int = SERIES_TOP) -> dict:
+    """One value of `metric` per period (day, week or month, UTC) over the last `periods` periods, for
+    the total or per key, model, provider or person: the Usage page's charts. Summed from the daily
+    rows, so every view comes from the same numbers as the tables. Groups whose metric is 0 over the
+    whole range are left out (`omitted`); past the `top` largest, the rest add up to one "Other"
+    line. `totals` has every metric over the range, so the page offers only the ones in use."""
+    end = datetime.fromisoformat(today).date() if today else datetime.now(timezone.utc).date()
+    spans = period_list(end, step, max(1, periods))
+    first = spans[0][0]
+    q = select(UsageDaily).where(UsageDaily.day >= first.isoformat(), UsageDaily.day <= end.isoformat())
+    if user_id is not None:
+        q = q.where(UsageDaily.user_id == user_id)
+    rows = db.scalars(q).all()
+    label, targets = labeler(db, rows, split)
+    index = {s.isoformat(): i for i, (s, _) in enumerate(spans)}
+    n = len(spans)
+
+    groups: dict[str, dict] = {}
+    total = [0] * n
+    totals = {m: 0 for m in SERIES_METRICS}
+    for r in rows:
+        i = index[period_start(date.fromisoformat(r.day), step).isoformat()]
+        for m in SERIES_METRICS:
+            totals[m] += _metric(r, m)
+        gid, name = label(r)
+        g = groups.setdefault(gid, {"id": gid, "name": name, "values": [0] * n, "total": 0})
+        if split == "provider":
+            g["cloud"] = targets[r.target or "local"].cloud
+        v = _metric(r, metric)
+        g["values"][i] += v
+        g["total"] += v
+        total[i] += v
+
+    used = sorted((g for g in groups.values() if g["total"] > 0), key=lambda g: (-g["total"], g["name"]))
+    lines = used[:max(1, top)]
+    rest = used[len(lines):]
+    if rest:
+        other = {"id": "other", "name": f"Other ({len(rest)})", "values": [0] * n, "total": 0, "other": True}
+        for g in rest:
+            other["values"] = [a + b for a, b in zip(other["values"], g["values"])]
+            other["total"] += g["total"]
+        lines.append(other)
+    return {"step": step, "split": split, "metric": metric, "from": first.isoformat(), "to": end.isoformat(),
+            "periods": [{"start": s.isoformat(), "end": e.isoformat(), "partial": e == end} for s, e in spans],
+            "series": lines, "total": total, "totals": totals, "omitted": len(groups) - len(used)}
+
+
+def labeler(db: DbSession, rows, group_by: str) -> tuple[Callable[[UsageDaily], tuple[str, str]], dict[str, TargetInfo]]:
+    """(id, name) of a row's group (GROUPS, or "none": one group for everything), and what each row's
+    target is."""
+    keys = {k.id: k for k in db.scalars(select(ApiKey).where(ApiKey.id.in_({r.key_id for r in rows if r.key_id}))).all()}
+    targets = target_info(db, {r.target or "local" for r in rows})
+
+    def label(r: UsageDaily) -> tuple[str, str]:
+        if group_by == "none":
+            return "total", "Total"
+        if group_by == "day":
+            return r.day, r.day
+        if group_by == "key":
+            if not r.key_id:
+                return "console", "Console playground"
+            k = keys.get(r.key_id)
+            return str(r.key_id), f"{k.name} ({k.prefix}…)" if k else f"deleted key #{r.key_id}"
+        if group_by == "user":
+            return str(r.user_id), r.username or f"user #{r.user_id}"
+        if group_by == "source":
+            return r.source, "API keys" if r.source == "api" else "Console playground"
+        if group_by == "target":
+            t = r.target or "local"
+            return t, targets[t].name
+        if group_by == "provider":
+            t = targets[r.target or "local"]
+            return t.provider_id, t.provider
+        return r.model, r.model
+
+    return label, targets
 
 
 def _empty(gid: str, name: str) -> dict:

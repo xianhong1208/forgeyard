@@ -309,6 +309,11 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - **Usage** counts requests, errors, tokens and latency per day, model, key, person, source and
   local or cloud. Everyone sees their own; admins see everyone's. Its **Cost** tab shows what cloud
   requests cost (see below).
+- **Over time**, on both tabs, draws one of those numbers as a line chart: per day (the last 30
+  days), week (13 weeks, from Monday) or month (12 months), in total or one line per key, model,
+  provider or person (admins, with **Everyone**). The five largest get a line each and the rest are
+  added up as *Other*. Hover a point or use the arrow keys to read a period's values; **Show the
+  numbers** lists them as a table. Days are UTC, and the latest period is still going on (dashed).
 
 ## Cloud providers and tiers
 
