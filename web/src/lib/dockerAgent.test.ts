@@ -98,7 +98,7 @@ describe("the agent image: published or built locally", () => {
   const PUBLISHED = { reference: "docker.io/forgeyard/forgeyard-agent:1.2.0", published: true,
     local_tag: "docker.io/forgeyard/forgeyard-agent:1.2.0" };
 
-  it("FY-WEB-141 the published image is the last line of the command, the rest as before; nothing to build", () => {
+  it("FY-WEB-263 the published image is the last line of the command, the rest as before; nothing to build", () => {
     const cmd = runCommand("amd", form({ server: "https://127.0.0.1:7860", portRange: "33000-33002", name: "amd-01" }),
       { ...JOIN, image: PUBLISHED.reference })!;
     // The command run by hand on the AMD machine, with only the image changed.
@@ -107,7 +107,7 @@ describe("the agent image: published or built locally", () => {
     expect(cmd.startsWith("sudo docker run -d --name forgeyard-agent --restart always --network host \\\n")).toBe(true);
   });
 
-  it("FY-WEB-142 a server that does not name an image means a local build of its version", () => {
+  it("FY-WEB-264 a server that does not name an image means a local build of its version", () => {
     expect(agentImage(undefined, "1.2.0")).toEqual({ reference: "forgeyard-agent:1.2.0", published: false,
       local_tag: "forgeyard-agent:1.2.0" });
     expect(agentImage(null, "1.2.0").published).toBe(false);
@@ -116,7 +116,7 @@ describe("the agent image: published or built locally", () => {
     expect(pinnedByDigest({ ...PUBLISHED, reference: `docker.io/forgeyard/forgeyard-agent@${DIGEST}` })).toBe(true);
   });
 
-  it("FY-WEB-143 offline: pull and save where the registry is reachable, load on the machine", () => {
+  it("FY-WEB-265 offline: pull and save where the registry is reachable, load on the machine", () => {
     expect(carryCommands(PUBLISHED)).toEqual({
       save: "sudo docker pull docker.io/forgeyard/forgeyard-agent:1.2.0 && \\\n"
         + "  sudo docker save docker.io/forgeyard/forgeyard-agent:1.2.0 | gzip > forgeyard-agent.tar.gz",
@@ -126,7 +126,7 @@ describe("the agent image: published or built locally", () => {
       "sudo docker build -f Dockerfile.agent -t docker.io/forgeyard/forgeyard-agent:1.2.0 .");
   });
 
-  it("FY-WEB-144 a pinned digest is pulled by digest and saved under its tag (a loaded image has no digest)", () => {
+  it("FY-WEB-266 a pinned digest is pulled by digest and saved under its tag (a loaded image has no digest)", () => {
     const pinned = { reference: `docker.io/forgeyard/forgeyard-agent@${DIGEST}`, published: true,
       local_tag: "docker.io/forgeyard/forgeyard-agent:1.2.0" };
     expect(carryCommands(pinned).save.split(" && \\\n  ")).toEqual([

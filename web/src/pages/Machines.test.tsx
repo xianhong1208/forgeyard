@@ -307,7 +307,7 @@ describe("machines page", () => {
     expect(docker()).toContain("-e FORGEYARD_PORT_RANGE=33000-33002");
   });
 
-  it("FY-WEB-145 with a published agent image: pulled by the command, building and carrying it are advanced", async () => {
+  it("FY-WEB-267 with a published agent image: pulled by the command, building and carrying it are advanced", async () => {
     const image = "docker.io/forgeyard/forgeyard-agent:1.2.0";
     const created = { id: "t4", created_at: "2026-11-09T10:00:00Z", expires_at: "2026-11-09T10:15:00Z", created_by: "owner",
       token: "fyj_secret", server_url: "https://forge.lan:7860", valid_minutes: 15, ca_fingerprint: null, trust_command: null,
