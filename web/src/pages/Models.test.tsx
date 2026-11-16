@@ -93,12 +93,12 @@ describe("models", () => {
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [dep(rep()), vl], server_time: "", can_manage: true } }
       : url === "/api/machines" ? { status: 200, body: { ...machinesFixture, machines: [{ ...machinesFixture.machines[0], id: 2, name: "a100" }] } }
       : url === "/api/models" ? { status: 200, body: catalog } : undefined);
-    mount("/models");
+    mount("/serving");
     const chat = await screen.findByRole("region", { name: "Chat · 1" });
     expect(within(chat).getByText("/v1/chat/completions")).toBeTruthy();
     expect(within(chat).getByText("Text in, text out")).toBeTruthy();
     const row = within(chat).getByRole("group", { name: "Deployment chat" });
-    expect(within(row).getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/models/deployments/3");
+    expect(within(row).getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/serving/3");
     expect(within(row).getByText("Downloading the model: 2 GiB of 8 GiB")).toBeTruthy();
     const where = within(row).getByRole("link", { name: /a100/ });
     expect(where.getAttribute("href")).toBe("/machines/2");
@@ -134,7 +134,7 @@ describe("models", () => {
       if (url === "/api/deployments/3") return { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null })), events: [], server_time: "", can_manage: true } };
       return undefined;
     });
-    mount("/models/deploy?model=qwen3-4b");
+    mount("/serving/deploy?model=qwen3-4b");
     expect(await screen.findByText("14.38 GiB", {}, { timeout: 3000 })).toBeTruthy();
     expect(screen.getByText("--gpu-memory-utilization 0.174")).toBeTruthy();
     expect((screen.getByLabelText("Deployment name") as HTMLInputElement).value).toBe("qwen3-4b");
@@ -149,7 +149,7 @@ describe("models", () => {
     const post = fetch.mock.calls.find(([u, i]) => u === "/api/deployments" && i?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "qwen3-4b", model: "qwen3-4b", recipe: "vllm", replicas: 1,
       params: { context: 8192, concurrency: 4, gpus: 1 } });
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/3"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
   it("FY-WEB-050 the detail page: estimate vs live memory, the gateway, try it", async () => {
@@ -161,7 +161,7 @@ describe("models", () => {
       if (url.startsWith("/api/workloads/11/replicas/0/logs")) return { status: 200, body: { source: "live", text: "INFO: Uvicorn running", truncated: false, state: "healthy" } };
       return undefined;
     });
-    mount("/models/deployments/3");
+    mount("/serving/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
     const gw = screen.getByRole("region", { name: "Through the gateway" });
     expect(within(gw).getByText("qwen3-4b").tagName).toBe("CODE");
@@ -182,7 +182,7 @@ describe("models", () => {
     const note = "cpu-01 could not reach huggingface.co; placed on cpu-02 instead";
     server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null,
       placement_note: note })), events: [], server_time: "", can_manage: true } } : undefined);
-    mount("/models/deployments/3");
+    mount("/serving/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
     // 1.4 (#81): a model is seen under Models only; its page no longer sends you to a workload.
     expect(screen.queryByText(/Runs as workload/)).toBeNull();
@@ -195,13 +195,13 @@ describe("models", () => {
     server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null })), events: [], server_time: "", can_manage: false } }
       : url === "/api/models" ? { status: 200, body: { ...catalog, can_manage: false, can_deploy: false, sources: undefined } } : undefined,
     { ...OWNER, role: "user", is_owner: false });
-    mount("/models/deployments/3");
+    mount("/serving/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     cleanup();
-    mount("/models/deploy");
+    mount("/serving/deploy");
     expect(await screen.findByText(/Only admins and operators deploy models/)).toBeTruthy();
   });
 
@@ -214,7 +214,7 @@ describe("models", () => {
         task_hint: "chat", size_bytes: 8 * GIB, file_count: 12, config: { layers: 36, kv_heads: 8, max_context: 40960, dtype: "bfloat16" }, weights: { params: { BF16: 4022468096 } } } } };
       return undefined;
     });
-    mount("/models?tab=library");
+    mount("/models");
     // An empty catalog opens Add a model by itself; a source can still be typed in.
     fireEvent.click(await screen.findByRole("button", { name: "Enter a source" }));
     fireEvent.change(screen.getByLabelText("Source"), { target: { value: "Qwen/Qwen3-4B" } });
@@ -241,8 +241,9 @@ describe("models", () => {
     ] };
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
       : url === "/api/models" ? { status: 200, body: { ...catalog, recipes: [recipe] } } : undefined);
-    mount("/models?tab=library");
-    const card = await screen.findByRole("article", { name: "Recipe vllm" });
+    mount("/models?tab=engines");
+    const card = await screen.findByRole("article", { name: "Engine vllm" });
+    fireEvent.click(within(card).getByText("Details"));  // 1.4 (#92): the variants are behind Details
     fireEvent.click(within(card).getByText("Machine without registry access: load the image"));
     const save = within(card).getByLabelText("Save command for cuda, pooling");
     expect(save.textContent).toBe(`sudo docker pull vllm/vllm-openai@${digest} && \\\n` +
@@ -250,7 +251,7 @@ describe("models", () => {
       "  sudo docker save vllm/vllm-openai:v0.32.0 | gzip > vllm-openai-v0.32.0.tar.gz");
     expect(within(card).getByLabelText("Load command for cuda, pooling").textContent).toBe(
       "gunzip -c vllm-openai-v0.32.0.tar.gz | sudo docker load");
-    expect(within(card).getByText(/so this recipe works offline as it is/)).toBeTruthy();
+    expect(within(card).getByText(/so this engine works offline as it is/)).toBeTruthy();
     // One image at a time; the process variant has none to carry.
     const pick = within(card).getByLabelText("Variant") as HTMLSelectElement;
     expect([...pick.options].map((o) => o.text)).toEqual(["cuda, pooling · vllm-openai:v0.32.0", "rocm · vllm-rocm:7"]);
@@ -259,28 +260,43 @@ describe("models", () => {
     expect(within(card).getByLabelText("Save command for rocm").textContent).toContain(
       "sudo docker save registry.example/team/vllm-rocm:7 | gzip > vllm-rocm-7.tar.gz");
     expect(within(card).getByText(/No ids are recorded for this image/)).toBeTruthy();
-    expect(within(card).queryByText(/so this recipe works offline as it is/)).toBeNull();
+    expect(within(card).queryByText(/so this engine works offline as it is/)).toBeNull();
     expect(within(card).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
   });
 
-  it("FY-WEB-226 the tabs are Deployments and Library (1.4, #81: no Serving); the old addresses land on Deployments or the Library", async () => {
-    server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
-      : url === "/api/models" ? { status: 200, body: catalog }
-        : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes: [] } } : undefined);
-    const view = mount("/models?tab=routes");
-    expect((await screen.findByRole("tab", { name: "Deployments (0)" })).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (0)", "Library"]);
-    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe(""));
-    view.unmount();
-    mount("/models?tab=catalog");
-    expect((await screen.findByRole("tab", { name: "Library" })).getAttribute("aria-selected")).toBe("true");
-    expect(await screen.findByRole("heading", { name: "Recipes" })).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=library"));
-    // The count in the tab's name comes with /api/deployments, which may answer after the catalog.
-    fireEvent.click(await screen.findByRole("tab", { name: "Deployments (0)" }));
+  it("FY-WEB-226 the library's tabs are Catalog (the default), Engines and, for admins, Sources (1.4, #92)", async () => {
+    server((url) => url === "/api/models" ? { status: 200, body: catalog } : undefined);
+    const view = mount("/models");
+    expect((await screen.findByRole("tab", { name: "Catalog (1)" })).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Catalog (1)", "Engines", "Sources"]);
+    expect(screen.getByRole("heading", { name: "Catalog" })).toBeTruthy();
+    // Download to… and Deploy stay on a catalog row; the engines and sources are on their own tabs.
+    const row = screen.getByText("Qwen3 4B").closest("tr")!;
+    // The short source (the repository); everything, revision included, in its tooltip.
+    expect(within(row).getByText("Qwen/Qwen3-4B").getAttribute("title")).toBe("hf://Qwen/Qwen3-4B @ 1cfa9a72");
+    // The row's actions are one group (stacked in one column at desktop widths, so none is clipped).
+    const actions = within(row).getByRole("group", { name: "Actions for qwen3-4b" });
+    expect(within(actions).getAllByRole("link").concat(within(actions).getAllByRole("button")).map((e) => e.textContent))
+      .toEqual(["Deploy", "Download to…", "Remove"]);
+    expect(within(actions).getByRole("link", { name: "Deploy" }).getAttribute("href")).toBe("/serving/deploy?model=qwen3-4b");
+    expect(screen.queryByRole("heading", { name: "Engines" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sources" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Engines" }));
+    expect(screen.getByTestId("where").dataset.search).toBe("?tab=engines");
+    expect(await screen.findByRole("heading", { name: "Engines" })).toBeTruthy();
+    expect(screen.getByRole("article", { name: "Engine vllm" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add a custom engine" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Catalog" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
+    expect(screen.getByTestId("where").dataset.search).toBe("?tab=sources");
+    expect(await screen.findByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(screen.getByLabelText(/Hosts for GGUF URLs/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog (1)" }));
     expect(screen.getByTestId("where").dataset.search).toBe("");
-    fireEvent.click(screen.getByRole("tab", { name: "Library" }));
-    expect(screen.getByTestId("where").dataset.search).toBe("?tab=library");
+    view.unmount();
+    // ?tab=catalog (1.3's name) is the Catalog too.
+    mount("/models?tab=catalog");
+    expect((await screen.findByRole("tab", { name: "Catalog (1)" })).getAttribute("aria-selected")).toBe("true");
   });
 
 });

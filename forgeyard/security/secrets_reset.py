@@ -3,7 +3,7 @@
 Run with the server stopped. It makes a new key (the old key file, if any, is kept as
 secret.key.lost-<time>), then for every stored secret the new key cannot read:
 
-- Hugging Face tokens are dropped: set the server's token again (Models -> Model sources), and enter
+- Hugging Face tokens are dropped: set the server's token again (Models -> Sources), and enter
   again any token of a deployment's own;
 - model replicas lose their internal key and are placed again, so they restart with a new one;
 - workload environment values are emptied (the names stay), and the workload's events say which:

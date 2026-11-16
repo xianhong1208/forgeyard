@@ -394,7 +394,7 @@ def test_fy_shr_003_the_advisor_notes_an_exclusive_replica_on_a_large_card(owner
     ready("chat", 0)
     [f] = found()
     assert f.severity == "info" and f.snoozable and f.scope == f"deployment:{d['id']}"
-    assert f.fix_url == f"/models/deployments/{d['id']}/edit" and "GPU #4 on a100" in f.detail
+    assert f.fix_url == f"/serving/{d['id']}/edit" and "GPU #4 on a100" in f.detail
     assert "14.4 GiB of the 80.0 GiB" in f.detail and f"deployment:{d['id']}" in f.pages
     db = new_session()
     try:

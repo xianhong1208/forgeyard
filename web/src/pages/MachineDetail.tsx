@@ -119,7 +119,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
       <section className="panel mk-section" aria-labelledby="mk-models">
         <div className="panel-head">
           <h2 id="mk-models">Models</h2>
-          {canPlace && <Link to={`/models/deploy?machine=${m.id}${kind === "cpu" ? "&device=cpu" : ""}`} className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> Deploy here</Link>}
+          {canPlace && <Link to={`/serving/deploy?machine=${m.id}${kind === "cpu" ? "&device=cpu" : ""}`} className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> Deploy here</Link>}
         </div>
         {p.loaded ? <HolderChips list={models} empty="No model runs on this machine." /> : <p className="muted small">Loading…</p>}
       </section>

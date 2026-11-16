@@ -13,7 +13,7 @@
 **[使用指南](docs/guide/zh-TW/README.md)** · **[English](README.md)** · **[發展藍圖](ROADMAP.zh-TW.md)** ·
 **[變更紀錄](CHANGELOG.md)**（英文）
 
-![Models 頁面：一台 CPU 機器上的四個部署，依種類分組（對話、多模態對話、文字轉語音、圖片），都已就緒，可以在各自的 /v1 路徑呼叫](docs/images/console-models.png)
+![Serving 頁面：一台 CPU 機器上的四個部署，依種類分組（對話、多模態對話、文字轉語音、圖片），都已就緒，可以在各自的 /v1 路徑呼叫](docs/images/console-serving.png)
 
 ## ✨ 主要功能
 
@@ -25,7 +25,7 @@
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
 - **任何 HTTP 服務都能用同一套金鑰。** 應用程式的 API 放在 `/x/<name>/…`，有金鑰、限制與用量。
-- **視覺模型（1.4）。** 物件偵測、影像分割與深度估計在 `/v1/vision/…`，像其他模型一樣從 Models 部署。
+- **視覺模型（1.4）。** 物件偵測、影像分割與深度估計在 `/v1/vision/…`，像其他模型一樣部署。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。
 - **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
@@ -99,7 +99,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 
 1. 開啟 `https://192.168.1.20:7860/setup`，輸入設定權杖，建立擁有者。接著開啟 **Trust this server**，在你的裝置上安裝 CA。
 2. **Machines → Add a machine**，在機器上執行那行指令。幾秒內它就會出現。
-3. **Models → Library → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
+3. **Models → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
 4. **API keys → New key**。在要呼叫模型的電腦上取得 CA 檔案和 SDK：
 
    ```bash

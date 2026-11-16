@@ -119,7 +119,7 @@ INFO forgeyard.agent: Joined https://192.168.1.20:7860 as 'gpu-01'; credential s
 Next, on https://192.168.1.20:7860:
   1. Machines: this machine shows as online within a few seconds.
   2. Change GPU access: choose which cards Forgeyard may use here.
-  3. Models: deploy a model on it. The guide: https://192.168.1.20:7860/guide
+  3. Serving: deploy a model on it. The guide: https://192.168.1.20:7860/guide
 ```
 
 依序發生了這些事：
@@ -147,7 +147,7 @@ Next, on https://192.168.1.20:7860:
 
 ## 5. 加入一個推薦的模型
 
-1. 開啟 **Models** → **Library**（模型庫）→ **Add a model**。
+1. 開啟 **Models** →（**Catalog** 分頁上的）**Add a model**。
 2. **Recommended** 列出已知可以正常運作的模型。挑一個適合你機器的：
    - GPU 至少有 8 GB 可用記憶體：**Qwen3 0.6B**（下載 1.4 GB）；
    - 只有 CPU：**Qwen3 1.7B (GGUF, for the CPU)**（下載 1.2 GB，約需 3 GB RAM）。
@@ -156,7 +156,7 @@ Next, on https://192.168.1.20:7860:
 
 ## 6. 部署它
 
-1. 選擇 **Deploy it**（部署它），或從 **Models** → **Deploy a model** 再挑選模型。
+1. 選擇 **Deploy it**（部署它），或從 **Serving** → **Deploy a model** 再挑選模型。
 2. 為這個部署取個名字，例如 `qwen`。這個名字就是程式呼叫時要用的**模型名稱**。
 3. 確認 **Runs on**（執行於）：Qwen3 0.6B 選 **GPU**，GGUF 模型選 **CPU only**（用 *Deploy it* 會自動幫你選好）。
 4. 頁面會顯示估算結果和它會在哪裡執行。選擇 **Deploy**。

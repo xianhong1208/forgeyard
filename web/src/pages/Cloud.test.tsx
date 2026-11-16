@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// 1.4 (#81): fewer places for one model. Models has Deployments and Library; a deployment's page holds
-// its cloud fallback; Cloud has Providers and Cloud models; the old addresses open the new places.
+// 1.4 (#81, #92): fewer places for one model. Serving lists what runs; Models is the library; a
+// deployment's page holds its cloud fallback; Cloud has Providers and Cloud models; the old addresses
+// open the new places.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation, useNavigate } from "react-router";
@@ -114,7 +115,7 @@ describe("where each route lives", () => {
     const { cloud: c, other } = ownNames(ROUTES);
     expect(c.map((r) => r.served_name)).toEqual(["smart", "flash", "lab"]);
     expect(other.map((r) => r.served_name)).toEqual(["chat-pool"]);
-    expect(routeHome(MIXED)).toBe("/models/deployments/1#cloud-fallback");
+    expect(routeHome(MIXED)).toBe("/serving/1#cloud-fallback");
     expect(routeHome(CLOUD_ONLY)).toBe("/cloud/models/9");
     expect(routeHome(ALIAS)).toBe("/cloud/models/11");
     // The list's mark: switched-on provider targets of the deployment's own route only.
@@ -126,39 +127,45 @@ describe("where each route lives", () => {
 });
 
 describe("navigation", () => {
-  it("FY-WEB-251 the menu: Machines, Models, Cloud (admins only, as Providers was), the everyday pages, then the admin pages", async () => {
+  it("FY-WEB-251 the menu: Machines, Serving, Models, Cloud (admins only, as Providers was), the everyday pages, then the admin pages", async () => {
     world();
     const view = mount("/models");
     const nav = await screen.findByRole("navigation", { name: "Main" });
     const top = () => within(nav).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent);
-    expect(top()).toEqual(["Machines", "Models", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
+    expect(top()).toEqual(["Machines", "Serving", "Models", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
+    expect(within(nav).getByRole("link", { name: "Serving" }).getAttribute("href")).toBe("/serving");
     expect(within(nav).getByRole("link", { name: "Cloud" }).getAttribute("href")).toBe("/cloud");
-    expect(within(nav).queryByRole("link", { name: /Providers|Serving/ })).toBeNull();
+    expect(within(nav).queryByRole("link", { name: /Providers|Apps|Workloads/ })).toBeNull();
     view.unmount();
     world(USER);
     mount("/models");
     const nav2 = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav2).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent))
-      .toEqual(["Machines", "Models", "Playground", "API keys", "Usage"]);
+      .toEqual(["Machines", "Serving", "Models", "Playground", "API keys", "Usage"]);
   });
 
   it("FY-WEB-252 old addresses open the new places, replacing the history entry", async () => {
+    // Only addresses a released version (1.3.x) had; the names used while 1.4 was made are gone (FY-WEB-321).
     const cases: [string, string][] = [
       ["/providers", "/cloud"],
       ["/providers/3", "/cloud/providers/3"],
       ["/providers/3/", "/cloud/providers/3"],
       ["/providers/new/x", "/cloud"],
-      ["/models?tab=serving", "/models"],
-      ["/models?tab=routes", "/models"],
-      ["/models?tab=catalog", "/models?tab=library"],
-      ["/models?tab=model-library", "/models?tab=library"],
-      ["/models?tab=serving&route=chat", "/models/deployments/1#cloud-fallback"],
-      ["/models?tab=routes&route=9", "/cloud/models/9"],
-      ["/models?tab=serving&route=nothing-by-that-name", "/models"],
-      ["/models/routes/5", "/models/deployments/1#cloud-fallback"],
+      ["/models?tab=routes", "/serving"],
+      ["/models?tab=deployments", "/serving"],
+      ["/models/routes/5", "/serving/1#cloud-fallback"],
       ["/models/routes/9", "/cloud/models/9"],
       ["/models/routes/new", "/cloud/models/new"],
-      ["/cloud/models/5", "/models/deployments/1#cloud-fallback"],
+      ["/cloud/models/5", "/serving/1#cloud-fallback"],
+      // 1.4 (#92): what runs now is on Serving.
+      ["/deployments", "/serving"],
+      ["/models/deploy", "/serving/deploy"],
+      ["/models/deploy?model=chat-model&machine=2", "/serving/deploy?model=chat-model&machine=2"],
+      ["/models/deployments/1", "/serving/1"],
+      ["/models/deployments/1#cloud-fallback", "/serving/1#cloud-fallback"],
+      ["/models/deployments/1/edit", "/serving/1/edit"],
+      ["/models/deployments/1/", "/serving/1"],
+      ["/models/deployments/x/y", "/serving"],
     ];
     for (const [from, to] of cases) {
       world();
@@ -183,8 +190,8 @@ describe("Apps (1.4, #81: Workloads before)", () => {
       ["/workloads/new?machine=2", "/apps/new?machine=2"],
       ["/workloads/7", "/apps/7"],
       // a model deployment's workload: its page is the deployment's
-      ["/workloads/9", "/models/deployments/1"],
-      ["/apps/9", "/models/deployments/1"],
+      ["/workloads/9", "/serving/1"],
+      ["/apps/9", "/serving/1"],
     ];
     const app = { ...workload(7, "notebook"), runtime: "container" };
     const model = { ...workload(9, "chat"), deployment_id: 1, deployment: { id: 1, name: "chat" } };
@@ -210,17 +217,18 @@ function Back() {
   return <button type="button" data-testid="back" onClick={() => void navigate(-1)}>back</button>;
 }
 
-describe("Models", () => {
+describe("Serving", () => {
   it("FY-WEB-253 a deployment with a cloud fallback shows → its provider in the list, linked to its page", async () => {
     world();
-    mount("/models");
+    mount("/serving");
     const chat = await screen.findByRole("group", { name: "Deployment chat" });
     const mark = await within(chat).findByRole("link", { name: /→ Gemini/ });
-    expect(mark.getAttribute("href")).toBe("/models/deployments/1#cloud-fallback");
+    expect(mark.getAttribute("href")).toBe("/serving/1#cloud-fallback");
     expect(within(screen.getByRole("group", { name: "Deployment embed" })).queryByText(/→/)).toBeNull();
     // Its Gemini tier is switched off: nothing to go to.
     expect(within(screen.getByRole("group", { name: "Deployment small" })).queryByText(/→/)).toBeNull();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (3)", "Library"]);
+    // Serving is one list: the library's tabs are on Models.
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 });
 
@@ -234,7 +242,7 @@ describe("a deployment's cloud fallback", () => {
       }
       return undefined;
     });
-    mount("/models/deployments/1#cloud-fallback");
+    mount("/serving/1#cloud-fallback");
     const panel = await screen.findByRole("region", { name: "Cloud fallback" });
     expect(within(panel).getByText("Gemini/gemini-2.5-flash")).toBeTruthy();
     fireEvent.click(within(panel).getByRole("button", { name: /Add a cloud tier/ }));
@@ -254,7 +262,7 @@ describe("a deployment's cloud fallback", () => {
 
   it("FY-WEB-255 everyone else sees it, read-only, and never asks for the route options", async () => {
     const fetch = world(USER);
-    mount("/models/deployments/1");
+    mount("/serving/1");
     const panel = await screen.findByRole("region", { name: "Cloud fallback" });
     expect(within(panel).getByText("Gemini/gemini-2.5-flash")).toBeTruthy();
     expect(within(panel).queryByRole("button", { name: /Save/ })).toBeNull();
@@ -279,7 +287,7 @@ describe("Cloud", () => {
     expect(within(other).getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["Model name chat-pool"]);
     // The deployments' own routes are not cards here: they are named with a link to their page.
     expect(screen.queryByRole("article", { name: "Model name chat" })).toBeNull();
-    expect(screen.getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/models/deployments/1#cloud-fallback");
+    expect(screen.getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/serving/1#cloud-fallback");
     expect(screen.getByRole("link", { name: /New cloud model/ }).getAttribute("href")).toBe("/cloud/models/new");
   });
 

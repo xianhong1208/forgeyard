@@ -95,8 +95,8 @@ describe("Playground: Vision (1.4: vision models)", () => {
     server((url) => (url === "/api/playground/vision/options" ? options([]) : undefined));
     mount();
     expect(await screen.findByRole("heading", { name: "No vision model to try yet" })).toBeTruthy();
-    expect(screen.getByText(/Deploy one from Models/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Add a vision model/ }).getAttribute("href")).toBe("/models?tab=library");
+    expect(screen.getByText(/Add one from Models \(the Catalog recommends three\) and deploy it/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Add a vision model/ }).getAttribute("href")).toBe("/models");
     expect(screen.getByText("facebook/sam2.1-hiera-tiny")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Vision" }).getAttribute("aria-selected")).toBe("true");
     cleanup();
@@ -124,7 +124,7 @@ describe("Playground: Vision (1.4: vision models)", () => {
       "det · Object detection · rtdetr_v2_r18vd", "seg · Segmentation · sam2.1-hiera-tiny",
       "dav2 · Depth estimation · Depth-Anything-V2-Small-hf"]);
     expect(within(panel).getByText("POST /v1/vision/detect with model=det")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Deployment" }).getAttribute("href")).toBe("/models/deployments/3");
+    expect(screen.getByRole("link", { name: "Deployment" }).getAttribute("href")).toBe("/serving/3");
     await pick(panel, photo());
     fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
     const boxes = await within(panel).findByRole("list", { name: "Detected objects" });

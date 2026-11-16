@@ -385,7 +385,7 @@ describe("what runs on a machine (1.4)", () => {
     const chips = within(box).getAllByRole("link").filter((a) => a.getAttribute("href") !== "/machines/1");
     expect(chips.map((a) => a.textContent)).toEqual(["notebook", "dep-chat", "dep-embed", "dep-rerank", "dep-asr"]);
     expect(chips[0].getAttribute("href")).toBe("/apps/9");
-    expect(chips[1].getAttribute("href")).toBe("/models/deployments/30");
+    expect(chips[1].getAttribute("href")).toBe("/serving/30");
     expect(within(box).getByText("+2 more")).toBeTruthy();
     // nothing runs on the offline APU
     expect(within(screen.getByRole("article", { name: "Machine strix" })).getByText("Nothing runs here yet.")).toBeTruthy();
@@ -405,13 +405,13 @@ describe("what runs on a machine (1.4)", () => {
     expect(within(screen.getByRole("group", { name: "GPU #2" })).getByRole("link").textContent).toBe("notebook");
     // 1.4 (#81): the map and "Running here" name both models (linked to the deployment) and apps (to the app).
     expect(within(screen.getByRole("group", { name: "GPU #2" })).getByRole("link").getAttribute("href")).toBe("/apps/9");
-    expect(within(four).getAllByRole("link")[0].getAttribute("href")).toBe("/models/deployments/30");
+    expect(within(four).getAllByRole("link")[0].getAttribute("href")).toBe("/serving/30");
     expect(within(screen.getByRole("group", { name: "GPU #0" })).queryAllByRole("link")).toHaveLength(0);
     const running = screen.getByRole("region", { name: /Running here/ });
     expect(within(running).getAllByRole("listitem")).toHaveLength(7);
     expect(within(running).getByRole("link", { name: "notebook" }).getAttribute("href")).toBe("/apps/9");
-    expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/models/deployments/30");
-    expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/models/deploy?machine=1");
+    expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/serving/30");
+    expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/serving/deploy?machine=1");
     // 1.4 (#81): Apps is an advanced page; nothing but the Apps page itself offers New app.
     expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
   });

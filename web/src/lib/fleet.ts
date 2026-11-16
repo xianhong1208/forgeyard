@@ -117,7 +117,7 @@ export function placement(workloads: Workload[], deployments: Deployment[]): Pla
       if (reserved === null && !dep && r.gpus.length === 0) reserved = w.spec.resources.memory ?? null;
       holders.push({
         name: dep?.name ?? w.name,
-        href: dep ? `/models/deployments/${dep.id}` : `/apps/${w.id}`,
+        href: dep ? `/serving/${dep.id}` : `/apps/${w.id}`,
         kind: dep ? modelKind(dep) : "workload",
         deployment: dep,
         workload: w,

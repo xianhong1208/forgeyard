@@ -57,7 +57,7 @@ SEEDS = (
     ("gateway_cloud", "default", "gateway_cloud_default", "level"),
     ("gateway_cloud", "max", "gateway_cloud_max", "level"),
 )
-SEED_PAGE = {"model_sources": ("/models?tab=library", "Models → Library → Model sources"),
+SEED_PAGE = {"model_sources": ("/models?tab=sources", "Models → Sources"),
              "gateway_limits": ("/keys", "API keys → Limits for keys"),
              "gateway_cloud": ("/keys", "API keys → Cloud policy")}
 

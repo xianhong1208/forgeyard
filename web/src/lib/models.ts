@@ -165,3 +165,39 @@ export function editBody(f: EditForm, recipe: Recipe): Record<string, unknown> {
   p.extra_args = extra.length ? extra : null;
   return { params: p, replicas: Number(f.replicas || "1"), machine_id: f.machine ? Number(f.machine) : null };
 }
+
+// ---------------------------------------------------------------- the catalog's source line (1.4, #92)
+const QUANT = /(?:^|[-_.])(i?q\d+(?:_[a-z0-9]+)*|bf16|fp16|f16|f32|fp8|mxfp4(?:_moe)?)$/i;
+const MAX_STEM = 28;
+
+// The quantisation a GGUF file name ends with (Q4_K_M, IQ4_XS, Q8_0, F16, BF16…), split parts
+// (-00001-of-00003) ignored; else the file's stem, shortened.
+export function quantTag(file: string): string {
+  const base = file.split("/").pop() ?? file;
+  const stem = base.replace(/\.gguf$/i, "").replace(/-\d{5}-of-\d{5}$/i, "");
+  const m = QUANT.exec(stem);
+  if (m) return m[1].toUpperCase();
+  return stem.length > MAX_STEM ? `${stem.slice(0, MAX_STEM - 1)}…` : stem;
+}
+
+// The short source under a catalog model's name: the repository (and the quantisation of a single
+// file), a URL's host and file, a local directory's name and file. `full` is everything, for a tooltip.
+export function shortSource(m: Pick<CatalogModel, "kind" | "source" | "file" | "revision" | "mmproj">): { text: string; full: string } {
+  const full = [m.source, m.file, m.mmproj ? `+ ${m.mmproj.path}` : null].filter(Boolean).join(" · ") + (m.revision ? ` @ ${m.revision}` : "");
+  if (m.kind === "url") {
+    let host = m.source;
+    let name = m.file ?? "";
+    try {
+      const u = new URL(m.source);
+      host = u.hostname;
+      name = name || decodeURIComponent(u.pathname.split("/").pop() ?? "");
+    } catch { /* keep the source as it is */ }
+    return { text: name ? `${host} · ${name}` : host, full };
+  }
+  if (m.kind === "local") {
+    const dir = m.source.replace(/^local:\/\//, "").replace(/\/+$/, "").split("/").pop() ?? m.source;
+    return { text: m.file ? `${dir} · ${m.file.split("/").pop()}` : dir, full };
+  }
+  const repo = m.source.replace(/^hf:\/\//, "");
+  return { text: m.file ? `${repo} · ${quantTag(m.file)}` : repo, full };
+}

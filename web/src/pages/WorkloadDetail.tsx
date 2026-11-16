@@ -24,7 +24,7 @@ export function OldWorkloads() {
   return <Navigate to={`/apps${rest ? `/${rest}` : ""}${search}${hash}`} replace />;
 }
 
-// An app's page. A model deployment's workload is seen under Models only (1.4, #81): an old link to
+// An app's page. A model deployment's workload is seen under Serving only (1.4, #81): an old link to
 // its page opens the deployment.
 export function WorkloadDetailPage() {
   const { id } = useParams();
@@ -63,7 +63,7 @@ export function WorkloadDetailPage() {
   };
 
   const deploymentId = w?.deployment?.id ?? w?.deployment_id;
-  if (deploymentId) return <Navigate to={`/models/deployments/${deploymentId}`} replace />;
+  if (deploymentId) return <Navigate to={`/serving/${deploymentId}`} replace />;
   return (
     <>
       <p className="crumb"><Link to="/apps"><IconArrowLeft size={14} aria-hidden="true" /> Apps</Link></p>
@@ -265,7 +265,7 @@ function Spec({ w }: { w: Workload }) {
   const rt = s.runtime;
   const facts: [string, ReactNode][] = [["Runtime", rt.type]];
   if (rt.type === "model") {
-    facts.push(["Model", <code key="m">{rt.model}</code>], ["Recipe", <code key="r">{rt.recipe}</code>]);
+    facts.push(["Model", <code key="m">{rt.model}</code>], ["Engine", <code key="r">{rt.recipe}</code>]);
   } else {
     facts.push(rt.type === "container" ? ["Image", <code key="i" title={rt.image}>{imageTag(rt.image)}</code>] : ["Command", <code key="c">{rt.command}</code>]);
     if (rt.type === "container" && rt.command) facts.push(["Entrypoint", <code key="e">{rt.command.join(" ")}</code>]);

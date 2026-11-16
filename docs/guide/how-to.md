@@ -62,8 +62,9 @@ of the carve-out and GTT. The deployment's events say which variant it got (`…
 …)`).
 
 A deployment cannot choose the variant itself. To run a card with the other one, add a custom
-recipe (**Models**, *Recipes*, **Add a custom recipe**): a copy of `llama-cpp` under another name, with only the variant you
-want under `variants`.
+engine (**Models → Engines → Add a custom engine**, *Start from a built-in engine*: `llama-cpp`): the copy
+gets another name; keep only the variant you want under `variants` and save. A custom engine's card
+has **Edit** and **Delete** (refused while a deployment uses it).
 
 **From a custom `llama-cpp-vulkan` recipe.** Before 1.3, Vulkan needed a custom recipe; the built-in
 one replaces it. A deployment keeps the recipe it was made with, so deploy the model again with
@@ -311,7 +312,7 @@ A machine that cannot reach the registry (no internet access, or a DNS filter th
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
 the deployment stay as they are.
 
-1. **Find the image.** On **Models → Library**, open **Machine without registry access:
+1. **Find the image.** On **Models → Engines**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
    ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
@@ -447,12 +448,12 @@ app is restarted. What passes and what is removed is in the
 ## Deploy an object-detection model
 
 Object detection, segmentation and depth are model kinds of their own (1.4): you add them to the
-**Library** and deploy them from **Models** like any other model. They run on Forgeyard's own vision
+catalog (**Models**) and deploy them from **Serving** like any other model. They run on Forgeyard's own vision
 server (recipe `vision`): the CUDA build on an NVIDIA GPU (one card shared by memory), the CPU build on
 any machine, AMD ones included. The model comes from the machine's model cache, so it is downloaded once
 and an offline machine works once its cache has it.
 
-1. **Models → Library → Recommended**: *Object detection, segmentation and depth* lists RT-DETRv2 R18
+1. **Models → Add a model → Recommended**: *Object detection, segmentation and depth* lists RT-DETRv2 R18
    (detection, the 80 COCO classes), SAM 2.1 Hiera tiny (segmentation) and Depth Anything V2 Small
    (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
    or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
@@ -460,7 +461,7 @@ and an offline machine works once its cache has it.
    MIT, BSD). Another licence, or none, cannot be added.
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
-3. The deployment shows up under **Models → Deployments → Vision**, with its path. **Try it** on its page
+3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
    sends a test image; **Playground → Vision** takes your own pictures.
 
 Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
@@ -508,12 +509,12 @@ take is in the [reference](reference.md#vision). Usage counts one image per requ
 kilopixels; a key's model list and requests per minute apply as for any model.
 
 On a machine that cannot reach Docker Hub, load the vision image under the tag of the server's version
-(Models → Library → Recipes → `vision` → *Machine without registry access* gives the commands).
+(Models → Engines → `vision` → *Machine without registry access* gives the commands).
 
 ## Apps made from a template (1.3)
 
 In 1.3, **Start from a template** on `/apps` made ready-made vision APIs as apps; in 1.4 vision models
-are deployed from Models instead ([above](#deploy-an-object-detection-model)) and the panel is gone.
+are deployed like any other model instead ([above](#deploy-an-object-detection-model)) and the panel is gone.
 Apps already made from a template keep running as they are, and `/apps/new?template=<id>` (or
 `GET /api/workloads/templates`) still makes one. Each runs Forgeyard's own vision server image with its
 model baked in and is exposed at `/x/<name>`:
@@ -559,14 +560,14 @@ is in the [reference](reference.md#app-templates). To try one without an API key
 
 ## Try vision in the Playground
 
-**Playground → Vision** sends a picture to a vision model ([deployed from Models](#deploy-an-object-detection-model)),
+**Playground → Vision** sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
 as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
 model in **Usage**. A vision model picked on the Playground's **Models** tab opens the same panel. Apps
 made from the 1.3 templates are not offered here any more (Apps leave the console in 1.4): call them at
 `/x/<name>` with an API key.
 
 1. Pick the **Model**: each is listed with its task and model. With none yet, the tab says so; admins
-   and operators get a link to add one from the Library.
+   and operators get a link to add one to the catalog.
 2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
@@ -766,7 +767,7 @@ to download them, and one token for the whole server is enough:
 
 1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
    **Settings → Access Tokens**, make a token with *Read* access.
-2. Admins: open **Models → Library**. Under **Model sources**, paste it into **Hugging Face token**
+2. Admins: open **Models → Sources** and paste it into **Hugging Face token**
    and choose **Save token**. It is stored encrypted with the server's secret key and never shown
    again, only its last four characters.
 3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
@@ -1165,7 +1166,7 @@ local tier. Admins see the results in three places:
 - **Get started → Setup health** lists every finding, with what to do and a link to where it is
   fixed.
 - **A count in the top bar** shows errors and warnings. It disappears when there are none.
-- **A banner on the page concerned** (Machines, API keys, Cloud, Models, a cloud model,
+- **A banner on the page concerned** (Machines, Serving, API keys, Cloud, a cloud model,
   a deployment, Users) shows that page's findings.
 
 Users and operators see none of it.
@@ -1280,7 +1281,7 @@ environment values have to be created again (their events say so).
 choose now, so a deployment there starts without waiting for the download. Nothing is started.
 Admins and operators can do it.
 
-1. Open **Models → Library**, and click **Download to…** on the model's row. Or open a machine's
+1. Open **Models** (the **Catalog** tab), and click **Download to…** on the model's row. Or open a machine's
    page and click **Download a model here…** above **Models in cache**, then pick the model.
 2. Tick the machines. Each line says whether that machine can take it:
    - **fits**: how much it downloads, the free disk, and the engine it would fetch;
@@ -1294,7 +1295,7 @@ Admins and operators can do it.
    it. Untick it to download the model only.
 4. Click **Download to N machines**.
 
-The progress shows under the model's row in the Library and on each machine's page, with the same
+The progress shows under the model's row in the catalog and on each machine's page, with the same
 words and bar as a deployment's download. **Cancel** stops it at once on that machine; what is on
 disk is kept, and **Download to…** again goes on from there. A download on a machine that goes
 offline waits and goes on when its agent is back. When it is done, the machine's **Models in cache**

@@ -304,7 +304,7 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 - 只有**雲端供應商**提供它，而金鑰的雲端設定不是 **Allowed**：對這把金鑰來說，這個模型不存在；
 - 部署或路由已被**刪除**，或名稱不是你以為的那個：程式使用的名稱是部署（或路由）的名稱，在它的頁面上標示為 *Model name*。
 
-**做法：** 打開 **Models** 查看模型的狀態；停止的部署請按 **Start**。到 **API keys** 檢查金鑰的模型清單和它的 *Cloud providers* 設定。
+**做法：** 打開 **Serving** 查看模型的狀態；停止的部署請按 **Start**。到 **API keys** 檢查金鑰的模型清單和它的 *Cloud providers* 設定。
 
 ## 模型有列出，卻回應 503
 
@@ -448,7 +448,7 @@ limits = "rlimit"
 **伺服器有啟動，但出現像 `Settings: GATEWAY_CLOUD_DEFUALT is not a setting` 這樣的紀錄**：伺服器會忽略那個名稱。每一行都會說明原因和該怎麼做：
 
 - *is not a setting… Did you mean …?*：打錯字，或是其他版本的設定。請在 `.env` 或環境變數裡改正名稱。
-- *is ignored*：另一個設定讓它沒有作用，例如沒有自己的憑證卻設了 `TLS_CA_FILE`，或管理員已經儲存過 **Model sources** 之後的 `MODEL_URL_HOSTS`（以儲存的值為準：請在網頁介面修改）。
+- *is ignored*：另一個設定讓它沒有作用，例如沒有自己的憑證卻設了 `TLS_CA_FILE`，或管理員已經儲存過 **Models → Sources** 之後的 `MODEL_URL_HOSTS`（以儲存的值為準：請在網頁介面修改）。
 - *ADMIN_PASSWORD is still set*：它只在第一次啟動時讀取。請把它從 `.env` 移除。
 
 管理員也會在 **Get started → Setup health** 看到同樣的內容，並附上修正位置的連結（[檢查設定健康狀態](how-to.md#check-the-setup-health)）。

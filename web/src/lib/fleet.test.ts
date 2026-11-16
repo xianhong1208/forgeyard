@@ -63,8 +63,8 @@ describe("fleet: what runs where (1.4)", () => {
     const d = dep(5, "chat", model);
     const p = placement([model, plain, cpuJob, gone], [d]);
     expect(p.holders.map((h) => [h.name, h.href, h.kind, h.reserved])).toEqual([
-      ["chat", "/models/deployments/5", "chat", 12 * GIB],
-      ["chat", "/models/deployments/5", "chat", 9 * GIB],    // no reading yet: the estimate per GPU
+      ["chat", "/serving/5", "chat", 12 * GIB],
+      ["chat", "/serving/5", "chat", 9 * GIB],    // no reading yet: the estimate per GPU
       ["notebook", "/apps/11", "workload", null],      // a GPU app declares no card memory
       ["etl", "/apps/12", "workload", 2 * GIB],        // a CPU app: its declared RAM
     ]);

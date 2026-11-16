@@ -104,7 +104,7 @@ export function deployLink(name: string, s: Suggestion | null | undefined): stri
   const q = new URLSearchParams({ model: name });
   if (s?.recipe) q.set("recipe", s.recipe);
   if (s?.device) q.set("device", s.device);
-  return `/models/deploy?${q.toString()}`;
+  return `/serving/deploy?${q.toString()}`;
 }
 
 // 1.4: why a vision model cannot be added as `task` (the server's rule, said before it is asked), or null.

@@ -84,7 +84,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
-| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Library → Model sources**, the database wins. Until then the panel marks it *from .env* |
+| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Sources**, the database wins. Until then the panel marks it *from .env* |
 | `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
 | `VRAM_HEADROOM_MIB` | `512` | Memory always left free on a card when placing replicas |

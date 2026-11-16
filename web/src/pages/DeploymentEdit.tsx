@@ -23,9 +23,9 @@ export function DeploymentEditPage() {
   const d = data?.deployment;
   const recipe = cat?.recipes.find((r) => r.name === d?.recipe);
   if (user && user.role === "user") {
-    return (<><PageHeader index="02 · Models" title="Change a deployment" /><Notice>Only admins and operators change deployments: it restarts code on a machine.</Notice></>);
+    return (<><PageHeader index="02 · Serving" title="Change a deployment" /><Notice>Only admins and operators change deployments: it restarts code on a machine.</Notice></>);
   }
-  if (!d || !recipe || !cat) return <><PageHeader index="02 · Models" title="Change a deployment" /><p className="muted">Loading…</p></>;
+  if (!d || !recipe || !cat) return <><PageHeader index="02 · Serving" title="Change a deployment" /><p className="muted">Loading…</p></>;
   return <EditView key={d.id} d={d} recipe={recipe} model={cat.models.find((m) => m.id === d.model.id)}
     machines={(machines?.machines ?? []).filter((m) => m.status !== "revoked")} />;
 }
@@ -67,7 +67,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
     setError(null);
     try {
       await api<EditResponse>(`/deployments/${d.id}`, { method: "PATCH", body });
-      navigate(`/models/deployments/${d.id}`);
+      navigate(`/serving/${d.id}`);
     } catch (err) {
       const list = err instanceof ApiError ? (err.detail.machines as MachineVerdict[] | undefined) : undefined;
       setError({ text: errorText(err), machines: list });
@@ -83,8 +83,8 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
 
   return (
     <>
-      <p className="crumb"><Link to={`/models/deployments/${d.id}`}><IconArrowLeft size={14} aria-hidden="true" /> {d.name}</Link></p>
-      <PageHeader index="02 · Models" title={`Change ${d.name}`}
+      <p className="crumb"><Link to={`/serving/${d.id}`}><IconArrowLeft size={14} aria-hidden="true" /> {d.name}</Link></p>
+      <PageHeader index="02 · Serving" title={`Change ${d.name}`}
         lead={`${d.model.name} with ${d.recipe}, served as “${d.served_name}”. The model, recipe and names stay; deploy a new one to change them.`} />
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label="Change the deployment">
         <div>
@@ -165,7 +165,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
             <span />
             <div className="row-gap">
               <button className="btn btn-primary" disabled={busy || !plan || changes.length === 0 || blocked}>{busy ? "Saving…" : running && plan?.restart !== "none" ? "Save and restart" : "Save"}</button>
-              <Link to={`/models/deployments/${d.id}`} className="btn btn-quiet">Cancel</Link>
+              <Link to={`/serving/${d.id}`} className="btn btn-quiet">Cancel</Link>
             </div>
           </div>
         </div>

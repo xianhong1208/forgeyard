@@ -172,6 +172,8 @@ def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatc
         assert all(p.severity == "info" and "(owner)" in p.detail for p in seeds)
         cloud = next(p for p in seeds if p.scope == "setting:GATEWAY_CLOUD_DEFAULT")
         assert cloud.fix_url == "/keys" and "API keys → Cloud policy" in cloud.detail
+        dirs = next(p for p in seeds if p.scope == "setting:MODEL_LOCAL_DIRS")
+        assert dirs.fix_url == "/models?tab=sources" and "Models → Sources" in dirs.detail  # 1.4 (#92)
     finally:
         db.close()
 

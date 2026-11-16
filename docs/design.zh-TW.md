@@ -52,7 +52,7 @@ server 不需要能連到機器。
 **Apps → New app** 建立，或用 `POST /api/workloads` 送出 spec。
 
 **在 console 裡它們叫 app**（1.4，#81），是不在選單裡的進階頁面：**Apps**（`/apps`；`/workloads…` 會轉址）只列出使用者自己執行的
-workload。模型部署的 workload（runtime 為 `model`）只在 **Models** 底下看得到：部署的頁面有副本、輸出和事件，舊的
+workload。模型部署的 workload（runtime 為 `model`）只在 **Serving** 底下看得到：部署的頁面有副本、輸出和事件，舊的
 workload 頁面連結會打開它的部署。API 仍然叫 `workloads`，也仍然拒絕停止、啟動或刪除部署的 workload（409
 `managed_by_deployment`）。**Machines** 兩者都顯示，因為兩者都佔用顯示卡。spec：
 
@@ -133,11 +133,19 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
 
 ## 模型
 
-**Models → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
-會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
+**console 裡的兩個頁面**（1.4，#92）。**Serving**（`/serving`）是現在正在執行的：依種類分組的部署，加上 **Deploy a model**
+（`/serving/deploy`）與每個部署的頁面（`/serving/<id>`，在 `/serving/<id>/edit` 修改）。**Models**（`/models`）是模型庫：
+**Catalog**（預設：可以部署的模型，有 *Download to…* 與 Deploy）、**Engines**（配方：console 說*引擎*，API 和 YAML 檔案仍叫
+*recipe*）與 **Sources**（只有 admin：GGUF 網址的主機、`local://` 目錄、Hugging Face 權杖）。選單是 Machines、Serving、Models、
+Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 09。只有發布過的版本有過的網址會轉址：1.3 的
+`/models/deployments/<id>[/edit]`、`/models/deploy`、`/models?tab=routes` 與 `?tab=deployments` 會打開 Serving；`?tab=catalog`
+就是 Catalog。只在 1.4 開發期間用過的分頁名稱（`?tab=serving`、`library`、`model-library`）不再支援。
+
+**Serving → Deploy a model**：從目錄挑模型與引擎、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
+會放到哪裡。一個部署 = 一個 service workload 加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
 （見「Gateway 與 API key」）。部署頁顯示這個名稱、用量、每個 replica，並有一個直接檢查單一 replica 的小小 **Try it**。
 
-- **加入模型**（admin），在 **Models → Library → Add a model** 有三種方式：
+- **加入模型**（admin），在 **Models → Add a model**（Catalog 分頁）有三種方式：
   - **Recommended（推薦清單）**：一份精選清單（[forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml)，容易修改），
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
@@ -166,7 +174,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   `repo:tag@sha256:…`：agent 拉取並執行的是 digest，registry 上的 tag 被改掉也改變不了實際執行的東西；介面顯示 tag。
   要升級引擎：改 tag，執行 `uv run --no-sync python scripts/pin_images.py --write`（從 Docker Hub 或 GHCR 取得多架構 digest，
   並檢查每個 variant 宣稱的平台都在），再檢查 diff；不加 `--write` 則檢查每個 digest 是否仍對應它的 tag。內建映像少了 digest
-  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，估算的 `vision_overhead` / `video_overhead`、文字轉語音用的 `tts` 區塊（引擎能產生的格式與預設格式、串流方式、列出聲音的路徑、預設聲音、gateway 替它補上的請求欄位、能否說中日韓文），以及兩階段引擎用的估算 `codec_overhead` 與 `{gpu_util_main}` / `{gpu_util_codec}` 佔位符。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
+  測試就會失敗。admin 可在 **Models → Engines** 加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，估算的 `vision_overhead` / `video_overhead`、文字轉語音用的 `tts` 區塊（引擎能產生的格式與預設格式、串流方式、列出聲音的路徑、預設聲音、gateway 替它補上的請求欄位、能否說中日韓文），以及兩階段引擎用的估算 `codec_overhead` 與 `{gpu_util_main}` / `{gpu_util_codec}` 佔位符。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
 
   | 配方 | 服務 | 執行在 | 固定版本 |
   |---|---|---|---|
@@ -390,10 +398,10 @@ Kong 與 GPUStack 之後決定。
   embeddings 路由，模型也要相符。每個登入的人都能讀路由（含是否可用，以及種類：local、mixed 或 cloud）；admin 才能修改（稽核紀錄
   `route.created`、`route.changed`、`route.deleted`）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
   名稱不變，所以行為完全和以前一樣。
-- **在 console 的位置**（1.4，#81）。部署自己的路由就是它的**雲端備援**，在部署的頁面上編輯；Deployments 清單會標出有雲端層的部署
+- **在 console 的位置**（1.4，#81）。部署自己的路由就是它的**雲端備援**，在部署的頁面上編輯；Serving 清單會標出有雲端層的部署
   （*→ Gemini*）。admin 自己建立的路由在 **Cloud → Cloud models**：裡面有供應商模型的是*雲端模型*，其他列在 *Other names for
   deployments*；每個部署的頁面會連到它另外回應的名稱。console 用「雲端備援」和「雲端模型」，「路由」只留作 API 的用語
-  （`/api/routes`）。舊網址（`/models?tab=serving`、`?tab=routes`、`/models/routes/<id>`、`/providers…`）會轉址。
+  （`/api/routes`）。舊網址（`?tab=routes`、`/models/routes/<id>`、`/providers…`）會轉址。
 - **溢出規則，只在第一個 byte 之前。** 這一層 *unavailable*（沒有就緒的副本、每個連線都失敗）、*busy*（每個就緒副本經由這台
   server 處理中的請求數都達到部署的 `concurrency`；名額是原子地取得的，兩個請求不會同時拿到最後一個；`wait_ms` 會先等名額）或
   *refusing*（429 或 503）時，才用下一層。*too long*（估計的提示加上 `max_tokens` 超過部署的 `context`）只有路由選擇時才算。
@@ -534,8 +542,8 @@ Kong 與 GPUStack 之後決定。
   `scope` 指出對象（`machine:3`、`key:12`、`route:4`），`pages` 指出 UI 在哪些頁面以橫幅顯示它。*error* 是現在就壞了或不安全，
   *warning* 是可能會花錢、外洩或壞掉，*info* 是沒有作用或出乎意料。拋出例外的檢查會被記錄並略過，所以一個 bug 絕不會蓋掉其他結果。
   檢查清單在指南的參考資料（*Setup health checks*）；有測試確保它完整。
-- **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、API keys、
-  Cloud、Models、雲端模型、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
+- **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、Serving、API keys、
+  Cloud、雲端模型、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
 - **延後提醒**是每位 admin、每項結果（`id@scope`）各自的，為期 30 天，存在使用者的 `preferences` JSON（`advisor_snoozed`），
   所以不需要 migration。error 不能延後。延後的結果如果仍然成立，30 天後會再出現。
 - **機密金鑰備份**（決策 D5）：在 admin 勾選 *I have a backup of key id X* 之前一直是警告。勾選是一筆 `server_settings`
