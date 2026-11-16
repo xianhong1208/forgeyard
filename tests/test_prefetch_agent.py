@@ -215,6 +215,7 @@ class ImageRuntime:
     def __init__(self, fail=None):
         self.calls = []
         self.fail = fail
+        self.reported = threading.Event()  # set by the test once the progress reached the job
 
     def info(self):
         return {"ok": True}
@@ -224,6 +225,8 @@ class ImageRuntime:
         if self.fail:
             raise StartError(self.fail)
         progress({"done": 50, "total": 100, "layers": 2, "layers_done": 1})
+        # Like a real pull, it ends after its progress was seen (the report goes through the event loop).
+        self.reported.wait(10)
         return image, "pinned"
 
 
@@ -241,7 +244,7 @@ def test_fy_pf_006_engine_images_are_pulled_by_the_container_runtime(tmp_path):
         sup = supervisor(tmp_path, cache, {"container": rt})
         seen = []
         orig = sup.prefetch._pull_progress
-        sup.prefetch._pull_progress = lambda j, snap: (orig(j, snap), seen.append(dict(j.download or {})))
+        sup.prefetch._pull_progress = lambda j, snap: (orig(j, snap), seen.append(dict(j.download or {})), rt.reported.set())
         want(sup, {"id": "i1", "image": image, "image_ids": ids})
         await until(lambda: job(sup, "i1").state == "done", "the pull")
         assert rt.calls == [(image, images.parse_check(ids))]
