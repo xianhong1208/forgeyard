@@ -162,6 +162,12 @@ def test_fy_relay_020_the_manifest_of_the_machines_platform_and_who_may_have_it(
         assert r.status_code == 200 and r.content == img.platforms["arm64"].manifest
         r = get(owner, f"/agent/v1/relay/download/{drisc['uid']}/image/manifest", c["credential"])
         assert r.status_code == 409 and r.json()["detail"]["code"] == "relay_no_platform"
+        entry = img.lock_entry()
+        for unknown in ({}, {"arch": ""}, {"arch": "mips"}):
+            assert relay.platform_of(Node(id=5, platform=unknown), entry) is None, unknown
+        assert relay.platform_of(Node(id=5, platform={"arch": "AMD64"}), entry) == "linux/amd64"
+        assert relay.platform_of(Node(id=5, platform={"arch": "arm64"}),
+                                 {"platforms": {"linux/arm64/v8": {}}}) == "linux/arm64/v8"
         assert "riscv64" in r.json()["detail"]["message"] and "linux/amd64" in r.json()["detail"]["message"]
         assert get(owner, path).status_code == 401
         assert get(owner, path, b["credential"]).status_code == 404  # another machine's download
@@ -172,6 +178,9 @@ def test_fy_relay_020_the_manifest_of_the_machines_platform_and_who_may_have_it(
         owner.put(f"/api/machines/{a['node_id']}/fetch-via", json={"fetch_via": "auto"})
         set_node(a["node_id"], features=FEATURES + ["image_ids", "relay"])
         r = get(owner, path, a["credential"])
+        assert r.status_code == 403 and r.json()["detail"]["code"] == "relay_off"
+        blob = f"/agent/v1/relay/download/{d['uid']}/image/blobs/{img.platforms['amd64'].config_digest}"
+        r = get(owner, blob, a["credential"])
         assert r.status_code == 403 and r.json()["detail"]["code"] == "relay_off"
         set_node(a["node_id"], features=IMAGES)
         assert get(owner, path, a["credential"]).status_code == 200
@@ -229,6 +238,14 @@ def test_fy_relay_022_blobs_by_digest_with_range_only_those_the_manifest_names(o
             r = get(owner, f"{base}/{other}", a["credential"])
             assert r.status_code == 404 and r.json()["detail"]["code"] == "relay_not_in_image", other
         assert get(owner, f"{base}/sha256:../../etc", a["credential"]).status_code == 404
+        # A pull token that expired early is renewed once: for a blob, and for a manifest fetched again.
+        before = server.tokens
+        server.expire_once = True
+        assert get(owner, f"{base}/{p.config_digest}", a["credential"]).content == p.config
+        relay.reset()
+        server.expire_once = True
+        assert get(owner, f"/agent/v1/relay/download/{d['uid']}/image/manifest", a["credential"]).status_code == 200
+        assert server.tokens >= before + 2
         assert get(owner, f"{base}/{p.config_digest}", a["credential"], Range="bytes=1-2,5-6").status_code == 416
 
 
@@ -281,7 +298,8 @@ def test_fy_relay_024_tag_only_images_are_refused_with_a_word_to_upload_them(own
 
 def test_fy_relay_025_a_replicas_image_and_a_relay_closed_when_the_deployment_goes(owner, reg):
     """FY-RELAY-025: a deployment's replica on a relaying machine gets `image_relay` beside its spec; its
-    manifest and blobs are served while it is wanted and refused once the deployment is deleted."""
+    manifest and blobs are served while it is wanted, refused once the deployment is stopped, and again once it
+    is deleted."""
     img, _ = reg
     model_id()
     engine_recipe(owner, img.ref)
@@ -296,6 +314,9 @@ def test_fy_relay_025_a_replicas_image_and_a_relay_closed_when_the_deployment_go
         path = f"/agent/v1/relay/replica/{rep['id']}/image/manifest"
         assert get(owner, path, a["credential"]).status_code == 200
         assert reps(owner, dep)
+        assert owner.post(f"/api/deployments/{dep['deployment']['id']}/stop").status_code == 200
+        r = get(owner, path, a["credential"])
+        assert r.status_code == 404 and r.json()["detail"]["code"] == "relay_not_wanted"
         owner.delete(f"/api/deployments/{dep['deployment']['id']}")
         assert get(owner, path, a["credential"]).status_code == 404
 

@@ -55,7 +55,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import quote, urlsplit
 
 import anyio
@@ -175,6 +175,8 @@ class Source:
     headers: dict = field(default_factory=dict)   # the token, never logged
     digest: Optional[str] = None   # an image blob: what its bytes must hash to ("sha256:…")
     size: Optional[int] = None     # and how many there are (the manifest says)
+    # An image blob: opens it from the registry with its pull token (renewed once on a 401), given the Range.
+    opener: Optional[Callable[[dict], fetch.Response]] = None
 
 
 # ------------------------------------------------------------------ engine images (#35 PR 4)
@@ -276,11 +278,11 @@ def _image_source(db: DbSession, node: Node, kind: str, uid: str, digest: str, *
     if digest not in blobs:
         raise Refused(404, "relay_not_in_image", "That digest is not the config or a layer of the image.")
     reg = registry_client()
-    headers = {} if check_only else reg._headers(target.registry, target.repo)
     what = "config" if digest == target.config else "layer"
     return Source(reg.blob_url(target.registry, target.repo, digest), reg.policy(),
-                  f"{oci.tag_ref(target.image)} ({target.platform}) {what} {digest[7:19]}", headers,
-                  digest=digest, size=blobs[digest])
+                  f"{oci.tag_ref(target.image)} ({target.platform}) {what} {digest[7:19]}",
+                  digest=digest, size=blobs[digest],
+                  opener=lambda h: reg.open_blob(target.registry, target.repo, digest, headers=h))
 
 
 def _wanted_replica(db: DbSession, node: Node, uid: str) -> Optional[Replica]:
@@ -481,7 +483,10 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
     if rng is not None:
         headers["Range"] = rng.strip()
     try:
-        resp = await run_in_threadpool(fetch.open_url, src.url, src.policy, headers=headers)
+        if src.opener is not None:
+            resp = await run_in_threadpool(src.opener, headers)
+        else:
+            resp = await run_in_threadpool(fetch.open_url, src.url, src.policy, headers=headers)
     except fetch.FetchError as e:
         slots.give(node_id)
         log.warning("Relay of %s to %s: could not open it at %s: %s", src.label, name, host, e)

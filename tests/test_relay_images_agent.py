@@ -27,6 +27,7 @@ from forgeyard.agent.workloads.runtime import StartError
 from forgeyard.workloads import images
 from tests.image_helpers import build_image, docker_save
 from tests.test_relay_agent import CRED, FakeRelay
+from tests.waits import wait_until
 from tests.workload_helpers import FakeDocker
 
 PATH = "/agent/v1/relay/download/j1/image"
@@ -104,6 +105,15 @@ def test_fy_relay_027_server_mode_fetches_checks_loads_tags_and_runs_by_the_reco
                              "layer": 3}) == "pulling the image via the server: 2.00 of 4.00 GiB (50%), layer 3 of 7"
     assert pulling.describe({"via": "server", "unpacking": True, "layers": 7}) == \
         "pulling the image via the server: loading it, 7 layers"
+    # An engine that loads it untagged (only "Loaded image ID: …"): the agent gives it the recipe's tag.
+    b2 = Box(box.cache.root.parent / "untagged", box.img)
+    try:
+        b2.fake.untagged_loads()
+        assert b2.ensure()[1] == LOADED
+        assert b2.fake.images()[0]["RepoTags"] == ["ghcr.io/acme/engine:1.0"]
+        assert ["tag", p.config_digest, "ghcr.io/acme/engine:1.0"] in b2.fake.calls()
+    finally:
+        b2.close()
     # Loaded now: the next time nothing is fetched.
     box.relay.requests.clear()
     assert box.ensure()[1] == LOADED and box.relay.requests == []
@@ -169,6 +179,15 @@ def test_fy_relay_029_auto_relays_only_after_the_registry_could_not_be_reached(t
         assert not ImageRelay(PATH, "auto", b.through.client, b.cache).first("quay.io/acme/x:1@sha256:" + "0" * 64)
     finally:
         b.close()
+    tagged = Box(tmp_path / "tagged", img, mode="auto")
+    try:
+        tagged.fake.offline()
+        with pytest.raises(StartError) as e:
+            tagged.ensure(image="ghcr.io/acme/engine:1.0", check=None)
+        assert "not pinned by digest" in str(e.value) and "Upload an image" in str(e.value)
+        assert tagged.relay.requests == []
+    finally:
+        tagged.close()
     denied = build_image("fail/engine:1.0")
     b3 = Box(tmp_path / "three", denied, mode="auto")
     try:
@@ -208,6 +227,15 @@ def test_fy_relay_030_what_does_not_match_is_never_loaded_or_run(tmp_path, monke
     assert not list((b.cache.root / ".partial").rglob("*.part")) and b.fake.loads() == []
     other = {"ids": img.check()["ids"], "content": ["sha256:" + "1" * 64]}
     refused("content", check=other, needle="not the recorded ones")
+    b0 = Box(tmp_path / "noids", img)
+    try:
+        with pytest.raises(imagerelay.ImageRelayError, match="no recorded ids"):
+            imagerelay.fetch(b0.through, img.ref, None)
+        assert b0.relay.requests == []
+    finally:
+        b0.close()
+    no_config = {"ids": [d for d in img.check()["ids"] if d != p.config_digest], "content": img.check()["content"]}
+    refused("config", check=no_config, needle="names a config that is not the recorded one")
     monkeypatch.setattr(imagerelay, "machine_arch", lambda: "arm64")
     refused("arch", needle="this machine is arm64")
     monkeypatch.undo()
@@ -243,7 +271,12 @@ def test_fy_relay_040_a_cancel_keeps_the_staging_and_the_next_try_resumes(tmp_pa
         big = p.layers[1]
         b.relay.stall_after = 50_000
         cancel = threading.Event()
-        threading.Timer(1.0, cancel.set).start()
+        def cancel_once_stalled():  # a condition, not a fixed time: the large layer has started and stalled
+            wait_until(lambda: any(f.stat().st_size >= 50_000 for f in (b.cache.root / ".partial").rglob("*.part")),
+                       "the large layer's first bytes on disk", 30)
+            cancel.set()
+
+        threading.Thread(target=cancel_once_stalled, daemon=True).start()
         with pytest.raises(pulling.PullCancelled):
             b.ensure(cancel=cancel)
         [staged] = b.staging()
@@ -277,15 +310,22 @@ def test_fy_relay_032_desired_image_relays_are_used_for_downloads_and_replicas(t
             sup = Supervisor(tmp_path / "state", {"container": b.rt}, models=b.cache, tick=0.05,
                              port_range=(32150, 32160))
             sup.server_features = {"workloads", "models", "prefetch", "pull_progress"}
-            seen = []
+            seen, replica_seen = [], []
             report = sup.prefetch._pull_progress
-            sup.prefetch._pull_progress = lambda job, snap: (seen.append(dict(snap)), report(job, snap))[1]
+            sup.prefetch._pull_progress = lambda job, snap: (report(job, snap), seen.append(dict(job.download or {})))[0]
+            replica_report = sup._pull_progress
+            sup._pull_progress = lambda rid, snap: (replica_report(rid, snap),
+                                                    replica_seen.append(dict(sup.records[rid].download or {})))[0]
             want(sup, {"id": "j1", "image": img.ref, "image_ids": img.check(),
                        "image_relay": {"path": PATH, "mode": "server"}})
             await converge(sup, lambda s: s.prefetch.jobs.get("j1") and s.prefetch.jobs["j1"].state in ("done", "failed"))
             job = sup.prefetch.jobs["j1"]
             assert job.state == "done", job.reason
-            assert seen and all(x["via"] == "server" for x in seen)
+            assert seen and all(x.get("via") == "server" for x in seen), seen
+            # The replica's image is not here any more and the registry cannot be reached: only the relay helps.
+            b.fake._update(lambda data: data.update(images=[]))
+            b.fake.offline()
+            b.relay.requests.clear()
             rep = replica("feedface01234567", container(image=img.ref))
             sup.set_desired(desired({**rep, "image_ids": img.check(),
                                      "image_relay": {"path": "/agent/v1/relay/replica/feedface01234567/image",
@@ -294,6 +334,8 @@ def test_fy_relay_032_desired_image_relays_are_used_for_downloads_and_replicas(t
                            and s.records["feedface01234567"].state in ("running", "backoff", "failed"))
             rec = sup.records["feedface01234567"]
             assert rec.state == "running", rec.reason
+            assert any(r["path"].startswith("/agent/v1/relay/replica/feedface01234567/image") for r in b.relay.requests)
+            assert replica_seen and all(x.get("via") == "server" for x in replica_seen if x), replica_seen
             return sup
 
         asyncio.run(scenario())
@@ -330,6 +372,27 @@ def test_fy_relay_033_the_agent_says_what_it_can(tmp_path, monkeypatch):
     nocache = features({"container": rt}, None)
     assert "relay_images" not in nocache and "image_load" in nocache
     assert len(full) <= 16
+    # Only relay paths of the expected forms are taken from the server.
+    from forgeyard.agent.relay import parse_image
+
+    assert parse_image({"image_relay": {"path": PATH, "mode": "server"}}) == {"path": PATH, "mode": "server"}
+    for bad in ("/etc/passwd", "https://evil.example/agent/v1/relay/download/j1/image", PATH + "/../x",
+                "/agent/v1/relay/download/j1/model"):
+        assert parse_image({"image_relay": {"path": bad, "mode": "server"}}) is None, bad
+    assert parse_image({"image_relay": {"path": PATH, "mode": "sideways"}}) is None
+    sup = Supervisor(tmp_path / "state3", {"container": rt}, models=ModelCache(tmp_path / "c3"), tick=0.05,
+                     port_range=(32170, 32180))
+    agent = Agent("http://127.0.0.1:9", CRED, inv, supervisor=sup)
+    sent = []
+
+    class WS:
+        async def send(self, text):
+            sent.append(json.loads(text))
+
+    asyncio.run(agent._answer_image_load(WS(), {"request_id": "r1", "path": "/agent/v1/relay/download/j1/model",
+                                                 "size": 10}))
+    assert sent == [{"v": 1, "type": "image_loaded", "request_id": "r1", "ok": False,
+                     "reason": "this agent cannot load images (no container engine), or the path is wrong"}]
 
 
 # ------------------------------------------------------------------ an uploaded image file

@@ -129,7 +129,8 @@ def test_fy_relay_036_the_file_goes_to_that_machines_agent_once_and_what_it_load
         got = agent.get(path, headers=bearer(a["credential"]))
         assert got.status_code == 200 and got.content == data
         assert int(got.headers["content-length"]) == len(data)
-        assert agent.get(path, headers=bearer(a["credential"])).status_code in (404, 409)
+        again = agent.get(path, headers=bearer(a["credential"]))
+        assert again.status_code == 409 and again.json()["detail"]["code"] == "upload_claimed"
         p = img.platforms["amd64"]
         ws.send_json({"v": 1, "type": "image_loaded", "request_id": msg["request_id"], "ok": True,
                       "images": [{"id": p.config_digest, "tags": ["ghcr.io/acme/engine:1.0"], "content": p.content,

@@ -373,3 +373,17 @@ def test_fy_acfg_009_agent_join_joins_once_and_exits(tmp_path, monkeypatch, capl
     empty = write(tmp_path, f'state_dir = "{tmp_path / "other"}"\n', "empty.toml")
     assert cli_main(["agent", "join", "--config", str(empty), "--join-token", "fyj_4"]) == 4
     assert "A server address is needed" in caplog.text
+
+
+def test_fy_acfg_010_a_multi_line_detection_note_stays_one_comment(tmp_path):
+    """FY-ACFG-010: a detection note that quotes a tool's multi-line output (`podman info` failing in a container
+    without CAP_SYS_ADMIN printed a warning, a newline and "cannot clone: …") is written as one comment line, so
+    the rendered file is still valid TOML that `init` can write."""
+    values = {s.key: s.default for s in config.SETTINGS}
+    note = ('No container engine found (podman info failed: time="x" level=warning msg="\\"/\\" is not a shared mount"\n'
+            "cannot clone: Op): only process workloads.")
+    text = config.render(values, {"workloads.container_engine": note})
+    data = tomllib.loads(text)
+    assert data["workloads"]["container_engine"] == values["workloads.container_engine"]
+    assert "# No container engine found (podman info failed: time=\"x\" level=warning msg=\"\\\"/\\\" is not a shared " \
+           "mount\" cannot clone: Op): only process workloads." in text

@@ -526,7 +526,8 @@ def render(values: dict, notes: Optional[dict] = None, header: Optional[list[str
             for line in textwrap.wrap(s.help, 96):
                 out.append(f"# {line}")
             if s.key in notes:
-                out.append(f"# {notes[s.key]}")
+                # A detection note can quote a tool's multi-line output (`podman info` failing): one comment line.
+                out.append("# " + " ".join(str(notes[s.key]).split()))
             v = values.get(s.key, s.default)
             if v is None:
                 example = s.example or '""'

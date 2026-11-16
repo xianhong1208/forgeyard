@@ -481,7 +481,7 @@ class ContainerRuntime:
         if item is None:
             raise StartError(f"{engine} loaded the image from the server, but what it shows does not match the "
                              "recorded ids: not running it")
-        if want not in (item.get("RepoTags") or []):
+        if not {want, imagerelay.full_name(image)} & set(item.get("RepoTags") or []):  # Podman names it in full
             r = self._cli("tag", str(item.get("Id")), want)
             if r.returncode != 0:
                 raise StartError(f"{engine} tag {want} failed: {(r.stderr or r.stdout).strip()[-200:]}")

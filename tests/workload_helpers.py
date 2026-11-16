@@ -288,7 +288,7 @@ elif cmd == "load":
         if state.get("load_alter"):  # an engine that is not what it says: other settings, another id
             run_config["Env"] = list(run_config.get("Env") or []) + ["ALTERED=1"]
             image_id = "sha256:" + hashlib.sha256(cbytes + b"altered").hexdigest()
-        tags = list(entry.get("RepoTags") or [])
+        tags = [] if state.get("load_untagged") else list(entry.get("RepoTags") or [])
         for img in state.get("images", []):
             img["RepoTags"] = [t for t in img.get("RepoTags", []) if t not in tags]
         state["images"] = [img for img in state.get("images", []) if img["Id"] != image_id]
@@ -407,6 +407,11 @@ class FakeDocker:
     def images(self) -> list[dict]:
         f = self.root / "state.json"
         return json.loads(f.read_text()).get("images", []) if f.exists() else []
+
+    def untagged_loads(self) -> None:
+        """`load` keeps no tag (prints only the image id), as an engine that reads an archive's layout without
+        its names does."""
+        self._update(lambda data: data.update(load_untagged=True))
 
     def alter_loads(self) -> None:
         """`load` records a different run configuration than the archive's (an engine that is not what it says)."""
