@@ -293,8 +293,9 @@ function TryIt({ d }: { d: Deployment }) {
       <p className="muted small">One small request straight to a ready replica (with its internal key), to check that replica{api_ === "openai-audio" ? ": an 11-second public-domain clip (JFK, 1961) to transcribe"
         : api_ === "openai-speech" ? ": a short sentence to speak, answered with the length of the audio (try it in the Playground to hear it)"
         : api_ === "openai-images" ? ": one small 256x256 image, answered with its size (try it in the Playground to see it)"
-        : api_ === "openai-videos" ? ": its video API is asked for its jobs, since a video takes minutes (make one in the Playground)" : ""}.</p>
-      {api_ !== "openai-audio" && api_ !== "openai-videos" && (
+        : api_ === "openai-videos" ? ": its video API is asked for its jobs, since a video takes minutes (make one in the Playground)"
+        : api_?.startsWith("vision-") ? `: a small test image (two coloured squares${api_ === "vision-segment" ? ", with a box around the red one" : ""}), answered with a summary (try your own pictures in the Playground)` : ""}.</p>
+      {api_ !== "openai-audio" && api_ !== "openai-videos" && !api_?.startsWith("vision-") && (
         <div className="field"><label htmlFor="try-input">{api_ === "rerank" ? "Query" : "Input"}</label>
           <input id="try-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder} maxLength={500} /></div>
       )}

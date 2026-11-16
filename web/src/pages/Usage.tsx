@@ -201,7 +201,7 @@ function requestColumns(u: Units): BreakdownColumn<UsageRow>[] {
     u.speech && { id: "characters", label: "Characters", className: "num", title: "Characters turned into speech", value: (r) => r.characters ?? 0, cell: (r) => num(r.characters ?? 0) },
     u.length && { id: "media_ms", label: u.lengthLabel, className: "num", title: "Length of the speech or video made (speech: where its format says it)",
       value: (r) => r.media_ms ?? 0, cell: (r) => audioLength(r.media_ms) },
-    u.images && { id: "images", label: "Images", className: "num", title: "Images made, and their megapixels", value: (r) => r.images ?? 0,
+    u.images && { id: "images", label: "Images", className: "num", title: "Images made (image models) or looked at (vision models), and their megapixels", value: (r) => r.images ?? 0,
       cell: (r) => <>{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</> },
     u.traffic && { id: "bytes", label: "Bytes in / out", dataLabel: "Bytes", className: "num", title: "Request and answer bodies of apps at /x/",
       value: (r) => (r.bytes_in ?? 0) + (r.bytes_out ?? 0), cell: (r) => (r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—") },

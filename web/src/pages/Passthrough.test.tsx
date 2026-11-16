@@ -227,19 +227,7 @@ const tpl: WorkloadTemplate = {
 };
 
 describe("ready-made templates", () => {
-  it("FY-WEB-187 the Apps page offers each template with its licence, on a GPU or the CPU", async () => {
-    server((url) => {
-      if (url === "/api/workloads/templates") return { status: 200, body: { templates: [tpl] } };
-      if (url === "/api/workloads") return { status: 200, body: { workloads: [], server_time: "x", can_manage: true } };
-    });
-    mount("/apps");
-    const card = await screen.findByRole("listitem", { name: "Template Object detection" });
-    expect(within(card).getByText("apache-2.0")).toBeTruthy();
-    expect(within(card).getByRole("link", { name: "PekingU/rtdetr_v2_r18vd" }).getAttribute("href")).toBe("https://huggingface.co/PekingU/rtdetr_v2_r18vd");
-    expect(within(card).getByRole("link", { name: "On an NVIDIA GPU" }).getAttribute("href")).toBe("/apps/new?template=object-detection&gpu=1");
-    expect(within(card).getByRole("link", { name: "On the CPU" }).getAttribute("href")).toBe("/apps/new?template=object-detection");
-  });
-
+  // FY-WEB-187 (the Apps page's template panel) went with the panel in 1.4 (#86): FY-WEB-306.
   it("FY-WEB-188 a template fills the form (image, task, shared GPU, port, health, exposed) and posts its spec", async () => {
     const posted: unknown[] = [];
     server((url, init) => {

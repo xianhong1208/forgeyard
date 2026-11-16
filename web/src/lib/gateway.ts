@@ -10,6 +10,9 @@ export const API_ENDPOINT: Record<string, string> = {
   "openai-speech": "/audio/speech",
   "openai-images": "/images/generations",
   "openai-videos": "/videos",
+  "vision-detect": "/vision/detect",
+  "vision-segment": "/vision/segment",
+  "vision-depth": "/vision/depth",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -20,6 +23,9 @@ export const API_KIND: Record<string, string> = {
   "openai-speech": "text to speech",
   "openai-images": "images",
   "openai-videos": "video",
+  "vision-detect": "object detection",
+  "vision-segment": "segmentation",
+  "vision-depth": "depth",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -63,6 +69,20 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     return {
       curl: `${curl} ${base}/videos \\\n  -H "Authorization: Bearer ${key}" \\\n  -F model=${model} -F prompt="A red kite over a green hill" -F seconds=5\n# then poll ${base}/videos/<id> until "status" is "completed", and:\n${curl} ${base}/videos/<id>/content -H "Authorization: Bearer ${key}" -o video.mp4`,
       python: `import time\n\n${sdk}${client}\nvideo = client.videos.create(model="${model}", prompt="A red kite over a green hill", seconds="5")\nwhile video.status in ("queued", "in_progress"):\n    time.sleep(5)\n    video = client.videos.retrieve(video.id)\nif video.status == "completed":\n    client.videos.download_content(video.id).write_to_file("video.mp4")\nelse:\n    print(video.error)`,
+    };
+  }
+  if (api.startsWith("vision-")) {
+    // 1.4: vision models take one image as a multipart file (or base64 in JSON) and answer JSON; not part
+    // of the OpenAI SDK.
+    const task = api.slice("vision-".length);
+    const extra = task === "segment" ? ` -F 'box=[40, 40, 320, 240]'` : task === "detect" ? " -F threshold=0.5" : "";
+    const field = task === "segment" ? `, "box": "[40, 40, 320, 240]"` : task === "detect" ? `, "threshold": "0.5"` : "";
+    const show = task === "detect" ? `for d in r.json()["detections"]:\n    print(d["label"], d["score"], d["box"])`
+      : task === "segment" ? `print(r.json()["masks"][0]["area"], "pixels")  # each mask: a PNG in base64`
+        : `open("depth.png", "wb").write(base64.b64decode(r.json()["depth_png"]))  # 16-bit, near = bright`;
+    return {
+      curl: `${curl} ${base}/vision/${task} \\\n  -H "Authorization: Bearer ${key}" \\\n  -F model=${model} -F image=@photo.jpg${extra}`,
+      python: `${task === "depth" ? "import base64\n" : ""}${trustUrl ? "import ssl\n" : ""}${task === "depth" || trustUrl ? "\n" : ""}import httpx  # pip install httpx: vision is Forgeyard's own API, not the OpenAI SDK's\n\n${caLines}with open("photo.jpg", "rb") as f:\n    r = httpx.post("${base}/vision/${task}", headers={"Authorization": "Bearer ${key}"},\n                   data={"model": "${model}"${field}}, files={"image": f}${trustUrl ? ", verify=ca" : ""}, timeout=120)\n${show}`,
     };
   }
   if (api === "openai-audio") {

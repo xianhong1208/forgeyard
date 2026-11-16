@@ -11,7 +11,7 @@ import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
 import type { RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Videos } from "./PlaygroundVideo";
-import { Vision } from "./PlaygroundVision";
+import { Vision, VisionModelPanel } from "./PlaygroundVision";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean; images?: Attached[] };
 
@@ -103,6 +103,7 @@ export function PlaygroundPage() {
       {route?.api === "openai-speech" && <Speak key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-images" && <Imagine key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-videos" && <Videos key={route.served_name} model={route.served_name} />}
+      {route?.api.startsWith("vision-") && <VisionModelPanel key={route.served_name} name={route.served_name} />}
       </>}
     </>
   );

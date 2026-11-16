@@ -23,7 +23,8 @@ function fromTarget(t: RouteTarget): Draft {
   };
 }
 
-const APIS = ["openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images", "openai-videos"];
+const APIS = ["openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images", "openai-videos",
+  "vision-detect", "vision-segment", "vision-depth"];
 
 // /models/routes/<id> before 1.4 (#81): the route's page now, which sends a deployment's own route on
 // to the deployment. "new" was the form for a name of its own.
