@@ -239,11 +239,13 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
     } catch (e) { setError(errorText(e)); }
   };
   return (
-    <article className="recipe" aria-label={`Engine ${r.name}`}>
-      <header>
-        <h3 className="mono">{r.name}</h3>
-        <span className="chip">{r.engine} {r.version}</span>
-        {!r.builtin && <span className="chip chip-tone-run">custom</span>}
+    <article className="recipe engine-card" aria-label={`Engine ${r.name}`}>
+      {/* Every closed card has the same height (1.4, #92): one header row, two lines of description, one
+          row of chips, one line of tasks, and the Details row at the bottom. Only an open card grows. */}
+      <header className="engine-head">
+        <h3 className="mono" title={r.name}>{r.name}</h3>
+        <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
+        {!r.builtin && <span className="chip chip-tone-run engine-custom">custom</span>}
       </header>
       <p className="small engine-desc" title={r.description}>{r.description}</p>
       <div className="engine-facts" aria-label={`Runs on: ${engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ")}`}>
@@ -252,27 +254,29 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
         ))}
         {r.share === "vram" && <span className="chip chip-tone-wait">shares a GPU</span>}
       </div>
-      <p className="small muted engine-serves">Serves {r.tasks.map((t) => TASK_LABEL[t]).join(", ")}</p>
-      <details className="engine-details">
-        <summary className="small">Details</summary>
-        <p className="small muted">Formats: {r.formats.join(", ")} · estimate: {r.estimate}</p>
-        <ul className="variants" aria-label={`Variants of ${r.name}`}>
-          {r.variants.map((v) => (
-            <li key={v.name}>
-              <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
-              <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
-              <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
-            </li>
-          ))}
-        </ul>
-        <OfflineImages name={r.name} variants={r.variants} />
-      </details>
-      {canManage && !r.builtin && (
-        <div className="row-gap engine-actions">
-          <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>Edit</button>
-          <button type="button" className="btn btn-quiet btn-small" onClick={() => void remove()}>Delete</button>
-        </div>
-      )}
+      <p className="small muted engine-serves" title={`Serves ${r.tasks.map((t) => TASK_LABEL[t]).join(", ")}`}>Serves {r.tasks.map((t) => TASK_LABEL[t]).join(", ")}</p>
+      <div className="engine-foot">
+        <details className="engine-details">
+          <summary className="small">Details</summary>
+          <p className="small muted">Formats: {r.formats.join(", ")} · estimate: {r.estimate}</p>
+          <ul className="variants" aria-label={`Variants of ${r.name}`}>
+            {r.variants.map((v) => (
+              <li key={v.name}>
+                <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
+                <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
+                <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
+              </li>
+            ))}
+          </ul>
+          <OfflineImages name={r.name} variants={r.variants} />
+        </details>
+        {canManage && !r.builtin && (
+          <div className="engine-actions">
+            <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>Edit</button>
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => void remove()}>Delete</button>
+          </div>
+        )}
+      </div>
       {error && <p className="field-error" role="alert">{error}</p>}
     </article>
   );

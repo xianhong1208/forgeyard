@@ -59,7 +59,9 @@ describe("Models → Engines (1.4, #92)", () => {
     server((url) => url === "/api/models" ? { status: 200, body: catalog(BUILTIN) } : undefined);
     mount("/models?tab=engines");
     const card = await screen.findByRole("article", { name: "Engine speaches-tts" });
-    expect(within(card).getByText("speaches 0.8.3")).toBeTruthy();
+    // One line each, the full text in a tooltip (the cards are all one size).
+    expect(within(card).getByText("speaches 0.8.3").getAttribute("title")).toBe("speaches 0.8.3");
+    expect(within(card).getByText("Serves Text to speech").getAttribute("title")).toBe("Serves Text to speech");
     expect(within(card).getByText(/Small English voices/).getAttribute("title")).toMatch(/^Small English voices/);
     const facts = within(card).getByLabelText("Runs on: NVIDIA, CPU");
     expect(within(facts).getAllByText(/NVIDIA|CPU/).map((e) => e.textContent)).toEqual(["NVIDIA", "CPU"]);
@@ -136,6 +138,10 @@ describe("Models → Engines (1.4, #92)", () => {
     expect(await screen.findByText("Engine llama-cpp-custom saved.")).toBeTruthy();
     expect(puts).toEqual([{ yaml: "name: llama-cpp-custom\nversion: \"1.0.1\"\n" }]);
     const again = screen.getByRole("article", { name: "Engine llama-cpp-custom" });
+    // Edit and Delete share the bottom row with Details, so a custom card is no taller than the others.
+    const foot = again.querySelector(".engine-foot") as HTMLElement;
+    expect(within(foot).getByText("Details")).toBeTruthy();
+    expect(within(foot).getByRole("button", { name: "Delete" })).toBeTruthy();
     await act(async () => fireEvent.click(within(again).getByRole("button", { name: "Delete" })));
     expect((await within(again).findByRole("alert")).textContent).toContain("is used by chat");
     view.unmount();
