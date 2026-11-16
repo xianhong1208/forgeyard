@@ -1,17 +1,20 @@
-import { IconDownload, IconPhoto, IconPhotoAi, IconPlayerStop, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { IconCheck, IconChevronDown, IconDownload, IconPhoto, IconPhotoAi, IconPlayerStop, IconPlus, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { ModelKindIcon } from "../components/Fleet";
 import { Notice, PageHeader } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
-import { API_KIND, IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
+import { IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
   type Attached, type ImageOptions, type Voice } from "../lib/gateway";
-import { ROUTE_KIND_LABEL, targetHeader } from "../lib/routing";
-import type { RoutesResponse } from "../lib/types";
+import { MODEL_KIND, type ModelKind } from "../lib/fleet";
+import { firstVision, pickerDetail, pickerGroups, routeReady } from "../lib/playground";
+import { targetHeader } from "../lib/routing";
+import type { DeploymentsResponse, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Videos } from "./PlaygroundVideo";
-import { Vision, VisionModelPanel } from "./PlaygroundVision";
+import { VisionModelPanel } from "./PlaygroundVision";
 
 type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?: boolean; images?: Attached[] };
 
@@ -38,62 +41,58 @@ async function failure(res: Response): Promise<string> {
 
 export function PlaygroundPage() {
   const { data, error } = useApi<RoutesResponse>("/routes");
+  // For the kind of a chat model (multimodal when its deployment reads images, audio or video).
+  const deps = useApi<DeploymentsResponse>("/deployments");
   const { user } = useAuth();
   const canDeploy = user?.role === "admin" || user?.role === "operator";
-  // Cloud-only models need the cloud setting the signed-in person may give a key.
-  const routes = (data?.routes ?? []).filter((r) => r.usable !== false);
-  const [picked, setModel] = useState<string>("");
-  // Until someone picks one: a ready chat model, else anything ready, else the first.
-  const fallback = routes.find((r) => r.api === "openai-chat" && r.endpoints.length) ?? routes.find((r) => r.endpoints.length) ?? routes[0];
-  const ready = (r: (typeof routes)[number]) => r.endpoints.length > 0 || r.kind === "cloud";
-  const model = picked || fallback?.served_name || "";
-  const route = routes.find((r) => r.served_name === model);
-  // Two tabs (1.3): deployed models, and exposed vision workloads (?tab=vision).
   const [search, setSearch] = useSearchParams();
-  const tab = search.get("tab") === "vision" ? "vision" : "models";
+  const loaded = !!data && (!!deps.data || !!deps.error);
+  // Cloud-only models need the cloud setting the signed-in person may give a key.
+  const routes = useMemo(() => (data?.routes ?? []).filter((r) => r.usable !== false), [data]);
+  const groups = useMemo(() => (loaded ? pickerGroups(routes, deps.data?.deployments ?? []) : []), [loaded, routes, deps.data]);
+  const offered = groups.flatMap(([, l]) => l);
+  // The model in the address (?model=), else the first one offered: a chat model when there is one.
+  const route = offered.find((r) => r.served_name === search.get("model")) ?? offered[0];
+  const waiting = routes.filter((r) => !routeReady(r) && r.deployment_id != null).length;
+  const legacy = search.get("tab");
+
+  // 1.3's Vision tab (?tab=vision) is part of the one picker now: its address opens the first ready vision
+  // model, or the picker when there is none, replacing the old address in the history.
+  const vision = firstVision(groups);
+  useEffect(() => {
+    if (legacy === null || !(loaded || error)) return;
+    setSearch(legacy === "vision" && vision ? { model: vision } : {}, { replace: true });
+  }, [legacy, loaded, error, vision, setSearch]);
+
+  const pick = (name: string) => setSearch({ model: name }, { replace: true });
 
   return (
     <>
       <PageHeader index="05 · Playground" title="Playground"
         lead="Try a deployed model through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “console” in Usage." />
-      <div className="tabs" role="tablist" aria-label="Playground">
-        <button type="button" role="tab" aria-selected={tab === "models"} className={tab === "models" ? "on" : ""}
-          onClick={() => setSearch({})}>Models</button>
-        <button type="button" role="tab" aria-selected={tab === "vision"} className={tab === "vision" ? "on" : ""}
-          onClick={() => setSearch({ tab: "vision" })}>Vision</button>
-      </div>
-      {tab === "vision" ? <Vision canCreate={canDeploy} /> : <>
       {error && <Notice tone="error">{error}</Notice>}
-      {data && routes.length === 0 && (
-        <section className="panel play-empty">
-          <h2>Nothing to try yet</h2>
+      {loaded && offered.length === 0 && (
+        <section className="panel play-empty" aria-labelledby="play-empty-title">
+          <h2 id="play-empty-title">Nothing to try yet</h2>
           <p className="muted">
-            The Playground sends messages to a deployed model, as you, without an API key. No model is deployed yet.{" "}
-            {canDeploy ? "Deploy one from the catalog; it shows up here once it is ready." : "Admins and operators deploy models; ask one to deploy the model you need."}
+            The Playground sends requests to a ready model, as you, without an API key.{" "}
+            {waiting > 0 ? <>{waiting === 1 ? "One deployment is" : `${waiting} deployments are`} not ready: <Link to="/serving">Serving</Link> shows whether each is stopped, starting or waiting for a machine.{" "}</>
+              : "No model is deployed yet. "}
+            {canDeploy ? <>Deploy one from <strong>Models → Catalog</strong>: chat, embeddings, speech, images, video or vision. It shows up here once it is ready.</>
+              : "Admins and operators deploy models; ask one to deploy the model you need."}
           </p>
-          {canDeploy && <Link to="/serving/deploy" className="btn btn-primary">Deploy a model</Link>}
+          {canDeploy && <Link to="/models" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy from the catalog</Link>}
         </section>
       )}
-      {routes.length > 0 && (
+      {route && (
         <div className="play-bar">
-          <div className="field">
-            <label htmlFor="play-model">Model</label>
-            <select id="play-model" value={model} onChange={(e) => setModel(e.target.value)}>
-              {routes.map((r) => (
-                <option key={r.served_name} value={r.served_name}>
-                  {r.served_name} · {API_KIND[r.api] ?? r.api}{r.kind && r.kind !== "local" ? ` · ${ROUTE_KIND_LABEL[r.kind]}` : ""}{ready(r) ? "" : " (not ready)"}
-                </option>
-              ))}
-            </select>
-          </div>
-          {route && (
-            <p className="muted small play-ready">
-              {route.kind === "cloud" ? "Served by a cloud provider." : route.endpoints.length ? `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}` : "No replica is ready yet."}
-              {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
-              {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>Deployment</Link>
-                : route.id ? <Link to={`/cloud/models/${route.id}`}>Details</Link> : null}
-            </p>
-          )}
+          <ModelPicker groups={groups} value={route} onPick={pick} startOpen={legacy === "vision" && !vision} />
+          <p className="muted small play-ready">
+            {route.kind === "cloud" ? "Served by a cloud provider." : `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}`}
+            {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
+            {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>Deployment</Link>
+              : route.id ? <Link to={`/cloud/models/${route.id}`}>Details</Link> : null}
+          </p>
         </div>
       )}
       {route?.api === "openai-chat" && <Chat key={route.served_name} model={route.served_name} />}
@@ -104,8 +103,98 @@ export function PlaygroundPage() {
       {route?.api === "openai-images" && <Imagine key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-videos" && <Videos key={route.served_name} model={route.served_name} />}
       {route?.api.startsWith("vision-") && <VisionModelPanel key={route.served_name} name={route.served_name} />}
-      </>}
     </>
+  );
+}
+
+// One picker for every kind (1.4, #100): a button naming the model and its kind, opening a list grouped
+// by kind with Serving's labels and icons. A listbox: arrows move, Enter or Space picks, Escape closes.
+function ModelPicker({ groups, value, onPick, startOpen }: {
+  groups: [ModelKind, RouteInfo[]][]; value: RouteInfo; onPick: (name: string) => void; startOpen: boolean;
+}) {
+  const flat = groups.flatMap(([k, l]) => l.map((r) => ({ k, r })));
+  const at = Math.max(0, flat.findIndex((x) => x.r.served_name === value.served_name));
+  const kind = flat[at]?.k ?? "chat";
+  const [open, setOpen] = useState(startOpen);
+  const [active, setActive] = useState(at);
+  const box = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const optId = (i: number) => `play-model-opt-${i}`;
+
+  useEffect(() => {
+    if (!open) return;
+    list.current?.focus();
+    const away = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) document.getElementById(optId(active))?.scrollIntoView?.({ block: "nearest" });
+  }, [open, active]);
+
+  const show = (v: boolean) => {
+    setActive(at);
+    setOpen(v);
+  };
+
+  const choose = (i: number) => {
+    const x = flat[i];
+    if (x) onPick(x.r.served_name);
+    setOpen(false);
+    button.current?.focus();
+  };
+
+  const keys = (e: KeyboardEvent<HTMLDivElement>) => {
+    const last = flat.length - 1;
+    const move: Record<string, number> = { ArrowDown: Math.min(last, active + 1), ArrowUp: Math.max(0, active - 1), Home: 0, End: last };
+    if (e.key in move) { e.preventDefault(); setActive(move[e.key]); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(active); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); button.current?.focus(); }
+    else if (e.key === "Tab") setOpen(false);
+  };
+
+  let i = -1;
+  return (
+    <div className="field picker" ref={box}>
+      <label id="play-model-label" htmlFor="play-model">Model</label>
+      <button id="play-model" ref={button} type="button" className="picker-button" aria-haspopup="listbox" aria-expanded={open}
+        aria-controls={open ? "play-model-list" : undefined} aria-labelledby="play-model-label play-model"
+        onClick={() => show(!open)}
+        onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); show(true); } }}>
+        <span className="kindicon kindicon-sm"><ModelKindIcon kind={kind} size={15} /></span>
+        <span className="picker-name mono">{value.served_name}</span>{" "}
+        <span className="picker-kind">{MODEL_KIND[kind].label}{pickerDetail(value) ? ` · ${pickerDetail(value)}` : ""}</span>
+        <IconChevronDown size={16} aria-hidden="true" className="picker-caret" />
+      </button>
+      {open && (
+        <div id="play-model-list" ref={list} className="picker-panel" role="listbox" aria-labelledby="play-model-label" tabIndex={-1}
+          aria-activedescendant={optId(active)} onKeyDown={keys}>
+          {groups.map(([k, l]) => (
+            <div key={k} role="group" aria-labelledby={`play-kind-${k}`} className="picker-group">
+              <div id={`play-kind-${k}`} className="picker-group-head">
+                <span className="kindicon kindicon-sm" aria-hidden="true"><ModelKindIcon kind={k} size={15} /></span>
+                <span className="picker-group-label">{MODEL_KIND[k].label}</span>{" "}
+                <span className="picker-group-api mono">{MODEL_KIND[k].api}</span>
+              </div>
+              {l.map((r) => {
+                const n = ++i;
+                const detail = pickerDetail(r);
+                return (
+                  <div key={r.served_name} id={optId(n)} role="option" aria-selected={r.served_name === value.served_name}
+                    className={`picker-option${n === active ? " active" : ""}`} onMouseMove={() => setActive(n)} onClick={() => choose(n)}>
+                    <span className="mono picker-option-name">{r.served_name}</span>
+                    {detail && <>{" "}<span className="picker-option-detail">{detail}</span></>}
+                    {r.served_name === value.served_name && <IconCheck size={15} aria-hidden="true" className="picker-check" />}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

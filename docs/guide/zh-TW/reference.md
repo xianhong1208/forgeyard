@@ -643,7 +643,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 ### 從 Playground 呼叫
 
-1.4 起，console 的 **Playground → Vision** 分頁只提供視覺模型，`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
+1.4 起，console 的 Playground 只提供視覺模型（在它唯一的模型選單裡；Vision 分頁已移除），`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的 Vision 分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
 
 | 路由 | 做什麼 |
 |---|---|

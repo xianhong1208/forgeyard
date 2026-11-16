@@ -175,10 +175,16 @@ The gateway sends each request to the ready replica with the fewest requests in 
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
-The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
-streaming, and images for models that read them), embeddings, rerank and speech to text. Its **Vision**
-tab sends a picture to an exposed vision app (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
-cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
+The **Playground** tries a model through the same gateway, as you, without an API key. One **Model**
+picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,
+Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video, Vision), and picking
+one opens its panel: chat (with streaming, and images for models that read them), embeddings, rerank,
+speech to text, **Speak**, **Image**, **Video**, or the vision panel (a picture in; boxes, a mask or a
+depth map out). The address keeps the model (`/playground?model=<name>`); 1.3's Vision tab address
+(`/playground?tab=vision`) opens the first ready vision model, or the picker when there is none. With no
+model ready, the page says so and points to **Models → Catalog** to deploy one. Its requests count as
+`console` in Usage, and its cloud setting is **Allowed** for admins and, for everyone else, the most they
+may give their own keys.
 
 ## Images, audio and video in chat
 
@@ -278,7 +284,8 @@ Vision models (1.4) look at a picture: **object detection** (boxes, labels and s
 DETR…), **segmentation** (the mask of what a point or a box shows: SAM 2 and 2.1) and **depth
 estimation** (how near every pixel is: Depth Anything, DPT…). They are model kinds like the others: added
 to the catalog from Hugging Face (three are recommended), deployed and listed under
-**Serving → Vision**, tried in **Playground → Vision**, called with an API key.
+**Serving → Vision**, tried in the **Playground** (under *Vision* in its model picker), called with an
+API key.
 
 - **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
   PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,

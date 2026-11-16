@@ -192,7 +192,8 @@ recipes: the console says *engine*, the API and the YAML files keep *recipe*) an
 only: GGUF URL hosts, `local://` directories, the Hugging Face token). The menu is Machines, Serving,
 Models, Cloud, Playground, API keys, Usage, Users, Audit log, numbered 01 to 09 on each page. Only
 addresses a released version had redirect: 1.3's `/models/deployments/<id>[/edit]`, `/models/deploy`,
-`/models?tab=routes` and `?tab=deployments` open Serving; `?tab=catalog` is the Catalog. The tab names
+`/models?tab=routes` and `?tab=deployments` open Serving; `?tab=catalog` is the Catalog; `/playground?tab=vision`
+opens the Playground on the first ready vision model (or its picker, open, when there is none). The tab names
 used only while 1.4 was made (`?tab=serving`, `library`, `model-library`) are gone.
 
 **Serving → Deploy a model**: pick a model from the catalog and an engine, set the parameters, and
@@ -583,7 +584,7 @@ page contain these lines whenever the server uses its own CA.
     WebM, animated WebP or MJPG AVI (no MP4) and returns the whole video as base64 inside the job's JSON,
     held in the engine's memory: it does not fit the same job model (one MP4 file per job, fetched and
     streamed with Range). Video on AMD and the CPU comes later.
-- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each), videos (**Video**: a prompt, the sizes and lengths the deployment takes, the job followed until it is made, then played in the page with a download link, and the person's earlier videos) in the console, and a **Vision** tab for exposed vision workloads (boxes, a mask from a click or a box, a depth map; the `/x/` rules through the console's own routes, 1.3), through
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each), videos (**Video**: a prompt, the sizes and lengths the deployment takes, the job followed until it is made, then played in the page with a download link, and the person's earlier videos) in the console, and vision models (boxes, a mask from a click or a box, a depth map; 1.3 had a **Vision** tab for exposed vision workloads instead). Since 1.4 (#100) there are no tabs: one model picker lists the ready models grouped by kind with Serving's labels and icons, and the model chosen opens its kind's panel; through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.

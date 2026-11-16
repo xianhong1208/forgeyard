@@ -60,7 +60,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/db.py`, `forgeyard/migrations/` | 資料庫模型；Alembic migration，啟動時執行 |
 | `forgeyard/api/` | HTTP API：`auth`（初始設定、登入、工作階段、連結）、`users`、`audit_log`、`machines`、`workloads`、`onboarding`（Get started）、`tls`（下載 CA）、`install`（`/install.sh` 與 wheel）、`guide` |
 | `forgeyard/api/models.py`, `deployments.py` | 模型目錄、recipe、來源；部署、估算、試用 |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground（它的 Vision 分頁經過 `forgeyard/gateway/vision.py`）；API 金鑰、它的限制、雲端設定與預算，以及用量 |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground（它的視覺面板經過 `forgeyard/gateway/vision.py`）；API 金鑰、它的限制、雲端設定與預算，以及用量 |
 | `forgeyard/api/providers.py` | 雲端供應商與它的模型：新增、測試、匯入、手動價格、複製 |
 | `forgeyard/api/routing.py` | 路由與它分層的目標 |
 | `forgeyard/api/prices.py` | 從 OpenRouter 更新價格：預覽與套用 |

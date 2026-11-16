@@ -85,7 +85,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 閘道會把每個請求送到正在處理中請求數最少的就緒副本；如果某個副本沒有回應，就改送下一個。副本無法繞過閘道直接使用：每個副本都有一把只有閘道知道的內部金鑰，agent 會拒絕送到副本連接埠的其他所有請求。
 
-**Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序和語音轉文字。它的 **Vision** 分頁也用同樣的方式，把圖片送給公開的視覺應用程式（偵測、分割、深度）。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
+**Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型。一個 **Model** 選單列出已就緒的模型，像 **Serving** 一樣依種類分組，用同樣的名稱和圖示（Chat、Multimodal chat、Embeddings、Rerank、Speech to text、Text to speech、Images、Video、Vision）；選一個就會開出它的面板：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序、語音轉文字、**Speak**、**Image**、**Video**，或視覺面板（送一張圖片，得到方框、遮罩或深度圖）。網址會記住選的模型（`/playground?model=<name>`）；1.3 的 Vision 分頁網址（`/playground?tab=vision`）會開出第一個就緒的視覺模型，沒有時就打開選單。沒有任何就緒的模型時，頁面會這樣說明，並指向 **Models → Catalog** 去部署一個。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
 
 ## 對話中的圖片、音訊與影片
 
@@ -145,7 +145,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 視覺模型
 
-視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入目錄（推薦了三個）、部署後列在 **Serving → Vision**、在 **Playground → Vision** 試用、用 API 金鑰呼叫。
+視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入目錄（推薦了三個）、部署後列在 **Serving → Vision**、在 **Playground** 試用（模型選單的 *Vision* 底下）、用 API 金鑰呼叫。
 
 - **只有一種引擎，Forgeyard 自己的。** `vision` 配方在與伺服器同版本的 `forgeyard-vision` 映像檔裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
 - **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。

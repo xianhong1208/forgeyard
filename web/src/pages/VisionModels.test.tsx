@@ -135,7 +135,7 @@ describe("vision models (1.4, #86)", () => {
     expect(fetch.mock.calls.some(([u, i]) => u === "/api/models" && i?.method === "POST")).toBe(false);
   });
 
-  it("FY-WEB-304 the Playground's Models tab opens the vision panel for a vision model", async () => {
+  it("FY-WEB-304 the Playground's picker opens the vision panel for a vision model", async () => {
     server((url) => {
       if (url === "/api/routes") return { status: 200, body: { cloud: "off", is_admin: true, routes: [{ id: 1, served_name: "det", api: "vision-detect",
         deployment_id: 3, kind: "local", endpoints: [{ replica: 0, machine: "cpu-a", state: "healthy", ready: true, url: "x" }], targets: [] }] } };
@@ -148,7 +148,7 @@ describe("vision models (1.4, #86)", () => {
     const panel = (await screen.findByRole("heading", { name: "Object detection" })).closest("section") as HTMLElement;
     expect(within(panel).getByText("POST /v1/vision/detect with model=det")).toBeTruthy();
     expect(within(panel).getByText("PekingU/rtdetr_v2_r18vd")).toBeTruthy();
-    expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("det");
+    expect(screen.getByLabelText("Model").textContent).toContain("det");
   });
 
   it("FY-WEB-305 the snippets for a vision model: curl with the image as a file, Python with httpx (no OpenAI SDK)", () => {

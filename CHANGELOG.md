@@ -41,9 +41,8 @@ version until 1.0.
   segmentation and depth in one **Vision** section, each row with its task and `/v1/vision/…` path;
   the **Catalog** shows a vision model's architecture and classes, a search result its licence, and
   says before adding why a vision model cannot be added (another task, a licence that is not
-  permissive, a timm backbone), with **Add** disabled. **Playground → Vision** picks a vision
-  deployment and sends it the picture as you; a vision model chosen on the Playground's Models tab opens
-  the same panel. **Try it** on a vision deployment sends the test image. The example calls (Get
+  permissive, a timm backbone), with **Add** disabled. The Playground's vision panel sends a vision
+  deployment the picture as you (picked in the Playground's one model picker, #100). **Try it** on a vision deployment sends the test image. The example calls (Get
   started, API keys, a deployment's page) are curl and httpx with the image as a file field.
 
 - **Download to…: a model, and its engine, on chosen machines before you deploy it** (part of #35).
@@ -175,6 +174,15 @@ version until 1.0.
     and no longer says *Runs as workload X*; an old link to a model's workload page opens the
     deployment. **Machines** still shows everything that holds a card: its tiles, memory map and
     *Running here* name models (linked to the deployment) and apps (named, not linked: #88).
+  - **The Playground has one model picker and no tabs** (#100). The ready models (as before: a ready
+    replica, or a cloud model the person may use) are listed grouped by kind with Serving's labels and
+    icons (Chat, Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video,
+    Vision), each with its task (vision) or *local, then cloud* / *cloud only*; models with no ready
+    replica are no longer listed. Picking one opens its panel, and the address keeps it
+    (`/playground?model=<name>`, without a step in the history). The **Vision** tab is gone: its address
+    `/playground?tab=vision` opens the first ready vision model, or the picker when there is none. With
+    nothing ready, the page says so, names how many deployments are not ready (linking Serving), and
+    sends admins and operators to **Models → Catalog**. The playground's own API is unchanged.
   - The menu is Machines, Serving, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit
     log (admins), and the pages are numbered 01 to 09 in that order. "Route" and "workload" left the
     console's navigation.

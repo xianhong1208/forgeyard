@@ -92,15 +92,16 @@ describe("apps left the console (1.4, #88)", () => {
     expect(userHref({ kind: "deployment", id: 3, name: "chat" })).toBe("/serving/3");
   });
 
-  it("FY-WEB-332 the Playground's Vision tab offers vision models only, whatever the options say", async () => {
+  it("FY-WEB-332 the Playground offers vision models only, whatever the options say", async () => {
     server((url) => url === "/api/playground/vision/options"
       ? { status: 200, body: { models: [], tasks: [{ task: "detect", title: "Object detection", template: "object-detection", model: "PekingU/rtdetr_v2_r18vd" }],
         // what a 1.3 server answered: the console must not offer these
         workloads: [{ name: "detector", workload_id: 7, task: "detect", title: "Object detection", model: "m", licence: "apache-2.0",
           endpoint: "/v1/detect", path: "/x/detector", ready: 1, reason: null, max_body_mb: 32 }] } }
-      : undefined);
+      : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes: [] } }
+        : undefined);
     mount("/playground?tab=vision");
-    expect(await screen.findByRole("heading", { name: "No vision model to try yet" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Nothing to try yet" })).toBeTruthy();
     expect(screen.queryByText(/detector/)).toBeNull();
     expect(screen.queryByText("/x/detector")).toBeNull();
   });

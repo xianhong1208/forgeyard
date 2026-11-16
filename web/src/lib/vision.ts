@@ -1,4 +1,4 @@
-// The Playground's Vision tab (1.4, #86): vision models, the deployments of detection, SAM 2 and depth models,
+// The Playground's vision panel (1.4, #86; one picker since #100): vision models, the deployments of detection, SAM 2 and depth models,
 // called through /api/playground/vision/<task> with the model's name (the /v1 gateway path) as the signed-in
 // person. The exposed vision apps of 1.3 (workload templates) are not offered: apps left the console in 1.4
 // (#88; deprecated, they keep running at /x/ until 1.5), and the options no longer list them.
@@ -35,7 +35,7 @@ export function imageLimitMb(w: { max_body_mb?: number } | undefined): number {
   return Math.min(VISION_MAX_MB, w?.max_body_mb ?? VISION_MAX_MB);
 }
 
-// What the tab sends an image to: a vision model.
+// What the panel sends an image to: a vision model.
 export type VisionTarget = {
   kind: "model"; id: string; name: string; task: VisionTask; title: string; model: string; licence: string | null;
   ready: number; reason: string | null; max_body_mb?: number;
@@ -52,10 +52,6 @@ export function targets(o: VisionOptions | null | undefined): VisionTarget[] {
     link: m.deployment_id ? { to: `/serving/${m.deployment_id}`, label: "Deployment" } : null,
   }));
   return models;
-}
-
-export function targetLabel(t: VisionTarget): string {
-  return `${t.name} · ${t.title} · ${shortModel(t.model)}${t.ready ? "" : " (not ready)"}`;
 }
 
 // Why this file cannot be sent (null: it can). The limit leaves room for the form around the image.

@@ -371,7 +371,7 @@ and an offline machine works once its cache has it.
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
 3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
-   sends a test image; **Playground → Vision** takes your own pictures.
+   sends a test image; the **Playground** (the model under *Vision* in its picker) takes your own pictures.
 
 Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
 and the picture as a file field `image`:
@@ -422,14 +422,16 @@ On a machine that cannot reach Docker Hub, load the vision image under the tag o
 
 ## Try vision in the Playground
 
-**Playground → Vision** sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
+The Playground's vision panel sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
 as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
-model in **Usage**. A vision model picked on the Playground's **Models** tab opens the same panel. Apps
-made from the 1.3 templates are not offered here (apps left the console in 1.4 and are
+model in **Usage**. There is no Vision tab since 1.4: vision models are in the Playground's one model
+picker, and 1.3's address (`/playground?tab=vision`) opens the first one. Apps made from the 1.3
+templates are not offered here (apps left the console in 1.4 and are
 [removed in 1.5](reference.md#apps-deprecated)).
 
-1. Pick the **Model**: each is listed with its task and model. With none yet, the tab says so; admins
-   and operators get a link to add one to the catalog.
+1. Open the **Model** picker and choose a model under **Vision**: each is listed with its task. Only
+   ready models are listed; with none at all, the Playground says so and admins and operators get a link
+   to the catalog.
 2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
@@ -555,7 +557,7 @@ a custom recipe whose vulkan variant sets `GGML_VK_DISABLE_COOPMAT: "1"` in its 
 
    Steps, a negative prompt and a seed go in `extra_body`:
    `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`.
-4. **Try it in the Playground:** an image model gets an **Image** tab with a prompt, the sizes the
+4. **Try it in the Playground:** an image model (under *Images* in the picker) gets an **Image** panel with a prompt, the sizes the
    deployment takes and how many images, and a download link under each.
 
 **How long:** seconds per image on an A100; minutes on a CPU. Measured on 16 to 32 cores of a busy
