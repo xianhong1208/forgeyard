@@ -160,9 +160,8 @@ def test_fy_adv_001_admins_only_and_the_shape_of_a_finding(owner, monkeypatch):
     add_user(owner, "ursula")
     for name in ("olga", "ursula"):
         assert sign_in(owner, name, PW).get("/api/advisor").status_code == 403
-    node("gpu-01", agent_version="0.9.0", protocol=0)
-    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")  # setup-token-left: info
-    get_settings.cache_clear()
+    node("gpu-01", agent_version="0.9.0", protocol=0,  # process-workloads-off: info
+         runtime_info={"process": {"ok": False, "reason": "no workload account"}})
     body = owner.get("/api/advisor").json()
     assert set(body) >= {"findings", "snoozed", "counts", "badge", "snooze_days", "checked_at"}
     f = next(f for f in body["findings"] if f["id"] == "agent-outdated")
@@ -254,8 +253,7 @@ def test_fy_adv_004_settings_problems_are_findings(owner, monkeypatch):
     found = findings()
     assert "setting:GATEWAY_CLOUD_DEFUALT" in {f.scope for f in found["setting-unknown"]}
     assert found["private-hosts-allowed"][0].severity == "warning"
-    assert found["setup-token-left"][0].severity == "info"
-    assert found["setting-deprecated"][0].scope == "setting:FORGEYARD_SETUP_TOKEN"
+    assert [(f.scope, f.severity) for f in found["setting-removed"]] == [("setting:FORGEYARD_SETUP_TOKEN", "warning")]
 
 
 # ------------------------------------------------------------------ server and network

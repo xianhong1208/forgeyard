@@ -16,7 +16,8 @@ The server checks its settings when it starts:
 - **Anything surprising is logged as a warning** and shown to admins under
   [Setup health](#setup-health-checks): a name that is not a setting ("did you mean"), a setting
   that another one makes useless, risky combinations, and a
-  [deprecated setting](#deprecated-settings), named with what replaces it.
+  [setting removed in 1.4](#removed-settings) that is still set, named with what replaces it. The
+  one exception: a removed `SECRET_KEY_FILE` that would now mean another key file stops the start.
 
 ### Common settings
 
@@ -127,21 +128,29 @@ Media URLs also follow `EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS` and `EGRESS_CA_FIL
 when the environment still holds another value. Until an admin saves, those panels mark the values
 that came from the environment as *from .env*.
 
-### Deprecated settings
+### Removed settings
 
-These still work in 1.3 and are **removed in 1.4**. When one is set, the server logs a warning at
-start that names what replaces it, and Setup health lists it (`setting-deprecated`). Nothing else
-changes while they are set.
+**Removed in 1.4.** These settings were deprecated in 1.3.1 and are no longer read. A server that
+still has one set, in the environment or in `.env`, logs a warning at start that it is ignored and
+what to use instead, and Setup health lists it (`setting-removed`) until you remove it.
 
-| Variable | Default | Replaced by |
-|---|---|---|
-| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`, the same value under a name that matches `FORGEYARD_SECRET_KEY`. With both set, `FORGEYARD_SECRET_KEY_FILE` is used |
-| `AGENT_HEARTBEAT_SECONDS` | — | Nothing: agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS` (at least every 2 seconds), 10 seconds by default. Set, it still decides the heartbeat |
-| `FORGEYARD_SETUP_TOKEN` | — | Nothing: the server prints a random setup token (and keeps it in `data/secrets.json` until setup). For an unattended first start use `ADMIN_USERNAME` and `ADMIN_PASSWORD` |
-| `USAGE_FLUSH_SECONDS` | `5` | Nothing: usage counted in memory is written to the database every 5 seconds |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | Nothing: a provider target that answered 429 or 5xx, or could not be reached, is tried last for 30 seconds (longer if its `Retry-After` says so, up to 5 minutes) |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | Nothing: when no other target is left, a `Retry-After` of up to 2 seconds is waited for once |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Nothing: **Refresh prices from OpenRouter** always reads OpenRouter's public list (only when an admin asks; no key is sent) |
+- `SECRET_KEY_FILE`: use `FORGEYARD_SECRET_KEY_FILE`, the same value under its new name. If
+  `SECRET_KEY_FILE` names a key file other than `data/secret.key` and neither
+  `FORGEYARD_SECRET_KEY_FILE` nor `FORGEYARD_SECRET_KEY` is set, **the server refuses to start**
+  instead of using (or making) a different key, and says to rename it. Nothing is changed until
+  you do; `secrets reset` refuses too.
+- `AGENT_HEARTBEAT_SECONDS`: agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS`, at
+  least every 2 seconds (10 seconds by default).
+- `FORGEYARD_SETUP_TOKEN`: the server prints a random setup token (and keeps it in
+  `data/secrets.json` until setup). For an unattended first start use `ADMIN_USERNAME` and
+  `ADMIN_PASSWORD`.
+- `USAGE_FLUSH_SECONDS`: usage counted in memory is written to the database every 5 seconds.
+- `PROVIDER_COOLDOWN_SECONDS`: a provider target that answered 429 or 5xx, or could not be reached,
+  is tried last for 30 seconds (longer if its `Retry-After` says so, up to 5 minutes).
+- `PROVIDER_RETRY_AFTER_CAP`: when no other target is left, a `Retry-After` of up to 2 seconds is
+  waited for once.
+- `OPENROUTER_MODELS_URL`: **Refresh prices from OpenRouter** always reads OpenRouter's public list
+  (only when an admin asks; no key is sent).
 
 ### Units, zero and empty
 
@@ -865,13 +874,12 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 |---|---|---|
 | `setting-unknown` | warning | A name in `.env`, or one in the environment that starts like a setting (`GATEWAY_`, `PROVIDER_`, `EGRESS_`…) or is very close to one, is not a setting. It says which setting you probably meant |
 | `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
-| `setting-deprecated` | warning | A [deprecated setting](#deprecated-settings) is set. It still works until 1.4; the finding names what replaces it |
-| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and a key file (`FORGEYARD_SECRET_KEY_FILE` or `SECRET_KEY_FILE`) are set, or the two file settings name different files |
-| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 heartbeats (`AGENT_HEARTBEAT_SECONDS`, or the shortest heartbeat of 2 seconds) |
+| `setting-removed` | warning | A [setting removed in 1.4](#removed-settings) is still set, so it is ignored. The finding names what replaces it or what happens instead |
+| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `FORGEYARD_SECRET_KEY_FILE` are set |
+| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 heartbeats (under 5 seconds: the shortest heartbeat is 2 seconds) |
 | `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS`, `PROVIDER_ALLOW_PRIVATE_HOSTS` or `MEDIA_ALLOW_PRIVATE_HOSTS` is on |
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
-| `setup-token-left` | note | `FORGEYARD_SETUP_TOKEN` is still set after setup |
 | `env-seed-ignored` | note | A first-value setting (`MODEL_URL_HOSTS`, `MODEL_LOCAL_DIRS`, `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, `GATEWAY_CLOUD_*`) differs from what an admin saved, which wins |
 | `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **I have a backup of key id …** ticks it off; it comes back when the key changes |
 | `host-loopback` | error | `HOST` is a loopback address, but a machine joined from another address (and no proxy is in front) |

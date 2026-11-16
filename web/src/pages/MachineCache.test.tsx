@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 describe("a machine's model cache", () => {
-  it("FY-WEB-233 lists each model with its size, its GGUF files under it, the engine, the disk and partial downloads", async () => {
+  it("FY-WEB-241 lists each model with its size, its GGUF files under it, the engine, the disk and partial downloads", async () => {
     server((url) => (url === "/api/machines/1/cache" ? { status: 200, body: cache() } : undefined));
     mount();
     const box = await section();
@@ -83,7 +83,7 @@ describe("a machine's model cache", () => {
     expect(within(box).getByRole("button", { name: "Remove partial downloads" })).toBeTruthy();
   });
 
-  it("FY-WEB-234 Remove is off while a deployment uses it, naming it; otherwise it asks, then calls the API", async () => {
+  it("FY-WEB-242 Remove is off while a deployment uses it, naming it; otherwise it asks, then calls the API", async () => {
     let current = cache();
     const fetch = server((url, init) => {
       if (url === "/api/machines/1/cache") return { status: 200, body: current };
@@ -116,7 +116,7 @@ describe("a machine's model cache", () => {
     await waitFor(() => expect(within(box).queryByText("tiny.gguf")).toBeNull());
   });
 
-  it("FY-WEB-235 a refusal is shown; an older agent lists without sizes and without Remove", async () => {
+  it("FY-WEB-243 a refusal is shown; an older agent lists without sizes and without Remove", async () => {
     let body = cache();
     server((url, init) => {
       if (url === "/api/machines/1/cache") return { status: 200, body };
@@ -141,7 +141,7 @@ describe("a machine's model cache", () => {
     expect(within(box).queryByRole("button", { name: /Remove/ })).toBeNull();
   });
 
-  it("FY-WEB-236 the rows, the disk line and why Remove is off, from the listing", () => {
+  it("FY-WEB-244 the rows, the disk line and why Remove is off, from the listing", () => {
     const c = cache();
     const rows = cacheRows(c);
     expect(rows.map((r) => [r.title, r.part, r.kind])).toEqual([

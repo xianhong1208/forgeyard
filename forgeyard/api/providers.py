@@ -28,7 +28,7 @@ from forgeyard.api.deps import Caller, current, fail, require_admin
 from forgeyard.config import get_settings
 from forgeyard.db import GatewayRoute, Provider, ProviderModel, RouteTarget, get_db, utcnow
 from forgeyard.gateway import budgets as gbudgets, egress, quirks, where
-from forgeyard.gateway.balancer import balancer
+from forgeyard.gateway.balancer import PROVIDER_COOLDOWN, balancer
 from forgeyard.gateway.pricing import PRICE_FIELDS
 
 router = APIRouter(prefix="/api", tags=["providers"])
@@ -157,7 +157,7 @@ def egress_out() -> dict:
     s = get_settings()
     return {"proxy": bool(s.egress_proxy.strip()), "allowed_hosts": s.egress_allowed_host_list,
             "ca_file": bool(s.egress_ca_file.strip()), "private_hosts": s.provider_allow_private_hosts,
-            "cooldown_s": s.provider_cooldown_seconds, "read_timeout_s": s.provider_read_timeout}
+            "cooldown_s": PROVIDER_COOLDOWN, "read_timeout_s": s.provider_read_timeout}
 
 
 # ------------------------------------------------------------------ checks

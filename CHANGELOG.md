@@ -8,6 +8,20 @@ version until 1.0.
 
 ### Added
 
+- **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
+  time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
+  line per key, model, provider or person (admins, with **Everyone**). The Requests tab charts
+  requests, tokens (in + out, in, out) or errors, and each unit of the newer model kinds once some
+  was counted (media items, characters, images, audio and video length, busy time, workload bytes);
+  the Cost tab charts cost in US dollars. The five largest lines are drawn by name and the rest
+  added up as *Other*; groups with none are left out. A line keeps its colour when another metric
+  re-ranks the lines. Hover or the arrow keys read a period's values aloud and in a tooltip, the
+  legend gives each line's total, and **Show the numbers** lists them as a table. The latest period,
+  still going on, is drawn dashed.
+  - `GET /api/usage/series?step=day|week|month&periods=N&split=none|key|model|provider|user&metric=…`
+    sums the same daily usage rows as the tables, so no data changes: at most 366 days, 104 weeks or
+    36 months. Whose usage follows `GET /api/usage`: your own, everyone's for admins with
+    `everyone=true`.
 - **A machine's page lists the models in its cache, with their sizes, and removes them** (part of
   #35). **Models in cache** shows each Hugging Face revision (and each GGUF file of a revision with
   several), single-file models from a URL and engine archives, with their sizes, the catalog models
@@ -82,6 +96,25 @@ version until 1.0.
   month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
+
+### Removed
+
+- **The seven settings deprecated in 1.3.1 are no longer read** (#78): `SECRET_KEY_FILE`,
+  `AGENT_HEARTBEAT_SECONDS`, `FORGEYARD_SETUP_TOKEN`, `USAGE_FLUSH_SECONDS`,
+  `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and `OPENROUTER_MODELS_URL`. The behaviour
+  is the fixed one they already documented: the heartbeat is a third of `AGENT_OFFLINE_SECONDS` (at
+  least 2 s), usage is written every 5 s, a failed provider target is tried last for 30 s (its
+  `Retry-After` up to 5 min), a `Retry-After` up to 2 s is waited for once, prices come from
+  OpenRouter's public list, the key file is `FORGEYARD_SECRET_KEY_FILE` and the setup token is the
+  generated one.
+  - One still set, in the environment or `.env`, is not ignored silently: the server logs
+    *X is no longer read. X was removed in 1.4, so its value is ignored. Use Y instead …* at start,
+    and Setup health lists it (`setting-removed`, which replaces `setting-deprecated`;
+    `setup-token-left` is gone with its setting).
+  - **Upgrade step:** rename `SECRET_KEY_FILE` to `FORGEYARD_SECRET_KEY_FILE`. Set alone to a key
+    file other than `data/secret.key`, it now stops the start with a message that says so, and
+    `secrets reset` refuses too, rather than the server looking for (or making) another key and
+    calling the real one lost.
 
 ### Fixed
 

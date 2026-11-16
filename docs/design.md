@@ -420,7 +420,7 @@ page contain these lines whenever the server uses its own CA.
 - **Usage** (page **Usage**): requests, errors, limit refusals, prompt, completion, cached and
   reasoning tokens, spilled requests, latency p50/p95, per day, model, key, person, source (API key or
   playground) or local and cloud; its **Cost** tab adds the cost per day, key, person, model or
-  provider (see *Cost*). Counted in memory and written every `USAGE_FLUSH_SECONDS` (5 s), on shutdown
+  provider (see *Cost*). Counted in memory and written every 5 s (`usage.FLUSH_SECONDS`), on shutdown
   and before a read, one row per UTC day, source, key, person, model and target. A client that went
   away (499) is not an error. Everyone sees their own; admins everyone's. A deployment's page shows
   its last 7 days.
@@ -729,9 +729,9 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   dropped. A local 429 or 503 that nothing else could replace is passed on.
 - **The cloud tier** tries its targets by weight (a weighted shuffle); one that answers 429 or 5xx,
   cannot be reached, redirects or is refused by the egress rules cools down for
-  `PROVIDER_COOLDOWN_SECONDS` (30 s, or its `Retry-After` / `retry-after-ms`, up to 5 min) and is
+  30 s (`balancer.PROVIDER_COOLDOWN`, or its `Retry-After` / `retry-after-ms`, up to 5 min) and is
   tried last, not skipped. When nothing else is left (the last tier), a `Retry-After` up to
-  `PROVIDER_RETRY_AFTER_CAP` (2 s) is waited for once. Provider answers become: 429 → 429
+  2 s (`proxy.RETRY_AFTER_CAP`) is waited for once. Provider answers become: 429 → 429
   `provider_rate_limited` (with its `Retry-After`); 5xx → 502 `provider_error`; 401, 403 or 407 → 502
   `provider_auth_failed` at once, without trying another target (never a 401 the client would blame
   on its own key); a redirect → 502 `provider_redirect`, never followed; any other 4xx keeps its status
@@ -785,7 +785,7 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
 - **Prices** live on provider models: input, output, cached input and cache write, each optional,
   with where they came from (`manual` or `openrouter`), when, and the OpenRouter id they match. Only
   models of providers outside your network are priced. **Refresh prices from OpenRouter** (admins,
-  `forgeyard/api/prices.py`) reads OpenRouter's public model list (`OPENROUTER_MODELS_URL`, no key,
+  `forgeyard/api/prices.py`) reads OpenRouter's public model list (`https://openrouter.ai/api/v1/models`, no key,
   through the egress rules) and returns a preview: each model, its match and old and new prices. The
   match is `confirmed` (the stored id), `exact` (an OpenRouter provider's own id), `suggested` (the
   kind's OpenRouter vendor plus the name as is, without a date suffix, or with version dashes as dots;
@@ -824,7 +824,7 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
     table (unique, so also once across restarts) and an audit event `budget.warning` or
     `budget.exhausted` (actor `forgeyard`). Checked when a request is reserved and settled, so a budget
     lowered below the month's spend alerts on its next request; a refusal while spend and reservations
-    are past 80% counts as 100%. Written with the usage, every `USAGE_FLUSH_SECONDS`, and on shutdown.
+    are past 80% counts as 100%. Written with the usage, every 5 s, and on shutdown.
   - `GET /api/budgets` (admins: `?everyone=true`) gives the month, `resets_at` and, per key, person
     and provider, the budget, spent, reserved, the share used and a level (`ok`, `warning` from 80%,
     `exhausted` from 100%; a budget of 0 is exhausted). The API keys page, **Usage → Cost** (*Budgets
