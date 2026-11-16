@@ -77,6 +77,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Agents send a heartbeat every third of it (at least every 2 seconds) |
+| `IMAGE_UPLOAD_MAX_GB` | `64` | The largest image file an admin may upload to a machine from its page (**Engine images** → **Upload an image**), in GiB. The file is streamed through the server to the agent, never stored |
 | `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
 ### Models
@@ -1030,6 +1031,58 @@ hosts). It checks every 2 seconds that the relay is still wanted, and closes it 
 
 The agent stops on 401, 403 and 404 (with the server's words), waits out 429 without counting it as a
 try, and retries the rest like a network error. Its progress then has `download.via: "server"`.
+
+**Engine images** (the protocol feature `relay_images`, agents and servers from 1.4). To an agent that
+also lists it, a desired replica (beside its `spec`) or download whose engine image is pinned by digest
+and recorded in `forgeyard/recipes/images.lock.json` carries `image_relay: {path, mode}` with the same
+modes; `path` is `/agent/v1/relay/{replica|download}/{id}/image`. A tag-only image never gets it.
+
+| Request | What it returns |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/manifest` | The recorded manifest of the machine's platform (from its agent's `platform.arch`), the registry's exact bytes, with `Docker-Content-Digest` and `Forgeyard-Platform` (`linux/amd64`) |
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/blobs/{digest}` | That manifest's config or one of its layers, by digest; `Range` as above |
+
+The server fetches the manifest by its recorded digest and refuses it unless its bytes hash to it and
+it names the recorded config; it keeps it in memory. Blobs come from the registry's API with an
+anonymous pull token (Docker Hub, GHCR, quay.io and other registries that hand them out), through the
+same egress rules as model files; the token is dropped when the registry redirects to its CDN. A whole
+blob is hashed on its way through and its last piece is sent only when the hash matches. The agent
+checks the manifest's digest against the recorded ids, every blob against its digest, the config's
+content id against the recorded ones and its architecture against the machine's, then loads an
+archive that holds an OCI image layout (`oci-layout`, `index.json`, `blobs/sha256/…`) and the classic
+`manifest.json`, tags it `repo:tag` and runs the `image_ids` check on it. Its progress is a
+`download` with `phase: "image"`, `layers`, `layers_done`, `via: "server"`, and `unpacking` while it loads.
+
+| Status | `code` | When |
+|---|---|---|
+| 403 | `relay_off` | The machine is set to `direct`, or its agent does not speak `relay_images` |
+| 404 | `relay_not_in_image` | The digest is not the config or a layer of that manifest |
+| 409 | `relay_image_not_pinned` | The image is not pinned by digest with recorded ids: upload it instead |
+| 409 | `relay_no_platform` | The image has no build for the machine's architecture |
+| 502 | `source_failed` | The registry's manifest does not hash to the recorded digest, or names another config |
+
+### Uploading an image file to a machine
+
+`POST /api/machines/{id}/images` (admins). The body is the file `docker save` or `podman save` wrote,
+gzip-compressed or not, with `Content-Length` (411 without it) and at most `IMAGE_UPLOAD_MAX_GB`
+(413); `X-Filename` (URL-encoded) names it in the audit log. The server sends the agent `image_load
+{request_id, path, size, name}` (protocol feature `image_load`); the agent fetches `GET
+/agent/v1/image-upload/{ticket}` with its credential (once; another machine's credential gets 404),
+streams it into `docker load` / `podman load`, and answers `image_loaded {request_id, ok, reason,
+images: [{id, tags, content, os, architecture}]}`. The answer to the browser is `{ok, bytes, images}`,
+each image with `matches: [{recipe, variant, image, how}]`: `how` is `checked` (its id or content id is
+one recorded for that recipe's pinned image) or `tag` (a tag-only recipe image named like one of its
+tags).
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `machine_offline`, `agent_cannot_load` | The agent is not connected, or has no container engine or is older than 1.4 |
+| 409 | `upload_busy` | An upload to that machine is under way (429: two in all) |
+| 400 | `upload_short`, `upload_broken` | The body ended early or broke off |
+| 504 | `agent_no_fetch`, `agent_stalled` | The agent did not start fetching within 30 s, or took nothing for 2 minutes |
+| 422 | `image_load_failed` | The engine could not load it (the agent's words) |
+
+Audited as `node.image_uploaded` (the file name, its size, `ok`, the images loaded or why not).
 
 ## Setup health checks
 

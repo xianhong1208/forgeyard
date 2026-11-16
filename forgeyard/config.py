@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     # Allow model sources on private addresses (and plain http): only for a LAN mirror. Agents
     # need their own --allow-private-model-hosts as well.
     model_allow_private_hosts: bool = False
+    # The largest image file (`docker save`, optionally gzip) an admin may upload to a machine from its page
+    # (1.4); it is streamed through the server to the agent, never stored.
+    image_upload_max_gb: int = Field(default=64, ge=1, le=4096)
     # Initial allowlists; admins change them on the Models page (stored in the database).
     model_url_hosts: str = ""      # hosts allowed for https:// GGUF sources, comma-separated
     model_local_dirs: str = ""     # directories allowed for local:// sources, comma-separated

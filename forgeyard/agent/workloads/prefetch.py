@@ -65,6 +65,9 @@ def _relays(item: dict) -> dict:
         found = relay.parse(item.get(part)) if isinstance(item, dict) else None
         if found is not None:
             out[part] = found
+    found = relay.parse_image(item)  # 1.4 PR 4: the engine image too ("relay_images")
+    if found is not None:
+        out["image"] = found
     return out
 
 
@@ -172,6 +175,8 @@ class Prefetcher:
                         "layers": int(snap.get("layers") or 0), "layers_done": int(snap.get("layers_done") or 0)}
         if snap.get("unpacking"):
             job.download["unpacking"] = True
+        if snap.get("via") == "server":
+            job.download["via"] = "server"
         job.reason = describe(snap)
         self._changed(job)
 
@@ -215,8 +220,9 @@ class Prefetcher:
                 rt = self.sup.runtimes.get("container")
                 if rt is None or not hasattr(rt, "ensure_image"):
                     raise StartError("this agent has no container engine to pull the engine image with")
+                through = self.sup.image_relay(job.relays.get("image"))
                 await asyncio.to_thread(rt.ensure_image, job.image, job.image_ids, pulled, job.cancel,
-                                        who=f"download {job.id[:12]}")
+                                        who=f"download {job.id[:12]}", **({"relay": through} if through else {}))
             if job.cancel.is_set():
                 raise Cancelled("cancelled")
             job.state, job.reason, job.download = "done", None, None

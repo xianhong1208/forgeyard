@@ -128,9 +128,14 @@ followed by Docker's error (`lookup ghcr.io … no such host`, a timeout, `pull 
 machine cannot reach the registry. When the pull got under way first, the message also says where it
 stopped: `at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`.
 
-**Do:** carry the image over as a file and load it: [Offline machines](how-to.md#offline-machines).
-The recipe's page lists the commands for each of its images. The agent tries again by itself; the
-next start uses the loaded image. If the machine should reach the registry, check its DNS and proxy
+**Do:** with a 1.4 agent, let the server fetch it: set the machine's **Internet access for downloads**
+to **Auto** or **Always through the server**
+([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server)),
+or upload the image file from the machine's page
+([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)). Or carry the
+image over as a file and load it: [Offline machines](how-to.md#offline-machines). The recipe's page
+lists the commands for each of its images. The agent tries again by itself; the next start uses the
+loaded image. If the machine should reach the registry, check its DNS and proxy
 first (`docker pull` of the image there must work).
 
 When the message instead says `… is loaded but Forgeyard has no recorded ids for this image`, the
@@ -239,7 +244,8 @@ counted: another machine would get the same answer.
 - let the server download it for the machine: on the machine's page set **Internet access for
   downloads** to **Auto** or **Always through the server**, and update its agent to 1.4 if the page
   says so ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server)).
-  The replica's progress then says *via the server*. Engine images are not relayed yet;
+  The replica's progress then says *via the server*. A pinned engine image comes the same way; an
+  image named by a tag only does not (upload it from the machine's page);
 - let the machine reach the host (DNS, a firewall rule, a proxy route); Forgeyard tries it again
   for new placements an hour after the last failure, or at once after a server restart;
 - or bring the files to it: copy a model cache from a machine that has the model
@@ -250,6 +256,15 @@ counted: another machine would get the same answer.
   [Hugging Face downloads are slow](#hugging-face-downloads-are-slow)).
 
 **Through the server, it still fails:**
+
+- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*, or
+  *… is not an image Forgeyard pinned by digest*: a custom recipe's image named by a tag only. Upload it
+  ([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)).
+- *… has no build for amd-strix's architecture*: the image has no build for that machine's platform
+  (for example arm64); pick a recipe or variant that has one.
+- *the image through the server: … SHA-256 mismatch* (a layer), *the manifest the server sent … is
+  not one of the image's recorded digests*, or *… does not match the recorded ids: not running it*: what
+  arrived is not the pinned image. Nothing was loaded; the server's log says which registry answered.
 
 - *download failed: through the server: the server could not reach huggingface.co: …*: the server
   cannot reach the source either. Fix the server's network, or use a mirror (`HF_ENDPOINT`).

@@ -335,3 +335,25 @@ class CacheRemovedIn(_Msg):
     freed_bytes: Bytes = None
     in_use: list[Annotated[str, _short(64)]] = Field(default_factory=list, max_length=32)
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
+
+
+class LoadedImageIn(BaseModel):
+    """One image an uploaded file held, as the agent's engine shows it once loaded (1.4, "image_load")."""
+
+    model_config = ConfigDict(extra="ignore")
+    id: Annotated[str, _short(80)]
+    tags: list[Annotated[str, _short(255)]] = Field(default_factory=list, max_length=16)
+    content: Annotated[Optional[str], _short(80)] = None
+    os: Annotated[Optional[str], _short(32)] = None
+    architecture: Annotated[Optional[str], _short(32)] = None
+
+
+class ImageLoadedIn(_Msg):
+    """1.4 (image_load): the answer to image_load: what the engine loaded from the uploaded file, or why not."""
+
+    v: int
+    type: Literal["image_loaded"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    reason: Annotated[Optional[str], _short(400)] = None
+    images: list[LoadedImageIn] = Field(default_factory=list, max_length=32)

@@ -178,6 +178,12 @@ class Supervisor:
                     if found is not None:
                         relays[part] = found
                     r = {**r, part: {k: v for k, v in block.items() if k != "relay"}}
+            if "image_relay" in r:
+                # 1.4 PR 4 ("relay_images"): the pinned engine image through the server, beside the spec.
+                found = relay.parse_image(r)
+                if found is not None:
+                    relays["image"] = found
+                r = {k: v for k, v in r.items() if k != "image_relay"}
             if relays:
                 self.relays[r["id"]] = relays
             else:
@@ -577,6 +583,31 @@ class Supervisor:
         rec.download = None
         return True
 
+    def image_relay(self, found: Optional[dict]):
+        """An engine image through the server (1.4 PR 4, agent/imagerelay.py), when the desired list allows it and
+        this agent has a model cache to stage it in and a client to its server; else None."""
+        client = getattr(self.models, "relay_client", None) if self.models is not None else None
+        if found is None or client is None:
+            return None
+        from forgeyard.agent.imagerelay import ImageRelay
+
+        return ImageRelay(found["path"], found["mode"], client, self.models)
+
+    def can_relay_images(self) -> bool:
+        """The agent may say "relay_images": a client to its server, a model cache, and a container engine."""
+        rt = self.runtimes.get("container")
+        return (self.models is not None and getattr(self.models, "relay_client", None) is not None
+                and rt is not None and hasattr(rt, "load") and bool(rt.info().get("ok")))
+
+    def can_load_images(self) -> bool:
+        rt = self.runtimes.get("container")
+        return rt is not None and hasattr(rt, "load_upload") and bool(rt.info().get("ok"))
+
+    async def load_upload(self, opened, size: Optional[int], cancel: threading.Event) -> list[dict]:
+        """1.4 ("image_load"): an image file an admin uploaded, loaded into the container engine."""
+        rt = self.runtimes.get("container")
+        return await asyncio.to_thread(rt.load_upload, opened, size, cancel)
+
     def _pull_progress(self, rec_id: str, snap: dict) -> None:
         rec = self.records.get(rec_id)
         if rec is None or rec.id not in self.cancels:
@@ -593,6 +624,8 @@ class Supervisor:
                         "layers_done": int(snap.get("layers_done") or 0)}
             if snap.get("unpacking"):
                 download["unpacking"] = True
+            if snap.get("via") == "server":
+                download["via"] = "server"  # 1.4: through the server's relay
             reason = describe(snap)
         if (rec.reason, rec.download) != (reason, download):
             rec.reason, rec.download = reason, download
@@ -611,8 +644,12 @@ class Supervisor:
         def progress(snap: dict) -> None:
             loop.call_soon_threadsafe(self._pull_progress, rec.id, dict(snap))
 
+        through = self.image_relay((self.relays.get(rec.id) or {}).get("image"))
         try:
-            await asyncio.to_thread(rt.pull, rec, progress, cancel)
+            if through is not None:
+                await asyncio.to_thread(rt.pull, rec, progress, cancel, through)
+            else:
+                await asyncio.to_thread(rt.pull, rec, progress, cancel)
         except PullCancelled:
             rec.state, rec.reason, rec.download = "pending", self.cancelled.get(rec.id, "cancelled"), None
             log.info("Replica %s of %s: image pull %s.", rec.id[:12], rec.workload, rec.reason)
@@ -659,6 +696,21 @@ class Supervisor:
         return rec.guarded or rec.key_env is not None
 
     async def _start(self, rec: Record) -> None:
+        """Start the replica; an unexpected error on the way (a bug, a missing module) ends this attempt with that
+        error as its reason, shown in the console, and the usual backoff follows. Without this the replica was
+        left "starting" with no process or container, and the next pass reported it as "ended while the agent was
+        not watching": the real error was only in the agent's log."""
+        try:
+            await self._start_steps(rec)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - shown, never fatal
+            log.exception("Replica %s of %s: the agent failed while starting it.", rec.id[:12], rec.workload)
+            if rec.id in self.records and rec.state in LIVE:
+                text = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                await self._ended(rec, None, reason=f"the agent failed while starting it ({text})"[:300])
+
+    async def _start_steps(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
         if self._guarded(rec) and rec.id not in self.keys:
             # Its internal key comes with the server's next `desired` (an agent restarted while the

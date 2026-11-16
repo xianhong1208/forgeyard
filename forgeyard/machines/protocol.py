@@ -17,6 +17,7 @@ agent -> server
              `model_cache.engines` lists the engine archives unpacked there (first 16 hex digits of
              their SHA-256); older servers ignore it
   logs       (M2) answer to a logs_request: the last lines of a replica's output
+  image_loaded (1.4) answer to image_load: ok or why not, and each image loaded (id, tags, content id)
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -33,11 +34,16 @@ server -> agent
   logs_request (M2) the last N lines of one replica's output
   cache_remove / cache_prune (1.4, "cache_admin") remove one model, or the partial downloads, from
              the agent's model cache; answered by `cache_removed` (agent -> server)
+  image_load (1.4, "image_load") an admin uploaded an image file to this machine: fetch it from `path`
+             on the server and load it into the container engine; answered by `image_loaded`
   error      a refused message; the server closes the connection after it
 
 HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
 the machine credential as a Bearer token and an optional `Range`: the bytes of a model file or engine
 archive the machine's desired state names, streamed from their source by the server, stored nowhere.
+(1.4, "relay_images") …/image/manifest and …/image/blobs/<digest>: a pinned engine image's manifest for the
+machine's platform, and its config and layers by digest. (1.4, "image_load") GET
+/agent/v1/image-upload/<ticket>: the bytes of an image file an admin is uploading to this machine.
 
 Models (M3) extend it the same way: an agent started with a model cache lists "models"; only
 then does the server place model deployments there, and its desired replicas carry a rendered
@@ -145,8 +151,24 @@ FEATURE_PREFETCH = "prefetch"
 # Progress through the server says `download.via` "server". Listed by both sides.
 FEATURE_RELAY = "relay"
 RELAY_PATH = "/agent/v1/relay"
+# 1.4 (issue #35 PR 4, D4): engine images through the server too. To an agent that lists it (and "relay"), a
+# desired replica's or download's *pinned* image (one in forgeyard/recipes/images.lock.json) gets
+# `image_relay: {path, mode}` beside `spec` (RELAY_PATH/<replica|download>/<id>/image), with the modes of
+# "relay". The agent GETs `<path>/manifest` (its platform's manifest, which must hash to a recorded manifest
+# digest) and `<path>/blobs/<digest>` (the config, then each layer, resumable, each checked against its
+# digest), builds an archive `docker load` / `podman load` accept, loads it and runs the "image_ids" check on
+# what it loaded. The server serves only the digests that manifest names. Tag-only images never get it.
+# Progress says `download.via` "server". Listed by both sides.
+FEATURE_RELAY_IMAGES = "relay_images"
+# 1.4 (issue #35 PR 4): an admin uploads an image file (`docker save`, optionally gzip) to a machine from the
+# console. The server sends `image_load {request_id, path, size, name}`; the agent GETs `<its server><path>`
+# (IMAGE_UPLOAD_PATH/<ticket>, with its credential), streams the body into `docker load` / `podman load`
+# and answers `image_loaded {request_id, ok, reason, images: [{id, tags, content, os, architecture}]}`. The
+# server keeps nothing but a small buffer. Listed by both sides; only an agent that lists it is asked.
+FEATURE_IMAGE_LOAD = "image_load"
+IMAGE_UPLOAD_PATH = "/agent/v1/image-upload"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
-                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY)
+                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

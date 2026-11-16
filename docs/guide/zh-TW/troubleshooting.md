@@ -88,7 +88,7 @@ sudo forgeyard agent config
 
 **原因：** 這台機器上沒有引擎映像檔，用釘住的 digest 和用 tag 都找不到，而且機器連不到 registry。如果拉取已經開始過，訊息也會說它停在哪裡：`at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`。
 
-**做法：** 把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
+**做法：** 用 1.4 的 agent 時，讓伺服器去抓：把機器的 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)），或從機器的頁面上傳映像檔（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。或者把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
 
 如果訊息是 `… is loaded but Forgeyard has no recorded ids for this image`，表示映像檔來自自訂 recipe：Forgeyard 無法檢查它載入的副本，請在那個 recipe 裡只用 tag 指定它（不加 `@sha256:…`）。
 
@@ -152,7 +152,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：**
 
-- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）。之後副本的進度會顯示 *via the server*。引擎映像檔目前還不能轉送；
+- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）。之後副本的進度會顯示 *via the server*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
 - 讓這台機器連得到那個主機（DNS、防火牆規則、proxy 路由）；Forgeyard 會在最後一次失敗一小時後，或伺服器重新啟動後，再把新的副本放到這台機器上試試；
 - 或把檔案帶過去：從已經有這個模型的機器複製模型快取（[搬移模型快取](how-to.md#move-a-model-cache)）、用 `docker load` 載入引擎映像檔（請看[副本失敗：映像檔不在這台機器上](#a-replica-fails-the-image-is-not-on-this-machine)），或把模型從本機目錄以 `local://` 模型的方式加入；
 - 或使用這台機器連得到的鏡像站（`HF_ENDPOINT`，請看 [Hugging Face 下載很慢](#hugging-face-downloads-are-slow)）。
@@ -163,6 +163,9 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 - *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
 - *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
 - *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
+- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。
+- *… has no build for amd-strix's architecture*：映像檔沒有那台機器平台（例如 arm64）的版本；請選有這個版本的 recipe 或變體。
+- *the image through the server: … SHA-256 mismatch*（某一層）、*the manifest the server sent … is not one of the image's recorded digests*，或 *… does not match the recorded ids: not running it*：收到的不是釘選的映像檔。什麼都沒有載入；伺服器的 log 會寫出是哪個 registry 回應的。
 - 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-strix: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。
 
 ## vLLM 在共用的卡上無法啟動

@@ -82,7 +82,7 @@ describe("through the server", () => {
   });
 
   it("FY-WEB-389 the Internet access setting says what each choice does; an agent that cannot relay is told to update", async () => {
-    machinePage(["workloads", "models", "prefetch", "cache_admin", "relay"], "auto");
+    machinePage(["workloads", "models", "prefetch", "cache_admin", "relay", "relay_images"], "auto");
     const section = (await screen.findByRole("heading", { name: /Models in cache/ })).closest("section") as HTMLElement;
     const select = await within(section).findByLabelText("Internet access for downloads") as HTMLSelectElement;
     expect(select.value).toBe("auto");
@@ -91,7 +91,7 @@ describe("through the server", () => {
     expect(hint()).not.toContain("update the agent");
     fireEvent.change(select, { target: { value: "server" } });
     expect(await screen.findByText("a100-box's internet access for downloads: Always through the server.")).toBeTruthy();
-    expect(await within(section).findByText(/Every model file and engine archive comes through the server/)).toBeTruthy();
+    expect(await within(section).findByText(/Every model file, engine archive and pinned engine image comes through the server/)).toBeTruthy();
     cleanup();
     machinePage(["workloads", "models", "prefetch", "cache_admin"], "server");
     const old = await screen.findByLabelText("Internet access for downloads") as HTMLSelectElement;

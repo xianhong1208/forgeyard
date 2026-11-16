@@ -21,6 +21,12 @@ The pull comes before `run` and is the agent's own (pull.py): through the engine
 when it can, with progress per layer ("pulling the image: 0.80 of 1.90 GiB (42%)"), else through the
 CLI. It fails when it stops making progress, not after a fixed time, and ends at once when the replica
 is cancelled. A failed pull says why the image is missing and how to load it (pull_failed_reason).
+
+Through the server (1.4, #35 PR 4, "relay_images"): a pinned image with an `image_relay` is fetched from the
+agent's own server instead (agent/imagerelay.py) when the machine is set so, or after the pull could not
+reach the registry ("auto"), then streamed into `docker load` / `podman load`, tagged, and run only when
+choose_image recognises it by its recorded ids. `load()` is also what an image file uploaded by an admin
+goes through ("image_load").
 """
 
 from __future__ import annotations
@@ -28,11 +34,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
+import signal
 import subprocess
 import threading
 from pathlib import Path
-from typing import Callable, Mapping, Optional
+from typing import BinaryIO, Callable, Mapping, Optional
 
 from forgeyard.agent.workloads import plan
 from forgeyard.agent.workloads import pull as pulling
@@ -42,6 +50,8 @@ from forgeyard.workloads import images
 from forgeyard.workloads.spec import ContainerRuntime as ContainerSpec, WorkloadSpec
 
 log = logging.getLogger("forgeyard.agent")
+# A replica's reason is kept to this many characters (the supervisor cuts there): build reasons to fit.
+REASON_MAX = 300
 
 ENGINES = ("docker", "podman")
 CDI_DIRS = ("/etc/cdi", "/var/run/cdi")
@@ -51,6 +61,9 @@ RUN_TIMEOUT = 600.0
 PULL_STALL = 300.0
 DOCKER_SOCKET = "/var/run/docker.sock"
 PODMAN_SOCKETS = ("/run/podman/podman.sock",)
+# `docker load` / `podman load` printing what it loaded: "Loaded image: repo:tag", "Loaded image ID: sha256:…",
+# Podman's older "Loaded image(s): a,b".
+LOADED_RE = re.compile(r"^\s*Loaded image(?:\(s\))?(?: ID)?:\s*(.+?)\s*$")
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -117,7 +130,7 @@ def pull_failed_reason(engine: str, image: str, found: str, detail: str) -> str:
     else:
         why = (f"the image is not on this machine and could not be pulled; on an offline machine, {engine} load "
                "the image (Forgeyard checks it by its recorded ids)")
-    return f"{why}. {detail}"[:300]
+    return f"{why}. {pulling.brief(detail, max(80, REASON_MAX - len(why) - 2))}"
 
 
 def _unix_path(host: str) -> Optional[str]:
@@ -377,7 +390,7 @@ class ContainerRuntime:
 
     # ------------------------------------------------------------------ pulling, before run
     def pull(self, rec: Record, progress: Optional[pulling.Report] = None,
-             cancel: Optional[threading.Event] = None) -> None:
+             cancel: Optional[threading.Event] = None, relay=None) -> None:
         """Make the replica's image local, if it is not: pulled by the pinned reference, with progress.
         Raises StartError (the pull failed: why, which layer, how to load it on an offline machine) or
         pull.PullCancelled. An image chosen by its recorded ids (#10) is never pulled."""
@@ -388,16 +401,19 @@ class ContainerRuntime:
         assert isinstance(rt, ContainerSpec)
         try:
             self._chosen[rec.id] = self.ensure_image(rt.image, rec.image_ids, progress, cancel,
-                                                     who=f"replica {rec.id[:12]} of {rec.workload}")
+                                                     who=f"replica {rec.id[:12]} of {rec.workload}", relay=relay)
         except (StartError, pulling.PullCancelled):
             self._chosen.pop(rec.id, None)
             raise
 
     def ensure_image(self, image: str, check: Optional[dict], progress: Optional[pulling.Report] = None,
-                     cancel: Optional[threading.Event] = None, *, who: str = "a download") -> tuple[str, str]:
+                     cancel: Optional[threading.Event] = None, *, who: str = "a download",
+                     relay=None) -> tuple[str, str]:
         """The image on this machine, pulled when it is not local; (what to run, what was found). Also what
-        "Download to…" (1.4) fetches an engine image with, starting nothing. Raises StartError or
-        pull.PullCancelled."""
+        "Download to…" (1.4) fetches an engine image with, starting nothing. `relay` (1.4, an
+        agent.imagerelay.ImageRelay): a pinned image may come through the server instead, at once ("server",
+        or a registry already found unreachable) or after a pull that could not reach the registry. Raises
+        StartError or pull.PullCancelled."""
         if not self._info.get("ok"):
             raise StartError(f"no container engine: {self._info.get('reason') or 'not available'}")
         target, found = choose_image(image, check, self._image)
@@ -405,19 +421,186 @@ class ContainerRuntime:
         if found == LOADED or (found == PINNED and (pinned or self._image(image) is not None)):
             return target, found  # local: the pinned digest, a loaded copy that matches, or a tag-only image
         engine = Path(self.engine).name
+        relay = relay if pinned and check else None
+        if relay is not None and relay.first(image):
+            return self._relay_image(image, check, relay, progress, cancel, who)
         log.info("Pulling %s for %s.", image, who)
         try:
             self._pull(image, progress, cancel)
         except pulling.PullStalled as e:
             raise StartError(str(e)[:300]) from None  # it was reaching the registry: no offline advice
         except pulling.PullError as e:
+            from forgeyard.models import fetch
+
+            if relay is not None and fetch.network_error(str(e)):
+                # "auto": the registry cannot be reached from here; the server fetches the image instead (and
+                # the next images from this registry go there at once).
+                relay.client.mark_unreachable(relay.host(image))
+                log.warning("Could not pull %s for %s (%s); fetching it through the server.", image, who,
+                            pulling.brief(str(e), 200))
+                return self._relay_image(image, check, relay, progress, cancel, who)
             if pinned:
                 raise StartError(pull_failed_reason(engine, image, found, str(e))) from None
-            raise StartError(f"{engine} could not pull {image}: {e}"[:300]) from None
+            if fetch.network_error(str(e)):
+                advice = (". It is not pinned by digest, so it cannot come through the server: upload the image file "
+                          "to this machine (its page: Upload an image)")
+                start = f"{engine} could not pull {image}: "
+                detail = pulling.brief(str(e), max(60, REASON_MAX - len(start) - len(advice)))
+                raise StartError(f"{start}{detail}{advice}"[-REASON_MAX:]) from None
+            raise StartError(pulling.brief(f"{engine} could not pull {image}: {e}", REASON_MAX)) from None
         if pinned and self._image(digest_ref(image)) is None:
             raise StartError(f"the pull of {image} finished, but {engine} does not show the pinned digest")
         log.info("Pulled %s.", image)
         return (image, PINNED) if pinned else (target, found)
+
+    # ------------------------------------------------------------------ through the server (1.4)
+    def _relay_image(self, image: str, check: dict, relay, progress: Optional[pulling.Report],
+                     cancel: Optional[threading.Event], who: str) -> tuple[str, str]:
+        """Fetch the image through the server, load it, tag it and check it (agent/imagerelay.py)."""
+        from forgeyard.agent import imagerelay
+        from forgeyard.agent.models import CacheError, Cancelled
+        from forgeyard.workloads.registry import tag_ref
+
+        cancel = cancel or threading.Event()
+        engine = Path(self.engine).name
+        log.info("Fetching %s for %s through the server.", image, who)
+        try:
+            staged = imagerelay.fetch(relay, image, check, progress=progress, cancel=cancel)
+        except Cancelled:
+            raise pulling.PullCancelled() from None
+        except (imagerelay.ImageRelayError, CacheError) as e:
+            raise StartError(f"the image through the server: {e}"[:300]) from None
+        total = sum(p.stat().st_size for p in {staged.blob(d) for d in [staged.config_digest, *staged.layers]})
+        if progress is not None:
+            n = len(staged.layers)
+            progress({"done": total, "total": total, "layers": n, "layers_done": n, "unpacking": True, "via": "server"})
+        refs = self.load(lambda out: imagerelay.write_archive(staged, out, cancel), cancel)
+        want = tag_ref(image)
+        item = None
+        for ref in dict.fromkeys([want, *refs, staged.config_digest]):
+            found_item = self._image(ref)
+            if found_item is not None and images.matches(found_item, check):
+                item = found_item
+                break
+        if item is None:
+            raise StartError(f"{engine} loaded the image from the server, but what it shows does not match the "
+                             "recorded ids: not running it")
+        if not {want, imagerelay.full_name(image)} & set(item.get("RepoTags") or []):  # Podman names it in full
+            r = self._cli("tag", str(item.get("Id")), want)
+            if r.returncode != 0:
+                raise StartError(f"{engine} tag {want} failed: {(r.stderr or r.stdout).strip()[-200:]}")
+        target, found = choose_image(image, check, self._image)
+        if found not in (LOADED, PINNED):
+            raise StartError(f"the image loaded from the server is not recognised under {want}: not running it")
+        imagerelay.clean(staged)
+        log.info("Loaded %s through the server for %s (%s).", image, who, found)
+        return target, found
+
+    def load(self, write: Callable[[BinaryIO], None], cancel: Optional[threading.Event] = None) -> list[str]:
+        """`docker load` / `podman load` of the archive `write` streams into it; what it says it loaded (tags,
+        or ids). A cancel ends it (and its process group). Raises StartError or pull.PullCancelled."""
+        if not self._info.get("ok"):
+            raise StartError(f"no container engine: {self._info.get('reason') or 'not available'}")
+        cancel = cancel or threading.Event()
+        engine = Path(self.engine).name
+        try:
+            proc = subprocess.Popen([self.engine, "load"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, env=self._engine_env(), start_new_session=True)
+        except OSError as e:
+            raise StartError(f"{engine} load could not start: {e}") from None
+        lines: list[str] = []
+
+        def read() -> None:
+            assert proc.stdout is not None
+            for raw in iter(proc.stdout.readline, b""):
+                lines.append(raw.decode("utf-8", "replace").rstrip())
+                del lines[:-200]
+
+        def end() -> None:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(proc.pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    return
+                try:
+                    proc.wait(timeout=5)
+                    return
+                except subprocess.TimeoutExpired:
+                    continue
+
+        def watch() -> None:
+            while proc.poll() is None:
+                if cancel.wait(0.5):
+                    end()
+                    return
+
+        reader = threading.Thread(target=read, daemon=True)
+        watcher = threading.Thread(target=watch, daemon=True)
+        reader.start()
+        watcher.start()
+        problem: Optional[BaseException] = None
+        killed = False
+        try:
+            assert proc.stdin is not None
+            write(proc.stdin)
+        except Exception as e:  # a broken pipe (the engine stopped reading), a cancel, a short or broken upload
+            problem = e
+            if proc.poll() is None:
+                killed = True
+                end()  # before its input ends: never load half an archive (a cut at a file's end is a valid tar)
+        finally:
+            try:
+                proc.stdin.close()  # type: ignore[union-attr]
+            except OSError:
+                pass
+        code = proc.wait()
+        reader.join(timeout=10)
+        if cancel.is_set():
+            raise pulling.PullCancelled()
+        tail = "\n".join(x for x in lines if x)[-300:]
+        if problem is not None and killed:
+            raise StartError(f"{engine} load: the archive broke off, nothing was loaded: {problem}"[:300])
+        if code != 0:
+            raise StartError(f"{engine} load failed: {tail or f'exit code {code}'}"[:400])
+        if problem is not None:
+            raise StartError(f"{engine} load: the archive broke off: {problem}"[:300])
+        refs = []
+        for line in lines:
+            m = LOADED_RE.match(line)
+            if m:
+                refs += [r.strip() for r in m.group(1).split(",") if r.strip()]
+        return list(dict.fromkeys(refs))
+
+    def load_upload(self, opened, size: Optional[int], cancel: Optional[threading.Event] = None) -> list[dict]:
+        """An uploaded image file (1.4, "image_load"): `opened` is the server's open answer (agent.relay), copied
+        into `docker load` as it arrives; each image loaded, as the console shows it."""
+        def write(out: BinaryIO) -> None:
+            got = 0
+            with opened as resp:
+                while True:
+                    chunk = resp.read1(1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    got += len(chunk)
+            if size and got != size:
+                raise OSError(f"the upload ended after {got} of {size} bytes")
+
+        refs = self.load(write, cancel)
+        found: dict[str, dict] = {}
+        for ref in refs:
+            item = self._image(ref)
+            if item is None or not isinstance(item.get("Id"), str):
+                continue
+            entry = found.setdefault(item["Id"], {
+                # Podman shows a bare hex id: as a digest, so the server can compare it with the recorded ids.
+                "id": images.normalize(item["Id"]) or item["Id"],
+                "tags": [t for t in (item.get("RepoTags") or []) if isinstance(t, str)][:16],
+                "content": images.content_of_inspect(item), "os": str(item.get("Os") or "")[:32],
+                "architecture": str(item.get("Architecture") or "")[:32]})
+            if ref not in entry["tags"] and not ref.startswith("sha256:") and len(entry["tags"]) < 16:
+                entry["tags"].append(ref)
+        return list(found.values())[:32]
 
     def _pull(self, image: str, progress: Optional[pulling.Report], cancel: Optional[threading.Event]) -> None:
         """Through the engine API when it answers; else (or when the registry wants credentials the
@@ -438,14 +621,19 @@ class ContainerRuntime:
         if code != 0:
             raise pulling.PullError(out.strip()[-200:] or f"{Path(self.engine).name} pull exited with {code}")
 
-    def _cli_pull(self, image: str, *, progress: Optional[pulling.Report] = None,
-                  cancel: Optional[threading.Event] = None, anonymous: bool = False) -> tuple[int, str]:
-        """`docker pull` (with a config without credential helpers when anonymous, see
-        anonymous_config); (exit code, the end of its output)."""
+    @staticmethod
+    def _engine_env() -> dict:
         env = {"PATH": os.environ.get("PATH", plan.BASIC_PATH), "HOME": os.environ.get("HOME", "/root")}
         for key in ("DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT", "CONTAINER_HOST", "XDG_RUNTIME_DIR"):
             if os.environ.get(key):
                 env[key] = os.environ[key]
+        return env
+
+    def _cli_pull(self, image: str, *, progress: Optional[pulling.Report] = None,
+                  cancel: Optional[threading.Event] = None, anonymous: bool = False) -> tuple[int, str]:
+        """`docker pull` (with a config without credential helpers when anonymous, see
+        anonymous_config); (exit code, the end of its output)."""
+        env = self._engine_env()
         argv = [self.engine, "pull", image]
         if anonymous:
             log.warning("%s's credential helper failed; pulling %s without it", Path(self.engine).name, image)

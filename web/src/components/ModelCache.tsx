@@ -149,6 +149,7 @@ function FetchViaField({ m, onChanged, onError }: { m: Machine; onChanged: (text
   const [saving, setSaving] = useState(false);
   const value: FetchVia = m.fetch_via ?? "auto";
   const relays = (m.features ?? []).includes("relay");
+  const images = (m.features ?? []).includes("relay_images");
   const save = async (next: FetchVia) => {
     setSaving(true);
     try {
@@ -169,7 +170,8 @@ function FetchViaField({ m, onChanged, onError }: { m: Machine; onChanged: (text
       <p className="field-hint">
         {FETCH_VIA_HINT[value]}
         {value !== "direct" && !relays && " This machine's agent cannot download through the server yet: update the agent. Until then it downloads directly."}
-        {" "}Engine images are still pulled directly.
+        {value !== "direct" && relays && !images && " Its agent pulls engine images directly: update the agent to get them through the server too."}
+        {value !== "direct" && " An image that is not pinned (a tag only) cannot come through the server: upload it below."}
       </p>
     </div>
   );

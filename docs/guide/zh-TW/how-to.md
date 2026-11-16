@@ -218,6 +218,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
 引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
 
+1.4 起，用 1.4 的 agent 有兩個更簡單的做法：內建 recipe 的映像檔（全部都有釘選）會自動**經由伺服器**一層一層送過去（[經由伺服器把模型送到離線機器](#give-an-offline-machine-models-through-the-server)），任何映像檔也都可以從機器的頁面**上傳**（[把引擎映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）。以下步驟仍然可用，適合較舊的 agent 或不經過伺服器的情況。
+
 1. **找出映像檔。** 在 **Models → Engines**，打開引擎上的 **Machine without registry access:
    load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
@@ -836,7 +838,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 ## 經由伺服器把模型送到離線機器
 
-自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型和引擎壓縮檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型、引擎壓縮檔和有釘選的引擎映像檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。
 
 1. 打開機器的頁面（admin）。在 **Models in cache** 底下設定 **Internet access for downloads**：
    - **Auto**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
@@ -854,7 +856,31 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
 - 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-strix could not reach huggingface.co just now; the model comes through the server*，或 *amd-strix downloads the model and the engine through the server (its internet access setting)*。
 
-**引擎映像檔**（container 變體）目前還不能轉送：請用檔案帶過去（[離線機器](#offline-machines)），或使用 process 變體（llama.cpp 的壓縮檔會經由伺服器）。機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它。
+**引擎映像檔**（container 變體）在 recipe 以 digest 釘選時也會經由伺服器，所有內建 recipe 都是如此：
+
+- 映像檔不在機器上時，agent 照常 pull（**Auto**）；pull 連不到 registry（`lookup ghcr.io: no such host`、逾時）時改經由伺服器，之後一小時內同一個 registry 的映像檔也一樣。設成 **Always through the server** 時完全不會先試 registry。
+- 伺服器依 Forgeyard 為這個映像檔記下的 digest（`forgeyard/recipes/images.lock.json`），用 registry 發的匿名 pull token 讀取**那台機器平台**（amd64、arm64）的 manifest，再依 digest 提供那份 manifest、它的 config 和每一層。那份 manifest 沒列的 digest 一律不給，完整的一層經過時也會檢查。
+- agent 把每一份都和它的 digest 比對，先放在模型快取的 `.partial/image-…` 底下（中斷後從那一層接續；**Remove partial downloads** 會清掉），組成 `docker load` 和 `podman load` 都接受的封存檔、載入、加上 recipe 的 tag，並且只有在載入的映像檔符合記錄的 id 時才執行，和手動載入的映像檔一樣。之後刪除這些檔案。
+- 進度會顯示 *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*，接著是 *loading it*。每一層都會經過伺服器的網路兩次，和模型檔一樣。
+- 只用 tag 指定的映像檔（自訂 recipe 的、這一版 Forgeyard 自己的 vision 映像檔）不能經由伺服器：沒有記錄的 digest 可以比對。請改用上傳（下一節）。
+
+機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。
+
+## 把引擎映像檔上傳到機器
+
+管理員可以從 console 把映像檔放到機器上：不能經由伺服器的映像檔（自訂 recipe 只用 tag 指定的映像檔、自己建置的映像檔），或那台機器要 pull 很久的映像檔。
+
+1. 在已經有這個映像檔（或能 pull 它）的機器上存成檔案：
+
+   ```bash
+   sudo docker save ghcr.io/example/engine:1.2 | gzip > engine.tar.gz
+   ```
+
+   `podman save` 也可以。有釘選的映像檔請先依 digest pull 並加上 tag，做法和[離線機器](#offline-machines)一樣，這樣檔案裡就是那個映像檔、而且是 recipe 的 tag。
+2. 打開目標機器的頁面 → **Engine images** → **Upload an image**，選擇檔案，按 **Upload**。對話框會顯示已送出多少，接著顯示 *Loading it into …'s container engine*。
+3. 載入完成後，對話框會列出檔案裡的每個映像檔：它的 tag、id，以及它是哪個 recipe 的映像檔。*The pinned image of llama-cpp (vulkan), checked by its recorded ids*：那台機器上的部署不用 pull 就會使用它。*Named as the image of …*：只用 tag 指定它的 recipe 會照樣使用。*Not the image of any recipe*：自訂 recipe 可以用它的 tag 指定它。
+
+檔案從你的瀏覽器經過伺服器直接送到 agent，agent 一邊收一邊把它串流進 `docker load`（或 `podman load`）：伺服器只保留很小的緩衝，機器也不需要其他通往你電腦的路。container 引擎載入時會檢查每一層；中斷的檔案絕不會被載入。每台機器同時只能有一個上傳，全部最多兩個；檔案最大為 `IMAGE_UPLOAD_MAX_GB`（沒設定時是 64 GiB）。機器的 agent 必須是 1.4 以後的版本、有 container 引擎，而且在線上。每次上傳和失敗的原因都會記入稽核紀錄（`node.image_uploaded`）。
 
 ## 釋出機器上的磁碟空間
 

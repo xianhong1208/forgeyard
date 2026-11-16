@@ -1,12 +1,15 @@
 """Machines: everyone signed in can look; admins add (join tokens), revoke and remove, and choose
 which GPUs Forgeyard may assign on each machine and how it reaches the internet (`fetch_via`, 1.4).
-Operators and admins remove models from a machine's model cache (1.4)."""
+Operators and admins remove models from a machine's model cache (1.4). Admins upload an image file to a
+machine (1.4, forgeyard/machines/upload.py)."""
 
 from __future__ import annotations
 
 from typing import Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
@@ -15,9 +18,9 @@ from forgeyard import audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin, require_operator
 from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
-from forgeyard.db import Accelerator, JoinToken, Node, get_db, utcnow
+from forgeyard.db import Accelerator, JoinToken, Node, get_db, new_session, utcnow
 from forgeyard.install import commands as install_commands
-from forgeyard.machines import cache, store
+from forgeyard.machines import cache, store, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED, FETCH_VIA
 from forgeyard.models import prefetch
@@ -48,6 +51,8 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [], "runtime_info": n.runtime_info or {},
         "fetch_via": n.fetch_via or "auto",
+        # 1.4: the largest image file an admin may upload to a machine (IMAGE_UPLOAD_MAX_GB).
+        "image_upload_max_bytes": get_settings().image_upload_max_gb * upload.UNIT,
         # The per-model listing (1.4) is served by /api/machines/{id}/cache, not with every machine.
         "model_cache": {k: v for k, v in (n.model_cache or {}).items() if k not in ("models", "engines_detail")},
         "accelerators": [accelerator_out(a, n, assigned) for a in n.accelerators],
@@ -265,3 +270,71 @@ def remove_partial_downloads(machine_id: int, caller: Caller = Depends(require_o
     db.commit()
     db.expire_all()
     return {"ok": True, "freed_bytes": answer.get("freed_bytes") or 0, "cache": cache.view(db, _get(db, machine_id), caller.user)}
+
+
+# ---------------------------------------------------------------------------- uploading an image file (1.4)
+def _upload_caller(request: Request, machine_id: int) -> tuple[Caller, Node]:
+    """In a thread, with a session of its own (an upload lasts minutes; no database connection is held)."""
+    db = new_session()
+    try:
+        caller = require_admin(current(request, db))
+        node = _get(db, machine_id)
+        _ = (caller.user.id, caller.user.username, node.id, node.name)  # loaded before the session closes
+        return caller, node
+    finally:
+        db.close()
+
+
+def _upload_audit(caller: Caller, node: Node, **detail) -> None:
+    db = new_session()
+    try:
+        audit.record(db, "node.image_uploaded", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                     **detail)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _matches(items: list[dict]) -> list[dict]:
+    db = new_session()
+    try:
+        return [{**i, "matches": upload.recipe_matches(db, i)} for i in items]
+    finally:
+        db.close()
+
+
+@router.post("/{machine_id}/images")
+async def upload_image(machine_id: int, request: Request):
+    """Upload an image file (`docker save`, optionally gzip) to this machine (1.4, admins only): streamed through
+    the server to its agent, which loads it into its container engine. The body is the file; Content-Length is
+    required; `X-Filename` names it in the audit log. Answers what was loaded, and which recipe image each one
+    is (checked by its recorded ids, or named by a tag-only recipe image)."""
+    caller, node = await run_in_threadpool(_upload_caller, request, machine_id)
+    limit = get_settings().image_upload_max_gb * upload.UNIT
+    length = request.headers.get("content-length") or ""
+    if not length.isdigit():
+        raise fail(411, "length_required", "The upload must say its size (Content-Length).")
+    size = int(length)
+    if size <= 0:
+        raise fail(400, "upload_empty", "The file is empty.")
+    if size > limit:
+        raise fail(413, "upload_too_large", f"The file is {size / upload.UNIT:.1f} GiB; the limit is "
+                                            f"{get_settings().image_upload_max_gb} GiB (IMAGE_UPLOAD_MAX_GB).")
+    name = unquote(request.headers.get("x-filename") or "")[:200] or "image.tar"
+    try:
+        upload.precheck(node)  # refused before a byte moves: not an upload, not audited
+    except upload.UploadFailed as e:
+        raise fail(e.status, e.code, e.message) from None
+    try:
+        answer = await upload.receive(request, node, size, name)
+    except upload.UploadFailed as e:
+        await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=False, reason=e.message[:200])
+        raise fail(e.status, e.code, e.message) from None
+    if not answer.get("ok"):
+        reason = str(answer.get("reason") or "the agent could not load it")[:400]
+        await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=False, reason=reason[:200])
+        raise fail(422, "image_load_failed", f"{node.name}: {reason}")
+    items = await run_in_threadpool(_matches, list(answer.get("images") or []))
+    await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=True,
+                            images=[{"id": i.get("id"), "tags": i.get("tags")} for i in items][:8])
+    return {"ok": True, "bytes": size, "images": items}

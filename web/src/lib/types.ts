@@ -98,8 +98,10 @@ export type Machine = {
   // Accelerator keys Forgeyard may assign; null = all of them.
   gpu_allowlist?: string[] | null;
   features?: string[];
-  // 1.4: how it fetches models, engines and images (admins set it); relaying through the server comes later.
+  // 1.4: how it fetches models, engines and images (admins set it): directly, through the server, or both.
   fetch_via?: FetchVia;
+  // 1.4: the largest image file an admin may upload to it (IMAGE_UPLOAD_MAX_GB).
+  image_upload_max_bytes?: number;
   runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
   model_cache?: { ok?: boolean; free_bytes?: number | null; cached?: string[]; reason?: string | null };
   accelerators: Accelerator[];

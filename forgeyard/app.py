@@ -41,7 +41,7 @@ from forgeyard.deprecation import DeprecationMiddleware
 from forgeyard.db import get_engine, new_session
 from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy, videojobs
 from forgeyard.gateway.usage import FLUSH_SECONDS as USAGE_FLUSH_SECONDS, recorder as usage_recorder
-from forgeyard.machines import agent_api, liveness, relay
+from forgeyard.machines import agent_api, liveness, relay, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_RESTART
 from forgeyard.migrate import upgrade
@@ -149,6 +149,7 @@ def create_app() -> FastAPI:
     app.include_router(passthrough.router)
     app.include_router(agent_api.router)
     app.include_router(relay.router)
+    app.include_router(upload.router)
     app.include_router(install.router)
     app.include_router(guide.router)
 
