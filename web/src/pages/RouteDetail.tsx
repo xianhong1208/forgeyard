@@ -54,7 +54,7 @@ export function RouteDetailPage() {
   if (r && r.deployment_id !== null) return <Navigate to={routeHome(r)} replace />;
   const crumb = admin
     ? <p className="crumb"><Link to="/cloud?tab=models"><IconArrowLeft size={14} aria-hidden="true" /> Cloud models</Link></p>
-    : <p className="crumb"><Link to="/models"><IconArrowLeft size={14} aria-hidden="true" /> Models</Link></p>;
+    : <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>;
   if (!isNew && !r) {
     return (
       <>
@@ -67,7 +67,7 @@ export function RouteDetailPage() {
   return (
     <>
       {crumb}
-      <PageHeader index={`03 · Cloud · ${cloud ? "Cloud model" : "Model name"}`} title={isNew ? "New cloud model" : r?.served_name ?? "Cloud model"}
+      <PageHeader index={`04 · Cloud · ${cloud ? "Cloud model" : "Model name"}`} title={isNew ? "New cloud model" : r?.served_name ?? "Cloud model"}
         lead={isNew ? "A model name of its own: a cloud model behind Forgeyard's keys and limits, or several deployments and providers in tiers."
           : r ? `${API_KIND[r.api] ?? r.api} · made by ${r.created_by ?? "an admin"}` : undefined} />
       {r && <AdvisorBanner pages={[`route:${r.id}`]} />}

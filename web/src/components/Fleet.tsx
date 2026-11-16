@@ -1,4 +1,4 @@
-// The pieces the Machines and Models pages share (1.4): kind icons, memory bars, what runs where.
+// The pieces the Machines and Serving pages share (1.4): kind icons, memory bars, what runs where.
 import {
   IconBox,
   IconBrain,
@@ -19,7 +19,7 @@ import { useEffect, useMemo } from "react";
 import { Link } from "react-router";
 
 import {
-  MACHINE_KIND, memoryLabel, placement, share, uniqueHolders,
+  MACHINE_KIND, appTitle, memoryLabel, placement, share, uniqueHolders,
   type CardMemory, type Holder, type MachineKind, type ModelKind, type Placement,
 } from "../lib/fleet";
 import { bytes } from "../lib/machines";
@@ -65,7 +65,7 @@ export function MemBar({ mem, held, size = "md" }: { mem: CardMemory; held?: Hol
     <span className={`membar membar-${size}`} role="img" aria-label={memoryLabel(mem)}>
       {named.length
         ? named.map((h, i) => (
-          <span key={`${h.href}-${h.replica.ordinal}-${i}`} className="membar-fy membar-seg" style={{ width: share(h.reserved ?? 0, mem.total) }}
+          <span key={`${h.key}-${h.replica.ordinal}-${i}`} className="membar-fy membar-seg" style={{ width: share(h.reserved ?? 0, mem.total) }}
             title={`${h.name}: ${bytes(h.reserved)}`}>
             {size === "lg" && (h.reserved ?? 0) / Math.max(1, mem.total) > 0.09 && <span className="membar-label">{h.name}</span>}
           </span>
@@ -86,18 +86,18 @@ export function MemLegend() {
   );
 }
 
-// What runs on a machine: one chip per deployment or app, linking to it; "+N more" past `max`.
+// What runs on a machine: one chip per deployment (linking to it) or app; "+N more" past `max`.
 export function HolderChips({ list, max, empty = "Nothing runs here yet.", link = true }: { list: Holder[]; max?: number; empty?: string; link?: boolean }) {
   const u = uniqueHolders(list);
   const shown = max === undefined ? u : u.slice(0, max);
   return (
     <div className="holder-chips">
       {shown.map((h) => {
-        const title = h.kind === "workload" ? `App ${h.name}` : `${h.deployment?.model.name ?? h.name}`;
-        return link ? (
-          <Link key={h.href} to={h.href} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></Link>
+        const title = h.kind === "workload" ? appTitle(h.name) : `${h.deployment?.model.name ?? h.name}`;
+        return link && h.href ? (
+          <Link key={h.key} to={h.href} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></Link>
         ) : (
-          <span key={h.href} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></span>
+          <span key={h.key} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></span>
         );
       })}
       {shown.length < u.length && <span className="holder-chip holder-more">+{u.length - shown.length} more</span>}

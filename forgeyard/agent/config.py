@@ -508,13 +508,21 @@ def _bare(k: str) -> str:
     return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k)
 
 
+def _comment(text: str) -> list[str]:
+    """`text` as TOML comment lines: every newline and run of whitespace folded into one space (a
+    note can quote a tool's multi-line error, e.g. `podman info`), wrapped at 96 characters, each
+    line starting with "#" so nothing of it can be read as a setting."""
+    import textwrap
+
+    flat = " ".join(str(text).split())
+    return [f"# {line}" for line in textwrap.wrap(flat, 96)] or ["#"]
+
+
 def render(values: dict, notes: Optional[dict] = None, header: Optional[list[str]] = None) -> str:
     """A complete, commented agent.toml: every setting with what it does; settings without a value
     are written commented out (with an example), so the file is its own reference."""
-    import textwrap
-
     notes = notes or {}
-    out = [f"# {line}" if line else "#" for line in (header or [])]
+    out = [c for line in (header or []) for c in _comment(line)]
     if out:
         out.append("")
     for section, title in SECTIONS.items():
@@ -523,11 +531,9 @@ def render(values: dict, notes: Optional[dict] = None, header: Optional[list[str
         for s in SETTINGS:
             if s.section != section:
                 continue
-            for line in textwrap.wrap(s.help, 96):
-                out.append(f"# {line}")
+            out += _comment(s.help)
             if s.key in notes:
-                # A detection note can quote a tool's multi-line output (`podman info` failing): one comment line.
-                out.append("# " + " ".join(str(notes[s.key]).split()))
+                out += _comment(notes[s.key])
             v = values.get(s.key, s.default)
             if v is None:
                 example = s.example or '""'

@@ -269,7 +269,7 @@ counted: another machine would get the same answer.
 - *download failed: through the server: the server could not reach huggingface.co: …*: the server
   cannot reach the source either. Fix the server's network, or use a mirror (`HF_ENDPOINT`).
 - *through the server: huggingface.co refused access (HTTP 401) …*: a gated model; set the server's
-  Hugging Face token under **Models → Model sources** (the machine's own token is not used through the
+  Hugging Face token under **Models → Sources** (the machine's own token is not used through the
   server), or give the deployment its own.
 - *through the server: … does not download through the server*: the machine was set to **Direct
   only** while it downloaded.
@@ -441,6 +441,8 @@ More in [Cloud providers](cloud-providers.md#troubleshooting).
 
 ## Errors from /x/
 
+`/x/` is deprecated in 1.4 and removed in 1.5 ([Apps (deprecated)](reference.md#apps-deprecated)).
+
 - **403 `workloads_not_allowed`:** the key's **Apps at /x/** is *None*, the default. Change it
   on **API keys**.
 - **404 `workload_not_found`:** the name is wrong, the app is not exposed (its page, **Gateway**),
@@ -510,7 +512,7 @@ when:
 - the deployment or the route was **deleted**, or its name is not what you think: the name programs
   use is the deployment's name (or the route's), shown as *Model name* on its page.
 
-**Do:** open **Models** and check the model's state; **Start** a stopped deployment. On **API keys**,
+**Do:** open **Serving** and check the model's state; **Start** a stopped deployment. On **API keys**,
 check the key's models and its *Cloud providers* setting.
 
 ## A model is listed but answers 503
@@ -713,7 +715,7 @@ that name. Each line says why and what to do:
 - *is not a setting… Did you mean …?*: a typo, or a setting from another version. Fix the name in
   `.env` or the environment.
 - *is ignored*: another setting makes it useless, e.g. `TLS_CA_FILE` without your own certificate,
-  or `MODEL_URL_HOSTS` after an admin saved **Model sources** (the saved value wins: change it in
+  or `MODEL_URL_HOSTS` after an admin saved **Models → Sources** (the saved value wins: change it in
   the web UI).
 - *ADMIN_PASSWORD is still set*: it is only read on the first start. Remove it from `.env`.
 

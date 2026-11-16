@@ -59,12 +59,12 @@ afterEach(() => {
 });
 
 describe("vision models (1.4, #86)", () => {
-  it("FY-WEB-300 Deployments: detection, segmentation and depth share one Vision section, each row with its task and path", async () => {
+  it("FY-WEB-300 Serving: detection, segmentation and depth share one Vision section, each row with its task and path", async () => {
     const deps = [visionDep(3, "det", "detect", "rtdetr-v2-r18"), visionDep(4, "seg", "segment", "sam2.1-hiera-tiny"),
       visionDep(5, "dav2", "depth", "depth-anything-v2-small")];
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: deps, server_time: "", can_manage: true } }
       : url === "/api/machines" ? { status: 200, body: { machines: [] } } : undefined);
-    mount("/models");
+    mount("/serving");
     const sec = await screen.findByRole("region", { name: "Vision · 3" });
     expect(within(sec).getByText("/v1/vision/…")).toBeTruthy();
     expect(within(sec).getByText("Object detection, segmentation and depth")).toBeTruthy();
@@ -85,7 +85,7 @@ describe("vision models (1.4, #86)", () => {
       if (url.startsWith("/api/workloads/103/replicas/0/logs")) return { status: 200, body: { source: "live", text: "", truncated: false, state: "healthy" } };
       return undefined;
     });
-    mount("/models/deployments/3");
+    mount("/serving/3");
     const tryIt = (await screen.findByRole("heading", { name: "Try it" })).closest("section") as HTMLElement;
     expect(within(tryIt).getByText(/a small test image \(two coloured squares\)/)).toBeTruthy();
     expect(within(tryIt).queryByLabelText("Input")).toBeNull();
@@ -123,7 +123,7 @@ describe("vision models (1.4, #86)", () => {
         vision: { task: "depth", architecture: "DepthAnythingForDepthEstimation" } }, suggestion: { recipe: "vision", recipes: ["vision"] } } };
       return undefined;
     });
-    mount("/models?tab=library");
+    mount("/models");
     fireEvent.click(await screen.findByRole("button", { name: "Enter a source" }));
     fireEvent.change(screen.getByLabelText("Source"), { target: { value: "depth-anything/Depth-Anything-V2-Large-hf" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Look it up" })));
@@ -135,20 +135,20 @@ describe("vision models (1.4, #86)", () => {
     expect(fetch.mock.calls.some(([u, i]) => u === "/api/models" && i?.method === "POST")).toBe(false);
   });
 
-  it("FY-WEB-304 the Playground's Models tab opens the vision panel for a vision model", async () => {
+  it("FY-WEB-304 the Playground's picker opens the vision panel for a vision model", async () => {
     server((url) => {
       if (url === "/api/routes") return { status: 200, body: { cloud: "off", is_admin: true, routes: [{ id: 1, served_name: "det", api: "vision-detect",
         deployment_id: 3, kind: "local", endpoints: [{ replica: 0, machine: "cpu-a", state: "healthy", ready: true, url: "x" }], targets: [] }] } };
       if (url === "/api/playground/vision/options") return { status: 200, body: { models: [{ name: "det", task: "detect", title: "Object detection",
         endpoint: "/v1/vision/detect", deployment_id: 3, model: "PekingU/rtdetr_v2_r18vd", licence: "apache-2.0", ready: 1, running: true, reason: null }],
-      workloads: [], tasks: [] } };
+      tasks: [] } };
       return undefined;
     });
     mount("/playground");
     const panel = (await screen.findByRole("heading", { name: "Object detection" })).closest("section") as HTMLElement;
     expect(within(panel).getByText("POST /v1/vision/detect with model=det")).toBeTruthy();
     expect(within(panel).getByText("PekingU/rtdetr_v2_r18vd")).toBeTruthy();
-    expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("det");
+    expect(screen.getByLabelText("Model").textContent).toContain("det");
   });
 
   it("FY-WEB-305 the snippets for a vision model: curl with the image as a file, Python with httpx (no OpenAI SDK)", () => {
@@ -168,12 +168,11 @@ describe("vision models (1.4, #86)", () => {
     expect(z.python).toContain('r.json()["depth_png"]');
   });
 
-  it("FY-WEB-306 Apps no longer offers the vision templates, and points vision to Models", async () => {
-    const fetch = server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "x", can_manage: true } } : undefined);
-    mount("/apps");
-    expect(await screen.findByRole("heading", { name: "No apps yet" })).toBeTruthy();
+  it("FY-WEB-306 nothing offers the vision templates any more: /apps opens Machines and the templates are never asked for (1.4, #88)", async () => {
+    const fetch = server(() => undefined);
+    mount("/apps/new?template=vision-detect");
+    expect(await screen.findByRole("heading", { level: 1, name: "Machines" })).toBeTruthy();
     expect(screen.queryByText("Start from a template")).toBeNull();
-    expect(screen.getByRole("link", { name: "add them from the Library" }).getAttribute("href")).toBe("/models?tab=library");
-    expect(fetch.mock.calls.some(([u]) => u === "/api/workloads/templates")).toBe(false);
+    expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/workloads/templates"))).toBe(false);
   });
 });

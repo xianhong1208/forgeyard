@@ -13,7 +13,7 @@ import { bytes } from "../lib/machines";
 import { share, usd } from "../lib/prices";
 import type { UsageResponse, UsageRow } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { usePoll } from "./Workloads";
+import { usePoll } from "../lib/poll";
 
 const DAYS = [1, 7, 30];
 const GROUPS: { id: string; label: string; admin?: boolean }[] = [
@@ -68,7 +68,7 @@ export function UsagePage() {
 
   return (
     <>
-      <PageHeader index="06 · Usage" title="Usage"
+      <PageHeader index="07 · Usage" title="Usage"
         lead={data?.everyone ? "Everyone's requests through the gateway and the playground." : "Your requests through the gateway, with your API keys and in the playground."} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="tabs" role="tablist" aria-label="Usage">

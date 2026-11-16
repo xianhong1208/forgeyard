@@ -18,7 +18,7 @@ Forgeyard 在你自己的 GPU（和 CPU）上執行工作與模型，並把模�
 ## 各頁內容
 
 1. [快速入門](quick-start.md)：安裝伺服器、信任它的憑證、加入一台機器、選擇它的 GPU、加入一個推薦的模型、部署它、建立 API 金鑰，再用 curl 和 OpenAI SDK 呼叫它。
-2. [概念](concepts.md)：機器與 agent、GPU 存取權、應用程式、模型、recipe（配方）與估算、部署、閘道與 Playground、API 金鑰與限制與用量、雲端供應商與分層、費用與預算、角色、登入與工作階段。
+2. [概念](concepts.md)：機器與 agent、GPU 存取權、模型、引擎與估算、部署、閘道與 Playground、API 金鑰與限制與用量、雲端供應商與分層、費用與預算、角色、登入與工作階段。
 3. [操作指南](how-to.md)：加入 AMD 機器或純 CPU 機器、用 Docker 跑 agent、執行服務或任務、加入雲端供應商、追蹤並限制雲端花費、在共用機器上限制 GPU、加入其他人、使用自己的憑證或反向代理、用 Docker 或當成服務執行伺服器、升級、備份與還原、搬移模型快取、輪替金鑰、撤銷機器、解除安裝 agent。
 4. [疑難排解](troubleshooting.md)：在實際機器上遇過的問題，附上症狀、原因和解法：憑證、離線的 agent、下載、記憶體、`/v1` 的每種錯誤、不信任 CA 的程式、找不到的模型、溢出和費用。
 5. [雲端供應商](cloud-providers.md)：加入 OpenAI、Anthropic、Gemini、Azure OpenAI、OpenRouter 或你自己的伺服器；把模型導向雲端；請求何時溢出；哪些金鑰可以使用雲端；各供應商端點做不到的事；哪些東西會離開你的伺服器。

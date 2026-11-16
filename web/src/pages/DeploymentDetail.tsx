@@ -17,8 +17,8 @@ import type { Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions,
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { RoutingEditor } from "./RouteDetail";
-import { NotPickedUpNotice, Output } from "./WorkloadDetail";
-import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
+import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
+import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
 
 export function DeploymentDetailPage() {
   const { id } = useParams();
@@ -43,7 +43,7 @@ export function DeploymentDetailPage() {
     try {
       if (what === "delete") {
         await api(`/deployments/${d.id}`, { method: "DELETE" });
-        navigate("/models", { replace: true });
+        navigate("/serving", { replace: true });
         return;
       }
       await api(`/deployments/${d.id}/${what}`, { method: "POST" });
@@ -59,12 +59,12 @@ export function DeploymentDetailPage() {
   const w = d?.workload;
   return (
     <>
-      <p className="crumb"><Link to="/models"><IconArrowLeft size={14} aria-hidden="true" /> Models</Link></p>
+      <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>
       <PageHeader index={`02 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
         lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
         actions={d && w && canManage && (
           <>
-            <Link to={`/models/deployments/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
+            <Link to={`/serving/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
             {w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             ) : (
@@ -211,7 +211,7 @@ function Gateway({ d }: { d: Deployment }) {
   );
 }
 
-// The deployment's own route, as its cloud fallback (1.4, #81: it was on Models → Serving). Admins
+// The deployment's own route, as its cloud fallback (1.4, #81: it was on the Serving tab of Models). Admins
 // change it here; everyone else sees it.
 function Fallback({ routing, reload }: { routing: RouteInfo; reload: () => void }) {
   const { user } = useAuth();

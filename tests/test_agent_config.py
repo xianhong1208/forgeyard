@@ -375,15 +375,17 @@ def test_fy_acfg_009_agent_join_joins_once_and_exits(tmp_path, monkeypatch, capl
     assert "A server address is needed" in caplog.text
 
 
-def test_fy_acfg_010_a_multi_line_detection_note_stays_one_comment(tmp_path):
-    """FY-ACFG-010: a detection note that quotes a tool's multi-line output (`podman info` failing in a container
-    without CAP_SYS_ADMIN printed a warning, a newline and "cannot clone: …") is written as one comment line, so
-    the rendered file is still valid TOML that `init` can write."""
-    values = {s.key: s.default for s in config.SETTINGS}
-    note = ('No container engine found (podman info failed: time="x" level=warning msg="\\"/\\" is not a shared mount"\n'
-            "cannot clone: Op): only process workloads.")
-    text = config.render(values, {"workloads.container_engine": note})
+def test_fy_acfg_010_a_multi_line_note_stays_a_comment():
+    """FY-ACFG-010: a note can quote a tool's multi-line error (`podman info` on a host without a shared
+    mount prints several lines): the written agent.toml is still valid TOML, every line of the note a
+    comment, and the settings read back unchanged."""
+    note = ('No container engine found (docker not found; podman info failed: time="2026-11-16T08:24:35Z" '
+            'level=warning msg="\\"/\\" is not a shared mount, this could cause issues or missing mounts"\n'
+            'cannot clone: Operation not permitted\nError: cannot re-exec process): only process workloads.')
+    text = config.render({"workloads.container_engine": "none"}, {"workloads.container_engine": note},
+                         header=["line one", "two\nlines"])
     data = tomllib.loads(text)
-    assert data["workloads"]["container_engine"] == values["workloads.container_engine"]
-    assert "# No container engine found (podman info failed: time=\"x\" level=warning msg=\"\\\"/\\\" is not a shared " \
-           "mount\" cannot clone: Op): only process workloads." in text
+    assert data["workloads"]["container_engine"] == "none"
+    assert "cannot clone: Operation not permitted" in text
+    assert all(line == "" or line.startswith("#") or "=" in line or line.startswith("[")
+               for line in text.splitlines())

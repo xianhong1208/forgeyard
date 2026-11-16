@@ -250,7 +250,7 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
                       {r.in_catalog ? <span className="chip chip-tone-ok">In the catalog as {r.in_catalog}</span>
                         : searchLicenceProblem(r) ? <span className="muted small">{searchLicenceProblem(r)}</span>
                         : servable ? <button type="button" className="btn btn-small" onClick={() => onPick(entry ? pickFromList(entry) : pickFromSearch(r))}>Choose</button>
-                          : <span className="muted small" title="No recipe reads this format for this task">Cannot be served</span>}
+                          : <span className="muted small" title="No engine reads this format for this task">Cannot be served</span>}
                     </td>
                   </tr>
                 );
@@ -380,7 +380,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
             <p className="field-hint">
               This model is gated: accept its licence on huggingface.co with your account, then paste a read token from your
               Hugging Face settings. It is used to read the model now and is not stored. To use one token for every gated model,
-              inspecting and downloading, save it as the server's token under Model sources.
+              inspecting and downloading, save it as the server's token under Models → Sources.
             </p>
           </div>
           <button type="button" className="btn" disabled={!f.token.trim() || inspecting} onClick={() => setAsk((cur) => ({ ...cur, round: cur.round + 1 }))}>Read it with this token</button>
@@ -514,7 +514,7 @@ function SuggestionPanel({ s, device, onDevice }: { s: Suggestion; device: strin
         <p className="suggest-nofit"><IconAlertTriangle size={16} aria-hidden="true" /> {(s.summary ?? "Does not fit on any machine right now.").replace(/([^.])$/, "$1.")}
           {" "}You can still add it; deploy it once a machine has room{cpu ? "" : ", or on more GPUs"}.</p>
       ) : null}
-      <p className="muted small">With the recipe's defaults ({s.recipes.length > 1 ? `also possible: ${s.recipes.filter((r) => r !== s.recipe).join(", ")}; ` : ""}context and concurrency can be changed when deploying).</p>
+      <p className="muted small">With the engine's defaults ({s.recipes.length > 1 ? `also possible: ${s.recipes.filter((r) => r !== s.recipe).join(", ")}; ` : ""}context and concurrency can be changed when deploying).</p>
     </div>
   );
 }

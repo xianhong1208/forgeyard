@@ -260,13 +260,6 @@ export type Workload = {
   gateway?: WorkloadGateway | null;
 };
 
-export type WorkloadTemplate = {
-  id: string; title: string; task: string; name: string; summary: string; model: string; revision: string;
-  licence: string; code_licence: string; model_url: string; endpoint: string; example: string; answer: string;
-  images: { cpu: string; cuda: string };
-  specs: { cpu: Record<string, unknown>; cuda: Record<string, unknown> };
-};
-
 export type WorkloadGatewaySettings = {
   expose: boolean; port: string | null; read_timeout: number; max_body_mb: number;
   concurrency: number | null; key_concurrency: number | null;
@@ -281,11 +274,6 @@ export type WorkloadGateway = WorkloadGatewaySettings & {
 export type WorkloadEvent = { at: string; kind: string; replica: number | null; message: string };
 
 export type WorkloadsResponse = { workloads: Workload[]; server_time: string; can_manage: boolean };
-
-export type WorkloadResponse = {
-  workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean;
-  gateway_base?: string; trust_url?: string | null;
-};
 
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
@@ -456,14 +444,12 @@ export type ApiKey = {
 };
 
 export type WorkloadAccess = "none" | "listed" | "all";
-export type WorkloadChoice = { name: string; exposed: boolean; path: string };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
   // Admins: environment variables the panels' values still come from (D1).
   env_seeds?: { limits: string[]; cloud: string[] };
   models: { name: string; api: string; kind?: RouteKind }[];
-  workloads?: WorkloadChoice[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
   month?: string; resets_at?: string; person_budget?: Budget;
 };

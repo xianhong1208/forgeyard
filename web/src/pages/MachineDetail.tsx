@@ -12,7 +12,7 @@ import { ModelCacheSection } from "../components/ModelCache";
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import {
-  MACHINE_KIND, cardLine, cardMemory, cards, machineKind, machineMemory, memoryRows, uniqueHolders, whereOnMachine, type Placement,
+  MACHINE_KIND, appTitle, cardLine, cardMemory, cards, machineKind, machineMemory, memoryRows, uniqueHolders, whereOnMachine, type Placement,
 } from "../lib/fleet";
 import { exact } from "../lib/format";
 import { archLabel, bytes } from "../lib/machines";
@@ -120,7 +120,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
       <section className="panel mk-section" aria-labelledby="mk-models">
         <div className="panel-head">
           <h2 id="mk-models">Models</h2>
-          {canPlace && <Link to={`/models/deploy?machine=${m.id}${kind === "cpu" ? "&device=cpu" : ""}`} className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> Deploy here</Link>}
+          {canPlace && <Link to={`/serving/deploy?machine=${m.id}${kind === "cpu" ? "&device=cpu" : ""}`} className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> Deploy here</Link>}
         </div>
         {p.loaded ? <HolderChips list={models} empty="No model runs on this machine." /> : <p className="muted small">Loading…</p>}
       </section>
@@ -141,12 +141,12 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
         {!p.loaded ? <p className="muted small">Loading…</p> : here.length === 0 ? <p className="empty-line">Nothing runs here yet.</p> : (
           <ul className="runlist">
             {uniqueHolders(here).map((h) => {
-              const all = here.filter((x) => x.href === h.href);
+              const all = here.filter((x) => x.key === h.key);
               return (
-                <li key={h.href}>
+                <li key={h.key}>
                   <span className="runlist-k"><HolderIcon h={h} size={16} /></span>
                   <span className="runlist-name">
-                    <Link to={h.href}>{h.name}</Link>
+                    {h.href ? <Link to={h.href}>{h.name}</Link> : <span className="strong" title={appTitle(h.name)}>{h.name}</span>}
                     <small>{h.kind === "workload" ? `app · ${h.workload.kind} · ${h.workload.runtime}` : h.deployment?.model.name}</small>
                   </span>
                   <span className="runlist-where">{all.map((x) => whereOnMachine(x.replica)).join(" ")}</span>
@@ -216,11 +216,12 @@ function MapRow({ m, a, p, restricted }: { m: Machine; a: Accelerator; p: Placem
         <MemBar mem={c} held={held} size="lg" />
         {held.length > 0 && (
           <span className="maprow-holders">
-            {held.map((h, i) => (
-              <Link key={`${h.href}-${h.replica.ordinal}-${i}`} to={h.href} className="holder-chip">
-                <HolderIcon h={h} /><span>{h.name}</span>{h.reserved ? <em>{bytes(h.reserved)}</em> : null}
-              </Link>
-            ))}
+            {held.map((h, i) => {
+              const inner = <><HolderIcon h={h} /><span>{h.name}</span>{h.reserved ? <em>{bytes(h.reserved)}</em> : null}</>;
+              return h.href
+                ? <Link key={`${h.key}-${h.replica.ordinal}-${i}`} to={h.href} className="holder-chip">{inner}</Link>
+                : <span key={`${h.key}-${h.replica.ordinal}-${i}`} className="holder-chip" title={appTitle(h.name)}>{inner}</span>;
+            })}
           </span>
         )}
       </span>

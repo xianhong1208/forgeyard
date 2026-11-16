@@ -26,7 +26,7 @@ const FILTERS = [
   { value: "workload.", label: "Apps" },
   { value: "deployment.", label: "Deployments" },
   { value: "model", label: "Models and sources" },
-  { value: "recipe.", label: "Recipes" },
+  { value: "recipe.", label: "Engines" },
   { value: "route.", label: "Routes" },
   { value: "provider.", label: "Providers" },
   { value: "budget.", label: "Budget alerts" },
@@ -109,7 +109,7 @@ export function AuditPage() {
   return (
     <>
       <PageHeader
-        index="08 · Audit log"
+        index="09 · Audit log"
         title="Audit log"
         lead="Sign-ins, failed sign-ins and every change to accounts, API keys, machines, apps, models, providers and budgets, newest first."
         actions={

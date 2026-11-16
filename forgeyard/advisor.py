@@ -13,7 +13,7 @@ Each check is a small function over a `Context` that yields `Finding`s:
 
 `scope` names what it is about (server, machine:3, key:12, route:4, provider:2, deployment:5,
 setting:NAME); `id@scope` is the finding's key, which a snooze remembers. `pages` says where the
-web UI shows it as a banner (machines, keys, providers, models, users, and route:4 or provider:2 for
+web UI shows it as a banner (machines, serving, keys, providers, cloud-models, users, and route:4 or provider:2 for
 a detail page); every finding is also listed under Get started -> Setup health.
 
 Admins only: the findings name machines, keys and people.
@@ -527,7 +527,26 @@ def offline_with_replicas(ctx: Context) -> Iterator[Finding]:
                           f"{'has' if len(names) == 1 else 'have'} replicas placed there that cannot answer. Start its "
                           "agent again; if the machine is gone for good, revoke it.",
                           "/guide/en/troubleshooting#an-agent-shows-offline", "Why a machine is offline",
-                          scope=f"machine:{n.id}", pages=("machines", "models"))
+                          scope=f"machine:{n.id}", pages=("machines", "serving"))
+
+
+@check
+def apps_deprecated(ctx: Context) -> Iterator[Finding]:
+    """V51 (1.4, #88): apps (workloads that are not models) are deprecated and go in 1.5, with /x/ and the
+    templates. Said while any app exists, so nobody learns it from the upgrade."""
+    from forgeyard import deprecation
+
+    apps = ctx.db.scalars(select(Workload.name).where(Workload.runtime != "model").order_by(Workload.name)).all()
+    if not apps:
+        return
+    yield Finding("apps-deprecated", "warning",
+                  f"{len(apps)} app{'s' if len(apps) != 1 else ''} will stop working in Forgeyard {deprecation.REMOVED_IN}",
+                  f"{_names(apps)} {'is an app' if len(apps) == 1 else 'are apps'}: a workload that is not a model. Apps, "
+                  "their API (/api/workloads, the templates) and the gateway's /x/ are deprecated and removed in "
+                  f"{deprecation.REMOVED_IN}, and the console no longer shows them. Deploy what you need as a model "
+                  "instead (a custom engine runs a model Forgeyard has no engine for), then delete the apps "
+                  "with DELETE /api/workloads/<id>.",
+                  f"{REFERENCE}#apps-deprecated", "What changes", pages=("machines",))
 
 
 # --- models and deployments
@@ -551,7 +570,7 @@ def replica_margin_low(ctx: Context) -> Iterator[Finding]:
                           f"{_size(a.vram_free)} is free on the card that runs {_names(names)}; Forgeyard keeps "
                           f"{_size(floor)}. Other processes use about {_size(outside)} there. If they grow, the "
                           "replica can run out of memory: free memory on the card, or move the deployment.",
-                          "/models", "Open Models", scope=f"gpu:{n.id}:{a.index}", pages=("models", "machines"))
+                          "/serving", "Open Serving", scope=f"gpu:{n.id}:{a.index}", pages=("serving", "machines"))
 
 
 @check
@@ -569,8 +588,8 @@ def deployments_waiting(ctx: Context) -> Iterator[Finding]:
                           f"{_plural(len(stuck), 'replica')} of {d.name} found no machine for over "
                           f"{int(WAITING_AFTER.total_seconds() // 60)} minutes" + (f": {reason}" if reason else ".")
                           + " Free memory, allow more GPUs, or lower its context or concurrency.",
-                          f"/models/deployments/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
-                          pages=("models", f"deployment:{d.id}"))
+                          f"/serving/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
+                          pages=("serving", f"deployment:{d.id}"))
 
 
 @check
@@ -598,8 +617,8 @@ def exclusive_could_share(ctx: Context) -> Iterator[Finding]:
                       f"Replica {r.ordinal} of {d.name} reserves {_size(r.vram)} of the {_size(a.vram_total)} of GPU "
                       f"#{a.index} on {r.node.name}, and keeps the card to itself (exclusive). With Share VRAM the "
                       "rest of the card can hold other models; they then share its compute. Change it with Edit on "
-                      "the deployment (its replicas restart).", f"/models/deployments/{d.id}/edit",
-                      "Change the deployment", scope=f"deployment:{d.id}", pages=("models", f"deployment:{d.id}"))
+                      "the deployment (its replicas restart).", f"/serving/{d.id}/edit",
+                      "Change the deployment", scope=f"deployment:{d.id}", pages=("serving", f"deployment:{d.id}"))
 
 
 # llama.cpp's short and long spellings of the flags Forgeyard sets.
@@ -648,8 +667,8 @@ def extra_args_override(ctx: Context) -> Iterator[Finding]:
                           "deployment's parameters (memory, context, address, key). Repeating "
                           f"{'it' if len(clash) == 1 else 'them'} in Extra engine arguments can break the memory "
                           "estimate, the gateway's connection or the key guard. Use the parameters instead.",
-                          f"/models/deployments/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
-                          pages=("models", f"deployment:{d.id}"))
+                          f"/serving/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
+                          pages=("serving", f"deployment:{d.id}"))
 
 
 REFUSED = re.compile(r"access refused|HTTP 40[13]\b", re.I)
@@ -672,10 +691,10 @@ def gated_without_token(ctx: Context) -> Iterator[Finding]:
                       f"{d.name} needs a Hugging Face token" if refused else f"{d.name} may not download: no Hugging Face token",
                       f"{m.name} is gated on Hugging Face, and neither the server nor this deployment has a token"
                       + (", so its download was refused." if refused else ": its download will be refused.")
-                      + " Set the server's token under Models → Library → Model sources (after accepting the model's licence on "
+                      + " Set the server's token under Models → Sources (after accepting the model's licence on "
                       "Hugging Face with that account), or give the deployment its own.",
-                      "/models?tab=library", "Set the token", scope=f"deployment:{d.id}",
-                      pages=("models", f"deployment:{d.id}"))
+                      "/models?tab=sources", "Set the token", scope=f"deployment:{d.id}",
+                      pages=("serving", f"deployment:{d.id}"))
 
 
 # --- gateway, cloud and money
@@ -810,8 +829,8 @@ def route_place(r: GatewayRoute) -> tuple[str, tuple[str, ...], str]:
     """Where the console shows a route (1.4, #81): a deployment's own route is its cloud fallback, on
     the deployment's page; a name an admin made is on Cloud -> Cloud models."""
     if r.deployment_id is not None:
-        return (f"/models/deployments/{r.deployment_id}#cloud-fallback",
-                ("models", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its cloud fallback")
+        return (f"/serving/{r.deployment_id}#cloud-fallback",
+                ("serving", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its cloud fallback")
     return f"/cloud/models/{r.id}", ("cloud-models", f"route:{r.id}"), "Open the model name"
 
 

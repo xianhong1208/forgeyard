@@ -62,8 +62,9 @@ of the carve-out and GTT. The deployment's events say which variant it got (`…
 …)`).
 
 A deployment cannot choose the variant itself. To run a card with the other one, add a custom
-recipe (**Models**, *Recipes*, **Add a custom recipe**): a copy of `llama-cpp` under another name, with only the variant you
-want under `variants`.
+engine (**Models → Engines → Add a custom engine**, *Start from a built-in engine*: `llama-cpp`): the copy
+gets another name; keep only the variant you want under `variants` and save. A custom engine's card
+has **Edit** and **Delete** (refused while a deployment uses it).
 
 **From a custom `llama-cpp-vulkan` recipe.** Before 1.3, Vulkan needed a custom recipe; the built-in
 one replaces it. A deployment keeps the recipe it was made with, so deploy the model again with
@@ -318,7 +319,7 @@ and any image file can be **uploaded** from the machine's page
 ([Upload an engine image to a machine](#upload-an-engine-image-to-a-machine)). The steps below still
 work, for an older agent or without the server.
 
-1. **Find the image.** On **Models → Library**, open **Machine without registry access:
+1. **Find the image.** On **Models → Engines**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
    ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
@@ -360,106 +361,15 @@ them exactly. Another image pinned by digest cannot be checked: on an offline ma
 tag only in your custom recipe. The check needs an agent from this release or later; an older one
 tries to pull.
 
-## Run a service or a task
-
-Admins and operators run their own programs on the machines as **apps**, an advanced feature that
-is not in the menu: open `/apps` on the server → **New app**, fill in the form, and choose **Create and start**.
-
-1. **What:** **Service** (runs until you stop it; restarted when it exits) or **Task** (runs to the
-   end). A **Name**: `a-z`, `0-9` and `-`, unique.
-2. **Run:** **Container** (an **Image**, for example `python:3.13-slim`, with an optional
-   **Entrypoint**) or **Process** (a **Command** on the basic `PATH` or an absolute path, run by the
-   agent as its account for processes). **Arguments** go one per line, without shell quoting.
-3. **Where:** a **Machine**, or *Any online machine with room*; **GPUs**: *None*, *How many* (and
-   a **Vendor**), or *These cards* on a chosen machine; **CPU cores**, **Memory** (for example `4Gi`)
-   and **Replicas** (1 to 16, each on one machine).
-4. **Environment:** the variables it needs. It starts from an empty environment; the variables
-   Forgeyard adds are in the [reference](reference.md#app-environment). Values are stored
-   encrypted.
-5. **Ports and health** (a service): **Add port** for each port it listens on. The agent picks a host
-   port from its range and shows the address on the app's page. A process listens on `$PORT`
-   (or `${PORT_<NAME>}` in its arguments); a container gives its own port, which the host port maps
-   to. **Health check**: *None*, *HTTP* (a **Path**) or *TCP*. **Restart**: *Always*, *On failure* or
-   *Never*.
-6. **Limits and retries** (a task): **Max duration (s)** stops and fails it when it runs longer;
-   **Retries** after a non-zero exit, with a **Retry backoff (s)** that doubles each time, up to 5
-   minutes.
-
-*Spec that will be sent* shows the JSON the form makes. The app's page shows each replica, its machine, GPUs and address, the
-events, and the last lines of its output. **Stop** stops every replica (SIGTERM, then SIGKILL after
-10 s) and frees its GPUs; **Start** places them again; **Delete** also removes its history and
-output.
-
-Isolation, in short: a process runs as the unprivileged account `forgeyard-run` with only its own cards
-visible; a container gets only its cards, never `--privileged`. See
-[Apps (advanced)](concepts.md#apps-advanced).
-
-## Expose an app at /x/
-
-Call a service's own HTTP API through the gateway, with an API key. Admins and operators do this.
-
-1. **The service listens on loopback.** Behind the agent's key guard a process must listen on
-   `127.0.0.1`: give it `${BIND_ADDRESS}` and `${PORT}` in its arguments, which become `127.0.0.1`
-   and its port. A container listens on its own port as usual (the agent publishes it on loopback).
-   A process that listens on another address is stopped, so it is never reachable around the guard.
-2. **Expose it.** In **New app**, tick **Expose at** `/x/<name>` under **Gateway**; or, on a
-   running app's page, **Gateway** → **Expose** → **Save**: its replicas restart behind the
-   guard. **Limits and timeouts** (collapsed) holds the **Port** (default: the first),
-   **Read timeout (s)** (600), **Largest request (MiB)** (32), **Requests at once per replica** and
-   **Requests at once per key** (no limit by default).
-3. **Give a key access.** On **API keys**, a key's **Apps at /x/**: *Listed apps* (tick
-   it) or *Every exposed app*. New keys have *None*.
-4. **Call it.** The app's page shows its address and a `curl` call. The prefix is stripped:
-   `/x/detector/v1/detect` reaches the service as `/v1/detect`.
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
-  -F image=@street.jpg
-```
-
-A service that builds links or redirects can read `X-Forwarded-Prefix` (`/x/<name>`), or set its root
-path. For example, a FastAPI service run with `python3 -m uvicorn` as a process, with the
-**Environment** variable `ROOT_PATH=/x/echo`:
-
-```python
-# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
-# root_path makes the docs and redirects use the public prefix.
-import os
-from fastapi import FastAPI, Request
-
-app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
-
-@app.post("/v1/echo")
-async def echo(request: Request):
-    return {"bytes": len(await request.body())}
-```
-
-and these **Arguments**:
-
-```text
--m
-uvicorn
-app:app
---host
-${BIND_ADDRESS}
---port
-${PORT}
-```
-
-Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of the replicas until the
-app is restarted. What passes and what is removed is in the
-[reference](reference.md#the-passthrough-x).
-
 ## Deploy an object-detection model
 
 Object detection, segmentation and depth are model kinds of their own (1.4): you add them to the
-**Library** and deploy them from **Models** like any other model. They run on Forgeyard's own vision
+catalog (**Models**) and deploy them from **Serving** like any other model. They run on Forgeyard's own vision
 server (recipe `vision`): the CUDA build on an NVIDIA GPU (one card shared by memory), the CPU build on
 any machine, AMD ones included. The model comes from the machine's model cache, so it is downloaded once
 and an offline machine works once its cache has it.
 
-1. **Models → Library → Recommended**: *Object detection, segmentation and depth* lists RT-DETRv2 R18
+1. **Models → Add a model → Recommended**: *Object detection, segmentation and depth* lists RT-DETRv2 R18
    (detection, the 80 COCO classes), SAM 2.1 Hiera tiny (segmentation) and Depth Anything V2 Small
    (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
    or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
@@ -467,8 +377,8 @@ and an offline machine works once its cache has it.
    MIT, BSD). Another licence, or none, cannot be added.
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
-3. The deployment shows up under **Models → Deployments → Vision**, with its path. **Try it** on its page
-   sends a test image; **Playground → Vision** takes your own pictures.
+3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
+   sends a test image; the **Playground** (the model under *Vision* in its picker) takes your own pictures.
 
 Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
 and the picture as a file field `image`:
@@ -515,65 +425,20 @@ take is in the [reference](reference.md#vision). Usage counts one image per requ
 kilopixels; a key's model list and requests per minute apply as for any model.
 
 On a machine that cannot reach Docker Hub, load the vision image under the tag of the server's version
-(Models → Library → Recipes → `vision` → *Machine without registry access* gives the commands).
-
-## Apps made from a template (1.3)
-
-In 1.3, **Start from a template** on `/apps` made ready-made vision APIs as apps; in 1.4 vision models
-are deployed from Models instead ([above](#deploy-an-object-detection-model)) and the panel is gone.
-Apps already made from a template keep running as they are, and `/apps/new?template=<id>` (or
-`GET /api/workloads/templates`) still makes one. Each runs Forgeyard's own vision server image with its
-model baked in and is exposed at `/x/<name>`:
-
-| Template | Model (licence) | Call |
-|---|---|---|
-| **Object detection** | RT-DETRv2 ResNet-18, `PekingU/rtdetr_v2_r18vd` (Apache-2.0) | `POST /x/detector/v1/detect`: boxes, labels and scores |
-| **Segmentation** | SAM 2.1 Hiera tiny, `facebook/sam2.1-hiera-tiny` (Apache-2.0) | `POST /x/segmenter/v1/segment` with a point or a box: masks |
-| **Depth estimation** | Depth Anything V2 Small, `depth-anything/Depth-Anything-V2-Small-hf` (Apache-2.0) | `POST /x/depth/v1/depth`: a 16-bit depth PNG |
-
-1. Open `/apps/new?template=object-detection&gpu=1` (the image's CUDA build, one card shared by memory,
-   3 GiB), or without `&gpu=1` for the CPU build. The form opens filled in: the image, the task, the port, the health
-   check and **Expose at** `/x/<name>`. Change anything, for example the name or the machine, then
-   **Create and start**.
-2. Allow an API key to call it (**API keys** → the key's **Apps at /x/**).
-3. Send an image as a multipart file `image` (or JSON `{"image": "<base64>"}`):
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
-```
-
-Only permissively licensed models are offered: not Ultralytics YOLOv8 or YOLO11 (AGPL-3.0), and only the
-Small Depth Anything V2 (Base and Large are CC-BY-NC-4.0). The models are inside the image, at pinned
-revisions, so a template needs no network once its image is on the machine. For a machine that cannot
-reach Docker Hub, copy the image (the CUDA build needs NVIDIA driver 580 or newer; without a usable GPU
-it runs on the CPU):
-
-```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeyard-vision.tar.gz
-# on the machine without the network:
-gunzip -c forgeyard-vision.tar.gz | sudo docker load
-```
-
-On AMD machines use the CPU build: the image has no ROCm build. What each endpoint takes and returns
-is in the [reference](reference.md#app-templates). To try one without an API key, see
-[Try vision in the Playground](#try-vision-in-the-playground).
+(Models → Engines → `vision` → *Machine without registry access* gives the commands).
 
 ## Try vision in the Playground
 
-**Playground → Vision** sends a picture to a vision model ([deployed from Models](#deploy-an-object-detection-model)),
+The Playground's vision panel sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
 as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
-model in **Usage**. A vision model picked on the Playground's **Models** tab opens the same panel. Apps
-made from the 1.3 templates are not offered here any more (Apps leave the console in 1.4): call them at
-`/x/<name>` with an API key.
+model in **Usage**. There is no Vision tab since 1.4: vision models are in the Playground's one model
+picker, and 1.3's address (`/playground?tab=vision`) opens the first one. Apps made from the 1.3
+templates are not offered here (apps left the console in 1.4 and are
+[removed in 1.5](reference.md#apps-deprecated)).
 
-1. Pick the **Model**: each is listed with its task and model. With none yet, the tab says so; admins
-   and operators get a link to add one from the Library.
+1. Open the **Model** picker and choose a model under **Vision**: each is listed with its task. Only
+   ready models are listed; with none at all, the Playground says so and admins and operators get a link
+   to the catalog.
 2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
@@ -699,7 +564,7 @@ a custom recipe whose vulkan variant sets `GGML_VK_DISABLE_COOPMAT: "1"` in its 
 
    Steps, a negative prompt and a seed go in `extra_body`:
    `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`.
-4. **Try it in the Playground:** an image model gets an **Image** tab with a prompt, the sizes the
+4. **Try it in the Playground:** an image model (under *Images* in the picker) gets an **Image** panel with a prompt, the sizes the
    deployment takes and how many images, and a download link under each.
 
 **How long:** seconds per image on an A100; minutes on a CPU. Measured on 16 to 32 cores of a busy
@@ -773,7 +638,7 @@ to download them, and one token for the whole server is enough:
 
 1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
    **Settings → Access Tokens**, make a token with *Read* access.
-2. Admins: open **Models → Library**. Under **Model sources**, paste it into **Hugging Face token**
+2. Admins: open **Models → Sources** and paste it into **Hugging Face token**
    and choose **Save token**. It is stored encrypted with the server's secret key and never shown
    again, only its last four characters.
 3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
@@ -1172,7 +1037,7 @@ local tier. Admins see the results in three places:
 - **Get started → Setup health** lists every finding, with what to do and a link to where it is
   fixed.
 - **A count in the top bar** shows errors and warnings. It disappears when there are none.
-- **A banner on the page concerned** (Machines, API keys, Cloud, Models, a cloud model,
+- **A banner on the page concerned** (Machines, Serving, API keys, Cloud, a cloud model,
   a deployment, Users) shows that page's findings.
 
 Users and operators see none of it.
@@ -1287,7 +1152,7 @@ environment values have to be created again (their events say so).
 choose now, so a deployment there starts without waiting for the download. Nothing is started.
 Admins and operators can do it.
 
-1. Open **Models → Library**, and click **Download to…** on the model's row. Or open a machine's
+1. Open **Models** (the **Catalog** tab), and click **Download to…** on the model's row. Or open a machine's
    page and click **Download a model here…** above **Models in cache**, then pick the model.
 2. Tick the machines. Each line says whether that machine can take it:
    - **fits**: how much it downloads, the free disk, and the engine it would fetch;
@@ -1301,7 +1166,7 @@ Admins and operators can do it.
    it. Untick it to download the model only.
 4. Click **Download to N machines**.
 
-The progress shows under the model's row in the Library and on each machine's page, with the same
+The progress shows under the model's row in the catalog and on each machine's page, with the same
 words and bar as a deployment's download. **Cancel** stops it at once on that machine; what is on
 disk is kept, and **Download to…** again goes on from there. A download on a machine that goes
 offline waits and goes on when its agent is back. When it is done, the machine's **Models in cache**
@@ -1335,7 +1200,7 @@ machine or in the tunnel changes.
      directly, so there is no wait for a failure first.
    - **Direct only**: never through the server.
 2. Deploy, or use **Download to…**, as usual. The progress says *Downloading the model via the server:
-   … of …* on the deployment's page, under the model in the Library and on the machine's page, and a
+   … of …* on the deployment's page, under the model in the Catalog and on the machine's page, and a
    finished download says *Downloaded … via the server*. The **Download to…** dialog says *via the
    server* for a machine set to always use it.
 
@@ -1347,7 +1212,7 @@ deleted, so the server is trusted with nothing it could not already do.
 
 What is different:
 
-- The server uses its own Hugging Face token (**Models → Model sources**), or the deployment's own,
+- The server uses its own Hugging Face token (**Models → Sources**), or the deployment's own,
   for gated models. Set to **Always through the server**, the machine is never sent a token at all.
 - The server's own rules for model sources apply: https and public addresses only (unless
   `MODEL_ALLOW_PRIVATE_HOSTS`), and URL models only from the allowed hosts.

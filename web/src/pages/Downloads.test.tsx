@@ -93,7 +93,7 @@ describe("Download to…", () => {
       if (url === "/api/machines") return { status: 200, body: fixture };
       return undefined;
     });
-    mount("/models?tab=library");
+    mount("/models");
     fireEvent.click(await screen.findByRole("button", { name: "Download to…" }));
     const dialog = await screen.findByRole("dialog", { name: /Download Qwen3 1.7B GGUF to/ });
     const row = (name: string) => within(dialog).getByText(name).closest("label") as HTMLElement;
@@ -125,7 +125,7 @@ describe("Download to…", () => {
       if (url === "/api/deployments") return { status: 200, body: { deployments: [] } };
       return undefined;
     });
-    mount("/models?tab=library");
+    mount("/models");
     fireEvent.click(await screen.findByRole("button", { name: "Download to…" }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findAllByText(/engine: llama.cpp-1.0.0 archive/);
@@ -153,7 +153,7 @@ describe("Download to…", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    mount("/models?tab=library");
+    mount("/models");
     const bar = await screen.findByRole("progressbar", { name: "Download of qwen3-1.7b-gguf to a100-box" });
     expect(bar.getAttribute("aria-valuenow")).toBe("40");
     expect(screen.getByText("Downloading the model: 512 MiB of 1.3 GiB (40%)")).toBeTruthy();

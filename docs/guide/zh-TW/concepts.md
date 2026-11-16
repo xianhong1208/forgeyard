@@ -46,40 +46,31 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 要在部署上修改，用 **Edit**：[修改部署](how-to.md#change-a-deployment)。
 
-## 應用程式（進階）
+## 應用程式（已淘汰）
 
-**應用程式（Apps）不在選單裡。**大部分的人只需要部署模型：要使用模型，請在 **Models** 部署它。需要更多功能的管理員和 operator 可以直接在伺服器上打開 `/apps`（例如 `https://<server>:7860/apps`）。
+1.4 之前，主控台也能執行**應用程式（app）**：你自己的程式（容器或行程、服務或一次性任務），跑在你的機器上，也可以公開在 `/x/<name>` 讓 API 金鑰呼叫。Forgeyard 的重點是執行和管理模型，所以 1.4 起應用程式離開主控台，**1.5 會移除**它們：API 裡屬於應用程式的部分（`/api/workloads`）、範本，以及閘道的 `/x/`。在那之前，它們只能透過 API 使用，並會明白告知：每個回應都帶 `Deprecation` 標頭，伺服器紀錄會警告（每小時最多一次），只要還有任何應用程式，**Setup health** 就會警告。細節在[參考資料](reference.md#apps-deprecated)。
 
-**應用程式（app）**是你自己在機器上執行的程式，以容器（機器上的 Docker 或 Podman）或行程的方式執行。它適合 Forgeyard 不會執行的東西：例如模型作者自己的伺服器映像檔，公開在 [`/x/<name>`](#apps-at-x) 讓 API 金鑰呼叫；或一次性的 GPU **任務**（批次工作，可以重試、有時間上限），以及一直執行到停止為止的**服務**。每個應用程式有 1 到 16 個副本，每個副本在一台機器上，只拿到分配給它的卡。行程以無特權帳號 `forgeyard-run` 執行，容器絕不使用 `--privileged`；兩者都從空的環境開始。API 稱應用程式為 *workloads*（`/api/workloads`）。
+- 要提供模型，請在 **Serving** 部署它。物件偵測、影像分割和深度估計從 1.4 起是[視覺模型](#vision-models)。
+- 內建引擎跑不了的模型，可以加一個**自訂引擎**（**Models → Engines → Add a custom engine**）：和內建的一樣是一份 recipe，指向它的容器映像檔或程式。
 
-**Apps** 頁面只列出應用程式。模型部署也以 workload（runtime 為 `model`）執行，但模型只在 **Models** 底下看得到，舊的 workload 頁面連結會打開它的部署；API 拒絕停止、啟動或刪除它（`409 managed_by_deployment`）。**Machines** 兩者都會顯示，因為模型和應用程式都佔用顯示卡。
+**Machines** 仍會列出佔用顯示卡的應用程式名稱，所以使用中的卡不會被顯示成空閒。模型部署也以 workload（runtime 為 `model`）執行：模型就是這樣跑的，這部分沒有淘汰。
 
-## 在 /x/ 的應用程式
+## 模型、引擎與估算
 
-服務型的應用程式可以**公開**在閘道後面：程式就能帶著 API 金鑰，在 `https://<server>:7860/x/<name>/…` 呼叫它自己的 HTTP API，就像在 `/v1` 呼叫模型一樣。適合不是對話、嵌入、語音或圖片模型的東西：物件偵測、影像分割、深度估計、Triton 或 KServe 的模型、FastAPI 或 BentoML 服務。
+模型放在兩個頁面。**Serving** 是現在正在執行的：依種類（chat、多模態 chat、嵌入、重排序、語音轉文字、文字轉語音、圖片、影片、視覺）把部署分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**Deploy a model** 也在這裡，每個部署的頁面在 `/serving/<id>`。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。
 
-- **在金鑰守門員後面。** 公開的應用程式和模型副本一樣，跑在 agent 的金鑰守門員後面：程式監聽 loopback，守門員佔住對外公開的連接埠，只有閘道能通過。守門員會在請求送到程式之前，拿掉閘道的內部金鑰。應用程式的每個連接埠都會被守住，不只是公開的那一個。
-- **金鑰要自己開啟。** 金鑰的 **Apps** 設定決定它能呼叫哪些公開的應用程式：*None*（預設值，1.3 之前的每把金鑰也是）、*Listed apps* 或 *Every exposed app*（API 裡是 `workloads`）。
-- **是 API，不是網頁。** 回應會被放進沙箱（`Content-Security-Policy: sandbox`），cookie 和 CORS 標頭會被拿掉，轉址會改寫到 `/x/<name>` 底下。瀏覽器介面（Gradio、Jupyter）在 `/x/` 無法使用。1.3 不轉送 WebSocket 和 gRPC，也不會溢出到雲端。
-- **會被計量。** 請求、錯誤、送進與送出的位元組、忙碌時間和延遲，會以模型 `x:<name>` 記在 **Usage**；金鑰的每分鐘請求數限制同樣適用。
+**Models** 是模型庫，也就是可以部署的東西，分成三個分頁：**Catalog**（目錄，預設）、**Engines**（引擎），以及管理員才有的 **Sources**（來源）。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.3 的連結（`/models/deployments/<id>`、`/models/deploy`、`/models?tab=routes`、`/models/routes/<id>`、`/providers`）會打開新的位置。
 
-管理員和操作員可以在建立應用程式時公開它，或之後在它的頁面上公開。請見[在 /x/ 公開應用程式](how-to.md#expose-an-app-at-x)。
-
-1.3 有三個**範本**用這種方式啟動最常見的視覺 API（物件偵測、影像分割、深度估計）。1.4 起它們是[視覺模型](#vision-models)，從 Models 部署；已經從範本做出來的應用程式照常執行。請見[從範本做的應用程式](how-to.md#apps-made-from-a-template-13)。
-
-## 模型、recipe 與估算
-
-**Models** 頁面有兩個分頁。**Deployments** 依種類（chat、多模態 chat、嵌入、重排序、語音轉文字、文字轉語音、圖片、影片）把執行中的模型分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。**Library**（模型庫）是可以部署的東西：目錄、recipe，以及（管理員才有的）模型來源。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.4 之前的連結（`?tab=serving`、`?tab=routes`、`?tab=catalog`、`/providers`）會打開新的位置。
-
-- **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。
-- **recipe**（配方）描述某一類模型要怎麼執行：用哪個引擎、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
+- **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。每一列都有 **Deploy** 和 **Download to…**。
+- **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
+- **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
 - 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。有釘選的引擎映像檔也會這樣一層一層送過去，管理員也可以從機器的頁面上傳任何映像檔。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
-- **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Model sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
+- **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Models → Sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
 
 ## 部署與閘道
 
-**部署**用一個 recipe 執行一個模型，包含一個或多個副本。它的副本以 runtime 為 `model` 的 workload 執行，只在部署的頁面上看得到（不在 **Apps**）。Forgeyard 會：
+**部署**用一個引擎（recipe）執行一個模型，包含一個或多個副本。它的副本以 runtime 為 `model` 的 workload 執行，只在部署的頁面上看得到（不在 **Apps**）。Forgeyard 會：
 
 1. 把每個副本放到放得下的地方。在放得下的機器之間，依序比較：
    - 過去一小時內**連不到**這個副本在那裡要下載的來源（模型的主機，例如 huggingface.co；引擎壓縮檔的主機，例如 github.com；或映像檔的 registry，例如 ghcr.io）的機器排在最後：只有其他機器都放不下時才會用它。名稱解析失敗、連線被拒或逾時、網路無法連線，才算「連不到」；HTTP 錯誤、權杖被拒或磁碟已滿則不算。agent 能**經由伺服器**下載的機器（1.4；它的 **Internet access for downloads** 是 **Auto** 或 **Always through the server**）會改用這個方式取得模型、引擎壓縮檔和有釘選的引擎映像檔，所以不會因此被避開（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）；
@@ -94,7 +85,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 閘道會把每個請求送到正在處理中請求數最少的就緒副本；如果某個副本沒有回應，就改送下一個。副本無法繞過閘道直接使用：每個副本都有一把只有閘道知道的內部金鑰，agent 會拒絕送到副本連接埠的其他所有請求。
 
-**Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序和語音轉文字。它的 **Vision** 分頁也用同樣的方式，把圖片送給公開的視覺應用程式（偵測、分割、深度）。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
+**Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型。一個 **Model** 選單列出已就緒的模型，像 **Serving** 一樣依種類分組，用同樣的名稱和圖示（Chat、Multimodal chat、Embeddings、Rerank、Speech to text、Text to speech、Images、Video、Vision）；選一個就會開出它的面板：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序、語音轉文字、**Speak**、**Image**、**Video**，或視覺面板（送一張圖片，得到方框、遮罩或深度圖）。網址會記住選的模型（`/playground?model=<name>`）；1.3 的 Vision 分頁網址（`/playground?tab=vision`）會開出第一個就緒的視覺模型，沒有時就打開選單。沒有任何就緒的模型時，頁面會這樣說明，並指向 **Models → Catalog** 去部署一個。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
 
 ## 對話中的圖片、音訊與影片
 
@@ -154,7 +145,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 視覺模型
 
-視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入 Library（推薦了三個）、從 Models 部署、列在 **Deployments → Vision**、在 **Playground → Vision** 試用、用 API 金鑰呼叫。
+視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入目錄（推薦了三個）、部署後列在 **Serving → Vision**、在 **Playground** 試用（模型選單的 *Vision* 底下）、用 API 金鑰呼叫。
 
 - **只有一種引擎，Forgeyard 自己的。** `vision` 配方在與伺服器同版本的 `forgeyard-vision` 映像檔裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
 - **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。

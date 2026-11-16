@@ -33,6 +33,9 @@ class FakeEngine:
         self.chunks = chunks
         self.delay = delay          # between streamed chunks
         self.hold = hold            # before a non-streamed answer
+        # Set to a threading.Event: a non-streamed answer waits until the test sets it (at most 30 s),
+        # so a test can hold a replica busy for exactly as long as it needs, not a guessed time.
+        self.gate: Optional[threading.Event] = None
         self.usage = usage or USAGE
         self.status: Optional[int] = None   # answer every request with this status instead
         self.retry_after: Optional[str] = None  # sent with `status`
@@ -81,6 +84,8 @@ class FakeEngine:
                 body = entry["body"] or {}
                 if self.path == "/v1/chat/completions" and body.get("stream"):
                     return self._stream(body)
+                if engine.gate is not None:
+                    engine.gate.wait(30)
                 if engine.hold:
                     time.sleep(engine.hold)
                 if self.path in ("/v1/chat/completions", "/v1/completions"):

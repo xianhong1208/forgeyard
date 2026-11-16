@@ -78,6 +78,7 @@ export function diskShares(c: MachineCache): { cache: number; other: number } | 
   return { cache: cache / c.total_bytes, other: (used - cache) / c.total_bytes };
 }
 
-export function userHref(u: CacheUser): string {
-  return u.kind === "deployment" ? `/models/deployments/${u.id}` : `/apps/${u.id}`;
+// A deployment's page; an app has none in the console since 1.4 (#88): it is only named.
+export function userHref(u: CacheUser): string | null {
+  return u.kind === "deployment" ? `/serving/${u.id}` : null;
 }

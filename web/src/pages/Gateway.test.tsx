@@ -248,7 +248,7 @@ describe("Playground", () => {
       }
     });
     mount("/playground");
-    expect(((await screen.findByLabelText("Model")) as HTMLSelectElement).value).toBe("chat");
+    expect((await screen.findByLabelText("Model")).textContent).toContain("chat");
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hi there" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     const convo = screen.getByLabelText("Conversation");
@@ -340,9 +340,11 @@ describe("Playground and the cloud (1.2)", () => {
       }
     }, USER);
     mount("/playground");
-    const select = (await screen.findByLabelText("Model")) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["chat"]);
-    expect(select.options[0].textContent).toContain("local, then cloud");
+    fireEvent.click(await screen.findByLabelText("Model"));
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options.map((o) => o.querySelector(".picker-option-name")?.textContent)).toEqual(["chat"]);
+    expect(options[0].textContent).toContain("local, then cloud");
+    fireEvent.click(options[0]);
     fireEvent.click(screen.getByLabelText(/Local only/));
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));

@@ -1,13 +1,12 @@
-import { IconEye, IconPhotoUp, IconPlayerStop, IconScan } from "@tabler/icons-react";
+import { IconEye, IconPhotoUp, IconPlayerStop } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Link } from "react-router";
 
 import { HelpLink } from "../components/HelpLink";
 import { Notice } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
 import { answerError, ms } from "../lib/gateway";
 import { DETECT_FLOOR, TASK_HELP, VISION_TYPES, boxStyle, checkImage, depthGradient, depthTables, imageLimitMb, labelColours,
-  pngUri, promptFrom, shown, targetLabel, targets, toImage,
+  pngUri, promptFrom, shown, targets, toImage,
   type Prompt, type VisionAnswer, type VisionOptions, type VisionTarget, type VisionTask } from "../lib/vision";
 import { useApi } from "../lib/useApi";
 
@@ -40,57 +39,8 @@ export function visionError(status: number, body: unknown, limitMb: number, what
   return answerError(status, body);
 }
 
-export function Vision({ canCreate }: { canCreate: boolean }) {
-  const { data, error } = useApi<VisionOptions>("/playground/vision/options");
-  const all = targets(data);
-  const [picked, setPicked] = useState("");
-  const fallback = all.find((t) => t.ready) ?? all[0];
-  const t = all.find((x) => x.id === picked) ?? fallback;
-
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!data) return <p className="muted">Loading…</p>;
-  if (!all.length) {
-    return (
-      <section className="panel play-empty" aria-labelledby="vis-empty-title">
-        <h2 id="vis-empty-title">No vision model to try yet</h2>
-        <p className="muted">
-          The Vision tab sends a picture to a vision model: object detection, segmentation or depth estimation.
-          None is deployed yet.{" "}
-          {canCreate ? "Deploy one from Models (the Library recommends three); it shows up here once it is ready."
-            : "Admins and operators deploy models; ask one to deploy the one you need."}
-        </p>
-        <ul className="vis-kinds">
-          {data.tasks.map((x) => <li key={x.task}><span className="strong">{x.title}</span> <span className="muted small mono">{x.model}</span></li>)}
-        </ul>
-        <div className="row-gap">
-          {canCreate && <Link to="/models?tab=library" className="btn btn-primary"><IconScan size={16} aria-hidden="true" /> Add a vision model</Link>}
-          <HelpLink page="how-to" anchor="deploy-an-object-detection-model">Deploy an object-detection model</HelpLink>
-        </div>
-      </section>
-    );
-  }
-  return (
-    <>
-      <div className="play-bar vis-bar">
-        <div className="field">
-          <label htmlFor="vis-target">Model</label>
-          <select id="vis-target" value={t?.id ?? ""} onChange={(e) => setPicked(e.target.value)}>
-            {all.map((x) => <option key={x.id} value={x.id}>{targetLabel(x)}</option>)}
-          </select>
-        </div>
-        {t && (
-          <p className="muted small play-ready">
-            {t.ready ? `${t.ready} ready replica${t.ready > 1 ? "s" : ""}` : (t.reason ?? "No replica is ready yet.")}{" "}
-            {t.link && <Link to={t.link.to}>{t.link.label}</Link>}
-          </p>
-        )}
-      </div>
-      {t && <VisionPanel key={t.id} w={t} />}
-    </>
-  );
-}
-
-// One vision model in the Playground's Models tab (1.4): the same panel as on the Vision tab.
+// The vision panel for one vision model the Playground's picker chose (1.4, #100): upload an image, then
+// boxes, a mask or a depth map.
 export function VisionModelPanel({ name }: { name: string }) {
   const { data, error } = useApi<VisionOptions>("/playground/vision/options");
   const t = targets(data).find((x) => x.kind === "model" && x.name === name);

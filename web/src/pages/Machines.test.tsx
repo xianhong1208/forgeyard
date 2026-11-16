@@ -382,10 +382,12 @@ describe("what runs on a machine (1.4)", () => {
     mount();
     const box = await screen.findByRole("article", { name: "Machine a100-box" });
     expect(await within(box).findByText("7 running")).toBeTruthy();
-    const chips = within(box).getAllByRole("link").filter((a) => a.getAttribute("href") !== "/machines/1");
+    // 1.4 (#88): an app is named (it holds a card) but not linked: apps left the console.
+    const chips = [...box.querySelectorAll(".holder-chip:not(.holder-more)")];
     expect(chips.map((a) => a.textContent)).toEqual(["notebook", "dep-chat", "dep-embed", "dep-rerank", "dep-asr"]);
-    expect(chips[0].getAttribute("href")).toBe("/apps/9");
-    expect(chips[1].getAttribute("href")).toBe("/models/deployments/30");
+    expect(chips[0].tagName).toBe("SPAN");
+    expect(chips[0].getAttribute("title")).toMatch(/^App notebook: apps are deprecated and removed in 1.5/);
+    expect(chips[1].getAttribute("href")).toBe("/serving/30");
     expect(within(box).getByText("+2 more")).toBeTruthy();
     // nothing runs on the offline APU
     expect(within(screen.getByRole("article", { name: "Machine strix" })).getByText("Nothing runs here yet.")).toBeTruthy();
@@ -401,17 +403,18 @@ describe("what runs on a machine (1.4)", () => {
     const bar = within(four).getAllByRole("img").find((x) => x.classList.contains("membar"))!;
     expect(bar.getAttribute("aria-label")).toMatch(/^21 GiB reserved by Forgeyard, .* free of 80 GiB$/);
     expect(bar.querySelector('[title="dep-image: 6 GiB"]')).toBeTruthy();
-    // a card held by a workload that declared no memory lists it without a size
-    expect(within(screen.getByRole("group", { name: "GPU #2" })).getByRole("link").textContent).toBe("notebook");
-    // 1.4 (#81): the map and "Running here" name both models (linked to the deployment) and apps (to the app).
-    expect(within(screen.getByRole("group", { name: "GPU #2" })).getByRole("link").getAttribute("href")).toBe("/apps/9");
-    expect(within(four).getAllByRole("link")[0].getAttribute("href")).toBe("/models/deployments/30");
+    // a card held by an app that declared no memory names it without a size; 1.4 (#88): not linked
+    const two = screen.getByRole("group", { name: "GPU #2" });
+    expect(within(two).queryAllByRole("link")).toHaveLength(0);
+    expect(two.querySelector(".holder-chip")?.textContent).toBe("notebook");
+    expect(within(four).getAllByRole("link")[0].getAttribute("href")).toBe("/serving/30");
     expect(within(screen.getByRole("group", { name: "GPU #0" })).queryAllByRole("link")).toHaveLength(0);
     const running = screen.getByRole("region", { name: /Running here/ });
     expect(within(running).getAllByRole("listitem")).toHaveLength(7);
-    expect(within(running).getByRole("link", { name: "notebook" }).getAttribute("href")).toBe("/apps/9");
-    expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/models/deployments/30");
-    expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/models/deploy?machine=1");
+    expect(within(running).queryByRole("link", { name: "notebook" })).toBeNull();
+    expect(within(running).getByText("notebook").getAttribute("title")).toMatch(/^App notebook: apps are deprecated/);
+    expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/serving/30");
+    expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/serving/deploy?machine=1");
     // 1.4 (#81): Apps is an advanced page; nothing but the Apps page itself offers New app.
     expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
   });

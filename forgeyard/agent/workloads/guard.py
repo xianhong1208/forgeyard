@@ -106,6 +106,9 @@ class Guard:
         self.connect_timeout, self.write_timeout = connect_timeout, write_timeout
         self._server: Optional[asyncio.base_events.Server] = None
         self._conns: set[asyncio.Task] = set()
+        # Every open stream, the clients' and the engine's: close() aborts them first, so stopping a
+        # guard never waits for a client that does not read (or an engine that does not answer).
+        self._writers: set[asyncio.StreamWriter] = set()
         self.refused = 0          # requests turned away without the key (tests, logs)
         self.forwarded = 0        # requests passed to the engine
         self._refused_logged = 0
@@ -133,10 +136,13 @@ class Guard:
         server, self._server = self._server, None
         if server is not None:
             server.close()
+        for w in list(self._writers):
+            w.transport.abort()
         conns = list(self._conns)
         for t in conns:
             t.cancel()
-        await asyncio.gather(*conns, return_exceptions=True)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.gather(*conns, return_exceptions=True), 5)
         if server is not None:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(server.wait_closed(), 5)
@@ -148,6 +154,7 @@ class Guard:
             writer.close()
             return
         self._conns.add(task)
+        self._writers.add(writer)
         try:
             await self._serve(reader, writer)
         except (_Gone, OSError, asyncio.TimeoutError, h11.ProtocolError):
@@ -158,6 +165,7 @@ class Guard:
             log.exception("Guard %s: a connection failed", self.name)
         finally:
             self._conns.discard(task)
+            self._writers.discard(writer)
             writer.close()
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(writer.wait_closed(), 2)
@@ -247,6 +255,7 @@ class Guard:
             # The engine is not there: no answer, so the gateway tries another replica.
             return False
         self.forwarded += 1
+        self._writers.add(up_writer)
         up = h11.Connection(h11.CLIENT, max_incomplete_event_size=MAX_HEAD)
         try:
             if conn.they_are_waiting_for_100_continue:
@@ -278,6 +287,7 @@ class Guard:
         except (_Gone, OSError, asyncio.TimeoutError, h11.ProtocolError):
             return False
         finally:
+            self._writers.discard(up_writer)
             up_writer.close()  # the engine sees the connection close and stops
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(up_writer.wait_closed(), 2)
