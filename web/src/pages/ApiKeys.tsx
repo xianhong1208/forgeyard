@@ -107,7 +107,7 @@ export function ApiKeysPage() {
   return (
     <>
       <PageHeader
-        index="06 · API keys"
+        index="05 · API keys"
         title="API keys"
         lead="Keys for programs that call the models through Forgeyard's OpenAI-compatible gateway. A key is shown once; Forgeyard keeps only a hash of it."
         actions={

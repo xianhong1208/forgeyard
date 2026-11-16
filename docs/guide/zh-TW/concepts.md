@@ -46,24 +46,13 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 要在部署上修改，用 **Edit**：[修改部署](how-to.md#change-a-deployment)。
 
-## 應用程式
+## 應用程式（進階）
 
-**應用程式（app）**是你自己在機器上執行的程式，例如視覺 API、notebook 或批次工作（API 稱它們為 *workloads*，在 `/api/workloads`）：
+**應用程式（Apps）不在選單裡。**大部分的人只需要部署模型：要使用模型，請在 **Models** 部署它。需要更多功能的管理員和 operator 可以直接在伺服器上打開 `/apps`（例如 `https://<server>:7860/apps`）。
 
-- **服務**會一直執行到你停止它為止。它會被做健康檢查，結束時會被重新啟動；
-- **任務**會執行到結束，可以設定重試次數和時間上限。
+**應用程式（app）**是你自己在機器上執行的程式，以容器（機器上的 Docker 或 Podman）或行程的方式執行。它適合 Forgeyard 不會執行的東西：例如模型作者自己的伺服器映像檔，公開在 [`/x/<name>`](#apps-at-x) 讓 API 金鑰呼叫；或一次性的 GPU **任務**（批次工作，可以重試、有時間上限），以及一直執行到停止為止的**服務**。每個應用程式有 1 到 16 個副本，每個副本在一台機器上，只拿到分配給它的卡。行程以無特權帳號 `forgeyard-run` 執行，容器絕不使用 `--privileged`；兩者都從空的環境開始。API 稱應用程式為 *workloads*（`/api/workloads`）。
 
-每個應用程式有 1 到 16 個**副本**，每個副本在一台機器上。應用程式可以用**容器**（機器上的 Docker 或 Podman）或**行程**（由 agent 啟動的程式）的方式執行。
-
-隔離方式簡述如下：
-
-- 行程以無特權帳號（`forgeyard-run`）執行，絕不以 root 執行，而且環境變數是空的：只有應用程式宣告的變數，加上它的 GPU 和連接埠變數。
-- 容器以容器引擎的預設值加上 `no-new-privileges` 執行，絕不使用 `--privileged`。
-- 資源限制：容器使用 `--cpus` 和 `--memory`；行程在有 systemd 的主機上使用 systemd scope，否則使用 rlimit。
-
-**Apps** 頁面只列出應用程式。模型部署也以 workload（runtime 為 `model`）執行，但模型只在 **Models** 底下看得到：它的頁面有副本、輸出和事件，舊的 workload 頁面連結會打開它的部署。API 拒絕停止、啟動或刪除部署的 workload（`409 managed_by_deployment`），這樣部署就不會在路由還留著的時候失去它。**Machines** 兩者都會顯示：所有佔用顯示卡的東西，不論是模型還是應用程式。
-
-只有管理員和 operator 可以建立應用程式，因為能建立應用程式的人，就能在機器上執行程式碼。大部分的人只需要部署模型。
+**Apps** 頁面只列出應用程式。模型部署也以 workload（runtime 為 `model`）執行，但模型只在 **Models** 底下看得到，舊的 workload 頁面連結會打開它的部署；API 拒絕停止、啟動或刪除它（`409 managed_by_deployment`）。**Machines** 兩者都會顯示，因為模型和應用程式都佔用顯示卡。
 
 ## 在 /x/ 的應用程式
 

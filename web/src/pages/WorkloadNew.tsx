@@ -63,7 +63,7 @@ export function WorkloadNewPage() {
   const navigate = useNavigate();
   const { data: machines } = useApi<MachinesResponse>("/machines");
   // A ready-made template (1.3): /apps/new?template=<id>&gpu=1 fills the form; everything stays editable.
-  // ?machine=<id> (1.4, "New app here" on a machine's page) picks the machine.
+  // ?machine=<id> picks the machine.
   const [params] = useSearchParams();
   const [f, setF] = useState<WorkloadForm>(() => ({ ...emptyForm(), machine: params.get("machine") ?? "" }));
   const [g, setG] = useState<GatewayForm>(() => gatewayForm());
@@ -86,7 +86,7 @@ export function WorkloadNewPage() {
   if (user && user.role === "user") {
     return (
       <>
-        <PageHeader index="03 · Apps" title="New app" />
+        <PageHeader index="Advanced · Apps" title="New app" />
         <Notice>Only admins and operators start apps: creating one runs code on a machine.</Notice>
       </>
     );
@@ -117,7 +117,7 @@ export function WorkloadNewPage() {
 
   return (
     <>
-      <PageHeader index="03 · Apps" title="New app"
+      <PageHeader index="Advanced · Apps" title="New app"
         lead="A container or a process, on a machine you pick or the first online machine with room. It starts as soon as it is placed." />
       {template && (
         <div className="tpl-from" role="status">

@@ -67,7 +67,7 @@ version until 1.0.
   Forgeyard reserved, other use, free), free memory, how many models and apps run there
   and their names, heartbeat and agent version, under a count of machines per kind. A machine has
   its own page (`/machines/<id>`): a memory map that splits each card by what holds it, named and
-  with what it reserved; what runs there, with **Deploy here** and **New app here**; GPU access
+  with what it reserved; what runs there, with **Deploy here**; GPU access
   and runtimes; the agent's details; **Revoke** and **Remove**; and only that machine's setup-health
   findings. **Models → Deployments** groups deployments by kind (chat, multimodal chat, embeddings,
   rerank, speech to text, text to speech, images, video), each with its icon, a line on what it does
@@ -91,7 +91,8 @@ version until 1.0.
     deployments only (several behind one name, or one under a second name) is listed there too, under
     *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
     `/cloud/providers/<id>`.
-  - **Workloads is now Apps** (`/apps`): only the programs people run themselves (services and
+  - **Workloads is now Apps** (`/apps`), an advanced page that is **not in the menu**; it says first
+    that models are deployed under Models. It lists only the programs people run themselves (services and
     tasks: vision templates, notebooks, batch jobs, any image or command), with **New app** and
     **Start from a template**. Workloads made by model deployments are not listed there, and its
     counts (*Apps*, *Running*, *Waiting*, *Failing*, *GPUs used by apps*) are the apps' alone. The
@@ -101,8 +102,10 @@ version until 1.0.
     and no longer says *Runs as workload X*; an old link to a model's workload page opens the
     deployment. **Machines** still shows everything that holds a card: its tiles, memory map and
     *Running here* name models (linked to the deployment) and apps (linked to the app).
-  - The menu is Machines, Models, Apps, Cloud (admins), Playground, API keys, Usage, Users,
-    Audit log. "Serving", "route" and "workload" left the console's navigation.
+  - The menu is Machines, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit log
+    (admins); the pages' numbers follow it, and the Apps pages say *Advanced · Apps*. A machine's page
+    no longer offers **New app here**; its memory map and *Running here* still list apps. "Serving", "route" and "workload" left the
+    console's navigation.
   - Old links open the new places, without a step in the history: `/models?tab=serving` and
     `?tab=routes` (with `&route=<id or name>`: that route's place), `?tab=catalog`,
     `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads`, `/workloads/<id>` and

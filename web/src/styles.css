@@ -1487,3 +1487,7 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
   .deprow .where { grid-column: 1 / -1; }
   .deprow-mem { justify-self: start; }
 }
+
+/* 1.4 (#81): Apps is an advanced page, not in the menu; it says where models go first. */
+.apps-note { margin: -6px 0 18px; max-width: 82ch; font-size: 14px; color: var(--ink-2); }
+.apps-note .help-link { display: inline-flex; margin-left: 2px; vertical-align: -3px; }

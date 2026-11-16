@@ -66,7 +66,7 @@ export function RouteDetailPage() {
   return (
     <>
       {crumb}
-      <PageHeader index={`04 · Cloud · ${cloud ? "Cloud model" : "Model name"}`} title={isNew ? "New cloud model" : r?.served_name ?? "Cloud model"}
+      <PageHeader index={`03 · Cloud · ${cloud ? "Cloud model" : "Model name"}`} title={isNew ? "New cloud model" : r?.served_name ?? "Cloud model"}
         lead={isNew ? "A model name of its own: a cloud model behind Forgeyard's keys and limits, or several deployments and providers in tiers."
           : r ? `${API_KIND[r.api] ?? r.api} · made by ${r.created_by ?? "an admin"}` : undefined} />
       {r && <AdvisorBanner pages={[`route:${r.id}`]} />}

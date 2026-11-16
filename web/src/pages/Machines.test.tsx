@@ -412,7 +412,8 @@ describe("what runs on a machine (1.4)", () => {
     expect(within(running).getByRole("link", { name: "notebook" }).getAttribute("href")).toBe("/apps/9");
     expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/models/deployments/30");
     expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/models/deploy?machine=1");
-    expect(screen.getByRole("link", { name: "New app here" }).getAttribute("href")).toBe("/apps/new?machine=1");
+    // 1.4 (#81): Apps is an advanced page; nothing but the Apps page itself offers New app.
+    expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
   });
 
   it("FY-WEB-225 users see a machine's page without Revoke, Remove, Deploy here or New app here", async () => {

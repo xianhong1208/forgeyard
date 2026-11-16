@@ -67,7 +67,7 @@ export function WorkloadDetailPage() {
   return (
     <>
       <p className="crumb"><Link to="/apps"><IconArrowLeft size={14} aria-hidden="true" /> Apps</Link></p>
-      <PageHeader index={`03 · ${w?.kind ?? "app"}`} title={w?.name ?? "App"}
+      <PageHeader index={`Advanced · Apps · ${w?.kind ?? "app"}`} title={w?.name ?? "App"}
         lead={w ? `${w.kind === "service" ? "Service" : "Task"} · ${w.runtime} · created by ${w.created_by ?? "?"} ${when(w.created_at)}` : undefined}
         actions={w && canManage && (
           <>

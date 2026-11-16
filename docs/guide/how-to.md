@@ -355,8 +355,8 @@ tries to pull.
 
 ## Run a service or a task
 
-Admins and operators run their own programs on the machines as **apps**: open **Apps** →
-**New app**, fill in the form, and choose **Create and start**.
+Admins and operators run their own programs on the machines as **apps**, an advanced feature that
+is not in the menu: open `/apps` on the server → **New app**, fill in the form, and choose **Create and start**.
 
 1. **What:** **Service** (runs until you stop it; restarted when it exits) or **Task** (runs to the
    end). A **Name**: `a-z`, `0-9` and `-`, unique.
@@ -385,7 +385,7 @@ output.
 
 Isolation, in short: a process runs as the unprivileged account `forgeyard-run` with only its own cards
 visible; a container gets only its cards, never `--privileged`. See
-[Apps](concepts.md#apps).
+[Apps (advanced)](concepts.md#apps-advanced).
 
 ## Expose an app at /x/
 
@@ -446,7 +446,7 @@ app is restarted. What passes and what is removed is in the
 
 ## Start an app from a template
 
-**Apps** → **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
+On `/apps`, **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
 vision server image and is exposed at `/x/<name>` straight away:
 
 | Template | Model (licence) | Call |

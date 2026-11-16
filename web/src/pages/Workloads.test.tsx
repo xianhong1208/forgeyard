@@ -118,7 +118,8 @@ describe("workloads", () => {
     mount("/apps");
     expect(await screen.findByText("No apps yet")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "New app" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Apps" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Apps" })).toBeNull();  // not in the menu (1.4, #81)
   });
 
   it("FY-WEB-041 the form sends the spec it shows and opens the new app", async () => {
@@ -312,13 +313,46 @@ describe("workloads and deployments (1.4, #36)", () => {
     expect(gpusText(web)).toBe("1 per replica");
   });
 
-  it("FY-WEB-229 'New app here' opens the form with the machine chosen (Deploy here: FY-WEB-230)", async () => {
+  it("FY-WEB-229 /apps/new?machine= opens the form with the machine chosen (as Deploy here does for models)", async () => {
     const data = structuredClone(machinesFixture);
     (data.machines[0] as Record<string, unknown>).features = ["workloads", "models"];
     server((url) => url === "/api/machines" ? { status: 200, body: data } : undefined);
     mount("/apps/new?machine=1");
     const pick = await screen.findByLabelText(/^Machine/) as HTMLSelectElement;
     await waitFor(() => expect(pick.value).toBe("1"));
+  });
+});
+
+describe("Apps, an advanced page (1.4, #81)", () => {
+  it("FY-WEB-269 Apps is not in the menu, but /apps, an app's page and New app still open; the page sends people with a model to Models", async () => {
+    server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web], server_time: "", can_manage: true } }
+      : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } }
+        : url === "/api/machines" ? { status: 200, body: machinesFixture } : undefined);
+    const view = mount("/apps");
+    expect(await screen.findByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(screen.getByText("Advanced · Apps")).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(within(nav).queryByRole("link", { name: /Apps|Workloads/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Deploy it under Models" }).getAttribute("href")).toBe("/models");
+    // The list and New app come with /api/workloads, after the page itself.
+    expect(await screen.findByRole("article", { name: "App web" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "New app" }).getAttribute("href")).toBe("/apps/new");
+    view.unmount();
+    const page = mount("/apps/7");
+    expect(await screen.findByRole("heading", { level: 1, name: "web" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Apps" }).getAttribute("href")).toBe("/apps");  // the way back
+    page.unmount();
+    mount("/apps/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New app" })).toBeTruthy();
+  });
+
+  it("FY-WEB-270 for everyone else too: no Apps in the menu, and no New app on the page", async () => {
+    server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web], server_time: "", can_manage: false } } : undefined,
+      { ...OWNER, role: "user", is_owner: false });
+    mount("/apps");
+    expect(await screen.findByRole("article", { name: "App web" })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Main" })).queryByRole("link", { name: /Apps/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
   });
 });
 

@@ -256,7 +256,7 @@ agent；舊版 agent 會試著去拉。
 
 ## 執行服務或任務
 
-管理員和操作員可以把自己的程式當成**應用程式**在機器上執行：打開 **Apps** → **New app**，填好表單，選 **Create and start**。
+管理員和操作員可以把自己的程式當成**應用程式**在機器上執行。這是進階功能，不在選單裡：在伺服器上打開 `/apps` → **New app**，填好表單，選 **Create and start**。
 
 1. **What：** **Service**（一直執行到你停止它；結束時會重新啟動）或 **Task**（執行到結束）。**Name**：`a-z`、`0-9` 和 `-`，不能重複。
 2. **Run：** **Container**（一個 **Image**，例如 `python:3.13-slim`，可選填 **Entrypoint**）或 **Process**（基本 `PATH` 上的 **Command** 或絕對路徑，由 agent 以執行行程的帳號執行）。**Arguments** 一行一個，不需要 shell 引號。
@@ -267,7 +267,7 @@ agent；舊版 agent 會試著去拉。
 
 *Spec that will be sent* 會顯示表單產生的 JSON。應用程式的頁面會顯示每個副本、它的機器、GPU 和位址、事件，以及最後幾行輸出。**Stop** 會停止每個副本（先 SIGTERM，10 秒後 SIGKILL）並釋出它的 GPU；**Start** 會重新配置它們；**Delete** 還會刪除它的歷史和輸出。
 
-隔離方式簡述：行程以無特權帳號 `forgeyard-run` 執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[應用程式](concepts.md#apps)。
+隔離方式簡述：行程以無特權帳號 `forgeyard-run` 執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[應用程式](concepts.md#apps-advanced)。
 
 ## 在 /x/ 公開應用程式
 
@@ -315,7 +315,7 @@ ${PORT}
 
 ## 從範本開始一個應用程式
 
-**Apps** → **Start from a template** 提供現成的視覺 API。每個範本都執行 Forgeyard 自己的 vision server 映像檔，並且直接公開在 `/x/<name>`：
+在 `/apps`，**Start from a template** 提供現成的視覺 API。每個範本都執行 Forgeyard 自己的 vision server 映像檔，並且直接公開在 `/x/<name>`：
 
 | 範本 | 模型（授權） | 呼叫 |
 |---|---|---|

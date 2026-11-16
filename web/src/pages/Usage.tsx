@@ -68,7 +68,7 @@ export function UsagePage() {
 
   return (
     <>
-      <PageHeader index="07 · Usage" title="Usage"
+      <PageHeader index="06 · Usage" title="Usage"
         lead={data?.everyone ? "Everyone's requests through the gateway and the playground." : "Your requests through the gateway, with your API keys and in the playground."} />
       {error && <Notice tone="error">{error}</Notice>}
       <div className="tabs" role="tablist" aria-label="Usage">

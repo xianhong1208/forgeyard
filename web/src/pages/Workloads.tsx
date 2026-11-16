@@ -40,15 +40,20 @@ export function WorkloadsPage() {
   return (
     <>
       <PageHeader
-        index="03 · Apps"
+        index="Advanced · Apps"
         title="Apps"
-        lead="The programs you run on your machines yourself: services and tasks, such as a vision API, a notebook or a batch job. Each replica runs on one machine, with only the GPUs it was given and an environment that starts empty. Models are under Models."
+        lead="An advanced feature, not in the menu: programs you run on your machines yourself, as services or tasks."
         actions={canManage && (
           <Link to="/apps/new" className="btn btn-primary">
             <IconPlus size={16} aria-hidden="true" /> New app
           </Link>
         )}
       />
+      <p className="apps-note">
+        Just want to use a model? <Link to="/models">Deploy it under Models</Link>. Apps fit a program that is not a model Forgeyard
+        runs: a model's own server image exposed at <code>/x/</code>, or a one-off GPU task.{" "}
+        <HelpLink page="concepts" anchor="apps-advanced">About apps</HelpLink>
+      </p>
       {error && <Notice tone="error">{error}</Notice>}
       {canManage && <Templates />}
       {list && list.length === 0 && (
@@ -62,13 +67,12 @@ export function WorkloadsPage() {
             <h2>No apps yet</h2>
             <p>
               An app is a program you run on your machines: a container or a command, kept running as a service or run
-              once as a task. To serve a model, use Models instead: it sets up the engine for you.{" "}
+              once as a task.{" "}
               {canManage ? "" : "Admins and operators start apps; they show up here with their status."}
             </p>
             {canManage && (
               <p className="empty-actions">
                 <Link to="/apps/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> New app</Link>
-                <Link to="/models" className="btn btn-quiet">Serve a model</Link>
               </p>
             )}
             <ul className="kinds">

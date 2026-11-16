@@ -109,7 +109,7 @@ export function AuditPage() {
   return (
     <>
       <PageHeader
-        index="09 · Audit log"
+        index="08 · Audit log"
         title="Audit log"
         lead="Sign-ins, failed sign-ins and every change to accounts, API keys, machines, apps, models, providers and budgets, newest first."
         actions={

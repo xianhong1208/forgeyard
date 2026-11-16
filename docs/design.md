@@ -68,7 +68,7 @@ health-checked and restarted) or a **task** (runs to the end, with retries and a
 Each one has 1 to 16 **replicas**; each replica runs on one machine. Open **Apps → New app**, or
 `POST /api/workloads` with the spec.
 
-**In the console they are apps** (1.4, #81): the **Apps** page (`/apps`; `/workloads…` redirects)
+**In the console they are apps** (1.4, #81), an advanced page that is not in the menu: **Apps** (`/apps`; `/workloads…` redirects)
 lists only the workloads people run themselves. A model deployment's workload (runtime `model`) is
 seen under **Models** only: its deployment's page has the replicas, output and events, and an old
 link to its workload page opens the deployment. The API keeps the name `workloads` and still refuses

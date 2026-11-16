@@ -72,7 +72,7 @@ export function UsersPage() {
   return (
     <>
       <PageHeader
-        index="08 · Users"
+        index="07 · Users"
         title="Users"
         lead="Who can sign in, and with which role. Admins manage users, machines and the model catalog; operators run apps and deploy models; users call the models with their own API keys and see their own usage."
         actions={

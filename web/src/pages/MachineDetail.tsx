@@ -1,6 +1,6 @@
 // A machine's own page (1.4): its kind, a memory map of each card split by what holds it, what runs
 // there, its GPU access, and the agent's details. Admins revoke or remove it here.
-import { IconArrowLeft, IconBox, IconLock, IconPlus } from "@tabler/icons-react";
+import { IconArrowLeft, IconLock, IconPlus } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
@@ -136,7 +136,6 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
       <section className="panel mk-section" aria-labelledby="mk-running">
         <div className="panel-head">
           <h2 id="mk-running">Running here <span className="muted small">· {uniqueHolders(here).length}</span></h2>
-          {canPlace && <Link to={`/apps/new?machine=${m.id}`} className="btn btn-small"><IconBox size={14} aria-hidden="true" /> New app here</Link>}
         </div>
         {!p.loaded ? <p className="muted small">Loading…</p> : here.length === 0 ? <p className="empty-line">Nothing runs here yet.</p> : (
           <ul className="runlist">

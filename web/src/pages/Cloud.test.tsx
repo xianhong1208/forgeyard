@@ -126,12 +126,12 @@ describe("where each route lives", () => {
 });
 
 describe("navigation", () => {
-  it("FY-WEB-251 Models comes first; Cloud sits after Machines, for admins only, as Providers did", async () => {
+  it("FY-WEB-251 the menu: Machines, Models, Cloud (admins only, as Providers was), the everyday pages, then the admin pages", async () => {
     world();
     const view = mount("/models");
     const nav = await screen.findByRole("navigation", { name: "Main" });
     const top = () => within(nav).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent);
-    expect(top()).toEqual(["Machines", "Models", "Apps", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
+    expect(top()).toEqual(["Machines", "Models", "Cloud", "Playground", "API keys", "Usage", "Users", "Audit log"]);
     expect(within(nav).getByRole("link", { name: "Cloud" }).getAttribute("href")).toBe("/cloud");
     expect(within(nav).queryByRole("link", { name: /Providers|Serving/ })).toBeNull();
     view.unmount();
@@ -139,7 +139,7 @@ describe("navigation", () => {
     mount("/models");
     const nav2 = await screen.findByRole("navigation", { name: "Main" });
     expect(within(nav2).getAllByRole("link").filter((a) => !a.className.includes("only-narrow")).map((a) => a.textContent))
-      .toEqual(["Machines", "Models", "Apps", "Playground", "API keys", "Usage"]);
+      .toEqual(["Machines", "Models", "Playground", "API keys", "Usage"]);
   });
 
   it("FY-WEB-252 old addresses open the new places, replacing the history entry", async () => {

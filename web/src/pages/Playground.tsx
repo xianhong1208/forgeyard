@@ -54,7 +54,7 @@ export function PlaygroundPage() {
 
   return (
     <>
-      <PageHeader index="05 · Playground" title="Playground"
+      <PageHeader index="04 · Playground" title="Playground"
         lead="Try a deployed model or an exposed vision app through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “console” in Usage." />
       <div className="tabs" role="tablist" aria-label="Playground">
         <button type="button" role="tab" aria-selected={tab === "models"} className={tab === "models" ? "on" : ""}

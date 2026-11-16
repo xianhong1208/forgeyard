@@ -79,33 +79,24 @@ when sharing would help:
 
 Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
 
-## Apps
+## Apps (advanced)
 
-An **app** is a program you run on your machines yourself, such as a vision API, a notebook or a
-batch job (the API calls them *workloads*, at `/api/workloads`):
+**Apps are not in the menu.** Most people only deploy models: to use a model, deploy it under
+**Models**. Admins and operators who need more open `/apps` on the server (for example
+`https://<server>:7860/apps`).
 
-- a **service** runs until you stop it. It is health-checked and restarted when it exits;
-- a **task** runs to the end, with retries and a time limit.
+An **app** is a program you run on your machines yourself, as a container (Docker or Podman on the
+machine) or a process. It fits what is not a model Forgeyard runs: a model's own server image,
+exposed at [`/x/<name>`](#apps-at-x) with API keys, or a one-off GPU **task** (a batch job, with
+retries and a time limit) next to the **services** that run until stopped. Each has 1 to 16
+replicas, each on one machine, with only the cards it was given. A process runs as the unprivileged
+account `forgeyard-run` and a container never `--privileged`; both start from an empty environment.
+The API calls apps *workloads* (`/api/workloads`).
 
-Each one has 1 to 16 **replicas**, each on one machine. An app runs as a **container** (Docker
-or Podman on the machine) or as a **process** (a program started by the agent).
-
-Isolation, in short:
-
-- A process runs as an unprivileged account (`forgeyard-run`), never as root, with an empty
-  environment: only what the app declares, plus its GPU and port variables.
-- A container runs with the engine's defaults plus `no-new-privileges`, never `--privileged`.
-- Limits: containers get `--cpus` and `--memory`; processes get a systemd scope on a systemd host,
-  else rlimits.
-
-Only admins and operators create apps, because whoever can create one can run code on the
-machines. Most people only deploy models.
-
-The **Apps** page lists only the apps. A model deployment also runs as a workload (of runtime
-`model`), but a model is seen under **Models** only: its page has the replicas, output and events,
-and an old link to its workload's page opens the deployment. The API refuses to stop, start or
-delete a deployment's workload (`409 managed_by_deployment`), so a deployment never loses it while
-its route stays behind. **Machines** shows both: everything that holds a card, model or app.
+The **Apps** page lists only apps. A model deployment also runs as a workload (of runtime `model`),
+but a model is seen under **Models** only, and an old link to its workload's page opens the
+deployment; the API refuses to stop, start or delete it (`409 managed_by_deployment`). **Machines**
+shows both, models and apps, since both hold cards.
 
 ## Apps at /x/
 
