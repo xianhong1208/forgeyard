@@ -33,16 +33,13 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from forgeyard.db import Node, Replica, as_utc, utcnow
+from forgeyard.models import fetch
 
 TTL = timedelta(hours=1)
 
-# What a download or pull says when it could not reach the source at all. Matched in lower case.
-NETWORK_ERRORS = (
-    "cannot resolve", "temporary failure in name resolution", "name or service not known", "no such host",
-    "server misbehaving", "nodename nor servname", "connection refused", "timed out", "i/o timeout",
-    "tls handshake timeout", "context deadline exceeded", "network is unreachable", "no route to host",
-    "host is unreachable", "connection reset",
-)
+# What a download or pull says when it could not reach the source at all (shared with the agent, which
+# switches to the server's relay on them: forgeyard.models.fetch).
+NETWORK_ERRORS = fetch.NETWORK_ERRORS
 
 PHASE_LABEL = {"model": "the model", "engine": "the engine", "image": "the engine image"}
 
@@ -104,8 +101,7 @@ def registry(image: Optional[str]) -> Optional[str]:
 
 
 def network_error(text: Optional[str]) -> bool:
-    t = (text or "").lower()
-    return any(p in t for p in NETWORK_ERRORS)
+    return fetch.network_error(text)
 
 
 def classify(r: Replica, reason: Optional[str], now: Optional[datetime] = None) -> Optional[Failure]:

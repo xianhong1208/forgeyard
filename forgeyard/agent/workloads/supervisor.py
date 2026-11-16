@@ -44,6 +44,7 @@ from typing import Callable, Optional
 
 from pydantic import ValidationError
 
+from forgeyard.agent import relay
 from forgeyard.agent.workloads import health, plan, ports as portlib
 from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
@@ -119,6 +120,10 @@ class Supervisor:
         # key before a request reaches the program, and their health checks never carry it.
         self.strip: set[str] = set()
         self.cancels: dict[str, threading.Event] = {}
+        # 1.4 ("relay"): {replica id: {"model"|"engine": {path, mode}}} from the desired list, and the replicas
+        # whose download is coming through the server right now (their progress says so).
+        self.relays: dict[str, dict] = {}
+        self.via_server: set[str] = set()
         # Why a download or pull in flight was cancelled ({replica id: "cancelled: …"}), for its last report.
         self.cancelled: dict[str, str] = {}
         self.stopping: set[str] = set()
@@ -163,6 +168,20 @@ class Supervisor:
             if isinstance(model, dict) and model.get("token"):
                 self.tokens[r["id"]] = str(model["token"])  # kept in memory only, never in a record
                 r = {**r, "model": {k: v for k, v in model.items() if k != "token"}}
+            # 1.4 ("relay"): how to fetch the model and the engine through the server, if this machine may. From
+            # every desired list (the machine's setting may change), kept beside the record, never in it.
+            relays = {}
+            for part in ("model", "engine"):
+                block = r.get(part)
+                if isinstance(block, dict) and "relay" in block:
+                    found = relay.parse(block)
+                    if found is not None:
+                        relays[part] = found
+                    r = {**r, part: {k: v for k, v in block.items() if k != "relay"}}
+            if relays:
+                self.relays[r["id"]] = relays
+            else:
+                self.relays.pop(r["id"], None)
             key = r.get("replica_key")
             if "replica_key" in r:
                 r = {k: v for k, v in r.items() if k != "replica_key"}
@@ -180,6 +199,8 @@ class Supervisor:
                 r = {**r, "image_ids": images.parse_check(r["image_ids"])}
             desired[r["id"]] = r
         self.desired = desired
+        for rid in [rid for rid in self.relays if rid not in desired]:
+            self.relays.pop(rid, None)
         self._cancel_unwanted()
         # 1.4: the downloads asked for ahead of a deployment (none from a server without "prefetch").
         self.prefetch.set_wanted(msg.get("downloads") or [])
@@ -501,6 +522,9 @@ class Supervisor:
             done = min(done, total)  # never "14.54 of 12.93 GiB": a safety net, the cache counts each byte once
         rec.download = {"phase": phase, "done": done, "total": total, **({"file": file} if file else {})}
         what = "the model" if phase == "model" else "the engine"
+        if rec.id in self.via_server:
+            rec.download["via"] = "server"
+            what += " through the server"
         if total:
             rec.reason = f"downloading {what}: {done / 1024**3:.2f} of {total / 1024**3:.2f} GiB ({100 * done // total}%)"
         else:
@@ -518,16 +542,24 @@ class Supervisor:
         def progress(phase, done, total, file):
             loop.call_soon_threadsafe(self._progress, rec.id, phase, done, total, file)
 
+        def via(how: str) -> None:
+            if how == "server":
+                loop.call_soon_threadsafe(self.via_server.add, rec.id)
+
+        relays = self.relays.get(rec.id) or {}
         try:
             if rec.engine is not None:
-                exe = await asyncio.to_thread(self.models.ensure_engine, rec.engine, progress=progress, cancel=cancel)
+                exe = await asyncio.to_thread(self.models.ensure_engine, rec.engine, progress=progress, cancel=cancel,
+                                              relay=relays.get("engine"), via=via)
                 rec.engine_path = str(exe)
+                self.via_server.discard(rec.id)  # the model may come another way
             if rec.model is not None:
                 if not self.models.is_cached(rec.model) and self.models.busy(cache_key(rec.model)):
                     rec.reason = "waiting for another replica's download of the same model"
                     self._notify(rec)
                 rec.paths = await asyncio.to_thread(self.models.ensure_model, rec.model, token=self.tokens.get(rec.id),
-                                                    progress=progress, cancel=cancel)
+                                                    progress=progress, cancel=cancel, relay=relays.get("model"),
+                                                    via=via)
         except Cancelled:
             rec.state, rec.reason, rec.download = "pending", self.cancelled.get(rec.id, "cancelled"), None
             return False
@@ -540,6 +572,7 @@ class Supervisor:
             raise
         finally:
             self.cancels.pop(rec.id, None)
+            self.via_server.discard(rec.id)
             self.cache_dirty = True
         rec.download = None
         return True

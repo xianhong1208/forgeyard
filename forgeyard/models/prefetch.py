@@ -15,7 +15,10 @@ chosen machines' model caches before anything is deployed there, with progress.
   first complete download and reports it with its cache listing; the first one reported is recorded in the
   catalog entry, `models.meta.files[0].sha256` (with `sha256_from`, the machine, and `sha256_at`), which is
   where Hugging Face models keep theirs. From then on it is sent with every download of that model, direct
-  or (later) relayed, and a file that does not match is refused.
+  or relayed, and a file that does not match is refused.
+- **Through the server** (1.4, "relay", forgeyard/machines/relay.py): on a machine whose `fetch_via` allows it,
+  the model and engine blocks carry `relay`; the row's `via` says how the bytes came last ("server" once the
+  agent reports progress through the server).
 - Finished rows are history: kept KEEP_DAYS days, at most KEEP_PER_MACHINE per machine.
 """
 
@@ -134,7 +137,7 @@ def target(db: DbSession, node: Node, model: CatalogModel, recipe: Optional[Reci
            "model_cached": cached, "need_bytes": need, "free_bytes": free, "variant": eng["variant"],
            "engine": ({"kind": "archive", "name": eng["engine"]["name"], "cached": eng["cached"]} if eng["engine"]
                       else {"kind": "image", "name": eng["image"], "cached": eng["cached"]} if eng["image"] else None),
-           "engine_note": eng["note"], "download": None}
+           "engine_note": eng["note"], "download": None, "via": _via(node, model)}
     if node.revoked_at is not None or node.status == "revoked":
         state, note = "revoked", f"{node.name} was revoked."
     elif FEATURE_MODELS not in feats:
@@ -157,6 +160,18 @@ def target(db: DbSession, node: Node, model: CatalogModel, recipe: Optional[Reci
         state, note = "ok", ("The model is here; downloads the engine." if cached else "")
     out["state"], out["note"] = state, note
     return out
+
+
+def _via(node: Node, model: CatalogModel) -> str:
+    """How this machine would fetch the model (1.4, "relay"): "server", "auto" (directly, through the server
+    after a network failure) or "direct"."""
+    from forgeyard.machines import relay
+
+    try:
+        host = reach.model_host(_block(model))
+    except (KeyError, TypeError):
+        host = None
+    return relay.mode(node, host) or "direct"
 
 
 def targets(db: DbSession, model: CatalogModel, recipe: Optional[Recipe]) -> list[dict]:
@@ -234,6 +249,7 @@ def prune(db: DbSession) -> None:
 # ------------------------------------------------------------------ the protocol
 def desired(db: DbSession, node: Node) -> list[dict]:
     """`desired.downloads` for a machine whose agent lists "prefetch": each queued or downloading row."""
+    from forgeyard.machines import relay
     from forgeyard.models import hf_token
     from forgeyard.models.catalog import get_recipe
     from forgeyard.workloads import images
@@ -266,7 +282,8 @@ def desired(db: DbSession, node: Node) -> list[dict]:
                 check = images.check_for(eng["image"]) if FEATURE_IMAGE_IDS in (node.features or []) else None
                 if check is not None:
                     item["image_ids"] = check
-        out.append(item)
+        # 1.4 ("relay"): through the server when this machine may; only through it, without the token.
+        out.append(relay.attach(item, node, "download", row.uid))
     return out
 
 
@@ -284,6 +301,8 @@ def apply_status(db: DbSession, node: Node, reports: list) -> bool:
             continue  # cancelled here already, or another machine's
         if st.state in ACTIVE:
             row.state, row.reason, row.download = st.state, st.reason, st.download
+            if st.download and st.download.get("via") in ("direct", "server"):
+                row.via = st.download["via"]  # how it came, last (1.4, "relay")
             continue
         row.state, row.download, row.finished_at = st.state, None, now
         row.reason = None if st.state == "done" else (st.reason or st.state)

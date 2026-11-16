@@ -65,7 +65,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
-- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
+- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
 - **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Models → Sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
 
 ## 部署與閘道
@@ -73,7 +73,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 **部署**用一個引擎（recipe）執行一個模型，包含一個或多個副本。它的副本以 runtime 為 `model` 的 workload 執行，只在部署的頁面上看得到（不在 **Apps**）。Forgeyard 會：
 
 1. 把每個副本放到放得下的地方。在放得下的機器之間，依序比較：
-   - 過去一小時內**連不到**這個副本在那裡要下載的來源（模型的主機，例如 huggingface.co；引擎壓縮檔的主機，例如 github.com；或映像檔的 registry，例如 ghcr.io）的機器排在最後：只有其他機器都放不下時才會用它。名稱解析失敗、連線被拒或逾時、網路無法連線，才算「連不到」；HTTP 錯誤、權杖被拒或磁碟已滿則不算；
+   - 過去一小時內**連不到**這個副本在那裡要下載的來源（模型的主機，例如 huggingface.co；引擎壓縮檔的主機，例如 github.com；或映像檔的 registry，例如 ghcr.io）的機器排在最後：只有其他機器都放不下時才會用它。名稱解析失敗、連線被拒或逾時、網路無法連線，才算「連不到」；HTTP 錯誤、權杖被拒或磁碟已滿則不算。agent 能**經由伺服器**下載的機器（1.4；它的 **Internet access for downloads** 是 **Auto** 或 **Always through the server**）會改用這個方式取得模型和引擎壓縮檔，所以不會因此被避開（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）；
    - 盡可能把同一個部署的副本放在**不同機器**上；
    - 已經**快取了這個模型**的機器優先，其次是也已經有引擎的機器（process 引擎執行的壓縮檔，或容器引擎執行的映像檔）；
    - 然後是夠大的卡中最剛好的那張（讓整張空著的卡留給大模型）；

@@ -121,14 +121,19 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
                 recipe = get_recipe(db, dep.recipe)
                 key_envs[dep.workload_id] = recipe.api_key_env if recipe is not None else None
     can_expose = expose.can_guard(node)
-    out = {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision,
-            "replicas": [replica_desired(r, models=models, token=tokens.get(r.workload_id),
-                                         key_env=key_envs.get(r.workload_id), guard=guard,
-                                         image_ids=image_ids,
-                                         # Plain replicas get a key only when exposed; one that was
-                                         # exposed stays guarded (and stripped) until it restarts.
-                                         exposed=can_expose and r.workload.runtime != "model" and bool(r.secret))
-                         for r in reps]}
+    replicas = [replica_desired(r, models=models, token=tokens.get(r.workload_id), key_env=key_envs.get(r.workload_id),
+                                guard=guard, image_ids=image_ids,
+                                # Plain replicas get a key only when exposed; one that was exposed stays guarded
+                                # (and stripped) until it restarts.
+                                exposed=can_expose and r.workload.runtime != "model" and bool(r.secret))
+                for r in reps]
+    if node is not None:
+        from forgeyard.machines import relay
+
+        # 1.4 ("relay"): each model and engine block this machine may fetch through the server says so, and one
+        # it fetches only through the server carries no token (the server adds its own).
+        replicas = [relay.attach(d, node, "replica", r.uid) for d, r in zip(replicas, reps)]
+    out = {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision, "replicas": replicas}
     if node is not None and FEATURE_PREFETCH in features:
         from forgeyard.models import prefetch
 

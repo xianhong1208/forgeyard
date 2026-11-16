@@ -832,7 +832,29 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
 
-機器頁面上的 **Internet access for downloads**（admin）是為之後 1.4 更新的「經由伺服器轉送」預留的設定；在那之前每台機器都直接下載。
+自己連不到 Hugging Face 或 GitHub 的機器，會經由伺服器取得檔案：請看下一節。
+
+## 經由伺服器把模型送到離線機器
+
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型和引擎壓縮檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。
+
+1. 打開機器的頁面（admin）。在 **Models in cache** 底下設定 **Internet access for downloads**：
+   - **Auto**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
+   - **Always through the server**：給完全沒有網路的機器。它不會先直接試，所以不用先等一次失敗。
+   - **Direct only**：永遠不經由伺服器。
+2. 照常部署，或使用 **Download to…**。進度會在部署的頁面、Catalog 裡模型的下方和機器的頁面上顯示 *Downloading the model via the server: … of …*，完成的下載會顯示 *Downloaded … via the server*。對設成一律經由伺服器的機器，**Download to…** 對話框會標示 *via the server*。
+
+不變的部分：中斷後 agent 會從磁碟上已有的部分繼續下載（伺服器會把 `Range` 轉給來源）、會重試、按 **Cancel** 會立刻停止，而且每個檔案都像直接下載一樣檢查（大檔的 SHA-256、小檔的 git blob id、引擎壓縮檔釘選的 SHA-256、URL 模型記下的 SHA-256）。在路上被改過的檔案會被拒絕並刪除，所以伺服器並沒有因此多了任何它原本做不到的權限。
+
+不同的部分：
+
+- 受限模型由伺服器用它自己的 Hugging Face 權杖（**Models → Sources**），或部署自己的權杖下載。設成 **Always through the server** 的機器完全不會收到權杖。
+- 套用伺服器自己的模型來源規則：只限 https 和公開位址（除非設了 `MODEL_ALLOW_PRIVATE_HOSTS`），URL 模型只限允許的主機。
+- 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **Download to…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
+- 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
+- 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-strix could not reach huggingface.co just now; the model comes through the server*，或 *amd-strix downloads the model and the engine through the server (its internet access setting)*。
+
+**引擎映像檔**（container 變體）目前還不能轉送：請用檔案帶過去（[離線機器](#offline-machines)），或使用 process 變體（llama.cpp 的壓縮檔會經由伺服器）。機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它。
 
 ## 釋出機器上的磁碟空間
 

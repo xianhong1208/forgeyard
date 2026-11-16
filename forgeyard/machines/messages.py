@@ -71,8 +71,9 @@ def _count(value: Any) -> int:
 
 
 def _download(value: Any) -> Optional[dict]:
-    """{"phase": "model"|"engine"|"image", "done": bytes, "total": bytes, "file"?: name, and for an image
-    "layers", "layers_done", "unpacking"}: small, or dropped. `done` never exceeds a known total."""
+    """{"phase": "model"|"engine"|"image", "done": bytes, "total": bytes, "file"?: name, "via"?: "direct" |
+    "server", and for an image "layers", "layers_done", "unpacking"}: small, or dropped. `done` never exceeds a
+    known total."""
     if not isinstance(value, dict):
         return None
     done, total = _bytes(value.get("done")) or 0, _bytes(value.get("total")) or 0
@@ -87,6 +88,9 @@ def _download(value: Any) -> Optional[dict]:
         out["file"] = str(value["file"])[:200]
     if value.get("waiting"):
         out["waiting"] = str(value["waiting"])[:200]
+    # 1.4 ("relay"): how the bytes come: "server" (through the server's relay) or "direct".
+    if value.get("via") in ("direct", "server"):
+        out["via"] = value["via"]
     return out
 
 

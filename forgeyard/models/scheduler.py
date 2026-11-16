@@ -15,7 +15,9 @@
 - a machine that could not reach a source this replica would have to fetch from there (the model's
   host, the engine archive's or the image registry) in the last hour comes last; it is only used
   when no other machine fits. Within one machine, a later variant that needs no such fetch is
-  chosen over a first one that does;
+  chosen over a first one that does. A machine that relays (its agent speaks "relay", its `fetch_via`
+  is not "direct") gets the model and the engine archive through the server instead, so a failure to
+  reach their source does not count against it (forgeyard.machines.relay);
 - (1.3.1) a replica that is restarted goes back to the machine it ran on, when that machine still
   takes it;
 - (M4) a machine without another replica of the same deployment, so replicas spread over machines;
@@ -47,6 +49,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, utcnow
 from forgeyard.machines.protocol import FEATURE_ENGINE_ZIP, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
+from forgeyard.machines import relay
 from forgeyard.models import reach, render, sources
 from forgeyard.models.catalog import Context, context_for, deployment_of, model_block
 from forgeyard.models.estimate import EstimateError, gib
@@ -72,6 +75,10 @@ class Option:
     # of those hosts from this machine (it then comes last).
     needs: list = field(default_factory=list)
     blocked: Optional[reach.Failure] = None
+    # 1.4 ("relay"): the phases this machine fetches through the server ("model", "engine"), and the remembered
+    # failure to reach their source that no longer blocks it because they come through the server.
+    via_server: list = field(default_factory=list)
+    relayed: Optional[reach.Failure] = None
 
     def describe(self) -> str:
         where = f"GPU {', '.join(f'#{a.index}' for a in self.cards)}" if self.cards else "CPU"
@@ -106,6 +113,8 @@ class Verdict:
             out["needs"] = [phase for phase, _ in self.option.needs]
             if self.option.blocked is not None:
                 out["unreachable"] = reach.could_not_reach(self.name, self.option.blocked)
+            if self.option.via_server:
+                out["via_server"] = list(self.option.via_server)
         return out
 
 
@@ -132,9 +141,16 @@ def _fetches(node: Node, ctx: Context, variant: Variant, cached: bool) -> list[t
 
 
 def _option(node: Node, ctx: Context, variant: Variant, cards: list[Accelerator], left: int) -> Option:
+    """A machine that relays (1.4: its agent speaks "relay" and its `fetch_via` is "auto" or "server") is not
+    avoided for a host it could not reach when what comes from there comes through the server instead: the
+    model and the engine archive (images still are, until they can be relayed too)."""
     cached = _cached(node, ctx)
     needs = _fetches(node, ctx, variant, cached)
-    return Option(node, variant, cards, left, cached, needs, reach.blocked(node, needs))
+    direct = [(phase, host) for phase, host in needs if not relay.relays(node, phase)]
+    relayed = [(phase, host) for phase, host in needs if relay.relays(node, phase)]
+    via_server = [phase for phase, host in relayed if relay.mode(node, host) == "server"]
+    return Option(node, variant, cards, left, cached, needs, reach.blocked(node, direct), via_server,
+                  reach.blocked(node, relayed))
 
 
 def _runtime_problem(node: Node, variant: Variant) -> Optional[str]:
@@ -427,6 +443,8 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
         entry["needs"] = [phase for phase, _ in opt.needs]
         if opt.blocked is not None:
             entry["unreachable"] = reach.could_not_reach(opt.node.name, opt.blocked)
+        if opt.via_server:
+            entry["via_server"] = list(opt.via_server)
         placed.append(entry)
     return {"fits": True, "placed": placed, "machines": [v.as_dict() for v in first or []],
             "share_hint": share_hint(ctx, *hint_card)}
@@ -511,9 +529,18 @@ def placement_note(verdicts: list[Verdict], opt: Option, machine_id: Optional[in
             return f"{who}; the deployment is pinned to {opt.node.name}, so it tries there anyway"
         return f"{who}; no other machine can take it, so it tries there again"
     unaware = choose(verdicts, machine_id, siblings=siblings, prefer=prefer, avoid=False)
-    if unaware is None or unaware.node.id == opt.node.id or unaware.blocked is None:
-        return None
-    return f"{reach.could_not_reach(unaware.node.name, unaware.blocked)}; placed on {opt.node.name} instead"
+    if unaware is not None and unaware.node.id != opt.node.id and unaware.blocked is not None:
+        return f"{reach.could_not_reach(unaware.node.name, unaware.blocked)}; placed on {opt.node.name} instead"
+    if opt.via_server:
+        what = " and ".join(PHASE_WHAT[p] for p in opt.via_server)
+        if opt.relayed is not None:
+            return f"{reach.could_not_reach(opt.node.name, opt.relayed)} {reach.ago(opt.relayed)}; {what} " \
+                   f"{'comes' if len(opt.via_server) == 1 else 'come'} through the server"
+        return f"{opt.node.name} downloads {what} through the server (its internet access setting)"
+    return None
+
+
+PHASE_WHAT = {"model": "the model", "engine": "the engine", "image": "the engine image"}
 
 
 def fetch_failed(db: DbSession, r: Replica, node: Node) -> bool:

@@ -63,9 +63,8 @@ version until 1.0.
     (`meta.files[0].sha256`, with the machine and time; audited as `model.checksum_recorded`), and
     every later download must match it.
   - **Internet access per machine** (`nodes.fetch_via`: `auto`, `server`, `direct`; admins only,
-    `PUT /api/machines/{id}/fetch-via`, audited as `node.fetch_via_changed`). Stored for the relay
-    through the server, which comes in a later 1.4 change; until then every machine downloads
-    directly.
+    `PUT /api/machines/{id}/fetch-via`, audited as `node.fetch_via_changed`), used by the relay through
+    the server (below).
   - Agent protocol feature `prefetch`: `desired.downloads` beside the replicas, `status.downloads` back.
     The agent uses the code a replica's download uses (locks, resume, checksums, cancel) and runs at most
     two at a time. Agents before 1.4 are listed as "update the agent" (rebuild the agent image); an agent
@@ -73,6 +72,36 @@ version until 1.0.
   - Migration `0015`: table `model_downloads` (what, where, state, progress, who asked, when, why it
     failed), and `nodes.fetch_via`, `auto` for every machine. Finished downloads are kept 30 days, at
     most 20 per machine. The downgrade drops both.
+- **Downloads through the server for machines that cannot reach the source** (part of #35, D1/D3). A
+  machine with no internet access of its own (amd-strix behind its SSH tunnel) gets model files and
+  engine archives **through the server**, which fetches them and passes the bytes on, storing nothing.
+  The agent asks the way it already talks to the server: outbound HTTPS with its pinned CA and machine
+  credential, so the tunnel that carries its connection carries this too.
+  - **Internet access for downloads** on the machine's page (admins) now acts: **Auto** (the default)
+    downloads directly and switches to the server after a network failure reaching the source (the
+    name does not resolve, the connection is refused, reset or times out, the network is unreachable;
+    never an HTTP error or a checksum), remembering the host for an hour; **Always through the server**
+    never tries directly; **Direct only** never relays.
+  - `GET /agent/v1/relay/{replica|download}/{id}/model[/{file}]` and `…/engine`: served only for what
+    that machine's current desired state names (a replica placed there and wanted running, or a
+    download to it under way), from the source URL the server builds from the catalog entry or recipe,
+    with the server's (or the deployment's) Hugging Face token and its own model-source rules. `Range`
+    is passed through, the body streamed in 1 MiB chunks with backpressure; a relay that is no longer
+    wanted (download cancelled, deployment removed, machine revoked or set to Direct only) is closed
+    within 2 s. Two relays per machine and four in all (429 with `Retry-After` beyond). One log line per
+    file: what, to which machine, how much, how fast, how it ended.
+  - The agent keeps its own resume, retries, cancel, progress and checks: a relayed file that fails its
+    SHA-256 (or git blob id, or the engine's pinned SHA-256) is refused and deleted. The Hugging Face
+    token is never sent to a machine set to Always through the server; nothing but `Range` goes from the
+    agent to the relay.
+  - Progress says **via the server** (deployment page, Library, machine page; `download.via` and the
+    download's `via`). The Download to… dialog says *via the server* for such a machine.
+  - Placement (#71): a machine whose agent relays and whose setting is not Direct only is no longer
+    avoided for the model or the engine archive of a host it could not reach; the deployment's page says
+    *… could not reach huggingface.co just now; the model comes through the server*. Engine images are
+    not relayed yet (the next #35 change) and still count against it.
+  - Agent protocol feature `relay`: listed by both sides; model and engine blocks carry `relay: {path,
+    mode}`. Older agents are never sent it and download directly as before. Rebuild the agent image.
 - **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
   time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
   line per key, model, provider or person (admins, with **Everyone**). The Requests tab charts

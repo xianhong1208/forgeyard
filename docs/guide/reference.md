@@ -947,18 +947,20 @@ header). Everyone signed in can look; admins and operators start and cancel down
 | `POST /api/downloads` with `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | Starts a download on each machine that can take it; `engine` is on by default, and `recipe` defaults to the first recipe that serves the model |
 | `GET /api/downloads?model_id=<id>&machine_id=<id>` | The downloads under way first, then the finished ones (the last 100) |
 | `POST /api/downloads/{id}/cancel` | Cancels one under way; its agent stops it at once and keeps what is on disk |
-| `PUT /api/machines/{id}/fetch-via` with `{"fetch_via": "auto"}` | Admins only: how that machine reaches the internet for downloads, `auto`, `server` or `direct` (kept for the relay through the server, which comes later; every machine downloads directly until then) |
+| `PUT /api/machines/{id}/fetch-via` with `{"fetch_via": "auto"}` | Admins only: how that machine fetches models and engine archives: `auto` (directly, through the server after a network failure), `server` (always through the server) or `direct` (never through it). Its agent gets the new way at once |
 
 Each machine in `targets` has a `state`: `ok`, `cached` (already there), `downloading`, `too_old` (an
 agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB margin is more than the
 cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
 the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
-when no variant of the recipe runs there. The variant is the one the machine would run: a GPU variant
+when no variant of the recipe runs there; and `via`, how the model would come (`direct`, `auto` or
+`server`). The variant is the one the machine would run: a GPU variant
 when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
 
 A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
 `state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
-shape as a deployment replica's), `reason`, `via` (`direct` until the relay comes), `requested_by`,
+shape as a deployment replica's, with `via: "server"` while the bytes come through the server),
+`reason`, `via` (`direct`, or `server` once it came through the server), `requested_by`,
 `created_at`, `finished_at` and `waiting` (the machine is offline). Finished ones are kept 30 days, at
 most 20 per machine.
 
@@ -986,6 +988,48 @@ locks, resume from partial files, checksums and cancel; an image with the pull p
 starts nothing, runs at most two at a time and reports `status.downloads` (`{id, state, reason,
 download}`); a download missing from the next list is cancelled. Migration `0015` adds the table
 `model_downloads` and the column `nodes.fetch_via` (`auto` for every existing machine).
+
+### Downloads through the server (the relay)
+
+The agent protocol feature `relay` (agents and servers from 1.4). To an agent that lists it, on a
+machine whose `fetch_via` is `auto` or `server`, every model block (Hugging Face or URL) and engine
+archive block of a desired replica or download carries `relay: {path, mode}`: `mode` is `server`
+(always through the server; set so, or `auto` with a network failure to that host remembered in the
+last hour) or `auto` (directly first, through the server after a network failure). A `server` model
+block carries no `token`. The agent then fetches from its own server, never from a host the server
+names:
+
+| Request | What it returns |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/model/{file path}` | One file of a Hugging Face model |
+| `GET /agent/v1/relay/{replica\|download}/{id}/model` | The file of a URL model |
+| `GET /agent/v1/relay/{replica\|download}/{id}/engine` | The engine archive of a process variant |
+
+`{id}` is the replica's or the download's id from the desired list. The request carries the machine
+credential (`Authorization: Bearer …`) and at most one `Range: bytes=N-` (or `N-M`), which is passed
+on to the source; the answer is the source's 200 or 206 with `Content-Length` and `Content-Range`,
+streamed and stored nowhere. Browsers (any `Origin`) are refused.
+
+The server serves only what the machine's **current** desired state names: a replica placed there
+and wanted running, or a download to it that is queued or under way, and only a file that model
+lists. It builds the source URL itself from the catalog entry or the recipe, with its own Hugging Face
+token (or the deployment's) and its own model-source rules (`MODEL_ALLOW_PRIVATE_HOSTS`, the URL
+hosts). It checks every 2 seconds that the relay is still wanted, and closes it when not.
+
+| Status | `code` | When |
+|---|---|---|
+| 401 | `credential_refused` | No credential, or a revoked one |
+| 403 | `relay_off` | The machine is set to `direct`, or its agent does not speak `relay` |
+| 403 | `browser_refused` | The request has an `Origin` |
+| 403 | `source_refused` | The source refused access (a gated model without a token that works) |
+| 403 | `source_blocked` | The source's address is not allowed by the server's rules |
+| 404 | `relay_not_wanted` | Nothing in the machine's desired state has that id, file or engine |
+| 416 | `bad_range`, `range_not_satisfiable` | More than one range, or past the end |
+| 429 | `relay_busy` | Two relays under way for that machine, or four in all; `Retry-After: 5` |
+| 502 | `source_unreachable`, `source_failed` | The server could not reach the source, or it answered an error |
+
+The agent stops on 401, 403 and 404 (with the server's words), waits out 429 without counting it as a
+try, and retries the rest like a network error. Its progress then has `download.via: "server"`.
 
 ## Setup health checks
 

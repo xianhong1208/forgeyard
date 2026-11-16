@@ -15,6 +15,10 @@ machine and shared by every replica there.
   directory mounted read-only, and nothing else of the host.
 - A Hugging Face token arrives with the desired state, is used for these requests only and is
   never written to disk or logged.
+- **Through the server** (1.4, "relay", agent/relay.py): a block with `relay` is fetched from the agent's own
+  server instead, always or after a network failure reaching the source; the same resume, retries, cancel,
+  progress and checks apply, so a relayed file that fails its checksum is refused and deleted like any other.
+  No token goes to the server.
 - **Listing and removing** (1.4, "cache_admin"): `info()` reports each model with its size (a
   revision, and each GGUF file of it; a single-file model; an engine archive) and the partial
   downloads. `remove()` deletes one, like `hf cache rm`: the revision's links, its marker and its refs,
@@ -44,8 +48,9 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
+from forgeyard.agent import relay as relay_client
 from forgeyard.agent.watchdog import Watchdog
 from forgeyard.models import cache_keys, fetch, sources
 
@@ -226,6 +231,9 @@ class ModelCache:
         self.local_dirs = [str(d) for d in (local_dirs or [])]
         self._resolver = resolver
         self._disk_usage = disk_usage
+        # 1.4 ("relay"): the agent's client to its server's relay, set once the agent knows its server and
+        # credential (agent/client.py). None: everything is fetched directly.
+        self.relay_client: Optional[relay_client.RelayClient] = None
         self._locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
         self.error: Optional[str] = None
@@ -508,9 +516,17 @@ class ModelCache:
                              f"(+1 GiB margin), {free / 1024**3:.1f} GiB free")
 
     def _fetch(self, url: str, dest: Path, size: int, *, headers: dict, progress: Progress, phase: str,
-               base: int, total: int, label: str, cancel: threading.Event, sha256: Optional[str] = None) -> None:
+               base: int, total: int, label: str, cancel: threading.Event, sha256: Optional[str] = None,
+               relay: Optional[dict] = None, via: Optional[Callable[[str], None]] = None) -> None:
         """Download url into dest (resuming a partial file), reporting base+done of total (never more
-        than total). A cancel ends the transfer at once, even a read waiting on a stalled connection."""
+        than total). A cancel ends the transfer at once, even a read waiting on a stalled connection.
+
+        `relay` (1.4, {path, mode}): the same bytes from the agent's server instead (agent/relay.py), always
+        ("server") or after a network failure reaching `url` ("auto"); `via("server")` is called when they
+        start coming that way. Only `Range` goes to the server, never `headers` (a token)."""
+        client = self.relay_client if relay is not None else None
+        route = client.route(relay, url) if client is not None else "direct"
+        told = False
         attempt = 0
         while True:
             _check(cancel)
@@ -520,11 +536,17 @@ class ModelCache:
                 have = 0
             if size and have == size:
                 return
-            h = {**headers}
+            h = {**headers} if route == "direct" else {}
             if have:
                 h["Range"] = f"bytes={have}-"
+            if route == "server" and not told:
+                told = True
+                if via is not None:
+                    via("server")
             try:
-                with fetch.open_url(url, self.policy(), headers=h) as resp, Watchdog(resp.abort, cancel):
+                opened = client.open(relay["path"], h) if route == "server" else fetch.open_url(url, self.policy(),
+                                                                                                 headers=h)
+                with opened as resp, Watchdog(resp.abort, cancel):
                     if resp.status == 416 and size and have >= size:
                         return
                     if resp.status >= 400:
@@ -558,14 +580,32 @@ class ModelCache:
                 if size and dest.stat().st_size != size:
                     raise fetch.FetchError(f"incomplete ({dest.stat().st_size} of {size} bytes)")
                 return
+            except relay_client.RelayRefused as e:
+                _check(cancel)
+                raise CacheError(f"{label}: through the server: {e}") from None
+            except relay_client.RelayBusy as e:
+                _check(cancel)
+                log.info("Download of %s: %s; waiting %.0f s.", label, e, e.wait)
+                if cancel.wait(e.wait):
+                    raise Cancelled("cancelled")
             except (fetch.FetchError, OSError, http.client.HTTPException) as e:
                 _check(cancel)  # the cancel itself broke the connection
                 if isinstance(e, fetch.BlockedAddress):
                     raise CacheError(f"{label}: {e}") from None
+                if route == "direct" and client is not None and relay_client.failure_is_network(e):
+                    # "auto": the source cannot be reached from here; the server fetches it instead, resuming
+                    # from what is on disk (and the next files from this host go there at once).
+                    host = (urlsplit(url).hostname or "").lower()
+                    client.mark_unreachable(host)
+                    log.warning("Download of %s: could not reach %s directly (%s); downloading it through the "
+                                "server.", label, host, e)
+                    route = "server"
+                    continue
                 attempt += 1
+                where = "through the server: " if route == "server" else ""
                 if attempt > RETRIES:
-                    raise CacheError(f"{label}: download failed: {e}") from None
-                log.warning("Download of %s failed (%s); retrying (%d of %d).", label, e, attempt, RETRIES)
+                    raise CacheError(f"{label}: download failed: {where}{e}") from None
+                log.warning("Download of %s failed (%s%s); retrying (%d of %d).", label, where, e, attempt, RETRIES)
                 if cancel.wait(min(30, 2 ** attempt)):
                     raise Cancelled("cancelled")
 
@@ -591,8 +631,10 @@ class ModelCache:
                 raise CacheError(f"{label}: content does not match its git blob id")
 
     def ensure_model(self, model: dict, *, token: Optional[str] = None, progress: Optional[Progress] = None,
-                     cancel: Optional[threading.Event] = None) -> dict:
-        """Make the model available in the cache (downloading what is missing); its host paths."""
+                     cancel: Optional[threading.Event] = None, relay: Optional[dict] = None,
+                     via: Optional[Callable[[str], None]] = None) -> dict:
+        """Make the model available in the cache (downloading what is missing); its host paths. `relay` (1.4):
+        the block's relay (agent/relay.py parse), `via` told when the bytes come through the server."""
         progress = progress or (lambda *a: None)
         cancel = cancel or threading.Event()
         if self.error:
@@ -608,12 +650,13 @@ class ModelCache:
         with self._locked(key, cancel), self._shared("partial", cancel), self._shared(self._files_lock(model), cancel):
             if not self.is_cached(model):
                 if model["kind"] == "hf":
-                    self._download_hf(model, token, progress, cancel)
+                    self._download_hf(model, token, progress, cancel, relay, via)
                 else:
-                    self._download_url(model, progress, cancel)
+                    self._download_url(model, progress, cancel, relay, via)
         return self.paths(model)
 
-    def _download_hf(self, model: dict, token: Optional[str], progress: Progress, cancel: threading.Event) -> None:
+    def _download_hf(self, model: dict, token: Optional[str], progress: Progress, cancel: threading.Event,
+                     relay: Optional[dict] = None, via: Optional[Callable[[str], None]] = None) -> None:
         base = self.root / sources.hf_dir(model["repo"])
         blobs = base / "blobs"
         snap = base / "snapshots" / model["revision"]
@@ -651,8 +694,10 @@ class ModelCache:
                 # What the other files have on disk, plus what this one has (the fetch counts it from
                 # its own partial file): each byte once, so a resumed download never passes 100%.
                 others = sum(on_disk(g) for j, g in enumerate(files) if j != i)
+                # Through the server: the same file, named by its path in the model (the server checks it is one).
+                file_relay = {**relay, "path": f"{relay['path']}/{quote(f['path'])}"} if relay else None
                 self._fetch(url, part, f["size"], headers=headers, progress=progress, phase="model", base=others,
-                            total=total, label=f["path"], cancel=cancel)
+                            total=total, label=f["path"], cancel=cancel, relay=file_relay, via=via)
                 self._verify(part, f, f["path"], cancel)
                 os.chmod(part, 0o444)
                 os.replace(part, blob)
@@ -686,7 +731,8 @@ class ModelCache:
         log.info("Cached %s@%s (%d files, %.2f GiB).", model["repo"], model["revision"][:12], len(files),
                  total / 1024**3)
 
-    def _download_url(self, model: dict, progress: Progress, cancel: threading.Event) -> None:
+    def _download_url(self, model: dict, progress: Progress, cancel: threading.Event, relay: Optional[dict] = None,
+                      via: Optional[Callable[[str], None]] = None) -> None:
         base = self.root / sources.url_dir(model["url"])
         base.mkdir(parents=True, exist_ok=True)
         os.chmod(base, 0o755)
@@ -695,7 +741,7 @@ class ModelCache:
         size = model.get("size") or 0
         self._check_space(max(0, size - (part.stat().st_size if part.exists() else 0)))
         self._fetch(model["url"], part, size, headers={}, progress=progress, phase="model", base=0, total=size,
-                    label=name, cancel=cancel)
+                    label=name, cancel=cancel, relay=relay, via=via)
         # No checksum is published for a file at a URL (1.4, D8): its SHA-256 is computed here and reported
         # (model_cache.models[].sha256); the server records the first one, and sends it with every later
         # download of the model, which must then match.
@@ -713,7 +759,8 @@ class ModelCache:
 
     # ------------------------------------------------------------------ engines (process variants)
     def ensure_engine(self, engine: dict, *, progress: Optional[Progress] = None,
-                      cancel: Optional[threading.Event] = None) -> Path:
+                      cancel: Optional[threading.Event] = None, relay: Optional[dict] = None,
+                      via: Optional[Callable[[str], None]] = None) -> Path:
         """Download, verify and unpack a pinned engine archive; the absolute path of its program."""
         progress = progress or (lambda *a: None)
         cancel = cancel or threading.Event()
@@ -736,7 +783,7 @@ class ModelCache:
                 part = self.root / ".partial" / f"engine-{sha}.part"
                 self._check_space(512 * 1024**2)
                 self._fetch(url, part, 0, headers={}, progress=progress, phase="engine", base=0, total=0,
-                            label=posixpath.basename(url), cancel=cancel)
+                            label=posixpath.basename(url), cancel=cancel, relay=relay, via=via)
                 got = self._sha256(part, cancel)
                 if got != sha:
                     part.unlink(missing_ok=True)

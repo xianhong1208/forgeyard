@@ -139,7 +139,9 @@ sudo forgeyard agent config
 
 **你會看到：** 那台機器上的副本停在 **backoff**，顯示 *Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co: …*（llama.cpp 引擎壓縮檔則是 *github.com*，映像檔則是 *could not be pulled*），接著部署的頁面顯示 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*。
 
-**原因：** agent 會嘗試下載五次，總共大約一分鐘；如果還是連不到來源（名稱解析失敗、連線被拒或逾時、網路無法連線），伺服器就會記住這台機器一小時內連不到那個主機。沒有指定這台機器的部署，它的副本會重新放到另一台放得下的機器上；之後需要從那個主機下載的新副本，也會先放到其他機器。已經有這個模型（和引擎）的機器不需要下載，所以仍然會用來放它。
+**原因：** 這台機器設成 **Direct only**，或它的 agent 比 1.4 舊（不能經由伺服器下載）。設成 **Auto**（預設）或 **Always through the server** 時，1.4 的 agent 會改經由伺服器取得模型和引擎壓縮檔，就不會發生以下的情況（見下方）。
+
+agent 會嘗試下載五次，總共大約一分鐘；如果還是連不到來源（名稱解析失敗、連線被拒或逾時、網路無法連線），伺服器就會記住這台機器一小時內連不到那個主機。沒有指定這台機器的部署，它的副本會重新放到另一台放得下的機器上；之後需要從那個主機下載的新副本，也會先放到其他機器。已經有這個模型（和引擎）的機器不需要下載，所以仍然會用來放它。
 
 在以下情況，副本會留在這台機器上繼續重試：
 
@@ -150,9 +152,18 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：**
 
+- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）。之後副本的進度會顯示 *via the server*。引擎映像檔目前還不能轉送；
 - 讓這台機器連得到那個主機（DNS、防火牆規則、proxy 路由）；Forgeyard 會在最後一次失敗一小時後，或伺服器重新啟動後，再把新的副本放到這台機器上試試；
 - 或把檔案帶過去：從已經有這個模型的機器複製模型快取（[搬移模型快取](how-to.md#move-a-model-cache)）、用 `docker load` 載入引擎映像檔（請看[副本失敗：映像檔不在這台機器上](#a-replica-fails-the-image-is-not-on-this-machine)），或把模型從本機目錄以 `local://` 模型的方式加入；
 - 或使用這台機器連得到的鏡像站（`HF_ENDPOINT`，請看 [Hugging Face 下載很慢](#hugging-face-downloads-are-slow)）。
+
+**經由伺服器仍然失敗：**
+
+- *download failed: through the server: the server could not reach huggingface.co: …*：伺服器也連不到來源。請修好伺服器的網路，或使用鏡像站（`HF_ENDPOINT`）。
+- *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
+- *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
+- *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
+- 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-strix: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。
 
 ## vLLM 在共用的卡上無法啟動
 

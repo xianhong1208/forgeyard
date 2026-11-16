@@ -8,7 +8,7 @@ import { Link } from "react-router";
 
 import { DownloadDialog, DownloadList } from "./DownloadTo";
 import { api, errorText } from "../lib/api";
-import { FETCH_VIA_LABEL, isActive, recentDownloads } from "../lib/downloads";
+import { FETCH_VIA_HINT, FETCH_VIA_LABEL, isActive, recentDownloads } from "../lib/downloads";
 import { cacheRows, diskLine, diskShares, removeBlocked, removeQuestion, userHref, type CacheRow } from "../lib/cache";
 import { bytes } from "../lib/machines";
 import type { DownloadsResponse, FetchVia, Machine, MachineCache } from "../lib/types";
@@ -148,6 +148,7 @@ export function ModelCacheSection({ m, poll, canManage = false, onChanged, onErr
 function FetchViaField({ m, onChanged, onError }: { m: Machine; onChanged: (text: string) => void; onError: (text: string) => void }) {
   const [saving, setSaving] = useState(false);
   const value: FetchVia = m.fetch_via ?? "auto";
+  const relays = (m.features ?? []).includes("relay");
   const save = async (next: FetchVia) => {
     setSaving(true);
     try {
@@ -165,8 +166,11 @@ function FetchViaField({ m, onChanged, onError }: { m: Machine; onChanged: (text
       <select id={`fetch-via-${m.id}`} value={value} disabled={saving} onChange={(e) => void save(e.target.value as FetchVia)}>
         {(Object.keys(FETCH_VIA_LABEL) as FetchVia[]).map((k) => <option key={k} value={k}>{FETCH_VIA_LABEL[k]}</option>)}
       </select>
-      <p className="field-hint">Auto: directly, and through the server after a network failure. Kept for the relay through the server,
-        which comes in a later 1.4 update; until then every machine downloads directly.</p>
+      <p className="field-hint">
+        {FETCH_VIA_HINT[value]}
+        {value !== "direct" && !relays && " This machine's agent cannot download through the server yet: update the agent. Until then it downloads directly."}
+        {" "}Engine images are still pulled directly.
+      </p>
     </div>
   );
 }
