@@ -5,10 +5,12 @@ takes Range and refuses the registry's token (as signed CDN URLs do). For the im
 
 from __future__ import annotations
 
+import errno
 import gzip
 import hashlib
 import io
 import json
+import socket
 import tarfile
 import threading
 from dataclasses import dataclass, field
@@ -16,6 +18,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 from forgeyard.workloads import images
+
+
+class _V6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
 
 OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 OCI_INDEX = "application/vnd.oci.image.index.v1+json"
@@ -190,19 +196,39 @@ class FakeRegistry:
                     return self._send(206, data[start:], {"Content-Range": f"bytes {start}-{len(data) - 1}/{len(data)}"})
                 return self._send(200, data)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
+        # The CDN redirect names `localhost`, which resolves to ::1 first on some hosts (GitHub's runners) and
+        # to 127.0.0.1 only on others: listen on both loopbacks, on one port, so either answers.
+        self.servers = []
+        for _ in range(20):
+            v4 = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            port = v4.server_address[1]
+            try:
+                v6 = _V6Server(("::1", port), Handler)
+            except OSError as e:
+                if e.errno == errno.EADDRINUSE:
+                    v4.server_close()
+                    continue
+                self.servers = [v4]       # no IPv6 loopback here: localhost cannot mean ::1 either
+                break
+            self.servers = [v4, v6]
+            break
+        if not self.servers:
+            raise RuntimeError("no port free on both 127.0.0.1 and ::1")
+        self.server = self.servers[0]
         self.port = self.server.server_address[1]
         self.host = f"127.0.0.1:{self.port}"
         self.url = f"http://{self.host}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        for srv in self.servers:
+            srv.daemon_threads = True
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     def blob_requests(self, d: Optional[str] = None) -> list[dict]:
         return [r for r in self.requests if r["path"].startswith("/cdn/") and (d is None or r["path"].endswith(d))]
 
     def close(self):
-        self.server.shutdown()
-        self.server.server_close()
+        for srv in self.servers:
+            srv.shutdown()
+            srv.server_close()
 
 
 def docker_save(img: Image, arch: str = "amd64", tags=None, compress: bool = False) -> bytes:
