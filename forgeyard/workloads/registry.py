@@ -58,6 +58,18 @@ def split_image(image: str) -> tuple[str, str, str, Optional[str]]:
     return registry, repo, tag, digest or None
 
 
+def registry_host(image: Optional[str]) -> Optional[str]:
+    """The registry an image reference is pulled from, as a host name: ghcr.io/x/y:tag -> ghcr.io;
+    python:3.13 -> docker.io. The server and the agent both key "this machine cannot reach it" on it, so it
+    lives here, where the agent can import it (no database)."""
+    if not image:
+        return None
+    first, slash, _ = image.partition("/")
+    if slash and ("." in first or ":" in first or first == "localhost"):
+        return first.split(":", 1)[0].lower()
+    return "docker.io"
+
+
 def tag_ref(image: str) -> str:
     """The name a loaded copy is tagged with: 'ghcr.io/a/b:tag@sha256:…' -> 'ghcr.io/a/b:tag' (as written in
     the recipe; Docker shortens 'docker.io/library/x' to 'x' itself)."""

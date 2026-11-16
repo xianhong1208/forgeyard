@@ -311,6 +311,9 @@ version until 1.0.
 
 ### Fixed
 
+- **An error the agent did not expect while starting a replica is now that replica's reason** in the console
+  ("the agent failed while starting it (…)"), followed by the usual backoff. It used to read "ended while the
+  agent was not watching", with the cause only in the agent's log.
 - **`agent init` and `install.sh` no longer write an invalid `agent.toml` when a tool's message has several
   lines.** A note in the file quoted, for example, `podman info`'s multi-line error on a host without a shared
   mount; its second line was not a comment, so the file was not valid TOML and the install stopped at

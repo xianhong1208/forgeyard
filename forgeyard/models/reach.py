@@ -34,6 +34,7 @@ from urllib.parse import urlsplit
 
 from forgeyard.db import Node, Replica, as_utc, utcnow
 from forgeyard.models import fetch
+from forgeyard.workloads.registry import registry_host
 
 TTL = timedelta(hours=1)
 
@@ -91,13 +92,9 @@ def engine_host(engine: Optional[dict]) -> Optional[str]:
 
 
 def registry(image: Optional[str]) -> Optional[str]:
-    """The registry of an image reference: ghcr.io/x/y:tag -> ghcr.io; python:3.13 -> docker.io."""
-    if not image:
-        return None
-    first, slash, _ = image.partition("/")
-    if slash and ("." in first or ":" in first or first == "localhost"):
-        return first.split(":", 1)[0].lower()
-    return "docker.io"
+    """The registry of an image reference: ghcr.io/x/y:tag -> ghcr.io; python:3.13 -> docker.io (the agent's
+    own copy is the same function: `workloads.registry.registry_host`)."""
+    return registry_host(image)
 
 
 def network_error(text: Optional[str]) -> bool:

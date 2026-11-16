@@ -39,7 +39,8 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Optional
 
 from forgeyard.workloads import images
-from forgeyard.workloads.registry import INDEX_TYPES, MANIFEST_TYPES, parse_manifest, split_image, tag_ref
+from forgeyard.workloads.registry import (INDEX_TYPES, MANIFEST_TYPES, parse_manifest, registry_host, split_image,
+                                         tag_ref)
 
 log = logging.getLogger("forgeyard.agent")
 
@@ -69,9 +70,7 @@ class ImageRelay:
 
     def host(self, image: str) -> str:
         """The registry a direct pull goes to (what "auto" remembers as unreachable)."""
-        from forgeyard.models.reach import registry
-
-        return registry(image) or ""
+        return registry_host(image) or ""
 
     def first(self, image: str) -> bool:
         """Through the server at once, without trying the registry first."""

@@ -696,6 +696,21 @@ class Supervisor:
         return rec.guarded or rec.key_env is not None
 
     async def _start(self, rec: Record) -> None:
+        """Start the replica; an unexpected error on the way (a bug, a missing module) ends this attempt with that
+        error as its reason, shown in the console, and the usual backoff follows. Without this the replica was
+        left "starting" with no process or container, and the next pass reported it as "ended while the agent was
+        not watching": the real error was only in the agent's log."""
+        try:
+            await self._start_steps(rec)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - shown, never fatal
+            log.exception("Replica %s of %s: the agent failed while starting it.", rec.id[:12], rec.workload)
+            if rec.id in self.records and rec.state in LIVE:
+                text = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                await self._ended(rec, None, reason=f"the agent failed while starting it ({text})"[:300])
+
+    async def _start_steps(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
         if self._guarded(rec) and rec.id not in self.keys:
             # Its internal key comes with the server's next `desired` (an agent restarted while the
