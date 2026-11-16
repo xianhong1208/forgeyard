@@ -138,6 +138,9 @@ def _hello(db: DbSession, node_id: int, hello: HelloIn, ip: str) -> Optional[dic
     if node is None:
         return None
     store.apply_hello(db, node, hello, ip)
+    from forgeyard.models import prefetch
+
+    prefetch.on_hello(db, node)
     return {"node_id": node.id, "name": node.name}
 
 
@@ -183,7 +186,9 @@ def _cache(db: DbSession, node_id: int, model_cache: dict) -> bool:
     node = _live_node(db, node_id)
     if node is None:
         return False
-    node.model_cache = dict(model_cache)
+    from forgeyard.models import prefetch
+
+    prefetch.store_cache(db, node, model_cache)
     return True
 
 

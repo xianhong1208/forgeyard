@@ -20,7 +20,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas, services
   and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps
   every card's memory to the models and apps that hold it, and lists the models in its
-  cache with their sizes, to remove the ones no deployment there uses.
+  cache with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
+  and its engine on chosen machines before you deploy it, with progress.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,

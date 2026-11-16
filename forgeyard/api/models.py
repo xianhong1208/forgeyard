@@ -447,9 +447,16 @@ def remove_model(model_id: int, caller: Caller = Depends(require_admin), db: DbS
     if used:
         raise fail(409, "model_in_use", f"{m.name} is deployed as {', '.join(used)}. Delete those deployments first.")
     name = m.name
+    from forgeyard.machines.hub import hub
+    from forgeyard.models import prefetch
+
+    # Its downloads ahead of a deployment (1.4) go with it (ON DELETE CASCADE); their agents stop them.
+    downloading = {r.node_id for r in prefetch.active_rows(db, model_id=m.id)}
     db.delete(m)
     audit.record(db, "model.removed", actor=caller.user, target=name, ip=caller.ip, model_id=model_id)
     db.commit()
+    for node_id in downloading:
+        hub.poke(node_id)
     return {"ok": True}
 
 

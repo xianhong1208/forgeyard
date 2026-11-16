@@ -189,7 +189,8 @@ def validate_model(model: dict, local_dirs: list[str]) -> dict:
         if src.kind != "url":
             raise CacheError("bad model URL")
         files = model.get("files") or [{}]
-        out.update(url=url, size=max(0, int(files[0].get("size") or 0)))
+        # The SHA-256 the server recorded after the first complete download of this URL (1.4, D8), if any.
+        out.update(url=url, size=max(0, int(files[0].get("size") or 0)), sha256=_hex(files[0].get("sha256"), 64))
     elif kind == "local":
         path = posixpath.normpath(str(model.get("path") or ""))
         if not sources.local_allowed(path, local_dirs):
@@ -347,9 +348,12 @@ class ModelCache:
                 continue
             files = [p for p in d.iterdir() if p.name != marker.name and (p.is_file() or p.is_symlink())]
             name = data.get("file") if isinstance(data.get("file"), str) else None
-            out.append({"key": f"url/{d.name}", "kind": "url", "file": (name or "")[:200] or None,
-                        "bytes": sum(p.lstat().st_size for p in files), "files": len(files),
-                        "completed_at": _number(data.get("completed_at")), "_dir": d})
+            entry = {"key": f"url/{d.name}", "kind": "url", "file": (name or "")[:200] or None,
+                     "bytes": sum(p.lstat().st_size for p in files), "files": len(files),
+                     "completed_at": _number(data.get("completed_at")), "_dir": d}
+            if _hex(data.get("sha256"), 64):
+                entry["sha256"] = data["sha256"]  # 1.4 (D8): computed after the download
+            out.append(entry)
         return out
 
     def _engine_dirs(self) -> list[tuple[Path, str, str]]:
@@ -692,10 +696,19 @@ class ModelCache:
         self._check_space(max(0, size - (part.stat().st_size if part.exists() else 0)))
         self._fetch(model["url"], part, size, headers={}, progress=progress, phase="model", base=0, total=size,
                     label=name, cancel=cancel)
+        # No checksum is published for a file at a URL (1.4, D8): its SHA-256 is computed here and reported
+        # (model_cache.models[].sha256); the server records the first one, and sends it with every later
+        # download of the model, which must then match.
+        got = self._sha256(part, cancel)
+        want = model.get("sha256")
+        if want and got != want:
+            part.unlink(missing_ok=True)
+            raise CacheError(f"{name}: SHA-256 mismatch (got {got[:12]}…, expected {want[:12]}…, recorded after "
+                             "its first download): the file at this URL changed")
         os.chmod(part, 0o444)
         os.replace(part, base / name)
         manifest = base / f"{MANIFEST_DIR}.json"
-        manifest.write_text(json.dumps({"url": model["url"], "file": name, "completed_at": time.time()}))
+        manifest.write_text(json.dumps({"url": model["url"], "file": name, "sha256": got, "completed_at": time.time()}))
         os.chmod(manifest, 0o644)
 
     # ------------------------------------------------------------------ engines (process variants)

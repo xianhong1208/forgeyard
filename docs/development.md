@@ -92,13 +92,13 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
-| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list, the server's Hugging Face token |
+| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list, the server's Hugging Face token, downloads ahead of a deployment (`prefetch.py`, with `api/downloads.py`) |
 | `forgeyard/recipes/` | the built-in engine recipes (YAML), images pinned by digest |
 | `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, HTTPS and the CA, secrets at rest, `secrets reset` |
 | `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`) |
 | `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
-| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks |
+| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks, downloads ahead of a deployment (`prefetch.py`) |
 | `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, the published images' names (`images.py`), the server image's health check |
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |

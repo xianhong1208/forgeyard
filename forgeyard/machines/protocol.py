@@ -20,13 +20,16 @@ agent -> server
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
+             (1.4, "prefetch") `status.downloads` reports each download asked for in `desired.downloads`:
+             {id, state (queued | downloading | done | failed | cancelled), reason, download}
 
 server -> agent
   welcome    answer to hello: machine id and name, heartbeat interval, offline threshold,
              and (M2) the features the server speaks
   desired    (M2) every replica this machine should run, with its full spec and generation; sent
              right after welcome and whenever it changes. The agent converges on it; it is
-             idempotent, so a restart or reconnect just converges again
+             idempotent, so a restart or reconnect just converges again. (1.4, "prefetch") beside the
+             replicas, `downloads`: what to download into the model cache without starting anything
   logs_request (M2) the last N lines of one replica's output
   cache_remove / cache_prune (1.4, "cache_admin") remove one model, or the partial downloads, from
              the agent's model cache; answered by `cache_removed` (agent -> server)
@@ -118,8 +121,18 @@ FEATURE_PULL_PROGRESS = "pull_progress"
 # asked. The agent refuses ("in_use") while a replica there uses the files, and ("busy") while one of
 # their downloads runs.
 FEATURE_CACHE_ADMIN = "cache_admin"
+# 1.4 ("Download to…", issue #35): the server lists downloads beside the replicas in `desired`:
+# `downloads: [{id, model, engine?, image?, image_ids?}]` (a Hugging Face model's `token` inside `model`, as
+# for replicas: memory only). The agent fetches each into its model cache with the code a replica uses (the
+# same locks, resume, checksums and cancel; an image with the 1.3.1 pull), starts nothing, and reports
+# `status.downloads: [{id, state, reason, download}]`. A download missing from the next list is cancelled.
+# Listed by both sides; only an agent that lists it is sent downloads, and only to a server that lists it
+# does the agent report them.
+FEATURE_PREFETCH = "prefetch"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
-                   FEATURE_CACHE_ADMIN)
+                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH)
+# What an agent reports of a download (1.4, prefetch). "queued": waiting for another download on that machine.
+DOWNLOAD_STATES = ("queued", "downloading", "done", "failed", "cancelled")
 RUNTIMES = ("process", "container")
 
 # What the agent reports per replica. Server-only states: "stopping" (asked, not confirmed yet).
