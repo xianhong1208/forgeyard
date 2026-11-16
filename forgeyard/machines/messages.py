@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from forgeyard.machines.protocol import MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
+from forgeyard.models.cache_keys import parse
 
 
 def _short(limit: int):
@@ -103,7 +104,66 @@ def _model_cache(value: Any) -> Optional[dict]:
     engines = [e for e in (value.get("engines") or []) if isinstance(e, str) and _ENGINE_ID.match(e)][:256]
     if engines:
         out["engines"] = engines
+    # 1.4 (cache_admin): each model with its size, the engines, what the cache takes, partial downloads.
+    if isinstance(value.get("models"), list):
+        out["models"] = [e for e in (_cache_model(v) for v in value["models"][:256]) if e is not None]
+        detail = value.get("engines_detail") if isinstance(value.get("engines_detail"), list) else []
+        out["engines_detail"] = [e for e in (_cache_engine(v) for v in detail[:256]) if e is not None]
+        for k in ("used_bytes", "partial_bytes"):
+            out[k] = _bytes(value.get(k))
+        out["partial_files"] = _count(value.get("partial_files"))
+        if value.get("truncated") is True:
+            out["truncated"] = True
     return out
+
+
+def _text(value: Any, limit: int) -> Optional[str]:
+    return str(value)[:limit] if isinstance(value, str) and value else None
+
+
+def _when(value: Any) -> Optional[float]:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 <= n < 1e11 else None
+
+
+def _cache_model(value: Any) -> Optional[dict]:
+    """One model in an agent's cache: dropped (never cut short) when its key is not a cache key, so a
+    key the server keeps is always one the agent can find again."""
+    if not isinstance(value, dict):
+        return None
+    key = value.get("key")
+    target = parse(key)
+    kind = "hf" if target is not None and target["kind"] == "hf" else "url"
+    if target is None or target["kind"] == "engine" or target.get("file") or value.get("kind") != kind:
+        return None
+    out = {"key": key, "kind": kind, "bytes": _bytes(value.get("bytes")) or 0, "files": _count(value.get("files")),
+           "completed_at": _when(value.get("completed_at"))}
+    if kind == "hf":
+        out["repo"] = _text(value.get("repo"), 200)
+        out["revision"] = target["revision"]
+        if _count(value.get("missing")):
+            out["missing"] = _count(value.get("missing"))
+        parts = []
+        for p in (value.get("parts") or [])[:64] if isinstance(value.get("parts"), list) else []:
+            t = parse(p.get("key")) if isinstance(p, dict) else None
+            if t is None or not t.get("file") or not p["key"].startswith(key + "/"):
+                continue
+            parts.append({"key": p["key"], "file": t["file"], "bytes": _bytes(p.get("bytes")) or 0})
+        if parts:
+            out["parts"] = parts
+    else:
+        out["file"] = _text(value.get("file"), 200)
+    return out
+
+
+def _cache_engine(value: Any) -> Optional[dict]:
+    t = parse(value.get("key")) if isinstance(value, dict) else None
+    if t is None or t["kind"] != "engine":
+        return None
+    return {"key": value["key"], "id": t["id"], "name": _text(value.get("name"), 64), "bytes": _bytes(value.get("bytes")) or 0}
 
 
 Bytes = Annotated[Optional[int], BeforeValidator(_bytes)]
@@ -240,3 +300,17 @@ class LogsIn(_Msg):
     text: str = Field(default="", max_length=MAX_LOG_CHARS)
     truncated: bool = False
     reason: Annotated[Optional[str], _short(400)] = None
+
+
+class CacheRemovedIn(_Msg):
+    """1.4 (cache_admin): the answer to cache_remove / cache_prune."""
+
+    v: int
+    type: Literal["cache_removed"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    code: Annotated[Optional[str], _short(32)] = None
+    reason: Annotated[Optional[str], _short(400)] = None
+    freed_bytes: Bytes = None
+    in_use: list[Annotated[str, _short(64)]] = Field(default_factory=list, max_length=32)
+    model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None

@@ -225,6 +225,46 @@ class Supervisor:
             msg["model_cache"] = self.models.info()
         return msg
 
+    # ------------------------------------------------------------------ the model cache (1.4, cache_admin)
+    def cache_users(self, target: dict) -> list[str]:
+        """The workloads of the replicas here that need what a cache removal would delete: every one
+        this agent has not finished with (running, starting, downloading, waiting to start, or in
+        backoff) and every one the last desired list wants. Called from the removal's thread while the
+        model's lock is held, on snapshots of the two lists."""
+        from forgeyard.models.cache_keys import engine_uses, model_uses
+
+        users = set()
+        for rec in list(self.records.values()):
+            if rec.final:
+                continue
+            if model_uses(rec.model, target) or engine_uses(rec.engine, target):
+                users.add(rec.workload)
+        for want in list((self.desired or {}).values()):
+            if model_uses(want.get("model"), target) or engine_uses(want.get("engine"), target):
+                users.add(str(want.get("workload") or want.get("id")))
+        return sorted(users)
+
+    async def cache_remove(self, key: Optional[str], *, partial: bool = False) -> dict:
+        """Remove a model (by its cache key) or the partial downloads from this machine's cache; the
+        answer to the server, with the cache as it is afterwards."""
+        from forgeyard.agent.models import CacheError, CacheRefused
+
+        if self.models is None:
+            return {"ok": False, "code": "no_cache", "reason": "This agent has no model cache."}
+        try:
+            if partial:
+                freed = await asyncio.to_thread(self.models.prune_partial)
+            else:
+                freed = await asyncio.to_thread(self.models.remove, str(key or ""), self.cache_users)
+            answer = {"ok": True, "freed_bytes": freed}
+        except CacheRefused as e:
+            answer = {"ok": False, "code": e.code, "reason": str(e), "in_use": e.users}
+        except (CacheError, OSError) as e:
+            log.warning("Could not remove %s from the model cache: %s", "the partial downloads" if partial else key, e)
+            answer = {"ok": False, "code": "failed", "reason": f"could not remove it: {e}"[:400]}
+        answer["model_cache"] = await asyncio.to_thread(self.models.info)
+        return answer
+
     async def logs(self, replica_id: str, lines: int) -> dict:
         rec = self.records.get(replica_id)
         if rec is None:

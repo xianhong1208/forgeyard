@@ -28,7 +28,7 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import HeartbeatIn, HelloIn, InventoryMsgIn, LogsIn, StatusIn
+from forgeyard.machines.messages import CacheRemovedIn, HeartbeatIn, HelloIn, InventoryMsgIn, LogsIn, StatusIn
 from forgeyard.machines.protocol import (
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
@@ -176,6 +176,15 @@ def _status(db: DbSession, node_id: int, msg: StatusIn) -> Optional[bool]:
         placement.place_and_poke(db)
         hub.poke(node_id)  # its agent drops a replica that was taken off this machine
     return changed
+
+
+def _cache(db: DbSession, node_id: int, model_cache: dict) -> bool:
+    """1.4: the model cache as it is after a removal, stored before the request that asked is answered."""
+    node = _live_node(db, node_id)
+    if node is None:
+        return False
+    node.model_cache = dict(model_cache)
+    return True
 
 
 def _place(db: DbSession) -> None:
@@ -329,6 +338,12 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     answer = _parse(text, LogsIn)
                     conn.answer(answer.request_id, answer.model_dump())
                     ok = True
+                elif kind == "cache_removed" and workloads:
+                    removed = _parse(text, CacheRemovedIn)
+                    ok = True
+                    if removed.model_cache is not None:
+                        ok = await run_in_threadpool(_db_call, _cache, node_id, removed.model_cache)
+                    conn.answer(removed.request_id, removed.model_dump())
                 else:
                     raise ValueError(f"unknown message type {kind!r}")
             except _ProtocolMismatch:
