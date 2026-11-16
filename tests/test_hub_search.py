@@ -123,7 +123,7 @@ def test_fy_hub_001_the_server_asks_hugging_face_and_summarises(owner, fake):
                     "last_modified": "2025-07-26T03:46:27.000Z", "gated": False, "gated_mode": None, "private": False,
                     "pipeline_tag": "text-generation", "library": "transformers", "task": "chat",
                     "format": "safetensors", "params": 751632384, "weights_bytes": 751632384 * 2,
-                    "in_catalog": None, "recipes": ["vllm"]}
+                    "in_catalog": None, "recipes": ["vllm"], "license": None}
     assert gemma["gated"] is True and gemma["gated_mode"] == "manual" and gemma["task"] == "chat"
     r = search(owner, q="qwen3", format="gguf")
     [g] = r.json()["results"]

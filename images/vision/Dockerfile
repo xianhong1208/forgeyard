@@ -1,9 +1,13 @@
-# Forgeyard's vision server: the image behind the ready-made workload templates (object detection,
-# segmentation, depth), exposed at /x/<name>. One image, the task chosen by its arguments:
+# Forgeyard's vision server (object detection, segmentation, depth): the image of the built-in `vision`
+# recipe (1.4), which runs a model from the machine's model cache (--model <dir>), and of the 1.3 workload
+# templates exposed at /x/<name>, which run the baked-in models below. One image, the task chosen by its
+# arguments:
 #
 #   docker build -t forgeyard-vision:<version> images/vision                              # CPU, amd64 + arm64
 #   docker build -t forgeyard-vision:<version>-cuda --build-arg VARIANT=cuda images/vision   # NVIDIA, amd64
 #   docker run --rm -p 8000:8000 forgeyard-vision:<version> --task detect
+#   docker run --rm -p 8000:8000 -v <model dir>:/model:ro -e VISION_API_KEY=… forgeyard-vision:<version> \
+#     --task detect --model /model --served-name rtdetr                                    # what the recipe runs
 #
 # The models are fetched at build time at the revisions pinned in models.json (all Apache-2.0), so a
 # container never needs the network; the dependencies are pinned with hashes (requirements-*.txt, from

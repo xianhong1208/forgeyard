@@ -281,6 +281,9 @@ page cannot use a signed-in browser against it.
 | `GET /v1/videos/{id}/content` | The finished video, `video/mp4`, streamed from the replica that made it. `variant=video` only; `Range` requests answer 206 | — |
 | `DELETE /v1/videos/{id}` | Cancels a job at work, or deletes a finished video, on its replica | — |
 | `POST /v1/videos/sync`, `POST /v1/videos/{id}/remix` | Not offered: always 404 `endpoint_not_supported` | — |
+| `POST /v1/vision/detect` | Object detection (1.4): one image, boxes, labels and scores back. See [Vision](#vision) | no |
+| `POST /v1/vision/segment` | Segmentation with SAM 2 (1.4): one image and a point or a box, masks as PNGs back | no |
+| `POST /v1/vision/depth` | Depth estimation (1.4): one image, a 16-bit depth map back | no |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -527,6 +530,42 @@ The Playground's **Video** panel uses `/api/playground/videos` (`POST`, `GET`), 
 the console's `X-Forgeyard: 1` header), for that person's own jobs, counted as console. The jobs are kept
 in the server's database (table `video_jobs`, migration `0014`).
 
+### Vision
+
+`POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` (1.4) take one image for a
+vision model and answer JSON. They are Forgeyard's own API (the OpenAI SDK has none): any HTTP client
+works. One engine serves them, Forgeyard's own vision server (recipe `vision`, the image
+`forgeyard-vision` of the server's version: the CUDA build on NVIDIA, the CPU build elsewhere), with the
+model from the machine's model cache. Local deployments only, never a cloud provider.
+
+The request is `multipart/form-data` with `model`, the image as a file field `image` and the options
+as fields, or JSON with `model`, `image` (base64, or a `data:` URI) and the options. PNG, JPEG or WebP,
+at most 20 MiB and 40 megapixels. The gateway checks that there is a model and an image, changes only
+`model`, and passes the rest to the replica as it came; a model of another task answers 400
+`wrong_endpoint` (the message names its endpoint).
+
+| Endpoint | Options | Answer |
+|---|---|---|
+| `detect` | `threshold` (0 to 1, 0.5), `max_detections` (1 to 1,000, 100) | `detections`: `[{"label", "score", "box": [x0, y0, x1, y1]}]`, best first, in the image's pixels |
+| `segment` | `points` (`[[x, y], …]`, at most 16) with `labels` (1 inside, 0 outside; all 1 when left out), or `box` (`[x0, y0, x1, y1]`); `multimask` (`true`: three candidate masks) | `masks`: `[{"score", "area", "box", "png"}]`, best first; each mask a 1-bit PNG of the image's size, base64 |
+| `depth` | none | `depth_png` (a 16-bit grey PNG of the image's size, base64, nearer is brighter), `min`, `max`, `unit` (relative depth, not metres) |
+
+Every answer also has `model`, `width`, `height` (the image's) and `ms` (the model's time). The vision
+server's errors (`{"error": {"message", "code"}}`) come back with their status: 400 `invalid_image`,
+`invalid_option`, `missing_prompt` (segment without a point or a box), 413 `image_too_large`.
+
+What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| `images` | 1: the image looked at |
+| `kilopixels` | Its width x height / 1,000, from the answer |
+| `busy_ms` | The time the replica worked on it |
+| tokens | None. A key's tokens per minute does not apply; its requests per minute and its model list do |
+
+A replica works on one image at a time and keeps the others waiting in order; more throughput is more
+replicas. Which models are vision models, and the licence rule, are under [Built-in recipes](#built-in-recipes).
+
 ### Headers
 
 | Header | Direction | Value |
@@ -572,7 +611,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `language_not_supported` | Text to speech: Chinese, Japanese or Korean text to speaches, which deletes those characters | Use a Qwen3-TTS deployment |
 | 400 | `voice_cloning_not_supported` | Text to speech: a reference recording, a voice given as audio or a link, `task_type: "Base"`, or uploading a voice. Not in 1.3 | Use one of the model's voices |
 | 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
-| 400 | `streaming_not_supported` | Images: `stream: true` | Leave it out |
+| 400 | `streaming_not_supported` | Images and vision: `stream: true` | Leave it out |
+| 400 | `missing_image` | Vision: no file field `image`, or JSON without `image` | Send the image |
 | 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
 | 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
 | 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
@@ -989,6 +1029,8 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `forgeyard-vision:<server version>-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `forgeyard-vision:<server version>` |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
@@ -1025,6 +1067,18 @@ and `env` to replace the recipe's, and `amd_kfd` (AMD containers; `true` by defa
 the card's render node; `false`: the render node only, for engines that use only Vulkan), and `unsupported` (1.3.1: parameter
 values the variant cannot run, such as `{kv_cache: [f8_e4m3]}`; a deployment with one of them is never
 placed on it, and the placement says why).
+
+The `vision` recipe (1.4) runs Forgeyard's own vision server with `--task {task}` (the model's task,
+a placeholder of its own) and `--model {model_path}`. Its image is not pinned by digest: a variant names
+it with `forgeyard_image: vision` (or `vision-cuda`) instead of `image`, which is the image of the
+server's own version, published with the same release (see [Container images](#container-images)). On a
+machine without registry access, `docker load` it under that tag. A model is a vision model when its
+`config.json` names an `…ForObjectDetection` architecture (detect: RT-DETR, D-FINE, DETR without a timm
+backbone…), SAM 2 or 2.1 (segment) or an `…ForDepthEstimation` one (depth: Depth Anything, DPT…). A
+Hugging Face vision model is only added with a permissive licence (Apache-2.0, MIT, BSD): another
+licence, or none, answers 422 `not_a_vision_model` (Depth Anything V2 Base and Large are CC-BY-NC-4.0,
+Ultralytics' YOLO checkpoints AGPL-3.0). Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
+1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as

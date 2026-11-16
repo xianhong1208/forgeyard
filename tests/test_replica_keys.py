@@ -35,7 +35,9 @@ def test_fy_rk_001_builtin_recipes_name_their_engines_key_variable():
     assert got == {"faster-whisper": "API_KEY", "llama-cpp": "LLAMA_API_KEY", "vllm": "VLLM_API_KEY",
                    "vllm-pooling": "VLLM_API_KEY", "speaches-tts": "API_KEY", "vllm-omni-tts": "VLLM_API_KEY",
                    # stable-diffusion.cpp's sd-server has no key: the agent's key guard alone keeps its port closed.
-                   "vllm-omni-image": "VLLM_API_KEY", "sd-cpp": None, "vllm-omni-video": "VLLM_API_KEY"}
+                   "vllm-omni-image": "VLLM_API_KEY", "sd-cpp": None, "vllm-omni-video": "VLLM_API_KEY",
+                   # 1.4: Forgeyard's own vision server reads its key on every path but /health.
+                   "vision": "VISION_API_KEY"}
     base = builtin_recipes()["llama-cpp"][1]
     for bad, msg in [("FORGEYARD_KEY", "cannot be used"), ("PORT", "cannot be used"), ("1BAD", "cannot be used")]:
         with pytest.raises(RecipeError, match=msg):

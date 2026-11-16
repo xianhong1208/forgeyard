@@ -9,11 +9,12 @@
 #   name          the catalog name it is added as (a-z, 0-9, '.', '_', '-')
 #   title         what people see
 #   source        hf://<org>/<name>
-#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech, image and
-#                 video entries are pinned to a commit (their voices, files and measured memory belong to it)
+#   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech, image,
+#                 video and vision (detect, segment, depth) entries are pinned to a commit (their voices,
+#                 files and measured memory belong to it)
 #   file          GGUF (and image models' safetensors files) only: which file of the repository
 #   group         one of the groups below
-#   task          chat | embed | rerank | asr | tts | image | video
+#   task          chat | embed | rerank | asr | tts | image | video | detect | segment | depth
 #   format        safetensors | gguf | ctranslate2 | onnx | diffusers (what the repository holds)
 #   recipe        the recipe suggested for it (it must serve that task and format)
 #   device        optional: cpu to suggest running it on the CPU (the recipe must have a CPU variant)
@@ -58,6 +59,9 @@ groups:
   - id: video
     title: Video (text to video)
     description: Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p and needs more memory. Apache-2.0.
+  - id: detection
+    title: Object detection, segmentation and depth
+    description: Vision models for /v1/vision/detect, /segment and /depth on Forgeyard's own vision server. Small and quick on a CPU, faster on an NVIDIA GPU. Apache-2.0 only.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -644,3 +648,44 @@ models:
     download_gib: 31.9
     memory_gib: 32.8
     note: Text to video at 1280x704 and 24 fps; better than 1.3B, about 33 GiB on the card (not yet measured). NVIDIA.
+  # ---------------------------------------------------------------- object detection, segmentation, depth (1.4)
+  # The models of the 1.3 workload templates (images/vision/models.json), at the same revisions.
+  - name: rtdetr-v2-r18
+    title: RT-DETRv2 R18 (object detection)
+    source: hf://PekingU/rtdetr_v2_r18vd
+    revision: 5650961749fa93567c0d46fc7f43ea4f9e914107
+    license: apache-2.0
+    group: detection
+    task: detect
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.08
+    memory_gib: 1.33
+    note: Boxes and labels for the 80 COCO classes (people, vehicles, animals, everyday objects), in real time on a GPU.
+  - name: sam2.1-hiera-tiny
+    title: SAM 2.1 Hiera tiny (segmentation)
+    source: hf://facebook/sam2.1-hiera-tiny
+    revision: de431c4043854a71d8101e17995dfe596bf101a5
+    license: apache-2.0
+    group: detection
+    task: segment
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.15
+    memory_gib: 1.4
+    note: The mask of what a point or a box shows, from Meta's Segment Anything 2.1.
+  - name: depth-anything-v2-small
+    title: Depth Anything V2 Small (depth)
+    source: hf://depth-anything/Depth-Anything-V2-Small-hf
+    revision: 5426e4f0f36572d16453bbda7a8389317b1bef99
+    license: apache-2.0
+    group: detection
+    task: depth
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.09
+    memory_gib: 1.34
+    note: Relative depth for every pixel of an image, as a 16-bit PNG. Only Small is Apache-2.0 (Base and Large are not).
