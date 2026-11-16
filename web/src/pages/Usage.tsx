@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 
+import { BreakdownTable, NAME, type BreakdownColumn } from "../components/BreakdownTable";
 import { BudgetMeter } from "../components/BudgetMeter";
 import { LineChart } from "../components/LineChart";
 import { Notice, PageHeader } from "../components/ui";
@@ -41,7 +42,6 @@ export function UsagePage() {
   const { data, error, reload } = useApi<UsageResponse>(`/usage?days=${days}&group=${by}${everyone ? "&everyone=true" : ""}`);
   usePoll(reload, 10000);
   const t = data?.total;
-  const max = Math.max(1, ...(data?.rows ?? []).map((r) => r.requests));
   // 1.3: the media column shows once there are images, audio or video in the period.
   const media = (t?.media_items ?? 0) > 0;
   // Text to speech: characters spoken and the audio's length.
@@ -55,6 +55,7 @@ export function UsagePage() {
   const length = speech || video;
   const lengthLabel = speech && video ? "Audio / video" : video ? "Video" : "Audio";
   const busy = images || traffic || video;
+  const nameLabel = GROUPS.find((g) => g.id === data?.group_by)?.label ?? "Name";
   const groups = (tab === "cost" ? COST_GROUPS : GROUPS).filter((g) => !g.admin || (data?.is_admin && everyone));
   const setBy = tab === "cost" ? setCostGroup : setGroup;
   // The chart's view stays when switching tabs.
@@ -131,36 +132,10 @@ export function UsagePage() {
             </p>
           </div>
         ) : (
-          <div className="table-wrap">
-            <table className="table usage-table">
-              <thead>
-                <tr><th>{GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name"}</th><th>Requests</th><th>Errors</th><th>Tokens in</th><th>Tokens out</th>{media && <th>Media</th>}{speech && <th>Characters</th>}{length && <th>{lengthLabel}</th>}{images && <th>Images</th>}{traffic && <th>Bytes in / out</th>}{busy && <th>Busy</th>}<th>Avg</th><th>p50</th><th>p95</th></tr>
-              </thead>
-              <tbody>
-                {data.rows.map((r: UsageRow) => (
-                  <tr key={r.id}>
-                    <td data-label="Name">
-                      <div className={data.group_by === "model" || data.group_by === "day" ? "mono" : ""}>{r.name}</div>
-                      <span className="bar usage-bar" aria-hidden="true"><span style={{ width: `${Math.round((r.requests / max) * 100)}%` }} /></span>
-                    </td>
-                    <td data-label="Requests" className="num"><span>{num(r.requests)}{r.spilled ? <span className="muted small"> · {num(r.spilled)} spilled</span> : null}</span></td>
-                    <td data-label="Errors" className="num"><span>{num(r.errors)}{r.limited > 0 && <span className="muted small"> · {num(r.limited)} limited</span>}</span></td>
-                    <td data-label="Tokens in" className="num"><span>{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span></td>
-                    <td data-label="Tokens out" className="num">{num(r.completion_tokens)}</td>
-                    {media && <td data-label="Media" className="num" title="Images, audio clips and videos sent in chat">{num(r.media_items ?? 0)}</td>}
-                    {speech && <td data-label="Characters" className="num" title="Characters turned into speech">{num(r.characters ?? 0)}</td>}
-                    {length && <td data-label={lengthLabel} className="num" title="Length of the speech or video made (speech: where its format says it)">{audioLength(r.media_ms)}</td>}
-                    {images && <td data-label="Images" className="num" title="Images made, and their megapixels">{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</td>}
-                    {traffic && <td data-label="Bytes" className="num" title="Request and answer bodies of apps at /x/">{r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—"}</td>}
-                    {busy && <td data-label="Busy" className="num" title="Time replicas worked on these requests (images and videos: times the GPUs each holds)">{busyTime(r.busy_ms)}</td>}
-                    <td data-label="Avg" className="num">{ms(r.latency_avg_ms)}</td>
-                    <td data-label="p50" className="num">{ms(r.latency_p50_ms)}</td>
-                    <td data-label="p95" className="num">{ms(r.latency_p95_ms)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BreakdownTable key={`requests-${data.group_by}`} label={`Requests by ${nameLabel.toLowerCase()}`} nameLabel={nameLabel} rows={data.rows}
+            columns={requestColumns({ media, speech, length, lengthLabel, images, traffic, busy })} metric="requests"
+            sort={data.group_by === "day" ? { by: NAME, desc: true } : undefined} others={addUp}
+            nameClass={data.group_by === "model" || data.group_by === "day" ? "mono" : undefined} />
         )
       )}
       {tab === "requests" && data && <p className="muted small usage-foot">{data.from === data.to ? data.from : `${data.from} to ${data.to}`} (UTC). Latency is from the gateway: until the last byte of the answer, streamed ones included.</p>}
@@ -175,7 +150,6 @@ function CostView({ data, chart }: { data: UsageResponse; chart: ReactNode }) {
   const local = t.split?.local;
   const unpriced = t.unpriced ?? 0;
   const estimated = t.cost_estimated ?? 0;
-  const max = Math.max(1, ...data.rows.map((r) => r.cost_micros ?? 0));
   const label = COST_GROUPS.find((g) => g.id === data.group_by)?.label ?? "Name";
   return (
     <>
@@ -196,29 +170,10 @@ function CostView({ data, chart }: { data: UsageResponse; chart: ReactNode }) {
       {data.rows.length === 0 ? (
         <div className="panel usage-empty"><p className="muted">No requests in this period. Requests to local replicas cost nothing; cloud requests are priced from their provider model's prices.</p></div>
       ) : (
-        <div className="table-wrap">
-          <table className="table usage-table cost-table">
-            <thead><tr><th>{label}</th><th>Requests</th><th>Tokens</th><th>Cost</th><th>Share</th><th>Without a price</th></tr></thead>
-            <tbody>
-              {data.rows.map((r) => (
-                <tr key={r.id}>
-                  <td data-label={label}>
-                    <div>
-                      <span className={data.group_by === "model" || data.group_by === "day" ? "mono" : ""}>{r.name}</span>
-                      {r.cloud !== undefined && <> <span className={`chip ${r.cloud ? "chip-tone-wait" : "chip-tone-ok"}`}>{r.cloud ? "cloud" : "local"}</span></>}
-                      <span className="bar usage-bar" aria-hidden="true"><span style={{ width: `${Math.round(((r.cost_micros ?? 0) / max) * 100)}%` }} /></span>
-                    </div>
-                  </td>
-                  <td data-label="Requests" className="num">{num(r.requests)}</td>
-                  <td data-label="Tokens" className="num"><span>{num(r.tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span></td>
-                  <td data-label="Cost" className="num strong">{usd(r.cost_micros)}</td>
-                  <td data-label="Share" className="num">{share(r.cost_micros ?? 0, t.cost_micros ?? 0)}</td>
-                  <td data-label="Unpriced" className="num">{r.unpriced ? <span className="usage-bad">{num(r.unpriced)}</span> : <span className="muted">0</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <BreakdownTable key={`cost-${data.group_by}`} label={`Cost by ${label.toLowerCase()}`} nameLabel={label} rows={data.rows} className="cost-table"
+          columns={costColumns(t.cost_micros ?? 0)} metric="cost" sort={data.group_by === "day" ? { by: NAME, desc: true } : undefined} others={addUp}
+          nameClass={data.group_by === "model" || data.group_by === "day" ? "mono" : undefined}
+          nameExtra={(r) => r.cloud !== undefined && <span className={`chip ${r.cloud ? "chip-tone-wait" : "chip-tone-ok"}`}>{r.cloud ? "cloud" : "local"}</span>} />
       )}
       <p className="muted small usage-foot">
         {data.from === data.to ? data.from : `${data.from} to ${data.to}`} (UTC), in US dollars. Local replicas and providers inside your network cost nothing.
@@ -228,6 +183,60 @@ function CostView({ data, chart }: { data: UsageResponse; chart: ReactNode }) {
       </p>
     </>
   );
+}
+
+// The columns of the Requests tab's table; the ones of 1.3's units only once the period has some.
+type Units = { media: boolean; speech: boolean; length: boolean; lengthLabel: string; images: boolean; traffic: boolean; busy: boolean };
+
+function requestColumns(u: Units): BreakdownColumn<UsageRow>[] {
+  const cols: (BreakdownColumn<UsageRow> | false)[] = [
+    { id: "requests", label: "Requests", className: "num", value: (r) => r.requests,
+      cell: (r) => <span>{num(r.requests)}{r.spilled ? <span className="muted small"> · {num(r.spilled)} spilled</span> : null}</span> },
+    { id: "errors", label: "Errors", className: "num", value: (r) => r.errors,
+      cell: (r) => <span>{num(r.errors)}{r.limited > 0 && <span className="muted small"> · {num(r.limited)} limited</span>}</span> },
+    { id: "prompt_tokens", label: "Tokens in", className: "num", value: (r) => r.prompt_tokens,
+      cell: (r) => <span>{num(r.prompt_tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span> },
+    { id: "completion_tokens", label: "Tokens out", className: "num", value: (r) => r.completion_tokens, cell: (r) => num(r.completion_tokens) },
+    u.media && { id: "media_items", label: "Media", className: "num", title: "Images, audio clips and videos sent in chat", value: (r) => r.media_items ?? 0, cell: (r) => num(r.media_items ?? 0) },
+    u.speech && { id: "characters", label: "Characters", className: "num", title: "Characters turned into speech", value: (r) => r.characters ?? 0, cell: (r) => num(r.characters ?? 0) },
+    u.length && { id: "media_ms", label: u.lengthLabel, className: "num", title: "Length of the speech or video made (speech: where its format says it)",
+      value: (r) => r.media_ms ?? 0, cell: (r) => audioLength(r.media_ms) },
+    u.images && { id: "images", label: "Images", className: "num", title: "Images made, and their megapixels", value: (r) => r.images ?? 0,
+      cell: (r) => <>{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</> },
+    u.traffic && { id: "bytes", label: "Bytes in / out", dataLabel: "Bytes", className: "num", title: "Request and answer bodies of apps at /x/",
+      value: (r) => (r.bytes_in ?? 0) + (r.bytes_out ?? 0), cell: (r) => (r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—") },
+    u.busy && { id: "busy_ms", label: "Busy", className: "num", title: "Time replicas worked on these requests (images and videos: times the GPUs each holds)",
+      value: (r) => r.busy_ms ?? 0, cell: (r) => busyTime(r.busy_ms) },
+    { id: "latency_avg_ms", label: "Avg", className: "num", value: (r) => r.latency_avg_ms, cell: (r) => ms(r.latency_avg_ms) },
+    { id: "latency_p50_ms", label: "p50", className: "num", value: (r) => r.latency_p50_ms, cell: (r) => ms(r.latency_p50_ms) },
+    { id: "latency_p95_ms", label: "p95", className: "num", value: (r) => r.latency_p95_ms, cell: (r) => ms(r.latency_p95_ms) },
+  ];
+  return cols.filter((c): c is BreakdownColumn<UsageRow> => !!c);
+}
+
+function costColumns(total: number): BreakdownColumn<UsageRow>[] {
+  return [
+    { id: "requests", label: "Requests", className: "num", value: (r) => r.requests, cell: (r) => num(r.requests) },
+    { id: "tokens", label: "Tokens", className: "num", value: (r) => r.tokens,
+      cell: (r) => <span>{num(r.tokens)}{r.cached_tokens ? <span className="muted small"> · {num(r.cached_tokens)} cached</span> : null}</span> },
+    { id: "cost", label: "Cost", className: "num strong", value: (r) => r.cost_micros ?? 0, cell: (r) => usd(r.cost_micros) },
+    { id: "share", label: "Share", className: "num", cell: (r) => share(r.cost_micros ?? 0, total) },
+    { id: "unpriced", label: "Without a price", dataLabel: "Unpriced", className: "num", value: (r) => r.unpriced ?? 0,
+      cell: (r) => (r.unpriced ? <span className="usage-bad">{num(r.unpriced)}</span> : <span className="muted">0</span>) },
+  ];
+}
+
+// The rows past the top ones as one: their counts added up. Latencies do not add up, so they show as "—" (the
+// totals above have the period's).
+export function addUp(rows: UsageRow[]): UsageRow {
+  const out: Record<string, unknown> = { id: "others", name: "Others", latency_avg_ms: null, latency_p50_ms: null, latency_p95_ms: null };
+  for (const r of rows) {
+    for (const [k, v] of Object.entries(r)) {
+      if (typeof v !== "number" || k.startsWith("latency_")) continue;
+      out[k] = ((out[k] as number | undefined) ?? 0) + v;
+    }
+  }
+  return out as UsageRow;
 }
 
 // Usage over time (1.4): one metric per day, week or month as a line chart, in total or per key, model, provider
