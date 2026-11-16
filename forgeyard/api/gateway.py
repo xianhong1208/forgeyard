@@ -6,7 +6,8 @@ does not apply (clients are not browsers). The host check (421) does. No CORS he
 
 The console's playground (`/api/playground/…`) goes through the same code with the signed-in
 user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Vision tab
-(1.3, `/api/playground/vision/…`) reaches exposed vision workloads the way /x/ does
+reaches vision models (1.4) at `/api/playground/vision/detect|segment|depth` like any /v1 request, and
+exposed vision workloads (1.3, `/api/playground/vision/<workload>/<task>`) the way /x/ does
 (forgeyard/gateway/vision.py).
 
 Videos (1.3, /v1/videos) are jobs (forgeyard/gateway/videojobs.py): POST answers at once, GET polls,
@@ -80,6 +81,8 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         kind = proxy.ENDPOINTS[endpoint][1]
         body = await proxy.read_body(request, await run_in_threadpool(proxy.body_ceiling))
         parsed = proxy.parse_body(body, request.headers.get("content-type", ""), kind)
+        if kind == "vision":
+            parsed.vision = endpoint.split("/", 1)[1]   # 1.4: detect, segment or depth
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
         if endpoint == speech.ENDPOINT:
@@ -155,6 +158,24 @@ async def speech_create(request: Request):
 @router.post("/images/generations")
 async def images_generate(request: Request):
     return await _api(request, "images/generations")
+
+
+@router.post("/vision/detect")
+async def vision_detect(request: Request):
+    """Object detection (1.4): an image to a detection model; boxes, labels and scores back."""
+    return await _api(request, "vision/detect")
+
+
+@router.post("/vision/segment")
+async def vision_segment(request: Request):
+    """Segmentation (1.4): an image and a point or a box to a SAM 2 model; masks as PNGs back."""
+    return await _api(request, "vision/segment")
+
+
+@router.post("/vision/depth")
+async def vision_depth(request: Request):
+    """Depth estimation (1.4): an image to a depth model; a 16-bit depth PNG back."""
+    return await _api(request, "vision/depth")
 
 
 @router.post("/images/edits")
@@ -332,7 +353,8 @@ async def unknown(rest: str):
     return GatewayError(404, "unknown_endpoint", f"Forgeyard's gateway has no /v1/{rest}. It serves /v1/models, "
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
                                                  "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
-                                                 "/v1/audio/voices, /v1/images/generations and /v1/videos.").response()
+                                                 "/v1/audio/voices, /v1/images/generations, /v1/videos and "
+                                                 "/v1/vision/detect, /segment and /depth.").response()
 
 
 # ------------------------------------------------------------------ the console's playground

@@ -8,6 +8,36 @@ version until 1.0.
 
 ### Added
 
+- **Vision models under Models: object detection, segmentation and depth** (#86, part 1: the engine and
+  the API). They are model kinds of their own (tasks `detect`, `segment`, `depth`), added from Hugging
+  Face and deployed like any other model.
+  - The catalog recognises them from `config.json`: an `…ForObjectDetection` architecture (RT-DETR,
+    D-FINE, DETR without a timm backbone…), SAM 2 / 2.1, or an `…ForDepthEstimation` one (Depth
+    Anything, DPT…); the search's tasks ask Hugging Face for object-detection, mask-generation and
+    depth-estimation models, and a result shows its licence. **Permissive licences only** (Apache-2.0,
+    MIT, BSD), as the 1.3 templates: another licence, or none, is 422 `not_a_vision_model` when it is
+    added, and so is a model of another task or a DETR on a timm backbone.
+  - A built-in recipe `vision` runs Forgeyard's own vision server (`images/vision`), now able to load the
+    model from the machine's model cache (`--model`), so the cache page, offline machines (and *Download
+    to…*, #35) work as for other models: the CUDA build on NVIDIA (7.5+, driver 580+, a shared card), the
+    CPU build elsewhere. Its image is named by the server's version (`forgeyard_image`), not pinned by
+    digest: it is built with the same release. The server asks for the replica's key
+    (`VISION_API_KEY`) on every path but `/health`, behind the agent's key guard.
+  - Estimate: the files plus 1 GiB on a GPU, 1.25 GiB of RAM on a CPU (measured: 0.66 to 1.12 GiB peak).
+  - The gateway answers `POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` by model
+    name: multipart (`model`, an `image` file, the options) or JSON (`image` in base64), only `model`
+    changed, the vision server's JSON passed back. API keys, their model lists and rpm apply; no cloud.
+    Usage counts one image, its kilopixels and the replica's busy time (the existing `images`,
+    `kilopixels` and `busy_ms` units: no migration). A model of another task is 400 `wrong_endpoint`;
+    no image 400 `missing_image`.
+  - **Try it** on a deployment sends a test image (the box around its red square for SAM 2); the
+    Playground's options list the vision models, and the console reaches them at
+    `/api/playground/vision/<task>`.
+  - The three models of the 1.3 templates are recommended (group *Object detection, segmentation and
+    depth*), at the same pinned revisions, on the CPU by default.
+  - `scripts/accept_vision.py` and a `vision` group in `scripts/accept_all.py` check them on real
+    machines. Apps made from the templates keep running as they are.
+
 - **Download to…: a model, and its engine, on chosen machines before you deploy it** (part of #35).
   From **Models → Library** (a model's row) or a machine's page (**Download a model here…**), pick the
   machines: each says whether it fits (what it downloads, the free disk, the engine), is already there,

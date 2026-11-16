@@ -28,7 +28,7 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, utcnow
 from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
-                              recommended as rec, scheduler, sources)
+                              recommended as rec, scheduler, sources, vision)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
@@ -39,7 +39,9 @@ router = APIRouter(prefix="/api", tags=["models"])
 
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
 TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
-              "image": "Images", "video": "Video"}
+              "image": "Images", "video": "Video", "detect": "Object detection", "segment": "Segmentation",
+              "depth": "Depth estimation"}
+TASK_WORDS = "chat, embed, rerank, asr, tts, image, video, detect, segment or depth"
 
 
 def _engine_args(raw) -> dict:
@@ -90,8 +92,16 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "summary": model_summary(m), "recipes": compatible(m, all_recipes), "deployments": deployments,
             "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
             "voices": list((m.meta or {}).get("voices") or []), "image": image_out(m.meta or {}),
-            "video": video_out(m.meta or {}),
+            "video": video_out(m.meta or {}), "vision": vision_out(m.meta or {}),
             **media_out(m.meta or {}, m.format)}
+
+
+def vision_out(meta: dict) -> Optional[dict]:
+    """A vision model's task, architecture and (detection) its classes (1.4), or None."""
+    v = meta.get("vision") if isinstance(meta.get("vision"), dict) else None
+    if v is None:
+        return None
+    return {k: v.get(k) for k in ("task", "architecture", "labels", "label_examples", "problem") if v.get(k) is not None}
 
 
 def image_out(meta: dict) -> Optional[dict]:
@@ -357,7 +367,10 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     meta = _inspect(db, body)
     task = (body.task or meta.get("task_hint") or "").strip()
     if task not in recipes.TASKS:
-        raise fail(422, "task_required", "task: say what the model does (chat, embed, rerank, asr, tts, image or video)")
+        raise fail(422, "task_required", f"task: say what the model does ({TASK_WORDS})")
+    if task in vision.TASKS and (why := vision.refusal(task, meta)):
+        # 1.4: a model the vision server cannot load, or one without a permissive licence.
+        raise fail(422, "not_a_vision_model", why)
     if task == "image" and "image" not in meta and meta.get("kind") != "local":
         raise fail(422, "not_an_image_model", "This repository is not one Forgeyard can make images with: a diffusers "
                                               "pipeline (model_index.json) or GGUF / safetensors files for "
@@ -367,7 +380,7 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
                                              "text-to-video pipeline (model_index.json naming WanPipeline).")
     if task == "image" and "video" in meta:
         raise fail(422, "not_an_image_model", "This repository is a video pipeline: add it as a video model.")
-    if task in ("tts", "image", "video"):
+    if task in ("tts", "image", "video") + vision.TASKS:
         # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
         # takes in chat.
         meta["modalities"] = []
@@ -412,7 +425,9 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
         changed["title"] = m.title
     if body.task is not None:
         if body.task not in recipes.TASKS:
-            raise fail(422, "bad_task", "task: chat, embed, rerank, asr, tts, image or video")
+            raise fail(422, "bad_task", f"task: {TASK_WORDS}")
+        if body.task in vision.TASKS and body.task != m.task and (why := vision.refusal(body.task, m.meta or {})):
+            raise fail(422, "not_a_vision_model", why)
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:
