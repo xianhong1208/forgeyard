@@ -1,226 +1,90 @@
-import { IconBrain, IconCloud, IconCpu, IconLock, IconMicrophone, IconMovie, IconPhoto, IconPhotoAi, IconPlus, IconScan, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
+import { IconCpu, IconLock, IconPhoto, IconPlus } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, Navigate, useSearchParams } from "react-router";
 
-import { AdvisorBanner } from "../components/Advisor";
+import { useAuth } from "../auth";
 import { DownloadDialog, DownloadList } from "../components/DownloadTo";
-import { KindMark, ModelKindIcon } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { AddModel } from "./AddModel";
 import { api, errorText } from "../lib/api";
 import { isActive, recentDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
-import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { TASK_LABEL, VISION_TASKS, downloadFraction, downloadText, gib, mediaText, params } from "../lib/models";
-import { FALLBACK_ANCHOR, fallbackProviders, routeHome } from "../lib/routing";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentsResponse, DownloadsResponse, Machine, MachinesResponse, ModelDownload, ModelSources, Recipe, RecipeVariant, RouteInfo, RoutesResponse } from "../lib/types";
+import { HARDWARE_LABEL, engineHardware, freeName, renameRecipe } from "../lib/engines";
+import { TASK_LABEL, mediaText, params, shortSource } from "../lib/models";
+import type { CatalogModel, CatalogResponse, DownloadsResponse, ModelDownload, ModelSources, Recipe, RecipeVariant } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { STATUS_TONE, stateLabel } from "../lib/workloads";
-import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
 
-const KINDS = [
-  { icon: IconBrain, name: "Chat", detail: "vLLM for safetensors, llama.cpp for GGUF (GPU or CPU)" },
-  { icon: IconVectorBezier2, name: "Embeddings", detail: "vLLM's pooling runner; small, shares a GPU" },
-  { icon: IconSortDescending, name: "Rerank", detail: "vLLM's pooling runner; small, shares a GPU" },
-  { icon: IconMicrophone, name: "Speech to text", detail: "faster-whisper behind speaches" },
-  { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
-  { icon: IconPhotoAi, name: "Images", detail: "diffusers pipelines on vLLM-Omni; stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA) and CPUs" },
-  { icon: IconMovie, name: "Video", detail: "Wan text-to-video pipelines on vLLM-Omni (NVIDIA), as jobs at /v1/videos" },
-  { icon: IconScan, name: "Vision", detail: "Object detection, segmentation and depth on Forgeyard's vision server (CPU or NVIDIA), at /v1/vision/…" },
-];
+// 1.4 (#92): Models is the model library: what can be deployed (Catalog), how each kind of model
+// runs (Engines: recipes in the API and in recipe files) and, for admins, where models may come from
+// (Sources). What runs now is on Serving.
+export type LibraryTab = "catalog" | "engines" | "sources";
+
+// The tab in the address. Sources is for admins: anyone else gets the Catalog. 1.3's Models page
+// showed the deployments with no tab or ?tab=deployments and the routes at ?tab=routes: those open
+// Serving (null here). The names used only while 1.4 was made (serving, library, model-library) are
+// gone, so they land on the Catalog like any unknown tab.
+export function libraryTab(raw: string | null, admin: boolean): LibraryTab | null {
+  if (raw === "deployments" || raw === "routes") return null;
+  if (raw === "engines") return "engines";
+  if (raw === "sources" && admin) return "sources";
+  return "catalog";
+}
 
 export function ModelsPage() {
-  const [search, setSearch] = useSearchParams();
-  const navigate = useNavigate();
-  const raw = search.get("tab");
-  const tab = modelsTab(raw);
-  // Old addresses: the Serving tab (1.4, before that "routes") is gone; a link that names a route
-  // opens where that route lives now, any other lands on Deployments. "catalog" was the Library.
-  const routeRef = tab === "serving" ? search.get("route") : null;
-  const legacy = useApi<RoutesResponse>(routeRef ? "/routes" : null);
-  useEffect(() => {
-    if (tab === "serving") {
-      if (!routeRef) setSearch({}, { replace: true });
-      else if (legacy.data || legacy.error) {
-        const r = legacy.data?.routes.find((x) => String(x.id) === routeRef || x.served_name === routeRef);
-        if (r) navigate(routeHome(r), { replace: true });
-        else setSearch({}, { replace: true });
-      }
-    } else if (raw !== null && raw !== tab && tab === "library") setSearch({ tab }, { replace: true });
-  }, [tab, raw, routeRef, legacy.data, legacy.error, navigate, setSearch]);
-  const deps = useApi<DeploymentsResponse>("/deployments");
-  const { data: machines } = useApi<MachinesResponse>("/machines");
-  const cat = useApi<CatalogResponse>("/models");
-  // For the "→ provider" mark of a deployment with a cloud fallback.
-  const routes = useApi<RoutesResponse>("/routes");
-  usePoll(deps.reload, WORKLOADS_POLL_MS);
-  const canDeploy = cat.data?.can_deploy ?? false;
-  const library = tab === "library";
+  const [search] = useSearchParams();
+  const { user } = useAuth();
+  const tab = libraryTab(search.get("tab"), user?.role === "admin");
+  if (tab === null) return <Navigate to="/serving" replace />;
+  return <Library tab={tab} />;
+}
 
+function Library({ tab }: { tab: LibraryTab }) {
+  const [, setSearch] = useSearchParams();
+  const { user } = useAuth();
+  const admin = user?.role === "admin";
+  const cat = useApi<CatalogResponse>("/models");
+  const tabs: { id: LibraryTab; label: string }[] = [
+    { id: "catalog", label: `Catalog${cat.data ? ` (${cat.data.models.length})` : ""}` },
+    { id: "engines", label: "Engines" },
+    ...(admin ? [{ id: "sources" as const, label: "Sources" }] : []),
+  ];
   return (
     <>
       <PageHeader
-        index="02 · Models"
+        index="03 · Models"
         title="Models"
-        lead="Models run here as deployments, grouped by what they do; a deployment's page also holds its cloud fallback. The library is what you can deploy. Every ready deployment answers at /v1 with an API key, and in the Playground."
-        actions={canDeploy && (
-          <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
+        lead="The model library: the models you can deploy, the engines that run them and, for admins, where models may come from. What runs now is on Serving."
+        actions={cat.data?.can_deploy && (
+          <Link to="/serving/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>
         )}
       />
-      <AdvisorBanner pages={["models"]} />
       <HelpLinks>
         <HelpLink page="quick-start" anchor="5-add-a-recommended-model">How do I deploy my first model?</HelpLink>
-        <HelpLink page="concepts" anchor="models-recipes-and-estimates">Models, recipes and estimates</HelpLink>
-        <HelpLink page="troubleshooting" anchor="a-deployment-does-not-fit">A deployment does not fit</HelpLink>
+        <HelpLink page="concepts" anchor="models-engines-and-estimates">Models, engines and estimates</HelpLink>
+        <HelpLink page="how-to" anchor="download-a-model-before-deploying-it">Download a model before deploying it</HelpLink>
       </HelpLinks>
       <div className="tabs" role="tablist" aria-label="Models">
-        <button type="button" role="tab" aria-selected={!library} className={!library ? "on" : ""}
-          onClick={() => setSearch({})}>Deployments{deps.data ? ` (${deps.data.deployments.length})` : ""}</button>
-        <button type="button" role="tab" aria-selected={library} className={library ? "on" : ""}
-          onClick={() => setSearch({ tab: "library" })}>Library</button>
+        {tabs.map((t) => (
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""}
+            onClick={() => setSearch(t.id === "catalog" ? {} : { tab: t.id })}>{t.label}</button>
+        ))}
       </div>
-      {!library ? (
-        <>
-          {deps.error && <Notice tone="error">{deps.error}</Notice>}
-          {deps.data && deps.data.deployments.length === 0 && (
-            <section className="empty">
-              <div className="empty-art empty-art-lanes" aria-hidden="true">
-                <span className="lane" /><span className="lane lane-hot" /><span className="lane" />
-              </div>
-              <div className="empty-copy">
-                <h2>No deployments yet</h2>
-                <p>
-                  A deployment runs a model on one of your machines and makes it callable at <code>/v1</code>.{" "}
-                  {!canDeploy ? "Admins and operators deploy models; once one is ready, try it in the Playground or call it with an API key."
-                    : cat.data && cat.data.models.length === 0 ? "Start by adding a model to the catalog, then deploy it."
-                      : "Choose a model from the catalog; Forgeyard estimates its memory and picks a machine where it fits."}
-                </p>
-                {canDeploy && (
-                  <p className="empty-actions">
-                    {cat.data && cat.data.models.length === 0
-                      ? (cat.data.can_manage
-                        ? <button type="button" className="btn btn-primary" onClick={() => setSearch({ tab: "library" })}><IconPlus size={16} aria-hidden="true" /> Add a model</button>
-                        : <span className="muted">The catalog is empty: an admin adds models.</span>)
-                      : <Link to="/models/deploy" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy a model</Link>}
-                  </p>
-                )}
-                <ul className="kinds">
-                  {KINDS.map(({ icon: Icon, name, detail }) => (
-                    <li key={name}><Icon size={18} stroke={1.6} aria-hidden="true" /><span className="kind-name">{name}</span><span className="kind-detail">{detail}</span></li>
-                  ))}
-                </ul>
-              </div>
-            </section>
-          )}
-          {deps.data && deps.data.deployments.length > 0 && (
-            <ByKind list={deps.data.deployments} machines={machines?.machines ?? []} canDeploy={canDeploy} routes={routes.data?.routes ?? []} />
-          )}
-        </>
-      ) : (
-        <Catalog data={cat.data} error={cat.error} reload={cat.reload} />
-      )}
+      {cat.error ? <Notice tone="error">{cat.error}</Notice>
+        : !cat.data ? <p className="muted">Loading…</p>
+          : tab === "catalog" ? <Catalog data={cat.data} reload={cat.reload} />
+            : tab === "engines" ? <Engines data={cat.data} reload={cat.reload} />
+              : cat.data.sources ? <Sources sources={cat.data.sources} onSaved={cat.reload} /> : null}
     </>
-  );
-}
-
-export type ModelsTab = "deployments" | "library" | "serving";
-
-// The tab in the address. "serving" is an old address only (the tab is gone in 1.4, #81); the names
-// before 1.4 ("routes", "catalog") still work.
-export function modelsTab(raw: string | null): ModelsTab {
-  if (raw === "serving" || raw === "routes") return "serving";
-  if (raw === "library" || raw === "catalog" || raw === "model-library") return "library";
-  return "deployments";
-}
-
-// 1.4 (#34): the deployments in one section per kind, each with its icon, what it does and its path
-// at /v1; one row per deployment with where it runs, its memory and its state. Kinds with none are
-// named once at the end.
-function ByKind({ list, machines, canDeploy, routes }: { list: Deployment[]; machines: Machine[]; canDeploy: boolean; routes: RouteInfo[] }) {
-  const groups = groupByKind(list);
-  const none = groups.filter(([, l]) => l.length === 0).map(([k]) => k);
-  return (
-    <>
-      {groups.filter(([, l]) => l.length > 0).map(([k, l]) => {
-        const K = MODEL_KIND[k];
-        return (
-          <section key={k} className="panel kindsec" aria-labelledby={`kind-${k}`}>
-            <div className="kindsec-head">
-              <span className="kindicon"><ModelKindIcon kind={k} size={18} /></span>
-              <div className="kindsec-title">
-                <h2 id={`kind-${k}`}>{K.label} <span className="muted small">· {l.length}</span></h2>
-                <span className="muted">{K.hint}</span>
-              </div>
-              <span className="kindsec-api mono">{K.api}</span>
-            </div>
-            {l.map((d) => <DeploymentRow key={d.id} d={d} machines={machines} cloud={fallbackProviders(routes, d.id)} />)}
-          </section>
-        );
-      })}
-      {none.length > 0 && (
-        <p className="kinds-none small">
-          <span className="muted">None deployed yet:</span>
-          {none.map((k) => <span key={k} className="kinds-none-item"><ModelKindIcon kind={k} size={14} /> {MODEL_KIND[k].label}</span>)}
-          {canDeploy && <Link to="/models/deploy">Deploy a model</Link>}
-        </p>
-      )}
-    </>
-  );
-}
-
-function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machine[]; cloud: string[] }) {
-  const w = d.workload;
-  const tone = STATUS_TONE[w.status];
-  const placed = w.replica_list.filter((r) => r.machine);
-  // What needs saying about a replica: a download in progress, why it waits, why it is where it is.
-  const notes = w.replica_list.flatMap((r) => {
-    const frac = downloadFraction(r);
-    const tag = w.replica_list.length > 1 ? `#${r.ordinal} ` : "";
-    if (frac !== null) return [<span key={r.ordinal} className="deprow-note"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {tag}{downloadText(r)}</span>];
-    const text = r.not_picked_up ?? r.reason ?? r.placement_note;
-    return text && w.status !== "stopped" ? [<span key={r.ordinal} className={`deprow-note${r.not_picked_up ? " rep-stuck" : ""}`}>{tag}{text}</span>] : [];
-  });
-  return (
-    <div className="deprow" role="group" aria-label={`Deployment ${d.name}`}>
-      <div className="deprow-main">
-        <div className="deprow-name">
-          <span className={`dot dot-tone-${tone}`} aria-hidden="true" />
-          <Link to={`/models/deployments/${d.id}`}>{d.name}</Link>
-          {cloud.length > 0 && (
-            <Link className="fallback-mark" to={`/models/deployments/${d.id}#${FALLBACK_ANCHOR}`}
-              title={`When ${d.name} is busy or down, requests may move on to ${cloud.join(", ")}`}>
-              <IconCloud size={12} aria-hidden="true" /> → {cloud.join(", ")}
-            </Link>
-          )}
-        </div>
-        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task}</code> · </>}{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
-      </div>
-      <div className="where">
-        {placed.length ? placed.map((r) => {
-          const m = machines.find((x) => x.id === r.machine!.id);
-          return (
-            <Link key={r.ordinal} to={`/machines/${r.machine!.id}`} className="where-chip" title={`Replica #${r.ordinal}: ${stateLabel(r)}`}>
-              {m && <KindMark kind={machineKind(m)} size={20} />}
-              <span className="mono">{r.machine!.name}</span>
-              <span>{whereOnMachine(r)}</span>
-            </Link>
-          );
-        }) : <span className="small muted">{w.status === "stopped" ? "stopped" : "waiting for a machine"}</span>}
-      </div>
-      <span className="deprow-mem">{d.estimate.device === "gpu" ? `${gib(d.estimate.per_gpu)} / GPU` : `${gib(d.estimate.ram)} RAM`}</span>
-      <span className={`chip chip-tone-${tone} deprow-state`}>{w.status === "running" ? `${w.ready}/${w.replicas} ready` : w.status}</span>
-      {notes.length > 0 && <div className="deprow-notes">{notes}</div>}
-    </div>
   );
 }
 
 // 1.4: the downloads ahead of a deployment ("Download to…"), polled while one is under way.
 const DOWNLOADS_POLL_MS = 2000;
 
-function Catalog({ data, error, reload }: { data: CatalogResponse | null; error: string | null; reload: () => void }) {
+function Catalog({ data, reload }: { data: CatalogResponse; reload: () => void }) {
   const dl = useApi<DownloadsResponse>("/downloads");
   const [dialog, setDialog] = useState<CatalogModel | null>(null);
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -231,8 +95,6 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
     const t = window.setInterval(() => { if (document.visibilityState !== "hidden") reloadDl(); }, DOWNLOADS_POLL_MS);
     return () => window.clearInterval(t);
   }, [running, reloadDl]);
-  if (error) return <Notice tone="error">{error}</Notice>;
-  if (!data) return <p className="muted">Loading…</p>;
   const byModel = (id: number): ModelDownload[] => recentDownloads((dl.data?.downloads ?? []).filter((d) => d.model?.id === id), "machine");
   const said = (tone: "ok" | "error") => (text: string) => { setNote({ tone, text }); reloadDl(); };
   return (
@@ -249,7 +111,7 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
         ) : (
           <div className="table-wrap catalog-wrap">
             <table className="table catalog-table">
-              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Recipes</th><th /></tr></thead>
+              <thead><tr><th>Model</th><th>Task</th><th>Format</th><th>Size</th><th>Architecture</th><th>Licence</th><th>Engines</th><th /></tr></thead>
               <tbody>{data.models.map((m) => (
                 <ModelRow key={m.id} m={m} canManage={data.can_manage} canDeploy={data.can_deploy} reload={reload}
                   downloads={byModel(m.id)} onDownload={() => setDialog(m)} onChanged={said("ok")} onError={said("error")} />
@@ -258,12 +120,37 @@ function Catalog({ data, error, reload }: { data: CatalogResponse | null; error:
           </div>
         )}
       </section>
-      <section className="panel" aria-labelledby="recipes-title">
-        <div className="panel-head"><h2 id="recipes-title">Recipes</h2><span className="muted small">how each engine runs, per hardware</span></div>
-        <div className="recipes">{data.recipes.map((r) => <RecipeCard key={r.name} r={r} />)}</div>
-        {data.can_manage && <AddRecipe onAdded={reload} />}
+    </>
+  );
+}
+
+// The engines (recipes in the API and in recipe files): how each kind of model runs, per hardware.
+// Admins add one (from scratch or from a copy of a built-in engine), and change or delete their own.
+type EngineFormFor = { mode: "add" } | { mode: "edit"; name: string };
+
+function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }) {
+  const [form, setForm] = useState<EngineFormFor | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const done = (text: string) => { setForm(null); setNote(text); reload(); };
+  return (
+    <>
+      {note && <Notice tone="ok">{note}</Notice>}
+      {data.can_manage && !form && (
+        <p className="add-model-open">
+          <button type="button" className="btn" onClick={() => { setNote(null); setForm({ mode: "add" }); }}>
+            <IconPlus size={16} aria-hidden="true" /> Add a custom engine
+          </button>
+        </p>
+      )}
+      {form && <EngineForm key={form.mode === "edit" ? form.name : "add"} edit={form.mode === "edit" ? form.name : null}
+        recipes={data.recipes} onDone={done} onCancel={() => setForm(null)} />}
+      <section className="panel" aria-labelledby="engines-title">
+        <div className="panel-head"><h2 id="engines-title">Engines</h2><span className="muted small">how each kind of model runs, per hardware</span></div>
+        <div className="recipes">{data.recipes.map((r) => (
+          <EngineCard key={r.name} r={r} canManage={data.can_manage}
+            onEdit={() => { setNote(null); setForm({ mode: "edit", name: r.name }); }} onDeleted={done} />
+        ))}</div>
       </section>
-      {data.can_manage && data.sources && <Sources sources={data.sources} onSaved={reload} />}
     </>
   );
 }
@@ -273,6 +160,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
   onDownload: () => void; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const src = shortSource(m);
   const remove = async () => {
     if (!window.confirm(`Remove ${m.name} from the catalog? Machines keep their cached copy.`)) return;
     try {
@@ -288,8 +176,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
       <td data-label="Model">
         <div className="cell-stack">
         <div className="strong">{m.title ?? m.name}</div>
-        <div className="mono small muted" title={m.revision ?? undefined}>{m.source}{m.file ? ` · ${m.file}` : ""}{m.revision ? ` @ ${m.revision.slice(0, 10)}` : ""}</div>
-        {m.mmproj && <div className="mono small muted" title="Projector file (llama.cpp --mmproj)">+ {m.mmproj.path}</div>}
+        <div className="mono small muted catalog-src" title={src.full}>{src.text}{m.mmproj ? " + projector" : ""}</div>
         {error && <div className="field-error">{error}</div>}
         </div>
       </td>
@@ -314,15 +201,18 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
           {m.gated && <span className="muted"><IconLock size={11} aria-hidden="true" /> gated</span>}
         </div>
       </td>
-      <td data-label="Recipes" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
+      <td data-label="Engines" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
       <td className="cell-actions">
-        {canDeploy && m.recipes.length > 0 && <Link className="btn btn-small" to={`/models/deploy?model=${encodeURIComponent(m.name)}`}>Deploy</Link>}
+        {/* One column of actions at desktop widths, so the table never clips them (1.4, #92). */}
+        <div className="catalog-actions" role="group" aria-label={`Actions for ${m.name}`}>
+        {canDeploy && m.recipes.length > 0 && <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}`}>Deploy</Link>}
         {canDeploy && m.kind !== "local" && (
           <button type="button" className="btn btn-quiet btn-small" onClick={onDownload}
             title={`Download ${m.name} to machines now, so a deployment there starts without waiting`}>Download to…</button>
         )}
         {canManage && <button type="button" className="btn btn-quiet btn-small" disabled={m.deployments > 0}
           title={m.deployments ? "Deployed: delete its deployments first" : undefined} onClick={() => void remove()}>Remove</button>}
+        </div>
       </td>
     </tr>
     {downloads.length > 0 && (
@@ -336,27 +226,58 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
   );
 }
 
-function RecipeCard({ r }: { r: Recipe }) {
+// 1.4 (#92): a short card (name, version, what it is, the hardware it runs on, what it serves); the
+// variants, their images and requirements, and the offline commands are behind Details.
+function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage: boolean; onEdit: () => void; onDeleted: (text: string) => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    if (!window.confirm(`Delete the engine ${r.name}? A deployment that uses it must be deleted first.`)) return;
+    setError(null);
+    try {
+      await api(`/recipes/${encodeURIComponent(r.name)}`, { method: "DELETE" });
+      onDeleted(`Engine ${r.name} deleted.`);
+    } catch (e) { setError(errorText(e)); }
+  };
   return (
-    <article className="recipe" aria-label={`Recipe ${r.name}`}>
-      <header>
-        <h3 className="mono">{r.name}</h3>
-        <span className="chip">{r.engine} {r.version}</span>
-        {!r.builtin && <span className="chip chip-tone-run">custom</span>}
-        {r.share === "vram" && <span className="chip chip-tone-wait">shares a GPU</span>}
+    <article className="recipe engine-card" aria-label={`Engine ${r.name}`}>
+      {/* Every closed card has the same height (1.4, #92): one header row, two lines of description, one
+          row of chips, one line of tasks, and the Details row at the bottom. Only an open card grows. */}
+      <header className="engine-head">
+        <h3 className="mono" title={r.name}>{r.name}</h3>
+        <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
+        {!r.builtin && <span className="chip chip-tone-run engine-custom">custom</span>}
       </header>
-      <p className="small">{r.description}</p>
-      <p className="small muted">{r.tasks.map((t) => TASK_LABEL[t]).join(", ")} · {r.formats.join(", ")} · estimate: {r.estimate}</p>
-      <ul className="variants">
-        {r.variants.map((v) => (
-          <li key={v.name}>
-            <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
-            <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
-            <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
-          </li>
+      <p className="small engine-desc" title={r.description}>{r.description}</p>
+      <div className="engine-facts" aria-label={`Runs on: ${engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ")}`}>
+        {engineHardware(r).map((h) => (
+          <span key={h} className={`vendor vendor-${h}`}>{h === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{HARDWARE_LABEL[h]}</span>
         ))}
-      </ul>
-      <OfflineImages name={r.name} variants={r.variants} />
+        {r.share === "vram" && <span className="chip chip-tone-wait">shares a GPU</span>}
+      </div>
+      <p className="small muted engine-serves" title={`Serves ${r.tasks.map((t) => TASK_LABEL[t]).join(", ")}`}>Serves {r.tasks.map((t) => TASK_LABEL[t]).join(", ")}</p>
+      <div className="engine-foot">
+        <details className="engine-details">
+          <summary className="small">Details</summary>
+          <p className="small muted">Formats: {r.formats.join(", ")} · estimate: {r.estimate}</p>
+          <ul className="variants" aria-label={`Variants of ${r.name}`}>
+            {r.variants.map((v) => (
+              <li key={v.name}>
+                <span className={`vendor vendor-${v.vendor}`}>{v.vendor === "cpu" ? <IconCpu size={11} aria-hidden="true" /> : null}{v.vendor.toUpperCase()}</span>
+                <span className="mono small variant-what" title={v.runtime === "container" ? v.image ?? undefined : undefined}>{v.runtime === "container" ? imageTag(v.image) : `process: ${v.engine?.split("/").pop() ?? ""}`}</span>
+                <span className="muted small">{[v.compute_capability && `cc ${v.compute_capability}`, v.driver && `driver ${v.driver}`, v.arch && v.arch.join(" ")].filter(Boolean).join(" · ")}</span>
+              </li>
+            ))}
+          </ul>
+          <OfflineImages name={r.name} variants={r.variants} />
+        </details>
+        {canManage && !r.builtin && (
+          <div className="engine-actions">
+            <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>Edit</button>
+            <button type="button" className="btn btn-quiet btn-small" onClick={() => void remove()}>Delete</button>
+          </div>
+        )}
+      </div>
+      {error && <p className="field-error" role="alert">{error}</p>}
     </article>
   );
 }
@@ -398,7 +319,7 @@ function OfflineImages({ name, variants }: { name: string; variants: RecipeVaria
       <CopyBox value={carry.load} label={`Load command for ${what}`} />
       <p className="small muted">
         {e.checked ? (
-          <>Forgeyard checks the loaded image against the ids recorded for it, so this recipe works offline as it is.</>
+          <>Forgeyard checks the loaded image against the ids recorded for it, so this engine works offline as it is.</>
         ) : (
           <>
             No ids are recorded for this image, so Forgeyard cannot check a loaded copy: name it by its tag only (without{" "}
@@ -410,26 +331,83 @@ function OfflineImages({ name, variants }: { name: string; variants: RecipeVaria
   );
 }
 
-function AddRecipe({ onAdded }: { onAdded: () => void }) {
+// Add a custom engine, or change a custom one: its recipe as YAML. A new one can start from a copy of a
+// built-in engine under a free name. The server checks the YAML; its message is shown here.
+function EngineForm({ edit, recipes, onDone, onCancel }: {
+  edit: string | null; recipes: Recipe[]; onDone: (text: string) => void; onCancel: () => void;
+}) {
   const [text, setText] = useState("");
-  const [open, setOpen] = useState(false);
+  const [start, setStart] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(edit !== null);
   const [error, setError] = useState<string | null>(null);
-  const save = async () => {
+  const builtins = recipes.filter((r) => r.builtin);
+  useEffect(() => {
+    if (edit === null) return;
+    let alive = true;
+    api<{ recipe: Recipe }>(`/recipes/${encodeURIComponent(edit)}`).then(
+      (r) => { if (alive) { setText(r.recipe.yaml ?? ""); setLoading(false); } },
+      (e) => { if (alive) { setError(errorText(e)); setLoading(false); } },
+    );
+    return () => { alive = false; };
+  }, [edit]);
+  const copy = async (name: string) => {
+    setStart(name);
     setError(null);
+    if (!name) { setText(""); return; }
     try {
-      await api("/recipes", { method: "POST", body: { yaml: text } });
-      setOpen(false); setText(""); onAdded();
+      const r = await api<{ recipe: Recipe }>(`/recipes/${encodeURIComponent(name)}`);
+      setText(renameRecipe(r.recipe.yaml ?? "", freeName(`${name}-custom`, recipes.map((x) => x.name))));
     } catch (e) { setError(errorText(e)); }
   };
-  if (!open) return <p><button type="button" className="btn btn-quiet btn-small" onClick={() => setOpen(true)}><IconPlus size={14} aria-hidden="true" /> Add a custom recipe</button></p>;
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api<{ recipe: Recipe }>(edit === null ? "/recipes" : `/recipes/${encodeURIComponent(edit)}`,
+        { method: edit === null ? "POST" : "PUT", body: { yaml: text } });
+      onDone(edit === null ? `Engine ${r.recipe.name} added.` : `Engine ${r.recipe.name} saved.`);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
   return (
-    <div className="field" style={{ marginTop: 14 }}>
-      <label htmlFor="r-yaml">Recipe (YAML, like the built-in ones)</label>
-      <textarea id="r-yaml" className="mono" rows={10} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
-      {error && <p className="field-error">{error}</p>}
-      <div className="row-gap"><button type="button" className="btn" onClick={() => void save()}>Save recipe</button>
-        <button type="button" className="btn btn-quiet" onClick={() => setOpen(false)}>Cancel</button></div>
-    </div>
+    <section className="panel engine-form" aria-labelledby="engine-form-title">
+      <div className="panel-head">
+        <h2 id="engine-form-title">{edit === null ? "Add a custom engine" : `Change ${edit}`}</h2>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>Close</button>
+      </div>
+      {edit === null && (
+        <p className="engine-form-lead">
+          Define an engine with your own image and arguments — for example a newer version, copied from a built-in engine. Built-in
+          engines are updated with Forgeyard releases.
+        </p>
+      )}
+      <p className="muted small">
+        An engine is a recipe in YAML, like the built-in ones: the program or container image per hardware, its parameters and its
+        memory estimate. <HelpLink page="reference" anchor="built-in-recipes">Built-in recipes</HelpLink>
+      </p>
+      {edit === null && (
+        <div className="field">
+          <label htmlFor="engine-start">Start from a built-in engine</label>
+          <select id="engine-start" value={start} onChange={(e) => void copy(e.target.value)}>
+            <option value="">Empty: write the YAML yourself</option>
+            {builtins.map((r) => <option key={r.name} value={r.name}>{r.name} ({r.engine} {r.version})</option>)}
+          </select>
+          <p className="field-hint">The copy gets a name of its own; change the variants or parameters you need.</p>
+        </div>
+      )}
+      <div className={`field${error ? " has-error" : ""}`}>
+        <label htmlFor="engine-yaml">Engine recipe (YAML)</label>
+        <textarea id="engine-yaml" className="mono" rows={16} value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
+          disabled={loading} aria-invalid={error ? true : undefined} aria-describedby={error ? "engine-yaml-error" : undefined} />
+        {error && <p className="field-error" id="engine-yaml-error" role="alert">{error}</p>}
+      </div>
+      <div className="row-gap">
+        <button type="button" className="btn btn-primary" disabled={busy || loading || !text.trim()} onClick={() => void save()}>
+          {busy ? "Saving…" : edit === null ? "Add engine" : "Save changes"}
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button>
+      </div>
+    </section>
   );
 }
 
@@ -446,7 +424,7 @@ function Sources({ sources, onSaved }: { sources: ModelSources; onSaved: () => v
   const seeds = sources.env_seeds ?? [];
   return (
     <section className="panel" aria-labelledby="sources-title">
-      <h2 id="sources-title">Model sources</h2>
+      <h2 id="sources-title">Sources</h2>
       <p className="muted small">Hugging Face models come from <code>{sources.hf_endpoint}</code>. Anything else only from what is listed here. Private and metadata addresses are always refused{sources.allow_private_hosts ? " (except: private hosts are allowed on this server for a LAN mirror)" : ""}.</p>
       {seeds.length > 0 && (
         <p className="from-env small" role="note">

@@ -89,12 +89,12 @@ Forgeyard drops nothing from requests to it.
 
 To let a deployment spill to the cloud when it is busy or down:
 
-1. Open the deployment from **Models**. Its page has a **Cloud fallback** section.
+1. Open the deployment from **Serving**. Its page has a **Cloud fallback** section.
 2. **Add a cloud tier**, and add the provider's model to it.
 3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save cloud
    fallback**.
 
-In the **Deployments** list, a deployment with a cloud fallback shows a small mark with its provider,
+In the **Serving** list, a deployment with a cloud fallback shows a small mark with its provider,
 such as *→ Gemini*.
 
 ## Serve a cloud model under a name of its own

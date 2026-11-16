@@ -101,7 +101,7 @@ describe("a machine's model cache", () => {
     const used = within(box).getByRole("button", { name: "Remove acme/gguf" }) as HTMLButtonElement;
     expect(used.disabled).toBe(true);
     expect(used.title).toBe("In use by chat-q4. Stop it first.");
-    expect(within(box).getAllByRole("link", { name: "in use: chat-q4" })[0].getAttribute("href")).toBe("/models/deployments/7");
+    expect(within(box).getAllByRole("link", { name: "in use: chat-q4" })[0].getAttribute("href")).toBe("/serving/7");
     expect((within(box).getByRole("button", { name: "Remove m-Q4_K_M.gguf" }) as HTMLButtonElement).disabled).toBe(true);
     const free = within(box).getByRole("button", { name: "Remove tiny.gguf" }) as HTMLButtonElement;
     expect(free.disabled).toBe(false);

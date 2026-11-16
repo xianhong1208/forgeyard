@@ -102,26 +102,15 @@ def vw(owner):
 
 
 # ------------------------------------------------------------------ which workloads
-def test_fy_pgv_001_options_list_only_exposed_vision_workloads(vw):
-    """FY-PGV-001: the options list the exposed services started with a vision task (`--task x` or
-    `--task=x`), with the task's title, model and licence, ready replicas or why none, and the body limit;
-    not an unexposed vision workload, an exposed workload without a vision task, or an unknown task."""
+def test_fy_pgv_001_options_no_longer_list_apps(vw):
+    """FY-PGV-001 (1.4, #88): apps left the console, so the options list vision models and the tasks only,
+    not an exposed vision app (which keeps running at /x/ until 1.5)."""
     o = vw.owner
-    create(o, vision_service("segmenter", ["--task=segment"], vw.node))      # exposed, not ready yet
-    create(o, vision_service("hidden-depth", ["--task", "depth"], vw.node), expose=False)
-    create(o, service("web", machine_id=vw.node))                            # exposed, no vision task
-    create(o, vision_service("classify", ["--task", "classify"], vw.node))   # not a vision server task
+    create(o, vision_service("segmenter", ["--task=segment"], vw.node))
     set_gateway(o, "segmenter", expose=True, max_body_mb=4)
     r = o.get("/api/playground/vision/options")
     assert r.status_code == 200, r.text
-    ws = {w["name"]: w for w in r.json()["workloads"]}
-    assert sorted(ws) == ["detector", "segmenter"]
-    d = ws["detector"]
-    assert (d["task"], d["title"], d["model"], d["licence"], d["endpoint"], d["path"]) == \
-        ("detect", "Object detection", "PekingU/rtdetr_v2_r18vd", "apache-2.0", "/v1/detect", "/x/detector")
-    assert d["ready"] == 1 and d["reason"] is None and d["max_body_mb"] == 32
-    s = ws["segmenter"]
-    assert s["task"] == "segment" and s["ready"] == 0 and "no ready replica" in s["reason"] and s["max_body_mb"] == 4
+    assert "workloads" not in r.json() and r.json()["models"] == []
     assert [t["template"] for t in r.json()["tasks"]] == ["object-detection", "segmentation", "depth"]
 
 
@@ -162,7 +151,7 @@ def test_fy_pgv_003_the_console_session_and_csrf_only(vw, client):
     assert vw.app.seen == []
     add_user(o, "alice")
     alice = sign_in(o, "alice", PW)
-    assert [w["name"] for w in alice.get("/api/playground/vision/options").json()["workloads"]] == ["detector"]
+    assert "workloads" not in alice.get("/api/playground/vision/options").json()
     r = alice.post("/api/playground/vision/detector/detect", **image_form())
     assert r.status_code == 200 and r.json()["detections"][0]["label"] == "cat"
     # /x/ takes API keys only: the console's session cookie gets 401 there and never reaches the workload.
@@ -212,7 +201,7 @@ def test_fy_pgv_005_refused_workloads_and_tasks_never_reach_anything(vw):
     set_gateway(o, "detector", expose=False)
     r = o.post("/api/playground/vision/detector/detect", **image_form())
     assert r.status_code == 404 and vw.app.seen == []
-    assert o.get("/api/playground/vision/options").json()["workloads"] == []
+    assert "workloads" not in o.get("/api/playground/vision/options").json()
 
 
 def test_fy_pgv_006_no_ready_replica(vw):

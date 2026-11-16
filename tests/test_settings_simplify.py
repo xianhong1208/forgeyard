@@ -370,6 +370,9 @@ def test_fy_simp_013_setup_health_flags_a_gated_model_without_a_token(owner):
     f = found()
     assert len(f) == 1 and f[0].severity == "info" and f[0].scope == f"deployment:{dep['id']}"
     assert "neither the server nor this deployment has a token" in f[0].detail
+    # 1.4 (#92): the server's token is on Models -> Sources; the banner is on Serving and the deployment.
+    assert f[0].fix_url == "/models?tab=sources" and "Models → Sources" in f[0].detail
+    assert f[0].pages == ("serving", f"deployment:{dep['id']}")
     db = new_session()
     try:
         r = db.scalar(select(Replica))

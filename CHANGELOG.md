@@ -37,17 +37,16 @@ version until 1.0.
     depth*), at the same pinned revisions, on the CPU by default.
   - `scripts/accept_vision.py` and a `vision` group in `scripts/accept_all.py` check them on real
     machines. Apps made from the templates keep running as they are.
-- **Vision models in the console** (#86, part 2). **Models → Deployments** groups detection,
+- **Vision models in the console** (#86, part 2). **Serving** groups detection,
   segmentation and depth in one **Vision** section, each row with its task and `/v1/vision/…` path;
-  the **Library** shows a vision model's architecture and classes, a search result its licence, and
+  the **Catalog** shows a vision model's architecture and classes, a search result its licence, and
   says before adding why a vision model cannot be added (another task, a licence that is not
-  permissive, a timm backbone), with **Add** disabled. **Playground → Vision** picks a vision
-  deployment and sends it the picture as you; a vision model chosen on the Playground's Models tab opens
-  the same panel. **Try it** on a vision deployment sends the test image. The example calls (Get
+  permissive, a timm backbone), with **Add** disabled. The Playground's vision panel sends a vision
+  deployment the picture as you (picked in the Playground's one model picker, #100). **Try it** on a vision deployment sends the test image. The example calls (Get
   started, API keys, a deployment's page) are curl and httpx with the image as a file field.
 
 - **Download to…: a model, and its engine, on chosen machines before you deploy it** (part of #35).
-  From **Models → Library** (a model's row) or a machine's page (**Download a model here…**), pick the
+  From **Models → Catalog** (a model's row) or a machine's page (**Download a model here…**), pick the
   machines: each says whether it fits (what it downloads, the free disk, the engine), is already there,
   is offline, has an agent too old for it, or lacks the disk. **Also the engine** (on by default)
   fetches, for the chosen recipe, what that machine would run: the engine archive of a process variant,
@@ -156,61 +155,74 @@ version until 1.0.
     archive also counts as on a machine once a replica started from it there. Older agents work
     as before.
 - **A model workload names the deployment that created it** (part of #36): `GET /api/workloads`
-  gives `deployment: {id, name, gpus}`. In the console a model is seen under Models only (#81).
-- **Machines and Models redesigned** (#34). **Machines** is one tile per machine with a mark for its
+  gives `deployment: {id, name, gpus}`. In the console a model is seen under Serving only (#81, #92).
+- **Machines and the models' pages redesigned** (#34, #92). **Machines** is one tile per machine with a mark for its
   kind (NVIDIA GPU, AMD GPU, AMD APU, CPU only), its cards as slots filled from the bottom (what
   Forgeyard reserved, other use, free), free memory, how many models and apps run there
   and their names, heartbeat and agent version, under a count of machines per kind. A machine has
   its own page (`/machines/<id>`): a memory map that splits each card by what holds it, named and
   with what it reserved; what runs there, with **Deploy here**; GPU access
   and runtimes; the agent's details; **Revoke** and **Remove**; and only that machine's setup-health
-  findings. **Models → Deployments** groups deployments by kind (chat, multimodal chat, embeddings,
-  rerank, speech to text, text to speech, images, video), each with its icon, a line on what it does
+  findings. **Serving** groups deployments by kind (chat, multimodal chat, embeddings,
+  rerank, speech to text, text to speech, images, video, vision), each with its icon, a line on what it does
   and its path at `/v1`; a row says where the deployment runs (machine and cards), its memory and its
   state, and any download, wait or placement note. `GET /api/deployments` gives the model's
   `modalities`, so a chat model that reads images is listed as multimodal chat.
 
 ### Changed
 
-- **Apps no longer offers the vision templates** (#86): the *Start from a template* panel is gone, and
-  **Playground → Vision** lists vision models only (Apps leave the console in 1.4, #88). Apps already
-  made from a template keep running at `/x/`; `/apps/new?template=…` and `GET /api/workloads/templates`
-  still work, and the vision image keeps its baked-in models for them.
-
-- **One thing in one place: Models has Deployments and Library, Workloads are Apps, cloud settings
-  are on Cloud** (#34, #36, #81). The console only; the API and the data are unchanged.
-  - **Models** has two tabs, **Deployments** and **Library** (*Catalog and recipes* before). The
-    Serving tab (*Routes and cloud* before 1.4) is gone: most of its routes only repeated a
-    deployment.
+- **One thing in one place: Serving runs the models, Models is the library, cloud settings are on
+  Cloud** (#34, #36, #81, #92; apps left the console, #88). The console only; the API and the data are unchanged.
+  - **Serving** (`/serving`) is a page of its own: the models running now, grouped by kind (the
+    Deployments list of Models before), with **Deploy a model** (`/serving/deploy`). A deployment's
+    page is `/serving/<id>` and it is changed at `/serving/<id>/edit`.
+  - **Models** is the model library only, with three tabs: **Catalog** (the default: the models you
+    can deploy, adding from the recommended list, a Hugging Face search or a source, *Download to…*,
+    Deploy), **Engines** (the recipes: vLLM, llama.cpp, sd.cpp, speaches, vLLM-Omni, vision, their
+    per-hardware variants and custom ones) and **Sources** (admins only: GGUF URL hosts, `local://`
+    directories, the Hugging Face token). The console says *engine*; the API and the recipe files keep
+    *recipe* (`/api/recipes`). An engine's card is short: its version, what it is, the hardware it runs
+    on (NVIDIA, AMD, CPU, *shares a GPU*) and what it serves; the variants, images, requirements and
+    offline commands are behind **Details**. Admins **Add a custom engine** (its recipe YAML, optionally
+    started from a copy of a built-in engine under a free name, the server's refusal shown at the
+    field) and **Edit** or **Delete** a custom one (`PUT` / `DELETE /api/recipes/<name>`; refused while
+    a deployment uses it). A catalog row's source is short (the repository and, for a GGUF file, its
+    quantisation such as `Q4_K_M`; a URL's host and file; a directory's name), the full source and
+    revision in its tooltip, and its actions are stacked so none is clipped. The *Routes and cloud* tab of 1.3 is gone: most of its routes only
+    repeated a deployment.
   - **A deployment's page holds its cloud fallback**: the tiers and the spill rules that were
     *Routing and cloud spill*, edited in place by admins and read-only for everyone else, plus the
-    other names it also answers as. In the Deployments list, a deployment with a cloud tier shows
+    other names it also answers as. In the Serving list, a deployment with a cloud tier shows
     *→ <provider>*.
   - **Providers is now Cloud** (`/cloud`), with two tabs: **Providers**, and **Cloud models**, the
     names an admin made for a provider's model (*New cloud model*). A name an admin made for
     deployments only (several behind one name, or one under a second name) is listed there too, under
     *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
     `/cloud/providers/<id>`.
-  - **Workloads is now Apps** (`/apps`), an advanced page that is **not in the menu**; it says first
-    that models are deployed under Models. It lists only the programs people run themselves (services and
-    tasks: vision templates, notebooks, batch jobs, any image or command), with **New app** and
-    **Start from a template**. Workloads made by model deployments are not listed there, and its
-    counts (*Apps*, *Running*, *Waiting*, *Failing*, *GPUs used by apps*) are the apps' alone. The
-    console says *app* for them everywhere (a key's **Apps at /x/** setting, the Playground's Vision
-    tab, the audit filter); the API keeps `workloads`.
-  - **A model is seen under Models only**: its deployment's page has its replicas, output and events,
+  - **A model is seen under Serving only**: its deployment's page has its replicas, output and events,
     and no longer says *Runs as workload X*; an old link to a model's workload page opens the
     deployment. **Machines** still shows everything that holds a card: its tiles, memory map and
-    *Running here* name models (linked to the deployment) and apps (linked to the app).
-  - The menu is Machines, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit log
-    (admins); the pages' numbers follow it, and the Apps pages say *Advanced · Apps*. A machine's page
-    no longer offers **New app here**; its memory map and *Running here* still list apps. "Serving", "route" and "workload" left the
+    *Running here* name models (linked to the deployment) and apps (named, not linked: #88).
+  - **The Playground has one model picker and no tabs** (#100). The ready models (as before: a ready
+    replica, or a cloud model the person may use) are listed grouped by kind with Serving's labels and
+    icons (Chat, Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video,
+    Vision), each with its task (vision) or *local, then cloud* / *cloud only*; models with no ready
+    replica are no longer listed. Picking one opens its panel, and the address keeps it
+    (`/playground?model=<name>`, without a step in the history). The **Vision** tab is gone: its address
+    `/playground?tab=vision` opens the first ready vision model, or the picker when there is none. With
+    nothing ready, the page says so, names how many deployments are not ready (linking Serving), and
+    sends admins and operators to **Models → Catalog**. The playground's own API is unchanged.
+  - The menu is Machines, Serving, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit
+    log (admins), and the pages are numbered 01 to 09 in that order. "Route" and "workload" left the
     console's navigation.
-  - Old links open the new places, without a step in the history: `/models?tab=serving` and
-    `?tab=routes` (with `&route=<id or name>`: that route's place), `?tab=catalog`,
-    `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads`, `/workloads/<id>` and
-    `/workloads/new` (to the same place under `/apps`). Setup-health findings link to a deployment's
-    cloud fallback, a cloud model or `/cloud/providers/<id>`, and show on those pages.
+  - 1.3's links open the new places, without a step in the history: `/models/deployments/<id>` (and
+    `/edit`, keeping `#cloud-fallback`), `/models/deploy` (keeping `?model=` and `?machine=`),
+    `/deployments`, `/models?tab=deployments` and `?tab=routes` (Serving), `?tab=catalog` (the
+    Catalog), `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads…` (a model's
+    workload: its deployment; anything else: Machines). Setup-health findings
+    link to Serving, a deployment's page or its cloud fallback, **Models → Sources** (the Hugging Face
+    token, settings still read from `.env`), a cloud model or `/cloud/providers/<id>`, and show on those
+    pages; Get started's steps open the Catalog and **Serving → Deploy a model**.
 - **A deployment's workload is stopped, started and deleted only through its deployment** (#36):
   `POST /api/workloads/<id>/stop`, `…/start` and `DELETE /api/workloads/<id>` answer `409
   managed_by_deployment` (naming the deployment) for a model deployment's workload, which the console
@@ -221,8 +233,30 @@ version until 1.0.
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
 
+### Deprecated
+
+- **Apps: their API, the templates and `/x/`** (#88), removed in 1.5 (#89) with a migration that removes
+  the apps left. Forgeyard is about running and managing models; an app (a workload that is not a
+  model's) drifts from that. Until 1.5 they keep working, and say so:
+  - the apps part of `/api/workloads` (create; read, expose, stop, start, delete and the logs of an app;
+    the list while it holds an app), `GET /api/workloads/templates`, `/x/<name>/…` and the console's
+    `POST /api/playground/vision/<name>/<task>` answer with `Deprecation: @1794787200` (RFC 9745) and
+    `Link: </guide/en/reference#apps-deprecated>; rel="deprecation"`, errors included; no `Sunset` yet;
+  - the server log warns once an hour at most per kind (apps, templates, `/x/`), naming the request;
+  - **Setup health** warns (`apps-deprecated`) while any app exists, naming them.
+
+  A key's `workloads` and `workload_list` settings stay in the API until 1.5. A model deployment's
+  workload is not deprecated: it is how models run (fine-tuning in 1.9 will run the same way). Use a
+  model deployment instead; a model no built-in engine runs gets a custom engine (**Models → Engines**).
+
 ### Removed
 
+- **Apps in the console** (#88). The Apps pages (`/apps`, an app's page, New app and its templates), a
+  key's **Apps at /x/** setting on API keys, and the exposed vision apps in **Playground → Vision**
+  (vision models replace them, #86) are gone. `/apps…` and 1.3's `/workloads…` open a model's
+  deployment, or Machines. **Machines** still names an app that holds a card (not linked), so a card in
+  use is never shown free. `GET /api/keys` no longer lists the apps a key could name (`workloads`), and
+  `GET /api/playground/vision/options` no longer lists the exposed vision apps (`workloads`).
 - **The seven settings deprecated in 1.3.1 are no longer read** (#78): `SECRET_KEY_FILE`,
   `AGENT_HEARTBEAT_SECONDS`, `FORGEYARD_SETUP_TOKEN`, `USAGE_FLUSH_SECONDS`,
   `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and `OPENROUTER_MODELS_URL`. The behaviour
@@ -242,6 +276,13 @@ version until 1.0.
 
 ### Fixed
 
+- **`agent init` and `install.sh` no longer write an invalid `agent.toml` when a tool's message has several
+  lines.** A note in the file quoted, for example, `podman info`'s multi-line error on a host without a shared
+  mount; its second line was not a comment, so the file was not valid TOML and the install stopped at
+  "writing … agent.toml failed". Every note and header line is now folded into comment lines.
+- **Stopping a replica's key guard no longer waits for a client that stopped reading.** Closing a guard
+  (the agent stops, a replica is removed) used to close each stream gracefully, up to 2 s per side plus 5 s
+  for the listener; it now aborts every open stream first, so it takes well under a second.
 - **Usage's tables no longer go on for pages** (#82). With about 100 models the page was some 48,000
   px tall on a phone: every row wrapped its name over three or four lines and kept every column.
   - Every table on Usage (by model, key, person, day, source, local or cloud; on **Cost** by day,

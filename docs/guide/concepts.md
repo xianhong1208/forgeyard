@@ -79,71 +79,51 @@ when sharing would help:
 
 Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
 
-## Apps (advanced)
+## Apps (deprecated)
 
-**Apps are not in the menu.** Most people only deploy models: to use a model, deploy it under
-**Models**. Admins and operators who need more open `/apps` on the server (for example
-`https://<server>:7860/apps`).
+Before 1.4 the console could also run **apps**: programs of your own (a container or a process,
+a service or a one-off task) on your machines, optionally exposed at `/x/<name>` with API keys.
+Forgeyard is about running and managing models, so in 1.4 apps left the console, and **in 1.5 they
+are removed**: their part of the API (`/api/workloads`), the templates and the gateway's `/x/`. Until
+then they keep working through the API only, and say so: every answer carries a `Deprecation` header,
+the server log warns (at most once an hour), and **Setup health** warns while any app exists. Details
+are in the [reference](reference.md#apps-deprecated).
 
-An **app** is a program you run on your machines yourself, as a container (Docker or Podman on the
-machine) or a process. It fits what is not a model Forgeyard runs: a model's own server image,
-exposed at [`/x/<name>`](#apps-at-x) with API keys, or a one-off GPU **task** (a batch job, with
-retries and a time limit) next to the **services** that run until stopped. Each has 1 to 16
-replicas, each on one machine, with only the cards it was given. A process runs as the unprivileged
-account `forgeyard-run` and a container never `--privileged`; both start from an empty environment.
-The API calls apps *workloads* (`/api/workloads`).
+- To serve a model, deploy it under **Serving**. Object detection, segmentation and depth are
+  [vision models](#vision-models) since 1.4.
+- A model that no built-in engine runs gets a **custom engine** (**Models → Engines → Add a
+  custom engine**): a recipe like the built-in ones, for its container image or program.
 
-The **Apps** page lists only apps. A model deployment also runs as a workload (of runtime `model`),
-but a model is seen under **Models** only, and an old link to its workload's page opens the
-deployment; the API refuses to stop, start or delete it (`409 managed_by_deployment`). **Machines**
-shows both, models and apps, since both hold cards.
+**Machines** still names an app that holds a card, so a card in use is never shown free. A model
+deployment runs as a workload too (of runtime `model`): that is how models run, and it is not
+deprecated.
 
-## Apps at /x/
+## Models, engines and estimates
 
-A service app can be **exposed** behind the gateway: programs then call its own HTTP API at
-`https://<server>:7860/x/<name>/…` with an API key, as they call models at `/v1`. Use it for what is
-not a chat, embedding, speech or image model: object detection, segmentation, depth, Triton or KServe
-models, a FastAPI or BentoML service.
+Two pages hold the models. **Serving** is what runs now: the deployments grouped by kind (chat,
+multimodal chat, embeddings, rerank, speech to text, text to speech, images, video, vision), each
+with the path it answers at under `/v1`, and one line per deployment: where it runs (machine and
+cards), its memory and its state. **Deploy a model** is there too, and each deployment has its page
+at `/serving/<id>`. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its
+provider, such as *→ Gemini*; the fallback itself is on the deployment's page.
 
-- **Behind the key guard.** An exposed app runs behind the agent's key guard, like a model
-  replica: the program listens on loopback, the guard holds the published port, and only the gateway
-  gets through. The guard removes the gateway's internal key before the request reaches the program.
-  Every port of the app is guarded, not only the exposed one.
-- **Keys opt in.** A key's **Apps** setting says which exposed apps it may call: *None*
-  (the default, and every key from before 1.3), *Listed apps* or *Every exposed app* (`workloads` in
-  the API).
-- **APIs, not web pages.** Answers are sandboxed (`Content-Security-Policy: sandbox`), cookies and
-  CORS headers are removed, and redirects are rewritten under `/x/<name>`. A browser UI (Gradio,
-  Jupyter) does not work at `/x/`. WebSockets and gRPC are not passed on in 1.3, and nothing spills
-  to the cloud.
-- **Counted.** Requests, errors, bytes in and out, busy time and latency go to **Usage** as the
-  model `x:<name>`; the key's requests per minute apply.
-
-Admins and operators expose an app, when they create it or later on its page. See
-[Expose an app at /x/](how-to.md#expose-an-app-at-x).
-
-In 1.3 three **templates** started the most common vision APIs this way (object detection,
-segmentation, depth). In 1.4 those are [vision models](#vision-models), deployed from Models; apps
-already made from a template keep running. See [Apps made from a template](how-to.md#apps-made-from-a-template-13).
-
-## Models, recipes and estimates
-
-The **Models** page has two tabs. **Deployments** groups what runs by kind (chat, multimodal
-chat, embeddings, rerank, speech to text, text to speech, images, video), each with the path it
-answers at under `/v1`, and one line per deployment: where it runs (machine and cards), its memory
-and its state. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its provider,
-such as *→ Gemini*; the fallback itself is on the deployment's page. **Library** is what you can
-deploy: the catalog, the recipes and, for admins, the model sources. Cloud models and providers are
-on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=routes`,
-`?tab=catalog`, `/providers`) open the new places.
+**Models** is the library, what you can deploy, in three tabs: **Catalog** (the default), **Engines**
+and, for admins, **Sources**. Cloud models and providers are on the **Cloud** page (admins). Links
+from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/models/routes/<id>`,
+`/providers`) open the new places.
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
-- A **recipe** says how to run a kind of model: which engine, which container image (pinned by
-  digest) or release, which parameters, and how much memory it needs. Built in: `vllm` (chat on
+  Each row has **Deploy** and **Download to…**.
+- An **engine** says how to run a kind of model: which program, which container image (pinned by
+  digest) or release, which parameters, and how much memory it needs. The API and the YAML files
+  call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
+  **Engines** tab. Built in: `vllm` (chat on
   NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
+- **Sources** (admins) say where models may come from: the hosts allowed for GGUF URLs, the
+  directories for `local://` models, and the server's Hugging Face token.
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
@@ -158,12 +138,12 @@ on the **Cloud** page (admins). Links from before 1.4 (`?tab=serving`, `?tab=rou
   and stores nothing; the agent checks them as it checks any download. Whether a
   model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
-  keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
+  keeps **one Hugging Face token** (an admin sets it under **Models → Sources**, stored encrypted) for
   inspecting and downloading them; a deployment may bring its own, which wins for it.
 
 ## Deployments and the gateway
 
-A **deployment** runs one model with one recipe, as one or more replicas. Its replicas run as a
+A **deployment** runs one model with one engine (recipe), as one or more replicas. Its replicas run as a
 workload of runtime `model`, seen only on the deployment's page (not on **Apps**). Forgeyard:
 
 1. places each replica where it fits. Among the machines that fit, in this order:
@@ -200,10 +180,16 @@ The gateway sends each request to the ready replica with the fewest requests in 
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
-The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
-streaming, and images for models that read them), embeddings, rerank and speech to text. Its **Vision**
-tab sends a picture to an exposed vision app (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
-cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
+The **Playground** tries a model through the same gateway, as you, without an API key. One **Model**
+picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,
+Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video, Vision), and picking
+one opens its panel: chat (with streaming, and images for models that read them), embeddings, rerank,
+speech to text, **Speak**, **Image**, **Video**, or the vision panel (a picture in; boxes, a mask or a
+depth map out). The address keeps the model (`/playground?model=<name>`); 1.3's Vision tab address
+(`/playground?tab=vision`) opens the first ready vision model, or the picker when there is none. With no
+model ready, the page says so and points to **Models → Catalog** to deploy one. Its requests count as
+`console` in Usage, and its cloud setting is **Allowed** for admins and, for everyone else, the most they
+may give their own keys.
 
 ## Images, audio and video in chat
 
@@ -302,8 +288,9 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 Vision models (1.4) look at a picture: **object detection** (boxes, labels and scores: RT-DETR, D-FINE,
 DETR…), **segmentation** (the mask of what a point or a box shows: SAM 2 and 2.1) and **depth
 estimation** (how near every pixel is: Depth Anything, DPT…). They are model kinds like the others: added
-to the Library from Hugging Face (three are recommended), deployed from Models, listed under
-**Deployments → Vision**, tried in **Playground → Vision**, called with an API key.
+to the catalog from Hugging Face (three are recommended), deployed and listed under
+**Serving → Vision**, tried in the **Playground** (under *Vision* in its model picker), called with an
+API key.
 
 - **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
   PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,

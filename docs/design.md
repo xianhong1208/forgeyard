@@ -65,15 +65,22 @@ agent dials out to the server, so the server never needs to reach the machine.
 
 A **workload** is something to run on your machines: a **service** (runs until stopped, is
 health-checked and restarted) or a **task** (runs to the end, with retries and a time limit).
-Each one has 1 to 16 **replicas**; each replica runs on one machine. Open **Apps → New app**, or
-`POST /api/workloads` with the spec.
+Each one has 1 to 16 **replicas**; each replica runs on one machine. Model deployments run as
+workloads (runtime `model`); fine-tuning (1.9) will too.
 
-**In the console they are apps** (1.4, #81), an advanced page that is not in the menu: **Apps** (`/apps`; `/workloads…` redirects)
-lists only the workloads people run themselves. A model deployment's workload (runtime `model`) is
-seen under **Models** only: its deployment's page has the replicas, output and events, and an old
-link to its workload page opens the deployment. The API keeps the name `workloads` and still refuses
-stop, start and delete of a deployment's workload (409 `managed_by_deployment`). **Machines** shows
-both, since both hold cards. The spec:
+**Apps leave Forgeyard** (#88, #89). A workload people run themselves, not a model's, was an *app*:
+in the console under **Apps** (1.4, #81), made with `POST /api/workloads`, optionally exposed at
+`/x/`. Forgeyard is about running and managing models, so 1.4 removes apps from the console (pages,
+templates, a key's *Apps at /x/* setting, the Playground's vision apps) and deprecates the rest: the
+apps part of `/api/workloads`, `GET /api/workloads/templates` and `/x/` keep working until 1.5 and say
+so (forgeyard/deprecation.py: a `Deprecation` header, RFC 9745, and a `Link` to the guide on every
+answer, errors included; a server log warning per kind at most once an hour; the Setup health finding
+`apps-deprecated` while any app exists). `GET /api/keys` and the Playground's vision options no
+longer list apps. 1.5 removes the API, `/x/`, the templates and the keys' settings, with a migration
+that removes the apps left. Old console links (`/apps…`, 1.3's `/workloads…`) open a model's
+deployment or Machines. **Machines** still names an app that holds a card (not linked), so a card in
+use is never shown free. A model deployment's workload is seen under **Serving** only, and the API
+still refuses stop, start and delete of it (409 `managed_by_deployment`). The spec:
 
 ```json
 {"name": "web", "kind": "service",
@@ -177,13 +184,25 @@ again.
 
 ## Models
 
-**Models → Deploy a model**: pick a model from the catalog and a recipe, set the parameters, and
+**Two pages in the console** (1.4, #92). **Serving** (`/serving`) is what runs now: the deployments
+grouped by kind, with **Deploy a model** (`/serving/deploy`) and each deployment's page
+(`/serving/<id>`, edited at `/serving/<id>/edit`). **Models** (`/models`) is the library: **Catalog**
+(the default: the models that can be deployed, with *Download to…* and Deploy), **Engines** (the
+recipes: the console says *engine*, the API and the YAML files keep *recipe*) and **Sources** (admins
+only: GGUF URL hosts, `local://` directories, the Hugging Face token). The menu is Machines, Serving,
+Models, Cloud, Playground, API keys, Usage, Users, Audit log, numbered 01 to 09 on each page. Only
+addresses a released version had redirect: 1.3's `/models/deployments/<id>[/edit]`, `/models/deploy`,
+`/models?tab=routes` and `?tab=deployments` open Serving; `?tab=catalog` is the Catalog; `/playground?tab=vision`
+opens the Playground on the first ready vision model (or its picker, open, when there is none). The tab names
+used only while 1.4 was made (`?tab=serving`, `library`, `model-library`) are gone.
+
+**Serving → Deploy a model**: pick a model from the catalog and an engine, set the parameters, and
 the page shows how much memory one replica needs and where it would go, before anything is created
-or downloaded. A deployment is one service workload (it also appears under Workloads) plus a
+or downloaded. A deployment is one service workload plus a
 gateway route: programs reach it at `/v1` with its **model name** (see *Gateway and API keys*). Its
 page shows that name, its usage, each replica and a small **Try it** that checks one replica directly.
 
-- **Adding a model** (admins), three ways on **Models → Library → Add a model**:
+- **Adding a model** (admins), three ways on **Models → Add a model** (the Catalog tab):
   - **Recommended**: a curated list ([forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml),
     easy to edit) of models known to work with the built-in recipes, grouped: Qwen3 (chat 0.6B to
     32B, two GGUF builds for the CPU, Embedding and Reranker 0.6B / 4B), other open chat models
@@ -271,7 +290,7 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   an engine, change the tag, run `uv run --no-sync python scripts/pin_images.py --write` (it resolves
   the multi-architecture digest from Docker Hub or GHCR and checks the platforms each variant
   claims), and review the diff; without `--write` it checks that every digest still matches its
-  tag. A test fails if a built-in image has no digest. Admins add custom recipes on the Models page
+  tag. A test fails if a built-in image has no digest. Admins add custom recipes on **Models → Engines**
   (a digest is recommended there too). 1.3 adds to recipes: a `media` block (what the engine takes in
   chat: `inputs` of image, audio, video, and `files`), `advanced: true` on parameters (the deploy form's
   collapsed Advanced section), `optional_args` with `if_model` (`mmproj`, or a medium the model takes)
@@ -565,7 +584,7 @@ page contain these lines whenever the server uses its own CA.
     WebM, animated WebP or MJPG AVI (no MP4) and returns the whole video as base64 inside the job's JSON,
     held in the engine's memory: it does not fit the same job model (one MP4 file per job, fetched and
     streamed with Range). Video on AMD and the CPU comes later.
-- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each), videos (**Video**: a prompt, the sizes and lengths the deployment takes, the job followed until it is made, then played in the page with a download link, and the person's earlier videos) in the console, and a **Vision** tab for exposed vision workloads (boxes, a mask from a click or a box, a depth map; the `/x/` rules through the console's own routes, 1.3), through
+- **Playground**: chat with streaming (and images attached, sent as `data:` URIs), embeddings, rerank, speech to text, text to speech (**Speak**: the model's voices and formats, a player) and images (**Image**: a prompt, the sizes the deployment takes, how many, the images with a download link each), videos (**Video**: a prompt, the sizes and lengths the deployment takes, the job followed until it is made, then played in the page with a download link, and the person's earlier videos) in the console, and vision models (boxes, a mask from a click or a box, a depth map; 1.3 had a **Vision** tab for exposed vision workloads instead). Since 1.4 (#100) there are no tabs: one model picker lists the ready models grouped by kind with Serving's labels and icons, and the model chosen opens its kind's panel; through
   the same routing, as the signed-in user (cookie and CSRF like the rest of the console). It creates
   no API key and counts as "console" in usage. Its cloud setting is `on` for admins and the server's
   most-allowed for everyone else; the person's budget applies, there is no key budget.
@@ -615,7 +634,7 @@ server's version (`forgeyard_image`) rather than pinned by digest, since it is b
 and its digest is not known before. The server asks for `VISION_API_KEY` on every path but `/health`;
 the baked-in models stay for the apps made from templates until Apps go (#88).
 
-### Workloads at /x/ (1.3, generic passthrough)
+### Workloads at /x/ (1.3, generic passthrough; deprecated in 1.4, removed in 1.5)
 
 Anything that is not a chat, embedding, speech or image model (detection, segmentation, depth, a
 Triton or KServe model, a FastAPI or BentoML service) runs as a service workload and is **exposed**
@@ -736,11 +755,11 @@ The gateway can also send requests to model APIs outside Forgeyard, local first.
   existing route into one tier-0 target with the same upstream model name, so they behave exactly as
   before.
 - **Where the console shows them** (1.4, #81). A deployment's own route is its **cloud fallback**, edited
-  on the deployment's page, and the Deployments list marks one with a cloud tier (*→ Gemini*). A route an
+  on the deployment's page, and the Serving list marks one with a cloud tier (*→ Gemini*). A route an
   admin made is on **Cloud → Cloud models**: a *cloud model* when a provider's model is in it, else
   under *Other names for deployments*; each deployment's page links the names it also answers as. The
   console says "cloud fallback" and "cloud model"; "route" stays the API's word (`/api/routes`). The
-  old addresses (`/models?tab=serving`, `?tab=routes`, `/models/routes/<id>`, `/providers…`) redirect.
+  old addresses (`?tab=routes`, `/models/routes/<id>`, `/providers…`) redirect.
 - **Spill rules, only before the first byte.** The next tier is used when this one is *unavailable*
   (no ready replica, every connection failed), *busy* (every ready replica has as many requests in
   flight through this server as its deployment's `concurrency`; the slot is taken atomically, so two
@@ -952,7 +971,7 @@ Two images, both built from this repository and published on Docker Hub by
   rest. The list of checks is in the guide's reference (*Setup health checks*); a test keeps it
   complete.
 - **Where it shows** (decision D8): **Get started → Setup health** lists everything, the top bar
-  shows the number of errors and warnings, and each page (Machines, API keys, Cloud, Models, a
+  shows the number of errors and warnings, and each page (Machines, Serving, API keys, Cloud, a
   cloud model, a deployment, Users) shows its own as a banner. Plain users and operators see none of it.
 - **Snoozing** is per admin and per finding (`id@scope`), for 30 days, in the user's `preferences`
   JSON (`advisor_snoozed`), so no migration. Errors cannot be snoozed. A snoozed finding that still

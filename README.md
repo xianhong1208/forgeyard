@@ -13,13 +13,13 @@ them where they fit, and every program calls them at `/v1` with an API key.
 **[Guide](docs/guide/README.md)** · **[繁體中文](README.zh-TW.md)** · **[Roadmap](ROADMAP.md)** ·
 **[Changelog](CHANGELOG.md)**
 
-![The Models page: four deployments on one CPU machine, grouped by kind (chat, multimodal chat, text to speech, images), each ready and answering at its /v1 path](docs/images/console-models.png)
+![The Serving page: four deployments on one CPU machine, grouped by kind (chat, multimodal chat, text to speech, images), each ready and answering at its /v1 path](docs/images/console-serving.png)
 
 ## ✨ Key features
 
-- **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas, services
-  and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps
-  every card's memory to the models and apps that hold it, and lists the models in its
+- **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas on the
+  cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps every card's memory
+  to the models that hold it, and lists the models in its
   cache with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
   and its engine on chosen machines before you deploy it, with progress. A machine that cannot reach
   Hugging Face or GitHub gets the files through the server, which passes them on and stores nothing.
@@ -33,9 +33,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
   budgets.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
   speech, image generation, video generation as jobs, and vision models: object detection,
-  segmentation and depth at `/v1/vision/…` (1.4), deployed from Models like any other.
-- **Any HTTP service behind the same keys.** An app's API at `/x/<name>/…` gets keys, limits and
-  usage.
+  segmentation and depth at `/v1/vision/…` (1.4), deployed like any other model.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted.
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
@@ -119,7 +117,7 @@ The join token works once, within 15 minutes. AMD and CPU-only machines:
 1. Open `https://192.168.1.20:7860/setup`, enter the setup token and create the owner. Then open
    **Trust this server** and install the CA on your device.
 2. **Machines → Add a machine**, and run the command on the machine. It shows up within seconds.
-3. **Models → Library → Add a model**, pick a recommended model (for a CPU:
+3. **Models → Add a model**, pick a recommended model (for a CPU:
    *Qwen3 1.7B (GGUF, for the CPU)*), then **Deploy it** with the name `qwen`.
 4. **API keys → New key**. On the computer that calls the model, get the CA file and the SDK:
 
@@ -169,7 +167,7 @@ Forgeyard itself at `/guide`:
 | Page | What it covers |
 |---|---|
 | [Quick start](docs/guide/quick-start.md) | from nothing to your first `/v1` call in about ten minutes |
-| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, apps, models, deployments and the gateway, keys, roles |
+| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, models, engines and estimates, deployments and the gateway, keys, roles |
 | [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the server and the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
 | [Cloud providers](docs/guide/cloud-providers.md) | OpenAI, Anthropic, Gemini, Azure, OpenRouter or your own server behind `/v1`; when a request spills; which keys may use the cloud |
 | [Troubleshooting](docs/guide/troubleshooting.md) | problems seen on real machines, with their fix |

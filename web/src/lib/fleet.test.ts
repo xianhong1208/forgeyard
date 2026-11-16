@@ -62,11 +62,12 @@ describe("fleet: what runs where (1.4)", () => {
     const gone = wl(13, "old", [rep({ state: "stopped" }), rep({ ordinal: 1, final: true, state: "failed" }), rep({ ordinal: 2, machine: null })]);
     const d = dep(5, "chat", model);
     const p = placement([model, plain, cpuJob, gone], [d]);
-    expect(p.holders.map((h) => [h.name, h.href, h.kind, h.reserved])).toEqual([
-      ["chat", "/models/deployments/5", "chat", 12 * GIB],
-      ["chat", "/models/deployments/5", "chat", 9 * GIB],    // no reading yet: the estimate per GPU
-      ["notebook", "/apps/11", "workload", null],      // a GPU app declares no card memory
-      ["etl", "/apps/12", "workload", 2 * GIB],        // a CPU app: its declared RAM
+    // 1.4 (#88): an app is named but has no page in the console (href null).
+    expect(p.holders.map((h) => [h.name, h.key, h.href, h.kind, h.reserved])).toEqual([
+      ["chat", "deployment:5", "/serving/5", "chat", 12 * GIB],
+      ["chat", "deployment:5", "/serving/5", "chat", 9 * GIB],    // no reading yet: the estimate per GPU
+      ["notebook", "app:11", null, "workload", null],      // a GPU app declares no card memory
+      ["etl", "app:12", null, "workload", 2 * GIB],        // a CPU app: its declared RAM
     ]);
     expect(uniqueHolders(p.onMachine(1)).map((h) => h.name)).toEqual(["chat", "notebook", "etl"]);
     expect(p.onRow(1, card()).map((h) => h.name)).toEqual(["chat", "notebook"]);

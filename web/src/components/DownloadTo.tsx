@@ -93,12 +93,12 @@ export function DownloadDialog({ model, machineId, onClose, onStarted }: {
         <div className="dlg-engine">
           <label className="check">
             <input type="checkbox" checked={engine} onChange={(e) => setEngine(e.target.checked)} />
-            Also the engine, for the recipe
+            Also the engine:
           </label>
-          <select aria-label="Recipe" value={recipe || t?.recipe || ""} disabled={!engine || !t || t.recipes.length < 2}
+          <select aria-label="Engine" value={recipe || t?.recipe || ""} disabled={!engine || !t || t.recipes.length < 2}
             onChange={(e) => setRecipe(e.target.value)}>
             {(t?.recipes ?? []).map((r) => <option key={r} value={r}>{r}</option>)}
-            {t && t.recipes.length === 0 && <option value="">no recipe serves it</option>}
+            {t && t.recipes.length === 0 && <option value="">no engine serves it</option>}
           </select>
         </div>
         {error && <Notice tone="error">{error}</Notice>}

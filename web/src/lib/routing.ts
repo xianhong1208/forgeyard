@@ -79,7 +79,7 @@ export function targetHeader(target: string | null): string | null {
 export const FALLBACK_ANCHOR = "cloud-fallback";
 
 export function routeHome(r: Pick<RouteInfo, "id" | "deployment_id">): string {
-  return r.deployment_id !== null ? `/models/deployments/${r.deployment_id}#${FALLBACK_ANCHOR}` : `/cloud/models/${r.id}`;
+  return r.deployment_id !== null ? `/serving/${r.deployment_id}#${FALLBACK_ANCHOR}` : `/cloud/models/${r.id}`;
 }
 
 // Among those names: one with a provider's model in it (a provider inside your network counts too).

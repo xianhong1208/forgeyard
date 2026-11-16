@@ -88,7 +88,10 @@ export function groupByKind(list: Deployment[]): [ModelKind, Deployment[]][] {
 
 export type Holder = {
   name: string;                  // the deployment's name, or the workload's
-  href: string;                  // its page
+  key: string;                   // one per deployment or app
+  // Its page: the deployment's. 1.4 (#88): an app has none in the console (apps are deprecated), so it is
+  // only named, so that a card it holds is never shown free.
+  href: string | null;
   kind: ModelKind | "workload";
   deployment?: Deployment;
   workload: Workload;
@@ -117,7 +120,8 @@ export function placement(workloads: Workload[], deployments: Deployment[]): Pla
       if (reserved === null && !dep && r.gpus.length === 0) reserved = w.spec.resources.memory ?? null;
       holders.push({
         name: dep?.name ?? w.name,
-        href: dep ? `/models/deployments/${dep.id}` : `/apps/${w.id}`,
+        key: dep ? `deployment:${dep.id}` : `app:${w.id}`,
+        href: dep ? `/serving/${dep.id}` : null,
         kind: dep ? modelKind(dep) : "workload",
         deployment: dep,
         workload: w,
@@ -132,10 +136,16 @@ export function placement(workloads: Workload[], deployments: Deployment[]): Pla
   return { holders, onMachine, onRow };
 }
 
+// 1.4 (#88): an app is named where it holds a card, so the card is never shown free, but not linked:
+// apps left the console (deprecated, removed in 1.5).
+export function appTitle(name: string): string {
+  return `App ${name}: apps are deprecated and removed in 1.5 (API only until then)`;
+}
+
 // One entry per name: a deployment with two replicas on a machine counts once.
 export function uniqueHolders(list: Holder[]): Holder[] {
   const seen = new Set<string>();
-  return list.filter((h) => (seen.has(h.href) ? false : (seen.add(h.href), true)));
+  return list.filter((h) => (seen.has(h.key) ? false : (seen.add(h.key), true)));
 }
 
 // ---------------------------------------------------------------- memory of one card

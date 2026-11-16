@@ -38,11 +38,17 @@ const DETECTED = { model: TASKS[0].model, width: 640, height: 480, ms: 41.2, det
 
 type Reply = { status: number; body?: unknown; headers?: Record<string, string> };
 
-function server(route: (url: string, init?: RequestInit) => Reply | undefined, user = OWNER) {
+// The Playground's picker lists the ready routes (1.4, #100): one per vision model here.
+const UP = [{ replica: 0, machine: "cpu-a", state: "healthy", ready: true, url: "http://10.0.0.5:31000/" }];
+const visionRoutes = (models = MODELS) => models.map((m, i) => ({ id: i + 1, served_name: m.name, api: `vision-${m.task}`, upstream_model: null,
+  deployment_id: m.deployment_id, local_only: false, spill_on_long_prompt: false, wait_ms: 0, kind: "local", has_local: true, has_cloud: false,
+  targets: [], usable: true, endpoints: UP }));
+
+function server(route: (url: string, init?: RequestInit) => Reply | undefined, user = OWNER, routes = visionRoutes()) {
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const r = url === "/api/auth/state"
       ? { status: 200, body: { needs_setup: false, registration: "off", user } }
-      : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes: [] } }
+      : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes } }
         : route(url, init) ?? { status: 404, body: {} };
     return new Response(JSON.stringify(r.body), { status: r.status, headers: r.headers });
   });
@@ -54,6 +60,12 @@ const options = (models = MODELS) => ({ status: 200, body: { models, workloads: 
 
 function mount(path = "/playground?tab=vision") {
   return render(<MemoryRouter initialEntries={[path]}><AuthProvider><App /></AuthProvider></MemoryRouter>);
+}
+
+// Choose a model in the Playground's one picker.
+async function choose(name: string) {
+  fireEvent.click(await screen.findByLabelText("Model"));
+  fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: new RegExp(`^${name}`) }));
 }
 
 function photo(name = "cats.jpg", type = "image/jpeg", size?: number): File {
@@ -90,20 +102,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Playground: Vision (1.4: vision models)", () => {
-  it("FY-WEB-189: with no vision model (exposed apps are not offered), says how to add one (operators get the link)", async () => {
-    server((url) => (url === "/api/playground/vision/options" ? options([]) : undefined));
+describe("Playground: vision models (1.4; one picker since #100)", () => {
+  it("FY-WEB-189: with no model at all (exposed apps are not offered), the old Vision address says how to deploy one (operators get the link)", async () => {
+    server((url) => (url === "/api/playground/vision/options" ? options([]) : undefined), OWNER, []);
     mount();
-    expect(await screen.findByRole("heading", { name: "No vision model to try yet" })).toBeTruthy();
-    expect(screen.getByText(/Deploy one from Models/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Add a vision model/ }).getAttribute("href")).toBe("/models?tab=library");
-    expect(screen.getByText("facebook/sam2.1-hiera-tiny")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Vision" }).getAttribute("aria-selected")).toBe("true");
+    expect(await screen.findByRole("heading", { name: "Nothing to try yet" })).toBeTruthy();
+    expect(screen.getByText(/chat, embeddings, speech, images, video or vision/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Deploy from the catalog/ }).getAttribute("href")).toBe("/models");
+    expect(screen.queryByRole("tab")).toBeNull();
     cleanup();
-    server((url) => (url === "/api/playground/vision/options" ? options([]) : undefined), USER);
+    server((url) => (url === "/api/playground/vision/options" ? options([]) : undefined), USER, []);
     mount();
-    expect(await screen.findByText(/ask one to deploy the one you need/)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Add a vision model/ })).toBeNull();
+    expect(await screen.findByText(/ask one to deploy the model you need/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Deploy from the catalog/ })).toBeNull();
   });
 
   it("FY-WEB-190: detection sends the image through the console route and draws boxes with label and score, filtered by the slider", async () => {
@@ -119,12 +130,12 @@ describe("Playground: Vision (1.4: vision models)", () => {
     });
     mount();
     const panel = await panelFor("Object detection");
-    const select = screen.getByLabelText("Model") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.text)).toEqual([
-      "det · Object detection · rtdetr_v2_r18vd", "seg · Segmentation · sam2.1-hiera-tiny",
-      "dav2 · Depth estimation · Depth-Anything-V2-Small-hf"]);
+    fireEvent.click(screen.getByLabelText("Model"));
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "det object detection", "seg segmentation", "dav2 depth"]);
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
     expect(within(panel).getByText("POST /v1/vision/detect with model=det")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Deployment" }).getAttribute("href")).toBe("/models/deployments/3");
+    expect(screen.getByRole("link", { name: "Deployment" }).getAttribute("href")).toBe("/serving/3");
     await pick(panel, photo());
     fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
     const boxes = await within(panel).findByRole("list", { name: "Detected objects" });
@@ -165,7 +176,7 @@ describe("Playground: Vision (1.4: vision models)", () => {
     });
     mount();
     await screen.findByRole("heading", { name: "Object detection" });
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "model:seg" } });
+    await choose("seg");
     const panel = await panelFor("Segmentation");
     const img = await pick(panel, photo());
     loaded(img, [640, 480], [320, 240]);
@@ -201,7 +212,7 @@ describe("Playground: Vision (1.4: vision models)", () => {
     });
     mount();
     await screen.findByRole("heading", { name: "Object detection" });
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "model:dav2" } });
+    await choose("dav2");
     const panel = await panelFor("Depth estimation");
     expect(within(panel).getByText("PNG, JPEG or WebP, at most 20 MiB.")).toBeTruthy();
     await pick(panel, photo("street.png", "image/png"));
@@ -244,14 +255,11 @@ describe("Playground: Vision (1.4: vision models)", () => {
     expect(visionError(504, { error: { code: "upstream_timeout", message: "x" } }, 4, "model")).toMatch(/^The model did not answer in time/);
   });
 
-  it("FY-WEB-194: the Models and Vision tabs, and the overlay geometry", async () => {
+  it("FY-WEB-194: a vision model opens from the Playground's address with no tab, and the overlay geometry", async () => {
     server((url) => (url === "/api/playground/vision/options" ? options() : undefined));
-    mount("/playground");
-    expect(await screen.findByRole("heading", { name: "Nothing to try yet" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "Vision" }));
-    expect(await screen.findByRole("heading", { name: "Object detection" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "Models" }));
-    expect(await screen.findByRole("heading", { name: "Nothing to try yet" })).toBeTruthy();
+    mount("/playground?model=seg");
+    expect(await screen.findByRole("heading", { name: "Segmentation" })).toBeTruthy();
+    expect(screen.queryByRole("tablist")).toBeNull();
 
     expect(boxStyle([-10, 0, 700, 240], 640, 480)).toEqual({ left: "0.000%", top: "0.000%", width: "100.000%", height: "50.000%" });
     expect(toImage(160, 120, { width: 320, height: 240 }, 640, 480)).toEqual([320, 240]);

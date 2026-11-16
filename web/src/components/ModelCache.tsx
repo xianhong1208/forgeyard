@@ -190,7 +190,9 @@ function CacheItem({ row, c, busy, onRemove }: { row: CacheRow; c: MachineCache;
       </span>
       <span className="cacherow-use">
         {row.usedBy.map((u) => (
-          <Link key={`${u.kind}-${u.id}`} to={userHref(u)} className="chip chip-tone-run" title={`Used by the ${u.kind} ${u.name} on this machine`}>in use: {u.name}</Link>
+          userHref(u)
+            ? <Link key={`${u.kind}-${u.id}`} to={userHref(u)!} className="chip chip-tone-run" title={`Used by the ${u.kind} ${u.name} on this machine`}>in use: {u.name}</Link>
+            : <span key={`${u.kind}-${u.id}`} className="chip chip-tone-run" title={`Used by the app ${u.name} on this machine`}>in use: {u.name}</span>
         ))}
       </span>
       <span className="cacherow-size mono">{row.bytes === null ? "size unknown" : bytes(row.bytes)}</span>

@@ -5,6 +5,10 @@ A service workload can be exposed behind the gateway at /x/<name> (1.3, forgeyar
 a running workload restarts its replicas behind the agent's key guard; turning it off closes /x/ at
 once (the guard stays until the workload is restarted). Both are audited.
 
+1.4 (#88): apps, the workloads that are not models, are deprecated and go in 1.5 (#89). Their part of
+this API and the templates keep working and say so (forgeyard/deprecation.py): a `Deprecation` header, a
+line in the server log and a Setup health finding. A model deployment's workload is not deprecated.
+
 Creating a workload runs code on a machine, so it is limited to the roles trusted with that.
 People with the `user` role see workloads and their status, but not environment values or
 logs (either may hold secrets).
@@ -19,7 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import audit
+from forgeyard import audit, deprecation
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, public_base, require_operator
 from forgeyard.db import Node, Replica, Workload, WorkloadEvent, get_db, utcnow
 from forgeyard.machines.hub import hub
@@ -166,25 +170,38 @@ def _poke(nodes) -> None:
         hub.poke(node_id)
 
 
+def _app(request: Request, w: Workload) -> Workload:
+    """Mark the answer as deprecated when it is about an app (any workload that is not a model's)."""
+    if w.runtime != "model":
+        deprecation.flag(request, "apps")
+    return w
+
+
 @router.get("/templates")
-def list_templates(_: Caller = Depends(current)):
+def list_templates(request: Request, _: Caller = Depends(current)):
     """The ready-made workload templates (1.3): each with its image (CPU and CUDA builds), its model and
-    licence, and the workload spec it makes (POST it to /api/workloads)."""
+    licence, and the workload spec it makes (POST it to /api/workloads). Deprecated in 1.4."""
     from forgeyard.workloads import templates
+
+    deprecation.flag(request, "templates")
 
     return {"templates": templates.listing()}
 
 
 @router.get("")
-def list_workloads(caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+def list_workloads(request: Request, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     rows = db.scalars(select(Workload).options(selectinload(Workload.replicas).selectinload(Replica.node))
                       .order_by(Workload.created_at.desc(), Workload.id.desc())).all()
+    if any(w.runtime != "model" for w in rows):
+        deprecation.flag(request, "apps")  # the list stays for the models' workloads; the apps in it go
     return {"workloads": [workload_out(w, caller) for w in rows], "server_time": utcnow(),
             "can_manage": can_run_workloads(caller.user)}
 
 
 @router.post("", status_code=201)
-def create_workload(body: Any = Body(...), caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
+def create_workload(request: Request, body: Any = Body(...), caller: Caller = Depends(require_operator),
+                    db: DbSession = Depends(get_db)):
+    deprecation.flag(request, "apps")  # only apps are made here: models are deployments
     gateway_in = body.pop("gateway", None) if isinstance(body, dict) else None
     spec = parse_spec(body)
     if spec.runtime_type == "model":
@@ -227,18 +244,18 @@ def create_workload(body: Any = Body(...), caller: Caller = Depends(require_oper
 def get_workload(workload_id: int, request: Request, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
     from forgeyard.api.tls import trust_page
 
-    w = _get(db, workload_id)
+    w = _app(request, _get(db, workload_id))
     return {"workload": workload_out(w, caller), "events": _events(db, w), "server_time": utcnow(),
             "can_manage": can_run_workloads(caller.user), "gateway_base": public_base(request),
             "trust_url": trust_page(request)}
 
 
 @router.put("/{workload_id}/gateway")
-def set_gateway(workload_id: int, body: Any = Body(...), caller: Caller = Depends(require_operator),
+def set_gateway(workload_id: int, request: Request, body: Any = Body(...), caller: Caller = Depends(require_operator),
                 db: DbSession = Depends(get_db)):
     """Expose the workload at /x/<name> (or stop exposing it), and its limits. A running workload that
     becomes exposed gets an internal key per replica: its agent restarts it behind the key guard."""
-    w = _get(db, workload_id)
+    w = _app(request, _get(db, workload_id))
     if w.runtime == "model":
         raise fail(422, "cannot_expose", "A model deployment is served at /v1, not /x/.")
     value = parse_gateway(w.spec, body)
@@ -267,8 +284,9 @@ def set_gateway(workload_id: int, body: Any = Body(...), caller: Caller = Depend
 
 
 @router.post("/{workload_id}/stop")
-def stop_workload_route(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
-    _not_a_deployments(_get(db, workload_id), "stop")
+def stop_workload_route(workload_id: int, request: Request, caller: Caller = Depends(require_operator),
+                        db: DbSession = Depends(get_db)):
+    _not_a_deployments(_app(request, _get(db, workload_id)), "stop")
     return stop_workload(workload_id, caller, db)
 
 
@@ -287,8 +305,9 @@ def stop_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
 
 
 @router.post("/{workload_id}/start")
-def start_workload_route(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
-    _not_a_deployments(_get(db, workload_id), "start")
+def start_workload_route(workload_id: int, request: Request, caller: Caller = Depends(require_operator),
+                         db: DbSession = Depends(get_db)):
+    _not_a_deployments(_app(request, _get(db, workload_id)), "start")
     return start_workload(workload_id, caller, db)
 
 
@@ -315,8 +334,9 @@ def start_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
 
 
 @router.delete("/{workload_id}")
-def delete_workload(workload_id: int, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
-    w = _get(db, workload_id)
+def delete_workload(workload_id: int, request: Request, caller: Caller = Depends(require_operator),
+                    db: DbSession = Depends(get_db)):
+    w = _app(request, _get(db, workload_id))
     _not_a_deployments(w, "delete")  # deleting only the workload would leave the deployment and its route behind
     nodes = {r.node_id for r in w.replicas if r.node_id is not None and not r.final}
     name = w.name
@@ -330,11 +350,11 @@ def delete_workload(workload_id: int, caller: Caller = Depends(require_operator)
 
 
 @router.get("/{workload_id}/replicas/{ordinal}/logs")
-def replica_logs(workload_id: int, ordinal: int, lines: int = Query(default=200, ge=1, le=MAX_LOG_LINES),
+def replica_logs(workload_id: int, ordinal: int, request: Request, lines: int = Query(default=200, ge=1, le=MAX_LOG_LINES),
                  caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
     """The last lines of a replica's output, live from its agent; the lines kept from when it
     ended when the agent cannot be asked."""
-    w = _get(db, workload_id)
+    w = _app(request, _get(db, workload_id))
     r = next((x for x in w.replicas if x.ordinal == ordinal), None)
     if r is None:
         raise fail(404, "not_found", "No such replica.")

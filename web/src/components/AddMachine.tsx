@@ -220,7 +220,7 @@ function OfflineImage({ image, version }: { image: AgentImage; version: string }
         )}
       </p>
       <p className="small">
-        The models' engine images are carried the same way: each recipe under Models, <em>Library</em>, lists the
+        The models' engine images are carried the same way: each engine under Models, <em>Engines</em>, lists the
         commands for its images, and the agent checks a loaded image before it uses it.{" "}
         <HelpLink page="how-to" anchor="offline-machines">Offline machines</HelpLink>
       </p>
