@@ -857,6 +857,16 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的工作負載則必須重新建立（它們的事件裡會說明）。
 
+## 釋出機器上的磁碟空間
+
+機器的頁面上有 **Models in cache**：列出它的 agent 下載過的東西和大小。每個 Hugging Face revision 一列；有好幾個 GGUF 檔的 revision，底下每個檔案各一列。從 URL 下載的單一 GGUF 檔，以及 process 引擎的引擎壓縮檔也會列出。清單上方是快取在那顆磁碟上占了多少，以及磁碟還剩多少可用空間。
+
+- **Remove** 會從那台機器刪除一個項目，管理員和操作員可以使用。那台機器上有部署正在使用這個模型時會被拒絕，該列也會指出是哪個部署：請先停止它。同一個 repository 的其他 revision 共用的檔案會保留，和 `hf cache rm` 的做法相同。之後需要這個模型的部署會在那裡重新下載。
+- **Remove partial downloads** 會刪除未完成的下載留下的檔案。下載會從這些檔案接續，所以只有在不想再繼續那次下載時才刪除。那台機器上有下載正在進行時會被拒絕。
+- 早於 1.4 的 agent 會列出模型但沒有大小，也不能刪除。請更新 agent。
+
+每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含刪了什麼、釋出了多少空間。API 請見[參考文件](reference.md#a-machines-model-cache-through-the-api)。
+
 ## 搬移模型快取
 
 例如從 `/srv/forgeyard-models` 搬到較大磁碟上的 `/data/forgeyard-models`：

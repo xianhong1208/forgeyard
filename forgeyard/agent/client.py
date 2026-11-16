@@ -26,6 +26,7 @@ from forgeyard.machines.protocol import (
     CLOSE_REPLACED,
     CLOSE_REVOKED,
     FATAL_CLOSE_CODES,
+    FEATURE_CACHE_ADMIN,
     FEATURE_ENGINE_ZIP,
     FEATURE_IMAGE_IDS,
     FEATURE_MODELS,
@@ -154,7 +155,7 @@ class Agent:
             msg["runtime_info"] = self.supervisor.runtime_info()
             cache = self.supervisor.model_cache_info()
             if cache is not None:
-                msg["features"].append(FEATURE_MODELS)
+                msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN]
                 msg["model_cache"] = cache
         return msg
 
@@ -286,6 +287,10 @@ class Agent:
                 task = asyncio.create_task(self._answer_logs(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+            elif kind in ("cache_remove", "cache_prune") and self.workloads:
+                task = asyncio.create_task(self._answer_cache(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
 
     async def _answer_logs(self, ws, data: dict) -> None:
         replica = str(data.get("replica") or "")
@@ -295,6 +300,18 @@ class Agent:
             answer = {"ok": False, "reason": f"could not read the output: {e}"}
         await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "logs", "request_id": data.get("request_id"),
                                   "replica": replica, **answer}))
+
+    async def _answer_cache(self, ws, data: dict) -> None:
+        """1.4 (cache_admin): remove a model, or the partial downloads, from the model cache."""
+        partial = data.get("type") == "cache_prune"
+        try:
+            answer = await self.supervisor.cache_remove(None if partial else str(data.get("key") or ""),
+                                                        partial=partial)
+        except Exception as e:  # never take the connection down
+            log.exception("Model cache removal failed")
+            answer = {"ok": False, "code": "failed", "reason": f"could not remove it: {e}"[:400]}
+        await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "cache_removed", "request_id": data.get("request_id"),
+                                  **answer}))
 
     async def _status_loop(self, ws) -> None:
         sup = self.supervisor
