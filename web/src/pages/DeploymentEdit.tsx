@@ -23,9 +23,9 @@ export function DeploymentEditPage() {
   const d = data?.deployment;
   const recipe = cat?.recipes.find((r) => r.name === d?.recipe);
   if (user && user.role === "user") {
-    return (<><PageHeader index="03 · Models" title="Change a deployment" /><Notice>Only admins and operators change deployments: it restarts code on a machine.</Notice></>);
+    return (<><PageHeader index="02 · Models" title="Change a deployment" /><Notice>Only admins and operators change deployments: it restarts code on a machine.</Notice></>);
   }
-  if (!d || !recipe || !cat) return <><PageHeader index="03 · Models" title="Change a deployment" /><p className="muted">Loading…</p></>;
+  if (!d || !recipe || !cat) return <><PageHeader index="02 · Models" title="Change a deployment" /><p className="muted">Loading…</p></>;
   return <EditView key={d.id} d={d} recipe={recipe} model={cat.models.find((m) => m.id === d.model.id)}
     machines={(machines?.machines ?? []).filter((m) => m.status !== "revoked")} />;
 }
@@ -84,7 +84,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
   return (
     <>
       <p className="crumb"><Link to={`/models/deployments/${d.id}`}><IconArrowLeft size={14} aria-hidden="true" /> {d.name}</Link></p>
-      <PageHeader index="03 · Models" title={`Change ${d.name}`}
+      <PageHeader index="02 · Models" title={`Change ${d.name}`}
         lead={`${d.model.name} with ${d.recipe}, served as “${d.served_name}”. The model, recipe and names stay; deploy a new one to change them.`} />
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label="Change the deployment">
         <div>

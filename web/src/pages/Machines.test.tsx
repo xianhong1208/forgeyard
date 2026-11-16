@@ -384,7 +384,7 @@ describe("what runs on a machine (1.4)", () => {
     expect(await within(box).findByText("7 running")).toBeTruthy();
     const chips = within(box).getAllByRole("link").filter((a) => a.getAttribute("href") !== "/machines/1");
     expect(chips.map((a) => a.textContent)).toEqual(["notebook", "dep-chat", "dep-embed", "dep-rerank", "dep-asr"]);
-    expect(chips[0].getAttribute("href")).toBe("/workloads/9");
+    expect(chips[0].getAttribute("href")).toBe("/apps/9");
     expect(chips[1].getAttribute("href")).toBe("/models/deployments/30");
     expect(within(box).getByText("+2 more")).toBeTruthy();
     // nothing runs on the offline APU
@@ -403,19 +403,25 @@ describe("what runs on a machine (1.4)", () => {
     expect(bar.querySelector('[title="dep-image: 6 GiB"]')).toBeTruthy();
     // a card held by a workload that declared no memory lists it without a size
     expect(within(screen.getByRole("group", { name: "GPU #2" })).getByRole("link").textContent).toBe("notebook");
+    // 1.4 (#81): the map and "Running here" name both models (linked to the deployment) and apps (to the app).
+    expect(within(screen.getByRole("group", { name: "GPU #2" })).getByRole("link").getAttribute("href")).toBe("/apps/9");
+    expect(within(four).getAllByRole("link")[0].getAttribute("href")).toBe("/models/deployments/30");
     expect(within(screen.getByRole("group", { name: "GPU #0" })).queryAllByRole("link")).toHaveLength(0);
     const running = screen.getByRole("region", { name: /Running here/ });
     expect(within(running).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(running).getByRole("link", { name: "notebook" }).getAttribute("href")).toBe("/apps/9");
+    expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/models/deployments/30");
     expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/models/deploy?machine=1");
-    expect(screen.getByRole("link", { name: "New workload here" }).getAttribute("href")).toBe("/workloads/new?machine=1");
+    // 1.4 (#81): Apps is an advanced page; nothing but the Apps page itself offers New app.
+    expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
   });
 
-  it("FY-WEB-225 users see a machine's page without Revoke, Remove, Deploy here or New workload here", async () => {
+  it("FY-WEB-225 users see a machine's page without Revoke, Remove, Deploy here or New app here", async () => {
     server(route(false), { ...OWNER, role: "user", is_owner: false });
     mount("/machines/1");
     await screen.findByRole("heading", { level: 1, name: "a100-box" });
     await screen.findByRole("group", { name: "GPU #4" });
     for (const name of ["Revoke", "Remove", "Change GPU access"]) expect(screen.queryByRole("button", { name })).toBeNull();
-    for (const name of ["Deploy here", "New workload here"]) expect(screen.queryByRole("link", { name })).toBeNull();
+    for (const name of ["Deploy here", "New app here"]) expect(screen.queryByRole("link", { name })).toBeNull();
   });
 });

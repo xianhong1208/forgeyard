@@ -158,7 +158,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .eyebrow { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-family: var(--mono); font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--heat-ink); }
 .eyebrow::before { content: ""; width: 18px; height: 3px; background: var(--heat); border-radius: 2px; }
-.lead { margin: 8px 0 0; max-width: 62ch; color: var(--ink-2); }
+.lead { margin: 8px 0 0; max-width: 62ch; color: var(--ink-2); overflow-wrap: anywhere; }
 .page-actions { display: flex; gap: 8px; flex: none; }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; margin-bottom: 20px; min-width: 0; }
@@ -1135,7 +1135,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .route-target { overflow-wrap: anywhere; min-width: 0; }
 .route-target.off { text-decoration: line-through; color: var(--muted); }
 .tier-n { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--heat-ink); min-width: 52px; }
-.tiers { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 4px; }
+.tiers { list-style: none; margin: 12px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .tier { position: relative; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
 .tier-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
 .tier-targets { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
@@ -1144,7 +1144,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .tier-edit { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-left: auto; }
 .tier-edit input[type="number"] { width: 64px; min-height: 30px; margin-left: 4px; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); font: inherit; }
 .tier-add { margin-top: 8px; }
-.tier-add select { max-width: 100%; min-height: 36px; }
+.tier-add select { max-width: 100%; min-width: 0; min-height: 36px; }
 .tier-arrow { display: block; margin: 6px auto -8px; color: var(--muted); }
 .key-cloud { margin-bottom: 4px; }
 .cloud-picks .card-pick { align-items: baseline; }
@@ -1436,6 +1436,18 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .deprow-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .deprow-name a { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .deprow-name a:hover { text-decoration: underline; }
+/* 1.4 (#81): "→ Gemini": the deployment has a cloud fallback (on its page). */
+.deprow-name { flex-wrap: wrap; row-gap: 2px; }
+.deprow-name a.fallback-mark { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px;
+  font-family: var(--font); font-size: 11.5px; font-weight: 500; color: var(--heat-ink); background: var(--heat-soft); border-color: #f3d39b; white-space: nowrap; }
+.deprow-name a.fallback-mark:hover { color: var(--ink); text-decoration: none; border-color: var(--line-strong); }
+#cloud-fallback { scroll-margin-top: 72px; }
+.fallback-form { margin-top: 6px; }
+.fallback-rules { margin: 18px 0 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.fallback-rules h3, .fallback-form .panel-head h3 { margin: 0; font-size: 15px; }
+.also-in { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.fallback-list { margin-top: 4px; }
+.fallback-delete { margin-left: auto; }
 .deprow-model { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .deprow-mem { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
 .deprow-state { justify-self: start; }
@@ -1450,23 +1462,6 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .kinds-none { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 4px 0 0; }
 .kinds-none-item { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); }
 
-/* Workloads: yours, then the ones deployments created. */
-.wl-group { margin-bottom: 22px; }
-.wl-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
-.wl-group-head h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 15px; }
-.wl-group-lead { margin: -4px 0 10px; }
-.wl-group-empty { margin: 0; }
-.wl-rows { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
-.wl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 9px 14px; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius); }
-.wl-row-name { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
-.wl-row-name a { font-size: 12.5px; color: var(--ink); overflow-wrap: anywhere; }
-.wl-from { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 12.5px; color: var(--ink-2); }
-.wl-from a { font-size: 12px; }
-.created-by { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
-.created-by p { margin: 0; }
-.created-by .created-by-title { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
-.created-by .created-by-title a { font-size: 14px; }
 .locked { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 
 /* The catalog's Model column kept collapsing to a few characters at desktop widths (long sources). */
@@ -1491,7 +1486,8 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
   .deprow { grid-template-columns: minmax(0, 1fr) auto; }
   .deprow .where { grid-column: 1 / -1; }
   .deprow-mem { justify-self: start; }
-  .wl-row { grid-template-columns: minmax(0, 1fr); }
-  .created-by { grid-template-columns: minmax(0, 1fr); }
-  .created-by > .btn { justify-self: start; }
 }
+
+/* 1.4 (#81): Apps is an advanced page, not in the menu; it says where models go first. */
+.apps-note { margin: -6px 0 18px; max-width: 82ch; font-size: 14px; color: var(--ink-2); }
+.apps-note .help-link { display: inline-flex; margin-left: 2px; vertical-align: -3px; }

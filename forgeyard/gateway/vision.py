@@ -144,7 +144,7 @@ async def handle(request: Request, name: str, task: str, caller: KeyCaller) -> R
                                                     f"{', '.join(sorted(TASKS))}.")
         route = await run_in_threadpool(_load, name, task)
         if route is None:
-            raise GatewayError(404, "workload_not_found", f"No exposed vision workload {name!r} does {task}. "
+            raise GatewayError(404, "workload_not_found", f"No exposed vision app {name!r} does {task}. "
                                                           "Deploy a vision model from Models instead.")
         return await passthrough.forward(request, caller, route, f"/v1/{task}".encode("ascii"), b"", started,
                                          request_id)

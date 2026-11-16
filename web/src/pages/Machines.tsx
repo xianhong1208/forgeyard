@@ -238,7 +238,7 @@ function EmptyMachines({ canManage, adding, onAdd }: { canManage: boolean; addin
       <div className="empty-copy">
         <h2>No machines yet</h2>
         <p>
-          Forgeyard runs models and workloads on machines you add: GPU servers, workstations, or computers with only a CPU.
+          Forgeyard runs models and apps on machines you add: GPU servers, workstations, or computers with only a CPU.
           Each one runs the Forgeyard agent, which reports its hardware and keeps a connection to this server.{" "}
           {canManage
             ? "To add one, create a join command here and paste it on the machine: one line installs the agent as a service (or run it in Docker)."

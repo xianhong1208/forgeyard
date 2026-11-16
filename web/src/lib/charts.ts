@@ -45,8 +45,8 @@ export const METRICS: { id: string; label: string; kind: Kind; always?: boolean 
   { id: "images", label: "Images made", kind: "count" },
   { id: "media_ms", label: "Audio and video made", kind: "duration" },
   { id: "busy_ms", label: "Busy time", kind: "duration" },
-  { id: "bytes_in", label: "Workload bytes in", kind: "bytes" },
-  { id: "bytes_out", label: "Workload bytes out", kind: "bytes" },
+  { id: "bytes_in", label: "App bytes in", kind: "bytes" },
+  { id: "bytes_out", label: "App bytes out", kind: "bytes" },
   { id: "cost_micros", label: "Cost (USD)", kind: "usd" },
 ];
 

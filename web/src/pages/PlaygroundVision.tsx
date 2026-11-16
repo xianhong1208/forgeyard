@@ -22,18 +22,18 @@ export function visionError(status: number, body: unknown, limitMb: number): str
   switch (e?.code) {
     case "request_too_large":
     case "image_too_large":
-      return `The image is too large for this workload: it takes at most ${limitMb} MiB.`;
+      return `The image is too large for this app: it takes at most ${limitMb} MiB.`;
     case "invalid_image":
-      return "The workload could not read this image. Send a PNG, JPEG or WebP picture.";
+      return "The app could not read this image. Send a PNG, JPEG or WebP picture.";
     case "workload_busy":
     case "key_busy":
-      return "The workload is busy with other images right now. Try again in a moment.";
+      return "The app is busy with other images right now. Try again in a moment.";
     case "no_ready_replica":
-      return `The workload is not ready: ${e.message ?? "no replica is running."}`;
+      return `The app is not ready: ${e.message ?? "no replica is running."}`;
     case "upstream_timeout":
-      return "The workload did not answer in time. A CPU can take a while on a large image; try a smaller one.";
+      return "The app did not answer in time. A CPU can take a while on a large image; try a smaller one.";
     case "workload_not_found":
-      return "This workload is no longer exposed. Reload the page to see the ones that are.";
+      return "This app is no longer exposed. Reload the page to see the ones that are.";
   }
   return answerError(status, body);
 }
@@ -50,19 +50,19 @@ export function Vision({ canCreate }: { canCreate: boolean }) {
   if (!workloads.length) {
     return (
       <section className="panel play-empty" aria-labelledby="vis-empty-title">
-        <h2 id="vis-empty-title">No vision workload to try yet</h2>
+        <h2 id="vis-empty-title">No vision app to try yet</h2>
         <p className="muted">
-          The Vision tab sends a picture to an exposed vision workload: object detection, segmentation or depth estimation.
+          The Vision tab sends a picture to an exposed vision app: object detection, segmentation or depth estimation.
           None is exposed yet.{" "}
-          {canCreate ? "Start one from a template on the Workloads page; it shows up here once it runs."
+          {canCreate ? "Start one from a template on the Apps page; it shows up here once it runs."
             : "Admins and operators start them from a template; ask one to start the one you need."}
         </p>
         <ul className="vis-kinds">
           {data.tasks.map((t) => <li key={t.task}><span className="strong">{t.title}</span> <span className="muted small mono">{t.model}</span></li>)}
         </ul>
         <div className="row-gap">
-          {canCreate && <Link to="/workloads" className="btn btn-primary"><IconTemplate size={16} aria-hidden="true" /> Start from a template</Link>}
-          <HelpLink page="how-to" anchor="try-a-vision-workload-in-the-playground">How the Vision tab works</HelpLink>
+          {canCreate && <Link to="/apps" className="btn btn-primary"><IconTemplate size={16} aria-hidden="true" /> Start from a template</Link>}
+          <HelpLink page="how-to" anchor="try-a-vision-app-in-the-playground">How the Vision tab works</HelpLink>
         </div>
       </section>
     );
@@ -71,7 +71,7 @@ export function Vision({ canCreate }: { canCreate: boolean }) {
     <>
       <div className="play-bar vis-bar">
         <div className="field">
-          <label htmlFor="vis-workload">Workload</label>
+          <label htmlFor="vis-workload">App</label>
           <select id="vis-workload" value={w?.name ?? ""} onChange={(e) => setPicked(e.target.value)}>
             {workloads.map((x) => <option key={x.name} value={x.name}>{workloadLabel(x)}</option>)}
           </select>
@@ -170,7 +170,7 @@ function VisionPanel({ w }: { w: VisionWorkload }) {
     <section className="panel play vision" aria-labelledby="vis-title">
       <div className="panel-head">
         <h2 id="vis-title"><IconEye size={18} stroke={1.7} aria-hidden="true" /> {w.title}</h2>
-        <HelpLink page="how-to" anchor="try-a-vision-workload-in-the-playground">How it works</HelpLink>
+        <HelpLink page="how-to" anchor="try-a-vision-app-in-the-playground">How it works</HelpLink>
       </div>
       <p className="muted small vis-about">
         {TASK_HELP[w.task]} <span className="mono">{w.model}</span> <span className="chip mono" title="The model's licence">{w.licence}</span>
@@ -196,8 +196,8 @@ function VisionPanel({ w }: { w: VisionWorkload }) {
             ? <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             : <button type="button" className="btn btn-primary" disabled={!w.ready} onClick={() => void run()}>{RUN_LABEL[w.task]}</button>)}
           {w.task === "segment" && <span className="small" role="note">Click a point on the picture, or drag a box around something.</span>}
-          {busy && <span className="muted small" role="status">Waiting for the workload…</span>}
-          {!w.ready && <span className="muted small">The workload has no ready replica.</span>}
+          {busy && <span className="muted small" role="status">Waiting for the app…</span>}
+          {!w.ready && <span className="muted small">The app has no ready replica.</span>}
         </div>
       )}
       {err && <Notice tone="error">{err}</Notice>}

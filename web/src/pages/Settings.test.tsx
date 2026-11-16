@@ -97,7 +97,7 @@ describe("provider: outside or inside your network (D4)", () => {
       if (url === "/api/providers" && init?.method === "POST") return { status: 201, body: { provider: { id: 9, name: "x", models: [] } } };
       if (url === "/api/providers") return { status: 200, body: { providers: [], kinds: KINDS, egress: EGRESS, is_admin: true } satisfies ProvidersResponse };
     });
-    mount("/providers");
+    mount("/cloud");
     fireEvent.click(await screen.findByRole("button", { name: /Add a provider/ }));
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Kind of provider" })).getByLabelText("OpenAI-compatible server"));
     const box = () => screen.getByRole("checkbox", { name: /Outside your network/ }) as HTMLInputElement;

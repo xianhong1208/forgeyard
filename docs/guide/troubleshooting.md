@@ -297,9 +297,9 @@ until room appears (the API's `"wait": true`).
 
 ## A replica stays pending
 
-**You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
+**You see:** a deployment or app was placed on a machine (*Replica 0 placed on …*), the machine
 is online, and the replica stays **pending**: nothing is downloaded or started. After 2 minutes the
-deployment and workload pages say *Replica #0 was never picked up*, with the machine, its agent's
+deployment and app pages say *Replica #0 was never picked up*, with the machine, its agent's
 version and what to do, for example *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
 update the agent (the server is 1.3.1)*. An agent gets its work list within a second of a placement
 (or of connecting) and answers every list with the state of each replica, so two minutes of silence
@@ -387,12 +387,12 @@ reached or refused its internal key: usually its agent restarted; it recovers wi
 A model that goes to a cloud provider adds these. The answer's `X-Forgeyard-Target` says whether a
 provider answered.
 
-- `404 model_not_found` for a model listed on **Models**: it is cloud-only, and the key's cloud
+- `404 model_not_found` for a model listed on **Cloud models**: it is cloud-only, and the key's cloud
   setting is not **Allowed**.
 - `400 cloud_only_model`: the request had `X-Forgeyard-Local-Only: 1` (or the route is
   **Local only**), but the model is served only by a cloud provider.
 - `502 provider_auth_failed`: the provider refused Forgeyard's key for it; an admin fixes it on
-  **Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
+  **Cloud → Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
   `502 provider_redirect`: the provider answered with a redirect, which is never followed; check its
   base URL.
 - `429 provider_rate_limited`: every target of the cloud tier was rate limited; wait for
@@ -404,13 +404,13 @@ More in [Cloud providers](cloud-providers.md#troubleshooting).
 
 ## Errors from /x/
 
-- **403 `workloads_not_allowed`:** the key's **Workloads at /x/** is *None*, the default. Change it
+- **403 `workloads_not_allowed`:** the key's **Apps at /x/** is *None*, the default. Change it
   on **API keys**.
-- **404 `workload_not_found`:** the name is wrong, the workload is not exposed (its page, **Gateway**),
-  or the key lists other workloads.
+- **404 `workload_not_found`:** the name is wrong, the app is not exposed (its page, **Gateway**),
+  or the key lists other apps.
 - **503 `no_ready_replica` and "runs without the agent's key guard":** the replica's agent is older
-  than 1.3, or the workload was exposed while running and has not restarted behind the guard yet.
-  Update the agent, or stop and start the workload.
+  than 1.3, or the app was exposed while running and has not restarted behind the guard yet.
+  Update the agent, or stop and start the app.
 - **The replica stops with "listens beyond loopback":** behind the key guard a process must listen on
   `127.0.0.1`. Use `${BIND_ADDRESS}` in its arguments instead of `0.0.0.0`.
 - **A page, its links or its redirects are wrong:** the prefix is stripped, so the service sees `/`.
@@ -489,11 +489,11 @@ offline. The message gives each replica's state, for example
 **Do:** open the deployment's page. Wait while it downloads or starts (the page shows the progress).
 If a replica keeps failing, its output on that page says why; a machine that is offline is in
 [An agent shows offline](#an-agent-shows-offline). To have such requests go to a cloud provider
-meanwhile, add a cloud tier to the model's route ([Cloud providers](cloud-providers.md#route-a-model-to-the-cloud)).
+meanwhile, give the deployment a cloud fallback on its page ([Cloud providers](cloud-providers.md#give-a-deployment-a-cloud-fallback)).
 
 ## A request does not spill to the cloud
 
-**You see:** a model's route has a cloud tier, but requests still fail (503, 429) or wait while the
+**You see:** a deployment has a cloud fallback, but requests still fail (503, 429) or wait while the
 local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 
 **Why**, in the order to check:
@@ -646,7 +646,7 @@ price. Under a budget, a model without a price is refused (`402 budget_unpriced`
 
 ## Agent in a container without systemd
 
-**You see:** process workloads fail to start, and the agent's log mentions `systemd-run` or
+**You see:** processes (apps or engines) fail to start, and the agent's log mentions `systemd-run` or
 `Failed to connect to bus`.
 
 **Why:** with `limits = "auto"` the agent uses a systemd scope when it runs as root and finds
@@ -661,7 +661,7 @@ limits = "rlimit"
 ```
 
 or `--limits rlimit`, or `FORGEYARD_LIMITS=rlimit` (the agent's Docker image sets this already).
-Process workloads then get resource limits per process, and their CPU is counted, not capped.
+Processes then get resource limits, and their CPU is counted, not capped.
 
 ## The server refuses a setting, or warns about one
 
