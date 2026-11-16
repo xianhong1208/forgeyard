@@ -13,7 +13,9 @@ import json
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +28,7 @@ from forgeyard.agent.workloads.records import RecordStore
 from forgeyard.agent.workloads.runtime import StartError
 from forgeyard.workloads import images
 from tests.image_helpers import build_image, docker_save
+from tests.pull_helpers import FakeEngineAPI
 from tests.test_relay_agent import CRED, FakeRelay
 from tests.waits import wait_until
 from tests.workload_helpers import FakeDocker
@@ -197,6 +200,50 @@ def test_fy_relay_029_auto_relays_only_after_the_registry_could_not_be_reached(t
         assert not b3.through.client.unreachable("docker.io")
     finally:
         b3.close()
+
+
+def docker29_unreachable(ref: str) -> str:
+    """What Docker 29 (containerd image store) answers to a pull of a pinned image when the registry's name does
+    not resolve, as a DNS-filtered machine sees it: the reference twice, each with its 64-digit digest, before the
+    cause. Well over 300 characters."""
+    name, _, digest = ref.partition("@")
+    repo = name.rsplit(":", 1)[0]
+    host, _, path = repo.partition("/")
+    return (f'failed to resolve reference "{repo}@{digest}": failed to do request: Head '
+            f'"https://{host}/v2/{path}/manifests/{digest}": dial tcp: lookup {host} on 127.0.0.53:53: no such host')
+
+
+def test_fy_relay_041_a_long_engine_api_error_still_reads_as_unreachable(tmp_path):
+    """FY-RELAY-041: on a real machine (Docker 29, pulls through the engine API) a pinned image whose registry does
+    not resolve fails with a message whose cause comes after the reference twice over, past 300 characters.
+    "auto" still sees a network failure and switches to the server; and where the image cannot come through the
+    server (a tag-only one), the reason the console shows keeps the cause ("no such host") at its end."""
+    img = build_image()
+    message = docker29_unreachable(img.ref)
+    assert len(message) > 300 and message.index("no such host") > 300
+    sock = Path(tempfile.mkdtemp(prefix="fyd-", dir="/tmp"))
+    api = FakeEngineAPI(sock / "d.sock", [("status", 500, message)])
+    b = Box(tmp_path, img, mode="auto")
+    try:
+        b.rt.socket = str(api.path)
+        assert b.ensure()[1] == LOADED
+        assert len(api.requests) == 1 and b.relay.requests
+        assert b.through.client.unreachable("ghcr.io")
+    finally:
+        b.close()
+        api.close()
+    tagged = Box(tmp_path / "tagged", img, mode="auto")
+    api2 = FakeEngineAPI(sock / "e.sock", [("status", 500, docker29_unreachable(img.ref))])
+    try:
+        tagged.rt.socket = str(api2.path)
+        with pytest.raises(StartError) as e:
+            tagged.ensure(image="ghcr.io/acme/engine:1.0", check=None)
+        reason = str(e.value)
+        assert len(reason) <= 300 and "no such host" in reason and "Upload an image" in reason
+    finally:
+        tagged.close()
+        api2.close()
+        shutil.rmtree(sock, ignore_errors=True)
 
 
 def test_fy_relay_030_what_does_not_match_is_never_loaded_or_run(tmp_path, monkeypatch):

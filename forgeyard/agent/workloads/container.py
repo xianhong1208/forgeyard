@@ -50,6 +50,8 @@ from forgeyard.workloads import images
 from forgeyard.workloads.spec import ContainerRuntime as ContainerSpec, WorkloadSpec
 
 log = logging.getLogger("forgeyard.agent")
+# A replica's reason is kept to this many characters (the supervisor cuts there): build reasons to fit.
+REASON_MAX = 300
 
 ENGINES = ("docker", "podman")
 CDI_DIRS = ("/etc/cdi", "/var/run/cdi")
@@ -128,7 +130,7 @@ def pull_failed_reason(engine: str, image: str, found: str, detail: str) -> str:
     else:
         why = (f"the image is not on this machine and could not be pulled; on an offline machine, {engine} load "
                "the image (Forgeyard checks it by its recorded ids)")
-    return f"{why}. {detail}"[:300]
+    return f"{why}. {pulling.brief(detail, max(80, REASON_MAX - len(why) - 2))}"
 
 
 def _unix_path(host: str) -> Optional[str]:
@@ -435,15 +437,17 @@ class ContainerRuntime:
                 # the next images from this registry go there at once).
                 relay.client.mark_unreachable(relay.host(image))
                 log.warning("Could not pull %s for %s (%s); fetching it through the server.", image, who,
-                            str(e)[:200])
+                            pulling.brief(str(e), 200))
                 return self._relay_image(image, check, relay, progress, cancel, who)
             if pinned:
                 raise StartError(pull_failed_reason(engine, image, found, str(e))) from None
             if fetch.network_error(str(e)):
-                raise StartError(f"{engine} could not pull {image}: {e}. This image is not pinned by digest, so it "
-                                 "cannot come through the server: upload the image file to this machine (its page "
-                                 "in the console: Upload an image)"[:400]) from None
-            raise StartError(f"{engine} could not pull {image}: {e}"[:300]) from None
+                advice = (". It is not pinned by digest, so it cannot come through the server: upload the image file "
+                          "to this machine (its page: Upload an image)")
+                start = f"{engine} could not pull {image}: "
+                detail = pulling.brief(str(e), max(60, REASON_MAX - len(start) - len(advice)))
+                raise StartError(f"{start}{detail}{advice}"[-REASON_MAX:]) from None
+            raise StartError(pulling.brief(f"{engine} could not pull {image}: {e}", REASON_MAX)) from None
         if pinned and self._image(digest_ref(image)) is None:
             raise StartError(f"the pull of {image} finished, but {engine} does not show the pinned digest")
         log.info("Pulled %s.", image)

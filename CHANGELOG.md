@@ -311,6 +311,11 @@ version until 1.0.
 
 ### Fixed
 
+- **A pull that failed because the registry could not be reached is read as such, however long the engine's
+  message.** Docker 29 puts the cause ("…: no such host") after the image reference twice over; the agent cut
+  the message at 300 characters before reading it, so the cause was lost: the console never showed it and
+  "Internet access: Auto" never switched to the server. Messages are kept whole until read, and the reason
+  shown keeps their start and their end.
 - **An error the agent did not expect while starting a replica is now that replica's reason** in the console
   ("the agent failed while starting it (…)"), followed by the usual backoff. It used to read "ended while the
   agent was not watching", with the cause only in the agent's log.

@@ -257,14 +257,30 @@ def _abort_socket(conn: http.client.HTTPConnection, held: dict) -> Callable[[], 
     return abort
 
 
+# An engine's error is kept whole (up to DETAIL_MAX) until it has been read: whether it is a network failure
+# depends on its end. Docker 29 puts the cause ("…: no such host") after the image reference twice over, each
+# with its 64-digit digest, past 300 characters. Only what is shown is shortened, with `brief`.
+DETAIL_MAX = 2000
+
+
+def brief(text: str, limit: int = 300) -> str:
+    """`text` in at most `limit` characters, keeping its start and its end (where an engine puts the cause)."""
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    head = max(limit // 3, 1)
+    tail = max(limit - head - 3, 1)
+    return f"{text[:head]} … {text[-tail:]}"
+
+
 def _message(body: bytes) -> str:
     try:
         data = json.loads(body.decode("utf-8", "replace"))
     except ValueError:
-        return body.decode("utf-8", "replace").strip()[:300]
+        return body.decode("utf-8", "replace").strip()[:DETAIL_MAX]
     if isinstance(data, dict):
-        return str(data.get("message") or data.get("error") or data)[:300]
-    return str(data)[:300]
+        return str(data.get("message") or data.get("error") or data)[:DETAIL_MAX]
+    return str(data)[:DETAIL_MAX]
 
 
 def _needs_credentials(text: str) -> bool:
@@ -353,7 +369,7 @@ def _feed(line: bytes, layers: Layers, dog: Watchdog) -> Optional[str]:
         return None
     if msg.get("error") or msg.get("errorDetail"):
         detail = msg.get("errorDetail") if isinstance(msg.get("errorDetail"), dict) else {}
-        return str(msg.get("error") or detail.get("message") or "error")[:300]
+        return str(msg.get("error") or detail.get("message") or "error")[:DETAIL_MAX]
     if layers.feed(msg):
         dog.moved()
     return None
