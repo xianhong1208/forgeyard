@@ -376,13 +376,20 @@ def test_fy_bdg_011_failures_release_and_in_flight_requests_hold(priced):
 
 def test_fy_bdg_012_concurrent_requests_do_not_overspend(priced):
     """FY-BDG-012: 12 requests at once against a budget that reserves room for 4: exactly 4 reach the
-    provider and the spend stays within the budget."""
+    provider and the spend stays within the budget. The provider holds its answers until the other 8 have been
+    refused (a gate, not a fixed hold): on a slow runner the first answers used to settle, at less than was
+    reserved, before the last requests had even started, which rightly let a fifth one in."""
     m = priced
     budget = 4 * need() // P + 1
     m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": budget})
     set_state("chat", 0, "starting", "loading")
-    m.cloud.hold = 0.5
+    m.cloud.gate = threading.Event()
     threads = [background(lambda: send(m)) for _ in range(12)]
+    try:
+        wait_until(lambda: sum(not t.is_alive() for t, _ in threads) == 8, "8 requests refused", timeout=30)
+        assert len(m.cloud.posts()) == 4     # held at the provider while the other 8 were refused
+    finally:
+        m.cloud.gate.set()
     for t, _ in threads:
         t.join()
     codes = sorted(out["r"].status_code for _, out in threads)

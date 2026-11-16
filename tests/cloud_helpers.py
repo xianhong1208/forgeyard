@@ -33,6 +33,7 @@ class FakeCloud:
         self.chunks = chunks
         self.delay = delay
         self.hold = hold
+        self.gate: Optional[threading.Event] = None   # set: a non-streamed answer waits for it (a test opens it)
         self.status: Optional[int] = None
         self.statuses: list[int] = []
         self.headers_out: dict = {}          # extra headers on error answers (Retry-After…)
@@ -109,6 +110,8 @@ class FakeCloud:
                 usage = cloud.usage or (ANTHROPIC_USAGE if cloud.style == "anthropic" else USAGE)
                 if self.path.endswith("/chat/completions") and body.get("stream"):
                     return self._stream(body, usage)
+                if cloud.gate is not None:
+                    cloud.gate.wait(30)
                 if cloud.hold:
                     time.sleep(cloud.hold)
                 if self.path.endswith("/chat/completions") or self.path.endswith("/completions"):
