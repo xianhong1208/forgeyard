@@ -45,7 +45,7 @@ What it shows for each card:
   serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
   1.1.0 or older keeps its GPU allowlist when the key changes.
 
-Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process workload gets
+Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process (an app or an engine) gets
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
@@ -229,7 +229,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 - **The model cache at the same path inside and outside** (`-v /srv/forgeyard-models:/srv/forgeyard-models`):
   the agent downloads models into it, then asks the host's Docker to start the engine container
   with the model mounted *by its path on the host*. Different paths would mount nothing.
-- **`/var/run/docker.sock`**: models and container workloads run as containers on the host's Docker,
+- **`/var/run/docker.sock`**: models and container apps run as containers on the host's Docker,
   next to the agent, not inside it. That socket gives full control of the host's Docker, which is
   why the agent's container is trusted like the agent itself.
 - **The `forgeyard-agent` volume** keeps the machine's credential and the pinned CA. Keep it: the
@@ -239,10 +239,10 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   [agent.toml](reference.md#agent-settings). You can also mount a file:
   `-v /etc/forgeyard/agent.toml:/etc/forgeyard/agent.toml:ro`.
 - The agent runs as **root** inside the container: it needs the Docker socket and switches to the
-  unprivileged account `forgeyard-run` for process workloads. Workloads never run as root.
-- There is no systemd in the container, so process workloads are limited with rlimits (the image
-  sets `FORGEYARD_LIMITS=rlimit`). Process workloads run inside the agent's container and stop
-  with it; models and container workloads keep running on the host.
+  unprivileged account `forgeyard-run` for processes. Apps and engines never run as root.
+- There is no systemd in the container, so processes are limited with rlimits (the image
+  sets `FORGEYARD_LIMITS=rlimit`). Processes run inside the agent's container and stop
+  with it; models and apps in containers keep running on the host.
 
 ### Offline machines, or build it yourself
 
@@ -285,7 +285,7 @@ A machine that already joined keeps its identity if the container gets its state
 1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.3` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
-   process you started. Its container workloads and models keep running.
+   process you started. Its models and apps in containers keep running.
 3. Start the container with the old state directory and the same model cache, and **without** the
    join variables:
 
@@ -302,7 +302,7 @@ A machine that already joined keeps its identity if the container gets its state
    agent takes over the containers the old one started (they carry its id, which is in the state
    directory).
 
-Process workloads the old agent started outside the container are not taken over: stop them from
+Processes the old agent started outside the container are not taken over: stop them from
 the UI first.
 
 ## Offline machines
@@ -311,7 +311,7 @@ A machine that cannot reach the registry (no internet access, or a DNS filter th
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
 the deployment stay as they are.
 
-1. **Find the image.** On **Models → Model library**, open **Machine without registry access:
+1. **Find the image.** On **Models → Library**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
    ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
@@ -355,22 +355,22 @@ tries to pull.
 
 ## Run a service or a task
 
-Admins and operators run their own programs on the machines as **workloads**: open **Workloads** →
-**New workload**, fill in the form, and choose **Create and start**.
+Admins and operators run their own programs on the machines as **apps**, an advanced feature that
+is not in the menu: open `/apps` on the server → **New app**, fill in the form, and choose **Create and start**.
 
 1. **What:** **Service** (runs until you stop it; restarted when it exits) or **Task** (runs to the
    end). A **Name**: `a-z`, `0-9` and `-`, unique.
 2. **Run:** **Container** (an **Image**, for example `python:3.13-slim`, with an optional
    **Entrypoint**) or **Process** (a **Command** on the basic `PATH` or an absolute path, run by the
-   agent as its workload account). **Arguments** go one per line, without shell quoting.
+   agent as its account for processes). **Arguments** go one per line, without shell quoting.
 3. **Where:** a **Machine**, or *Any online machine with room*; **GPUs**: *None*, *How many* (and
    a **Vendor**), or *These cards* on a chosen machine; **CPU cores**, **Memory** (for example `4Gi`)
    and **Replicas** (1 to 16, each on one machine).
 4. **Environment:** the variables it needs. It starts from an empty environment; the variables
-   Forgeyard adds are in the [reference](reference.md#workload-environment). Values are stored
+   Forgeyard adds are in the [reference](reference.md#app-environment). Values are stored
    encrypted.
 5. **Ports and health** (a service): **Add port** for each port it listens on. The agent picks a host
-   port from its range and shows the address on the workload's page. A process listens on `$PORT`
+   port from its range and shows the address on the app's page. A process listens on `$PORT`
    (or `${PORT_<NAME>}` in its arguments); a container gives its own port, which the host port maps
    to. **Health check**: *None*, *HTTP* (a **Path**) or *TCP*. **Restart**: *Always*, *On failure* or
    *Never*.
@@ -378,16 +378,16 @@ Admins and operators run their own programs on the machines as **workloads**: op
    **Retries** after a non-zero exit, with a **Retry backoff (s)** that doubles each time, up to 5
    minutes.
 
-*Spec that will be sent* shows the JSON the form makes. The workload's page shows each replica, its machine, GPUs and address, the
+*Spec that will be sent* shows the JSON the form makes. The app's page shows each replica, its machine, GPUs and address, the
 events, and the last lines of its output. **Stop** stops every replica (SIGTERM, then SIGKILL after
 10 s) and frees its GPUs; **Start** places them again; **Delete** also removes its history and
 output.
 
-Isolation, in short: a process runs as the unprivileged workload account with only its own cards
+Isolation, in short: a process runs as the unprivileged account `forgeyard-run` with only its own cards
 visible; a container gets only its cards, never `--privileged`. See
-[Workloads](concepts.md#workloads).
+[Apps (advanced)](concepts.md#apps-advanced).
 
-## Expose a workload at /x/
+## Expose an app at /x/
 
 Call a service's own HTTP API through the gateway, with an API key. Admins and operators do this.
 
@@ -395,14 +395,14 @@ Call a service's own HTTP API through the gateway, with an API key. Admins and o
    `127.0.0.1`: give it `${BIND_ADDRESS}` and `${PORT}` in its arguments, which become `127.0.0.1`
    and its port. A container listens on its own port as usual (the agent publishes it on loopback).
    A process that listens on another address is stopped, so it is never reachable around the guard.
-2. **Expose it.** In **New workload**, tick **Expose at** `/x/<name>` under **Gateway**; or, on a
-   running workload's page, **Gateway** → **Expose** → **Save**: its replicas restart behind the
+2. **Expose it.** In **New app**, tick **Expose at** `/x/<name>` under **Gateway**; or, on a
+   running app's page, **Gateway** → **Expose** → **Save**: its replicas restart behind the
    guard. **Limits and timeouts** (collapsed) holds the **Port** (default: the first),
    **Read timeout (s)** (600), **Largest request (MiB)** (32), **Requests at once per replica** and
    **Requests at once per key** (no limit by default).
-3. **Give a key access.** On **API keys**, a key's **Workloads at /x/**: *Listed workloads* (tick
-   it) or *Every exposed workload*. New keys have *None*.
-4. **Call it.** The workload's page shows its address and a `curl` call. The prefix is stripped:
+3. **Give a key access.** On **API keys**, a key's **Apps at /x/**: *Listed apps* (tick
+   it) or *Every exposed app*. New keys have *None*.
+4. **Call it.** The app's page shows its address and a `curl` call. The prefix is stripped:
    `/x/detector/v1/detect` reaches the service as `/v1/detect`.
 
 ```bash
@@ -441,12 +441,12 @@ ${PORT}
 ```
 
 Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of the replicas until the
-workload is restarted. What passes and what is removed is in the
+app is restarted. What passes and what is removed is in the
 [reference](reference.md#the-passthrough-x).
 
-## Start a workload from a template
+## Start an app from a template
 
-**Workloads** → **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
+On `/apps`, **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
 vision server image and is exposed at `/x/<name>` straight away:
 
 | Template | Model (licence) | Call |
@@ -459,7 +459,7 @@ vision server image and is exposed at `/x/<name>` straight away:
    CPU** (the CPU build, no GPU). The form opens filled in: the image, the task, the port, the health
    check and **Expose at** `/x/<name>`. Change anything, for example the name or the machine, then
    **Create and start**.
-2. Allow an API key to call it (**API keys** → the key's **Workloads at /x/**).
+2. Allow an API key to call it (**API keys** → the key's **Apps at /x/**).
 3. Send an image as a multipart file `image` (or JSON `{"image": "<base64>"}`):
 
 ```bash
@@ -485,20 +485,20 @@ gunzip -c forgeyard-vision.tar.gz | sudo docker load
 ```
 
 On AMD machines use **On the CPU**: the image has no ROCm build. What each endpoint takes and returns
-is in the [reference](reference.md#workload-templates). To try one without an API key, see
-[Try a vision workload in the Playground](#try-a-vision-workload-in-the-playground).
+is in the [reference](reference.md#app-templates). To try one without an API key, see
+[Try a vision app in the Playground](#try-a-vision-app-in-the-playground).
 
-## Try a vision workload in the Playground
+## Try a vision app in the Playground
 
-**Playground → Vision** sends a picture to an exposed vision workload (one started from a
-[template](#start-a-workload-from-a-template), or any exposed service started with `--task detect`,
+**Playground → Vision** sends a picture to an exposed vision app (one started from a
+[template](#start-an-app-from-a-template), or any exposed service started with `--task detect`,
 `--task segment` or `--task depth`), as you, without an API key. Everyone signed in may use it; the
-requests follow the workload's limits and count as `console` under `x:<name>` in **Usage**.
+requests follow the app's limits and count as `console` under `x:<name>` in **Usage**.
 
-1. Pick the **Workload**: each is listed with its task and model. With none exposed yet, the tab says
+1. Pick the **App**: each is listed with its task and model. With none exposed yet, the tab says
    so; admins and operators get a link to **Start from a template**.
 2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB, or the
-   workload's **Largest request** if that is smaller).
+   app's **Largest request** if that is smaller).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
      model found; **Score at least** hides the weaker ones without asking again.
@@ -509,7 +509,7 @@ requests follow the workload's limits and count as `console` under `x:<name>` in
      where it is nearer, in **Colour** or **Grey**. The depth is relative, not metres.
 
 Under the result: which replica answered, the picture's size and the time the model and the whole request
-took. A busy, stopped or too-small workload is said in plain words; nothing reaches `/x/` with your
+took. A busy, stopped or too-small app is said in plain words; nothing reaches `/x/` with your
 console sign-in, which takes API keys only. The routes are in the
 [reference](reference.md#from-the-playground).
 
@@ -697,7 +697,7 @@ to download them, and one token for the whole server is enough:
 
 1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
    **Settings → Access Tokens**, make a token with *Read* access.
-2. Admins: open **Models → Model library**. Under **Model sources**, paste it into **Hugging Face token**
+2. Admins: open **Models → Library**. Under **Model sources**, paste it into **Hugging Face token**
    and choose **Save token**. It is stored encrypted with the server's secret key and never shown
    again, only its last four characters.
 3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
@@ -713,10 +713,11 @@ health says when a deployment of a gated model has no token to use (`gated-model
 
 ## Add a cloud provider
 
-Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
-OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test connection**. Add the
-models you want, then put one in a route: open a deployment, choose **Routing and cloud spill**, add
-a tier with the cloud model, and save. Give the keys that may use it a cloud setting other than
+Admins: open **Cloud → Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google
+Gemini, Azure OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test
+connection**. Add the models you want, then use one: open a deployment, and under **Cloud fallback**
+add a cloud tier with the cloud model and save; or serve it under a name of its own with **Cloud →
+Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
 **Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
 [Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
 one's endpoint cannot do.
@@ -754,7 +755,7 @@ panel marks the values as *from .env*. Saving replaces them for good.
 
 Admins, once providers are in use:
 
-1. **Set prices.** On **Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
+1. **Set prices.** On **Cloud → Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
    matches, tick the rows to take, and choose **Apply ticked**. For a model OpenRouter does not list,
    open its provider, choose **Prices** on the model, type the prices from the provider's pricing
    page (US dollars per million tokens), and **Save prices**. A cloud model without a price is counted
@@ -817,7 +818,7 @@ From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-
 
 From then on:
 
-- nothing Forgeyard runs is given another card, whatever a workload or deployment asks;
+- nothing Forgeyard runs is given another card, whatever an app or deployment asks;
 - the other cards show *not for Forgeyard*;
 - memory is counted from what each allowed card reports **free**, so what other programs use on the
   same card is respected.
@@ -1065,7 +1066,7 @@ the journal: `journalctl -u forgeyard -f`.
    ([the list](reference.md#removed-settings)). Before you restart, rename `SECRET_KEY_FILE` to
    `FORGEYARD_SECRET_KEY_FILE` if you set it (otherwise the server refuses to start), and remove
    the others; Setup health lists any that are left.
-3. **The agents**, one by one. Running agents keep their workloads while they restart.
+3. **The agents**, one by one. Running agents keep their models and apps running while they restart.
    - **Installed** with the one-line install: run it again, without `--join`. It installs the
      server's new version and keeps the settings and the credential:
 
@@ -1095,8 +1096,8 @@ local tier. Admins see the results in three places:
 - **Get started → Setup health** lists every finding, with what to do and a link to where it is
   fixed.
 - **A count in the top bar** shows errors and warnings. It disappears when there are none.
-- **A banner on the page concerned** (Machines, API keys, Providers, Models, a route, a
-  deployment, Users) shows that page's findings.
+- **A banner on the page concerned** (Machines, API keys, Cloud, Models, a cloud model,
+  a deployment, Users) shows that page's findings.
 
 Users and operators see none of it.
 
@@ -1134,7 +1135,7 @@ saying so. The groups, in the order they run:
 |---|---|
 | `server` | HTTPS with the CA, security headers, a foreign host name (421), the CSRF rule, sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh` |
 | `machines` | each machine is online with its hardware; its GPU allowlist is enforced; join commands pin the CA |
-| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that a workload sees only its card |
+| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that an app sees only its card |
 | `models` | deploys small models and waits for them: Qwen3-1.7B GGUF on each CPU machine; a chat, an embedding, a rerank and a speech model on the GPU machine (each skipped if its estimate does not fit); the estimate on the deployment page; **Try it** |
 | `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
 | `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
@@ -1148,7 +1149,7 @@ failed, 2 when the run could not start.
 What to know before you run it:
 
 - **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
-  workloads, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
+  apps, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
   at the end, also after a failure or **Ctrl-C**. Usage rows and audit events of the run stay.
 - **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
   cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
@@ -1171,7 +1172,7 @@ What to know before you run it:
 | What | Why |
 |---|---|
 | `data/forgeyard.db` (or your PostgreSQL database) | everything Forgeyard knows: users, machines, models, deployments, keys, usage |
-| `data/secret.key` | it encrypts stored secrets (Hugging Face tokens, replicas' keys, workload environment values). Keep it **apart** from the database backup |
+| `data/secret.key` | it encrypts stored secrets (Hugging Face tokens, replicas' keys, apps' environment values). Keep it **apart** from the database backup |
 | `data/tls/` | the CA every device and agent trusts. Without it, every device and agent has to trust a new one |
 | `.env` | your settings |
 
@@ -1201,7 +1202,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
 It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
-(and any deployment's own), model replicas restart with new internal keys, and workloads with lost
+(and any deployment's own), model replicas restart with new internal keys, and apps with lost
 environment values have to be created again (their events say so).
 
 ## Download a model before deploying it
@@ -1310,7 +1311,7 @@ and `FORGEYARD_MODEL_CACHE`, then recreate the container.
 3. **Remove** takes it off the list. To bring the machine back, join it again with a new token
    (`forgeyard agent join --rejoin --join-token fyj_…`).
 
-Workloads still running on a revoked machine are not stopped by the server, which can no longer
+Models and apps still running on a revoked machine are not stopped by the server, which can no longer
 reach the agent. Stop them on the machine: `docker ps --filter label=forgeyard.agent` lists the
 containers.
 

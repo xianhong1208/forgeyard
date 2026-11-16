@@ -62,8 +62,8 @@ export function WorkloadNewPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { data: machines } = useApi<MachinesResponse>("/machines");
-  // A ready-made template (1.3): /workloads/new?template=<id>&gpu=1 fills the form; everything stays editable.
-  // ?machine=<id> (1.4, "New workload here" on a machine's page) picks the machine.
+  // A ready-made template (1.3): /apps/new?template=<id>&gpu=1 fills the form; everything stays editable.
+  // ?machine=<id> picks the machine.
   const [params] = useSearchParams();
   const [f, setF] = useState<WorkloadForm>(() => ({ ...emptyForm(), machine: params.get("machine") ?? "" }));
   const [g, setG] = useState<GatewayForm>(() => gatewayForm());
@@ -86,8 +86,8 @@ export function WorkloadNewPage() {
   if (user && user.role === "user") {
     return (
       <>
-        <PageHeader index="02 · Workloads" title="New workload" />
-        <Notice>Only admins and operators start workloads: creating one runs code on a machine.</Notice>
+        <PageHeader index="Advanced · Apps" title="New app" />
+        <Notice>Only admins and operators start apps: creating one runs code on a machine.</Notice>
       </>
     );
   }
@@ -104,7 +104,7 @@ export function WorkloadNewPage() {
     setError(null);
     try {
       const r = await api<WorkloadResponse>("/workloads", { method: "POST", body });
-      navigate(`/workloads/${r.workload.id}`);
+      navigate(`/apps/${r.workload.id}`);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -117,7 +117,7 @@ export function WorkloadNewPage() {
 
   return (
     <>
-      <PageHeader index="02 · Workloads" title="New workload"
+      <PageHeader index="Advanced · Apps" title="New app"
         lead="A container or a process, on a machine you pick or the first online machine with room. It starts as soon as it is placed." />
       {template && (
         <div className="tpl-from" role="status">
@@ -127,7 +127,7 @@ export function WorkloadNewPage() {
           <span className="muted small">serving code {template.code_licence}. Change anything before you start it.</span>
         </div>
       )}
-      <form className="wl-form" onSubmit={submit} aria-label="New workload">
+      <form className="wl-form" onSubmit={submit} aria-label="New app">
         <section className="panel">
           <h2>What</h2>
           <div className="grid-2">
@@ -144,7 +144,7 @@ export function WorkloadNewPage() {
           <h2>Run</h2>
           <Segmented label="Runtime" value={f.runtime} onChange={(v) => set("runtime", v)} options={[
             { value: "container", label: "Container", hint: "Docker or Podman on the machine" },
-            { value: "process", label: "Process", hint: "A program on the machine, as its workload user" },
+            { value: "process", label: "Process", hint: "A program on the machine, as the account the agent runs processes as" },
           ]} />
           {f.runtime === "container" ? (
             <div className="grid-2">
@@ -175,7 +175,7 @@ export function WorkloadNewPage() {
                 <option value="">Any online machine with room</option>
                 {usable.map((m) => (
                   <option key={m.id} value={m.id} disabled={!canRunWorkloads(m)}>
-                    {m.name} · {m.status}{canRunWorkloads(m) ? ` · Forgeyard may use ${allowlistSummary(m)}` : " · agent too old for workloads"}
+                    {m.name} · {m.status}{canRunWorkloads(m) ? ` · Forgeyard may use ${allowlistSummary(m)}` : " · agent too old for apps"}
                   </option>
                 ))}
               </select>
@@ -239,7 +239,7 @@ export function WorkloadNewPage() {
             </button>
           </div>
           <p className="muted small">
-            A workload starts from an empty environment: only what you list here
+            An app starts from an empty environment: only what you list here
             {f.runtime === "process" ? " (plus PATH, HOME, LANG and the user)" : ""}, its GPU variables, its ports and
             FORGEYARD_* identity. Nothing of the agent's or the host's is passed on.
           </p>
@@ -324,7 +324,7 @@ export function WorkloadNewPage() {
           </details>
           <div className="row-gap">
             <button className="btn btn-primary" disabled={busy}>{busy ? "Creating…" : "Create and start"}</button>
-            <Link to="/workloads" className="btn btn-quiet">Cancel</Link>
+            <Link to="/apps" className="btn btn-quiet">Cancel</Link>
           </div>
         </div>
       </form>
@@ -346,7 +346,7 @@ export function GatewayPanel({ g, setG, name, ports, heading = true }: {
         <span>
           <span className="strong">Expose at <code>{path}</code></span>
           <span className="muted small">Programs call the service's HTTP API through the gateway with an API key whose
-            Workloads setting allows it. Its ports then answer only the gateway (the agent's key guard).</span>
+            Apps setting allows it. Its ports then answer only the gateway (the agent's key guard).</span>
         </span>
       </label>
       {g.expose && (

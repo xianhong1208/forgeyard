@@ -1,5 +1,5 @@
 """Ready-made workload templates (1.3): vision services that run Forgeyard's own vision server image
-(images/vision) and are exposed at /x/<name> straight away. Choosing one on the Workloads page fills the
+(images/vision) and are exposed at /x/<name> straight away. Choosing one on the Apps page fills the
 new-workload form: the image (the CPU or the CUDA build), the GPU, the port, the health check and the
 gateway setting; everything stays editable.
 

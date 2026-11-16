@@ -196,7 +196,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 ## 副本一直停在 pending
 
-**你會看到：**部署或 workload 已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**：沒有下載、也沒有啟動。2 分鐘後，部署和 workload 頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
+**你會看到：**部署或應用程式已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**：沒有下載、也沒有啟動。2 分鐘後，部署和 workload 頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
 
 **原因：**那台機器的 agent 沒有處理它的工作清單。1.2.0 以前的 agent 會跨連線記住最後收到的工作清單編號，而之後重新啟動過的伺服器又從 1 開始編號：agent 把這些清單全當成舊的，默默丟掉。1.3.0 起的伺服器編號方式不會再這樣，連舊版 agent 也一樣；1.3.0 起的 agent 每次連線都重新計數，丟掉清單時也會留下紀錄。
 
@@ -248,9 +248,9 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 送往雲端供應商的模型會多出這些錯誤。回應的 `X-Forgeyard-Target` 會說明是不是由供應商回答的。
 
-- 模型明明列在 **Models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
+- 模型明明列在 **Cloud models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
 - `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **Local only**），但這個模型只由雲端供應商提供。
-- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
+- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Cloud → Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
 - `429 provider_rate_limited`：雲端層的每個目標都達到速率限制；請依 `Retry-After` 等待。
 - `402 budget_exhausted`、`402 budget_unpriced`：每月預算；請見 [402](#402)。
 - 其他 4xx 會保留供應商的狀態碼、代碼和訊息，並在訊息前加上供應商的名稱。
@@ -259,9 +259,9 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 ## 來自 /x/ 的錯誤
 
-- **403 `workloads_not_allowed`：** 金鑰的 **Workloads at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
-- **404 `workload_not_found`：** 名稱打錯、工作負載沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他工作負載。
-- **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或工作負載是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動工作負載。
+- **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
+- **404 `workload_not_found`：** 名稱打錯、應用程式沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他應用程式。
+- **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或應用程式是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動應用程式。
 - **副本因「listens beyond loopback」被停止：** 在金鑰守門員後面，行程必須監聽 `127.0.0.1`。在它的參數裡用 `${BIND_ADDRESS}`，不要用 `0.0.0.0`。
 - **頁面、它的連結或轉址不對：** 前綴會被拿掉，所以服務看到的是 `/`。把它的 root path 設成 `/x/<name>`（FastAPI 的 `root_path`、`--root-path`、`GRADIO_ROOT_PATH`），或讀 `X-Forwarded-Prefix`。瀏覽器介面在 `/x/` 無法使用：回應會被放進沙箱。
 - **WebSocket 或 gRPC 用戶端失敗：** 1.3 兩者都不轉送。請用一般的 HTTP，串流請用 SSE。
@@ -312,11 +312,11 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **原因：** 部署應該在執行，但還沒有就緒的副本：模型還在下載、引擎還在啟動、某個副本失敗後正在重新啟動，或它所在的機器離線。訊息會列出每個副本的狀態，例如 `replica 0 on gpu-01: downloading`。如果你還是呼叫已停止的部署，也會得到同樣的回應（`The deployment is stopped.`）。
 
-**做法：** 打開部署的頁面。下載或啟動中就等待（頁面會顯示進度）。如果副本一直失敗，頁面上的輸出會說明原因；機器離線請見[agent 顯示離線](#an-agent-shows-offline)。如果想讓這段期間的請求改送雲端供應商，請在模型的路由加上雲端層（[雲端供應商](cloud-providers.md#route-a-model-to-the-cloud)）。
+**做法：** 打開部署的頁面。下載或啟動中就等待（頁面會顯示進度）。如果副本一直失敗，頁面上的輸出會說明原因；機器離線請見[agent 顯示離線](#an-agent-shows-offline)。如果想讓這段期間的請求改送雲端供應商，請在部署的頁面替它設定雲端備援（[雲端供應商](cloud-providers.md#give-a-deployment-a-cloud-fallback)）。
 
 ## 請求沒有溢出到雲端
 
-**你會看到：** 模型的路由有雲端層，但本機副本忙碌或停擺時，請求仍然失敗（503、429）或在等待。回應沒有 `X-Forgeyard-Spilled`。
+**你會看到：** 部署有雲端備援，但本機副本忙碌或停擺時，請求仍然失敗（503、429）或在等待。回應沒有 `X-Forgeyard-Spilled`。
 
 **原因**，依序檢查：
 
@@ -428,7 +428,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 ## 在沒有 systemd 的容器裡執行 agent
 
-**你會看到：** 行程類工作負載無法啟動，agent 的紀錄裡提到 `systemd-run` 或 `Failed to connect to bus`。
+**你會看到：** 行程無法啟動，agent 的紀錄裡提到 `systemd-run` 或 `Failed to connect to bus`。
 
 **原因：** 在 `limits = "auto"` 的情況下，如果 agent 以 root 執行而且找到 systemd，就會使用 systemd scope。在和主機共用 `/run` 的容器裡，它可能找得到 systemd 的檔案，卻無法和 systemd 溝通。
 
@@ -439,7 +439,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 limits = "rlimit"
 ```
 
-或使用 `--limits rlimit`，或 `FORGEYARD_LIMITS=rlimit`（agent 的 Docker 映像檔已經設定好了）。這樣行程類工作負載會以每個行程為單位套用資源限制，CPU 用量只會被計算，不會被設上限。
+或使用 `--limits rlimit`，或 `FORGEYARD_LIMITS=rlimit`（agent 的 Docker 映像檔已經設定好了）。這樣行程會以每個行程為單位套用資源限制，CPU 用量只會被計算，不會被設上限。
 
 ## 伺服器拒絕某個設定，或對它發出警告
 

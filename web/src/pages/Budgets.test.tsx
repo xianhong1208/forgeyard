@@ -139,7 +139,7 @@ describe("budgets on Usage → Cost", () => {
     expect(within(panel).getByText(/ursula's budget is used up: it keeps requests local until December 1/)).toBeTruthy();
     expect(within(panel).getByText(/The budget of the key laptop \(ursula\) is past 80%/)).toBeTruthy();
     expect(within(panel).getByRole("meter", { name: /Budget of the provider openai/ }).getAttribute("aria-valuenow")).toBe("12");
-    expect(within(panel).getByRole("link", { name: "openai" }).getAttribute("href")).toBe("/providers/3");
+    expect(within(panel).getByRole("link", { name: "openai" }).getAttribute("href")).toBe("/cloud/providers/3");
     fireEvent.click(within(panel).getByRole("button", { name: "Set budget" }));
     fireEvent.change(within(panel).getByLabelText("Monthly budget of owner (USD)"), { target: { value: "50" } });
     fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
@@ -207,7 +207,7 @@ describe("budgets on a provider", () => {
       if (url === "/api/providers/3") return { status: 200, body: { provider: PROVIDER, kinds: KINDS, egress: EGRESS, is_admin: true } };
       if (url === "/api/providers") return { status: 200, body: { providers: [PROVIDER], kinds: KINDS, egress: EGRESS, is_admin: true } };
     });
-    mount("/providers/3");
+    mount("/cloud/providers/3");
     const panel = (await screen.findByRole("heading", { name: "Monthly budget" })).closest("section") as HTMLElement;
     expect(within(panel).getByText(/budget is used up: openai is skipped/)).toBeTruthy();
     expect(within(panel).getByText("$20.00 of $20.00")).toBeTruthy();
@@ -215,7 +215,7 @@ describe("budgets on a provider", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Save budget" }));
     await waitFor(() => expect(puts).toEqual([["/api/budgets/providers/3", { budget_micros: null }]]));
     cleanup();
-    mount("/providers");
+    mount("/cloud");
     const row = (await screen.findByRole("link", { name: "openai" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("budget used up")).toBeTruthy();
   });

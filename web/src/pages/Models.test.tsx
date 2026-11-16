@@ -103,14 +103,15 @@ describe("models", () => {
     const where = within(row).getByRole("link", { name: /a100/ });
     expect(where.getAttribute("href")).toBe("/machines/2");
     expect(where.textContent).toContain("#4");
-    expect(within(where).getByRole("img", { name: "NVIDIA GPU" })).toBeTruthy();
+    // The machine's mark comes with /api/machines, the header's Deploy with the catalog: either may answer last.
+    expect(await within(where).findByRole("img", { name: "NVIDIA GPU" })).toBeTruthy();
     expect(within(row).getByText("14.38 GiB / GPU")).toBeTruthy();
     expect(within(row).getByText("starting")).toBeTruthy();
     // A chat model that reads images is multimodal chat; kinds with none are named once.
     const mm = screen.getByRole("region", { name: "Multimodal chat · 1" });
     expect(within(mm).getByText("1/1 ready")).toBeTruthy();
     expect(screen.getByText("None deployed yet:").parentElement?.textContent).toContain("Embeddings");
-    expect(screen.getAllByRole("link", { name: "Deploy a model" }).length).toBe(2);
+    await waitFor(() => expect(screen.getAllByRole("link", { name: "Deploy a model" }).length).toBe(2));
   });
 
   it("FY-WEB-049 the deploy form shows the live estimate and refuses what does not fit, by how much", async () => {
@@ -177,13 +178,15 @@ describe("models", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ input: "Hi" });
   });
 
-  it("FY-WEB-216 the deployment links to its workload and says why a replica is on its machine (1.4)", async () => {
+  it("FY-WEB-216 the deployment says why a replica is on its machine, and links to no workload (1.4, #81)", async () => {
     const note = "cpu-01 could not reach huggingface.co; placed on cpu-02 instead";
     server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep(rep({ state: "healthy", reason: null, download: null,
       placement_note: note })), events: [], server_time: "", can_manage: true } } : undefined);
     mount("/models/deployments/3");
     expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
-    expect(screen.getByText("Runs as workload").closest("span")?.querySelector("a")?.getAttribute("href")).toBe("/workloads/11");
+    // 1.4 (#81): a model is seen under Models only; its page no longer sends you to a workload.
+    expect(screen.queryByText(/Runs as workload/)).toBeNull();
+    expect(screen.queryAllByRole("link").filter((a) => /^\/(workloads|apps)\//.test(a.getAttribute("href") ?? ""))).toHaveLength(0);
     const row = within(screen.getByRole("table")).getByText("a100").closest("td") as HTMLElement;
     expect(within(row).getByText(note)).toBeTruthy();
   });
@@ -260,25 +263,24 @@ describe("models", () => {
     expect(within(card).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
   });
 
-  it("FY-WEB-226 the tabs are Deployments, Serving and Model library; the old addresses land on the new tabs", async () => {
+  it("FY-WEB-226 the tabs are Deployments and Library (1.4, #81: no Serving); the old addresses land on Deployments or the Library", async () => {
     server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [], server_time: "", can_manage: true } }
       : url === "/api/models" ? { status: 200, body: catalog }
         : url === "/api/routes" ? { status: 200, body: { cloud: "off", is_admin: true, routes: [] } } : undefined);
     const view = mount("/models?tab=routes");
-    expect((await screen.findByRole("tab", { name: "Serving" })).getAttribute("aria-selected")).toBe("true");
-    await screen.findByRole("tab", { name: "Deployments (0)" });
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (0)", "Serving", "Model library"]);
-    expect(await screen.findByText("Model names at /v1")).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving"));
+    expect((await screen.findByRole("tab", { name: "Deployments (0)" })).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Deployments (0)", "Library"]);
+    await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe(""));
     view.unmount();
     mount("/models?tab=catalog");
-    expect((await screen.findByRole("tab", { name: "Model library" })).getAttribute("aria-selected")).toBe("true");
+    expect((await screen.findByRole("tab", { name: "Library" })).getAttribute("aria-selected")).toBe("true");
     expect(await screen.findByRole("heading", { name: "Recipes" })).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("where").dataset.search).toBe("?tab=library"));
-    fireEvent.click(screen.getByRole("tab", { name: "Serving" }));
-    expect(screen.getByTestId("where").dataset.search).toBe("?tab=serving");
     // The count in the tab's name comes with /api/deployments, which may answer after the catalog.
     fireEvent.click(await screen.findByRole("tab", { name: "Deployments (0)" }));
     expect(screen.getByTestId("where").dataset.search).toBe("");
+    fireEvent.click(screen.getByRole("tab", { name: "Library" }));
+    expect(screen.getByTestId("where").dataset.search).toBe("?tab=library");
   });
+
 });

@@ -35,7 +35,7 @@ export function imageLimitMb(w: VisionWorkload | undefined): number {
 // Why this file cannot be sent (null: it can). The limit leaves room for the form around the image.
 export function checkImage(file: File, limitMb: number): string | null {
   if (!VISION_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG or WebP image.`;
-  if (file.size > limitMb * 1024 * 1024 - 64 * 1024) return `${file.name || "The image"} is ${mib(file.size)}: the most this workload takes is ${limitMb} MiB.`;
+  if (file.size > limitMb * 1024 * 1024 - 64 * 1024) return `${file.name || "The image"} is ${mib(file.size)}: the most this app takes is ${limitMb} MiB.`;
   return null;
 }
 

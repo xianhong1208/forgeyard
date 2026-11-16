@@ -94,7 +94,7 @@ describe("workloads at /x/", () => {
       }
       if (url.startsWith("/api/workloads/9")) return { status: 200, body: { workload: detector, events: [], server_time: "x", can_manage: true } };
     });
-    mount("/workloads/new");
+    mount("/apps/new");
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "detector" } });
     fireEvent.change(screen.getByLabelText("Image"), { target: { value: "python:3.13-slim" } });
     const expose = screen.getByRole("checkbox", { name: /Expose at/ });
@@ -122,7 +122,7 @@ describe("workloads at /x/", () => {
       if (url === "/api/workloads/9") return { status: 200, body: { workload: detector, events: [], server_time: "x", can_manage: true,
         gateway_base: "https://forge.example:7860", trust_url: null } };
     });
-    mount("/workloads/9");
+    mount("/apps/9");
     const panel = (await screen.findByRole("heading", { name: "Gateway" })).closest("section")!;
     expect(within(panel).getByLabelText("Address of detector").textContent).toBe("https://forge.example:7860/x/detector");
     expect(within(panel).getByLabelText("curl call to detector").textContent).toContain("https://forge.example:7860/x/detector/");
@@ -142,14 +142,14 @@ describe("workloads at /x/", () => {
       if (url.startsWith("/api/workloads/9/replicas")) return { status: 200, body: { source: "live", text: "", truncated: false, state: "running" } };
       if (url === "/api/workloads/9") return { status: 200, body: { workload: w, events: [], server_time: "x", can_manage: true } };
     });
-    mount("/workloads/9");
+    mount("/apps/9");
     expect(await screen.findByText(/is not\s+behind the agent's key guard yet/)).toBeTruthy();
   });
 
-  it("FY-WEB-184 the list marks exposed workloads with their path", async () => {
+  it("FY-WEB-184 the list marks exposed apps with their path", async () => {
     server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [detector], server_time: "x", can_manage: true } } : undefined));
-    mount("/workloads");
-    const card = await screen.findByRole("article", { name: "Workload detector" });
+    mount("/apps");
+    const card = await screen.findByRole("article", { name: "App detector" });
     expect(within(card).getByText("/x/detector")).toBeTruthy();
   });
 });
@@ -168,11 +168,11 @@ describe("a key's workloads setting", () => {
     fireEvent.click(await screen.findByRole("button", { name: /New key/ }));
     // The button is in the page header at once; the form opens once the keys have arrived.
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "vision" } });
-    const more = screen.getByText(/Workloads at \/x\//, { selector: "summary" }).closest("details")!;
+    const more = screen.getByText(/Apps at \/x\//, { selector: "summary" }).closest("details")!;
     expect(more.open).toBe(false);
     expect(within(more).getByLabelText(/^None/)).toHaveProperty("checked", true);
-    fireEvent.click(within(more).getByLabelText(/Listed workloads/));
-    const group = within(more).getByRole("group", { name: "Allowed workloads" });
+    fireEvent.click(within(more).getByLabelText(/Listed apps/));
+    const group = within(more).getByRole("group", { name: "Allowed apps" });
     expect(within(group).getByText("not exposed")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create key" })).toHaveProperty("disabled", true);
     fireEvent.click(within(group).getByLabelText("/x/detector"));
@@ -193,7 +193,7 @@ describe("a key's workloads setting", () => {
       }
     });
     mount("/keys");
-    expect(await screen.findByText(/Workloads: every exposed one/)).toBeTruthy();
+    expect(await screen.findByText(/Apps: every exposed one/)).toBeTruthy();
     expect(screen.getAllByText(/set by boss/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Limits" }));
     const form = screen.getByRole("form", { name: "Limits of laptop" });
@@ -202,9 +202,9 @@ describe("a key's workloads setting", () => {
     await waitFor(() => expect(patches).toEqual([{ workloads: "none", workload_list: null }]));
     // Saving closes the form when the answer comes; reopen it only then (a click before it would toggle the
     // still-open form shut).
-    expect(await screen.findByText("Limits, cloud, budget and workloads of laptop saved.")).toBeTruthy();
+    expect(await screen.findByText("Limits, cloud, budget and apps of laptop saved.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Limits" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Unlock workloads/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Unlock apps/ }));
     await waitFor(() => expect(patches).toEqual([{ workloads: "none", workload_list: null }, { workloads: null }]));
   });
 });
@@ -227,17 +227,17 @@ const tpl: WorkloadTemplate = {
 };
 
 describe("ready-made templates", () => {
-  it("FY-WEB-187 the Workloads page offers each template with its licence, on a GPU or the CPU", async () => {
+  it("FY-WEB-187 the Apps page offers each template with its licence, on a GPU or the CPU", async () => {
     server((url) => {
       if (url === "/api/workloads/templates") return { status: 200, body: { templates: [tpl] } };
       if (url === "/api/workloads") return { status: 200, body: { workloads: [], server_time: "x", can_manage: true } };
     });
-    mount("/workloads");
+    mount("/apps");
     const card = await screen.findByRole("listitem", { name: "Template Object detection" });
     expect(within(card).getByText("apache-2.0")).toBeTruthy();
     expect(within(card).getByRole("link", { name: "PekingU/rtdetr_v2_r18vd" }).getAttribute("href")).toBe("https://huggingface.co/PekingU/rtdetr_v2_r18vd");
-    expect(within(card).getByRole("link", { name: "On an NVIDIA GPU" }).getAttribute("href")).toBe("/workloads/new?template=object-detection&gpu=1");
-    expect(within(card).getByRole("link", { name: "On the CPU" }).getAttribute("href")).toBe("/workloads/new?template=object-detection");
+    expect(within(card).getByRole("link", { name: "On an NVIDIA GPU" }).getAttribute("href")).toBe("/apps/new?template=object-detection&gpu=1");
+    expect(within(card).getByRole("link", { name: "On the CPU" }).getAttribute("href")).toBe("/apps/new?template=object-detection");
   });
 
   it("FY-WEB-188 a template fills the form (image, task, shared GPU, port, health, exposed) and posts its spec", async () => {
@@ -251,7 +251,7 @@ describe("ready-made templates", () => {
       }
       if (url.startsWith("/api/workloads/9")) return { status: 200, body: { workload: detector, events: [], server_time: "x", can_manage: true } };
     });
-    mount("/workloads/new?template=object-detection&gpu=1");
+    mount("/apps/new?template=object-detection&gpu=1");
     expect(await screen.findByText(/From the template/)).toBeTruthy();
     await waitFor(() => expect((screen.getByLabelText("Image") as HTMLInputElement).value).toBe("docker.io/tonyhuang1101/forgeyard-vision:1.2.0-cuda"));
     expect((screen.getByLabelText("Share the card (memory)") as HTMLInputElement).value).toBe("3Gi");

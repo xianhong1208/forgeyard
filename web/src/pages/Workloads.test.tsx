@@ -7,6 +7,7 @@ import App from "../App";
 import { AuthProvider } from "../auth";
 import machinesFixture from "../test/machines.json";
 import type { Replica, Workload } from "../lib/types";
+import { gpusText } from "../lib/workloads";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 type Reply = { status: number; body: unknown };
@@ -74,41 +75,36 @@ afterEach(() => {
 describe("workloads", () => {
   it("FY-WEB-039 the list shows status, replicas, machine, GPUs and the address", async () => {
     server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [web, job], server_time: "2026-11-09T10:02:00Z", can_manage: true } } : undefined));
-    mount("/workloads");
-    const card = await screen.findByRole("article", { name: "Workload web" });
+    mount("/apps");
+    const card = await screen.findByRole("article", { name: "App web" });
     expect(within(card).getByText("running")).toBeTruthy();
     expect(within(card).getByText("healthy")).toBeTruthy();
     expect(within(card).getByText("a100-box")).toBeTruthy();
     expect(within(card).getByText("GPU #4")).toBeTruthy();
     expect(within(card).getByRole("link", { name: "10.0.0.5:31000" }).getAttribute("href")).toBe("http://10.0.0.5:31000/");
     expect(within(card).getByText("python3 -m http.server ${PORT}")).toBeTruthy();
-    const failed = screen.getByRole("article", { name: "Workload job" });
+    const failed = screen.getByRole("article", { name: "App job" });
     expect(within(failed).getByText("exited with code 3 (attempt 3 of 3)")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "New workload" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "New app" })).toBeTruthy();
   });
 
-  it("FY-WEB-217 a model workload says which deployment created it, in the list and on its page (1.4)", async () => {
-    const note = "cpu-01 could not reach huggingface.co; placed on cpu-02 instead";
+  it("FY-WEB-217 a model's workload is not an app: Apps leaves it out, and its old page opens its deployment (1.4, #81)", async () => {
     const model: Workload = { ...web, id: 9, name: "chat", runtime: "model", deployment_id: 3, deployment: { id: 3, name: "chat-dep" },
       spec: { ...web.spec, name: "chat", runtime: { type: "model", recipe: "llama-cpp", model: "qwen3-1.7b-gguf" } },
-      replica_list: [replica({ machine: { id: 2, name: "cpu-02", status: "online", connected: true }, gpus: [], placement_note: note })] };
+      replica_list: [replica({ machine: { id: 2, name: "cpu-02", status: "online", connected: true }, gpus: [] })] };
     server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web, model], server_time: "", can_manage: true } }
       : url === "/api/workloads/9" ? { status: 200, body: { workload: model, events: [], server_time: "", can_manage: true } } : undefined);
-    mount("/workloads");
-    const group = await screen.findByRole("region", { name: /Created by model deployments/ });
-    expect(within(group).getByRole("link", { name: "chat" }).getAttribute("href")).toBe("/workloads/9");
-    expect(within(group).getByText(/created by deployment/)).toBeTruthy();
-    expect(within(group).getByRole("link", { name: "chat-dep" }).getAttribute("href")).toBe("/models/deployments/3");
-    expect(within(screen.getByRole("article", { name: "Workload web" })).queryByText(/created by deployment/)).toBeNull();
+    mount("/apps");
+    expect(await screen.findByRole("article", { name: "App web" })).toBeTruthy();
+    expect(screen.queryByRole("article", { name: "App chat" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "chat" })).toBeNull();
+    expect(screen.queryByText(/Created by model deployments|created by deployment/)).toBeNull();
     cleanup();
-    mount("/workloads/9");
-    expect(await screen.findByRole("heading", { name: "chat" })).toBeTruthy();
-    const links = screen.getAllByRole("link", { name: "chat-dep" });
-    expect(links.length).toBe(2);  // the banner and the spec's "Created by"
-    expect(links.every((a) => a.getAttribute("href") === "/models/deployments/3")).toBe(true);
-    expect(screen.getByRole("link", { name: "Open the deployment" }).getAttribute("href")).toBe("/models/deployments/3");
-    expect(screen.getByText("Created by")).toBeTruthy();
-    expect(within(screen.getByRole("table")).getByText(note)).toBeTruthy();
+    for (const old of ["/apps/9", "/workloads/9"]) {
+      const view = mount(old);
+      await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/3"));
+      view.unmount();
+    }
   });
 
   it("FY-WEB-040 users can look but not start; the old Deployments link lands on Models (M3)", async () => {
@@ -119,20 +115,21 @@ describe("workloads", () => {
     expect(await screen.findByText("No deployments yet")).toBeTruthy();
     expect(screen.getByTestId("where").textContent).toBe("/models");
     cleanup();
-    mount("/workloads");
-    expect(await screen.findByText("No workloads yet")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "New workload" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Workloads" })).toBeTruthy();
+    mount("/apps");
+    expect(await screen.findByText("No apps yet")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "New app" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Apps" })).toBeNull();  // not in the menu (1.4, #81)
   });
 
-  it("FY-WEB-041 the form sends the spec it shows and opens the new workload", async () => {
+  it("FY-WEB-041 the form sends the spec it shows and opens the new app", async () => {
     const fetch = server((url, init) => {
       if (url === "/api/machines") return { status: 200, body: machinesFixture };
       if (url === "/api/workloads" && init?.method === "POST") return { status: 201, body: { workload: { ...web, id: 9 }, events: [] } };
       if (url === "/api/workloads/9") return { status: 200, body: { workload: { ...web, id: 9 }, events: [], server_time: "", can_manage: true } };
       return undefined;
     });
-    mount("/workloads/new");
+    mount("/apps/new");
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "web-demo" } });
     fireEvent.change(screen.getByLabelText("Image"), { target: { value: "python:3.13-slim" } });
     fireEvent.change(screen.getByLabelText("Arguments"), { target: { value: "python\n-m\nhttp.server\n8000\n" } });
@@ -151,7 +148,7 @@ describe("workloads", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create and start" })));
     const post = fetch.mock.calls.find(([u, i]) => u === "/api/workloads" && i?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toEqual(expected);
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/workloads/9"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps/9"));
   });
 
   it("FY-WEB-042 picking cards on a machine: only allowed, free ones; a task has limits, no ports", async () => {
@@ -165,7 +162,7 @@ describe("workloads", () => {
       if (url === "/api/workloads" && init?.method === "POST") return { status: 422, body: { detail: { code: "invalid_spec", message: "max_duration: Input should be greater than or equal to 1" } } };
       return undefined;
     });
-    mount("/workloads/new");
+    mount("/apps/new");
     fireEvent.click(await screen.findByRole("radio", { name: "Task" }));
     fireEvent.click(screen.getByRole("radio", { name: "Process" }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "probe" } });
@@ -199,7 +196,7 @@ describe("workloads", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    mount("/workloads/7");
+    mount("/apps/7");
     expect(await screen.findByRole("heading", { name: "web" })).toBeTruthy();
     const table = screen.getByRole("table");
     expect(within(table).getByText("healthy")).toBeTruthy();
@@ -227,14 +224,14 @@ describe("workloads", () => {
                        "pulling the image: 0.80 of 1.90 GiB (42%)");
     server((url) => url === "/api/workloads/7"
       ? { status: 200, body: { workload: body, events: [], server_time: "", can_manage: false } } : undefined);
-    const { unmount } = mount("/workloads/7");
+    const { unmount } = mount("/apps/7");
     const bar = await screen.findByLabelText("Download progress");
     expect(bar.textContent).toBe("Pulling the image: 819 MiB of 1.9 GiB (42%)");
     expect(screen.queryByText("pulling the image: 0.80 of 1.90 GiB (42%)")).toBeNull();
     unmount();
     cleanup();
     body = pulling({ phase: "image", done: 0, total: 0, layers: 7, layers_done: 3 }, "pulling the image: 3 of 7 layers");
-    mount("/workloads/7");
+    mount("/apps/7");
     expect(await screen.findByText("pulling the image: 3 of 7 layers")).toBeTruthy();
     expect(screen.queryByLabelText("Download progress")).toBeNull();
   });
@@ -248,18 +245,18 @@ describe("workloads", () => {
       return undefined;
     });
     vi.stubGlobal("confirm", vi.fn(() => true));
-    mount("/workloads/8");
+    mount("/apps/8");
     expect(await screen.findByText("exit 3")).toBeTruthy();
     expect(await screen.findByText("Live output is not available.")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete" })));
     expect(fetch.mock.calls.some(([u, i]) => u === "/api/workloads/8" && i?.method === "DELETE")).toBe(true);
-    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/workloads"));
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/apps"));
   });
 
   it("FY-WEB-045 users get no stop, delete or output on the detail page", async () => {
     const fetch = server((url) => (url === "/api/workloads/7" ? { status: 200, body: { workload: { ...web, spec: { ...web.spec, env: { GREETING: "••••" } } }, events: [], server_time: "", can_manage: false } } : undefined),
       { ...OWNER, role: "user", is_owner: false });
-    mount("/workloads/7");
+    mount("/apps/7");
     expect(await screen.findByRole("heading", { name: "web" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
@@ -272,69 +269,90 @@ describe("workloads and deployments (1.4, #36)", () => {
   const model = (n: number): Workload => ({ ...web, id: 100 + n, name: `m${n}`, runtime: "model", deployment_id: 200 + n,
     deployment: { id: 200 + n, name: `dep${n}` }, spec: { ...web.spec, name: `m${n}`, runtime: { type: "model", recipe: "vllm", model: "qwen3-4b" } } });
 
-  it("FY-WEB-227 the list has your workloads, then the ones deployments created: eight, then '… and N more'", async () => {
-    const models = Array.from({ length: 10 }, (_, i) => model(i));
+  it("FY-WEB-227 Apps lists only the apps; its counts and GPUs are the apps' alone", async () => {
+    // the last one as an older answer might give it: the deployment's id only
+    const models = [...Array.from({ length: 9 }, (_, i) => model(i)), { ...model(9), deployment: null }];
     server((url) => (url === "/api/workloads" ? { status: 200, body: { workloads: [web, ...models, job], server_time: "", can_manage: true } } : undefined));
-    mount("/workloads");
-    const own = await screen.findByRole("region", { name: "Your workloads · 2" });
-    expect(within(own).getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["Workload web", "Workload job"]);
-    const made = screen.getByRole("region", { name: "Created by model deployments · 10" });
-    expect(within(made).getAllByRole("listitem")).toHaveLength(8);
-    expect(within(made).getAllByRole("link", { name: /^dep\d$/ }).map((a) => a.getAttribute("href"))[0]).toBe("/models/deployments/200");
-    const more = within(made).getByRole("button", { name: "… and 2 more" });
-    fireEvent.click(more);
-    expect(within(made).getAllByRole("listitem")).toHaveLength(10);
-    fireEvent.click(within(made).getByRole("button", { name: "Show fewer" }));
-    expect(within(made).getAllByRole("listitem")).toHaveLength(8);
+    mount("/apps");
+    await screen.findByRole("article", { name: "App web" });
+    expect(screen.getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["App web", "App job"]);
+    const totals = screen.getByLabelText("Apps");
+    const fact = (dt: string) => within(totals).getByText(dt).nextElementSibling?.textContent;
+    expect(fact("Apps")).toBe("2");
+    expect(fact("Running")).toBe("1");
+    // web holds GPU #4; the ten model workloads hold a card each too, but they are counted under Models.
+    expect(fact("GPUs used by apps")).toBe("1");
+    expect(screen.queryByRole("link", { name: /^dep\d$/ })).toBeNull();
   });
 
-  it("FY-WEB-228 a deployment's workload has no Stop, Start or Delete: its banner sends you to the deployment", async () => {
+  it("FY-WEB-228 a deployment's workload page opens the deployment, running or stopped; an app keeps Stop and Delete", async () => {
     const m = model(1);
-    const stopped = { ...model(2), desired_state: "stopped" as const, status: "stopped" as const };
+    const stopped = { ...model(2), desired_state: "stopped" as const, status: "stopped" as const, deployment: null }; // the id only
     server((url) => url === "/api/workloads/101" ? { status: 200, body: { workload: m, events: [], server_time: "", can_manage: true } }
       : url === "/api/workloads/102" ? { status: 200, body: { workload: stopped, events: [], server_time: "", can_manage: true } }
         : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } } : undefined);
-    const view = mount("/workloads/101");
-    const banner = await screen.findByRole("region", { name: "Created by a deployment" });
-    expect(within(banner).getByRole("link", { name: "dep1" }).getAttribute("href")).toBe("/models/deployments/201");
-    expect(screen.getByText("Stop and delete are on the deployment")).toBeTruthy();
-    for (const name of ["Stop", "Start", "Delete"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    const view = mount("/apps/101");
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/201"));
     view.unmount();
-    const again = mount("/workloads/102");
-    await screen.findByRole("region", { name: "Created by a deployment" });
-    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+    const again = mount("/apps/102");
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/models/deployments/202"));
     again.unmount();
-    mount("/workloads/7"); // a plain workload keeps its buttons
+    mount("/apps/7");
     expect(await screen.findByRole("button", { name: "Stop" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Created by a deployment" })).toBeNull();
+    expect(screen.getByTestId("where").textContent).toBe("/apps/7");
   });
 
-  it("FY-WEB-232 a model workload's spec gives the GPUs its deployment chose, not 'none'", async () => {
+  it("FY-WEB-232 a model workload's GPUs line gives what its deployment chose, not 'none'", () => {
     const onGpu = { ...model(1), deployment: { id: 201, name: "dep1", gpus: 1 } };
     const onCpu = { ...model(2), deployment: { id: 202, name: "dep2", gpus: 0 }, replica_list: [replica({ gpus: [] })] };
     const old = { ...model(3), deployment: { id: 203, name: "dep3" } }; // a server before this field: from the replicas
-    server((url) => url === "/api/workloads/101" ? { status: 200, body: { workload: onGpu, events: [], server_time: "", can_manage: true } }
-      : url === "/api/workloads/102" ? { status: 200, body: { workload: onCpu, events: [], server_time: "", can_manage: true } }
-        : url === "/api/workloads/103" ? { status: 200, body: { workload: old, events: [], server_time: "", can_manage: true } }
-          : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } } : undefined);
-    const fact = async () => (await screen.findByText("GPUs", { selector: "dt" })).nextElementSibling?.textContent;
-    for (const [path, want] of [["/workloads/101", "1 per replica, from the deployment; holding #4"],
-      ["/workloads/102", "none: the deployment runs it on the CPU"], ["/workloads/103", "from the deployment; holding #4"],
-      ["/workloads/7", "1 per replica"]] as const) {
-      const view = mount(path);
-      expect(await fact()).toBe(want);
-      view.unmount();
-    }
+    expect(gpusText(onGpu)).toBe("1 per replica, from the deployment; holding #4");
+    expect(gpusText(onCpu)).toBe("none: the deployment runs it on the CPU");
+    expect(gpusText(old)).toBe("from the deployment; holding #4");
+    expect(gpusText(web)).toBe("1 per replica");
   });
 
-  it("FY-WEB-229 'New workload here' opens the form with the machine chosen (Deploy here: FY-WEB-230)", async () => {
+  it("FY-WEB-229 /apps/new?machine= opens the form with the machine chosen (as Deploy here does for models)", async () => {
     const data = structuredClone(machinesFixture);
     (data.machines[0] as Record<string, unknown>).features = ["workloads", "models"];
     server((url) => url === "/api/machines" ? { status: 200, body: data } : undefined);
-    mount("/workloads/new?machine=1");
+    mount("/apps/new?machine=1");
     const pick = await screen.findByLabelText(/^Machine/) as HTMLSelectElement;
     await waitFor(() => expect(pick.value).toBe("1"));
+  });
+});
+
+describe("Apps, an advanced page (1.4, #81)", () => {
+  it("FY-WEB-269 Apps is not in the menu, but /apps, an app's page and New app still open; the page sends people with a model to Models", async () => {
+    server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web], server_time: "", can_manage: true } }
+      : url === "/api/workloads/7" ? { status: 200, body: { workload: web, events: [], server_time: "", can_manage: true } }
+        : url === "/api/machines" ? { status: 200, body: machinesFixture } : undefined);
+    const view = mount("/apps");
+    expect(await screen.findByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
+    expect(screen.getByText("Advanced · Apps")).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(within(nav).queryByRole("link", { name: /Apps|Workloads/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Deploy it under Models" }).getAttribute("href")).toBe("/models");
+    // The list and New app come with /api/workloads, after the page itself.
+    expect(await screen.findByRole("article", { name: "App web" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "New app" }).getAttribute("href")).toBe("/apps/new");
+    view.unmount();
+    const page = mount("/apps/7");
+    expect(await screen.findByRole("heading", { level: 1, name: "web" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Apps" }).getAttribute("href")).toBe("/apps");  // the way back
+    page.unmount();
+    mount("/apps/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New app" })).toBeTruthy();
+  });
+
+  it("FY-WEB-270 for everyone else too: no Apps in the menu, and no New app on the page", async () => {
+    server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [web], server_time: "", can_manage: false } } : undefined,
+      { ...OWNER, role: "user", is_owner: false });
+    mount("/apps");
+    expect(await screen.findByRole("article", { name: "App web" })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Main" })).queryByRole("link", { name: /Apps/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
   });
 });
 
@@ -363,7 +381,7 @@ describe("GPU access on a machine's page", () => {
     const group = within(card).getByRole("group", { name: "GPU access on a100-box: the GPUs Forgeyard may assign" });
     fireEvent.click(within(group).getAllByRole("checkbox")[4]);
     await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Save" })));
-    expect(confirm.mock.calls[0]).toEqual(["Let Forgeyard assign only GPU #4 on a100-box? No workload will ever get another card of this machine."]);
+    expect(confirm.mock.calls[0]).toEqual(["Let Forgeyard assign only GPU #4 on a100-box? No model or app will ever get another card of this machine."]);
     const put = fetch.mock.calls.find(([u, i]) => u === "/api/machines/1/gpu-allowlist" && i?.method === "PUT");
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({ keys: [key4] });
     expect(await screen.findByText("Forgeyard may assign only #4 on a100-box.")).toBeTruthy();

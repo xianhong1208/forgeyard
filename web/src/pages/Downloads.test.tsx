@@ -79,7 +79,7 @@ afterEach(() => {
 });
 
 describe("Download to…", () => {
-  it("FY-WEB-270 from the Library: the machines that can take it, the engine on by default, then the request", async () => {
+  it("FY-WEB-276 from the Library: the machines that can take it, the engine on by default, then the request", async () => {
     let list: ModelDownload[] = [];
     const fetch = server((url, init) => {
       if (url === "/api/models") return { status: 200, body: catalog };
@@ -115,7 +115,7 @@ describe("Download to…", () => {
     expect(await screen.findByText("Waiting to start")).toBeTruthy();
   });
 
-  it("FY-WEB-271 without the engine: the machines are asked again, and the request leaves the recipe out", async () => {
+  it("FY-WEB-277 without the engine: the machines are asked again, and the request leaves the recipe out", async () => {
     const fetch = server((url, init) => {
       if (url === "/api/models") return { status: 200, body: catalog };
       if (url === "/api/downloads" && init?.method === "POST") return { status: 201, body: { downloads: [dl()], skipped: [] } };
@@ -138,7 +138,7 @@ describe("Download to…", () => {
     expect(body(fetch, "/api/downloads")).toEqual({ model_id: 5, machine_ids: [1], engine: false });
   });
 
-  it("FY-WEB-272 progress under the model, with the deployment's words, and Cancel after asking", async () => {
+  it("FY-WEB-278 progress under the model, with the deployment's words, and Cancel after asking", async () => {
     let list = [dl(), dl({ id: 8, machine: { id: 3, name: "cpu-b", connected: true }, state: "failed", download: null,
       reason: "Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co", finished_at: "2026-11-16T10:05:00Z" })];
     const fetch = server((url, init) => {
@@ -169,7 +169,7 @@ describe("Download to…", () => {
     expect(screen.getByText(/^Cancelled by owner/)).toBeTruthy();
   });
 
-  it("FY-WEB-273 from a machine's page: pick a model, this machine ticked; its downloads listed there", async () => {
+  it("FY-WEB-279 from a machine's page: pick a model, this machine ticked; its downloads listed there", async () => {
     const machines = { ...fixture, can_manage: false,
       machines: fixture.machines.map((m) => ({ ...m, features: ["workloads", "models", "cache_admin", "prefetch"] })) };
     const cache: MachineCache = { machine_id: 1, connected: true, reported: true, sizes: true, ok: true, reason: null, free_bytes: 48 * GIB,
@@ -199,7 +199,7 @@ describe("Download to…", () => {
     await waitFor(() => expect(body(fetch, "/api/downloads")).toEqual({ model_id: 5, machine_ids: [1], engine: true, recipe: "llama-cpp" }));
   });
 
-  it("FY-WEB-274 an older agent cannot download ahead; admins set the machine's Internet access", async () => {
+  it("FY-WEB-280 an older agent cannot download ahead; admins set the machine's Internet access", async () => {
     const machines = { ...fixture, machines: fixture.machines.map((m) => ({ ...m, features: ["workloads", "models"], fetch_via: "auto" })) };
     const cache: MachineCache = { machine_id: 1, connected: true, reported: true, sizes: false, ok: true, reason: null, free_bytes: 48 * GIB,
       total_bytes: 100 * GIB, used_bytes: null, partial_bytes: null, partial_files: 0, truncated: false,
@@ -224,7 +224,7 @@ describe("Download to…", () => {
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({ fetch_via: "server" });
   });
 
-  it("FY-WEB-275 the words: progress for any download, how one ended, the machines' details, the latest per machine", () => {
+  it("FY-WEB-281 the words: progress for any download, how one ended, the machines' details, the latest per machine", () => {
     expect(downloadText({ download: { phase: "image", done: 2 * 1024 ** 2, total: 0, layers: 7, layers_done: 3 } })).toBe("Pulling the image: 2 MiB, 3 of 7 layers");
     expect(downloadLine(dl({ state: "queued", download: null, reason: "waiting for another download on this machine to finish" })))
       .toBe("waiting for another download on this machine to finish");

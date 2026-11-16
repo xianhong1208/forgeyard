@@ -216,7 +216,7 @@ describe("Usage", () => {
     expect(within(totals).getByText("$0.00")).toBeTruthy();               // local
     expect(within(totals).getByText("75%")).toBeTruthy();                 // served locally
     expect(screen.getByText(/2 cloud requests have no price/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Set prices/ }).getAttribute("href")).toBe("/providers");
+    expect(screen.getByRole("link", { name: /Set prices/ }).getAttribute("href")).toBe("/cloud");
     expect(screen.getByText(/1 request was estimated/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Provider" }));
     await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === "/api/usage?days=7&group=provider")).toBe(true));

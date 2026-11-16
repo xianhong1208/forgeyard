@@ -113,7 +113,7 @@ export function UsagePage() {
           {speech && <div><dt>Speech</dt><dd>{num(t.characters)} <span className="muted small">characters · {audioLength(t.media_ms)} of audio</span></dd></div>}
           {video && <div><dt>Video</dt><dd>{audioLength(t.media_ms)} <span className="muted small">made{speech ? " (with the audio)" : ""} · {busyTime(t.busy_ms)} busy</span></dd></div>}
           {images && <div><dt>Images</dt><dd>{num(t.images)} <span className="muted small">{megapixels(t.kilopixels)} · {busyTime(t.busy_ms)} busy</span></dd></div>}
-          {traffic && <div><dt>Workload traffic</dt><dd>{bytes(t.bytes_in)} <span className="muted small">in · {bytes(t.bytes_out)} out</span></dd></div>}
+          {traffic && <div><dt>App traffic</dt><dd>{bytes(t.bytes_in)} <span className="muted small">in · {bytes(t.bytes_out)} out</span></dd></div>}
           <div><dt>Latency p50</dt><dd>{ms(t.latency_p50_ms)}</dd></div>
           <div><dt>Latency p95</dt><dd>{ms(t.latency_p95_ms)}</dd></div>
         </dl>
@@ -163,7 +163,7 @@ function CostView({ data, chart }: { data: UsageResponse; chart: ReactNode }) {
       {unpriced > 0 && (
         <Notice tone="error">
           {num(unpriced)} cloud request{unpriced === 1 ? " has" : "s have"} no price, so the cost above leaves {unpriced === 1 ? "it" : "them"} out.{" "}
-          {data.is_admin ? <Link to="/providers">Set prices on the provider's models</Link> : "An admin sets the prices of cloud models."}
+          {data.is_admin ? <Link to="/cloud">Set prices on the provider's models</Link> : "An admin sets the prices of cloud models."}
         </Notice>
       )}
       {chart}
@@ -203,7 +203,7 @@ function requestColumns(u: Units): BreakdownColumn<UsageRow>[] {
       value: (r) => r.media_ms ?? 0, cell: (r) => audioLength(r.media_ms) },
     u.images && { id: "images", label: "Images", className: "num", title: "Images made, and their megapixels", value: (r) => r.images ?? 0,
       cell: (r) => <>{num(r.images ?? 0)}{r.images ? <span className="muted small"> · {megapixels(r.kilopixels)}</span> : null}</> },
-    u.traffic && { id: "bytes", label: "Bytes in / out", dataLabel: "Bytes", className: "num", title: "Request and answer bodies of workloads at /x/",
+    u.traffic && { id: "bytes", label: "Bytes in / out", dataLabel: "Bytes", className: "num", title: "Request and answer bodies of apps at /x/",
       value: (r) => (r.bytes_in ?? 0) + (r.bytes_out ?? 0), cell: (r) => (r.bytes_in || r.bytes_out ? `${bytes(r.bytes_in)} / ${bytes(r.bytes_out)}` : "—") },
     u.busy && { id: "busy_ms", label: "Busy", className: "num", title: "Time replicas worked on these requests (images and videos: times the GPUs each holds)",
       value: (r) => r.busy_ms ?? 0, cell: (r) => busyTime(r.busy_ms) },
@@ -377,7 +377,7 @@ function Budgets({ everyone }: { everyone: boolean }) {
           <div className="budget-grid">
             {providers.map((p) => (
               <div key={p.id} className="budget-item">
-                <div className="budget-who"><Link className="strong" to={`/providers/${p.id}`}>{p.name}</Link></div>
+                <div className="budget-who"><Link className="strong" to={`/cloud/providers/${p.id}`}>{p.name}</Link></div>
                 <BudgetMeter b={p} label={`Budget of the provider ${p.name}`} />
               </div>
             ))}
