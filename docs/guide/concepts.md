@@ -38,7 +38,8 @@ The **Machines** page shows one tile per machine, with a mark for its kind: **NV
 **CPU only**. Its cards are a row of slots filled from the bottom: what Forgeyard reserved, then
 other use (other programs on the card, and apps that declare no memory), then free.
 The tile also says how much memory is free, how many models and apps run there, and their
-names. Choose a machine for its own page: a **memory map** that splits each card by what holds it
+names. Above the tiles, a summary counts the machines of each kind and the offline ones: *1 NVIDIA
+machine*, *2 CPU-only machines* (a machine, however many cards it has). Choose a machine for its own page: a **memory map** that splits each card by what holds it
 (named, with what it reserved), what runs there, its GPU access and runtimes, and its agent. Admins
 revoke or remove a machine there.
 
@@ -312,6 +313,10 @@ API key.
 
 - Programs call `/v1` with an **API key** (`fyk_…`). Everyone creates their own on **API keys**. A
   key is shown once; the server keeps only its hash.
+- The list on **API keys** shows the keys that still work. Revoked and expired keys are folded away
+  under one row, **Show N revoked keys**, in *Mine* and in *Everyone's*; **Usage** and the **Audit log**
+  still name them. Its *Limits* column shows only the limits a key has ("3 requests/min",
+  "10k tokens/min"), or *No limits*.
 - A key can be limited to some models, have an expiry, and have **limits**: requests per minute and
   tokens per minute. Over a limit, the gateway answers 429 with `Retry-After`.
 - Admins set **defaults** (for keys without their own limits) and **caps** (the most anyone may

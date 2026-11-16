@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import fixture from "../test/machines.json";
-import { cardLine, cardMemory, machineKind, modelKind, placement, uniqueHolders } from "./fleet";
+import { cardLine, cardMemory, machineCount, machineKind, modelKind, placement, uniqueHolders } from "./fleet";
 import type { Accelerator, Deployment, Machine, Replica, Workload } from "./types";
 
 const GIB = 1024 ** 3;
@@ -44,6 +44,18 @@ describe("fleet: what runs where (1.4)", () => {
     expect(machineKind({ ...box, accelerators: box.accelerators.filter((a) => a.vendor === "cpu") })).toBe("cpu");
     expect(cardLine(box)).toBe("8 × A100 80GB PCIe");
     expect(cardLine(strix)).toBe("Radeon 8060S");
+  });
+
+  it("FY-WEB-397 the machine summary counts machines, not cards: \"1 NVIDIA machine\", \"2 CPU-only machines\"", () => {
+    expect(machineCount("nvidia", 1)).toBe("NVIDIA machine");
+    expect(machineCount("nvidia", 3)).toBe("NVIDIA machines");
+    expect(machineCount("cpu", 2)).toBe("CPU-only machines");
+    expect(machineCount("cpu", 1)).toBe("CPU-only machine");
+    expect(machineCount("amd-apu", 1, ["nvidia", "amd-apu"])).toBe("AMD machine");
+    expect(machineCount("amd-gpu", 2, ["amd-gpu", "amd-gpu"])).toBe("AMD machines");
+    // both AMD kinds on one server: say which is which
+    expect(machineCount("amd-gpu", 1, ["amd-gpu", "amd-apu"])).toBe("AMD GPU machine");
+    expect(machineCount("amd-apu", 2, ["amd-apu", "amd-gpu", "amd-apu"])).toBe("AMD APU machines");
   });
 
   it("FY-WEB-220 a chat model that takes images, audio or video is multimodal chat; other tasks keep their kind", () => {

@@ -6,6 +6,24 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **API keys: revoked keys folded away, shorter rows** (#105). On a server with 172 keys, 163 of them
+  revoked, the page was about 19,000 px tall on a desktop and 75,000 px on a phone. UI only; the API
+  is unchanged.
+  - The list shows the keys that still work. Revoked and expired keys are folded away under one row,
+    **Show N revoked keys** (or *expired*, or *revoked or expired*), which opens them below the active
+    ones and folds them again (**Hide revoked keys**). The same in *Mine* and *Everyone's*; switching
+    between the two folds them again. When every key is revoked, the page says there are no active
+    keys and still offers the row. Usage and the audit log still name them.
+  - *Limits* reads short: only the limits that are set ("3 requests/min", "10k tokens/min"), or
+    *No limits*; the exact values are in its tooltip, and a lock stays next to its limit.
+  - Phones: every value of a key stays in its value column (the token limit, the key's prefix and a
+    revoked key's "by …" used to wrap under the labels), and a revoked key's card has no empty action
+    strip.
+  - Machines: the summary above the tiles counts machines, not cards: *1 NVIDIA machine*, *1 AMD
+    machine*, *2 CPU-only machines* (*AMD GPU* and *AMD APU* when a server has both).
+
 ### Added
 
 - **Vision models under Models: object detection, segmentation and depth** (#86, part 1: the engine and

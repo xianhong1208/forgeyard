@@ -498,6 +498,12 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .empty-keys { display: flex; align-items: center; gap: 12px; color: var(--ink-2); }
 .empty-keys p { margin: 0; }
 .keys-table td { vertical-align: top; }
+/* The revoked and expired keys, folded away under one full-width row (1.4). */
+.keys-fold { display: flex; align-items: center; gap: 8px; width: 100%; margin: 8px 0 0; padding: 10px 14px; font: inherit; font-size: 13px;
+  color: var(--ink-2); background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--radius); cursor: pointer; text-align: left; }
+.keys-fold:hover { background: var(--surface-2); }
+.keys-fold:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+.empty-keys + .table-wrap, .empty-keys + .keys-fold { margin-top: 10px; }
 .row-off td { color: var(--muted); }
 .row-off .strong { text-decoration: line-through; text-decoration-color: var(--line-strong); }
 .row-edit td { background: var(--surface-2); }
@@ -946,6 +952,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   .table td:not([data-label]) { display: block; }
   .cell-actions { text-align: left; white-space: normal; display: flex !important; flex-wrap: wrap; gap: 6px; padding-top: 10px !important; border-top: 1px solid var(--line) !important; margin-top: 4px; }
   .cell-actions .btn + .btn { margin-left: 0; }
+  .keys-table .cell-actions:empty { display: none !important; }
   .catalog-actions { justify-content: flex-start; }
   .sessions li { grid-template-columns: minmax(0, 1fr); }
   .sessions .btn { grid-column: 1; grid-row: auto; justify-self: start; }
