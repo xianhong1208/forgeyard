@@ -151,7 +151,7 @@ CUDA_IMAGE = "nvidia/cuda:12.4.1-base-ubuntu22.04"
 CLOUD_PROMPT = "Count from 1 to 20, separated by spaces."
 # Pages the console group opens: (path, the tab title it must have; None: the page's own name).
 CONSOLE_PAGES = [
-    ("/start", None), ("/machines", "Machines"), ("/apps", "Apps"), ("/apps/new", "New app"),
+    ("/start", None), ("/machines", "Machines"),
     ("/serving", "Serving"), ("/serving/deploy", "Deploy a model"), ("/models", "Models"), ("/cloud", "Cloud"),
     ("/playground", "Playground"), ("/keys", "API keys"), ("/usage", "Usage"), ("/account", None),
     ("/users", "Users"), ("/audit", "Audit log"), ("/trust", "Trust this server"), ("/guide/en/how-to", "How-to"),

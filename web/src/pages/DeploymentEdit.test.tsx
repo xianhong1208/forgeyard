@@ -178,12 +178,13 @@ describe("changing a deployment (1.3.1)", () => {
     await waitFor(() => expect((screen.getByLabelText("Machine") as HTMLSelectElement).value).toBe("2"), { timeout: 3000 });
   });
 
-  it("FY-WEB-201: a replica its agent never took says so on the deployment and the workload, with what to do", async () => {
+  it("FY-WEB-201: a replica its agent never took says so on the deployment, with what to do; its old workload address opens it", async () => {
     const text = "gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)";
     const stuck = rep({ state: "pending", started_at: null, container: null, not_picked_up: text });
     const d = dep([stuck], { pinned: { id: 2, name: "gpu-01" }, rollout: { generation: 2, updated: 1, total: 2, next: 1 } });
     server((url) => {
       if (url === "/api/deployments/3") return { status: 200, body: { deployment: d, events: [], server_time: "", can_manage: true } };
+      if (url === "/api/deployments") return { status: 200, body: { deployments: [d], server_time: "", can_manage: true } };
       if (url === "/api/workloads/11") return { status: 200, body: { workload: d.workload, events: [], server_time: "", can_manage: true } };
       if (url.startsWith("/api/workloads/11/replicas")) return { status: 200, body: { source: "stored", text: "", truncated: false, state: "pending" } };
       return undefined;
@@ -198,8 +199,9 @@ describe("changing a deployment (1.3.1)", () => {
     expect(screen.getByText("updating: 1 of 2 on the new settings")).toBeTruthy();
     expect(screen.getByText(/Pinned to/).textContent).toBe("Pinned to gpu-01");
     cleanup();
-    mount("/workloads/11");
+    mount("/workloads/11");  // 1.4 (#88): no workload pages; a model's opens its deployment
     expect(within(await screen.findByRole("alert")).getByText("Replica #0 was never picked up.")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: d.name })).toBeTruthy();
     expect(screen.getByText(text, { selector: ".cell-stuck" })).toBeTruthy();
   });
 

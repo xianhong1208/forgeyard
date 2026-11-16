@@ -18,6 +18,7 @@ import { MachinesPage } from "./pages/Machines";
 import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
+import { OldApps } from "./pages/OldApps";
 import { PlaygroundPage } from "./pages/Playground";
 import { CloudPage, ProviderDetailPage } from "./pages/Providers";
 import { OldProviders, OldRoute, RouteDetailPage } from "./pages/RouteDetail";
@@ -28,9 +29,6 @@ import { SetupPage } from "./pages/Setup";
 import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
 import { UsersPage } from "./pages/Users";
-import { OldWorkloads, WorkloadDetailPage } from "./pages/WorkloadDetail";
-import { WorkloadNewPage } from "./pages/WorkloadNew";
-import { WorkloadsPage } from "./pages/Workloads";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { state, loadError, user, ended, reload } = useAuth();
@@ -70,11 +68,10 @@ export default function App() {
         <Route path="/start" element={<GetStartedPage />} />
         <Route path="/machines" element={<MachinesPage />} />
         <Route path="/machines/:id" element={<MachineDetailPage />} />
-        {/* 1.4 (#81): Workloads became Apps; a model deployment's workload is seen under Serving only. */}
-        <Route path="/apps" element={<WorkloadsPage />} />
-        <Route path="/apps/new" element={<WorkloadNewPage />} />
-        <Route path="/apps/:id" element={<WorkloadDetailPage />} />
-        <Route path="/workloads/*" element={<OldWorkloads />} />
+        {/* 1.4 (#88): apps left the console. 1.3's /workloads… and 1.4's /apps… open the model's
+            deployment, or Machines (where an app holding a card is still named). */}
+        <Route path="/apps/*" element={<OldApps />} />
+        <Route path="/workloads/*" element={<OldApps />} />
         {/* 1.4 (#92): Serving is what runs now, with Deploy a model and each deployment's page; Models
             is the library (Catalog, Engines, Sources). 1.3's addresses under /models open the new places. */}
         <Route path="/serving" element={<ServingPage />} />

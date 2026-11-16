@@ -30,8 +30,8 @@ export function Layout() {
   }, [menu]);
 
   // 1.4 (#81, #92): Machines, Serving (what runs now), Models (the library), Cloud (cloud providers and
-  // cloud models, admins only, as Providers was), the everyday pages, then the admin pages. Apps (/apps)
-  // is an advanced feature, not in the menu.
+  // cloud models, admins only, as Providers was), the everyday pages, then the admin pages. Apps left
+  // the console in 1.4 (#88).
   const admin = user?.role === "admin";
   const links = [
     { to: "/machines", label: "Machines" },

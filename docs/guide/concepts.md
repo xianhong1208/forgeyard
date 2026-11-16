@@ -79,52 +79,24 @@ when sharing would help:
 
 Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
 
-## Apps (advanced)
+## Apps (deprecated)
 
-**Apps are not in the menu.** Most people only deploy models: to use a model, deploy it under
-**Serving**. Admins and operators who need more open `/apps` on the server (for example
-`https://<server>:7860/apps`).
+Before 1.4 the console could also run **apps**: programs of your own (a container or a process,
+a service or a one-off task) on your machines, optionally exposed at `/x/<name>` with API keys.
+Forgeyard is about running and managing models, so in 1.4 apps left the console, and **in 1.5 they
+are removed**: their part of the API (`/api/workloads`), the templates and the gateway's `/x/`. Until
+then they keep working through the API only, and say so: every answer carries a `Deprecation` header,
+the server log warns (at most once an hour), and **Setup health** warns while any app exists. Details
+are in the [reference](reference.md#apps-deprecated).
 
-An **app** is a program you run on your machines yourself, as a container (Docker or Podman on the
-machine) or a process. It fits what is not a model Forgeyard runs: a model's own server image,
-exposed at [`/x/<name>`](#apps-at-x) with API keys, or a one-off GPU **task** (a batch job, with
-retries and a time limit) next to the **services** that run until stopped. Each has 1 to 16
-replicas, each on one machine, with only the cards it was given. A process runs as the unprivileged
-account `forgeyard-run` and a container never `--privileged`; both start from an empty environment.
-The API calls apps *workloads* (`/api/workloads`).
+- To serve a model, deploy it under **Serving**. Object detection, segmentation and depth are
+  [vision models](#vision-models) since 1.4.
+- A model that no built-in engine runs gets a **custom engine** (**Models → Engines → Add a
+  custom engine**): a recipe like the built-in ones, for its container image or program.
 
-The **Apps** page lists only apps. A model deployment also runs as a workload (of runtime `model`),
-but a model is seen under **Serving** only, and an old link to its workload's page opens the
-deployment; the API refuses to stop, start or delete it (`409 managed_by_deployment`). **Machines**
-shows both, models and apps, since both hold cards.
-
-## Apps at /x/
-
-A service app can be **exposed** behind the gateway: programs then call its own HTTP API at
-`https://<server>:7860/x/<name>/…` with an API key, as they call models at `/v1`. Use it for what is
-not a chat, embedding, speech or image model: object detection, segmentation, depth, Triton or KServe
-models, a FastAPI or BentoML service.
-
-- **Behind the key guard.** An exposed app runs behind the agent's key guard, like a model
-  replica: the program listens on loopback, the guard holds the published port, and only the gateway
-  gets through. The guard removes the gateway's internal key before the request reaches the program.
-  Every port of the app is guarded, not only the exposed one.
-- **Keys opt in.** A key's **Apps** setting says which exposed apps it may call: *None*
-  (the default, and every key from before 1.3), *Listed apps* or *Every exposed app* (`workloads` in
-  the API).
-- **APIs, not web pages.** Answers are sandboxed (`Content-Security-Policy: sandbox`), cookies and
-  CORS headers are removed, and redirects are rewritten under `/x/<name>`. A browser UI (Gradio,
-  Jupyter) does not work at `/x/`. WebSockets and gRPC are not passed on in 1.3, and nothing spills
-  to the cloud.
-- **Counted.** Requests, errors, bytes in and out, busy time and latency go to **Usage** as the
-  model `x:<name>`; the key's requests per minute apply.
-
-Admins and operators expose an app, when they create it or later on its page. See
-[Expose an app at /x/](how-to.md#expose-an-app-at-x).
-
-In 1.3 three **templates** started the most common vision APIs this way (object detection,
-segmentation, depth). In 1.4 those are [vision models](#vision-models), deployed like any other model; apps
-already made from a template keep running. See [Apps made from a template](how-to.md#apps-made-from-a-template-13).
+**Machines** still names an app that holds a card, so a card in use is never shown free. A model
+deployment runs as a workload too (of runtime `model`): that is how models run, and it is not
+deprecated.
 
 ## Models, engines and estimates
 

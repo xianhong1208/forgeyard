@@ -1,14 +1,9 @@
 // The Playground's Vision tab (1.4, #86): vision models, the deployments of detection, SAM 2 and depth models,
 // called through /api/playground/vision/<task> with the model's name (the /v1 gateway path) as the signed-in
-// person. The exposed vision apps of 1.3 (workload templates) are not offered any more: Apps leave the
-// console in 1.4 (#88); the options still list them, and they keep running at /x/.
+// person. The exposed vision apps of 1.3 (workload templates) are not offered: apps left the console in 1.4
+// (#88; deprecated, they keep running at /x/ until 1.5), and the options no longer list them.
 
 export type VisionTask = "detect" | "segment" | "depth";
-
-export type VisionWorkload = {
-  name: string; workload_id: number; task: VisionTask; title: string; model: string; licence: string;
-  endpoint: string; path: string; ready: number; reason: string | null; max_body_mb: number;
-};
 
 // A vision model (1.4): a route of a vision task, with how many replicas are ready.
 export type VisionModel = {
@@ -18,7 +13,6 @@ export type VisionModel = {
 
 export type VisionOptions = {
   models?: VisionModel[];
-  workloads: VisionWorkload[];
   tasks: { task: VisionTask; title: string; template: string; model: string }[];
 };
 
@@ -73,10 +67,6 @@ export function checkImage(file: File, limitMb: number): string | null {
 
 function mib(bytes: number): string {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MiB` : `${Math.ceil(bytes / 1024)} KiB`;
-}
-
-export function workloadLabel(w: VisionWorkload): string {
-  return `${w.name} · ${w.title} · ${shortModel(w.model)}${w.ready ? "" : " (not ready)"}`;
 }
 
 // A box in pixels as percentages of the image, for an overlay that scales with it.

@@ -448,12 +448,12 @@ def test_fy_vis_010_try_it_and_models_list(vis):
 
 def test_fy_vis_011_the_playground(vis, client):
     """FY-VIS-011: the Playground's options list the vision models with their task, endpoint, catalog model,
-    licence and ready replicas (beside the exposed workloads); the console reaches a model at
+    licence and ready replicas (no apps since 1.4, #88); the console reaches a model at
     /api/playground/vision/<task> as the signed-in person (its session and CSRF rule, counted as console),
     and not with an API key."""
     o = vis.owner.get("/api/playground/vision/options").json()
     models = {m["name"]: m for m in o["models"]}
-    assert set(models) == {"det", "seg", "depth"} and o["workloads"] == []
+    assert set(models) == {"det", "seg", "depth"} and "workloads" not in o  # 1.4 (#88): no apps
     assert models["det"] | {"deployment_id": None} == {
         "name": "det", "task": "detect", "title": "Object detection", "endpoint": "/v1/vision/detect",
         "deployment_id": None, "model": "PekingU/rtdetr_v2_r18vd", "licence": "apache-2.0", "ready": 1,

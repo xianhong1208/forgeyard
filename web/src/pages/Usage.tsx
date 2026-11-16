@@ -13,7 +13,7 @@ import { bytes } from "../lib/machines";
 import { share, usd } from "../lib/prices";
 import type { UsageResponse, UsageRow } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { usePoll } from "./Workloads";
+import { usePoll } from "../lib/poll";
 
 const DAYS = [1, 7, 30];
 const GROUPS: { id: string; label: string; admin?: boolean }[] = [

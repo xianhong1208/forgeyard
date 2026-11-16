@@ -105,20 +105,9 @@ def model_options(db: DbSession) -> list[dict]:
 
 
 def options(db: DbSession) -> dict:
-    """The vision models and the exposed vision workloads, for the Playground's Vision tab."""
-    out = []
-    for w in db.scalars(select(Workload).where(Workload.kind == "service").order_by(Workload.name)).all():
-        task = vision_task(w)
-        if task is None:
-            continue
-        t = TASKS[task]
-        route = passthrough.load(db, w.name)
-        ready = len(route.replicas) if route is not None else 0
-        out.append({"name": w.name, "workload_id": w.id, "task": task, "title": t.title, "model": t.model,
-                    "licence": t.licence, "endpoint": t.endpoint, "path": expose.url_path(w.name),
-                    "ready": ready, "reason": None if ready else (route.reason if route else None),
-                    "max_body_mb": expose.of(w).max_body_mb})
-    return {"models": model_options(db), "workloads": out,
+    """The vision models, for the Playground's Vision tab, and the tasks there are. Apps left the console in
+    1.4 (#88): the exposed vision workloads of 1.3 are no longer listed (they keep running at /x/ until 1.5)."""
+    return {"models": model_options(db),
             "tasks": [{"task": t.task, "title": t.title, "template": t.id, "model": t.model} for t in templates.TEMPLATES]}
 
 

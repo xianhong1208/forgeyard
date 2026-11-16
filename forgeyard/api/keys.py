@@ -40,7 +40,6 @@ from forgeyard.db import ApiKey, Deployment, GatewayRoute, Workload, as_utc, get
 from forgeyard.models import routes as mroutes
 from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
-from forgeyard.workloads import expose as wexpose
 
 router = APIRouter(prefix="/api", tags=["keys"])
 
@@ -172,13 +171,6 @@ def _workloads(db: DbSession, level: Optional[str], names: Optional[list[str]]) 
     return level, clean
 
 
-def workload_choices(db: DbSession) -> list[dict]:
-    """The service workloads a key's list can name, and whether each is exposed now."""
-    rows = db.scalars(select(Workload).where(Workload.runtime != "model", Workload.kind == "service")
-                      .order_by(Workload.name)).all()
-    return [{"name": w.name, "exposed": wexpose.of(w) is not None, "path": wexpose.url_path(w.name)} for w in rows]
-
-
 def _get(db: DbSession, key_id: str, caller: Caller) -> ApiKey:
     k = db.scalar(select(ApiKey).where(ApiKey.public_id == key_id).options(selectinload(ApiKey.user)))
     # Someone else's key is "not found" for a non-admin: they cannot even learn that it exists.
@@ -219,7 +211,7 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
                                         spend.held.get(("person", me.id), 0)),
             "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
             "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows],
-            "workloads": workload_choices(db), **({"env_seeds": _env_seeds(db)} if admin else {})}
+            **({"env_seeds": _env_seeds(db)} if admin else {})}
 
 
 def _env_seeds(db: DbSession) -> dict:

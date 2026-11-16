@@ -17,14 +17,13 @@
 
 ## ✨ 主要功能
 
-- **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本、服務與任務；AMD
-  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署和應用程式佔用，並列出快取裡的模型和大小，可刪除那台機器上沒有部署在用的模型。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。
+- **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本；AMD
+  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和大小，可刪除那台機器上沒有部署在用的模型。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。
 - **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。
 - **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
-- **任何 HTTP 服務都能用同一套金鑰。** 應用程式的 API 放在 `/x/<name>/…`，有金鑰、限制與用量。
 - **視覺模型（1.4）。** 物件偵測、影像分割與深度估計在 `/v1/vision/…`，像其他模型一樣部署。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。
 - **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
@@ -146,7 +145,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | 頁面 | 內容 |
 |---|---|
 | [快速入門](docs/guide/zh-TW/quick-start.md) | 從零開始，大約十分鐘完成第一次 `/v1` 呼叫 |
-| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、應用程式、模型、部署與閘道、金鑰、角色 |
+| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、模型、引擎與估算、部署與閘道、金鑰、角色 |
 | [操作指南](docs/guide/zh-TW/how-to.md) | AMD 與純 CPU 機器、用 Docker 跑伺服器與 agent、共用 GPU、自己的憑證、升級、備份 |
 | [雲端供應商](docs/guide/zh-TW/cloud-providers.md) | 把 OpenAI、Anthropic、Gemini、Azure、OpenRouter 或你自己的伺服器放到 `/v1` 後面；請求何時溢出；哪些金鑰可以使用雲端 |
 | [疑難排解](docs/guide/zh-TW/troubleshooting.md) | 在真實機器上遇過的問題與解法 |

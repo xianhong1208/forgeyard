@@ -404,6 +404,8 @@ More in [Cloud providers](cloud-providers.md#troubleshooting).
 
 ## Errors from /x/
 
+`/x/` is deprecated in 1.4 and removed in 1.5 ([Apps (deprecated)](reference.md#apps-deprecated)).
+
 - **403 `workloads_not_allowed`:** the key's **Apps at /x/** is *None*, the default. Change it
   on **API keys**.
 - **404 `workload_not_found`:** the name is wrong, the app is not exposed (its page, **Gateway**),
