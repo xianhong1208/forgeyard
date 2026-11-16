@@ -103,6 +103,43 @@ export type Machine = {
   accelerators: Accelerator[];
 };
 
+// A machine's model cache (1.4): GET /api/machines/{id}/cache.
+export type CacheUser = { name: string; kind: "deployment" | "workload"; id: number };
+export type CacheCatalogRef = { id: number; name: string };
+export type CachePart = { key: string; file: string; bytes: number; catalog: CacheCatalogRef[]; used_by: CacheUser[] };
+export type CacheModel = {
+  key: string;
+  kind: "hf" | "url";
+  repo?: string | null;
+  revision?: string;
+  file?: string | null;
+  bytes: number | null;
+  files?: number;
+  completed_at?: number | null;
+  missing?: number;
+  parts?: CachePart[];
+  catalog: CacheCatalogRef[];
+  used_by: CacheUser[];
+};
+export type CacheEngine = { key: string; id: string; name: string | null; bytes: number; used_by: CacheUser[] };
+export type MachineCache = {
+  machine_id: number;
+  connected: boolean;
+  reported: boolean;
+  sizes: boolean;
+  ok: boolean | null;
+  reason: string | null;
+  free_bytes: number | null;
+  total_bytes: number | null;
+  used_bytes: number | null;
+  partial_bytes: number | null;
+  partial_files: number;
+  truncated: boolean;
+  models: CacheModel[];
+  engines: CacheEngine[];
+  remove_note: string | null;
+};
+
 export type MachinesResponse = {
   machines: Machine[];
   server_time: string;

@@ -8,6 +8,27 @@ version until 1.0.
 
 ### Added
 
+- **A machine's page lists the models in its cache, with their sizes, and removes them** (part of
+  #35). **Models in cache** shows each Hugging Face revision (and each GGUF file of a revision with
+  several), single-file models from a URL and engine archives, with their sizes, the catalog models
+  they are and the deployments there that use them; how much the cache takes on its disk and what is
+  free; and the partial downloads.
+  - **Remove** (admins and operators) deletes one like `hf cache rm`: the revision's links, its
+    marker and refs, and only the blobs no other revision links to. **Remove partial downloads**
+    deletes what unfinished downloads left. Each is audited as `model.cache_removed`, with the bytes
+    freed.
+  - Refused while a deployment on that machine uses it (409 `model_in_use`, naming it): the server
+    checks, and the agent checks again before it deletes anything. Never while a download of the
+    same repository (or, for partial downloads, any download) runs there: a download holds a shared
+    lock that the removal takes exclusively, without waiting.
+  - The agent only looks up the key among the models it found on its own disk; no path is ever made
+    from what the server sends.
+  - API: `GET /api/machines/{id}/cache`, `POST …/cache/remove` and `POST …/cache/remove-partial`.
+    The machine list no longer carries the per-model detail.
+  - Agent protocol feature `cache_admin` (`cache_remove`, `cache_prune`, `cache_removed`), and
+    `model_cache` gains `models`, `engines_detail`, `used_bytes`, `partial_bytes`, `partial_files`
+    (kept within 192 KiB, the largest models first). Agents before 1.4 are listed without sizes and
+    without Remove; update them (rebuild the agent image) to remove models. No migration.
 - **Placement knows what a machine can fetch** (#56). Among the machines that fit, a machine that
   could not reach a source a replica would download from there in the last hour (the model's host,
   the engine archive's, the image registry) comes last; then replicas spread over machines; then a

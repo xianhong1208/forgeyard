@@ -664,6 +664,41 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
 
+## 透過 API 查看機器的模型快取
+
+和其他 `/api` 請求一樣使用主控台的登入工作階段（寫入請求還要帶 `X-Forgeyard: 1` 標頭）。所有登入的人都可以查看；管理員和操作員可以刪除。
+
+| 請求 | 做什麼 |
+|---|---|
+| `GET /api/machines/{id}/cache` | 那台機器快取裡的模型，以它的 agent 最近一次的回報為準 |
+| `POST /api/machines/{id}/cache/remove`，內容 `{"key": "<key>"}` | 刪除一個項目：一個 revision、其中一個 GGUF 檔、一個 URL 模型或一個引擎 |
+| `POST /api/machines/{id}/cache/remove-partial` | 刪除未完成的下載留下的檔案 |
+
+回應有 `free_bytes` 和 `total_bytes`（快取所在的磁碟）、`used_bytes`（快取在上面占了多少，共用的檔案只算一次）、`partial_bytes` 和 `partial_files`、`sizes`（早於 1.4 的 agent 為 false，它只列出 key），以及 `remove_note`（目前為什麼不能刪除，或 `null`）。`models` 列出每個項目：
+
+| 欄位 | 內容 |
+|---|---|
+| `key` | 刪除時要送的值：Hugging Face revision 是 `hub/models--<org>--<name>@<commit>`，從 URL 下載的單一檔案是 `url/<id>` |
+| `kind` | `hf` 或 `url` |
+| `repo`、`revision`、`file` | repository 和 commit，或 URL 模型的檔名 |
+| `bytes`、`files` | 大小和檔案數。兩個 revision 共用的檔案兩邊都會算 |
+| `parts` | 有 GGUF 檔的 revision：每個檔案（分割的模型只算一次，包含所有部分）各有自己的 `key`、`bytes`、`catalog` 和 `used_by`。刪掉最後一個就會刪掉整個 revision |
+| `catalog` | 它對應的目錄模型 |
+| `used_by` | 那台機器上使用它的部署（或工作負載） |
+
+`engines` 列出引擎壓縮檔（`key` 為 `engine/<壓縮檔 SHA-256 的前 16 個十六進位數字>`、`name`、`bytes`、`used_by`）。刪除的回應有 `freed_bytes`（磁碟上釋出的空間）和刪除後的清單（`cache`）。
+
+| 狀態 | `code` | 什麼時候 |
+|---|---|---|
+| 409 | `model_in_use` | 那台機器上有部署正在使用它；`in_use` 會列出是哪些。agent 在刪除前也會再檢查一次 |
+| 409 | `cache_busy` | 那裡正在下載這個模型（刪除未完成的下載時：正在進行任何下載） |
+| 409 | `machine_offline`、`agent_too_old`、`agent_no_answer` | agent 沒有連線、不支援刪除（1.4 之前），或一分鐘內沒有回應 |
+| 409 | `cache_remove_failed` | agent 刪不掉；訊息會說明原因 |
+| 404 | `not_in_cache` | 那台機器沒有回報這個 key |
+| 403 | | 不是管理員或操作員 |
+
+每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含機器、key、模型和 `freed_bytes`。背後是 agent 協定的 feature `cache_admin`（1.4 起的 agent）：agent 列出快取和大小、依要求刪除，並在那台機器上有副本使用這些檔案、或這些檔案正在下載時拒絕。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。

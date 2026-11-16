@@ -1291,6 +1291,38 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .runlist-where { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
 .gpu-access .gpu-access-line { margin-top: 0; }
 
+/* A machine's model cache (1.4). */
+.cache-disk { color: var(--ink-2); font-family: var(--mono); font-size: 11.5px; }
+.cache-disk-map { display: grid; gap: 6px; margin: 10px 0 12px; }
+.cache-bar-cache { min-width: 3px; }
+.cache-note { margin: 0 0 10px; }
+.cachelist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.cacherow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 84px auto; gap: 6px 12px; align-items: center; padding: 9px 11px; border-bottom: 1px solid var(--line); }
+.cacherow:last-child { border-bottom: 0; }
+.cacherow-part { padding-left: 34px; background: var(--surface-2); }
+.cacherow-part .runlist-k { background: transparent; width: 16px; }
+.cacherow-branch { display: block; width: 10px; height: 14px; margin-top: -8px; border-left: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); }
+.cacherow-main { min-width: 0; }
+.cacherow-main strong { display: block; font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.cacherow-main small { display: block; font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.cacherow-use { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; min-width: 0; }
+.cacherow-use .chip { text-decoration: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cacherow-use .chip + .chip { margin-left: 0; }
+.cacherow-size { font-size: 12px; color: var(--ink); text-align: right; white-space: nowrap; }
+.cacherow-act .btn { gap: 4px; }
+.cache-partial { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin-top: 10px; padding: 9px 11px; border: 1px dashed var(--line-strong); border-radius: var(--radius); font-size: 13px; color: var(--ink-2); }
+.cache-partial-text { display: grid; gap: 2px; }
+.cache-partial-text > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+@media (max-width: 760px) {
+  .cacherow { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .cacherow-use { grid-column: 2 / -1; justify-content: flex-start; }
+  .cacherow-use:empty { display: none; }
+  .cacherow-size { grid-column: 2; grid-row: 2; text-align: left; }
+  .cacherow-use:not(:empty) ~ .cacherow-size { grid-row: 3; }
+  .cacherow-act { grid-column: 3; grid-row: 1; }
+  .cacherow-part { padding-left: 18px; }
+}
+
 /* Models: one section per kind. */
 .kindsec { margin-bottom: 14px; padding: 0; overflow: hidden; }
 .kindsec-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
