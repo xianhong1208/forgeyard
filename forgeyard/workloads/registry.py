@@ -70,6 +70,18 @@ def registry_host(image: Optional[str]) -> Optional[str]:
     return "docker.io"
 
 
+def full_name(image: str) -> str:
+    """An image reference in Docker's full form, to compare names: Docker lists Docker Hub images without
+    "docker.io/" (and official ones without "library/"), a recipe may name them in full.
+    'python:3.13' -> 'docker.io/library/python:3.13'; 'acme/x:1' -> 'docker.io/acme/x:1'; others unchanged."""
+    first, slash, rest = image.partition("/")
+    if slash and ("." in first or ":" in first or first == "localhost"):
+        if first.lower() == "docker.io" and "/" not in rest:
+            return f"docker.io/library/{rest}"
+        return image
+    return f"docker.io/{image}" if slash else f"docker.io/library/{image}"
+
+
 def tag_ref(image: str) -> str:
     """The name a loaded copy is tagged with: 'ghcr.io/a/b:tag@sha256:…' -> 'ghcr.io/a/b:tag' (as written in
     the recipe; Docker shortens 'docker.io/library/x' to 'x' itself)."""
