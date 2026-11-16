@@ -146,6 +146,21 @@ version until 1.0.
 
 ### Fixed
 
+- **Usage's tables no longer go on for pages** (#82). With about 100 models the page was some 48,000
+  px tall on a phone: every row wrapped its name over three or four lines and kept every column.
+  - Every table on Usage (by model, key, person, day, source, local or cloud; on **Cost** by day,
+    key, person, model, provider) lists its top 15 rows by the column it is sorted by, and adds up
+    the rest in one last row, *N others* (latencies do not add up, so that row has none); **Show all
+    N** lists every row. A column's heading sorts by it, again for the other way round. **Cost** is
+    sorted by cost, a table by day starts with the latest day.
+  - On a phone (760 px or less) each row is one line: the name, cut short with the whole name in its
+    tooltip, and the number it is sorted by. Tapping it (or Enter) opens the other columns under it;
+    **Sort by** chooses the order.
+  - At desktop widths, a long name stays on one line (cut short, the whole name in its tooltip), and
+    a table with more columns than fit scrolls sideways inside its frame instead of cutting off the
+    last ones (Busy, Avg, p50 and p95, once images, video or workload traffic were counted).
+  - With the data of a server with 88 models (Requests, by model, 7 days): 48,681 → 2,514 px tall at
+    390 px, 7,561 → 2,075 px at 1,440 px; Cost by model 23,607 → 2,830 px at 390 px.
 - **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model
   library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
 - **A long command no longer fills the Workloads list on a phone**: at narrow widths it shows three lines

@@ -313,6 +313,12 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - **Usage** counts requests, errors, tokens and latency per day, model, key, person, source and
   local or cloud. Everyone sees their own; admins see everyone's. Its **Cost** tab shows what cloud
   requests cost (see below).
+- The table under the chart lists the top 15 rows by the column it is sorted by (requests; cost on
+  **Cost**; the latest days first when grouped by day). The rest are added up in one last row, *N
+  others*, so the table still adds up to the totals; **Show all N** lists every row. Click a column's
+  heading to sort by it, and again for the other way round. On a phone each row is one line, the
+  name and the number it is sorted by; tap it for the other columns, and choose the order with
+  **Sort by**. A long name is cut short: hover it, or open the row, for the whole name.
 - **Over time**, on both tabs, draws one of those numbers as a line chart: per day (the last 30
   days), week (13 weeks, from Monday) or month (12 months), in total or one line per key, model,
   provider or person (admins, with **Everyone**). The five largest get a line each and the rest are
