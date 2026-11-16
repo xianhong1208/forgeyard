@@ -675,9 +675,41 @@ Two more cases:
   it with one last event, an error with the code `upstream_stream_broken`:
   `data: {"error": {…, "code": "upstream_stream_broken"}}`.
 
+## Apps (deprecated)
+
+Apps, the workloads that are not models (1.4, #88), left the console and are **removed in 1.5**, with a
+migration that removes the ones left. Until then they keep working through the API, and say so:
+
+| Deprecated | What |
+|---|---|
+| The apps part of `/api/workloads` | `POST /api/workloads`; and `GET`, `PUT …/gateway`, `POST …/stop`, `POST …/start`, `DELETE` and `GET …/replicas/<n>/logs` of an app; `GET /api/workloads` while it lists an app |
+| `GET /api/workloads/templates` | The 1.3 templates |
+| `/x/<name>/…` | The [passthrough](#the-passthrough-x), and the console's own `POST /api/playground/vision/<name>/<task>` to an exposed vision app |
+| A key's `workloads` and `workload_list` | Still taken and returned by `/api/keys`, but the console no longer shows them, and `GET /api/keys` no longer lists the apps a key could name |
+
+- **Headers.** Every answer of these, errors included, carries `Deprecation` (RFC 9745: the date it was
+  announced, `@<epoch>`) and a `Link` with `rel="deprecation"` to this section. There is no `Sunset`
+  header: 1.5 has no date yet.
+- **Log.** The server logs a warning for each of the three kinds (apps, templates, `/x/`) at most once
+  an hour, naming the request.
+- **Setup health.** `apps-deprecated` (a warning) names the apps while any exists.
+
+A model deployment's workload (runtime `model`) is not deprecated: it is how models run, and reading it
+(`GET /api/workloads/<id>`, its logs) carries no header.
+
+```http
+HTTP/1.1 200 OK
+Deprecation: @1794787200
+Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
+```
+
+Instead: deploy what you run as a model under **Serving**; for a model that no built-in engine runs, add a
+custom engine (**Models → Engines**, a recipe). Then delete each app with `DELETE /api/workloads/<id>`.
+The [Playground's vision models](#vision) replace the 1.3 vision templates.
+
 ## The passthrough (/x/)
 
-Programs call an exposed app at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
+**Deprecated in 1.4, removed in 1.5** ([Apps (deprecated)](#apps-deprecated)). Programs call an exposed app at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
 whose **Apps** setting allows it. Like `/v1`, it takes `Authorization: Bearer fyk_…` only: no
 cookies, no key in the query string, no CORS headers.
 
@@ -751,7 +783,9 @@ the body is complete, so a client never takes a cut-off body for a whole one.
 
 ### From the Playground
 
-The console's **Playground → Vision** tab calls exposed vision apps through routes of its own,
+Since 1.4 the console's **Playground → Vision** tab offers vision models only, and
+`GET /api/playground/vision/options` no longer lists apps (`workloads`). The route below still reaches an
+exposed vision app until 1.5 (deprecated), the way the tab did in 1.3: through routes of its own,
 never through `/x/`: they take the console's sign-in (its cookie, and on `POST` the `X-Forgeyard: 1`
 header from the console's own origin), and `/x/` keeps taking API keys only. Anyone signed in may use
 them. A vision app is an exposed service started with `--task detect`, `--task segment` or
@@ -759,7 +793,7 @@ them. A vision app is an exposed service started with `--task detect`, `--task s
 
 | Route | What it does |
 |---|---|
-| `GET /api/playground/vision/options` | `workloads`: each exposed vision app's `name`, `workload_id`, `task`, `title`, `model`, `licence`, `endpoint`, `path`, `ready` (replicas behind the key guard), `reason` (why none is ready), `max_body_mb`; `tasks`: the templates' tasks |
+| `GET /api/playground/vision/options` | `models`: the vision models (see [Vision](#vision)); `tasks`: the vision tasks |
 | `POST /api/playground/vision/<name>/<task>` | The body (the image, as multipart) to the app's own `POST /v1/<task>`, nothing else: no other path, method or query |
 
 The request then follows the `/x/` rules above: the same replicas and key guard, request and answer
@@ -771,7 +805,7 @@ under `x:<name>` as *console*, for the person signed in.
 
 ## App templates
 
-The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
+**Deprecated in 1.4, removed in 1.5.** The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
 `X.Y.Z` (CPU, linux/amd64 and linux/arm64) or `X.Y.Z-cuda` (torch with CUDA 13.0, linux/amd64, NVIDIA
 driver 580 or newer). Built from `images/vision` in the repository, the dependencies pinned with hashes
 and the models baked in at their revisions; it runs as an unprivileged user. `GET /api/workloads/templates`
@@ -981,6 +1015,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
 | `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
 | `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
+| `apps-deprecated` | warning | Apps (workloads that are not models) exist: they, their API and `/x/` are removed in 1.5 |
 | `process-workloads-off` | note | An online agent refuses to run processes; the finding gives its reason |
 | `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
 | `machine-simulated` | warning | A machine reports simulated hardware |

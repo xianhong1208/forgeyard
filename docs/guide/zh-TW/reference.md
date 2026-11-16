@@ -548,9 +548,34 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 - **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
 - **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
 
+## 應用程式（已淘汰）
+
+應用程式，也就是不是模型的 workload（1.4，#88），已經離開主控台，**1.5 會移除**，並以 migration 移除剩下的應用程式。在那之前，它們仍可透過 API 使用，並會明白告知：
+
+| 已淘汰 | 內容 |
+|---|---|
+| `/api/workloads` 裡屬於應用程式的部分 | `POST /api/workloads`；以及應用程式的 `GET`、`PUT …/gateway`、`POST …/stop`、`POST …/start`、`DELETE` 和 `GET …/replicas/<n>/logs`；清單裡有應用程式時的 `GET /api/workloads` |
+| `GET /api/workloads/templates` | 1.3 的範本 |
+| `/x/<name>/…` | [直通](#the-passthrough-x)，以及主控台自己送到公開視覺應用程式的 `POST /api/playground/vision/<name>/<task>` |
+| 金鑰的 `workloads` 與 `workload_list` | `/api/keys` 仍會接受並回傳，但主控台不再顯示，`GET /api/keys` 也不再列出金鑰可以指定的應用程式 |
+
+- **標頭。** 這些路由的每個回應（包括錯誤）都帶 `Deprecation`（RFC 9745：宣布淘汰的日期，`@<epoch>`），以及一個 `rel="deprecation"` 的 `Link`，指向這一節。沒有 `Sunset` 標頭：1.5 還沒有日期。
+- **紀錄。** 伺服器對三類（應用程式、範本、`/x/`）各自最多每小時記一次警告，並寫出是哪個請求。
+- **Setup health。** 只要還有任何應用程式，`apps-deprecated`（警告）就會列出它們的名稱。
+
+模型部署的 workload（runtime 為 `model`）沒有淘汰：模型就是這樣跑的，讀取它（`GET /api/workloads/<id>`、它的紀錄）不會帶這些標頭。
+
+```http
+HTTP/1.1 200 OK
+Deprecation: @1794787200
+Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
+```
+
+替代做法：把要跑的東西當成模型在 **Serving** 部署；內建引擎跑不了的模型，加一個自訂引擎（**Models → Engines**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[Playground 的視覺模型](#vision)取代 1.3 的視覺範本。
+
 ## 直通（/x/）
 
-程式以 **Apps** 設定允許的 API 金鑰，在 `https://<server>:7860/x/<name>/<path>?<query>` 呼叫公開的應用程式。和 `/v1` 一樣只接受 `Authorization: Bearer fyk_…`：不接受 cookie、不接受放在查詢字串裡的金鑰、不送 CORS 標頭。
+**1.4 起淘汰，1.5 移除**（[應用程式（已淘汰）](#apps-deprecated)）。程式以 **Apps** 設定允許的 API 金鑰，在 `https://<server>:7860/x/<name>/<path>?<query>` 呼叫公開的應用程式。和 `/v1` 一樣只接受 `Authorization: Bearer fyk_…`：不接受 cookie、不接受放在查詢字串裡的金鑰、不送 CORS 標頭。
 
 ### 路徑與方法
 
@@ -618,18 +643,18 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 ### 從 Playground 呼叫
 
-console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的視覺應用程式，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
+1.4 起，console 的 **Playground → Vision** 分頁只提供視覺模型，`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
 
 | 路由 | 做什麼 |
 |---|---|
-| `GET /api/playground/vision/options` | `workloads`：每個公開視覺應用程式的 `name`、`workload_id`、`task`、`title`、`model`、`licence`、`endpoint`、`path`、`ready`（在金鑰守門員後面的副本數）、`reason`（為什麼沒有就緒的副本）、`max_body_mb`；`tasks`：範本的任務 |
+| `GET /api/playground/vision/options` | `models`：視覺模型（見[視覺](#vision)）；`tasks`：視覺任務 |
 | `POST /api/playground/vision/<name>/<task>` | 把本文（圖片，multipart）送到應用程式自己的 `POST /v1/<task>`，不會送到別處：沒有其他路徑、方法或查詢字串 |
 
 之後請求依照上面 `/x/` 的規則：同樣的副本和金鑰守門員、請求與回應標頭（cookie 絕不會送到應用程式）、應用程式的 **Largest request**、**Requests at once per replica** 和 **Requests at once per key**（以每個人計算）、它的逾時，以及同樣的錯誤。任務和應用程式的不同，或應用程式不是公開的視覺應用程式，回 404 `workload_not_found`；視覺伺服器沒有的任務回 404 `unknown_task`。用量記在 `x:<name>` 底下，來源是 *console*，算在登入的人身上。
 
 ## 應用程式範本
 
-範本執行伺服器版本的 `docker.io/tonyhuang1101/forgeyard-vision`：tag `X.Y.Z`（CPU，linux/amd64 與 linux/arm64）或 `X.Y.Z-cuda`（CUDA 13.0 的 torch，linux/amd64，NVIDIA 驅動 580 或更新）。它由儲存庫裡的 `images/vision` 建置，相依套件以雜湊值固定，模型以固定的 revision 包在裡面，並以無特權的使用者執行。`GET /api/workloads/templates` 會列出範本，以及每個範本產生的應用程式規格。
+**1.4 起淘汰，1.5 移除。**範本執行伺服器版本的 `docker.io/tonyhuang1101/forgeyard-vision`：tag `X.Y.Z`（CPU，linux/amd64 與 linux/arm64）或 `X.Y.Z-cuda`（CUDA 13.0 的 torch，linux/amd64，NVIDIA 驅動 580 或更新）。它由儲存庫裡的 `images/vision` 建置，相依套件以雜湊值固定，模型以固定的 revision 包在裡面，並以無特權的使用者執行。`GET /api/workloads/templates` 會列出範本，以及每個範本產生的應用程式規格。
 
 | 端點 | 接受 | 回傳 |
 |---|---|---|
@@ -779,6 +804,7 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
 | `gpus-shared-no-allowlist` | 警告 | 某台機器的顯示卡佔用的記憶體比 Forgeyard 在那裡保留的多出至少 1 GiB，而且沒有人選擇它的 GPU 存取 |
 | `machine-no-models` | 提示 | 某個上線的 agent 沒有模型快取，所以不會有模型放到那裡。如果它有 GPU，則是警告 |
+| `apps-deprecated` | 警告 | 有應用程式（不是模型的 workload）：它們、它們的 API 和 `/x/` 會在 1.5 移除 |
 | `process-workloads-off` | 提示 | 某個上線的 agent 拒絕行程；檢查結果會說明原因 |
 | `model-cache-full` | 警告 | 某台機器的模型快取磁碟剩餘空間不到 10% |
 | `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |

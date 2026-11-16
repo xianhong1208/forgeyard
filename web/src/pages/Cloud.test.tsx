@@ -181,26 +181,24 @@ describe("navigation", () => {
   });
 });
 
-describe("Apps (1.4, #81: Workloads before)", () => {
-  it("FY-WEB-268 /workloads and everything under it opens the same place under /apps, and a model's workload its deployment, replacing the history entry", async () => {
+describe("Apps left the console (1.4, #88)", () => {
+  it("FY-WEB-268 /workloads… (1.3) and /apps… open a model's deployment, or Machines for anything else, replacing the history entry", async () => {
     const cases: [string, string][] = [
-      ["/workloads", "/apps"],
-      ["/workloads/new", "/apps/new"],
-      ["/workloads/new?template=vision-detect&gpu=1", "/apps/new?template=vision-detect&gpu=1"],
-      ["/workloads/new?machine=2", "/apps/new?machine=2"],
-      ["/workloads/7", "/apps/7"],
+      ["/workloads", "/machines"],
+      ["/workloads/new", "/machines"],
+      ["/workloads/new?template=vision-detect&gpu=1", "/machines"],
+      ["/workloads/7", "/machines"],
+      ["/apps", "/machines"],
+      ["/apps/new?machine=2", "/machines"],
+      ["/apps/7", "/machines"],
+      ["/apps/7/x", "/machines"],
       // a model deployment's workload: its page is the deployment's
-      ["/workloads/9", "/serving/1"],
-      ["/apps/9", "/serving/1"],
+      ["/workloads/11", "/serving/1"],
+      ["/apps/11", "/serving/1"],
+      ["/workloads/11#x", "/serving/1#x"],
     ];
-    const app = { ...workload(7, "notebook"), runtime: "container" };
-    const model = { ...workload(9, "chat"), deployment_id: 1, deployment: { id: 1, name: "chat" } };
     for (const [from, to] of cases) {
-      server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "", can_manage: true } }
-        : url === "/api/workloads/7" ? { status: 200, body: { workload: app, events: [], server_time: "", can_manage: true } }
-          : url === "/api/workloads/9" ? { status: 200, body: { workload: model, events: [], server_time: "", can_manage: true } }
-            : url === "/api/deployments/1" ? { status: 200, body: { deployment: { ...DEPLOYMENTS[0], routing: MIXED, also_in: [] }, events: [], server_time: "", can_manage: true } }
-              : undefined);
+      world();
       const view = render(<MemoryRouter initialEntries={["/start", from]} initialIndex={1}><AuthProvider><App /><Where /><Back /></AuthProvider></MemoryRouter>);
       await waitFor(() => expect([from, where()]).toEqual([from, to]));
       fireEvent.click(screen.getByTestId("back"));

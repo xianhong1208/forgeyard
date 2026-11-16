@@ -254,65 +254,6 @@ config），或者當 id 是儲存自己產生的時候，比對它的內容（�
 釘住的映像檔無法檢查：在離線機器上，請在你的自訂 recipe 裡只用 tag 指定它。這項檢查需要這一版或更新的
 agent；舊版 agent 會試著去拉。
 
-## 執行服務或任務
-
-管理員和操作員可以把自己的程式當成**應用程式**在機器上執行。這是進階功能，不在選單裡：在伺服器上打開 `/apps` → **New app**，填好表單，選 **Create and start**。
-
-1. **What：** **Service**（一直執行到你停止它；結束時會重新啟動）或 **Task**（執行到結束）。**Name**：`a-z`、`0-9` 和 `-`，不能重複。
-2. **Run：** **Container**（一個 **Image**，例如 `python:3.13-slim`，可選填 **Entrypoint**）或 **Process**（基本 `PATH` 上的 **Command** 或絕對路徑，由 agent 以執行行程的帳號執行）。**Arguments** 一行一個，不需要 shell 引號。
-3. **Where：** 一台 **Machine**，或 *Any online machine with room*；**GPUs**：*None*、*How many*（再加上 **Vendor**），或在選定的機器上指定 *These cards*；**CPU cores**、**Memory**（例如 `4Gi`）和 **Replicas**（1 到 16 個，每個在一台機器上）。
-4. **Environment：** 它需要的變數。它從空的環境開始；Forgeyard 會加入的變數列在[參考資料](reference.md#app-environment)。值會加密儲存。
-5. **Ports and health**（服務）：它監聽的每個連接埠都按一次 **Add port**。agent 會從它的範圍挑一個主機連接埠，並把位址顯示在應用程式的頁面上。行程監聽 `$PORT`（參數裡用 `${PORT_<NAME>}`）；容器則填它自己的連接埠，主機連接埠會對應過去。**Health check**：*None*、*HTTP*（一個 **Path**）或 *TCP*。**Restart**：*Always*、*On failure* 或 *Never*。
-6. **Limits and retries**（任務）：**Max duration (s)** 超過時會停止並標為失敗；非零結束時依 **Retries** 重試，**Retry backoff (s)** 每次加倍，最多 5 分鐘。
-
-*Spec that will be sent* 會顯示表單產生的 JSON。應用程式的頁面會顯示每個副本、它的機器、GPU 和位址、事件，以及最後幾行輸出。**Stop** 會停止每個副本（先 SIGTERM，10 秒後 SIGKILL）並釋出它的 GPU；**Start** 會重新配置它們；**Delete** 還會刪除它的歷史和輸出。
-
-隔離方式簡述：行程以無特權帳號 `forgeyard-run` 執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[應用程式](concepts.md#apps-advanced)。
-
-## 在 /x/ 公開應用程式
-
-透過閘道、帶著 API 金鑰呼叫服務自己的 HTTP API。由管理員和操作員設定。
-
-1. **服務監聽 loopback。** 在 agent 的金鑰守門員後面，行程必須監聽 `127.0.0.1`：在它的參數裡用 `${BIND_ADDRESS}` 和 `${PORT}`，它們會變成 `127.0.0.1` 和它的連接埠。容器照常監聽它自己的連接埠（agent 會把它發布在 loopback 上）。監聽其他位址的行程會被停止，所以它永遠不會繞過守門員被連到。
-2. **公開它。** 在 **New app** 的 **Gateway** 底下勾選 **Expose at** `/x/<name>`；或在執行中應用程式的頁面上，**Gateway** → **Expose** → **Save**：它的副本會在守門員後面重新啟動。**Limits and timeouts**（預設收合）裡有 **Port**（預設：第一個）、**Read timeout (s)**（600）、**Largest request (MiB)**（32）、**Requests at once per replica** 和 **Requests at once per key**（預設不限）。
-3. **讓金鑰可以呼叫。** 在 **API keys** 頁面，金鑰的 **Apps at /x/**：*Listed apps*（勾選它）或 *Every exposed app*。新金鑰是 *None*。
-4. **呼叫它。** 應用程式的頁面會顯示它的位址和一個 `curl` 呼叫。前綴會被拿掉：`/x/detector/v1/detect` 到服務那邊是 `/v1/detect`。
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
-  -F image=@street.jpg
-```
-
-會產生連結或轉址的服務，可以讀 `X-Forwarded-Prefix`（`/x/<name>`），或設定它的 root path。例如以行程方式用 `python3 -m uvicorn` 執行的 FastAPI 服務，**Environment** 加上變數 `ROOT_PATH=/x/echo`：
-
-```python
-# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
-# root_path makes the docs and redirects use the public prefix.
-import os
-from fastapi import FastAPI, Request
-
-app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
-
-@app.post("/v1/echo")
-async def echo(request: Request):
-    return {"bytes": len(await request.body())}
-```
-
-**Arguments** 填：
-
-```text
--m
-uvicorn
-app:app
---host
-${BIND_ADDRESS}
---port
-${PORT}
-```
-
-關掉 **Expose** 會立刻關閉 `/x/<name>`；守門員會一直留在副本前面，直到應用程式重新啟動。哪些東西會通過、哪些會被拿掉，請見[參考資料](reference.md#the-passthrough-x)。
-
 ## 部署物件偵測模型
 
 物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**Models**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
@@ -363,43 +304,9 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
 
-## 從範本做的應用程式（1.3）
-
-在 1.3，`/apps` 的 **Start from a template** 會把現成的視覺 API 做成應用程式；1.4 起視覺模型像其他模型一樣部署（[見上一節](#deploy-an-object-detection-model)），這個面板也拿掉了。已經從範本做出來的應用程式照常執行，`/apps/new?template=<id>`（或 `GET /api/workloads/templates`）也還能做一個。每個都執行 Forgeyard 自己的 vision server 映像檔，模型包在裡面，公開在 `/x/<name>`：
-
-| 範本 | 模型（授權） | 呼叫 |
-|---|---|---|
-| **Object detection** | RT-DETRv2 ResNet-18，`PekingU/rtdetr_v2_r18vd`（Apache-2.0） | `POST /x/detector/v1/detect`：框、標籤與分數 |
-| **Segmentation** | SAM 2.1 Hiera tiny，`facebook/sam2.1-hiera-tiny`（Apache-2.0） | `POST /x/segmenter/v1/segment`，給一個點或一個框：遮罩 |
-| **Depth estimation** | Depth Anything V2 Small，`depth-anything/Depth-Anything-V2-Small-hf`（Apache-2.0） | `POST /x/depth/v1/depth`：16 位元的深度 PNG |
-
-1. 開 `/apps/new?template=object-detection&gpu=1`（映像檔的 CUDA 版本，以記憶體共用一張卡，3 GiB），不加 `&gpu=1` 則是 CPU 版本。表單會開好並填好：映像檔、任務、連接埠、健康檢查，以及 **Expose at** `/x/<name>`。可以改任何東西，例如名稱或機器，再按 **Create and start**。
-2. 讓 API 金鑰可以呼叫它（**API keys** → 金鑰的 **Apps at /x/**）。
-3. 以 multipart 檔案欄位 `image` 送出圖片（或 JSON `{"image": "<base64>"}`）：
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
-```
-
-只提供寬鬆授權的模型：不用 Ultralytics YOLOv8 或 YOLO11（AGPL-3.0），Depth Anything V2 也只用 Small（Base 和 Large 是 CC-BY-NC-4.0）。模型以固定的 revision 包在映像檔裡，所以映像檔到了機器上之後，範本就不需要網路。連不到 Docker Hub 的機器，請把映像檔複製過去（CUDA 版本需要 NVIDIA 驅動 580 或更新；沒有可用的 GPU 時會改用 CPU）：
-
-```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeyard-vision.tar.gz
-# on the machine without the network:
-gunzip -c forgeyard-vision.tar.gz | sudo docker load
-```
-
-AMD 機器請用 CPU 版本：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#app-templates)。不用 API 金鑰就想試試看，請見[在 Playground 試用視覺](#try-vision-in-the-playground)。
-
 ## 在 Playground 試用視覺
 
-**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。在 Playground 的 **Models** 分頁選視覺模型，也會開出同一個面板。從 1.3 範本做的應用程式不再列在這裡（1.4 起應用程式離開主控台）：請用 API 金鑰呼叫 `/x/<name>`。
+**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。在 Playground 的 **Models** 分頁選視覺模型，也會開出同一個面板。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
 
 1. 選 **Model**：每一個都標出任務和模型。還沒有時，分頁會這樣說明；管理員和操作員會看到加入目錄的連結。
 2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。

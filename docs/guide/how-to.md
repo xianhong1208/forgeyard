@@ -354,97 +354,6 @@ them exactly. Another image pinned by digest cannot be checked: on an offline ma
 tag only in your custom recipe. The check needs an agent from this release or later; an older one
 tries to pull.
 
-## Run a service or a task
-
-Admins and operators run their own programs on the machines as **apps**, an advanced feature that
-is not in the menu: open `/apps` on the server → **New app**, fill in the form, and choose **Create and start**.
-
-1. **What:** **Service** (runs until you stop it; restarted when it exits) or **Task** (runs to the
-   end). A **Name**: `a-z`, `0-9` and `-`, unique.
-2. **Run:** **Container** (an **Image**, for example `python:3.13-slim`, with an optional
-   **Entrypoint**) or **Process** (a **Command** on the basic `PATH` or an absolute path, run by the
-   agent as its account for processes). **Arguments** go one per line, without shell quoting.
-3. **Where:** a **Machine**, or *Any online machine with room*; **GPUs**: *None*, *How many* (and
-   a **Vendor**), or *These cards* on a chosen machine; **CPU cores**, **Memory** (for example `4Gi`)
-   and **Replicas** (1 to 16, each on one machine).
-4. **Environment:** the variables it needs. It starts from an empty environment; the variables
-   Forgeyard adds are in the [reference](reference.md#app-environment). Values are stored
-   encrypted.
-5. **Ports and health** (a service): **Add port** for each port it listens on. The agent picks a host
-   port from its range and shows the address on the app's page. A process listens on `$PORT`
-   (or `${PORT_<NAME>}` in its arguments); a container gives its own port, which the host port maps
-   to. **Health check**: *None*, *HTTP* (a **Path**) or *TCP*. **Restart**: *Always*, *On failure* or
-   *Never*.
-6. **Limits and retries** (a task): **Max duration (s)** stops and fails it when it runs longer;
-   **Retries** after a non-zero exit, with a **Retry backoff (s)** that doubles each time, up to 5
-   minutes.
-
-*Spec that will be sent* shows the JSON the form makes. The app's page shows each replica, its machine, GPUs and address, the
-events, and the last lines of its output. **Stop** stops every replica (SIGTERM, then SIGKILL after
-10 s) and frees its GPUs; **Start** places them again; **Delete** also removes its history and
-output.
-
-Isolation, in short: a process runs as the unprivileged account `forgeyard-run` with only its own cards
-visible; a container gets only its cards, never `--privileged`. See
-[Apps (advanced)](concepts.md#apps-advanced).
-
-## Expose an app at /x/
-
-Call a service's own HTTP API through the gateway, with an API key. Admins and operators do this.
-
-1. **The service listens on loopback.** Behind the agent's key guard a process must listen on
-   `127.0.0.1`: give it `${BIND_ADDRESS}` and `${PORT}` in its arguments, which become `127.0.0.1`
-   and its port. A container listens on its own port as usual (the agent publishes it on loopback).
-   A process that listens on another address is stopped, so it is never reachable around the guard.
-2. **Expose it.** In **New app**, tick **Expose at** `/x/<name>` under **Gateway**; or, on a
-   running app's page, **Gateway** → **Expose** → **Save**: its replicas restart behind the
-   guard. **Limits and timeouts** (collapsed) holds the **Port** (default: the first),
-   **Read timeout (s)** (600), **Largest request (MiB)** (32), **Requests at once per replica** and
-   **Requests at once per key** (no limit by default).
-3. **Give a key access.** On **API keys**, a key's **Apps at /x/**: *Listed apps* (tick
-   it) or *Every exposed app*. New keys have *None*.
-4. **Call it.** The app's page shows its address and a `curl` call. The prefix is stripped:
-   `/x/detector/v1/detect` reaches the service as `/v1/detect`.
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
-  -F image=@street.jpg
-```
-
-A service that builds links or redirects can read `X-Forwarded-Prefix` (`/x/<name>`), or set its root
-path. For example, a FastAPI service run with `python3 -m uvicorn` as a process, with the
-**Environment** variable `ROOT_PATH=/x/echo`:
-
-```python
-# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
-# root_path makes the docs and redirects use the public prefix.
-import os
-from fastapi import FastAPI, Request
-
-app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
-
-@app.post("/v1/echo")
-async def echo(request: Request):
-    return {"bytes": len(await request.body())}
-```
-
-and these **Arguments**:
-
-```text
--m
-uvicorn
-app:app
---host
-${BIND_ADDRESS}
---port
-${PORT}
-```
-
-Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of the replicas until the
-app is restarted. What passes and what is removed is in the
-[reference](reference.md#the-passthrough-x).
-
 ## Deploy an object-detection model
 
 Object detection, segmentation and depth are model kinds of their own (1.4): you add them to the
@@ -511,60 +420,13 @@ kilopixels; a key's model list and requests per minute apply as for any model.
 On a machine that cannot reach Docker Hub, load the vision image under the tag of the server's version
 (Models → Engines → `vision` → *Machine without registry access* gives the commands).
 
-## Apps made from a template (1.3)
-
-In 1.3, **Start from a template** on `/apps` made ready-made vision APIs as apps; in 1.4 vision models
-are deployed like any other model instead ([above](#deploy-an-object-detection-model)) and the panel is gone.
-Apps already made from a template keep running as they are, and `/apps/new?template=<id>` (or
-`GET /api/workloads/templates`) still makes one. Each runs Forgeyard's own vision server image with its
-model baked in and is exposed at `/x/<name>`:
-
-| Template | Model (licence) | Call |
-|---|---|---|
-| **Object detection** | RT-DETRv2 ResNet-18, `PekingU/rtdetr_v2_r18vd` (Apache-2.0) | `POST /x/detector/v1/detect`: boxes, labels and scores |
-| **Segmentation** | SAM 2.1 Hiera tiny, `facebook/sam2.1-hiera-tiny` (Apache-2.0) | `POST /x/segmenter/v1/segment` with a point or a box: masks |
-| **Depth estimation** | Depth Anything V2 Small, `depth-anything/Depth-Anything-V2-Small-hf` (Apache-2.0) | `POST /x/depth/v1/depth`: a 16-bit depth PNG |
-
-1. Open `/apps/new?template=object-detection&gpu=1` (the image's CUDA build, one card shared by memory,
-   3 GiB), or without `&gpu=1` for the CPU build. The form opens filled in: the image, the task, the port, the health
-   check and **Expose at** `/x/<name>`. Change anything, for example the name or the machine, then
-   **Create and start**.
-2. Allow an API key to call it (**API keys** → the key's **Apps at /x/**).
-3. Send an image as a multipart file `image` (or JSON `{"image": "<base64>"}`):
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
-```
-
-Only permissively licensed models are offered: not Ultralytics YOLOv8 or YOLO11 (AGPL-3.0), and only the
-Small Depth Anything V2 (Base and Large are CC-BY-NC-4.0). The models are inside the image, at pinned
-revisions, so a template needs no network once its image is on the machine. For a machine that cannot
-reach Docker Hub, copy the image (the CUDA build needs NVIDIA driver 580 or newer; without a usable GPU
-it runs on the CPU):
-
-```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeyard-vision.tar.gz
-# on the machine without the network:
-gunzip -c forgeyard-vision.tar.gz | sudo docker load
-```
-
-On AMD machines use the CPU build: the image has no ROCm build. What each endpoint takes and returns
-is in the [reference](reference.md#app-templates). To try one without an API key, see
-[Try vision in the Playground](#try-vision-in-the-playground).
-
 ## Try vision in the Playground
 
 **Playground → Vision** sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
 as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
 model in **Usage**. A vision model picked on the Playground's **Models** tab opens the same panel. Apps
-made from the 1.3 templates are not offered here any more (Apps leave the console in 1.4): call them at
-`/x/<name>` with an API key.
+made from the 1.3 templates are not offered here (apps left the console in 1.4 and are
+[removed in 1.5](reference.md#apps-deprecated)).
 
 1. Pick the **Model**: each is listed with its task and model. With none yet, the tab says so; admins
    and operators get a link to add one to the catalog.

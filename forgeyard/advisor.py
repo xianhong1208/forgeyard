@@ -530,6 +530,25 @@ def offline_with_replicas(ctx: Context) -> Iterator[Finding]:
                           scope=f"machine:{n.id}", pages=("machines", "serving"))
 
 
+@check
+def apps_deprecated(ctx: Context) -> Iterator[Finding]:
+    """V51 (1.4, #88): apps (workloads that are not models) are deprecated and go in 1.5, with /x/ and the
+    templates. Said while any app exists, so nobody learns it from the upgrade."""
+    from forgeyard import deprecation
+
+    apps = ctx.db.scalars(select(Workload.name).where(Workload.runtime != "model").order_by(Workload.name)).all()
+    if not apps:
+        return
+    yield Finding("apps-deprecated", "warning",
+                  f"{len(apps)} app{'s' if len(apps) != 1 else ''} will stop working in Forgeyard {deprecation.REMOVED_IN}",
+                  f"{_names(apps)} {'is an app' if len(apps) == 1 else 'are apps'}: a workload that is not a model. Apps, "
+                  "their API (/api/workloads, the templates) and the gateway's /x/ are deprecated and removed in "
+                  f"{deprecation.REMOVED_IN}, and the console no longer shows them. Deploy what you need as a model "
+                  "instead (a custom engine runs a model Forgeyard has no engine for), then delete the apps "
+                  "with DELETE /api/workloads/<id>.",
+                  f"{REFERENCE}#apps-deprecated", "What changes", pages=("machines",))
+
+
 # --- models and deployments
 @check
 def replica_margin_low(ctx: Context) -> Iterator[Finding]:

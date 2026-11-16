@@ -46,26 +46,14 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 要在部署上修改，用 **Edit**：[修改部署](how-to.md#change-a-deployment)。
 
-## 應用程式（進階）
+## 應用程式（已淘汰）
 
-**應用程式（Apps）不在選單裡。**大部分的人只需要部署模型：要使用模型，請在 **Serving** 部署它。需要更多功能的管理員和 operator 可以直接在伺服器上打開 `/apps`（例如 `https://<server>:7860/apps`）。
+1.4 之前，主控台也能執行**應用程式（app）**：你自己的程式（容器或行程、服務或一次性任務），跑在你的機器上，也可以公開在 `/x/<name>` 讓 API 金鑰呼叫。Forgeyard 的重點是執行和管理模型，所以 1.4 起應用程式離開主控台，**1.5 會移除**它們：API 裡屬於應用程式的部分（`/api/workloads`）、範本，以及閘道的 `/x/`。在那之前，它們只能透過 API 使用，並會明白告知：每個回應都帶 `Deprecation` 標頭，伺服器紀錄會警告（每小時最多一次），只要還有任何應用程式，**Setup health** 就會警告。細節在[參考資料](reference.md#apps-deprecated)。
 
-**應用程式（app）**是你自己在機器上執行的程式，以容器（機器上的 Docker 或 Podman）或行程的方式執行。它適合 Forgeyard 不會執行的東西：例如模型作者自己的伺服器映像檔，公開在 [`/x/<name>`](#apps-at-x) 讓 API 金鑰呼叫；或一次性的 GPU **任務**（批次工作，可以重試、有時間上限），以及一直執行到停止為止的**服務**。每個應用程式有 1 到 16 個副本，每個副本在一台機器上，只拿到分配給它的卡。行程以無特權帳號 `forgeyard-run` 執行，容器絕不使用 `--privileged`；兩者都從空的環境開始。API 稱應用程式為 *workloads*（`/api/workloads`）。
+- 要提供模型，請在 **Serving** 部署它。物件偵測、影像分割和深度估計從 1.4 起是[視覺模型](#vision-models)。
+- 內建引擎跑不了的模型，可以加一個**自訂引擎**（**Models → Engines → Add a custom engine**）：和內建的一樣是一份 recipe，指向它的容器映像檔或程式。
 
-**Apps** 頁面只列出應用程式。模型部署也以 workload（runtime 為 `model`）執行，但模型只在 **Serving** 底下看得到，舊的 workload 頁面連結會打開它的部署；API 拒絕停止、啟動或刪除它（`409 managed_by_deployment`）。**Machines** 兩者都會顯示，因為模型和應用程式都佔用顯示卡。
-
-## 在 /x/ 的應用程式
-
-服務型的應用程式可以**公開**在閘道後面：程式就能帶著 API 金鑰，在 `https://<server>:7860/x/<name>/…` 呼叫它自己的 HTTP API，就像在 `/v1` 呼叫模型一樣。適合不是對話、嵌入、語音或圖片模型的東西：物件偵測、影像分割、深度估計、Triton 或 KServe 的模型、FastAPI 或 BentoML 服務。
-
-- **在金鑰守門員後面。** 公開的應用程式和模型副本一樣，跑在 agent 的金鑰守門員後面：程式監聽 loopback，守門員佔住對外公開的連接埠，只有閘道能通過。守門員會在請求送到程式之前，拿掉閘道的內部金鑰。應用程式的每個連接埠都會被守住，不只是公開的那一個。
-- **金鑰要自己開啟。** 金鑰的 **Apps** 設定決定它能呼叫哪些公開的應用程式：*None*（預設值，1.3 之前的每把金鑰也是）、*Listed apps* 或 *Every exposed app*（API 裡是 `workloads`）。
-- **是 API，不是網頁。** 回應會被放進沙箱（`Content-Security-Policy: sandbox`），cookie 和 CORS 標頭會被拿掉，轉址會改寫到 `/x/<name>` 底下。瀏覽器介面（Gradio、Jupyter）在 `/x/` 無法使用。1.3 不轉送 WebSocket 和 gRPC，也不會溢出到雲端。
-- **會被計量。** 請求、錯誤、送進與送出的位元組、忙碌時間和延遲，會以模型 `x:<name>` 記在 **Usage**；金鑰的每分鐘請求數限制同樣適用。
-
-管理員和操作員可以在建立應用程式時公開它，或之後在它的頁面上公開。請見[在 /x/ 公開應用程式](how-to.md#expose-an-app-at-x)。
-
-1.3 有三個**範本**用這種方式啟動最常見的視覺 API（物件偵測、影像分割、深度估計）。1.4 起它們是[視覺模型](#vision-models)，像其他模型一樣部署；已經從範本做出來的應用程式照常執行。請見[從範本做的應用程式](how-to.md#apps-made-from-a-template-13)。
+**Machines** 仍會列出佔用顯示卡的應用程式名稱，所以使用中的卡不會被顯示成空閒。模型部署也以 workload（runtime 為 `model`）執行：模型就是這樣跑的，這部分沒有淘汰。
 
 ## 模型、引擎與估算
 

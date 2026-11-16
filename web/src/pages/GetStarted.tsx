@@ -10,7 +10,7 @@ import { API_KIND } from "../lib/gateway";
 import { MACHINES } from "../lib/nav";
 import { KEY_ENV, currentStep, exampleCall, type Checklist, type Step } from "../lib/onboarding";
 import { useApi } from "../lib/useApi";
-import { usePoll } from "./Workloads";
+import { usePoll } from "../lib/poll";
 
 // Steps tick themselves off from real state (a machine joining, a deployment becoming ready), so
 // the page follows along while it is open.

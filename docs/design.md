@@ -65,15 +65,22 @@ agent dials out to the server, so the server never needs to reach the machine.
 
 A **workload** is something to run on your machines: a **service** (runs until stopped, is
 health-checked and restarted) or a **task** (runs to the end, with retries and a time limit).
-Each one has 1 to 16 **replicas**; each replica runs on one machine. Open **Apps → New app**, or
-`POST /api/workloads` with the spec.
+Each one has 1 to 16 **replicas**; each replica runs on one machine. Model deployments run as
+workloads (runtime `model`); fine-tuning (1.9) will too.
 
-**In the console they are apps** (1.4, #81), an advanced page that is not in the menu: **Apps** (`/apps`; `/workloads…` redirects)
-lists only the workloads people run themselves. A model deployment's workload (runtime `model`) is
-seen under **Serving** only: its deployment's page has the replicas, output and events, and an old
-link to its workload page opens the deployment. The API keeps the name `workloads` and still refuses
-stop, start and delete of a deployment's workload (409 `managed_by_deployment`). **Machines** shows
-both, since both hold cards. The spec:
+**Apps leave Forgeyard** (#88, #89). A workload people run themselves, not a model's, was an *app*:
+in the console under **Apps** (1.4, #81), made with `POST /api/workloads`, optionally exposed at
+`/x/`. Forgeyard is about running and managing models, so 1.4 removes apps from the console (pages,
+templates, a key's *Apps at /x/* setting, the Playground's vision apps) and deprecates the rest: the
+apps part of `/api/workloads`, `GET /api/workloads/templates` and `/x/` keep working until 1.5 and say
+so (forgeyard/deprecation.py: a `Deprecation` header, RFC 9745, and a `Link` to the guide on every
+answer, errors included; a server log warning per kind at most once an hour; the Setup health finding
+`apps-deprecated` while any app exists). `GET /api/keys` and the Playground's vision options no
+longer list apps. 1.5 removes the API, `/x/`, the templates and the keys' settings, with a migration
+that removes the apps left. Old console links (`/apps…`, 1.3's `/workloads…`) open a model's
+deployment or Machines. **Machines** still names an app that holds a card (not linked), so a card in
+use is never shown free. A model deployment's workload is seen under **Serving** only, and the API
+still refuses stop, start and delete of it (409 `managed_by_deployment`). The spec:
 
 ```json
 {"name": "web", "kind": "service",
@@ -626,7 +633,7 @@ server's version (`forgeyard_image`) rather than pinned by digest, since it is b
 and its digest is not known before. The server asks for `VISION_API_KEY` on every path but `/health`;
 the baked-in models stay for the apps made from templates until Apps go (#88).
 
-### Workloads at /x/ (1.3, generic passthrough)
+### Workloads at /x/ (1.3, generic passthrough; deprecated in 1.4, removed in 1.5)
 
 Anything that is not a chat, embedding, speech or image model (detection, segmentation, depth, a
 Triton or KServe model, a FastAPI or BentoML service) runs as a service workload and is **exposed**

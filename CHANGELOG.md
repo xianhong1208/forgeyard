@@ -143,13 +143,8 @@ version until 1.0.
 
 ### Changed
 
-- **Apps no longer offers the vision templates** (#86): the *Start from a template* panel is gone, and
-  **Playground → Vision** lists vision models only (Apps leave the console in 1.4, #88). Apps already
-  made from a template keep running at `/x/`; `/apps/new?template=…` and `GET /api/workloads/templates`
-  still work, and the vision image keeps its baked-in models for them.
-
-- **One thing in one place: Serving runs the models, Models is the library, Workloads are Apps, cloud
-  settings are on Cloud** (#34, #36, #81, #92). The console only; the API and the data are unchanged.
+- **One thing in one place: Serving runs the models, Models is the library, cloud settings are on
+  Cloud** (#34, #36, #81, #92; apps left the console, #88). The console only; the API and the data are unchanged.
   - **Serving** (`/serving`) is a page of its own: the models running now, grouped by kind (the
     Deployments list of Models before), with **Deploy a model** (`/serving/deploy`). A deployment's
     page is `/serving/<id>` and it is changed at `/serving/<id>/edit`.
@@ -176,26 +171,18 @@ version until 1.0.
     deployments only (several behind one name, or one under a second name) is listed there too, under
     *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
     `/cloud/providers/<id>`.
-  - **Workloads is now Apps** (`/apps`), an advanced page that is **not in the menu**; it says first
-    that models are deployed under Serving. It lists only the programs people run themselves (services and
-    tasks: vision templates, notebooks, batch jobs, any image or command), with **New app** and
-    **Start from a template**. Workloads made by model deployments are not listed there, and its
-    counts (*Apps*, *Running*, *Waiting*, *Failing*, *GPUs used by apps*) are the apps' alone. The
-    console says *app* for them everywhere (a key's **Apps at /x/** setting, the Playground's Vision
-    tab, the audit filter); the API keeps `workloads`.
   - **A model is seen under Serving only**: its deployment's page has its replicas, output and events,
     and no longer says *Runs as workload X*; an old link to a model's workload page opens the
     deployment. **Machines** still shows everything that holds a card: its tiles, memory map and
-    *Running here* name models (linked to the deployment) and apps (linked to the app).
+    *Running here* name models (linked to the deployment) and apps (named, not linked: #88).
   - The menu is Machines, Serving, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit
-    log (admins), and the pages are numbered 01 to 09 in that order; the Apps pages say *Advanced ·
-    Apps*. A machine's page no longer offers **New app here**; its memory map and *Running here* still
-    list apps. "Route" and "workload" left the console's navigation.
+    log (admins), and the pages are numbered 01 to 09 in that order. "Route" and "workload" left the
+    console's navigation.
   - 1.3's links open the new places, without a step in the history: `/models/deployments/<id>` (and
     `/edit`, keeping `#cloud-fallback`), `/models/deploy` (keeping `?model=` and `?machine=`),
     `/deployments`, `/models?tab=deployments` and `?tab=routes` (Serving), `?tab=catalog` (the
-    Catalog), `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads`,
-    `/workloads/<id>` and `/workloads/new` (to the same place under `/apps`). Setup-health findings
+    Catalog), `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads…` (a model's
+    workload: its deployment; anything else: Machines). Setup-health findings
     link to Serving, a deployment's page or its cloud fallback, **Models → Sources** (the Hugging Face
     token, settings still read from `.env`), a cloud model or `/cloud/providers/<id>`, and show on those
     pages; Get started's steps open the Catalog and **Serving → Deploy a model**.
@@ -209,8 +196,30 @@ version until 1.0.
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
 
+### Deprecated
+
+- **Apps: their API, the templates and `/x/`** (#88), removed in 1.5 (#89) with a migration that removes
+  the apps left. Forgeyard is about running and managing models; an app (a workload that is not a
+  model's) drifts from that. Until 1.5 they keep working, and say so:
+  - the apps part of `/api/workloads` (create; read, expose, stop, start, delete and the logs of an app;
+    the list while it holds an app), `GET /api/workloads/templates`, `/x/<name>/…` and the console's
+    `POST /api/playground/vision/<name>/<task>` answer with `Deprecation: @1794787200` (RFC 9745) and
+    `Link: </guide/en/reference#apps-deprecated>; rel="deprecation"`, errors included; no `Sunset` yet;
+  - the server log warns once an hour at most per kind (apps, templates, `/x/`), naming the request;
+  - **Setup health** warns (`apps-deprecated`) while any app exists, naming them.
+
+  A key's `workloads` and `workload_list` settings stay in the API until 1.5. A model deployment's
+  workload is not deprecated: it is how models run (fine-tuning in 1.9 will run the same way). Use a
+  model deployment instead; a model no built-in engine runs gets a custom engine (**Models → Engines**).
+
 ### Removed
 
+- **Apps in the console** (#88). The Apps pages (`/apps`, an app's page, New app and its templates), a
+  key's **Apps at /x/** setting on API keys, and the exposed vision apps in **Playground → Vision**
+  (vision models replace them, #86) are gone. `/apps…` and 1.3's `/workloads…` open a model's
+  deployment, or Machines. **Machines** still names an app that holds a card (not linked), so a card in
+  use is never shown free. `GET /api/keys` no longer lists the apps a key could name (`workloads`), and
+  `GET /api/playground/vision/options` no longer lists the exposed vision apps (`workloads`).
 - **The seven settings deprecated in 1.3.1 are no longer read** (#78): `SECRET_KEY_FILE`,
   `AGENT_HEARTBEAT_SECONDS`, `FORGEYARD_SETUP_TOKEN`, `USAGE_FLUSH_SECONDS`,
   `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and `OPENROUTER_MODELS_URL`. The behaviour

@@ -259,6 +259,8 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 ## 來自 /x/ 的錯誤
 
+`/x/` 在 1.4 淘汰，1.5 移除（[應用程式（已淘汰）](reference.md#apps-deprecated)）。
+
 - **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
 - **404 `workload_not_found`：** 名稱打錯、應用程式沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他應用程式。
 - **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或應用程式是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動應用程式。

@@ -17,8 +17,8 @@ import type { Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions,
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { RoutingEditor } from "./RouteDetail";
-import { NotPickedUpNotice, Output } from "./WorkloadDetail";
-import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
+import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
+import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
 
 export function DeploymentDetailPage() {
   const { id } = useParams();

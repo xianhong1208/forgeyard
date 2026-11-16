@@ -308,7 +308,7 @@ describe("add a model", () => {
 
 // ------------------------------------------------------------------ empty pages
 describe("empty pages say what to do", () => {
-  it("FY-WEB-111 Playground, Usage, API keys and Apps, by role", async () => {
+  it("FY-WEB-111 Playground, Usage and API keys, by role", async () => {
     const fetch = server((url) => {
       if (url === "/api/routes") return { status: 200, body: { routes: [] } };
       if (url.startsWith("/api/usage")) return { status: 200, body: { rows: [], total: { requests: 0, errors: 0, limited: 0, tokens: 0, prompt_tokens: 0, completion_tokens: 0, latency_p50_ms: null, latency_p95_ms: null },
@@ -332,10 +332,6 @@ describe("empty pages say what to do", () => {
     mount("/keys");
     fireEvent.click(await screen.findByRole("button", { name: "Create a key" }));
     expect(await screen.findByLabelText("Name")).toBeTruthy();
-    cleanup();
-    mount("/apps");
-    expect(await screen.findByText(/An app is a program you run on your machines/)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "New app" })).toBeNull();
   });
 
   it("FY-WEB-112 Serving with an empty catalog leads to adding one; the deploy page says the catalog is empty", async () => {

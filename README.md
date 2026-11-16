@@ -17,9 +17,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
 
 ## ✨ Key features
 
-- **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas, services
-  and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps
-  every card's memory to the models and apps that hold it, and lists the models in its
+- **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas on the
+  cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps every card's memory
+  to the models that hold it, and lists the models in its
   cache with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
   and its engine on chosen machines before you deploy it, with progress.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
@@ -33,8 +33,6 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
   speech, image generation, video generation as jobs, and vision models: object detection,
   segmentation and depth at `/v1/vision/…` (1.4), deployed like any other model.
-- **Any HTTP service behind the same keys.** An app's API at `/x/<name>/…` gets keys, limits and
-  usage.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted.
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
@@ -168,7 +166,7 @@ Forgeyard itself at `/guide`:
 | Page | What it covers |
 |---|---|
 | [Quick start](docs/guide/quick-start.md) | from nothing to your first `/v1` call in about ten minutes |
-| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, apps, models, deployments and the gateway, keys, roles |
+| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, models, engines and estimates, deployments and the gateway, keys, roles |
 | [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the server and the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
 | [Cloud providers](docs/guide/cloud-providers.md) | OpenAI, Anthropic, Gemini, Azure, OpenRouter or your own server behind `/v1`; when a request spills; which keys may use the cloud |
 | [Troubleshooting](docs/guide/troubleshooting.md) | problems seen on real machines, with their fix |

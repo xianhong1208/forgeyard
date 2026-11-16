@@ -141,7 +141,7 @@ describe("vision models (1.4, #86)", () => {
         deployment_id: 3, kind: "local", endpoints: [{ replica: 0, machine: "cpu-a", state: "healthy", ready: true, url: "x" }], targets: [] }] } };
       if (url === "/api/playground/vision/options") return { status: 200, body: { models: [{ name: "det", task: "detect", title: "Object detection",
         endpoint: "/v1/vision/detect", deployment_id: 3, model: "PekingU/rtdetr_v2_r18vd", licence: "apache-2.0", ready: 1, running: true, reason: null }],
-      workloads: [], tasks: [] } };
+      tasks: [] } };
       return undefined;
     });
     mount("/playground");
@@ -168,12 +168,11 @@ describe("vision models (1.4, #86)", () => {
     expect(z.python).toContain('r.json()["depth_png"]');
   });
 
-  it("FY-WEB-306 Apps no longer offers the vision templates, and points vision to Models", async () => {
-    const fetch = server((url) => url === "/api/workloads" ? { status: 200, body: { workloads: [], server_time: "x", can_manage: true } } : undefined);
-    mount("/apps");
-    expect(await screen.findByRole("heading", { name: "No apps yet" })).toBeTruthy();
+  it("FY-WEB-306 nothing offers the vision templates any more: /apps opens Machines and the templates are never asked for (1.4, #88)", async () => {
+    const fetch = server(() => undefined);
+    mount("/apps/new?template=vision-detect");
+    expect(await screen.findByRole("heading", { level: 1, name: "Machines" })).toBeTruthy();
     expect(screen.queryByText("Start from a template")).toBeNull();
-    expect(screen.getByRole("link", { name: "add them from the Catalog" }).getAttribute("href")).toBe("/models");
-    expect(fetch.mock.calls.some(([u]) => u === "/api/workloads/templates")).toBe(false);
+    expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/workloads/templates"))).toBe(false);
   });
 });

@@ -11,7 +11,7 @@ import { FALLBACK_ANCHOR, fallbackProviders } from "../lib/routing";
 import type { CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATUS_TONE, stateLabel } from "../lib/workloads";
-import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
+import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
 
 const KINDS = [
   { icon: IconBrain, name: "Chat", detail: "vLLM for safetensors, llama.cpp for GGUF (GPU or CPU)" },

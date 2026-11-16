@@ -48,13 +48,17 @@ server 不需要能連到機器。
 ## Workload
 
 **workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
-可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。在
-**Apps → New app** 建立，或用 `POST /api/workloads` 送出 spec。
+可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。模型部署以
+workload（runtime 為 `model`）執行；微調（1.9）也會。
 
-**在 console 裡它們叫 app**（1.4，#81），是不在選單裡的進階頁面：**Apps**（`/apps`；`/workloads…` 會轉址）只列出使用者自己執行的
-workload。模型部署的 workload（runtime 為 `model`）只在 **Serving** 底下看得到：部署的頁面有副本、輸出和事件，舊的
-workload 頁面連結會打開它的部署。API 仍然叫 `workloads`，也仍然拒絕停止、啟動或刪除部署的 workload（409
-`managed_by_deployment`）。**Machines** 兩者都顯示，因為兩者都佔用顯示卡。spec：
+**應用程式離開 Forgeyard**（#88、#89）。使用者自己執行、不是模型的 workload 叫 *app*：1.4（#81）在 console 的 **Apps**，
+用 `POST /api/workloads` 建立，可以公開在 `/x/`。Forgeyard 的重點是執行和管理模型，所以 1.4 把應用程式從 console 拿掉（頁面、範本、
+金鑰的 *Apps at /x/* 設定、Playground 的視覺應用程式），其餘淘汰：`/api/workloads` 屬於應用程式的部分、`GET /api/workloads/templates`
+和 `/x/` 在 1.5 之前照常運作，並明白告知（forgeyard/deprecation.py：每個回應，包括錯誤，都帶 `Deprecation` 標頭（RFC 9745）和指向指南的
+`Link`；伺服器紀錄每類最多每小時警告一次；只要還有應用程式，就有 Setup health 檢查 `apps-deprecated`）。`GET /api/keys` 與 Playground
+的視覺選項不再列出應用程式。1.5 會移除 API、`/x/`、範本和金鑰的設定，並以 migration 移除剩下的應用程式。舊的 console 連結（`/apps…`、
+1.3 的 `/workloads…`）會打開模型的部署或 Machines。**Machines** 仍會列出佔用顯示卡的應用程式名稱（沒有連結），所以使用中的卡不會被顯示成空閒。
+模型部署的 workload 只在 **Serving** 底下看得到，API 也仍然拒絕停止、啟動或刪除它（409 `managed_by_deployment`）。spec：
 
 ```json
 {"name": "web", "kind": "service",
@@ -310,7 +314,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 
 真機檢查：`scripts/accept_m4.py`。
 
-### 在 /x/ 的 workload（1.3，通用直通）
+### 在 /x/ 的 workload（1.3，通用直通；1.4 淘汰、1.5 移除）
 
 不是對話、嵌入、語音或圖片模型的東西（偵測、分割、深度估計、Triton 或 KServe 模型、FastAPI 或 BentoML 服務），以 service
 workload 執行，並**公開**在 gateway 後面的 **`https://<server>:7860/x/<name>/…`**，使用和 `/v1` 相同的 API key、限制與用量。研究與

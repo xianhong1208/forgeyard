@@ -24,6 +24,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from forgeyard import deprecation
 from forgeyard.db import new_session
 from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs, vision
 from forgeyard.gateway.balancer import balancer
@@ -503,7 +504,7 @@ def _vision_options() -> dict:
 
 @console.get("/vision/options")
 async def playground_vision_options(request: Request):
-    """The exposed vision workloads (1.3), for the Playground's Vision tab."""
+    """The vision models (1.4), for the Playground's Vision tab."""
     caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
     if caller is None:
         return _not_signed_in(reason)
@@ -513,6 +514,7 @@ async def playground_vision_options(request: Request):
 @console.post("/vision/{workload}/{task}")
 async def playground_vision(workload: str, task: str, request: Request):
     """An image to an exposed vision workload's /v1/<task> (1.3), as the signed-in user: the /x/ rules."""
+    deprecation.flag(request, "x")  # 1.4 (#88): apps leave the console; this goes with /x/ in 1.5
     caller, reason = await run_in_threadpool(_console_caller, request.cookies.get(sessions.COOKIE))
     if caller is None:
         return _not_signed_in(reason)
