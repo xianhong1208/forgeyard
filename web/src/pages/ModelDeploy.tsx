@@ -181,7 +181,7 @@ export function ModelDeployPage() {
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />
                     <p className="field-hint">{cat?.hf_token_set
                       ? "Gated models use the server's token; one here replaces it for this deployment only."
-                      : "Gated models only (or set one for the server under Models → Model library → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
+                      : "Gated models only (or set one for the server under Models → Library → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
                 </div>
               </details>
             </section>
