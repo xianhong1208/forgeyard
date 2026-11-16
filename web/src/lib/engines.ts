@@ -1,4 +1,4 @@
-// The Engines tab (1.4, #92): what a card says at a glance, and the YAML helpers of "Add an engine".
+// The Engines tab (1.4, #92): what a card says at a glance, and the YAML helpers of "Add a custom engine".
 import type { Recipe } from "./types";
 
 export type Hardware = "nvidia" | "amd" | "cpu";

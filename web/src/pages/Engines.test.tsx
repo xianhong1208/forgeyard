@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 1.4 (#92): Models → Engines: short cards with the variants behind Details, Add an engine (from a copy of a
+// 1.4 (#92): Models → Engines: short cards with the variants behind Details, Add a custom engine (from a copy of a
 // built-in one), Edit and Delete of custom engines; and the Catalog's short source line. FY-WEB-340 to 344.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -83,7 +83,7 @@ describe("Models → Engines (1.4, #92)", () => {
     expect(within(card).queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
-  it("FY-WEB-341 Add an engine starts from a copy of a built-in one under a free name, shows the server's refusal and adds it", async () => {
+  it("FY-WEB-341 Add a custom engine starts from a copy of a built-in one under a free name, shows the server's refusal and adds it", async () => {
     const posts: unknown[] = [];
     let answer: Reply = { status: 422, body: { detail: { code: "invalid_recipe", message: "variants: at least one variant is needed" } } };
     const fetch = server((url, init) => {
@@ -93,8 +93,9 @@ describe("Models → Engines (1.4, #92)", () => {
       return undefined;
     });
     mount("/models?tab=engines");
-    fireEvent.click(await screen.findByRole("button", { name: "Add an engine" }));
-    const form = screen.getByRole("region", { name: "Add an engine" });
+    fireEvent.click(await screen.findByRole("button", { name: "Add a custom engine" }));
+    const form = screen.getByRole("region", { name: "Add a custom engine" });
+    expect(within(form).getByText(/^Define an engine with your own image and arguments — for example a newer version, copied from a built-in engine\. Built-in engines are updated with Forgeyard releases\.$/)).toBeTruthy();
     const yaml = within(form).getByLabelText("Engine recipe (YAML)") as HTMLTextAreaElement;
     expect((within(form).getByRole("button", { name: "Add engine" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(within(form).getByLabelText("Start from a built-in engine"), { target: { value: "llama-cpp" } });
@@ -107,7 +108,7 @@ describe("Models → Engines (1.4, #92)", () => {
     answer = { status: 201, body: { recipe: { ...CUSTOM, name: "llama-cpp-custom-2" } } };
     await act(async () => fireEvent.click(within(form).getByRole("button", { name: "Add engine" })));
     expect(await screen.findByText("Engine llama-cpp-custom-2 added.")).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Add an engine" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a custom engine" })).toBeNull();
     expect(fetch.mock.calls.filter(([u]) => u === "/api/models").length).toBeGreaterThan(1);  // reloaded
   });
 
@@ -143,7 +144,7 @@ describe("Models → Engines (1.4, #92)", () => {
     server((url) => url === "/api/models" ? { status: 200, body: catalog([...BUILTIN, CUSTOM], false) } : undefined, OPERATOR);
     mount("/models?tab=engines");
     const theirs = await screen.findByRole("article", { name: "Engine llama-cpp-custom" });
-    expect(screen.queryByRole("button", { name: "Add an engine" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a custom engine" })).toBeNull();
     expect(within(theirs).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(within(theirs).queryByRole("button", { name: "Delete" })).toBeNull();
   });

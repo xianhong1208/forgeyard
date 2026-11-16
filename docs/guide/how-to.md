@@ -62,7 +62,7 @@ of the carve-out and GTT. The deployment's events say which variant it got (`…
 …)`).
 
 A deployment cannot choose the variant itself. To run a card with the other one, add a custom
-engine (**Models → Engines → Add an engine**, *Start from a built-in engine*: `llama-cpp`): the copy
+engine (**Models → Engines → Add a custom engine**, *Start from a built-in engine*: `llama-cpp`): the copy
 gets another name; keep only the variant you want under `variants` and save. A custom engine's card
 has **Edit** and **Delete** (refused while a deployment uses it).
 

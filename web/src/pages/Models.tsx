@@ -138,7 +138,7 @@ function Engines({ data, reload }: { data: CatalogResponse; reload: () => void }
       {data.can_manage && !form && (
         <p className="add-model-open">
           <button type="button" className="btn" onClick={() => { setNote(null); setForm({ mode: "add" }); }}>
-            <IconPlus size={16} aria-hidden="true" /> Add an engine
+            <IconPlus size={16} aria-hidden="true" /> Add a custom engine
           </button>
         </p>
       )}
@@ -327,7 +327,7 @@ function OfflineImages({ name, variants }: { name: string; variants: RecipeVaria
   );
 }
 
-// Add an engine, or change a custom one: its recipe as YAML. A new one can start from a copy of a
+// Add a custom engine, or change a custom one: its recipe as YAML. A new one can start from a copy of a
 // built-in engine under a free name. The server checks the YAML; its message is shown here.
 function EngineForm({ edit, recipes, onDone, onCancel }: {
   edit: string | null; recipes: Recipe[]; onDone: (text: string) => void; onCancel: () => void;
@@ -368,9 +368,15 @@ function EngineForm({ edit, recipes, onDone, onCancel }: {
   return (
     <section className="panel engine-form" aria-labelledby="engine-form-title">
       <div className="panel-head">
-        <h2 id="engine-form-title">{edit === null ? "Add an engine" : `Change ${edit}`}</h2>
+        <h2 id="engine-form-title">{edit === null ? "Add a custom engine" : `Change ${edit}`}</h2>
         <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>Close</button>
       </div>
+      {edit === null && (
+        <p className="engine-form-lead">
+          Define an engine with your own image and arguments — for example a newer version, copied from a built-in engine. Built-in
+          engines are updated with Forgeyard releases.
+        </p>
+      )}
       <p className="muted small">
         An engine is a recipe in YAML, like the built-in ones: the program or container image per hardware, its parameters and its
         memory estimate. <HelpLink page="reference" anchor="built-in-recipes">Built-in recipes</HelpLink>

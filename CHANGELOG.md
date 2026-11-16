@@ -160,7 +160,7 @@ version until 1.0.
     directories, the Hugging Face token). The console says *engine*; the API and the recipe files keep
     *recipe* (`/api/recipes`). An engine's card is short: its version, what it is, the hardware it runs
     on (NVIDIA, AMD, CPU, *shares a GPU*) and what it serves; the variants, images, requirements and
-    offline commands are behind **Details**. Admins **Add an engine** (its recipe YAML, optionally
+    offline commands are behind **Details**. Admins **Add a custom engine** (its recipe YAML, optionally
     started from a copy of a built-in engine under a free name, the server's refusal shown at the
     field) and **Edit** or **Delete** a custom one (`PUT` / `DELETE /api/recipes/<name>`; refused while
     a deployment uses it). A catalog row's source is short (the repository and, for a GGUF file, its

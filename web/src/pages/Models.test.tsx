@@ -285,7 +285,7 @@ describe("models", () => {
     expect(screen.getByTestId("where").dataset.search).toBe("?tab=engines");
     expect(await screen.findByRole("heading", { name: "Engines" })).toBeTruthy();
     expect(screen.getByRole("article", { name: "Engine vllm" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add an engine" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add a custom engine" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Catalog" })).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
     expect(screen.getByTestId("where").dataset.search).toBe("?tab=sources");
