@@ -25,8 +25,10 @@ leftovers of an earlier run are removed first, so it can be run again.
 Models it knows (--only; the first three are the recommended ones):
   rtdetr-v2-r18, sam2.1-hiera-tiny, depth-anything-v2-small, rtdetr-v2-r50 (a larger detector, Apache-2.0)
 
-The vision image is Forgeyard's own at the server's version (forgeyard-vision:<version>[-cuda]): on a dev
-server before a release, build it there first (images/vision/Dockerfile) under that tag.
+The vision image is the one the `vision` recipe pins by digest (1.4.1: docker.io/tonyhuang1101/forgeyard-vision,
+X.Y.Z or X.Y.Z-cuda, recorded in images.lock.json): the machine pulls it, or gets it through the server. To try
+a change to images/vision before its release, build it on the machine (images/vision/Dockerfile) and pass a
+custom recipe that names that local tag with --recipe.
 """
 
 from __future__ import annotations

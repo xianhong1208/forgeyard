@@ -373,6 +373,15 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   **read-only** into containers (the model's own directory, nothing else); files are read-only for
   processes too. Downloads go through the same guard as the server: https and public addresses
   only, every redirect checked (`--allow-private-model-hosts` for a LAN mirror).
+- **Through the server** (1.4, #35; 1.4.1, #104): a machine set so, or one that could not reach the
+  source, GETs its files from the server's relay, which fetches them and stores nothing. In 1.4.1 the
+  relay first asks another machine whose cache has the model file to send it (`relay_send` over its
+  WebSocket, then an outbound POST of the bytes): agents never accept connections from each other, so
+  every byte still passes the server. The file is named to the source by the digest the server holds
+  and looked up only among what that agent found on its own disk; the server hashes whole files on the
+  way, holds back the last piece until the hash matches, and stops asking a source whose copy did not
+  match; the fallback is machine, next machine, internet, decided before the first byte. Direct
+  agent-to-agent transfers are left for Later.
 - **Who:** admins manage the catalog, recipes and model sources; admins and operators deploy;
   everyone signed in sees deployments and can try them.
 
@@ -629,9 +638,12 @@ that are not permissive, and the built-in `vision` recipe runs the same vision s
 the model-cache mount, so caching, offline machines and placement are those of every model. The gateway
 gives them their own endpoints (`/v1/vision/<task>`, routes of api `vision-<task>`) instead of `/x/`:
 multipart or JSON in, the server's JSON passed back, counted with the image units of 1.3 (`images`,
-`kilopixels`, `busy_ms`), so there is no migration. The recipe's image is Forgeyard's own, named by the
-server's version (`forgeyard_image`) rather than pinned by digest, since it is built by the same release
-and its digest is not known before. The server asks for `VISION_API_KEY` on every path but `/health`;
+`kilopixels`, `busy_ms`), so there is no migration. The recipe's image is Forgeyard's own. In 1.4.0 it
+was named by the server's version (`forgeyard_image`) rather than pinned by digest, since it is built by
+the same release and its digest is not known before; that left it unchecked when loaded and unable to come
+through the server. Since 1.4.1 (#113) the recipe pins it like every engine (`images.lock.json`), and a
+PR after a release that changed `images/vision` moves the pin: a server upgrade alone does not change
+it. `forgeyard_image` stays for custom recipes copied from 1.4.0. The server asks for `VISION_API_KEY` on every path but `/health`;
 the baked-in models stay for the apps made from templates until Apps go (#88).
 
 ### Workloads at /x/ (1.3, generic passthrough; deprecated in 1.4, removed in 1.5)

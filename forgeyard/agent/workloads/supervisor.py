@@ -599,6 +599,11 @@ class Supervisor:
         return (self.models is not None and getattr(self.models, "relay_client", None) is not None
                 and rt is not None and hasattr(rt, "load") and bool(rt.info().get("ok")))
 
+    def can_save_images(self) -> bool:
+        """1.4.1 ("image_save"): a container engine whose images can be listed and saved for another machine."""
+        rt = self.runtimes.get("container")
+        return rt is not None and hasattr(rt, "save_stream") and bool(rt.info().get("ok"))
+
     def can_load_images(self) -> bool:
         rt = self.runtimes.get("container")
         return rt is not None and hasattr(rt, "load_upload") and bool(rt.info().get("ok"))

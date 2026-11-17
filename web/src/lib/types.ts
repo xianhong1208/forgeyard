@@ -206,6 +206,8 @@ export type Replica = {
     layers?: number; layers_done?: number; unpacking?: boolean;
     // 1.4: "server" while the bytes come through the server's relay.
     via?: "direct" | "server";
+    // 1.4.1: the machine whose cache the model file comes from, through the server.
+    source?: string;
   } | null;
   ready_at?: string | null;
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
@@ -552,6 +554,8 @@ export type DownloadProgress = {
   layers?: number; layers_done?: number; unpacking?: boolean;
   // 1.4 ("relay"): "server" while the bytes come through the server.
   via?: "direct" | "server";
+  // 1.4.1: the machine whose cache the model file comes from, through the server.
+  source?: string;
 };
 
 export type ModelDownload = {
@@ -569,6 +573,8 @@ export type ModelDownload = {
   finished_at: string | null;
   // Under way on a machine that is offline: it goes on when the agent is back.
   waiting: string | null;
+  // 1.4.1: via "machine": the machine whose cache the model came from, through the server.
+  source?: { id: number; name: string } | null;
 };
 
 export type DownloadsResponse = { downloads: ModelDownload[]; can_download: boolean };
@@ -584,6 +590,8 @@ export type DownloadTarget = {
   // 1.4 ("relay"): how the model would come: "server" (through the server), "auto" (directly, through the
   // server after a network failure) or "direct". Absent from older servers.
   via?: FetchVia;
+  // 1.4.1: through the server, a machine whose cache has the model sends it.
+  from_machine?: string | null;
 };
 
 export type DownloadTargets = {

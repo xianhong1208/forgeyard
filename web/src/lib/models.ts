@@ -62,8 +62,10 @@ export function downloadText(r: WithDownload): string | null {
     if (done && layers) return `Pulling the image: ${bytes(done)}, ${layers}`;
     return layers ? `Pulling the image: ${layers}` : "Pulling the image";
   }
-  // 1.4: through the server's relay, for a machine that cannot reach the source itself.
-  const what = `${d.phase === "engine" ? "engine" : "model"}${d.via === "server" ? " via the server" : ""}`;
+  // 1.4: through the server's relay, for a machine that cannot reach the source itself; 1.4.1: from another
+  // machine's cache, through the server.
+  const from = d.via === "server" && d.source ? `, from ${d.source}` : "";
+  const what = `${d.phase === "engine" ? "engine" : "model"}${d.via === "server" ? ` via the server${from}` : ""}`;
   return d.total ? `Downloading the ${what}: ${bytes(done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(done)}`;
 }
 

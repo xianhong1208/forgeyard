@@ -65,7 +65,7 @@ export function MachineDetailPage() {
       {data && !m && <Notice tone="error">No such machine: it may have been removed.</Notice>}
       {!data && !error && <p className="muted">Loading…</p>}
       {m && data && (
-        <MachineView m={m} serverTime={data.server_time} p={p} canManage={canManage} message={message}
+        <MachineView m={m} machines={data.machines} serverTime={data.server_time} p={p} canManage={canManage} message={message}
           onRevoke={revoke} onRemove={remove}
           onChanged={(text) => { setMessage({ tone: "ok", text }); reload(); }}
           onError={(text) => setMessage({ tone: "error", text })} />
@@ -74,8 +74,8 @@ export function MachineDetailPage() {
   );
 }
 
-function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove, onChanged, onError }: {
-  m: Machine; serverTime: string; p: Placement & { loaded: boolean; canRun: boolean }; canManage: boolean;
+function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke, onRemove, onChanged, onError }: {
+  m: Machine; machines: Machine[]; serverTime: string; p: Placement & { loaded: boolean; canRun: boolean }; canManage: boolean;
   message: { tone: "ok" | "error"; text: string } | null;
   onRevoke: (m: Machine) => void; onRemove: (m: Machine) => void; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
@@ -159,7 +159,7 @@ function MachineView({ m, serverTime, p, canManage, message, onRevoke, onRemove,
 
       {m.status !== "revoked" && <ModelCacheSection m={m} poll={POLL_MS} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
-      {m.status !== "revoked" && <EngineImagesSection m={m} canManage={canManage} onChanged={onChanged} />}
+      {m.status !== "revoked" && <EngineImagesSection m={m} machines={machines} canManage={canManage} onChanged={onChanged} />}
 
       {m.status !== "revoked" && <GpuAccess m={m} canManage={canManage} onChanged={onChanged} onError={onError} />}
 

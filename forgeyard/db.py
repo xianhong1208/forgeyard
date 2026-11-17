@@ -679,7 +679,7 @@ class ModelDownload(Base):
     # model only.
     recipe: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     state: Mapped[str] = mapped_column(String(16), default="queued", index=True)  # queued | downloading | done | failed | cancelled
-    # How it was fetched, last: direct | server | machine (only "direct" until the relay comes).
+    # How it was fetched, last: direct | server | machine (1.4.1: from `source_node_id`'s cache, through the server).
     via: Mapped[str] = mapped_column(String(16), default="direct")
     source_node_id: Mapped[Optional[int]] = mapped_column(ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True)
     # Progress, the same shape as replicas.download: {phase, done, total, file?, layers?, …}.
@@ -691,6 +691,7 @@ class ModelDownload(Base):
 
     model: Mapped[CatalogModel] = relationship()
     node: Mapped[Node] = relationship(foreign_keys=[node_id])
+    source_node: Mapped[Optional[Node]] = relationship(foreign_keys=[source_node_id])
 
 
 _engine = None

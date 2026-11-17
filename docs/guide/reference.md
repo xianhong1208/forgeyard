@@ -536,7 +536,7 @@ in the server's database (table `video_jobs`, migration `0014`).
 `POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` (1.4) take one image for a
 vision model and answer JSON. They are Forgeyard's own API (the OpenAI SDK has none): any HTTP client
 works. One engine serves them, Forgeyard's own vision server (recipe `vision`, the image
-`forgeyard-vision` of the server's version: the CUDA build on NVIDIA, the CPU build elsewhere), with the
+`forgeyard-vision` pinned by digest: the CUDA build on NVIDIA, the CPU build elsewhere), with the
 model from the machine's model cache. Local deployments only, never a cloud provider.
 
 The request is `multipart/form-data` with `model`, the image as a file field `image` and the options
@@ -955,13 +955,14 @@ agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB mar
 cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
 the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
 when no variant of the recipe runs there; and `via`, how the model would come (`direct`, `auto` or
-`server`). The variant is the one the machine would run: a GPU variant
+`server`), with `from_machine` (1.4.1) naming the machine that would send it through the server, or null. The variant is the one the machine would run: a GPU variant
 when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
 
 A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
 `state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
 shape as a deployment replica's, with `via: "server"` while the bytes come through the server),
-`reason`, `via` (`direct`, or `server` once it came through the server), `requested_by`,
+`reason`, `via` (`direct`, `server` once it came through the server, or `machine` once the model came from
+another machine's cache through the server, with `source: {id, name}`), `requested_by`,
 `created_at`, `finished_at` and `waiting` (the machine is offline). Finished ones are kept 30 days, at
 most 20 per machine.
 
@@ -1032,6 +1033,53 @@ hosts). It checks every 2 seconds that the relay is still wanted, and closes it 
 The agent stops on 401, 403 and 404 (with the server's words), waits out 429 without counting it as a
 try, and retries the rest like a network error. Its progress then has `download.via: "server"`.
 
+**From another machine** (the protocol feature `relay_source`, agents and servers from 1.4.1). Before the
+server opens a model file's source, it asks another machine that has it. The candidates are the other
+machines that are connected, whose agent lists `relay_source`, whose reported cache (`model_cache.cached`)
+has the model's revision (a URL model: its key, listed in `model_cache.models` with the SHA-256 the server
+recorded), and that are not marked for that file. A machine listing the GGUF file's own key comes first,
+then the one with fewer sends under way, then the latest heartbeat. The request of the machine that asks
+does not change.
+
+The server sends the chosen machine `relay_send {request_id, path, item, offset, length}` over its
+WebSocket. `item` describes the file by the digest the server holds: `{kind: "hf", repo, revision, file,
+blob, size}` (`blob` is the SHA-256 of an LFS file, else its git blob id) or `{kind: "url", dir, sha256,
+size}`. The agent looks it up only among the models it found on its own disk (the revision's marker lists
+the file, its snapshot link points at that blob, a regular file of that size inside the cache; a URL model's
+marker has that SHA-256), holds the model's files lock while it sends (a removal answers `busy`), and
+POSTs bytes `offset` to `offset + length - 1`:
+
+| Request | What it does |
+|---|---|
+| `POST /agent/v1/relay-send/{ticket}` | The bytes, with the machine credential and `Content-Length` = `length`; answered `{"ok": true, "bytes": n}` once all of them were passed on |
+
+Every answer closes the connection (`Connection: close`), so a source whose send was ended early (the machine
+that asked went away, the download was cancelled) stops writing at once.
+
+It then answers `relay_sent {request_id, ok, code, reason, bytes}`, `code` being `not_found`, `busy` (two
+sends under way), `corrupt` (a whole file it sent does not hash to its digest) or `failed`. The server
+pipes the body into the asking machine's answer through a queue of at most 64 pieces; `Content-Length` and
+`Content-Range` are its own, from the file's size. A machine that answers `not_found` or `busy`, or sends
+nothing within 10 seconds (it is then not asked for that file for 10 minutes), is skipped for the next
+one, then the source on the internet as above. A whole file is hashed on its way, and its last piece held
+back until it matches: a machine whose copy does not match is not asked for that file for an hour, the
+audit log records `node.relay_copy_refused` (the machine, the file, the machine that asked, both digests),
+a deployment's events say so too, and the next request for that file from the machine that asked is
+answered whole (200, ignoring its `Range`), so it starts the file over. At most two sends per machine.
+
+| Status | `code` | When |
+|---|---|---|
+| 401 | `credential_refused` | No credential, or a revoked one |
+| 403 | `browser_refused` | The request has an `Origin` |
+| 404 | `send_not_found` | No send from this machine with that ticket (another machine's credential, a ticket that ended) |
+| 409 | `send_claimed`, `send_ended` | A second POST for the ticket; the send ended before all its bytes were passed on |
+| 400 | `send_length` | A `Content-Length` other than the length asked for |
+
+Progress through the server then carries `download.source`, the sending machine's name (set by the server;
+an agent cannot), and a download's `via` becomes `machine` with `source: {id, name}`. In the targets of
+Download to…, `from_machine` names the machine that would send the model to a machine that gets it through
+the server.
+
 **Engine images** (the protocol feature `relay_images`, agents and servers from 1.4). To an agent that
 also lists it, a desired replica (beside its `spec`) or download whose engine image is pinned by digest
 and recorded in `forgeyard/recipes/images.lock.json` carries `image_relay: {path, mode}` with the same
@@ -1083,6 +1131,39 @@ tags).
 | 422 | `image_load_failed` | The engine could not load it (the agent's words) |
 
 Audited as `node.image_uploaded` (the file name, its size, `ok`, the images loaded or why not).
+
+### Copying an image from another machine
+
+`GET /api/machines/{id}/images` (admins) asks that machine's agent for the images in its engine (protocol
+feature `image_save`, agents from 1.4.1: `image_list {request_id}`, answered by `image_listed {request_id, ok,
+reason, images}`) and answers `{machine_id, images: [{id, tags, content, size, created, os, architecture,
+matches}]}`, at most 256.
+
+`POST /api/machines/{id}/images/copy` with `{"source_id": 2, "image": "sha256:…"}` (admins) copies one of them to
+machine `id`. The server sends the source `image_save {request_id, path, image}`; its agent saves the image whose
+id is `image` (one of its own: never a name from the server) under its own tags, with `docker save` (Podman:
+`podman save --multi-image-archive` for several tags), and POSTs it, chunked, to `/agent/v1/image-send/{ticket}`
+with its credential (once; another machine's credential gets 404, a second POST 409, a browser 403; every answer
+closes the connection, so a source whose send was ended early stops at once). The server
+pipes it into the target's `image_load` as for an upload (without `size`; the answer to the target is chunked and
+never ends cleanly when the source broke off), and the source answers `image_saved {request_id, ok, reason, bytes,
+image}`. The answer is `{ok, bytes, images, source: {id, name}, saved}`, each image with `matches` and
+`same_as_source` (its content id, else its id, equals the source's; null when there is nothing to compare).
+
+| Status | `code` | When |
+|---|---|---|
+| 422 | `bad_image`, `same_machine` | The image is not named by its id; the source is the target |
+| 409 | `source_offline`, `source_cannot_save` | The source is not connected, or has no container engine or is older than 1.4.1 |
+| 409 | `source_busy` | The source is already sending an image |
+| 409 | `machine_offline`, `agent_cannot_load`, `upload_busy` | The target, as for an upload (429: two in all) |
+| 409 | `image_save_failed` | The source could not save it (its words): not one of its images, or its engine failed |
+| 504 | `source_no_send` | The source did not start sending within 2 minutes |
+| 400 | `upload_broken` | The source's save broke off; nothing was loaded |
+| 413 | `upload_too_large` | The image is larger than `IMAGE_UPLOAD_MAX_GB` |
+| 422 | `image_load_failed` | The target's engine could not load it (the agent's words) |
+
+Audited as `node.image_copied` (the target; `from_machine`, the image asked for, its size, `ok`, the images
+loaded with their content ids, or why not). Refusals before a byte moved are not audited.
 
 ## Setup health checks
 
@@ -1212,8 +1293,8 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
-| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `forgeyard-vision:<server version>-cuda` (torch +cu130) |
-| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `forgeyard-vision:<server version>` |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.0` (linux/amd64 and arm64) |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
@@ -1252,10 +1333,12 @@ values the variant cannot run, such as `{kv_cache: [f8_e4m3]}`; a deployment wit
 placed on it, and the placement says why).
 
 The `vision` recipe (1.4) runs Forgeyard's own vision server with `--task {task}` (the model's task,
-a placeholder of its own) and `--model {model_path}`. Its image is not pinned by digest: a variant names
-it with `forgeyard_image: vision` (or `vision-cuda`) instead of `image`, which is the image of the
-server's own version, published with the same release (see [Container images](#container-images)). On a
-machine without registry access, `docker load` it under that tag. A model is a vision model when its
+a placeholder of its own) and `--model {model_path}`. Its image is pinned by digest like every other
+engine's (1.4.1), so a loaded copy is checked by its recorded ids and a machine without registry access
+gets it through the server. A server upgrade does not change it: when a release changes the vision server,
+the pin moves to the new image in a later version. A custom recipe may still name the image of the
+server's own version, tag only, with `forgeyard_image: vision` (or `vision-cuda`) instead of `image` (how
+1.4.0's `vision` recipe named it); such an image is neither checked nor relayed. A model is a vision model when its
 `config.json` names an `…ForObjectDetection` architecture (detect: RT-DETR, D-FINE, DETR without a timm
 backbone…), SAM 2 or 2.1 (segment) or an `…ForDepthEstimation` one (depth: Depth Anything, DPT…). A
 Hugging Face vision model is only added with a permissive licence (Apache-2.0, MIT, BSD): another
@@ -1269,14 +1352,16 @@ A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asyn
 
 ## Container images
 
-Each release publishes two images on Docker Hub, built by CI from the release's tag:
+Each release publishes two images on Docker Hub, built by CI from the release's tag (and the vision
+server's, `docker.io/tonyhuang1101/forgeyard-vision`, `X.Y.Z` and `X.Y.Z-cuda`, which the `vision` recipe
+pins by digest):
 
 | Image | What | Platforms |
 |---|---|---|
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.4.0` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
+- **Tags**: `1.4.1` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

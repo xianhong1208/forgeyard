@@ -3,7 +3,7 @@ nothing (1.4, issue #35, D1/D3; protocol feature "relay").
 
 The agent calls it outbound, the way it reaches the server for everything else: an HTTPS GET with its
 machine credential as a Bearer token, through the CA it pins, so it works through the same tunnel or NAT
-that carries its WebSocket (amd-strix's `ssh -R`).
+that carries its WebSocket (an `ssh -R` tunnel, say).
 
     GET /agent/v1/relay/{replica|download}/{id}/model/{file path}   a Hugging Face model's file
     GET /agent/v1/relay/{replica|download}/{id}/model               a URL model's file
@@ -67,7 +67,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.config import get_settings
 from forgeyard.db import ModelDownload, Node, Replica, Workload, new_session
-from forgeyard.machines import store
+from forgeyard.machines import peers, store
 from forgeyard.machines.protocol import FEATURE_RELAY, FEATURE_RELAY_IMAGES, RELAY_PATH
 from forgeyard.models import fetch, reach
 from forgeyard.workloads import images, registry as oci
@@ -177,6 +177,8 @@ class Source:
     size: Optional[int] = None     # and how many there are (the manifest says)
     # An image blob: opens it from the registry with its pull token (renewed once on a 401), given the Range.
     opener: Optional[Callable[[dict], fetch.Response]] = None
+    # 1.4.1 (#104): a model file that may come from another machine's cache, and the machines that have it.
+    copy: Optional["peers.FileCopy"] = None
 
 
 # ------------------------------------------------------------------ engine images (#35 PR 4)
@@ -370,9 +372,11 @@ def resolve(db: DbSession, node: Node, kind: str, uid: str, what: str, path: Opt
         url = f"{endpoint}/{model['repo']}/resolve/{model['revision']}/{quote(path)}"
         token = None if check_only else _token(db, kind, uid, node)
         return Source(url, hf_policy(), f"{model['repo']}@{str(model['revision'])[:12]}/{path}",
-                      {"Authorization": f"Bearer {token}"} if token else {})
+                      {"Authorization": f"Bearer {token}"} if token else {},
+                      copy=None if check_only else peers.file_copy(db, node, model, path))
     if model.get("kind") == "url" and path is None and model.get("url"):
-        return Source(str(model["url"]), url_policy(db), str(model["url"])[:200])
+        return Source(str(model["url"]), url_policy(db), str(model["url"])[:200],
+                      copy=None if check_only else peers.file_copy(db, node, model, None))
     raise Refused(404, "relay_not_wanted", "That model cannot be fetched through the server.")
 
 
@@ -406,9 +410,11 @@ slots = _Slots()
 
 
 def reset() -> None:
-    """Forget the relays under way, the manifests and the registry tokens (tests)."""
+    """Forget the relays under way, the manifests and the registry tokens, and (1.4.1) the machine copies' marks
+    (tests)."""
     global _registry
     slots.reset()
+    peers.reset()
     with _manifests_lock:
         _manifests.clear()
     _registry = None
@@ -464,12 +470,56 @@ def _upstream_error(resp: fetch.Response, host: str) -> JSONResponse:
     return _refuse(502, "source_failed", f"the server's download from {host} failed: HTTP {resp.status}")
 
 
+class _Internet:
+    """The bytes from their source on the internet (or a registry), read in a thread."""
+
+    def __init__(self, resp: fetch.Response):
+        self._resp = resp
+        self.status = resp.status
+        self.headers = resp.headers
+
+    async def read(self) -> bytes:
+        return await anyio.to_thread.run_sync(self._resp.read1, CHUNK, abandon_on_cancel=True)
+
+    def remaining(self) -> Optional[int]:
+        return self._resp.remaining()
+
+    def abort(self) -> None:
+        self._resp.abort()
+
+    async def close(self) -> None:
+        await anyio.to_thread.run_sync(self._resp.close, abandon_on_cancel=True)
+
+
+def _span(rng: Optional[str], size: int) -> Optional[tuple[int, int]]:
+    """(offset, length) of the bytes a Range asks for in a file of `size` bytes; None when it asks for none."""
+    if rng is None:
+        return 0, size
+    m = _RANGE.match(rng)
+    if m is None:
+        return None
+    first = int(m.group(1))
+    last = min(int(m.group(2)), size - 1) if m.group(2) is not None else size - 1
+    if last < first:  # (also a first byte at or past the end)
+        return None
+    return first, last - first + 1
+
+
+def _hasher(algo: str, size: int):
+    """What a whole file is checked with: SHA-256, or the git blob id (SHA-1 of a "blob <size>" header and the
+    bytes)."""
+    if algo == "oid":
+        return hashlib.sha1(f"blob {size}\0".encode())
+    return hashlib.sha256()
+
+
 async def _relay(request: Request, kind: str, uid: str, what: str, path: Optional[str]):
     if request.headers.get("origin"):
         return _refuse(403, "browser_refused", "This endpoint is for Forgeyard agents, not browsers.")
     rng = request.headers.get("range")
     if rng is not None and not _RANGE.match(rng.strip()):
         return _refuse(416, "bad_range", "Only one range of bytes, bytes=N- or bytes=N-M, can be asked for.")
+    rng = rng.strip() if rng is not None else None
     try:
         node_id, name, src = await run_in_threadpool(_start, _bearer(request), kind, uid, what, path)
     except Refused as e:
@@ -478,34 +528,58 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
         return _refuse(429, "relay_busy", f"{name} already has {MAX_PER_MACHINE} downloads through the server, or "
                                           f"the server relays {MAX_TOTAL} at a time: try again shortly.",
                        {"Retry-After": str(RETRY_AFTER)})
-    host = (urlsplit(src.url).hostname or "?").lower()
-    headers = dict(src.headers)
-    if rng is not None:
-        headers["Range"] = rng.strip()
-    try:
-        if src.opener is not None:
-            resp = await run_in_threadpool(src.opener, headers)
-        else:
-            resp = await run_in_threadpool(fetch.open_url, src.url, src.policy, headers=headers)
-    except fetch.FetchError as e:
-        slots.give(node_id)
-        log.warning("Relay of %s to %s: could not open it at %s: %s", src.label, name, host, e)
-        status, code = (403, "source_blocked") if isinstance(e, fetch.BlockedAddress) else (502, "source_unreachable")
-        return _refuse(status, code, f"the server could not reach {host}: {e}")
-    if resp.status >= 400:
-        answer = _upstream_error(resp, host)
-        await run_in_threadpool(resp.close)
-        slots.give(node_id)
-        log.warning("Relay of %s to %s: %s answered HTTP %s.", src.label, name, host, resp.status)
-        return answer
+    # 1.4.1 (#104): a model file comes from another machine that has it, when one can send it; else from the
+    # internet as before. A copy refused for this machine's file before: its partial file holds those bytes, so
+    # this answer is the whole file (the agent then starts it over).
+    copy = src.copy
+    if copy is not None and rng is not None and peers.restart_due(node_id, kind, uid, path):
+        log.info("Relay of %s to %s: sending the whole file again (a copy of it was refused).", src.label, name)
+        rng = None
+    up = None
+    if copy is not None:
+        span = _span(rng, copy.size)
+        if span is not None and copy.candidates:
+            up = await peers.open_copy(name, copy, *span)
+        peers.note_source(kind, uid, up.source if up is not None else None)
+    if up is not None:
+        host = up.source[1]
+        label = f"{src.label} from {host}"
+        verify = (copy.algo, copy.expect, copy.size)
+    else:
+        host = (urlsplit(src.url).hostname or "?").lower()
+        label = src.label
+        verify = ("sha256", src.digest[7:], src.size) if src.digest else None
+        headers = dict(src.headers)
+        if rng is not None:
+            headers["Range"] = rng
+        try:
+            if src.opener is not None:
+                resp = await run_in_threadpool(src.opener, headers)
+            else:
+                resp = await run_in_threadpool(fetch.open_url, src.url, src.policy, headers=headers)
+        except fetch.FetchError as e:
+            slots.give(node_id)
+            log.warning("Relay of %s to %s: could not open it at %s: %s", src.label, name, host, e)
+            status, code = (403, "source_blocked") if isinstance(e, fetch.BlockedAddress) else (502, "source_unreachable")
+            return _refuse(status, code, f"the server could not reach {host}: {e}")
+        if resp.status >= 400:
+            answer = _upstream_error(resp, host)
+            await run_in_threadpool(resp.close)
+            slots.give(node_id)
+            log.warning("Relay of %s to %s: %s answered HTTP %s.", src.label, name, host, resp.status)
+            return answer
+        up = _Internet(resp)
     out = {"Content-Type": "application/octet-stream", "Cache-Control": "no-store"}
     for k in ("Content-Length", "Content-Range", "Accept-Ranges"):
-        if resp.headers.get(k):
-            out[k] = resp.headers[k]
-    log.info("Relaying %s to %s%s.", src.label, name, f" ({rng.strip()})" if rng else "")
+        if up.headers.get(k):
+            out[k] = up.headers[k]
+    log.info("Relaying %s to %s%s.", label, name, f" ({rng})" if rng else "")
     state = {"sent": 0, "why": "finished", "started": time.monotonic(), "done": False}
-    # A whole image blob is hashed on its way through; its last piece is sent only once the hash matches.
-    hasher = hashlib.sha256() if src.digest and rng is None and resp.status == 200 else None
+    # A whole file with a digest (an image blob; 1.4.1, a model file from a machine) is hashed on its way
+    # through; its last piece is sent only once the hash matches.
+    hasher = _hasher(verify[0], verify[2] or 0) if verify and rng is None and up.status == 200 else None
+    expect = verify[1] if verify else None
+    size = verify[2] if verify else None
 
     async def finish() -> None:
         """Once, however the response ends (even if it never started): the source closed, the slot given back,
@@ -513,12 +587,12 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
         if state["done"]:
             return
         state["done"] = True
-        resp.abort()
-        await anyio.to_thread.run_sync(resp.close, abandon_on_cancel=True)
+        up.abort()
+        await up.close()
         slots.give(node_id)
         took = max(time.monotonic() - state["started"], 1e-6)
         mib = state["sent"] / 1024**2
-        log.info("Relayed %s to %s: %.1f MiB in %.1f s (%.1f MiB/s), %s.", src.label, name, mib, took, mib / took,
+        log.info("Relayed %s to %s: %.1f MiB in %.1f s (%.1f MiB/s), %s.", label, name, mib, took, mib / took,
                  state["why"])
 
     async def body():
@@ -534,33 +608,36 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
                 gone = await run_in_threadpool(_still_wanted, node_id, kind, uid, what, path)
                 if gone:
                     state["why"] = f"no longer wanted: {gone}"
-                    resp.abort()  # a read waiting on the source ends at once
+                    up.abort()  # a read waiting on the source ends at once
                     return
 
         watcher = asyncio.create_task(watch())
         held = b""
         try:
             while True:
-                chunk = await anyio.to_thread.run_sync(resp.read1, CHUNK, abandon_on_cancel=True)
+                chunk = await up.read()
                 if state["why"] != "finished":
                     break
                 if not chunk:
-                    if resp.remaining():
-                        state["why"] = f"the source ended {resp.remaining()} bytes early"
+                    if up.remaining():
+                        state["why"] = f"the source ended {up.remaining()} bytes early"
                     elif hasher is not None:
-                        got = "sha256:" + hasher.hexdigest()
-                        if got != src.digest:
-                            state["why"] = f"the source's bytes hash to {got[:19]}…, not {src.digest[:19]}…: not sent"
-                            log.warning("Relay of %s to %s: the bytes from %s do not match their digest.", src.label,
+                        got = hasher.hexdigest()
+                        if got != expect:
+                            state["why"] = f"the source's bytes hash to {got[:12]}…, not {expect[:12]}…: not sent"
+                            log.warning("Relay of %s to %s: the bytes from %s do not match their digest.", label,
                                         name, host)
+                            if copy is not None and up.status == 200 and isinstance(up, peers.PipeSource):
+                                await run_in_threadpool(peers.refused, node_id, name, kind, uid, path, copy, up.source,
+                                                        got)
                         elif held:
                             yield held
                             state["sent"] += len(held)
                     break
                 if hasher is not None:
                     hasher.update(chunk)
-                    if src.size is not None and state["sent"] + len(held) + len(chunk) > src.size:
-                        state["why"] = f"the source sent more than the {src.size} bytes the manifest says"
+                    if size is not None and state["sent"] + len(held) + len(chunk) > size:
+                        state["why"] = f"the source sent more than the {size} bytes the file has"
                         break
                     chunk, held = held, chunk
                     if not chunk:
@@ -578,7 +655,7 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
             stop.set()
             watcher.cancel()
 
-    return _RelayResponse(body(), finish, status_code=206 if resp.status == 206 else 200, headers=out)
+    return _RelayResponse(body(), finish, status_code=206 if up.status == 206 else 200, headers=out)
 
 
 class _RelayResponse(StreamingResponse):

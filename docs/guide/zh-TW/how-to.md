@@ -97,7 +97,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
 ```
 
 接著：
@@ -129,7 +129,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -140,7 +140,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1 inventory
 ```
 
 ### 純 CPU
@@ -154,7 +154,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
 ```
 
 ### 為什麼要用這些選項
@@ -172,8 +172,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **Advanced / offline** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.0 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.1 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.1 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -187,16 +187,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.0 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.1 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.4.0`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.4.1`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.1`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類應用程式和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -206,7 +206,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.1
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -304,7 +304,7 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 回應：`detections`（標籤、分數、方框）、`masks`（每個有分數、面積、方框和一張 1 位元 PNG，最好的在前）或 `depth_png`（附 `min` 和 `max`）；都附圖片的 `width` 和 `height`。它們接受的所有選項見[參考資料](reference.md#vision)。用量每個請求計一張圖片和它的千像素數；金鑰的模型清單和每分鐘請求數照常適用。
 
-連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
+連不到 Docker Hub 的機器，會和其他固定的引擎映像檔一樣經由伺服器取得視覺映像檔（[離線機器](#offline-machines)）；也可以在那台機器上載入（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
 
 ## 在 Playground 試用視覺
 
@@ -618,7 +618,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.0
+  docker.io/tonyhuang1101/forgeyard:1.4.1
 sudo docker logs forgeyard
 ```
 
@@ -636,7 +636,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -644,7 +644,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -652,26 +652,26 @@ sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
 **升級**靠 tag。先備份，再拉取新版本，用它執行同一個指令；volume 會保留所有資料，資料庫的變更會在啟動時執行：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.1
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.2
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.1
+  docker.io/tonyhuang1101/forgeyard:1.4.2
 ```
 
-`1.4.1` 就是那個版本；`1.4` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
+`1.4.2` 就是那個版本；`1.4` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
 
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.0
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.1
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**Machines** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.4.0 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.4.1 .`
 
 ## 把伺服器當成服務執行
 
@@ -854,7 +854,17 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 套用伺服器自己的模型來源規則：只限 https 和公開位址（除非設了 `MODEL_ALLOW_PRIVATE_HOSTS`），URL 模型只限允許的主機。
 - 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **Download to…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
 - 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
-- 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-strix could not reach huggingface.co just now; the model comes through the server*，或 *amd-strix downloads the model and the engine through the server (its internet access setting)*。
+- 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-01 could not reach huggingface.co just now; the model comes through the server*，或 *amd-01 downloads the model and the engine through the server (its internet access setting)*。
+
+**從另一台機器**（1.4.1）。伺服器替這種機器從網際網路抓模型檔之前，會先問快取裡已經有這個模型的機器。其中一台把檔案送給伺服器（和它的 agent 做的其他事一樣，由機器往外連：沒有機器要開 port，tunnel 也不用改），伺服器再轉給要的機器，不存任何檔案。在區域網路上這比網際網路快，也省下伺服器的對外頻寬。不需要任何設定：
+
+- **哪些機器會送**：任何一台 agent 是 1.4.1 以後、而且快取裡列出這個模型的其他機器，不論它自己能不能上網（完全沒有網路的機器也能送）。只會送它下載並檢查過的檔案，而且只依伺服器持有的 digest 指定。URL 模型要等它的 SHA-256 記錄下來後，才會從機器取得。
+- **選哪一台**：先選有那個 GGUF 檔本身的機器，再選正在送的檔案比較少的。沒有那個檔案、已經在送兩個，或 10 秒內沒開始送的機器會被跳過，改問下一台，最後才用網際網路；這些都發生在提出要求的機器收到第一個位元組之前。送到一半中斷的機器會讓那次回應提早結束；下載會從磁碟上已有的部分繼續，伺服器會重新選來源。
+- **檢查**：提出要求的機器照常檢查每個檔案。伺服器也會檢查經過的完整檔案，並保留最後一段直到相符才送出：副本不符的機器在一小時內不會再被要求送那個檔案，稽核紀錄會寫出是哪台（`node.relay_copy_refused`），檔案會從別處重新開始。請從那台送出檔案的機器的快取移除這個模型，再重新下載。
+- **你會看到**：*Downloading the model via the server, from gpu-host: … of …*、*Downloaded … via the server, from gpu-host*，有機器會送時 **Download to…** 會顯示 *via the server, from gpu-host*。
+- 只有經由伺服器取得檔案的機器會用到（**Always through the server**，或 **Auto** 且連不到來源之後）。連得到網際網路的機器仍然直接下載。
+- 受限模型可能這樣送到一台機器而不用到任何 Hugging Face 權杖，因為另一台機器已經有它。和以前一樣，每台機器拿到什麼由伺服器決定。
+- 引擎壓縮檔仍然經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
 
 **引擎映像檔**（container 變體）在 recipe 以 digest 釘選時也會經由伺服器，所有內建 recipe 都是如此：
 
@@ -864,7 +874,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 進度會顯示 *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*，接著是 *loading it*。每一層都會經過伺服器的網路兩次，和模型檔一樣。
 - 只用 tag 指定的映像檔（自訂 recipe 的、這一版 Forgeyard 自己的 vision 映像檔）不能經由伺服器：沒有記錄的 digest 可以比對。請改用上傳（下一節）。
 
-機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。
+機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。要送檔案給其他機器，agent 必須是 1.4.1 以後的版本；提出要求的機器只要 1.4。
 
 ## 把引擎映像檔上傳到機器
 
@@ -881,6 +891,23 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 3. 載入完成後，對話框會列出檔案裡的每個映像檔：它的 tag、id，以及它是哪個 recipe 的映像檔。*The pinned image of llama-cpp (vulkan), checked by its recorded ids*：那台機器上的部署不用 pull 就會使用它。*Named as the image of …*：只用 tag 指定它的 recipe 會照樣使用。*Not the image of any recipe*：自訂 recipe 可以用它的 tag 指定它。
 
 檔案從你的瀏覽器經過伺服器直接送到 agent，agent 一邊收一邊把它串流進 `docker load`（或 `podman load`）：伺服器只保留很小的緩衝，機器也不需要其他通往你電腦的路。container 引擎載入時會檢查每一層；中斷的檔案絕不會被載入。每台機器同時只能有一個上傳，全部最多兩個；檔案最大為 `IMAGE_UPLOAD_MAX_GB`（沒設定時是 64 GiB）。機器的 agent 必須是 1.4 以後的版本、有 container 引擎，而且在線上。每次上傳和失敗的原因都會記入稽核紀錄（`node.image_uploaded`）。
+
+要複製另一台機器已經有的映像檔，不需要檔案：請看下一節。
+
+## 從另一台機器複製引擎映像檔
+
+管理員可以把一台機器的 container 引擎裡的映像檔，經由伺服器複製到另一台機器（1.4.1）：只用 tag 指定的自訂 recipe 映像檔、在某台機器上自己建置的映像檔，或連不到 registry 的機器需要的映像檔。不會自動複製任何東西。
+
+1. 打開目標機器的頁面 → **Engine images** → **Copy from another machine**。
+2. 在 **From** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。
+3. 選一個，按 **Copy**。來源機器會用它自己的 tag 對它執行 `docker save`（或 `podman save`），送給伺服器，伺服器直接轉進目標機器的 `docker load`，只保留很小的緩衝。載入完成後，對話框會列出載入了什麼、它是哪個 recipe 的映像檔，以及 *The same image as on gpu-host (same content id)*：載入的就是來源機器上的那個映像檔。
+
+注意事項：
+
+- **信任**：只用 tag 指定的映像檔沒有記錄的 id，所以目標機器會執行來源機器在那個 tag 底下的任何東西。只從你信任的機器複製。有釘選的映像檔在執行前仍會以記錄的 id 檢查。
+- `docker save` 的資料流事先不知道大小，也不能續傳：中斷的複製會從頭重來，目標機器不會從中斷的資料流載入任何東西。
+- 限制和上傳相同：每台目標機器同時只能有一個複製或上傳，全部最多兩個，最大 `IMAGE_UPLOAD_MAX_GB`；每台來源機器同時只能送一個。
+- 來源機器的 agent 必須是 1.4.1 以後、有 container 引擎；目標機器是 1.4 以後、有 container 引擎。兩台都必須在線上。每次複製和失敗的原因都會記入稽核紀錄（`node.image_copied`，包含兩台機器和載入的 id）。
 
 ## 釋出機器上的磁碟空間
 

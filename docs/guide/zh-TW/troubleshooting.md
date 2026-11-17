@@ -164,9 +164,10 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 - *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
 - *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
 - *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。
-- *… has no build for amd-strix's architecture*：映像檔沒有那台機器平台（例如 arm64）的版本；請選有這個版本的 recipe 或變體。
+- *… has no build for amd-01's architecture*：映像檔沒有那台機器平台（例如 arm64）的版本；請選有這個版本的 recipe 或變體。
 - *the image through the server: … SHA-256 mismatch*（某一層）、*the manifest the server sent … is not one of the image's recorded digests*，或 *… does not match the recorded ids: not running it*：收到的不是釘選的映像檔。什麼都沒有載入；伺服器的 log 會寫出是哪個 registry 回應的。
-- 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-strix: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。
+- 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-01: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。從另一台機器來的檔案（1.4.1）會寫 *… <file> from gpu-host to …*，送不出來的機器會寫出名稱和原因：*gpu-host could not send <file> for … (not_found: …); trying the next machine*。
+- *gpu-host's copy of <file> does not match its checksum*（伺服器的 log，稽核紀錄裡的 `node.relay_copy_refused`；送出檔案的機器自己的 log 會寫 *A cached file failed its checksum*）：那台機器上的副本壞了。檔案已改從別處取得；請從那台機器的快取（它的頁面）移除這個模型再重新下載。一小時內不會再要求它送這個檔案。
 
 ## vLLM 在共用的卡上無法啟動
 

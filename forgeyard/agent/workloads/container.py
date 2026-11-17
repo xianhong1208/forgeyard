@@ -67,6 +67,24 @@ LOADED_RE = re.compile(r"^\s*Loaded image(?:\(s\))?(?: ID)?:\s*(.+?)\s*$")
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
+# 1.4.1 ("image_save"): what the agent lists of its images, and how it reads a `docker save` stream.
+LIST_MAX = 256
+SAVE_CHUNK = 1024 * 1024
+
+
+class SaveFailed(Exception):
+    """An image could not be saved (or no longer): the message is safe to show."""
+
+
+def listed_image(item: dict) -> dict:
+    """One image of `image inspect`, as the listing shows it."""
+    size = item.get("Size")
+    return {"id": images.normalize(item.get("Id")) or str(item.get("Id"))[:80],
+            "tags": [t for t in (item.get("RepoTags") or []) if isinstance(t, str) and "<none>" not in t][:16],
+            "content": images.content_of_inspect(item), "size": size if isinstance(size, int) and size >= 0 else None,
+            "created": str(item.get("Created") or "")[:40] or None, "os": str(item.get("Os") or "")[:32],
+            "architecture": str(item.get("Architecture") or "")[:32]}
+
 
 # What the docker CLI prints when its credential helper (credsStore / credHelpers in config.json)
 # fails. A helper that needs a desktop session, a keyring or a GPG agent can fail under the agent
@@ -601,6 +619,82 @@ class ContainerRuntime:
             if ref not in entry["tags"] and not ref.startswith("sha256:") and len(entry["tags"]) < 16:
                 entry["tags"].append(ref)
         return list(found.values())[:32]
+
+    # ------------------------------------------------------------------ copying an image to another machine (1.4.1)
+    def list_images(self) -> list[dict]:
+        """The images in the engine (1.4.1, "image_save"), as an admin picks one to copy to another machine: id,
+        tags, content id, size, creation time, platform. At most LIST_MAX."""
+        if not self._info.get("ok"):
+            raise StartError(f"no container engine: {self._info.get('reason') or 'not available'}")
+        engine = Path(self.engine).name
+        r = self._cli("image", "ls", "-q", "--no-trunc", timeout=60)
+        if r.returncode != 0:
+            raise StartError(f"{engine} image ls failed: {(r.stderr or r.stdout).strip()[-200:]}")
+        ids = list(dict.fromkeys(x.strip() for x in r.stdout.splitlines() if x.strip()))[:LIST_MAX]
+        found: dict[str, dict] = {}
+        for ref in ids:
+            item = self._image(ref)
+            if item is None or not isinstance(item.get("Id"), str):
+                continue  # removed since the listing
+            entry = listed_image(item)
+            found.setdefault(entry["id"], entry)
+        return list(found.values())
+
+    def save_stream(self, image_id: str, cancel: threading.Event):
+        """`docker save` / `podman save` of one of the engine's own images, by its id, under its own tags: (what the
+        listing says of it, an iterator of the archive's bytes). The iterator raises SaveFailed when the engine
+        stops or fails, so the archive is never ended cleanly then. Raises SaveFailed("not_found") for an id that
+        is not one of the engine's images."""
+        wanted = images.normalize(image_id)
+        entry = next((e for e in self.list_images() if e["id"] == wanted), None) if wanted else None
+        if entry is None:
+            raise SaveFailed("that image is not on this machine (any more)")
+        engine = Path(self.engine).name
+        names = entry["tags"][:8] or [wanted]
+        argv = [self.engine, "save"]
+        if engine == "podman" and len(names) > 1:
+            argv.append("--multi-image-archive")  # Podman saves one name only without it
+        try:
+            proc = subprocess.Popen([*argv, *names], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    env=self._engine_env(), start_new_session=True)
+        except OSError as e:
+            raise SaveFailed(f"{engine} save could not start: {e}") from None
+        err: list[bytes] = []
+        reader = threading.Thread(target=lambda: err.append(proc.stderr.read()[-2000:]), daemon=True)  # type: ignore[union-attr]
+        reader.start()
+
+        def end() -> None:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(proc.pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    return
+                try:
+                    proc.wait(timeout=5)
+                    return
+                except subprocess.TimeoutExpired:
+                    continue
+
+        def chunks():
+            try:
+                assert proc.stdout is not None
+                while True:
+                    if cancel.is_set():
+                        raise SaveFailed("cancelled")
+                    data = proc.stdout.read1(SAVE_CHUNK)
+                    if not data:
+                        break
+                    yield data
+                code = proc.wait()
+                reader.join(timeout=10)
+                if code != 0:
+                    said = b"".join(err).decode("utf-8", "replace").strip()[-200:]
+                    raise SaveFailed(f"{engine} save failed: {said or f'exit code {code}'}")
+            finally:
+                if proc.poll() is None:
+                    end()
+
+        return entry, chunks()
 
     def _pull(self, image: str, progress: Optional[pulling.Report], cancel: Optional[threading.Event]) -> None:
         """Through the engine API when it answers; else (or when the registry wants credentials the

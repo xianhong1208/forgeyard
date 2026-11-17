@@ -17,7 +17,8 @@ model cache's (forgeyard.agent.models), so bytes changed on the way are refused 
 
 Engine images (#35 PR 4, "relay_images") come the same way, as `image_relay: {path, mode}` beside the spec
 (parse_image); agent/imagerelay.py fetches and loads them. An uploaded image file (an admin's, "image_load")
-is read from IMAGE_UPLOAD_PATH/<ticket> with the same client.
+is read from IMAGE_UPLOAD_PATH/<ticket> with the same client. (1.4.1, "relay_source") A cached model file another
+machine needs is sent with `post` to RELAY_SEND_PATH/<ticket> (agent/share.py).
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from forgeyard.models import fetch
 PATH_RE = re.compile(r"^/agent/v1/relay/(replica|download)/[A-Za-z0-9_-]{1,64}/(model|engine)$")
 IMAGE_PATH_RE = re.compile(r"^/agent/v1/relay/(replica|download)/[A-Za-z0-9_-]{1,64}/image$")
 UPLOAD_PATH_RE = re.compile(r"^/agent/v1/image-upload/[A-Za-z0-9_-]{16,64}$")
+IMAGE_SEND_PATH_RE = re.compile(r"^/agent/v1/image-send/[A-Za-z0-9_-]{16,64}$")
 MODES = ("auto", "server")
 UNREACHABLE_TTL = 3600.0
 
@@ -45,6 +47,10 @@ UNREACHABLE_TTL = 3600.0
 class RelayRefused(Exception):
     """The server will not relay this (not wanted any more, not allowed, the source refused access): retrying
     would get the same answer. The message is the server's."""
+
+
+class SendStopped(Exception):
+    """A send this agent stopped itself (cancelled, or the file ended early)."""
 
 
 class RelayBusy(Exception):
@@ -126,17 +132,57 @@ class RelayClient:
         return "server" if host and self.unreachable(host) else "direct"
 
     # ------------------------------------------------------------------ the request
+    def _connection(self) -> http.client.HTTPConnection:
+        if self.scheme == "https":
+            return http.client.HTTPSConnection(self.host, self.port, timeout=self.timeout,
+                                               context=self.ssl_context or ssl.create_default_context())
+        return http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+
+    def post(self, path: str, chunks, length: Optional[int]) -> dict:
+        """1.4.1 ("relay_source"): POST `length` bytes (from the iterable `chunks`) to <server><path> with the machine
+        credential; the server's JSON answer. `length` None ("image_save": a `docker save` stream): chunked, and
+        ended cleanly only when `chunks` ends without an error. Raises RelayRefused (the server refused or ended
+        the send) or fetch.FetchError (the connection failed); an error from `chunks` ends it (and goes on up)."""
+        conn = self._connection()
+        try:
+            try:
+                conn.putrequest("POST", self.base + path, skip_accept_encoding=True)
+                size = ("Content-Length", str(length)) if length is not None else ("Transfer-Encoding", "chunked")
+                for k, v in (("User-Agent", f"forgeyard-agent/{__version__}"), ("Authorization", f"Bearer {self._credential}"),
+                             ("Content-Type", "application/octet-stream"), size):
+                    conn.putheader(k, v)
+                conn.endheaders()
+                for chunk in chunks:
+                    if length is not None:
+                        conn.send(chunk)
+                    elif chunk:
+                        conn.send(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                if length is None:
+                    conn.send(b"0\r\n\r\n")
+                resp = conn.getresponse()
+                body = resp.read(16 * 1024)
+            except (OSError, http.client.HTTPException) as e:
+                raise fetch.FetchError(f"the server ({self.host}): {getattr(e, 'strerror', None) or e or type(e).__name__}") \
+                    from None
+            try:
+                answer = json.loads(body or b"{}")
+            except ValueError:
+                answer = {}
+            if resp.status == 200:
+                return answer if isinstance(answer, dict) else {}
+            detail = answer.get("detail") if isinstance(answer, dict) else None
+            said = detail.get("message") if isinstance(detail, dict) else None
+            raise RelayRefused(str(said or "")[:300] or f"HTTP {resp.status}")
+        finally:
+            conn.close()
+
     def open(self, path: str, headers: Optional[dict] = None) -> fetch.Response:
         """Open the relay. Raises fetch.FetchError (retry), RelayBusy (wait, then retry) or RelayRefused (stop);
         a 2xx or 416 answer is returned for the caller to read."""
         h = {"User-Agent": f"forgeyard-agent/{__version__}", "Accept-Encoding": "identity",
              **{k: v for k, v in (headers or {}).items() if k.lower() == "range"},
              "Authorization": f"Bearer {self._credential}"}
-        if self.scheme == "https":
-            conn = http.client.HTTPSConnection(self.host, self.port, timeout=self.timeout,
-                                               context=self.ssl_context or ssl.create_default_context())
-        else:
-            conn = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+        conn = self._connection()
         try:
             conn.request("GET", self.base + path, headers=h)
             resp = conn.getresponse()

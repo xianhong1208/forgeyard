@@ -1,5 +1,5 @@
 """The recommended models file, the list on Add a model, and the suggestion an inspection comes with:
-recipe, estimate and where it would fit (FY-REC-*)."""
+recipe, estimate and where it would fit (FY-RCM-*)."""
 
 import copy
 
@@ -35,8 +35,8 @@ def raw() -> dict:
     return yaml.safe_load(rec.FILE.read_text())
 
 
-def test_fy_rec_001_the_shipped_list(owner):
-    """FY-REC-001: the file loads and covers what was asked for: Qwen3 chat in six sizes plus a CPU
+def test_fy_rcm_001_the_shipped_list(owner):
+    """FY-RCM-001: the file loads and covers what was asked for: Qwen3 chat in six sizes plus a CPU
     GGUF, Qwen3 embedding and reranker 0.6B/4B, gpt-oss, Gemma 3 and Llama marked gated, Qwen3-VL
     (1.3), Whisper small and large-v3-turbo, BGE-M3 and its reranker."""
     data = rec.load()
@@ -97,15 +97,15 @@ BROKEN = [
 
 
 @pytest.mark.parametrize("label,mutate,needle", BROKEN, ids=[b[0] for b in BROKEN])
-def test_fy_rec_002_a_broken_entry_is_refused(label, mutate, needle):
-    """FY-REC-002: every rule of the file has a check that names the entry."""
+def test_fy_rcm_002_a_broken_entry_is_refused(label, mutate, needle):
+    """FY-RCM-002: every rule of the file has a check that names the entry."""
     with pytest.raises(rec.RecommendedError) as e:
         rec.check(mutate(raw()))
     assert needle in str(e.value), str(e.value)
 
 
-def test_fy_rec_003_duplicates_are_refused():
-    """FY-REC-003: the same name or the same source twice, or two groups with one id."""
+def test_fy_rcm_003_duplicates_are_refused():
+    """FY-RCM-003: the same name or the same source twice, or two groups with one id."""
     d = raw()
     d["models"].append(dict(d["models"][0]))
     with pytest.raises(rec.RecommendedError, match="used twice"):
@@ -120,8 +120,8 @@ def test_fy_rec_003_duplicates_are_refused():
         rec.check(d)
 
 
-def test_fy_rec_004_admins_get_the_list_with_whats_in_the_catalog(owner, hf):
-    """FY-REC-004: only admins (who add models) get the list; an entry already added says under
+def test_fy_rcm_004_admins_get_the_list_with_whats_in_the_catalog(owner, hf):
+    """FY-RCM-004: only admins (who add models) get the list; an entry already added says under
     which name."""
     r = owner.get("/api/models/recommended")
     assert r.status_code == 200
@@ -138,8 +138,8 @@ def test_fy_rec_004_admins_get_the_list_with_whats_in_the_catalog(owner, hf):
         assert c.get("/api/models/recommended").status_code == 403
 
 
-def test_fy_rec_005_inspecting_suggests_a_recipe_and_where_it_fits(owner, hf):
-    """FY-REC-005: an inspection comes with the recipe, the estimate with its defaults and the machines
+def test_fy_rcm_005_inspecting_suggests_a_recipe_and_where_it_fits(owner, hf):
+    """FY-RCM-005: an inspection comes with the recipe, the estimate with its defaults and the machines
     it would fit on now (the card on the allowlist), before anything is added."""
     r = owner.post("/api/models/inspect", json={"source": "hf://Qwen/Qwen3-4B"})
     s = r.json()["suggestion"]
@@ -158,8 +158,8 @@ def test_fy_rec_005_inspecting_suggests_a_recipe_and_where_it_fits(owner, hf):
         db.close()
 
 
-def test_fy_rec_006_device_and_recipe_follow_the_hardware(owner, hf):
-    """FY-REC-006: a GGUF model is suggested for the CPU when no GPU is free (and on request), the
+def test_fy_rcm_006_device_and_recipe_follow_the_hardware(owner, hf):
+    """FY-RCM-006: a GGUF model is suggested for the CPU when no GPU is free (and on request), the
     recipe asked for is used when it fits the model, and a model nothing serves says so."""
     make_node("a100", allowlist=[], features=MODELS)  # no GPU allowed for Forgeyard
     s = owner.post("/api/models/inspect", json={"source": "hf://ggml-org/Qwen3-1.7B-GGUF"}).json()["suggestion"]
@@ -176,8 +176,8 @@ def test_fy_rec_006_device_and_recipe_follow_the_hardware(owner, hf):
     assert s["recipe"] is None and s["error"] == "No recipe serves ctranslate2 chat models."
 
 
-def test_fy_rec_007_adding_from_the_list_keeps_engine_args_and_pins(owner, hf):
-    """FY-REC-007: what the page sends for a recommended entry (its name, title, task and engine
+def test_fy_rcm_007_adding_from_the_list_keeps_engine_args_and_pins(owner, hf):
+    """FY-RCM-007: what the page sends for a recommended entry (its name, title, task and engine
     arguments) is added pinned to the commit, like any other model; a gated one needs a token."""
     entry = next(e for e in rec.load().models if e.name == "qwen3-reranker-0.6b")
     body = {"name": "qwen3-4b", "title": "Qwen3 4B", "source": "hf://Qwen/Qwen3-4B", "task": "chat",

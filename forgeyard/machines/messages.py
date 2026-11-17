@@ -238,7 +238,8 @@ class HelloIn(_Msg):
     simulated: bool = False
     inventory: InventoryIn
     # Added in M2, optional so an M1 agent's hello stays valid.
-    features: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=16)
+    # (1.4.1: up to 32; an agent sends at most 16, which servers up to 1.4.0 accept.)
+    features: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=32)
     runtime_info: Annotated[dict, BeforeValidator(_runtime_info)] = Field(default_factory=dict)
     # Added in M3: the model cache (free space, cached models).
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
@@ -337,6 +338,18 @@ class CacheRemovedIn(_Msg):
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
 
 
+class RelaySentIn(_Msg):
+    """1.4.1 (relay_source): how the send of a cached model file to the server ended."""
+
+    v: int
+    type: Literal["relay_sent"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    code: Annotated[Optional[str], _short(32)] = None
+    reason: Annotated[Optional[str], _short(400)] = None
+    bytes: Bytes = None
+
+
 class LoadedImageIn(BaseModel):
     """One image an uploaded file held, as the agent's engine shows it once loaded (1.4, "image_load")."""
 
@@ -346,6 +359,42 @@ class LoadedImageIn(BaseModel):
     content: Annotated[Optional[str], _short(80)] = None
     os: Annotated[Optional[str], _short(32)] = None
     architecture: Annotated[Optional[str], _short(32)] = None
+
+
+class ListedImageIn(BaseModel):
+    """One image in an agent's container engine (1.4.1, "image_save"): what can be copied from it."""
+
+    model_config = ConfigDict(extra="ignore")
+    id: Annotated[str, _short(80)]
+    tags: list[Annotated[str, _short(255)]] = Field(default_factory=list, max_length=16)
+    content: Annotated[Optional[str], _short(80)] = None
+    size: Bytes = None
+    created: Annotated[Optional[str], _short(40)] = None
+    os: Annotated[Optional[str], _short(32)] = None
+    architecture: Annotated[Optional[str], _short(32)] = None
+
+
+class ImageListedIn(_Msg):
+    """1.4.1 (image_save): the answer to image_list."""
+
+    v: int
+    type: Literal["image_listed"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    reason: Annotated[Optional[str], _short(400)] = None
+    images: list[ListedImageIn] = Field(default_factory=list, max_length=256)
+
+
+class ImageSavedIn(_Msg):
+    """1.4.1 (image_save): how the send of an image ended, and which image it was."""
+
+    v: int
+    type: Literal["image_saved"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    reason: Annotated[Optional[str], _short(400)] = None
+    bytes: Bytes = None
+    image: Optional[ListedImageIn] = None
 
 
 class ImageLoadedIn(_Msg):

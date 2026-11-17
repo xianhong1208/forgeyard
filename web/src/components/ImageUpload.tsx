@@ -1,38 +1,53 @@
 // Engine images on a machine (1.4, issue #35): what comes through the server by itself (a pinned image), and,
 // for admins, "Upload an image": a file `docker save` wrote (optionally gzip), streamed through the server,
 // which keeps none of it, into the machine's container engine. The answer says what was loaded, and which
-// recipe's image each one is.
-import { IconBox, IconUpload, IconX } from "@tabler/icons-react";
+// recipe's image each one is. 1.4.1 (#104): "Copy from another machine": an image another machine's engine has,
+// saved there and passed on by the server the same way.
+import { IconBox, IconCopy, IconUpload, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 
-import { notifyUnauthorized } from "../lib/api";
-import { UPLOAD_ACCEPT, matchLine, shortId, uploadBlocked, uploadLine, type UploadResult } from "../lib/imageUpload";
+import { api, errorText, notifyUnauthorized } from "../lib/api";
+import {
+  UPLOAD_ACCEPT, copyBlocked, copySources, listedLine, matchLine, sameLine, shortId, uploadBlocked, uploadLine,
+  type CopyResult, type ListedImage, type UploadResult,
+} from "../lib/imageUpload";
 import { bytes } from "../lib/machines";
 import type { Machine } from "../lib/types";
 import { Notice } from "./ui";
 
-export function EngineImagesSection({ m, canManage, onChanged }: { m: Machine; canManage: boolean; onChanged: (text: string) => void }) {
+export function EngineImagesSection({ m, machines, canManage, onChanged }: {
+  m: Machine; machines: Machine[]; canManage: boolean; onChanged: (text: string) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [copying, setCopying] = useState(false);
   const blocked = uploadBlocked(m);
+  const copyNo = copyBlocked(m, machines);
   return (
     <section className="panel mk-section" aria-labelledby="mk-images">
       <div className="panel-head">
         <h2 id="mk-images">Engine images</h2>
         {canManage && (
-          <button type="button" className="btn btn-small" disabled={blocked !== null} title={blocked ?? undefined}
-            onClick={() => setOpen(true)}>
-            <IconUpload size={14} aria-hidden="true" /> Upload an image
-          </button>
+          <div className="img-actions">
+            <button type="button" className="btn btn-small" disabled={copyNo !== null} title={copyNo ?? undefined}
+              onClick={() => setCopying(true)}>
+              <IconCopy size={14} aria-hidden="true" /> Copy from another machine
+            </button>
+            <button type="button" className="btn btn-small" disabled={blocked !== null} title={blocked ?? undefined}
+              onClick={() => setOpen(true)}>
+              <IconUpload size={14} aria-hidden="true" /> Upload an image
+            </button>
+          </div>
         )}
       </div>
       <p className="small muted img-lead">
         A deployment pulls its engine image itself. A machine that cannot reach the registry gets a pinned image through
         the server instead (Internet access, above). Any other image, such as a custom recipe's image named by a tag only,
-        can be uploaded here: save it on a machine that has it, for example
+        can be copied here from another machine (Copy from another machine), or uploaded: save it on a machine that has it, for example
         <code className="mono"> docker save IMAGE | gzip &gt; image.tar.gz</code>.
       </p>
       {canManage && blocked && <p className="small muted">{blocked}</p>}
       {open && <UploadDialog m={m} onClose={() => setOpen(false)} onLoaded={onChanged} />}
+      {copying && <CopyDialog m={m} sources={copySources(m, machines)} onClose={() => setCopying(false)} onLoaded={onChanged} />}
     </section>
   );
 }
@@ -146,6 +161,136 @@ function UploadDialog({ m, onClose, onLoaded }: { m: Machine; onClose: () => voi
           {phase !== "done" && (
             <button type="button" className="btn btn-primary" disabled={!file || tooLarge || busy} onClick={start}>
               <IconUpload size={16} aria-hidden="true" /> {busy ? "Uploading…" : "Upload"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type CopyPhase = "pick" | "copying" | "done" | "error";
+
+// 1.4.1 (#104): an image another machine's engine has, saved there and passed on by the server, loaded here.
+function CopyDialog({ m, sources, onClose, onLoaded }: {
+  m: Machine; sources: Machine[]; onClose: () => void; onLoaded: (text: string) => void;
+}) {
+  const [from, setFrom] = useState<number | null>(sources[0]?.id ?? null);
+  const [list, setList] = useState<ListedImage[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [image, setImage] = useState<string | null>(null);
+  const [phase, setPhase] = useState<CopyPhase>("pick");
+  const [result, setResult] = useState<CopyResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const source = sources.find((x) => x.id === from) ?? null;
+  const busy = phase === "copying";
+
+  useEffect(() => {
+    box.current?.querySelector<HTMLElement>("select, button")?.focus();
+  }, []);
+  useEffect(() => {
+    if (from === null) return;
+    let live = true;
+    api<{ images: ListedImage[] }>(`/machines/${from}/images`)
+      .then((r) => { if (live) { setList(r.images); setImage(r.images[0]?.id ?? null); } })
+      .catch((e) => { if (live) setListError(errorText(e)); });
+    return () => { live = false; };
+  }, [from]);
+  const close = () => {
+    if (busy && !window.confirm("Close this? The copy goes on until it ends; its result is in the audit log.")) return;
+    onClose();
+  };
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  });
+
+  const start = async () => {
+    if (from === null || image === null || !source) return;
+    setPhase("copying");
+    setError(null);
+    setResult(null);
+    try {
+      const r = await api<CopyResult>(`/machines/${m.id}/images/copy`, { method: "POST", body: { source_id: from, image } });
+      setResult(r);
+      setPhase("done");
+      onLoaded(`Copied ${r.images.flatMap((i) => i.tags).join(", ") || r.images.map((i) => shortId(i.id)).join(", ")} from ${source.name} to ${m.name}.`);
+    } catch (e) {
+      setPhase("error");
+      setError(errorText(e));
+    }
+  };
+
+  return (
+    <div className="dlg-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
+      <div className="dlg panel" role="dialog" aria-modal="true" aria-labelledby="cpy-title" ref={box}>
+        <div className="dlg-head">
+          <h2 id="cpy-title"><IconCopy size={18} aria-hidden="true" /> Copy an image to {m.name}</h2>
+          <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label="Close" onClick={close}><IconX size={16} aria-hidden="true" /></button>
+        </div>
+        <p className="small muted dlg-lead">
+          The other machine saves the image from its container engine; the server passes it on, keeping none of it,
+          straight into {m.name}'s ({m.runtime_info?.container?.engine ?? "Docker or Podman"}). An image named by a tag
+          only is used as that machine has it: copy only from a machine you trust.
+        </p>
+        <div className="field">
+          <label htmlFor="cpy-from">From</label>
+          <select id="cpy-from" value={from ?? ""} disabled={busy || phase === "done"}
+            onChange={(e) => {
+              setFrom(Number(e.target.value)); setList(null); setListError(null); setImage(null);
+              setPhase("pick"); setError(null); setResult(null);
+            }}>
+            {sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </div>
+        {listError && <Notice tone="error">{listError}</Notice>}
+        {!listError && list === null && <p className="small muted">Asking {source?.name ?? "the machine"} for its images…</p>}
+        {list !== null && list.length === 0 && <p className="small muted">{source?.name} has no images.</p>}
+        {list !== null && list.length > 0 && phase !== "done" && (
+          <fieldset className="dlg-machines cpy-images">
+            <legend>Images on {source?.name}</legend>
+            {list.map((i) => (
+              <label key={i.id} className="dlg-target">
+                <input type="radio" name="cpy-image" value={i.id} checked={image === i.id} disabled={busy}
+                  onChange={() => setImage(i.id)} />
+                <span className="dlg-target-main">
+                  <span className="dlg-target-name"><strong className="mono">{i.tags.length ? i.tags.join(", ") : "(no tag)"}</strong></span>
+                  <small className="mono">{listedLine(i)}</small>
+                  <small>{matchLine({ ...i, tags: i.tags })}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {busy && source && (
+          <div className="upl-progress" role="status">
+            <span className="bar bar-dl bar-busy" aria-hidden="true"><span /></span>
+            <small>Copying from {source.name}: it saves the image, the server passes it on, {m.name} loads it. A large image takes minutes.</small>
+          </div>
+        )}
+        {error && <Notice tone="error">{error}</Notice>}
+        {result && (
+          <ul className="upl-result" aria-label="Loaded images">
+            {result.images.map((i) => (
+              <li key={i.id}>
+                <IconBox size={16} aria-hidden="true" />
+                <span className="upl-result-main">
+                  <strong className="mono">{i.tags.length ? i.tags.join(", ") : "(no tag)"}</strong>
+                  <small className="mono muted">{shortId(i.id)}{i.architecture ? ` · ${i.os || "linux"}/${i.architecture}` : ""} · {bytes(result.bytes)} from {result.source.name}</small>
+                  <small>{sameLine(i, result.source.name)}</small>
+                  <small>{matchLine(i)}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="dlg-foot">
+          <button type="button" className="btn btn-quiet" onClick={close}>{phase === "done" ? "Close" : "Cancel"}</button>
+          {phase !== "done" && (
+            <button type="button" className="btn btn-primary" disabled={image === null || busy} onClick={() => void start()}>
+              <IconCopy size={16} aria-hidden="true" /> {busy ? "Copying…" : "Copy"}
             </button>
           )}
         </div>

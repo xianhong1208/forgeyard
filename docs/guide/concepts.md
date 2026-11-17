@@ -136,8 +136,11 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   **Download to…** fills it ahead of a deployment, with the engine too
   ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). A machine
   that cannot reach Hugging Face or GitHub gets the files **through the server**, which passes them on
-  and stores nothing; the agent checks them as it checks any download. A pinned engine image comes the
-  same way, layer by layer, and an admin can upload any image file to a machine from its page. Whether a
+  and stores nothing; the agent checks them as it checks any download. Since 1.4.1 a model file comes
+  from another machine that has it in its cache, still through the server, before the internet. A pinned
+  engine image comes the
+  same way, layer by layer, and an admin can upload any image file to a machine from its page, or copy an
+  image from another machine's engine (1.4.1). Whether a
   model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
   keeps **one Hugging Face token** (an admin sets it under **Models → Sources**, stored encrypted) for
@@ -295,9 +298,9 @@ to the catalog from Hugging Face (three are recommended), deployed and listed un
 API key.
 
 - **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
-  PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,
-  one card shared by memory, or the CPU build on any machine (an AMD machine runs it on its CPU: there
-  is no ROCm build yet). The model comes from the machine's model cache, like every other model.
+  PyTorch) in the `forgeyard-vision` image, pinned by digest like every engine: the CUDA build on an
+  NVIDIA GPU, one card shared by memory, or the CPU build on any machine (an AMD machine runs it on its
+  CPU: there is no ROCm build yet). The model comes from the machine's model cache, like every other model.
 - **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
   is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
   model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large

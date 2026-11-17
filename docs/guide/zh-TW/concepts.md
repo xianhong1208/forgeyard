@@ -65,7 +65,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
-- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。有釘選的引擎映像檔也會這樣一層一層送過去，管理員也可以從機器的頁面上傳任何映像檔。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
+- 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。1.4.1 起，模型檔會先從快取裡已經有它的另一台機器取得（仍然經由伺服器），之後才用網際網路。有釘選的引擎映像檔也會這樣一層一層送過去，管理員也可以從機器的頁面上傳任何映像檔，或從另一台機器的引擎複製映像檔（1.4.1）。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
 - **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Models → Sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
 
 ## 部署與閘道
@@ -147,7 +147,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入目錄（推薦了三個）、部署後列在 **Serving → Vision**、在 **Playground** 試用（模型選單的 *Vision* 底下）、用 API 金鑰呼叫。
 
-- **只有一種引擎，Forgeyard 自己的。** `vision` 配方在與伺服器同版本的 `forgeyard-vision` 映像檔裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
+- **只有一種引擎，Forgeyard 自己的。** `vision` 配方在 `forgeyard-vision` 映像檔（和每個引擎一樣以 digest 固定）裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
 - **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。
 - **自己的 API：**`/v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`，每個請求一張圖片（multipart，或 JSON 裡的 base64），回應是 JSON；遮罩和深度圖是 base64 的 PNG。OpenAI SDK 沒有這個 API：任何 HTTP 用戶端都能呼叫。
 - 每個副本**一次處理一張圖片**；其餘排隊等候。要更高吞吐量就多開副本。

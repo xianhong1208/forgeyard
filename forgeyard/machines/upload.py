@@ -16,6 +16,10 @@ small buffer (QUEUE_CHUNKS pieces), so a slow agent slows the browser's upload i
 
 The ticket is random, for one machine and one GET; it is gone when the upload ends. One upload at a time per
 machine, MAX_TOTAL in all. The size limit is IMAGE_UPLOAD_MAX_GB. Audited as `node.image_uploaded`.
+
+1.4.1 (#104): an image copied from another machine (forgeyard/machines/imagecopy.py) comes the same way, with the
+source agent's `docker save` as the body instead of the browser's file: its size is not known ahead, so the
+answer to the agent is chunked (no `size` in image_load), and a body that breaks off is never ended cleanly.
 """
 
 from __future__ import annotations
@@ -61,12 +65,13 @@ class Upload:
     ticket: str
     node_id: int
     node_name: str
-    size: int
+    size: Optional[int]            # None: not known ahead (a copy from another machine), sent chunked
     queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=QUEUE_CHUNKS))
     claimed: bool = False
     started: asyncio.Event = field(default_factory=asyncio.Event)
     gone: Optional[str] = None     # why the agent's side ended early
     sent: int = 0
+    sent_total: int = 0            # what the body held, once it ended
 
 
 _uploads: dict[str, Upload] = {}
@@ -124,37 +129,55 @@ def precheck(node: Node) -> None:
 
 async def receive(request: Request, node: Node, size: int, name: str) -> dict:
     """Pipe the request's body to the machine's agent, and return its answer. Raises UploadFailed."""
+    return await pipe(node, request.stream(), size, name)
+
+
+async def pipe(node: Node, chunks, size: Optional[int], name: str, *, limit: Optional[int] = None,
+               on_started=None) -> dict:
+    """Pipe `chunks` (an async iterator of bytes: a browser's body, or another machine's `docker save`) to the
+    machine's agent, and return its answer. `size` None: not known ahead (then at most `limit` bytes).
+    `on_started` is called once the agent fetches. Raises UploadFailed."""
     precheck(node)
     conn = hub.get(node.id)
     assert conn is not None
     up = Upload(secrets.token_urlsafe(24), node.id, node.name, size)
     _uploads[up.ticket] = up
-    fut = conn.request({"v": PROTOCOL_VERSION, "type": "image_load", "path": f"{IMAGE_UPLOAD_PATH}/{up.ticket}",
-                        "size": size, "name": name[:200]})
+    ask = {"v": PROTOCOL_VERSION, "type": "image_load", "path": f"{IMAGE_UPLOAD_PATH}/{up.ticket}", "name": name[:200]}
+    if size is not None:
+        ask["size"] = size
+    fut = conn.request(ask)
     started = time.monotonic()
-    log.info("Upload of an image file (%s, %.1f MiB) to %s started.", name[:80], size / 1024**2, node.name)
+    log.info("Upload of an image file (%s, %s) to %s started.", name[:80],
+             f"{size / 1024**2:.1f} MiB" if size is not None else "size not known ahead", node.name)
     try:
         try:
             await asyncio.wait_for(up.started.wait(), CONNECT_TIMEOUT)
         except asyncio.TimeoutError:
             raise UploadFailed(504, "agent_no_fetch", f"{node.name}'s agent did not start fetching the file within "
                                                       f"{CONNECT_TIMEOUT:g} s.") from None
+        if on_started is not None:
+            on_started()
         got = 0
+        of = f" of {size}" if size is not None else ""
         try:
-            async for chunk in request.stream():
+            async for chunk in chunks:
                 if not chunk:
                     continue
                 got += len(chunk)
-                if got > size:
+                if size is not None and got > size:
                     raise UploadFailed(400, "upload_too_long", "The file is longer than its Content-Length.")
+                if limit is not None and got > limit:
+                    raise UploadFailed(413, "upload_too_large", f"The image is larger than the limit of "
+                                                                f"{limit / UNIT:.0f} GiB (IMAGE_UPLOAD_MAX_GB).")
                 await _put(up, chunk)
         except UploadFailed:
             raise
         except Exception as e:  # the browser went away (ClientDisconnect), or the connection broke
-            raise UploadFailed(400, "upload_broken", f"The upload broke off after {got} of {size} bytes "
-                                                     f"({type(e).__name__}).") from None
-        if got != size:
+            raise UploadFailed(400, "upload_broken", f"The upload broke off after {got}{of} bytes "
+                                                     f"({type(e).__name__}{f': {e}' if str(e) else ''}).") from None
+        if size is not None and got != size:
             raise UploadFailed(400, "upload_short", f"The upload ended after {got} of {size} bytes.")
+        up.sent_total = got
         await _put(up, None)
         try:
             answer = await asyncio.wait_for(asyncio.wrap_future(fut), ANSWER_TIMEOUT)
@@ -177,9 +200,9 @@ async def receive(request: Request, node: Node, size: int, name: str) -> dict:
         conn.forget(fut)
         _uploads.pop(up.ticket, None)
     took = max(time.monotonic() - started, 1e-6)
-    log.info("Upload of an image file to %s: %.1f MiB in %.1f s, %s.", node.name, size / 1024**2, took,
+    log.info("Upload of an image file to %s: %.1f MiB in %.1f s, %s.", node.name, up.sent_total / 1024**2, took,
              "loaded" if answer.get("ok") else f"not loaded: {answer.get('reason')}")
-    return answer
+    return {**answer, "bytes": up.sent_total}
 
 
 async def _put(up: Upload, chunk) -> None:
@@ -247,5 +270,6 @@ async def upload_stream(ticket: str, request: Request):
             if not finished and up.gone is None:
                 up.gone = "the connection to the agent ended"
 
-    return StreamingResponse(body(), media_type="application/octet-stream",
-                             headers={"Content-Length": str(up.size), "Cache-Control": "no-store"})
+    # Without a size (a copy from another machine) the answer is chunked: one that breaks off never ends cleanly.
+    headers = {"Cache-Control": "no-store", **({"Content-Length": str(up.size)} if up.size is not None else {})}
+    return StreamingResponse(body(), media_type="application/octet-stream", headers=headers)

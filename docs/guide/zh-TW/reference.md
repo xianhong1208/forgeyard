@@ -425,7 +425,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 ### 視覺
 
-`POST /v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`（1.4）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是與伺服器同版本的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`（1.4）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是以 digest 固定的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
 
 請求是 `multipart/form-data`，帶 `model`、檔案欄位 `image` 和各選項欄位；或是 JSON，帶 `model`、`image`（base64 或 `data:` URI）和選項。PNG、JPEG 或 WebP，最多 20 MiB、4,000 萬像素。閘道檢查有沒有模型和圖片，只換掉 `model`，其餘原樣交給副本；別種任務的模型回 400 `wrong_endpoint`（訊息會寫出它的端點）。
 
@@ -764,9 +764,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
 | `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和引擎壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
 
-`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`）。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`），和 `from_machine`（1.4.1）：會經由伺服器把模型送過來的機器，沒有則為 null。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
 
-一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`，模型經由伺服器從另一台機器的快取取得則是 `machine`，並帶 `source: {id, name}`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
 
 | 狀態碼 | `code` | 何時 |
 |---|---|---|
@@ -809,6 +809,28 @@ agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出�
 
 agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇到 429 會等待且不算一次重試，其餘的則像網路錯誤一樣重試。這時它的進度會帶 `download.via: "server"`。
 
+**從另一台機器**（協定 feature `relay_source`，1.4.1 起的 agent 和伺服器）。伺服器開啟模型檔的來源之前，會先問另一台有這個檔案的機器。候選機器是：已連線、agent 列出 `relay_source`、回報的快取（`model_cache.cached`）裡有這個模型的 revision（URL 模型則是它的 key，並且在 `model_cache.models` 裡列出和伺服器記錄相同的 SHA-256），而且沒有因為這個檔案被標記的其他機器。列出那個 GGUF 檔本身 key 的機器優先，其次是正在送的檔案比較少的，再其次是最近一次心跳較新的。提出要求的機器，它的請求完全不變。
+
+伺服器透過 WebSocket 傳給選中的機器 `relay_send {request_id, path, item, offset, length}`。`item` 依伺服器持有的 digest 描述檔案：`{kind: "hf", repo, revision, file, blob, size}`（`blob` 是 LFS 檔的 SHA-256，否則是它的 git blob id）或 `{kind: "url", dir, sha256, size}`。agent 只在它自己磁碟上找到的模型裡找這個檔案（revision 的標記檔列出這個檔案、snapshot 連結指向那個 blob、快取裡大小相符的一般檔案；URL 模型的標記檔有那個 SHA-256），送的期間持有模型檔案的鎖（這時移除會回 `busy`），然後 POST 第 `offset` 到 `offset + length - 1` 個位元組：
+
+| 請求 | 作用 |
+|---|---|
+| `POST /agent/v1/relay-send/{ticket}` | 這些位元組，帶機器憑證，`Content-Length` = `length`；全部轉出去之後回 `{"ok": true, "bytes": n}` |
+
+每個回應都會關閉連線（`Connection: close`），所以傳送被提早結束時（提出要求的機器離開了、下載被取消），來源會立刻停止寫入。
+
+之後它回 `relay_sent {request_id, ok, code, reason, bytes}`，`code` 是 `not_found`、`busy`（已經在送兩個）、`corrupt`（它送出的完整檔案和 digest 不符）或 `failed`。伺服器透過最多 64 段的佇列把內容轉進提出要求的機器的回應；`Content-Length` 和 `Content-Range` 由伺服器依檔案大小產生。回 `not_found` 或 `busy`，或 10 秒內沒有送出任何東西（之後 10 分鐘內不會再被要求送這個檔案）的機器會被跳過，改問下一台，最後才照上面的方式從網際網路取得。完整的檔案在經過時會計算 hash，最後一段保留到相符才送出：副本不符的機器在一小時內不會再被要求送這個檔案，稽核紀錄會記下 `node.relay_copy_refused`（那台機器、檔案、提出要求的機器和兩個 digest），部署的事件也會寫出來，而提出要求的機器對這個檔案的下一次請求會收到完整檔案（200，忽略它的 `Range`），所以會從頭重新下載。每台機器同時最多送兩個。
+
+| 狀態 | `code` | 時機 |
+|---|---|---|
+| 401 | `credential_refused` | 沒有憑證，或憑證已撤銷 |
+| 403 | `browser_refused` | 請求帶有 `Origin` |
+| 404 | `send_not_found` | 這台機器沒有那個 ticket 的傳送（別台機器的憑證、已結束的 ticket） |
+| 409 | `send_claimed`、`send_ended` | 同一個 ticket 第二次 POST；傳送在全部位元組轉出前就結束了 |
+| 400 | `send_length` | `Content-Length` 不是要求的長度 |
+
+這時經由伺服器的進度會帶 `download.source`，也就是送出檔案的機器名稱（由伺服器填入，agent 不能設定）；下載的 `via` 會變成 `machine`，並帶 `source: {id, name}`。Download to… 的 targets 裡，`from_machine` 會寫出哪台機器會經由伺服器把模型送給這台機器。
+
 **引擎映像檔**（協定 feature `relay_images`，1.4 起的 agent 和伺服器）。對同時列出它的 agent，desired 裡的副本（在 `spec` 旁邊）或下載，如果引擎映像檔以 digest 釘選、並記錄在 `forgeyard/recipes/images.lock.json`，就會帶 `image_relay: {path, mode}`，模式相同；`path` 是 `/agent/v1/relay/{replica|download}/{id}/image`。只用 tag 指定的映像檔永遠不會有。
 
 | 請求 | 回傳內容 |
@@ -839,6 +861,26 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | 422 | `image_load_failed` | 引擎無法載入（附 agent 的說明） |
 
 稽核事件 `node.image_uploaded`（檔名、大小、`ok`、載入的映像檔或失敗原因）。
+
+### 從另一台機器複製映像檔
+
+`GET /api/machines/{id}/images`（管理員）會向那台機器的 agent 詢問它引擎裡的映像檔（協定 feature `image_save`，1.4.1 起的 agent：`image_list {request_id}`，以 `image_listed {request_id, ok, reason, images}` 回答），回傳 `{machine_id, images: [{id, tags, content, size, created, os, architecture, matches}]}`，最多 256 個。
+
+`POST /api/machines/{id}/images/copy`，內容 `{"source_id": 2, "image": "sha256:…"}`（管理員），把其中一個複製到機器 `id`。伺服器傳給來源 `image_save {request_id, path, image}`；它的 agent 以自己的 tag 儲存 id 為 `image` 的映像檔（必須是它自己的：絕不使用伺服器給的名稱），用 `docker save`（Podman 有多個 tag 時用 `podman save --multi-image-archive`），再以 chunked 方式 POST 到 `/agent/v1/image-send/{ticket}`，帶它的憑證（只能一次；別台機器的憑證會得到 404，第二次 POST 是 409，瀏覽器是 403；每個回應都會關閉連線，所以傳送被提早結束的來源會立刻停止）。伺服器像上傳一樣把它轉進目標機器的 `image_load`（不帶 `size`；給目標機器的回應是 chunked，來源中斷時絕不會正常結束），來源再回 `image_saved {request_id, ok, reason, bytes, image}`。回應是 `{ok, bytes, images, source: {id, name}, saved}`，每個映像檔帶 `matches` 和 `same_as_source`（它的 content id，沒有則用 id，和來源的相同；沒有可比對的則為 null）。
+
+| 狀態 | `code` | 時機 |
+|---|---|---|
+| 422 | `bad_image`、`same_machine` | 映像檔不是用 id 指定；來源就是目標 |
+| 409 | `source_offline`、`source_cannot_save` | 來源沒有連線，或沒有 container 引擎、或比 1.4.1 舊 |
+| 409 | `source_busy` | 來源已經在送一個映像檔 |
+| 409 | `machine_offline`、`agent_cannot_load`、`upload_busy` | 目標機器，同上傳（全部兩個時是 429） |
+| 409 | `image_save_failed` | 來源無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
+| 504 | `source_no_send` | 來源 2 分鐘內沒有開始送 |
+| 400 | `upload_broken` | 來源的儲存中斷；什麼都沒有載入 |
+| 413 | `upload_too_large` | 映像檔超過 `IMAGE_UPLOAD_MAX_GB` |
+| 422 | `image_load_failed` | 目標機器的引擎無法載入（agent 的說明） |
+
+稽核事件 `node.image_copied`（目標機器；`from_machine`、要求的映像檔、大小、`ok`、載入的映像檔和它們的 content id，或失敗原因）。在任何位元組送出前就被拒絕的不會記錄。
 
 ## Setup health 檢查
 
@@ -954,8 +996,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
 | | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
-| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `forgeyard-vision:<伺服器版本>-cuda`（torch +cu130） |
-| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `forgeyard-vision:<伺服器版本>` |
+| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda`（torch +cu130） |
+| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.0`（linux/amd64 與 arm64） |
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
@@ -975,20 +1017,20 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 
 Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
-`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔不以 digest 釘住：variant 用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指的是和伺服器同版本、隨同一個 release 發布的映像檔（見[容器映像檔](#container-images)）。連不到 registry 的機器，用 `docker load` 以那個 tag 載入。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）。
+`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 
 ## 容器映像檔
 
-每個版本都會在 Docker Hub 發布兩個映像檔，由 CI 從該版本的 tag 建置：
+每個版本都會在 Docker Hub 發布兩個映像檔，由 CI 從該版本的 tag 建置（還有視覺伺服器的 `docker.io/tonyhuang1101/forgeyard-vision`，`X.Y.Z` 與 `X.Y.Z-cuda`，由 `vision` 配方以 digest 固定）：
 
 | 映像檔 | 內容 | 平台 |
 |---|---|---|
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.4.0`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.4.1`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。

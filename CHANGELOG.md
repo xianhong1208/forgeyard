@@ -6,6 +6,67 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-11-17
+
+A patch release for machines without internet. A machine that gets its files through the server now gets a
+model file from another machine that already has it in its cache, still through the server, before the
+internet (#116); an admin can copy an engine image from one machine to another (#117). The vision image is
+pinned by digest like every other engine, so a machine without registry access gets it through the server
+(#115), and a fully named Docker Hub image (`docker.io/<org>/<name>`) can be relayed and pinned
+(`split_image`). Test IDs are unique across the project (#114). No setting and no migration; rebuild the
+agent images to get the new agent features (`relay_source`, `image_save`).
+
+### Added
+
+- **A model file from another machine, through the server** (#104, part 1). A machine that gets its files
+  through the server (**Always through the server**, or **Auto** after the source could not be reached) now
+  gets a model file from another machine that already has it in its cache before the internet. The source
+  agent sends it outbound to its own server (agent feature `relay_source`: the server asks with `relay_send`
+  over the WebSocket, the agent POSTs the bytes to `/agent/v1/relay-send/<ticket>` and answers `relay_sent`),
+  and the server pipes it into the unchanged relay GET of the machine that asked, storing nothing: no agent
+  opens a port, and the machine that asks needs only a 1.4 agent. The file is named to the source by the
+  digest the server holds (the SHA-256 or git blob id of a Hugging Face file, the recorded SHA-256 of a URL
+  model) and looked up only among what that agent found on its own disk; the source holds the model's lock
+  while it sends, so Remove waits. The server picks a machine listing the GGUF file itself, then the one with
+  fewer sends, then the latest heartbeat; one that does not have the file, already sends two or does not start
+  within 10 seconds is skipped for the next, then the internet is used, before the first byte. The server
+  hashes a whole file on its way and holds back the last piece until it matches: a machine whose copy does not
+  match is not asked for that file for an hour, the audit log names it (`node.relay_copy_refused`), and the
+  file starts over from elsewhere. `Range` resumes, the relay's cancel and limits apply, plus two sends at a
+  time per source. Progress says *via the server, from <machine>*, a download's `via` is `machine` with its
+  `source`, and **Download to…** names the machine that would send it. No setting and no migration. Engine
+  archives keep coming from the internet through the server.
+- **Copy an image from another machine** (#104, part 2). On a machine's page, **Engine images → Copy from another
+  machine** (admins): pick a machine and one of the images its agent lists (`GET /api/machines/{id}/images`), and
+  **Copy** (`POST /api/machines/{id}/images/copy`). The source agent (new feature `image_save`) saves the image
+  whose id was asked for, one of its own, under its own tags, and POSTs the `docker save` stream, chunked, to
+  `/agent/v1/image-send/<ticket>`; the server pipes it into the target's image upload (`image_load`, unchanged),
+  keeping nothing. The answer says what was loaded, which recipe's image it is, and whether it is the image the
+  source has (by content id). A save that breaks off never ends the target's stream cleanly, so nothing is loaded.
+  The upload's limits apply, plus one copy at a time per source. Audited as `node.image_copied`. Never automatic:
+  a tag-only image is trusted as the source machine has it.
+
+### Changed
+
+- **The vision image is pinned by digest, like every other engine** (#113). The built-in `vision` recipe
+  names `docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:ab60eb21…` (CPU, linux/amd64 and arm64) and
+  `…:1.4.0-cuda@sha256:77344971…` (NVIDIA, linux/amd64) instead of the image of the server's version
+  (`forgeyard_image`), and `images.lock.json` records their ids (`scripts/pin_images.py`). So a copy
+  loaded with `docker load` is checked by its ids, a machine without registry access gets the image
+  through the server (#102), and a server upgrade alone no longer changes the image vision models run:
+  after a release that changes `images/vision`, a small PR moves the pin (docs/development.md, *Pinned
+  engine images*; CONTRIBUTING.md, *Releasing*). `forgeyard_image` still works in a custom recipe (a copy
+  of 1.4.0's recipe), tag only, unchecked and not relayed.
+- The ROADMAP's 1.4.1 row says what was decided: still through the server. Direct transfers between machines
+  are in Later.
+- The server accepts up to 32 features in an agent's hello (agents still send at most 16).
+
+### Fixed
+
+- An image named on Docker Hub in full (`docker.io/<org>/<name>:<tag>`) is read from Docker Hub's
+  registry API (`registry-1.docker.io`) by the server's image relay and `scripts/pin_images.py`:
+  `https://docker.io/v2/` is the website's redirect, so such a pinned image could not be relayed or pinned.
+
 ## [1.4.0] — 2026-11-17
 
 Easier to see, and models on machines without internet. **Machines** are tiles, each with a page that
@@ -90,7 +151,7 @@ agent images to get the new agent features.
     failed), and `nodes.fetch_via`, `auto` for every machine. Finished downloads are kept 30 days, at
     most 20 per machine. The downgrade drops both.
 - **Downloads through the server for machines that cannot reach the source** (part of #35, D1/D3). A
-  machine with no internet access of its own (amd-strix behind its SSH tunnel) gets model files and
+  machine with no internet access of its own (one behind an SSH tunnel) gets model files and
   engine archives **through the server**, which fetches them and passes the bytes on, storing nothing.
   The agent asks the way it already talks to the server: outbound HTTPS with its pinned CA and machine
   credential, so the tunnel that carries its connection carries this too.
