@@ -424,8 +424,9 @@ first) or `depth_png` (with `min` and `max`); each with the image's `width` and 
 take is in the [reference](reference.md#vision). Usage counts one image per request and its
 kilopixels; a key's model list and requests per minute apply as for any model.
 
-On a machine that cannot reach Docker Hub, load the vision image under the tag of the server's version
-(Models → Engines → `vision` → *Machine without registry access* gives the commands).
+A machine that cannot reach Docker Hub gets the vision image through the server, like every pinned engine
+image ([Offline machines](#offline-machines)); or load it there (Models → Engines → `vision` → *Machine
+without registry access* gives the commands).
 
 ## Try vision in the Playground
 

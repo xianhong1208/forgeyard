@@ -103,6 +103,11 @@ Without them, or run by hand (*Actions → Publish images → Run workflow*) on 
 smoke-tests both images, pushes nothing and ends green with a notice saying why. Run by hand on a
 tag, it publishes that tag again. The tag must be `v` plus the version in `forgeyard/__init__.py`.
 
+The same run publishes the vision image (`docker.io/tonyhuang1101/forgeyard-vision`, `X.Y.Z` and
+`X.Y.Z-cuda`). The `vision` recipe pins it by digest, so a release does not change what vision models
+run by itself: when the release changed `images/vision`, a follow-up pull request into `dev` moves the
+pin to the new version with `scripts/pin_images.py --write` ([docs/development.md](docs/development.md#pinned-engine-images)).
+
 ## Licence
 
 Forgeyard is licensed under the [Apache License 2.0](LICENSE). By contributing you agree that your

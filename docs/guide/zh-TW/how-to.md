@@ -304,7 +304,7 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 回應：`detections`（標籤、分數、方框）、`masks`（每個有分數、面積、方框和一張 1 位元 PNG，最好的在前）或 `depth_png`（附 `min` 和 `max`）；都附圖片的 `width` 和 `height`。它們接受的所有選項見[參考資料](reference.md#vision)。用量每個請求計一張圖片和它的千像素數；金鑰的模型清單和每分鐘請求數照常適用。
 
-連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
+連不到 Docker Hub 的機器，會和其他固定的引擎映像檔一樣經由伺服器取得視覺映像檔（[離線機器](#offline-machines)）；也可以在那台機器上載入（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
 
 ## 在 Playground 試用視覺
 
