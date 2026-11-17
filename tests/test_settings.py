@@ -134,10 +134,10 @@ def test_fy_cfg_006_risky_combinations():
         return _ids(settings_check.static_problems(Settings(_env_file=None, **kw), {}, []))
 
     assert ids() == {}
-    assert "secret-key-both" in ids(forgeyard_secret_key="a" * 44, secret_key_file="/k")
-    assert "secret-key-both" not in ids(secret_key_file="/k")
-    assert "heartbeat-flapping" in ids(agent_heartbeat_seconds=10, agent_offline_seconds=24)
-    assert "heartbeat-flapping" not in ids(agent_heartbeat_seconds=10, agent_offline_seconds=25)
+    assert "secret-key-both" in ids(forgeyard_secret_key="a" * 44, forgeyard_secret_key_file="/k")
+    assert "secret-key-both" not in ids(forgeyard_secret_key_file="/k")
+    assert "heartbeat-flapping" in ids(agent_offline_seconds=4)   # 2.5 × the shortest heartbeat (2 s) is 5
+    assert "heartbeat-flapping" not in ids(agent_offline_seconds=5)
     assert len(ids(model_allow_private_hosts=True, provider_allow_private_hosts=True)["private-hosts-allowed"]) == 2
     assert len(ids(media_allow_private_hosts=True)["private-hosts-allowed"]) == 1
     assert "cookie-not-secure" in ids(cookie_secure="false")
@@ -146,12 +146,10 @@ def test_fy_cfg_006_risky_combinations():
 
 
 def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatch):
-    """FY-CFG-007: once an owner exists, ADMIN_PASSWORD (warning) and FORGEYARD_SETUP_TOKEN (info)
-    are reported. An env seed is reported only when it is set and the database holds another value:
+    """FY-CFG-007: once an owner exists, ADMIN_PASSWORD (warning) is reported. An env seed is reported only when it is set and the database holds another value:
     not while the seed is still used, nor when they agree, nor for a seed that is not set (MODEL_URL_HOSTS
     here). Directories compare case-sensitively."""
     monkeypatch.setenv("ADMIN_PASSWORD", "some-old-password-1")
-    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")
     monkeypatch.setenv("GATEWAY_MAX_RPM", "30")
     monkeypatch.setenv("GATEWAY_CLOUD_DEFAULT", "fallback")
     monkeypatch.setenv("GATEWAY_CLOUD_MAX", "fallback")
@@ -161,7 +159,6 @@ def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatc
     try:
         found = _ids(settings_check.database_problems(get_settings(), db))
         assert found["admin-password-left"][0].severity == "warning"
-        assert found["setup-token-left"][0].severity == "info"
         assert "env-seed-ignored" not in found  # no row saved yet: the seeds are what is used
     finally:
         db.close()
@@ -175,6 +172,8 @@ def test_fy_cfg_007_setup_values_left_behind_and_ignored_seeds(owner, monkeypatc
         assert all(p.severity == "info" and "(owner)" in p.detail for p in seeds)
         cloud = next(p for p in seeds if p.scope == "setting:GATEWAY_CLOUD_DEFAULT")
         assert cloud.fix_url == "/keys" and "API keys → Cloud policy" in cloud.detail
+        dirs = next(p for p in seeds if p.scope == "setting:MODEL_LOCAL_DIRS")
+        assert dirs.fix_url == "/models?tab=sources" and "Models → Sources" in dirs.detail  # 1.4 (#92)
     finally:
         db.close()
 

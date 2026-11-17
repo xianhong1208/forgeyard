@@ -160,9 +160,8 @@ def test_fy_adv_001_admins_only_and_the_shape_of_a_finding(owner, monkeypatch):
     add_user(owner, "ursula")
     for name in ("olga", "ursula"):
         assert sign_in(owner, name, PW).get("/api/advisor").status_code == 403
-    node("gpu-01", agent_version="0.9.0", protocol=0)
-    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")  # setup-token-left: info
-    get_settings.cache_clear()
+    node("gpu-01", agent_version="0.9.0", protocol=0,  # process-workloads-off: info
+         runtime_info={"process": {"ok": False, "reason": "no workload account"}})
     body = owner.get("/api/advisor").json()
     assert set(body) >= {"findings", "snoozed", "counts", "badge", "snooze_days", "checked_at"}
     f = next(f for f in body["findings"] if f["id"] == "agent-outdated")
@@ -254,8 +253,7 @@ def test_fy_adv_004_settings_problems_are_findings(owner, monkeypatch):
     found = findings()
     assert "setting:GATEWAY_CLOUD_DEFUALT" in {f.scope for f in found["setting-unknown"]}
     assert found["private-hosts-allowed"][0].severity == "warning"
-    assert found["setup-token-left"][0].severity == "info"
-    assert found["setting-deprecated"][0].scope == "setting:FORGEYARD_SETUP_TOKEN"
+    assert [(f.scope, f.severity) for f in found["setting-removed"]] == [("setting:FORGEYARD_SETUP_TOKEN", "warning")]
 
 
 # ------------------------------------------------------------------ server and network
@@ -448,7 +446,7 @@ def test_fy_adv_014_a_deployment_waiting_for_room(owner):
     did = deployment("big", replica={"state": "pending", "reason": "needs 70 GiB per card",
                                      "updated_at": utcnow() - timedelta(minutes=20)})
     f = findings()["deployment-waiting"][0]
-    assert f.scope == f"deployment:{did}" and "needs 70 GiB per card" in f.detail and f.fix_url == f"/models/deployments/{did}"
+    assert f.scope == f"deployment:{did}" and "needs 70 GiB per card" in f.detail and f.fix_url == f"/serving/{did}"
     deployment("fresh", replica={"state": "pending", "updated_at": utcnow() - timedelta(minutes=5)})
     deployment("halted", desired="stopped", replica={"state": "pending", "updated_at": utcnow() - timedelta(hours=1)})
     assert [f.scope for f in findings()["deployment-waiting"]] == [f"deployment:{did}"]
@@ -688,3 +686,23 @@ def test_fy_adv_025_a_failing_check_does_not_take_the_panel_down(owner, monkeypa
             advisor.run(db, get_settings(), strict=True)
         finally:
             db.close()
+
+
+def test_fy_adv_026_findings_link_where_the_console_shows_a_route_or_provider(owner):
+    """FY-ADV-026 (1.4, #81): a deployment's own route is its cloud fallback, on the deployment's page;
+    a name an admin made is on Cloud -> Cloud models; a provider is under /cloud/providers. The banners
+    follow: the deployment's page and Models, or the Cloud models tab."""
+    pid, pm, did, rid = _cloud_world()
+    edit(GatewayRoute, rid, local_only=True)
+    named = route("flash", [("provider", pm, 0, False)])
+    edit(Provider, pid, budget_micros=0)
+    f = findings()
+    own = f["route-cloud-never-used"][0]
+    assert own.fix_url == f"/serving/{did}#cloud-fallback" and own.fix_label == "Open its cloud fallback"
+    assert own.pages == ("serving", f"deployment:{did}", f"route:{rid}")
+    dead = f["route-no-target"][0]
+    assert dead.fix_url == f"/cloud/models/{named}" and dead.pages == ("cloud-models", f"route:{named}")
+    budget = [x for x in f["budget-zero"] if x.scope == f"provider:{pid}"][0]
+    assert budget.fix_url == f"/cloud/providers/{pid}"
+    assert not any(x.fix_url.startswith(("/providers", "/models/routes")) or "tab=serving" in x.fix_url
+                   for found in f.values() for x in found)

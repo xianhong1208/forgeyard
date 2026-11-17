@@ -39,6 +39,7 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
         "repo": meta.get("repo") or (ctx.deployment.served_name if ctx.deployment else ""),
         # The projector file of a GGUF vision model (1.3), next to the model file in its directory.
         "mmproj_file": f"${{MODEL_PATH}}/{mmproj_path(meta)}" if mmproj_path(meta) else "",
+        "task": getattr(ctx.model, "task", ""),   # 1.4: engines that serve several tasks (the vision server's --task)
     })
     # The largest image in pixels for an image-token cap, where tokens grow with the resolution.
     tile = int(meta.get("vision_tile_px") or 0)
@@ -160,7 +161,13 @@ def render(ctx: Context, variant: Variant, cards: list[Accelerator], name: str, 
 
 
 def engine_block(ctx: Context, variant: Variant):
+    return engine_of(ctx.recipe, variant)
+
+
+def engine_of(recipe, variant: Variant):
+    """The engine archive the agent downloads for a process variant (None for a container variant or an
+    installed command). Also what "Download to…" fetches (1.4), so both land in the same directory."""
     if variant.runtime != "process" or variant.engine is None:
         return None
     e = variant.engine
-    return {"name": f"{ctx.recipe.engine}-{ctx.recipe.version}", "url": e.url, "sha256": e.sha256, "binary": e.binary}
+    return {"name": f"{recipe.engine}-{recipe.version}", "url": e.url, "sha256": e.sha256, "binary": e.binary}

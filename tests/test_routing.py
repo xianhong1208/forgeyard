@@ -18,6 +18,7 @@ from tests.cloud_helpers import (CLOUD_KEY, FakeCloud, add_provider, cloud_key, 
                                  set_tiers)
 from tests.gateway_helpers import FakeEngine, api_client, free_port, make_ready, set_state
 from tests.test_scheduler import MODELS, deploy, seed_catalog
+from tests.waits import wait_until
 from tests.workload_helpers import make_node
 
 KEYS = MODELS + ("replica_keys",)
@@ -62,9 +63,7 @@ def events(text: str) -> list:
 
 
 def in_flight_soon(n: int = 1) -> None:
-    deadline = time.monotonic() + 5
-    while sum(balancer.inflight.values()) < n and time.monotonic() < deadline:
-        time.sleep(0.01)
+    wait_until(lambda: sum(balancer.inflight.values()) >= n, f"{n} request(s) in flight")
 
 
 def background(fn):
@@ -358,12 +357,18 @@ def test_fy_rt_014_provider_errors_are_mapped(mixed):
 def test_fy_rt_015_busy_and_the_cloud_failing_waits_for_local_after_all(mixed):
     """FY-RT-015: local is busy and the cloud tier cannot take the request either: it waits for the
     local replica instead of failing."""
-    mixed.engine.hold = 1.0          # long enough for a slow CI runner to see local busy
+    mixed.engine.gate = threading.Event()   # local stays busy until the second request has tried the cloud
     mixed.cloud.status = 500
-    t, _ = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    r = chat(mixed.api)
-    t.join()
+    try:
+        t1, _ = background(lambda: chat(mixed.api))
+        in_flight_soon()
+        t2, second = background(lambda: chat(mixed.api))
+        wait_until(lambda: len(mixed.cloud.posts()) == 1, "the second request tried the cloud tier")
+    finally:
+        mixed.engine.gate.set()
+    t1.join()
+    t2.join()
+    r = second["r"]
     assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0"
     assert "x-forgeyard-spilled" not in r.headers and len(mixed.cloud.posts()) == 1
     # Answered locally after the cloud failed: free, not an unpriced cloud request (1.2 cost).

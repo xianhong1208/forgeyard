@@ -3,7 +3,8 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
 
     name: vllm                       a-z, 0-9, '-'; unique
     engine, version, title, description
-    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image, video
+    tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image, video,
+                                     detect, segment, depth (1.4, vision: forgeyard/models/vision.py)
     formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx,
                                      diffusers (a repository with model_index.json)
     api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
@@ -57,6 +58,11 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
                                        parameter values this variant cannot run (1.3.1): a deployment
                                        with one of them is not placed on it (llama.cpp has no FP8
                                        KV cache on Vulkan: llama-server aborts at startup)
+      - name: cpu
+        when: {vendor: cpu}
+        runtime: container
+        forgeyard_image: vision        1.4: Forgeyard's own image of this release (vision, vision-cuda),
+                                       named by the server's version instead of `image`
       - name: cpu-process
         when: {vendor: cpu, arch: [x86_64]}
         runtime: process
@@ -70,7 +76,8 @@ Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} 
 {width} {height} {max_pixels} (image models: the deployment's default size and its largest image in pixels)
 {keep_seconds} (video models: how long the engine keeps a finished video, the deployment's keep_minutes and an hour)
 {vae_file} {llm_file} {clip_l_file} {clip_g_file} {t5xxl_file} (image models made of separate files: the
-component's path) {gpu_budget_gib} (the reservation in GiB, less the CUDA context) and any declared param.
+component's path) {gpu_budget_gib} (the reservation in GiB, less the CUDA context) {task} (1.4: the model's
+task, for engines that serve several) and any declared param.
 Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
 mount inside a container, the cache directory for a process).
 """
@@ -89,15 +96,19 @@ from forgeyard.workloads.spec import ENV_KEY_RE, IMAGE_RE, RESERVED_ENV, RESERVE
 BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-TASKS = ("chat", "embed", "rerank", "asr", "tts", "image", "video")
+VISION_TASKS = ("detect", "segment", "depth")
+TASKS = ("chat", "embed", "rerank", "asr", "tts", "image", "video") + VISION_TASKS
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
+VISION_APIS = ("vision-detect", "vision-segment", "vision-depth")
 APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images",
-        "openai-videos")
+        "openai-videos") + VISION_APIS
+# Forgeyard's own images (1.4), named by the server's version: forgeyard/install/images.py.
+FORGEYARD_IMAGES = ("vision", "vision-cuda")
 ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed", "diffusers")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
                         "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
                         "mmproj_file", "image_max_pixels", "gpu_util_main", "gpu_util_codec", "width", "height",
-                        "max_pixels", "gpu_budget_gib", "keep_seconds"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
+                        "max_pixels", "gpu_budget_gib", "keep_seconds", "task"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
 MEDIA_KINDS = ("image", "audio", "video")
 # mmproj: a GGUF projector file; image_pixels: image tokens scale with the resolution (vision_tile_px).
 # Image models (1.3): image_single (one checkpoint file with everything: -m), image_split (a diffusion
@@ -191,6 +202,8 @@ class Variant(_M):
     when: When
     runtime: Literal["container", "process"]
     image: Optional[str] = Field(default=None, max_length=255)
+    # 1.4: one of Forgeyard's own images instead of `image`, at the server's version (FORGEYARD_IMAGES).
+    forgeyard_image: Optional[Literal[FORGEYARD_IMAGES]] = None  # type: ignore[valid-type]
     entrypoint: Optional[list[Annotated[str, Field(max_length=256)]]] = Field(default=None, max_length=8)
     engine: Optional[Engine] = None
     command: Optional[str] = Field(default=None, max_length=1024)  # process: an installed program
@@ -207,6 +220,13 @@ class Variant(_M):
     def _runtime(self) -> "Variant":
         if not self.amd_kfd and (self.when.vendor != "amd" or self.runtime != "container"):
             raise ValueError(f"variant {self.name}: amd_kfd is for AMD container variants")
+        if self.forgeyard_image is not None:
+            if self.image or self.runtime != "container":
+                raise ValueError(f"variant {self.name}: forgeyard_image is instead of image, for a container variant")
+            from forgeyard import __version__
+            from forgeyard.install.images import vision_image
+
+            self.image = vision_image(__version__, "cuda" if self.forgeyard_image == "vision-cuda" else "cpu")
         if self.runtime == "container":
             if not self.image or not IMAGE_RE.match(self.image):
                 raise ValueError(f"variant {self.name}: a container variant needs an image")
@@ -507,6 +527,9 @@ class Recipe(_M):
             raise ValueError("api: video is served as openai-videos")
         if "video" in self.tasks and self.estimate.method not in ("diffusers", "fixed"):
             raise ValueError("estimate: a video recipe uses the diffusers (or fixed) method")
+        for task in VISION_TASKS:
+            if task in self.tasks and self.api.get(task) != f"vision-{task}":
+                raise ValueError(f"api: {task} is served as vision-{task}")
         if "video" in self.tasks and len(self.tasks) > 1:
             raise ValueError("tasks: a video recipe serves only the video task (its jobs have their own API)")
         return self

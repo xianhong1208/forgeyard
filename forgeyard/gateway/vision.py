@@ -1,4 +1,12 @@
-"""The Playground's Vision tab (1.3): exposed vision workloads, tried from the console as the signed-in user.
+"""The Playground's Vision tab: vision models (1.4) and exposed vision workloads (1.3), tried from the console
+as the signed-in user.
+
+**Vision models (1.4)** are deployments of detection, SAM 2 and depth models (forgeyard/models/vision.py).
+The tab sends their requests to `/api/playground/vision/detect|segment|depth` with the model's name, which
+is the /v1 gateway path for the signed-in person (forgeyard/api/gateway.py); `options()` lists them with
+how many replicas are ready.
+
+**Exposed vision workloads (1.3)**, made from the workload templates, are reached as below.
 
 A vision workload is an exposed service (forgeyard/workloads/expose.py) whose program is started with
 `--task detect|segment|depth`, as every vision template's is (forgeyard/workloads/templates.py, the vision
@@ -33,10 +41,12 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
-from forgeyard.db import Workload, new_session
-from forgeyard.gateway import passthrough
+from forgeyard.db import Deployment, GatewayRoute, Workload, new_session
+from forgeyard.gateway import passthrough, proxy
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
+from forgeyard.models import vision as vision_models
+from forgeyard.models.catalog import all_recipes
 from forgeyard.workloads import expose, templates
 
 # The vision server's tasks, with the template that runs each (its title, model and licence).
@@ -72,22 +82,33 @@ def vision_task(w: Workload) -> Optional[str]:
     return declared_task(w.spec)
 
 
-def options(db: DbSession) -> dict:
-    """The exposed vision workloads, for the Playground's Vision tab."""
+def model_options(db: DbSession) -> list[dict]:
+    """The vision models (1.4): every route of a vision task, with its ready replicas (or why none) and the
+    catalog model behind its deployment."""
+    recipes = all_recipes(db)
     out = []
-    for w in db.scalars(select(Workload).where(Workload.kind == "service").order_by(Workload.name)).all():
-        task = vision_task(w)
-        if task is None:
-            continue
-        t = TASKS[task]
-        route = passthrough.load(db, w.name)
-        ready = len(route.replicas) if route is not None else 0
-        out.append({"name": w.name, "workload_id": w.id, "task": task, "title": t.title, "model": t.model,
-                    "licence": t.licence, "endpoint": t.endpoint, "path": expose.url_path(w.name),
-                    "ready": ready, "reason": None if ready else (route.reason if route else None),
-                    "max_body_mb": expose.of(w).max_body_mb})
-    return {"workloads": out, "tasks": [{"task": t.task, "title": t.title, "template": t.id, "model": t.model}
-                                        for t in templates.TEMPLATES]}
+    apis = {api: task for task, api in vision_models.API.items()}
+    for row in db.scalars(proxy._route_query().where(GatewayRoute.api.in_(list(apis)))
+                          .order_by(GatewayRoute.served_name)).all():
+        route = proxy.build_route(row, recipes)
+        ready = len(route.targets)
+        running = any(g.running for tier in route.tiers for g in tier.locals)
+        d = db.get(Deployment, row.deployment_id) if row.deployment_id else None
+        m = d.model if d is not None else None
+        task = apis[row.api]
+        out.append({"name": row.served_name, "task": task, "title": vision_models.LABEL[task],
+                    "endpoint": f"/v1/vision/{task}", "deployment_id": row.deployment_id,
+                    "model": ((m.meta or {}).get("repo") or m.source) if m is not None else None,
+                    "licence": (m.meta or {}).get("license") if m is not None else None,
+                    "ready": ready, "running": running, "reason": None if ready else route.reason})
+    return out
+
+
+def options(db: DbSession) -> dict:
+    """The vision models, for the Playground's Vision tab, and the tasks there are. Apps left the console in
+    1.4 (#88): the exposed vision workloads of 1.3 are no longer listed (they keep running at /x/ until 1.5)."""
+    return {"models": model_options(db),
+            "tasks": [{"task": t.task, "title": t.title, "template": t.id, "model": t.model} for t in templates.TEMPLATES]}
 
 
 def _load(name: str, task: str) -> Optional[passthrough.XRoute]:
@@ -112,8 +133,8 @@ async def handle(request: Request, name: str, task: str, caller: KeyCaller) -> R
                                                     f"{', '.join(sorted(TASKS))}.")
         route = await run_in_threadpool(_load, name, task)
         if route is None:
-            raise GatewayError(404, "workload_not_found", f"No exposed vision workload {name!r} does {task}. "
-                                                          "Start one from a template on the Workloads page.")
+            raise GatewayError(404, "workload_not_found", f"No exposed vision app {name!r} does {task}. "
+                                                          "Deploy a vision model from Models instead.")
         return await passthrough.forward(request, caller, route, f"/v1/{task}".encode("ascii"), b"", started,
                                          request_id)
     except GatewayError as e:

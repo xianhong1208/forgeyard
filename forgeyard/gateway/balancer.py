@@ -7,8 +7,8 @@ reports a dead engine within seconds, and until it does, requests should not kee
 The penalty ends early when the replica has become ready again since (it was restarted).
 
 Provider targets (1.2) are counted the same way, keyed "pm:<provider model id>", and one that
-failed (429, 5xx, no connection) cools down for longer (PROVIDER_COOLDOWN_SECONDS, or the
-provider's Retry-After when that is longer, up to five minutes).
+failed (429, 5xx, no connection) cools down for longer (`PROVIDER_COOLDOWN`, or the provider's
+Retry-After when that is longer, up to `PROVIDER_COOLDOWN_MAX`).
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 PENALTY = 15.0
+PROVIDER_COOLDOWN = 30.0        # seconds a failed provider target is tried last
+PROVIDER_COOLDOWN_MAX = 300.0   # the longest a provider's Retry-After can make it
 
 
 @dataclass

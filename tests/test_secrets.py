@@ -72,9 +72,9 @@ def test_fy_sec_002_key_file_is_made_0600_and_the_variable_wins(monkeypatch, tmp
     assert crypto.load_key(create=False) == key and stat.S_IMODE(path.stat().st_mode) == 0o600
 
     other = tmp_path / "elsewhere" / "fy.key"
-    monkeypatch.setenv("SECRET_KEY_FILE", str(other))
+    monkeypatch.setenv("FORGEYARD_SECRET_KEY_FILE", str(other))
     get_settings.cache_clear()
-    assert crypto.load_key(create=True) != key and other.exists()  # SECRET_KEY_FILE moves it
+    assert crypto.load_key(create=True) != key and other.exists()  # FORGEYARD_SECRET_KEY_FILE moves it
 
     env_key = os.urandom(32)
     monkeypatch.setenv(crypto.KEY_ENV, base64.urlsafe_b64encode(env_key).decode())
@@ -247,3 +247,91 @@ def test_fy_sec_006_secrets_reset_after_a_lost_key(owner, caplog):
         assert any("API_TOKEN, MODE were lost" in m for m in events) and any("new internal keys" in m for m in events)
     finally:
         db.close()
+
+
+def test_fy_sec_007_the_removed_secret_key_file_never_means_another_key(owner, monkeypatch, tmp_path, caplog):
+    """FY-SEC-007 (#78): SECRET_KEY_FILE was the key file's name until 1.4. Set alone to the real key
+    (elsewhere), the server would now look for data_dir/secret.key instead: it refuses to start, makes
+    no new key, and says to rename the setting, also when another key sits in data_dir; `secrets
+    reset` refuses too and moves nothing. Renamed (or next to FORGEYARD_SECRET_KEY_FILE or
+    FORGEYARD_SECRET_KEY, or naming data_dir/secret.key itself) it changes nothing: the server starts
+    and Setup health reports it. Read from .env too."""
+    from forgeyard.cli import main as cli_main
+
+    _deploy_with_secrets(owner)
+    default = get_settings().secret_key_path
+    real = tmp_path / "keys" / "fy.key"
+    real.parent.mkdir()
+    default.rename(real)
+    monkeypatch.setenv("SECRET_KEY_FILE", str(real))
+    get_settings.cache_clear()
+    crypto.reset()
+    reset_engine()
+    refused = f"SECRET_KEY_FILE \\({real}\\) is no longer read since 1.4, so this server would use {default}"
+    with pytest.raises(crypto.SecretKeyError, match=refused):
+        with make_client():
+            pass
+    assert not default.exists()  # no new key was made
+    caplog.set_level(logging.ERROR)
+    assert cli_main(["serve"]) == 2
+    assert "Rename SECRET_KEY_FILE to FORGEYARD_SECRET_KEY_FILE (same value) and start again" in caplog.text
+    assert cli_main(["secrets", "reset", "--yes"]) == 2
+    assert not default.exists() and sorted(p.name for p in real.parent.iterdir()) == ["fy.key"]
+
+    stray = base64.urlsafe_b64encode(os.urandom(32)) + b"\n"  # another key in data_dir: still refused,
+    default.write_bytes(stray)                                  # and `secrets reset` does not move it
+    os.chmod(default, 0o600)
+    with pytest.raises(crypto.SecretKeyError, match=refused):
+        crypto.load_key(create=False)
+    assert cli_main(["secrets", "reset", "--yes"]) == 2
+    assert default.read_bytes() == stray and not list(default.parent.glob("secret.key.lost-*"))
+    default.unlink()
+
+    def starts() -> list:
+        get_settings.cache_clear()
+        crypto.reset()
+        with make_client() as c:
+            assert c.get("/api/health").status_code == 200
+        db = new_session()
+        try:
+            assert db.scalar(select(Deployment)).hf_token == HF
+        finally:
+            db.close()
+        from forgeyard import settings_check
+
+        return [p.scope for p in settings_check.static_problems(get_settings()) if p.id == "setting-removed"]
+
+    monkeypatch.setenv("FORGEYARD_SECRET_KEY_FILE", str(real))   # renamed, the old one left behind
+    assert starts() == ["setting:SECRET_KEY_FILE"]
+    monkeypatch.setenv("SECRET_KEY_FILE", str(tmp_path / "stale.key"))  # another file: 1.3 already used the new name
+    assert starts() == ["setting:SECRET_KEY_FILE"]
+    monkeypatch.setenv("SECRET_KEY_FILE", str(real))
+    monkeypatch.delenv("FORGEYARD_SECRET_KEY_FILE")
+    monkeypatch.setenv(crypto.KEY_ENV, real.read_text().strip())
+    assert starts() == ["setting:SECRET_KEY_FILE"]
+    monkeypatch.delenv(crypto.KEY_ENV)
+    real.rename(default)
+    monkeypatch.setenv("SECRET_KEY_FILE", str(default))           # it names the default file anyway
+    assert starts() == ["setting:SECRET_KEY_FILE"]
+
+    get_settings.cache_clear()
+    with pytest.raises(crypto.SecretKeyError, match="SECRET_KEY_FILE .* is no longer read"):
+        crypto.check_old_key_file(environ={}, dotenv={"SECRET_KEY_FILE": str(real)})
+    crypto.check_old_key_file(environ={}, dotenv={"SECRET_KEY_FILE": ""})
+
+
+def test_fy_sec_008_a_new_server_with_the_removed_secret_key_file_refuses_before_making_a_key(monkeypatch, tmp_path,
+                                                                                           caplog):
+    """FY-SEC-008 (#78): on a server with no database yet, SECRET_KEY_FILE set alone to another file
+    stops `serve` cleanly (exit 2, the message) before the first migration would make a key in
+    data_dir."""
+    from forgeyard.cli import main as cli_main
+
+    monkeypatch.setenv("SECRET_KEY_FILE", str(tmp_path / "keys" / "fy.key"))
+    get_settings.cache_clear()
+    crypto.reset()
+    reset_engine()
+    caplog.set_level(logging.ERROR)
+    assert cli_main(["serve"]) == 2
+    assert "SECRET_KEY_FILE (" in caplog.text and "is no longer read since 1.4" in caplog.text
+    assert not get_settings().secret_key_path.exists() and not (tmp_path / "keys").exists()

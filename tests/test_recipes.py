@@ -39,10 +39,11 @@ def first_variant(name, accel):
 
 
 def test_fy_rec_001_builtins_load_and_are_pinned():
-    """FY-REC-001: eight recipes (1.3 adds the text-to-speech and the image ones), every image tagged (never
-    latest; a rolling tag such as master-vulkan is held by its digest, FY-REC-008), engines by SHA-256."""
+    """FY-REC-001: ten recipes (1.3 adds the text-to-speech, image and video ones, 1.4 vision), every image
+    tagged (never latest; a rolling tag such as master-vulkan is held by its digest, FY-REC-008), engines by
+    SHA-256."""
     rs = recipes.builtin_recipes()
-    assert sorted(rs) == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vllm", "vllm-omni-image",
+    assert sorted(rs) == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vision", "vllm", "vllm-omni-image",
                           "vllm-omni-tts", "vllm-omni-video", "vllm-pooling"]
     for r, _ in rs.values():
         assert r.builtin
@@ -150,9 +151,10 @@ DIGEST_RE = re.compile(r"^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{
 def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
     """FY-REC-008: every container variant names its image as repo:tag@sha256:<digest> (the tag for
     people, the digest for what runs), so a tag moved on the registry cannot change what an agent
-    runs. Bump with scripts/pin_images.py --write."""
+    runs. Bump with scripts/pin_images.py --write. Forgeyard's own vision image (1.4, forgeyard_image) is the
+    exception: it is built with the same release as the server and named by its version (FY-VIS-001)."""
     images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
-              if v.runtime == "container"]
+              if v.runtime == "container" and v.forgeyard_image is None]
     assert len(images) == 19
     unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
     assert unpinned == []

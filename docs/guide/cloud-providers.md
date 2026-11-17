@@ -8,13 +8,16 @@ local models come first. [繁體中文版](zh-TW/cloud-providers.md)
 ## How it works
 
 - A **provider** is one account at one of those APIs: its base URL and its API key. The key is
-  stored encrypted and is never shown again. Admins add providers on **Providers**.
+  stored encrypted and is never shown again. Admins add providers on **Cloud → Providers**.
 - A provider's **models** are the names you may send it, such as `gpt-4o-mini` or, for Azure, your
   deployment's name.
-- A **route** is a model name at `/v1`. It has **targets** in **tiers**. Every deployment has its
-  route, with the deployment as its only target. An admin can add a second tier to it, such as a
-  cloud model to use when the local replicas are busy or down. An admin can also make a route that
-  has only a cloud model.
+- A deployment answers at `/v1` under its model name. An admin can give it a **cloud fallback**: a
+  later tier with a provider's model, used when the local replicas are busy or down. It is on the
+  deployment's page.
+- An admin can also make a **cloud model**: a provider's model under a name of its own, on
+  **Cloud → Cloud models**.
+- Both are **routes** in the API (`/api/routes`): a model name with **targets** in **tiers**. Every
+  deployment has its route, with the deployment as its first target.
 - Forgeyard talks to every provider through that provider's **own OpenAI-compatible endpoint**.
   It has no translators to the providers' native APIs, and it does not use LiteLLM. What each
   endpoint cannot do is listed [below](#what-each-providers-endpoint-cannot-do).
@@ -25,13 +28,14 @@ Only chat, completions and embeddings go to providers. Rerank, score and speech 
 
 ## Add a provider
 
-On **Providers**, choose **Add a provider**, pick the kind and paste the key. Then:
+On **Cloud → Providers**, choose **Add a provider**, pick the kind and paste the key. Then:
 
 1. **Test connection** asks the base URL for `/models` with the key. It shows how many models the
    provider listed, or why it refused.
 2. Open the provider and add its models: by name, or with **Import from /models** (not for Azure,
    whose list does not show your deployments).
-3. Put a model in a route (see [route a model to the cloud](#route-a-model-to-the-cloud)).
+3. Use a model: as a deployment's [cloud fallback](#give-a-deployment-a-cloud-fallback), or as a
+   [cloud model of its own](#serve-a-cloud-model-under-a-name-of-its-own).
 
 **Outside your network** is ticked for every kind except *OpenAI-compatible server*, which is ticked
 when its base URL is a public address (or a name that resolves to one) and left unticked for a
@@ -81,18 +85,27 @@ need no cloud permission to use it. A public address ticks it (Together, Groq an
 parties); untick it only if the server really is yours. Over a VPN with a private address, you may tick **Allow plain HTTP**.
 Forgeyard drops nothing from requests to it.
 
-## Route a model to the cloud
+## Give a deployment a cloud fallback
 
 To let a deployment spill to the cloud when it is busy or down:
 
-1. Open the deployment and choose **Routing and cloud spill**. You can also go to **Models**, then
-   **Routes and cloud**.
-2. **Add a tier**, and add the provider's model to it.
-3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save routing**.
+1. Open the deployment from **Serving**. Its page has a **Cloud fallback** section.
+2. **Add a cloud tier**, and add the provider's model to it.
+3. Choose the rules (see [when a request spills](#when-a-request-spills)) and **Save cloud
+   fallback**.
 
-To serve a cloud model under a name of its own, choose **Models**, then **Routes and cloud**, then
-**New route**. Give it the name clients will send as `model`, and add the provider's model. Only
-keys whose cloud setting is **Allowed** see such a route.
+In the **Serving** list, a deployment with a cloud fallback shows a small mark with its provider,
+such as *→ Gemini*.
+
+## Serve a cloud model under a name of its own
+
+Open **Cloud**, then **Cloud models**, and choose **New cloud model**. Give it the name clients will
+send as `model`, add the provider's model, and **Create**. Only keys whose cloud setting is
+**Allowed** see a cloud model that has nothing local in it.
+
+A name of your own can also point at deployments only: several deployments behind one name, or one
+under a second name. Make it the same way. **Cloud models** lists those under *Other names for
+deployments*, and each deployment's page lists the names it also answers as.
 
 Every answer says who served it, in the header `X-Forgeyard-Target`: `local:<deployment>#<replica>`
 or `provider:<provider>/<model>`. When a request moved past the first tier, `X-Forgeyard-Spilled`
@@ -226,7 +239,8 @@ when a request leaves for them.
 ## Cost and prices
 
 **Usage → Cost** shows what requests cost, in US dollars, per day, key, person (admins), model or
-provider, with the share served locally and the requests that have no price. It is Forgeyard's
+provider, with the share served locally and the requests that have no price, and **Cost over time**
+charts it per day, week or month, in total or per key, model, provider or person. It is Forgeyard's
 estimate of what the providers charge, not their invoice.
 
 ### How a request's cost is worked out
@@ -277,7 +291,7 @@ by hand* or *from OpenRouter*) and when. Admins set them:
 
 - **Prices** on a model: input, output, cached input and cache write, in US dollars per million
   tokens, as the provider's pricing page lists them. Leave a field empty when it does not apply.
-- **Refresh prices from OpenRouter**, on a provider (its models) or on the Providers page (every
+- **Refresh prices from OpenRouter**, on a provider (its models) or on **Cloud → Providers** (every
   provider outside your network). Forgeyard reads OpenRouter's public model list,
   `https://openrouter.ai/api/v1/models` (no key is sent; it goes through the egress rules below, so if you set
   `EGRESS_ALLOWED_HOSTS`, add `openrouter.ai` to it), and shows a **diff**: each model, how it
@@ -369,7 +383,11 @@ show it too:
   own budget, and a warning past 80%;
 - **Usage → Cost**: *Budgets this month*, with every budget that applies to you (admins: everyone's,
   and the providers');
-- a provider's page: its budget, and the Providers list flags one past 80%.
+- a provider's page: its budget, and the list on **Cloud → Providers** flags one past 80%.
+
+A **revoked key** leaves these lists and warnings, and gets no alert after it was revoked; what it
+spent this month still counts in its person's and its provider's budgets. `GET /api/budgets` leaves it
+out too.
 
 There is no e-mail: check the audit log or the pages.
 
@@ -415,9 +433,9 @@ The egress rules refused the request before it was sent. The base URL is http, i
 `EGRESS_ALLOWED_HOSTS`, or resolves to a private, link-local or metadata address. The message says
 which.
 
-### A model is not found, but it is in the list on Models
+### A model is not found, but it is on Cloud models
 
-It is a cloud-only route, and the key's cloud setting is not **Allowed**. Such models are "not
+It is a cloud model with nothing local in it, and the key's cloud setting is not **Allowed**. Such models are "not
 found" for such keys, exactly like a name that does not exist.
 
 ### A request did not spill

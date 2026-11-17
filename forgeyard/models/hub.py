@@ -36,6 +36,10 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "tts": ("text-to-speech",),
     "image": ("text-to-image",),
     "video": ("text-to-video",),
+    # 1.4, vision models: detection, SAM-style masks, depth
+    "detect": ("object-detection",),
+    "segment": ("mask-generation",),
+    "depth": ("depth-estimation",),
 }
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 EXPAND = ("downloads", "likes", "lastModified", "gated", "private", "pipeline_tag", "library_name", "tags",
@@ -63,7 +67,7 @@ def make_query(text: str, task: Optional[str], fmt: Optional[str], limit: int) -
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise ValueError("search: plain text only")
     if task not in (None, "", *TASK_TAGS):
-        raise ValueError("task: chat, embed, rerank, asr, tts, image or video")
+        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment or depth")
     if fmt not in (None, "", *FORMATS):
         raise ValueError("format: safetensors, gguf, ctranslate2, onnx or diffusers")
     if not 1 <= int(limit) <= MAX_LIMIT:
@@ -134,6 +138,9 @@ def summarise(m: dict) -> Optional[dict]:
         "format": fmt,
         "params": int(params) if isinstance(params, (int, float)) and params > 0 else None,
         "weights_bytes": _weights_bytes(m) if fmt == "safetensors" else None,
+        # 1.4: the licence its tags state (vision models are added with a permissive licence only).
+        "license": next((t.split(":", 1)[1][:64] for t in m.get("tags") or [] if isinstance(t, str)
+                         and t.startswith("license:")), None),
     }
 
 

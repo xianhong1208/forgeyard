@@ -90,7 +90,7 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
                 against that authority. Then it:
                 <ul className="what-it-does">
                   <li>installs the agent {issued.version} from this server in <code>/opt/forgeyard</code>;</li>
-                  <li>creates the account <code>forgeyard-run</code> that process workloads run as;</li>
+                  <li>creates the account <code>forgeyard-run</code> that apps run as when they are processes;</li>
                   <li>writes <code>/etc/forgeyard/agent.toml</code> from what it finds (GPUs, Docker, systemd);</li>
                   <li>joins with the token, and starts the <code>forgeyard-agent</code> service (systemd).</li>
                 </ul>
@@ -220,7 +220,7 @@ function OfflineImage({ image, version }: { image: AgentImage; version: string }
         )}
       </p>
       <p className="small">
-        The models' engine images are carried the same way: each recipe under Models, <em>Catalog and recipes</em>, lists the
+        The models' engine images are carried the same way: each engine under Models, <em>Engines</em>, lists the
         commands for its images, and the agent checks a loaded image before it uses it.{" "}
         <HelpLink page="how-to" anchor="offline-machines">Offline machines</HelpLink>
       </p>

@@ -1,24 +1,29 @@
 """Machines: everyone signed in can look; admins add (join tokens), revoke and remove, and choose
-which GPUs Forgeyard may assign on each machine."""
+which GPUs Forgeyard may assign on each machine and how it reaches the internet (`fetch_via`, 1.4).
+Operators and admins remove models from a machine's model cache (1.4). Admins upload an image file to a
+machine (1.4, forgeyard/machines/upload.py)."""
 
 from __future__ import annotations
 
 from typing import Optional
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard import audit
-from forgeyard.api.deps import Caller, current, fail, public_base, require_admin
+from forgeyard.api.deps import Caller, current, fail, public_base, require_admin, require_operator
 from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
-from forgeyard.db import Accelerator, JoinToken, Node, get_db, utcnow
+from forgeyard.db import Accelerator, JoinToken, Node, get_db, new_session, utcnow
 from forgeyard.install import commands as install_commands
-from forgeyard.machines import store
+from forgeyard.machines import cache, store, upload
 from forgeyard.machines.hub import hub
-from forgeyard.machines.protocol import CLOSE_REVOKED
+from forgeyard.machines.protocol import CLOSE_REVOKED, FETCH_VIA
+from forgeyard.models import prefetch
 from forgeyard.security import tls
 from forgeyard.workloads import placement, state as wstate
 
@@ -45,7 +50,11 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "ip": n.ip, "joined_at": n.joined_at, "connected_at": n.connected_at,
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [], "runtime_info": n.runtime_info or {},
-        "model_cache": n.model_cache or {},
+        "fetch_via": n.fetch_via or "auto",
+        # 1.4: the largest image file an admin may upload to a machine (IMAGE_UPLOAD_MAX_GB).
+        "image_upload_max_bytes": get_settings().image_upload_max_gb * upload.UNIT,
+        # The per-model listing (1.4) is served by /api/machines/{id}/cache, not with every machine.
+        "model_cache": {k: v for k, v in (n.model_cache or {}).items() if k not in ("models", "engines_detail")},
         "accelerators": [accelerator_out(a, n, assigned) for a in n.accelerators],
     }
 
@@ -117,6 +126,7 @@ def revoke_machine(machine_id: int, caller: Caller = Depends(require_admin), db:
         raise fail(409, "already_revoked", "This machine is already revoked.")
     store.revoke(db, node, caller.user.username)
     wstate.unplace_node(db, node.id, f"{node.name} was revoked")
+    prefetch.fail_all(db, node.id, f"{node.name} was revoked")
     audit.record(db, "machine.revoked", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id)
     db.commit()
     closed = hub.close(node.id, CLOSE_REVOKED, "revoked by an admin")
@@ -181,3 +191,150 @@ def set_gpu_allowlist(machine_id: int, body: AllowlistIn, caller: Caller = Depen
     db.expire_all()
     node = db.scalar(select(Node).where(Node.id == machine_id).options(selectinload(Node.accelerators)))
     return {"machine": machine_out(node, db)}
+
+
+FETCH_VIA_TEXT = {"auto": "Auto (directly, through the server after a network failure)",
+                  "server": "Always through the server", "direct": "Direct only"}
+
+
+class FetchViaIn(BaseModel):
+    fetch_via: str = Field(max_length=16)
+
+
+@router.put("/{machine_id}/fetch-via")
+def set_fetch_via(machine_id: int, body: FetchViaIn, caller: Caller = Depends(require_admin),
+                  db: DbSession = Depends(get_db)):
+    """How this machine fetches models and engine archives (1.4, D3/D9: admins only): "auto" (directly, and
+    through the server after a network failure), "server" (always through the server) or "direct" (never
+    through it). Its agent gets the new way with its next desired state, sent now; placement no longer
+    avoids a machine that relays for a host it could not reach."""
+    if body.fetch_via not in FETCH_VIA:
+        raise fail(422, "bad_fetch_via", f"fetch_via is one of: {', '.join(FETCH_VIA)}.")
+    node = _get(db, machine_id)
+    before = node.fetch_via or "auto"
+    if before != body.fetch_via:
+        node.fetch_via = body.fetch_via
+        audit.record(db, "node.fetch_via_changed", actor=caller.user, target=node.name, ip=caller.ip,
+                     machine_id=node.id, before=before, after=body.fetch_via)
+        db.commit()
+        hub.poke(node.id)  # its replicas' and downloads' blocks say how to fetch them
+        placement.place_and_poke(db)  # a replica waiting for a machine that can fetch it may now go here
+    db.expire_all()
+    node = db.scalar(select(Node).where(Node.id == machine_id).options(selectinload(Node.accelerators)))
+    return {"machine": machine_out(node, db)}
+
+
+# ---------------------------------------------------------------------------- the model cache (1.4)
+@router.get("/{machine_id}/cache")
+def machine_cache(machine_id: int, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+    """The models in this machine's model cache, with their sizes, the catalog models they are, and
+    the deployments there that use them (as its agent last reported)."""
+    return cache.view(db, _get(db, machine_id), caller.user)
+
+
+class CacheRemoveIn(BaseModel):
+    key: str = Field(min_length=1, max_length=800)
+
+
+@router.post("/{machine_id}/cache/remove")
+def remove_from_cache(machine_id: int, body: CacheRemoveIn, caller: Caller = Depends(require_operator),
+                      db: DbSession = Depends(get_db)):
+    """Delete one model (or engine) from this machine's cache. Refused while a deployment there uses
+    it: stop that first. Its agent checks again before it deletes anything."""
+    node = _get(db, machine_id)
+    found = cache.find(node.model_cache or {}, body.key)
+    if found is None:
+        raise fail(404, "not_in_cache", f"{node.name} does not report that model in its cache (any more).")
+    users = cache.users_of(db, node.id, found.target)
+    if users:
+        names = ", ".join(u["name"] for u in users)
+        raise fail(409, "model_in_use", f"{found.title} is in use by {names} on {node.name}. Stop "
+                                        f"{'it' if len(users) == 1 else 'them'} first.", in_use=users)
+    answer = cache.ask(node, {"type": "cache_remove", "key": body.key})
+    audit.record(db, "model.cache_removed", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                 key=body.key, model=found.title, freed_bytes=answer.get("freed_bytes") or 0)
+    db.commit()
+    db.expire_all()
+    return {"ok": True, "freed_bytes": answer.get("freed_bytes") or 0, "cache": cache.view(db, _get(db, machine_id), caller.user)}
+
+
+@router.post("/{machine_id}/cache/remove-partial")
+def remove_partial_downloads(machine_id: int, caller: Caller = Depends(require_operator),
+                             db: DbSession = Depends(get_db)):
+    """Delete what unfinished downloads left in this machine's cache (refused by the agent while a
+    download runs there)."""
+    node = _get(db, machine_id)
+    answer = cache.ask(node, {"type": "cache_prune"})
+    audit.record(db, "model.cache_removed", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                 key=None, model="partial downloads", freed_bytes=answer.get("freed_bytes") or 0)
+    db.commit()
+    db.expire_all()
+    return {"ok": True, "freed_bytes": answer.get("freed_bytes") or 0, "cache": cache.view(db, _get(db, machine_id), caller.user)}
+
+
+# ---------------------------------------------------------------------------- uploading an image file (1.4)
+def _upload_caller(request: Request, machine_id: int) -> tuple[Caller, Node]:
+    """In a thread, with a session of its own (an upload lasts minutes; no database connection is held)."""
+    db = new_session()
+    try:
+        caller = require_admin(current(request, db))
+        node = _get(db, machine_id)
+        _ = (caller.user.id, caller.user.username, node.id, node.name)  # loaded before the session closes
+        return caller, node
+    finally:
+        db.close()
+
+
+def _upload_audit(caller: Caller, node: Node, **detail) -> None:
+    db = new_session()
+    try:
+        audit.record(db, "node.image_uploaded", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                     **detail)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _matches(items: list[dict]) -> list[dict]:
+    db = new_session()
+    try:
+        return [{**i, "matches": upload.recipe_matches(db, i)} for i in items]
+    finally:
+        db.close()
+
+
+@router.post("/{machine_id}/images")
+async def upload_image(machine_id: int, request: Request):
+    """Upload an image file (`docker save`, optionally gzip) to this machine (1.4, admins only): streamed through
+    the server to its agent, which loads it into its container engine. The body is the file; Content-Length is
+    required; `X-Filename` names it in the audit log. Answers what was loaded, and which recipe image each one
+    is (checked by its recorded ids, or named by a tag-only recipe image)."""
+    caller, node = await run_in_threadpool(_upload_caller, request, machine_id)
+    limit = get_settings().image_upload_max_gb * upload.UNIT
+    length = request.headers.get("content-length") or ""
+    if not length.isdigit():
+        raise fail(411, "length_required", "The upload must say its size (Content-Length).")
+    size = int(length)
+    if size <= 0:
+        raise fail(400, "upload_empty", "The file is empty.")
+    if size > limit:
+        raise fail(413, "upload_too_large", f"The file is {size / upload.UNIT:.1f} GiB; the limit is "
+                                            f"{get_settings().image_upload_max_gb} GiB (IMAGE_UPLOAD_MAX_GB).")
+    name = unquote(request.headers.get("x-filename") or "")[:200] or "image.tar"
+    try:
+        upload.precheck(node)  # refused before a byte moves: not an upload, not audited
+    except upload.UploadFailed as e:
+        raise fail(e.status, e.code, e.message) from None
+    try:
+        answer = await upload.receive(request, node, size, name)
+    except upload.UploadFailed as e:
+        await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=False, reason=e.message[:200])
+        raise fail(e.status, e.code, e.message) from None
+    if not answer.get("ok"):
+        reason = str(answer.get("reason") or "the agent could not load it")[:400]
+        await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=False, reason=reason[:200])
+        raise fail(422, "image_load_failed", f"{node.name}: {reason}")
+    items = await run_in_threadpool(_matches, list(answer.get("images") or []))
+    await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=True,
+                            images=[{"id": i.get("id"), "tags": i.get("tags")} for i in items][:8])
+    return {"ok": True, "bytes": size, "images": items}

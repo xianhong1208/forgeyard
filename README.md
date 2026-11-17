@@ -13,34 +13,43 @@ them where they fit, and every program calls them at `/v1` with an API key.
 **[Guide](docs/guide/README.md)** · **[繁體中文](README.zh-TW.md)** · **[Roadmap](ROADMAP.md)** ·
 **[Changelog](CHANGELOG.md)**
 
-![The Models page: four deployments on one CPU machine (chat, chat with images, image generation, text to speech), each healthy and answering at /v1](docs/images/console-models.png)
+![The Serving page: four deployments on one CPU machine, grouped by kind (chat, multimodal chat, text to speech, images), each ready and answering at its /v1 path](docs/images/console-serving.png)
 
 ## ✨ Key features
 
-- **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas, services
-  and tasks on the cards you allow; AMD cards run ROCm or Vulkan builds.
+- **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas on the
+  cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps every card's memory
+  to the models that hold it, and lists the models in its
+  cache with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
+  and its engine on chosen machines before you deploy it, with progress. A machine that cannot reach
+  Hugging Face, GitHub or the image registry gets the files and pinned engine images through the server,
+  which passes them on and stores nothing; admins can also upload an image file to a machine.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
-  usage per key, model and person, and failover between replicas.
+  usage and cost per key, model and person (charted by day, week and month), and failover between
+  replicas.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
-  speech, image generation, and video generation as jobs.
-- **Any HTTP service behind the same keys.** A workload's API at `/x/<name>/…` gets keys, limits and
-  usage, and templates start object detection, segmentation and depth APIs in one step.
+  speech, image generation, video generation as jobs, and vision models: object detection,
+  segmentation and depth at `/v1/vision/…` (1.4), deployed like any other model.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted.
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
-  they are; the agent checks a loaded image against the pinned one before it runs it.
+  they are; the agent checks a loaded image against the pinned one before it runs it. Placement
+  prefers machines that already have the model and engine, avoids one that could not reach Hugging
+  Face, GitHub or a registry, and moves a replica stuck on such a download to a machine that can.
 
-## What's new in 1.3
+## What's new in 1.4
 
-1.3 adds images, audio and video in chat, text to speech, image and video generation, workloads at
-`/x/` with vision templates, and the server and agent images on Docker Hub. 1.3.1 lets you change a
-deployment in place; 1.3.2 and 1.3.3 are fixes. Every change is in the
-[CHANGELOG](CHANGELOG.md).
+1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
+the running models and a model library (Catalog, Engines, Sources), usage and cost charts, and vision
+models (object detection, segmentation, depth) deployed like any other model. **Download to…** puts a
+model and its engine on machines before you deploy; a machine without internet gets them through the
+server, and admins can upload an image file to it. Apps left the console, and their API is deprecated
+until 1.5. Every change is in the [CHANGELOG](CHANGELOG.md).
 
 ## 🚀 Installation
 
@@ -53,7 +62,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -98,7 +107,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
@@ -111,7 +120,7 @@ The join token works once, within 15 minutes. AMD and CPU-only machines:
 1. Open `https://192.168.1.20:7860/setup`, enter the setup token and create the owner. Then open
    **Trust this server** and install the CA on your device.
 2. **Machines → Add a machine**, and run the command on the machine. It shows up within seconds.
-3. **Models → Catalog and recipes → Add a model**, pick a recommended model (for a CPU:
+3. **Models → Add a model**, pick a recommended model (for a CPU:
    *Qwen3 1.7B (GGUF, for the CPU)*), then **Deploy it** with the name `qwen`.
 4. **API keys → New key**. On the computer that calls the model, get the CA file and the SDK:
 
@@ -161,7 +170,7 @@ Forgeyard itself at `/guide`:
 | Page | What it covers |
 |---|---|
 | [Quick start](docs/guide/quick-start.md) | from nothing to your first `/v1` call in about ten minutes |
-| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, workloads, models, deployments and the gateway, keys, roles |
+| [Concepts](docs/guide/concepts.md) | machines and agents, GPU access, models, engines and estimates, deployments and the gateway, keys, roles |
 | [How-to](docs/guide/how-to.md) | AMD and CPU-only machines, the server and the agent in Docker, shared GPUs, your own certificate, upgrades, backups |
 | [Cloud providers](docs/guide/cloud-providers.md) | OpenAI, Anthropic, Gemini, Azure, OpenRouter or your own server behind `/v1`; when a request spills; which keys may use the cloud |
 | [Troubleshooting](docs/guide/troubleshooting.md) | problems seen on real machines, with their fix |
@@ -218,6 +227,8 @@ and with stable-diffusion.cpp's CUDA build (Stable Diffusion 1.5 and Z-Image-Tur
 | Z-Image-Turbo GGUF | stable-diffusion.cpp (`sd-cpp`) | CPU (process); AMD Strix Halo (Vulkan); NVIDIA A100 (CUDA) |
 | **Video generation** | | |
 | Wan2.1-T2V-1.3B | vLLM-Omni (`vllm-omni-video`) | NVIDIA A100 |
+| **Vision (1.4)** | | |
+| RT-DETRv2 R18 and R50, SAM 2.1 Hiera tiny, Depth Anything V2 Small | Forgeyard's vision server (`vision`) | CPU (as a process, before the 1.4 image is published) |
 | **Cloud** | | |
 | Google `gemini-2.5-flash` | its OpenAI-compatible endpoint (a provider) | — |
 

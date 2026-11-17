@@ -4,9 +4,11 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 ## 運作方式
 
-- **供應商（provider）**是那些 API 之一的一個帳號：它的 base URL 和 API 金鑰。金鑰加密儲存，之後不會再顯示。管理員在 **Providers** 新增供應商。
+- **供應商（provider）**是那些 API 之一的一個帳號：它的 base URL 和 API 金鑰。金鑰加密儲存，之後不會再顯示。管理員在 **Cloud → Providers** 新增供應商。
 - 供應商的**模型**是你可以送給它的名稱，例如 `gpt-4o-mini`；Azure 則是你在 Azure 上的部署名稱。
-- **路由（route）**是 `/v1` 上的一個模型名稱，它有分成好幾**層（tier）**的**目標（target）**。每個部署都有自己的路由，唯一的目標就是這個部署。管理員可以替它加上第二層，例如本機副本忙碌或停擺時改用的雲端模型；也可以建立只有雲端模型的路由。
+- 部署以它的模型名稱在 `/v1` 上回應。管理員可以替它設定**雲端備援（cloud fallback）**：後面一層放供應商的模型，本機副本忙碌或停擺時改用。它在部署的頁面上。
+- 管理員也可以建立**雲端模型（cloud model）**：用自己的名稱提供供應商的模型，在 **Cloud → Cloud models**。
+- 兩者在 API 裡都是**路由（route）**（`/api/routes`）：一個模型名稱，加上分成好幾**層（tier）**的**目標（target）**。每個部署都有自己的路由，第一個目標就是這個部署。
 - Forgeyard 一律透過各供應商**自己的 OpenAI 相容端點**溝通。它沒有轉換成各家原生 API 的翻譯層，也不使用 LiteLLM。各端點做不到的事列在[下方](#what-each-providers-endpoint-cannot-do)。
 - 每把 API 金鑰都有一個**雲端**設定，除非有人改過，否則一律是 **Never**。請見[誰可以使用雲端](#who-may-use-the-cloud)。
 
@@ -14,11 +16,11 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 ## 新增供應商
 
-在 **Providers** 選 **Add a provider**，挑選種類並貼上金鑰。接著：
+在 **Cloud → Providers** 選 **Add a provider**，挑選種類並貼上金鑰。接著：
 
 1. **Test connection** 會帶著金鑰向 base URL 查詢 `/models`，顯示供應商列出了幾個模型，或它拒絕的原因。
 2. 打開這個供應商，加入它的模型：直接輸入名稱，或用 **Import from /models**（Azure 不適用，它的清單不會列出你的部署）。
-3. 把模型放進路由（請見[把模型導向雲端](#route-a-model-to-the-cloud)）。
+3. 使用模型：當作部署的[雲端備援](#give-a-deployment-a-cloud-fallback)，或當作[有自己名稱的雲端模型](#serve-a-cloud-model-under-a-name-of-its-own)。
 
 除了 *OpenAI-compatible server* 以外，所有種類都預設勾選 **Outside your network**；*OpenAI-compatible server* 在 base URL 是公開位址（或解析成公開位址的名稱）時勾選，是私有位址或你自己網路上的名稱時不勾選，表單會說明原因。第三方服務請保持勾選；自己的伺服器請取消勾選：在你網路內的供應商不算雲端，所以每把金鑰都能使用。1.3.1 之前加入的供應商維持原本的勾選。
 
@@ -46,15 +48,21 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 種類選 *OpenAI-compatible server*，填入它的 base URL（例如 `https://llm.example.org/v1`），需要的話再加上金鑰。私有位址（`10.x`、`192.168.x`、VPN 的 `100.64.x`、IPv6 `fd…`）或像 `llm.lan`、`gpu-box` 這樣的名稱，*Outside your network* 維持不勾選：這是你自己的伺服器，所以金鑰不需要雲端權限就能使用。公開位址會自動勾選（Together、Groq 之類都是第三方）；只有伺服器真的是你的才取消勾選。如果透過 VPN 連到私有位址，可以勾選 **Allow plain HTTP**。Forgeyard 送給它的請求不會刪掉任何參數。
 
-## 把模型導向雲端
+## 替部署設定雲端備援
 
 讓某個部署在忙碌或停擺時溢出到雲端：
 
-1. 打開這個部署，選 **Routing and cloud spill**。也可以到 **Models** 的 **Routes and cloud** 分頁。
-2. 按 **Add a tier**，把供應商的模型加進去。
-3. 選好規則（請見[請求何時溢出](#when-a-request-spills)），按 **Save routing**。
+1. 從 **Serving** 打開這個部署。它的頁面上有 **Cloud fallback** 區塊。
+2. 按 **Add a cloud tier**，把供應商的模型加進去。
+3. 選好規則（請見[請求何時溢出](#when-a-request-spills)），按 **Save cloud fallback**。
 
-要用自己的名稱提供雲端模型，請到 **Models** 的 **Routes and cloud**，選 **New route**。填入用戶端會以 `model` 送出的名稱，再加入供應商的模型。只有雲端設定為 **Allowed** 的金鑰看得到這種路由。
+在 **Serving** 清單裡，有雲端備援的部署會顯示一個標出供應商的小標記，例如 *→ Gemini*。
+
+## 用自己的名稱提供雲端模型
+
+打開 **Cloud** 的 **Cloud models** 分頁，選 **New cloud model**。填入用戶端會以 `model` 送出的名稱，加入供應商的模型，再按 **Create**。裡面沒有本機目標的雲端模型，只有雲端設定為 **Allowed** 的金鑰看得到。
+
+自己取的名稱也可以只指向部署：好幾個部署共用一個名稱，或替一個部署取第二個名稱。建立方式相同。**Cloud models** 會把它們列在 *Other names for deployments* 底下，每個部署的頁面也會列出它另外回應的名稱。
 
 每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
 
@@ -147,7 +155,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 
 ## 費用與價格
 
-**Usage → Cost** 以美元顯示請求花了多少錢，可以按日期、金鑰、人（管理員）、模型或供應商分組，並列出在本機處理的比例，以及沒有價格的請求數。這是 Forgeyard 對供應商收費的估算，不是供應商的帳單。
+**Usage → Cost** 以美元顯示請求花了多少錢，可以按日期、金鑰、人（管理員）、模型或供應商分組，並列出在本機處理的比例，以及沒有價格的請求數；**Cost over time** 則把費用按日、週或月畫成折線圖，可以看總數，或依金鑰、模型、供應商或個人分開。這是 Forgeyard 對供應商收費的估算，不是供應商的帳單。
 
 ### 每個請求的費用怎麼算
 
@@ -181,7 +189,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 在供應商頁面上，每個模型都會顯示每百萬 token 的價格、價格的來源（*entered by hand* 手動輸入，或 *from OpenRouter*）以及時間。價格由管理員設定：
 
 - 模型上的 **Prices**：輸入、輸出、快取輸入與快取寫入，以每百萬 token 的美元計，照供應商定價頁面上的數字填。用不到的欄位留空。
-- **Refresh prices from OpenRouter**：在供應商頁面上（只更新它的模型），或在 Providers 頁面上（所有在你網路外的供應商）。Forgeyard 會讀取 OpenRouter 公開的模型清單 `https://openrouter.ai/api/v1/models`（不送出任何金鑰；連線遵守下面的對外連線規則，所以如果你有設定 `EGRESS_ALLOWED_HOSTS`，請加上 `openrouter.ai`），然後顯示**差異**：每個模型怎麼對應、舊價格和新價格。在你勾選並按下 **Apply** 之前，什麼都不會改變。
+- **Refresh prices from OpenRouter**：在供應商頁面上（只更新它的模型），或在 **Cloud → Providers** 上（所有在你網路外的供應商）。Forgeyard 會讀取 OpenRouter 公開的模型清單 `https://openrouter.ai/api/v1/models`（不送出任何金鑰；連線遵守下面的對外連線規則，所以如果你有設定 `EGRESS_ALLOWED_HOSTS`，請加上 `openrouter.ai`），然後顯示**差異**：每個模型怎麼對應、舊價格和新價格。在你勾選並按下 **Apply** 之前，什麼都不會改變。
   - OpenRouter 供應商的模型依它自己的 id 對應（*same id*）。其他供應商的模型會根據名稱給出**建議的**對應（`gpt-4o-mini` → `openai/gpt-4o-mini`、`claude-sonnet-4-5-20250929` → `anthropic/claude-sonnet-4.5`），請自己確認後再勾選。對應不到的模型，可以輸入它在 OpenRouter 上的 id 再按 **Compare**。套用之後會記住這個對應（*confirmed*）。
   - **手動輸入的價格會保留**，除非你勾選那一列要覆蓋。
   - 如果 OpenRouter 的價格在你看到差異之後、按下 **Apply** 之前變了，那一列會被略過；請重新讀取。
@@ -240,7 +248,9 @@ prompt size (about 3 bytes a token, on the high side) × input price
 
 - **API keys**：每把金鑰一個量表（已花費 / 預算，以及進行中請求預留的金額）、你自己的預算，以及超過 80% 的警告；
 - **Usage → Cost**：*Budgets this month*，列出適用於你的每個預算（管理員：所有人的，以及供應商的）；
-- 供應商頁面：它的預算；Providers 清單會標示超過 80% 的供應商。
+- 供應商頁面：它的預算；**Cloud → Providers** 的清單會標示超過 80% 的供應商。
+
+**已撤銷的金鑰**不會出現在這些清單和警告裡，撤銷之後也不會再有它的警示；它本月已經花的錢，仍然算在它的人和它的供應商的預算裡。`GET /api/budgets` 也不會列出它。
 
 沒有電子郵件通知：請查看稽核紀錄或這些頁面。
 
@@ -271,9 +281,9 @@ prompt size (about 3 bytes a token, on the high side) × input price
 
 請求在送出之前就被對外連線規則拒絕了：base URL 是 http、不在 `EGRESS_ALLOWED_HOSTS` 裡，或解析到私有、link-local 或 metadata 位址。錯誤訊息會說明是哪一個。
 
-### 模型出現在 Models 的清單裡，卻回應找不到
+### 模型出現在 Cloud models 上，卻回應找不到
 
-那是只有雲端的路由，而金鑰的雲端設定不是 **Allowed**。對這種金鑰來說，這些模型就和不存在的名稱一樣「找不到」。
+那是裡面沒有本機目標的雲端模型，而金鑰的雲端設定不是 **Allowed**。對這種金鑰來說，這些模型就和不存在的名稱一樣「找不到」。
 
 ### 請求沒有溢出
 

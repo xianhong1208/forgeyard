@@ -1,5 +1,5 @@
-"""1.3.1 settings-simplify (issue #30): deprecated settings (D7), values from .env (D1), where a
-provider is (D4), the server's Hugging Face token (D2), the agent's machine defaults (D6) and the
+"""1.3.1 settings-simplify (issue #30): deprecated settings (D7, removed in 1.4: #78), values from
+.env (D1), where a provider is (D4), the server's Hugging Face token (D2), the agent's machine defaults (D6) and the
 deploy form's context hint (D9) (FY-SIMP-*)."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from sqlalchemy import select, text
 
 from forgeyard import advisor, settings_check
 from forgeyard.agent import config as agent_config
-from forgeyard.config import DEPRECATED, Settings, get_settings
+from forgeyard.config import REMOVED, Settings, get_settings, removed_in_use
 from forgeyard.db import AuditEvent, Deployment, Replica, ServerSetting, get_engine, new_session
 from forgeyard.gateway import where
 from forgeyard.models import hf_token
@@ -35,78 +35,84 @@ def _ids(problems) -> dict[str, list]:
     return out
 
 
-# ------------------------------------------------------------------ D7: deprecated settings
-@pytest.mark.parametrize("name, value", [
+# ------------------------------------------------------------------ D7: settings removed in 1.4 (#78)
+REMOVED_VALUES = [
     ("OPENROUTER_MODELS_URL", "https://prices.example.org/models"), ("USAGE_FLUSH_SECONDS", "7"),
     ("PROVIDER_COOLDOWN_SECONDS", "45"), ("PROVIDER_RETRY_AFTER_CAP", "1"),
     ("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789"), ("AGENT_HEARTBEAT_SECONDS", "7"),
     ("SECRET_KEY_FILE", "/etc/forgeyard/secret.key"),
-])
-def test_fy_simp_001_a_deprecated_setting_still_works_and_is_named_with_its_replacement(name, value):
-    """FY-SIMP-001: each deprecated setting is still read (its value is used), and a warning names
-    it, what replaces it and that 1.4 removes it. An empty value is not reported."""
-    s = Settings(_env_file=None, **{name.lower(): value})
-    assert str(getattr(s, name.lower())) in (value, f"{value}.0")
-    found = [p for p in settings_check.static_problems(s, {}, []) if p.id == "setting-deprecated"]
-    assert [p.scope for p in found] == [f"setting:{name}"]
-    assert found[0].severity == "warning" and "removed in 1.4" in found[0].detail
-    instead, how = DEPRECATED[name.lower()]
-    assert how in found[0].detail and found[0].fix_url.endswith("#deprecated-settings")
-    if name in ("USAGE_FLUSH_SECONDS", "PROVIDER_COOLDOWN_SECONDS", "PROVIDER_RETRY_AFTER_CAP", "OPENROUTER_MODELS_URL"):
-        assert instead is None and "Nothing replaces it" in found[0].detail
-    else:
-        assert f"Use {instead} instead" in found[0].detail
-    empty = Settings(_env_file=None, **{name.lower(): ""}) if name not in (
-        "USAGE_FLUSH_SECONDS", "PROVIDER_COOLDOWN_SECONDS", "PROVIDER_RETRY_AFTER_CAP", "AGENT_HEARTBEAT_SECONDS") else None
-    if empty is not None:
-        assert not [p for p in settings_check.static_problems(empty, {}, []) if p.id == "setting-deprecated"]
-    assert not [p for p in settings_check.static_problems(Settings(_env_file=None), {}, []) if p.id == "setting-deprecated"]
+]
 
 
-def test_fy_simp_002_the_server_logs_the_deprecation_at_start(monkeypatch, caplog):
-    """FY-SIMP-002: started with a deprecated variable, the server logs which one and what to use, and
-    keeps using its value."""
+@pytest.mark.parametrize("name, value", REMOVED_VALUES)
+def test_fy_simp_001_a_removed_setting_is_not_read_and_is_named_with_its_replacement(name, value):
+    """FY-SIMP-001: each setting removed in 1.4 is no longer a setting (its value is not read), and
+    when it is still set, in the environment or in .env, in any case, a warning names it, says it is
+    ignored, and names what replaces it or what happens instead. An empty value is not reported, and
+    it is never also reported as an unknown name."""
+    assert name.lower() not in Settings.model_fields
+    s = Settings(_env_file=None)
+    for environ, dotenv in (({name: value}, {}), ({}, {name: value}), ({name.lower(): value}, {}), ({}, [name])):
+        found = _ids(settings_check.static_problems(s, environ, dotenv))
+        assert [p.scope for p in found["setting-removed"]] == [f"setting:{name}"] and "setting-unknown" not in found
+        p = found["setting-removed"][0]
+        assert p.severity == "warning" and p.title == f"{name} is no longer read"
+        assert p.detail.startswith(f"{name} was removed in 1.4, so its value is ignored.")
+        instead, how = REMOVED[name]
+        assert how in p.detail and p.fix_url.endswith("#removed-settings")
+        if name in ("USAGE_FLUSH_SECONDS", "PROVIDER_COOLDOWN_SECONDS", "PROVIDER_RETRY_AFTER_CAP", "OPENROUTER_MODELS_URL"):
+            assert instead is None and "Nothing replaces it" in p.detail
+        else:
+            assert f"Use {instead} instead" in p.detail
+    for environ, dotenv in (({name: ""}, {}), ({}, {name: "  "}), ({}, {name: None}), ({}, {})):
+        assert "setting-removed" not in _ids(settings_check.static_problems(s, environ, dotenv))
+    assert removed_in_use({name: "env"}, {name: "file"}) == {name: "env"}  # the environment wins, as for settings
+
+
+def test_fy_simp_002_the_server_logs_a_removed_setting_at_start_and_uses_the_fixed_behaviour(monkeypatch, caplog):
+    """FY-SIMP-002: started with removed variables, the server logs each one, says it is ignored and
+    what to use; the behaviour is the fixed one (heartbeat a third of AGENT_OFFLINE_SECONDS, the
+    pinned setup token not accepted), and Setup health lists them."""
     monkeypatch.setenv("USAGE_FLUSH_SECONDS", "3")
     monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "6")
+    monkeypatch.setenv("FORGEYARD_SETUP_TOKEN", "pinned-setup-token-0123456789")
     get_settings.cache_clear()
     with caplog.at_level(logging.WARNING, logger="forgeyard"), make_client() as c:
         assert c.get("/api/health").status_code == 200
-    assert "USAGE_FLUSH_SECONDS is deprecated" in caplog.text and "AGENT_HEARTBEAT_SECONDS is deprecated" in caplog.text
-    assert "Use AGENT_OFFLINE_SECONDS instead (agents send a heartbeat every third of it)" in caplog.text
-    assert get_settings().heartbeat_seconds == 6
+        assert c.post("/api/auth/setup", json={"setup_token": "pinned-setup-token-0123456789", "username": "owner",
+                                               "password": PW}).status_code == 403
+    assert ("Settings: USAGE_FLUSH_SECONDS is no longer read. USAGE_FLUSH_SECONDS was removed in 1.4, so its value is "
+            "ignored. Nothing replaces it: usage is written to the database every 5 seconds.") in caplog.text
+    assert ("AGENT_HEARTBEAT_SECONDS was removed in 1.4, so its value is ignored. Use AGENT_OFFLINE_SECONDS instead "
+            "(agents send a heartbeat every third of it, at least every 2 seconds)") in caplog.text
+    assert "FORGEYARD_SETUP_TOKEN is no longer read" in caplog.text
+    assert get_settings().heartbeat_seconds == 10
 
 
-def test_fy_simp_003_secret_key_file_and_its_new_name(tmp_path):
-    """FY-SIMP-003: FORGEYARD_SECRET_KEY_FILE names the key file; SECRET_KEY_FILE still does when it is
-    alone; with both, the new name wins and a different old one is reported; FORGEYARD_SECRET_KEY next to
-    either file is reported as before."""
-    new, old = str(tmp_path / "new.key"), str(tmp_path / "old.key")
+def test_fy_simp_003_the_key_file_setting_and_the_removed_old_name(tmp_path):
+    """FY-SIMP-003: FORGEYARD_SECRET_KEY_FILE names the key file, else it is data_dir/secret.key;
+    FORGEYARD_SECRET_KEY next to a key file is reported. A removed SECRET_KEY_FILE that would now mean
+    another file stops the start (FY-SEC-007); one that changes nothing is only reported."""
+    new = str(tmp_path / "new.key")
     assert str(Settings(_env_file=None, forgeyard_secret_key_file=new).secret_key_path) == new
-    assert str(Settings(_env_file=None, secret_key_file=old).secret_key_path) == old
-    both = Settings(_env_file=None, forgeyard_secret_key_file=new, secret_key_file=old)
-    assert str(both.secret_key_path) == new
-    found = _ids(settings_check.static_problems(both, {}, []))
-    assert "SECRET_KEY_FILE (its old name) is ignored" in found["secret-key-both"][0].detail
-    same = Settings(_env_file=None, forgeyard_secret_key_file=new, secret_key_file=new)
-    assert "secret-key-both" not in _ids(settings_check.static_problems(same, {}, []))
-    for field in ("forgeyard_secret_key_file", "secret_key_file"):
-        s = Settings(_env_file=None, forgeyard_secret_key="a" * 44, **{field: new})
-        p = _ids(settings_check.static_problems(s, {}, []))["secret-key-both"][0]
-        assert field.upper() in p.title
     assert str(Settings(_env_file=None, data_dir=tmp_path).secret_key_path) == str(tmp_path / "secret.key")
+    s = Settings(_env_file=None, forgeyard_secret_key="a" * 44, forgeyard_secret_key_file=new)
+    p = _ids(settings_check.static_problems(s, {}, []))["secret-key-both"][0]
+    assert p.title == "FORGEYARD_SECRET_KEY and FORGEYARD_SECRET_KEY_FILE are both set"
+    assert "secret-key-both" not in _ids(settings_check.static_problems(
+        Settings(_env_file=None, forgeyard_secret_key_file=new), {"SECRET_KEY_FILE": str(tmp_path / "old.key")}, []))
 
 
 def test_fy_simp_004_the_heartbeat_is_a_third_of_the_offline_time(owner, monkeypatch):
-    """FY-SIMP-004: without AGENT_HEARTBEAT_SECONDS, agents are told to beat every third of
-    AGENT_OFFLINE_SECONDS (at least 2 s); the deprecated value still wins when set. The Machines API
-    and the join answer carry it."""
+    """FY-SIMP-004: agents are told to beat every third of AGENT_OFFLINE_SECONDS (at least 2 s); a set
+    AGENT_HEARTBEAT_SECONDS changes nothing. The Machines API and the join answer carry it."""
     for offline, beat in ((30, 10), (45, 15), (4, 2), (7, 2)):
         assert Settings(_env_file=None, agent_offline_seconds=offline).heartbeat_seconds == beat
-    assert Settings(_env_file=None, agent_offline_seconds=30, agent_heartbeat_seconds=4).heartbeat_seconds == 4
     assert "heartbeat-flapping" not in _ids(settings_check.static_problems(Settings(_env_file=None), {}, []))
     assert "heartbeat-flapping" in _ids(settings_check.static_problems(
         Settings(_env_file=None, agent_offline_seconds=4), {}, []))
     monkeypatch.setenv("AGENT_OFFLINE_SECONDS", "60")
+    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "4")
     get_settings.cache_clear()
     body = owner.get("/api/machines").json()
     assert body["heartbeat_interval"] == 20 and body["offline_after"] == 60
@@ -364,6 +370,9 @@ def test_fy_simp_013_setup_health_flags_a_gated_model_without_a_token(owner):
     f = found()
     assert len(f) == 1 and f[0].severity == "info" and f[0].scope == f"deployment:{dep['id']}"
     assert "neither the server nor this deployment has a token" in f[0].detail
+    # 1.4 (#92): the server's token is on Models -> Sources; the banner is on Serving and the deployment.
+    assert f[0].fix_url == "/models?tab=sources" and "Models → Sources" in f[0].detail
+    assert f[0].pages == ("serving", f"deployment:{dep['id']}")
     db = new_session()
     try:
         r = db.scalar(select(Replica))

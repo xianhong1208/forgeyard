@@ -27,7 +27,8 @@ from forgeyard.agent.inventory import SIMULATION_ENV, SimulatedInventory, Simula
 from forgeyard.cli import main as cli_main
 from forgeyard.config import get_settings
 from forgeyard.machines.hub import hub
-from tests.conftest import OWNER, SETUP_TOKEN
+from tests.conftest import OWNER, SETUP_TOKEN, fast_heartbeat
+from tests.leaks import kill_group
 
 
 # ------------------------------------------------------------------ backoff
@@ -210,7 +211,7 @@ async def _wait(predicate, timeout=10.0):
 def test_fy_agt_020_join_connect_heartbeat_reconnect_after_restart_then_revoke(monkeypatch):
     """FY-AGT-020: the whole loop over real HTTP and WebSocket: join, online, heartbeats change free
     memory, the server restarts and the agent comes back by itself, a revoke stops it for good."""
-    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    fast_heartbeat(monkeypatch)
     monkeypatch.setenv(SIMULATION_ENV, "1")
     get_settings.cache_clear()
     port = _free_port()
@@ -296,7 +297,7 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
     from forgeyard.agent.workloads.supervisor import Supervisor
     from tests.workload_helpers import alive
 
-    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    fast_heartbeat(monkeypatch)
     get_settings.cache_clear()
     port, web_port = _free_port(), _free_port()
     server = f"http://127.0.0.1:{port}"
@@ -370,13 +371,10 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
         try:
             asyncio.run(scenario())
         finally:  # never leave a server process behind, even when an assertion failed
-            import signal
-
             for rt in made:
                 for proc in rt.children.values():
                     if proc.poll() is None:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                        proc.wait(5)
+                        kill_group(proc)
 
 
 @pytest.mark.parametrize("server_clock_back", [False, True])
@@ -391,7 +389,7 @@ def test_fy_agt_031_after_a_server_restart_the_same_agent_takes_new_work(monkeyp
     from forgeyard.agent.workloads.supervisor import Supervisor
     from forgeyard.machines import agent_api
 
-    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    fast_heartbeat(monkeypatch)
     get_settings.cache_clear()
     port = _free_port()
     server = f"http://127.0.0.1:{port}"

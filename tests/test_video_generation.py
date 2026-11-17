@@ -135,6 +135,14 @@ def engine_of(v, public_id: str) -> FakeVideos:
     return v.engines[v.uids.index(uid)]
 
 
+def hang(v, on: bool = True) -> None:
+    """Jobs on every replica stay at work (until `hang(v, False)`). Set it before asking for the job that
+    must still be at work: a fake job takes 0.15 s, so setting it on the job's own engine after the POST was
+    sometimes too late on a busy CI machine (the job was completed already)."""
+    for e in v.engines:
+        e.hang = on
+
+
 # ------------------------------------------------------------------ the recipe
 def test_fy_vid_001_the_recipe_serves_video_jobs():
     """FY-VID-001: vllm-omni-video serves the video task as openai-videos from diffusers pipelines on the
@@ -260,6 +268,7 @@ def test_fy_vid_005_a_job_from_asked_to_made(vid):
     engine's; status queued; progress 0; seconds as a string; no prompt kept); polling sees it in progress,
     then completed with progress 100 and expires_at the deployment's keep_minutes after; the content is the
     MP4 from the replica, as video/mp4, inline with a file name, and Range requests answer 206."""
+    hang(vid)
     r = make(vid.api)
     assert r.status_code == 200, r.text
     v = r.json()
@@ -272,10 +281,9 @@ def test_fy_vid_005_a_job_from_asked_to_made(vid):
     row = job(v["id"])
     assert row.upstream_id.startswith("video_gen_") and row.frames == 81 and row.fps == 16
     eng = engine_of(vid, v["id"])
-    eng.hang = True
     got = wait_status(vid.owner, vid.api, v["id"], "in_progress")
     assert got["status"] == "in_progress" and job(v["id"]).started_at is not None
-    eng.hang = False
+    hang(vid, False)
     got = wait_status(vid.owner, vid.api, v["id"], "completed")
     assert got["status"] == "completed" and got["progress"] == 100 and got["completed_at"]
     assert got["expires_at"] - got["completed_at"] in (86400, 86401)
@@ -324,15 +332,14 @@ def test_fy_vid_007_a_replica_that_restarts_or_goes_fails_its_jobs(vid):
     """FY-VID-007: the engine keeps its jobs in memory, so a job whose replica restarted (the engine no
     longer knows it, or the agent counted a restart) or is gone (stopped, placed again) reports failed
     with a reason that says so; a finished video whose replica restarted answers 410 for its content."""
+    hang(vid)                      # a, b and c must still be at work when their replica restarts or goes
     a = make(vid.api).json()
     eng = engine_of(vid, a["id"])
-    eng.hang = True
     wait_status(vid.owner, vid.api, a["id"], "in_progress")
     eng.restart()
     got = wait_status(vid.owner, vid.api, a["id"], "failed")
     assert got["status"] == "failed" and got["error"]["code"] == "video_lost" and "Ask for the video again" in \
         got["error"]["message"]
-    eng.hang = False
     b = make(vid.api).json()
     set_replica(job(b["id"]).replica_uid, restarts=3)          # the agent restarted the engine
     posts = sum(len(e.posts) for e in vid.engines)
@@ -347,6 +354,7 @@ def test_fy_vid_007_a_replica_that_restarts_or_goes_fails_its_jobs(vid):
     assert got["error"]["code"] == "replica_gone"
     set_replica(job(c["id"]).replica_uid, generation=1)
     vid.api.delete(f"/v1/videos/{c['id']}")
+    hang(vid, False)
     d = make(vid.api).json()
     wait_status(vid.owner, vid.api, d["id"], "completed")
     engine_of(vid, d["id"]).restart()
@@ -366,8 +374,8 @@ def test_fy_vid_007_a_replica_that_restarts_or_goes_fails_its_jobs(vid):
 
 def test_fy_vid_008_a_stopped_deployment_fails_its_jobs(vid):
     """FY-VID-008: stopping the deployment takes its replicas, and their jobs report failed (replica_gone)."""
+    hang(vid)
     a = make(vid.api).json()
-    engine_of(vid, a["id"]).hang = True
     db = new_session()
     try:
         w = db.scalar(select(Workload).where(Workload.name == "wan"))
@@ -381,9 +389,9 @@ def test_fy_vid_008_a_stopped_deployment_fails_its_jobs(vid):
 
 def test_fy_vid_009_a_job_past_its_time_is_stopped(vid):
     """FY-VID-009: a job not done by the deployment's timeout is cancelled on its replica and failed."""
+    hang(vid)
     a = make(vid.api).json()
     eng = engine_of(vid, a["id"])
-    eng.hang = True
     set_job(a["id"], deadline_at=utcnow() - timedelta(seconds=1))
     got = wait_status(vid.owner, vid.api, a["id"], "failed")
     assert got["error"]["code"] == "timed_out" and job(a["id"]).upstream_id in eng.deletes
@@ -462,15 +470,15 @@ def test_fy_vid_012_a_key_sees_only_its_own_jobs(vid):
 def test_fy_vid_013_deleting(vid):
     """FY-VID-013: DELETE cancels a job at work on its replica (and counts it as 499, not an error) or deletes
     a finished video's file there; the job is gone for its key afterwards."""
+    hang(vid)
     a = make(vid.api).json()
     eng = engine_of(vid, a["id"])
-    eng.hang = True
     uid = job(a["id"]).upstream_id
     r = vid.api.delete(f"/v1/videos/{a['id']}")
     assert r.status_code == 200 and r.json() == {"id": a["id"], "object": "video.deleted", "deleted": True}
     assert uid in eng.deletes and uid not in eng.jobs
     assert vid.api.get(f"/v1/videos/{a['id']}").status_code == 404
-    eng.hang = False
+    hang(vid, False)
     b = make(vid.api).json()
     wait_status(vid.owner, vid.api, b["id"], "completed")
     ub = job(b["id"]).upstream_id
@@ -774,7 +782,8 @@ def test_fy_vid_026_the_migration_adds_only_the_jobs_table(owner):
     with get_engine().begin() as conn:
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, "0013_passthrough")
-    assert tables() == before - {"video_jobs"} and keys() == n
+    # model_downloads comes with a later migration (0015), so going down to 0013 drops it too.
+    assert tables() == before - {"video_jobs", "model_downloads"} and keys() == n
     upgrade()
     assert tables() == before and keys() == n
     with get_engine().connect() as conn:

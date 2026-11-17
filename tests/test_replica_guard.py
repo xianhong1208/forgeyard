@@ -23,6 +23,7 @@ from forgeyard.agent.workloads.records import RecordStore
 from forgeyard.agent.workloads.supervisor import Supervisor
 from tests.gateway_helpers import free_port
 from tests.guard_helpers import KEY, GuardThread, OpenEngine
+from tests.waits import wait_until
 from tests.workload_helpers import FakeDocker, container, converge, desired, replica, cleanup_world, world_dir
 
 OPEN_PATHS = ["/invocations", "/rerank", "/pooling", "/score", "/classify", "/tokenize", "/v1/chat/completions",
@@ -167,8 +168,7 @@ def test_fy_rg_005_a_client_that_goes_away_closes_the_engines_connection(guarded
     s.close()
     assert engine.gone.wait(5)
     assert time.monotonic() - t0 < 3
-    time.sleep(0.2)
-    assert g.call(_conns(g.guard)) == 0
+    wait_until(lambda: g.call(_conns(g.guard)) == 0, "the guard to drop the connection", timeout=5)
 
 
 async def _conns(guard):
@@ -524,6 +524,33 @@ def test_fy_rg_013_close_cuts_open_streams():
         engine.close()
 
 
+def test_fy_rg_020_close_does_not_wait_for_a_client_that_does_not_read():
+    """FY-RG-020: closing a guard is quick even when a client stopped reading a stream (its buffers
+    full, so a graceful close of either side would wait): every stream is aborted first."""
+    engine = OpenEngine(big=256 * 1024 * 1024)
+
+    async def scenario():
+        port = free_port()
+        g = Guard(listen=("127.0.0.1", port), upstream=("127.0.0.1", engine.port), key=KEY)
+        await g.start()
+        reader, writer = await asyncio.open_connection("127.0.0.1", port, limit=1024)
+        writer.transport.pause_reading()  # this client never reads: the guard's writes back up
+        writer.write(f"GET /big HTTP/1.1\r\nHost: r\r\nAuthorization: Bearer {KEY}\r\nContent-Length: 0\r\n\r\n".encode())
+        await writer.drain()
+        await asyncio.sleep(1.0)  # the answer fills the buffers on both sides
+        started = time.monotonic()
+        await g.close()
+        took = time.monotonic() - started
+        writer.transport.abort()
+        return took, g.listening
+
+    try:
+        took, listening = asyncio.run(scenario())
+        assert not listening and took < 1.0, f"close took {took:.2f} s"
+    finally:
+        engine.close()
+
+
 def test_fy_rg_014_threads_do_not_leak():
     """FY-RG-014: nothing of a guard outlives its close (no thread, no listening socket)."""
     before = threading.active_count()
@@ -532,10 +559,10 @@ def test_fy_rg_014_threads_do_not_leak():
     port = g.port
     g.close()
     engine.close()
-    time.sleep(0.2)
+    # Threads that were told to end may take a moment to do so on a busy machine; one that never ends fails.
+    wait_until(lambda: threading.active_count() <= before + 1, "the guard's threads to end", timeout=5)
     with pytest.raises(OSError):
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
-    assert threading.active_count() <= before + 1
 
 
 # ------------------------------------------------------------------ the server's side

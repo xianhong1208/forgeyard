@@ -27,6 +27,29 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 
 資料表變更一律走 Alembic（`forgeyard/migrations`）；啟動時執行 `upgrade head`，model 與 migration 不一致時會有測試失敗。測試編號（`FY-…`）在整個專案中唯一。
 
+## 寫不會時好時壞的測試
+
+CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最慢），所以在這裡會過的測試，到那裡偶爾會失敗。
+目前為止幾乎每一次都是測試固定等一段時間就以為事情發生了，或是在需要的資料到達之前就讀了頁面。
+
+- **等狀態，不要等時間。** `tests/waits.py` 有 `wait_until(predicate, what, timeout=10)`，非同步測試用
+  `await until(...)`：狀態一到就返回，超過期限才失敗並說出 `what`，所以期限可以放寬。要先有一個請求在處理中，
+  就在執行緒裡送出它，再等假的 engine 或 app 收到（FY-IGEN-007、FY-X-014、FY-PGV-008），不要
+  `time.sleep(0.2)`。
+- **先把狀態準備好，再做可能搶先的那一步。** 一個必須還在進行中的假工作：先讓假 engine 卡住再送出，而不是送出後才設定（FY-VID-005）。
+- **Fixture 要看起來是現在的。** 測試期間 app 的 liveness 檢查每 2 秒跑一次，所以 `make_node` 會說它的機器剛剛才回報過；
+  沒有 heartbeat 的機器在慢的測試裡會變成離線，下一次部署就得到 409。
+- **結束 process 不是瞬間的。** 用 `tests/leaks.py` 的 `kill_group()` 結束 process group，它會等到每個成員都消失；
+  否則每個測試之後的遺留檢查會看到一個還在結束中的 process。
+- **時間本身就是測試對象時，sleep 沒問題**：逾時、停滯、「0.5 秒內什麼都不會發生」。
+- **UI 測試：API 的東西都比較晚到，而且順序不定。** 來自 fetch 的東西（資料到了才顯示的表單、另一個 endpoint 提供的
+  select 選項、回應到達時才設定的值）一律用 `await screen.findBy…` 或 `waitFor`，`getBy…` 只用在已知已經在頁面上的東西。
+  儲存之後，先等它的訊息出現再點下一步。`npm run test:jitter` 讓每個假 fetch 隨機延遲 0–150 ms 再回應
+  （`web/src/test/fetchJitter.ts`）：寫完 UI 測試後跑幾次。
+- **在 CI 之前先在負載下試**：把測試固定在兩個核心上並讓它們保持忙碌，例如
+  `for i in 1 2 3 4; do taskset -c 2,3 sh -c 'while :; do :; done' & done`，再
+  `taskset -c 2,3 uv run --no-sync python -m pytest -q`（或 `npx vitest run`），之後把那四個迴圈結束掉。
+
 ## 程式碼結構
 
 | 路徑 | 內容 |
@@ -37,7 +60,7 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `forgeyard/db.py`, `forgeyard/migrations/` | 資料庫模型；Alembic migration，啟動時執行 |
 | `forgeyard/api/` | HTTP API：`auth`（初始設定、登入、工作階段、連結）、`users`、`audit_log`、`machines`、`workloads`、`onboarding`（Get started）、`tls`（下載 CA）、`install`（`/install.sh` 與 wheel）、`guide` |
 | `forgeyard/api/models.py`, `deployments.py` | 模型目錄、recipe、來源；部署、估算、試用 |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground（它的 Vision 分頁經過 `forgeyard/gateway/vision.py`）；API 金鑰、它的限制、雲端設定與預算，以及用量 |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` 與 playground（它的視覺面板經過 `forgeyard/gateway/vision.py`）；API 金鑰、它的限制、雲端設定與預算，以及用量 |
 | `forgeyard/api/providers.py` | 雲端供應商與它的模型：新增、測試、匯入、手動價格、複製 |
 | `forgeyard/api/routing.py` | 路由與它分層的目標 |
 | `forgeyard/api/prices.py` | 從 OpenRouter 更新價格：預覽與套用 |
@@ -72,10 +95,10 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | 推送版本 tag 時，把兩個映像檔發布到 Docker Hub |
 | `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](guide/zh-TW/how-to.md#從頭到尾檢查一台伺服器)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
-| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查工作負載看到哪張 NVIDIA GPU |
+| `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查應用程式看到哪張 NVIDIA GPU |
 | `scripts/accept_tts.py` | 文字轉語音在真實硬體上的驗收（也是 `accept_all.py` 的 `tts` 群組） |
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
-| `images/vision/` | 工作負載範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
+| `images/vision/` | 應用程式範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
 | `scripts/accept_x.py` | `/x/` 直通在真實硬體上的驗收（也是 `accept_all.py` 的 `passthrough` 群組） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

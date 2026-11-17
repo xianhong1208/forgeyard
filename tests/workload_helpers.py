@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from forgeyard.db import new_session
+from forgeyard.db import new_session, utcnow
 from forgeyard.machines import store
 from forgeyard.machines.messages import InventoryIn
 from tests.leaks import cleanup as cleanup_world, world_dir  # noqa: F401 (the tests import them from here)
@@ -31,7 +31,9 @@ def gpus_of(name: str) -> list[dict]:
 
 def make_node(name: str = "box", inv: str = "nvidia-a100x8", *, status: str = "online", allowlist=None,
               runtime_info: Optional[dict] = None, features=("workloads",)) -> int:
-    """A machine straight in the database, as if its agent had said hello."""
+    """A machine straight in the database, as if its agent had said hello (just now: the app's liveness
+    sweep, every 2 s, takes an online machine never heard from offline, which made tests that took a few
+    seconds on a busy CI machine fail with 409 "does not fit")."""
     db = new_session()
     try:
         _, node = store.create_node(db, name=name, hostname=name, agent_version="0.1.0", protocol=1, ip="10.0.0.9")
@@ -39,6 +41,7 @@ def make_node(name: str = "box", inv: str = "nvidia-a100x8", *, status: str = "o
         store.apply_inventory(db, node, InventoryIn.model_validate({"accelerators": data["accelerators"],
                                                                     "collectors": data["collectors"]}))
         node.status = status
+        node.last_heartbeat_at = utcnow()
         node.features = list(features)
         node.runtime_info = PROCESS_OK if runtime_info is None else runtime_info
         node.runtimes = [k for k, v in node.runtime_info.items() if v.get("ok")]
@@ -237,6 +240,75 @@ elif cmd == "pull":
         time.sleep(delay)
         print(line, flush=True)
     print("Status: Downloaded newer image for " + image, flush=True)
+elif cmd == "load":
+    # As Docker's classic store loads an archive (1.4, the image relay and uploads): the whole stream (gzip or
+    # not) is read first, manifest.json is followed, each layer (compressed or not) is unpacked and checked
+    # against the config's diff id, and the image Id is the config's digest.
+    import gzip, hashlib, io, tarfile
+    fcntl.flock(_lock, fcntl.LOCK_UN)  # reading the stream may take long
+    data = sys.stdin.buffer.read()
+    fcntl.flock(_lock, fcntl.LOCK_EX)
+    state = json.loads(STATE.read_text()) if STATE.exists() else {"containers": {}}
+    loads = HERE / "loads"
+    loads.mkdir(exist_ok=True)
+    (loads / f"{len(list(loads.iterdir()))}.tar").write_bytes(data)
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)
+    def fail(msg):
+        print(msg, file=sys.stderr)
+        sys.exit(1)
+    try:
+        tar = tarfile.open(fileobj=io.BytesIO(data))
+        members = {m.name.lstrip("./"): m for m in tar.getmembers()}
+    except (tarfile.TarError, EOFError) as e:
+        fail(f"Error processing tar file: {e}")
+    def read(name):
+        m = members.get(name)
+        if m is None:
+            fail(f"Error processing tar file: open /var/lib/docker/tmp/{name}: no such file or directory")
+        return tar.extractfile(m).read()
+    if "manifest.json" not in members:
+        fail("Error processing tar file: open /var/lib/docker/tmp/manifest.json: no such file or directory")
+    for entry in json.loads(read("manifest.json")):
+        cbytes = read(entry["Config"])
+        config = json.loads(cbytes)
+        diff_ids = config["rootfs"]["diff_ids"]
+        if len(diff_ids) != len(entry["Layers"]):
+            fail("Error processing tar file: invalid manifest, layers length mismatch")
+        for i, name in enumerate(entry["Layers"]):
+            raw = read(name)
+            if raw[:2] == b"\x1f\x8b":
+                raw = gzip.decompress(raw)
+            tarfile.open(fileobj=io.BytesIO(raw)).getmembers()  # a layer must be a tar
+            got = "sha256:" + hashlib.sha256(raw).hexdigest()
+            if got != diff_ids[i]:
+                fail(f"Error processing tar file: invalid diffID for layer {i}: calculated {got}, expected {diff_ids[i]}")
+        image_id = "sha256:" + hashlib.sha256(cbytes).hexdigest()
+        run_config = dict(config.get("config") or {})
+        if state.get("load_alter"):  # an engine that is not what it says: other settings, another id
+            run_config["Env"] = list(run_config.get("Env") or []) + ["ALTERED=1"]
+            image_id = "sha256:" + hashlib.sha256(cbytes + b"altered").hexdigest()
+        tags = [] if state.get("load_untagged") else list(entry.get("RepoTags") or [])
+        for img in state.get("images", []):
+            img["RepoTags"] = [t for t in img.get("RepoTags", []) if t not in tags]
+        state["images"] = [img for img in state.get("images", []) if img["Id"] != image_id]
+        state.setdefault("images", []).append({"Id": image_id, "RepoTags": tags, "RepoDigests": [],
+                                               "Os": config.get("os"), "Architecture": config.get("architecture"),
+                                               "RootFS": {"Type": "layers", "Layers": diff_ids}, "Config": run_config})
+        for t in tags:
+            print("Loaded image: " + t)
+        if not tags:
+            print("Loaded image ID: " + image_id)
+    save()
+elif cmd == "tag":
+    img = find_image(args[1])
+    if img is None:
+        print("Error response from daemon: No such image: " + args[1], file=sys.stderr)
+        sys.exit(1)
+    for other in state.get("images", []):
+        other["RepoTags"] = [t for t in other.get("RepoTags", []) if t != args[2]]
+    img.setdefault("RepoTags", []).append(args[2])
+    save()
 elif cmd == "inspect":
     if args[1] == "--format":
         cid, c = find(args[3])
@@ -326,6 +398,24 @@ class FakeDocker:
 
     def pulls(self) -> list[list[str]]:
         return [c for c in self.calls() if c and c[0] == "pull"]
+
+    def loads(self) -> list[bytes]:
+        """Every archive `load` was given, in order (1.4)."""
+        d = self.root / "loads"
+        return [(d / f"{i}.tar").read_bytes() for i in range(len(list(d.iterdir())))] if d.exists() else []
+
+    def images(self) -> list[dict]:
+        f = self.root / "state.json"
+        return json.loads(f.read_text()).get("images", []) if f.exists() else []
+
+    def untagged_loads(self) -> None:
+        """`load` keeps no tag (prints only the image id), as an engine that reads an archive's layout without
+        its names does."""
+        self._update(lambda data: data.update(load_untagged=True))
+
+    def alter_loads(self) -> None:
+        """`load` records a different run configuration than the archive's (an engine that is not what it says)."""
+        self._update(lambda data: data.update(load_alter=True))
 
     def offline(self) -> None:
         """No registry: `run` of an image that is not local fails as a failed DNS lookup does."""

@@ -22,6 +22,7 @@ from forgeyard.machines.messages import ReplicaStatusIn
 from forgeyard.machines.protocol import FEATURE_PULL_PROGRESS, SERVER_FEATURES
 from forgeyard.workloads.spec import WorkloadSpec
 from tests.pull_helpers import MIB, FakeEngineAPI, layer_events, pull_script
+from tests.waits import wait_until
 from tests.workload_helpers import FakeDocker, container, converge, desired, replica
 
 ENGINE_IMAGE = "acme/engine:v1"
@@ -390,8 +391,13 @@ def test_fy_pull_013_a_stalled_cli_pull_is_ended(tmp_path):
     with pytest.raises(StartError, match="made no progress for 0.6 s"):
         rt.pull(_record("acme/quiet:1"))
     pid = int((tmp_path / "silent.pid").read_text())
-    time.sleep(0.2)
-    assert not Path(f"/proc/{pid}").exists() or "Z" in Path(f"/proc/{pid}/stat").read_text().split()[2]
+
+    def ended():
+        try:
+            return Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z"
+        except FileNotFoundError:
+            return True
+    wait_until(ended, "the silent CLI to be ended", timeout=5)
 
 
 def test_fy_pull_014_cli_lines_count_layers():
@@ -521,3 +527,26 @@ def test_fy_pull_018_the_server_shows_pull_progress_without_an_event_per_step(ow
             time.sleep(0.05)
         assert rep["state"] == "stopped" and rep["reason"] == "cancelled: the workload was stopped"
         assert rep["download"] is None
+
+
+def test_fy_pull_019_an_unexpected_error_while_starting_is_the_replicas_reason(tmp_path, caplog):
+    """FY-PULL-019: an error nobody planned for while a replica starts (here the image step raising what the agent
+    image raised on a real machine, "No module named 'sqlalchemy'") ends that attempt with the error as its
+    reason, shown in the console, then the usual backoff; never "ended while the agent was not watching" with
+    the cause only in the agent's log. Nothing is run."""
+    fake = FakeDocker(tmp_path / "bin")
+    rt = _rt(tmp_path, fake)
+
+    def broken_pull(rec, progress, cancel, *through):
+        raise ModuleNotFoundError("No module named 'sqlalchemy'")
+
+    rt.pull = broken_pull
+    with caplog.at_level("ERROR"):
+        sup, reasons, _ = _supervise(tmp_path, rt, container(image=ENGINE_IMAGE))
+    rec = sup.records["feedface01234567"]
+    assert rec.state == "backoff"
+    assert rec.reason.startswith("the agent failed while starting it (ModuleNotFoundError: No module named "
+                                 "'sqlalchemy')")
+    assert not any(r and "not watching" in r for r in reasons)
+    assert fake.runs() == []
+    assert any("failed while starting it" in m for m in caplog.messages)

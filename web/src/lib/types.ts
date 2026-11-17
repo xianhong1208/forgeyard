@@ -98,9 +98,50 @@ export type Machine = {
   // Accelerator keys Forgeyard may assign; null = all of them.
   gpu_allowlist?: string[] | null;
   features?: string[];
+  // 1.4: how it fetches models, engines and images (admins set it): directly, through the server, or both.
+  fetch_via?: FetchVia;
+  // 1.4: the largest image file an admin may upload to it (IMAGE_UPLOAD_MAX_GB).
+  image_upload_max_bytes?: number;
   runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
   model_cache?: { ok?: boolean; free_bytes?: number | null; cached?: string[]; reason?: string | null };
   accelerators: Accelerator[];
+};
+
+// A machine's model cache (1.4): GET /api/machines/{id}/cache.
+export type CacheUser = { name: string; kind: "deployment" | "workload"; id: number };
+export type CacheCatalogRef = { id: number; name: string };
+export type CachePart = { key: string; file: string; bytes: number; catalog: CacheCatalogRef[]; used_by: CacheUser[] };
+export type CacheModel = {
+  key: string;
+  kind: "hf" | "url";
+  repo?: string | null;
+  revision?: string;
+  file?: string | null;
+  bytes: number | null;
+  files?: number;
+  completed_at?: number | null;
+  missing?: number;
+  parts?: CachePart[];
+  catalog: CacheCatalogRef[];
+  used_by: CacheUser[];
+};
+export type CacheEngine = { key: string; id: string; name: string | null; bytes: number; used_by: CacheUser[] };
+export type MachineCache = {
+  machine_id: number;
+  connected: boolean;
+  reported: boolean;
+  sizes: boolean;
+  ok: boolean | null;
+  reason: string | null;
+  free_bytes: number | null;
+  total_bytes: number | null;
+  used_bytes: number | null;
+  partial_bytes: number | null;
+  partial_files: number;
+  truncated: boolean;
+  models: CacheModel[];
+  engines: CacheEngine[];
+  remove_note: string | null;
 };
 
 export type MachinesResponse = {
@@ -163,11 +204,15 @@ export type Replica = {
   download?: {
     phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
     layers?: number; layers_done?: number; unpacking?: boolean;
+    // 1.4: "server" while the bytes come through the server's relay.
+    via?: "direct" | "server";
   } | null;
   ready_at?: string | null;
   runs?: { type: string; image: string | null; command: string | string[] | null } | null;
   // 1.3.1: placed on a connected machine whose agent has not taken it for two minutes: why, and what to do.
   not_picked_up?: string | null;
+  // 1.4: why it is on this machine, when one that could not fetch what it needs decided it.
+  placement_note?: string | null;
 };
 
 export type ContainerRuntimeSpec = { type: "container"; image: string; command: string[] | null; args: string[] };
@@ -208,15 +253,11 @@ export type Workload = {
   replicas: number;
   replica_list: Replica[];
   deployment_id?: number | null;
+  // 1.4: the deployment that created this (model) workload.
+  // and the GPUs it gives each replica (0: the CPU); a model workload's own spec asks for none.
+  deployment?: { id: number; name: string; gpus?: number } | null;
   // 1.3: exposed behind the gateway at /x/<name> (null for a model deployment's workload).
   gateway?: WorkloadGateway | null;
-};
-
-export type WorkloadTemplate = {
-  id: string; title: string; task: string; name: string; summary: string; model: string; revision: string;
-  licence: string; code_licence: string; model_url: string; endpoint: string; example: string; answer: string;
-  images: { cpu: string; cuda: string };
-  specs: { cpu: Record<string, unknown>; cuda: Record<string, unknown> };
 };
 
 export type WorkloadGatewaySettings = {
@@ -234,15 +275,11 @@ export type WorkloadEvent = { at: string; kind: string; replica: number | null; 
 
 export type WorkloadsResponse = { workloads: Workload[]; server_time: string; can_manage: boolean };
 
-export type WorkloadResponse = {
-  workload: Workload; events: WorkloadEvent[]; server_time: string; can_manage: boolean;
-  gateway_base?: string; trust_url?: string | null;
-};
-
 export type LogsResponse = { source: "live" | "stored"; text: string; truncated: boolean; state: string; note?: string };
 
 // ---------------------------------------------------------------- models (M3)
-export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video";
+// 1.4 (#86): detect, segment and depth are vision models (Forgeyard's vision server, /v1/vision/<task>).
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "detect" | "segment" | "depth";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -286,6 +323,8 @@ export type CatalogModel = {
   voices?: string[];
   // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
   image?: ImageModel | null;
+  // 1.4, vision models: the task, architecture and (detection) the classes it knows.
+  vision?: { task: "detect" | "segment" | "depth"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string } | null;
   // 1.3, video models: the native size and frame rate, and the pipeline's components.
   video?: VideoModel | null;
 };
@@ -354,7 +393,9 @@ export type LiveCard = { replica: number; machine: string | null; key: string; i
 
 export type Deployment = {
   id: number; name: string; recipe: string; served_name: string; params: Record<string, unknown>;
-  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number };
+  model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number;
+    // 1.4: what it takes in chat besides text (null: unknown), so a chat model can be listed as multimodal.
+    modalities?: Medium[] | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];
@@ -403,14 +444,12 @@ export type ApiKey = {
 };
 
 export type WorkloadAccess = "none" | "listed" | "all";
-export type WorkloadChoice = { name: string; exposed: boolean; path: string };
 
 export type KeysResponse = {
   keys: ApiKey[]; limits: KeyLimits; is_admin: boolean; gateway_url: string; trust_url?: string | null; cloud: CloudSettings;
   // Admins: environment variables the panels' values still come from (D1).
   env_seeds?: { limits: string[]; cloud: string[] };
   models: { name: string; api: string; kind?: RouteKind }[];
-  workloads?: WorkloadChoice[];
   // Budgets (1.2): this month (UTC), when it resets, and the signed-in person's own budget.
   month?: string; resets_at?: string; person_budget?: Budget;
 };
@@ -504,3 +543,53 @@ export type ProviderResponse = { provider: Provider; kinds: ProviderKind[]; egre
 export type TestResult = { ok: boolean; status: number; ms: number; models: number; sample: string[]; message: string | null };
 
 export type UpstreamModel = { id: string; owned_by: string | null; context_length: number | null; api: string; display_name: string | null; added: boolean };
+
+// 1.4, "Download to…" (issue #35): a model (and by default its engine) downloaded to a machine ahead of a deployment.
+export type FetchVia = "auto" | "server" | "direct";
+
+export type DownloadProgress = {
+  phase: "model" | "engine" | "image"; done: number; total: number; file?: string;
+  layers?: number; layers_done?: number; unpacking?: boolean;
+  // 1.4 ("relay"): "server" while the bytes come through the server.
+  via?: "direct" | "server";
+};
+
+export type ModelDownload = {
+  id: number;
+  model: { id: number; name: string; title: string | null } | null;
+  machine: { id: number; name: string; connected: boolean } | null;
+  file: string | null;
+  recipe: string | null;
+  state: "queued" | "downloading" | "done" | "failed" | "cancelled";
+  via: string;
+  download: DownloadProgress | null;
+  reason: string | null;
+  requested_by: string;
+  created_at: string;
+  finished_at: string | null;
+  // Under way on a machine that is offline: it goes on when the agent is back.
+  waiting: string | null;
+};
+
+export type DownloadsResponse = { downloads: ModelDownload[]; can_download: boolean };
+
+export type DownloadTargetState = "ok" | "cached" | "downloading" | "too_old" | "no_cache" | "offline" | "no_space" | "revoked";
+
+export type DownloadTarget = {
+  machine_id: number; name: string; status: string; connected: boolean; state: DownloadTargetState; note: string;
+  model_cached: boolean; need_bytes: number; free_bytes: number | null; variant: string | null;
+  engine: { kind: "archive" | "image"; name: string; cached: boolean | null } | null;
+  engine_note: string | null;
+  download: ModelDownload | null;
+  // 1.4 ("relay"): how the model would come: "server" (through the server), "auto" (directly, through the
+  // server after a network failure) or "direct". Absent from older servers.
+  via?: FetchVia;
+};
+
+export type DownloadTargets = {
+  model: { id: number; name: string; title: string | null; size_bytes: number; kind: string; file: string | null };
+  recipes: string[];
+  recipe: string | null;
+  machines: DownloadTarget[];
+  can_download: boolean;
+};

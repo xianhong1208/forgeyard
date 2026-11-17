@@ -3,8 +3,9 @@
 For every entry: the repository exists, Forgeyard's inspector can read it at its revision (config,
 safetensors headers, GGUF metadata), it holds the format the file says, and the estimate with the
 suggested recipe's defaults (printed next to the file's download_gib and memory_gib, so they can be
-updated), the licence and what it takes besides text (inputs) against what the inspector reads, and
-for GGUF vision models the projector file. Gated entries need a token whose account accepted the licence: without HF_TOKEN they are
+updated), the licence and what it takes besides text (inputs) against what the inspector reads, for
+GGUF vision models the projector file, and for object detection, segmentation and depth models (1.4) the
+task the inspector reads from config.json. Gated entries need a token whose account accepted the licence: without HF_TOKEN they are
 only checked to exist and to be gated.
 
     HF_TOKEN=hf_… python scripts/check_recommended.py [name …]
@@ -68,6 +69,10 @@ def main(names: list[str]) -> int:
         # A speech model's projector is its decoder (and voice encoder), not media it takes in chat.
         if e.task not in ("tts", "image", "video") and sorted(meta.get("modalities") or []) != sorted(e.inputs):
             problems.append(f"it takes {meta.get('modalities')}, the file says {e.inputs}")
+        if e.task in recipes.VISION_TASKS and (meta.get("vision") or {}).get("task") != e.task:
+            # 1.4: the inspector must read it as the vision model the file says.
+            problems.append(f"the inspector reads it as {(meta.get('vision') or {}).get('task') or 'no vision model'}, "
+                            f"the file says {e.task}")
         recipe = builtin[e.recipe]
         params = {k: p.default for k, p in recipe.params.items()} | {"gpus": 0 if e.device == "cpu" else 1,
                                                                        "share": recipe.share}

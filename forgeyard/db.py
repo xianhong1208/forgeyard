@@ -161,6 +161,10 @@ class Node(Base):
     features: Mapped[list] = mapped_column(JSON, default=list)
     # The agent's model cache (M3): {"ok", "free_bytes", "cached": [cache keys]}.
     model_cache: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 1.4 (issue #35): how this machine fetches models, engines and images: "auto" (directly, and through
+    # the server after a network failure), "server" (always through the server) or "direct" (never through
+    # it). Set by admins only. Stored now; relaying through the server comes in a later 1.4 change.
+    fetch_via: Mapped[str] = mapped_column(String(16), default="auto", server_default="auto")
 
     accelerators: Mapped[list["Accelerator"]] = relationship(
         back_populates="node", cascade="all, delete-orphan", order_by="Accelerator.position"
@@ -309,7 +313,7 @@ class CatalogModel(Base):
     revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)   # the commit it is pinned to
     file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)      # the GGUF file
     format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2 | onnx | diffusers
-    task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr | tts | image
+    task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr | tts | image | video | detect | segment | depth
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     # Extra engine arguments per recipe (e.g. Qwen3-Reranker's --hf-overrides for vllm-pooling).
     engine_args: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -366,7 +370,7 @@ class GatewayRoute(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     served_name: Mapped[str] = mapped_column(String(128), unique=True)
-    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio | openai-speech | openai-images
+    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio | openai-speech | openai-images | openai-videos | vision-detect | vision-segment | vision-depth
     # The deployment this route was created with (NULL: a route an admin made, e.g. cloud only).
     deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="CASCADE"),
                                                          unique=True, nullable=True)
@@ -650,6 +654,43 @@ class VideoJob(Base):
     # Its file is gone from the replica: expired and deleted there, or lost with the replica.
     removed: Mapped[bool] = mapped_column(Boolean, default=False)
     counted: Mapped[bool] = mapped_column(Boolean, default=False)         # its usage is recorded
+
+
+class ModelDownload(Base):
+    """A "Download to…" request (1.4, issue #35): one catalog model (and, by default, the engine of a
+    recipe) downloaded into one machine's model cache before anything is deployed there. The agent gets
+    it in `desired.downloads` while it is queued or downloading, fetches it with the code a replica uses,
+    and reports its progress; it starts nothing.
+
+    Whether a model *is* on a machine is never read from here: that is what its agent reports
+    (`nodes.model_cache`). Finished rows (done, failed, cancelled) are history: kept 30 days, at most 20
+    per machine."""
+
+    __tablename__ = "model_downloads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # What the agent knows it by. Random, like replicas.uid.
+    uid: Mapped[str] = mapped_column(String(32), unique=True, default=lambda: uuid.uuid4().hex)
+    model_id: Mapped[int] = mapped_column(ForeignKey("models.id", ondelete="CASCADE"), index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
+    # The GGUF file of the commit, when the catalog model is one GGUF file (its cache key includes it).
+    file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Also fetch this recipe's engine (archive or image) for the variant this machine would use. NULL: the
+    # model only.
+    recipe: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    state: Mapped[str] = mapped_column(String(16), default="queued", index=True)  # queued | downloading | done | failed | cancelled
+    # How it was fetched, last: direct | server | machine (only "direct" until the relay comes).
+    via: Mapped[str] = mapped_column(String(16), default="direct")
+    source_node_id: Mapped[Optional[int]] = mapped_column(ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True)
+    # Progress, the same shape as replicas.download: {phase, done, total, file?, layers?, …}.
+    download: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(400), nullable=True)
+    requested_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    model: Mapped[CatalogModel] = relationship()
+    node: Mapped[Node] = relationship(foreign_keys=[node_id])
 
 
 _engine = None

@@ -5,7 +5,7 @@ COOKIE_SECURE, the cloud levels), and so does an own certificate with only one o
 (forgeyard/security/tls.py). What is left is found here, without refusing anything:
 
 - a name in the environment or in `.env` that is not a setting but looks like one ("did you mean");
-- a deprecated setting (still read in 1.3, removed in 1.4), named with what replaces it;
+- a setting removed in 1.4 that is still set (no longer read), named with what replaces it;
 - a setting that another one makes useless (TLS_CA_FILE without an own certificate, any TLS_* with
   TLS=off, a key file next to FORGEYARD_SECRET_KEY);
 - values that work but are risky (heartbeat against offline time, the private-address switches,
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
 
-from forgeyard.config import REMOVED_IN, Settings
+from forgeyard.config import REMOVED, REMOVED_IN, Settings, dotenv_values, removed_in_use
 
 REFERENCE = "/guide/en/reference"
 
@@ -57,7 +57,7 @@ SEEDS = (
     ("gateway_cloud", "default", "gateway_cloud_default", "level"),
     ("gateway_cloud", "max", "gateway_cloud_max", "level"),
 )
-SEED_PAGE = {"model_sources": ("/models?tab=catalog", "Models → Model sources"),
+SEED_PAGE = {"model_sources": ("/models?tab=sources", "Models → Sources"),
              "gateway_limits": ("/keys", "API keys → Limits for keys"),
              "gateway_cloud": ("/keys", "API keys → Cloud policy")}
 
@@ -85,12 +85,7 @@ def other_forgeyard_names() -> set[str]:
 
 def dotenv_names(path: Path | str = ".env") -> list[str]:
     """The names a `.env` file sets (the one the server reads: next to the working directory)."""
-    try:
-        from dotenv import dotenv_values
-
-        return [k for k in dotenv_values(path) if k]
-    except (OSError, UnicodeDecodeError):
-        return []
+    return list(dotenv_values(path))
 
 
 def unknown_names(environ: Mapping[str, str], dotenv: Iterable[str]) -> list[tuple[str, str, Optional[str]]]:
@@ -104,8 +99,8 @@ def unknown_names(environ: Mapping[str, str], dotenv: Iterable[str]) -> list[tup
     for where, names in ((".env", list(dotenv)), ("the environment", list(environ))):
         for name in names:
             upper = name.upper()
-            if upper in known or upper in others or upper in seen:
-                continue
+            if upper in known or upper in others or upper in seen or upper in REMOVED:
+                continue  # a removed setting has its own finding (setting-removed)
             hint = difflib.get_close_matches(upper, choices, n=1, cutoff=0.6)
             close = difflib.get_close_matches(upper, choices, n=1, cutoff=CLOSE_ENOUGH)
             # .env is Forgeyard's own file: every unknown name in it is reported.
@@ -116,21 +111,24 @@ def unknown_names(environ: Mapping[str, str], dotenv: Iterable[str]) -> list[tup
 
 
 def static_problems(s: Settings, environ: Optional[Mapping[str, str]] = None,
-                    dotenv: Optional[Iterable[str]] = None) -> list[Problem]:
-    """What can be said from the settings alone."""
+                    dotenv: Optional[Iterable[str] | Mapping[str, Optional[str]]] = None) -> list[Problem]:
+    """What can be said from the settings alone. `dotenv`: the names `.env` sets, or its names and
+    values (default: the file the server reads)."""
     environ = os.environ if environ is None else environ
-    dotenv = dotenv_names() if dotenv is None else dotenv
+    dotenv = dotenv_values() if dotenv is None else dotenv
     out: list[Problem] = []
     for name, where, hint in unknown_names(environ, dotenv):
         out.append(Problem("setting-unknown", "warning", f"{name} is not a setting",
                            f"{name} is set in {where}, but Forgeyard has no such setting, so it is ignored."
                            + (f" Did you mean {hint}?" if hint else ""), scope=f"setting:{name.upper()}"))
-    for name, instead, how in s.deprecated_in_use():
+    values = dotenv if isinstance(dotenv, Mapping) else {name: "set" for name in dotenv}
+    for name in removed_in_use(environ, values):
+        instead, how = REMOVED[name]
         then = (f"Use {instead} instead ({how}), and remove {name}." if instead else
                 f"Nothing replaces it: {how}. Remove {name}.")
-        out.append(Problem("setting-deprecated", "warning", f"{name} is deprecated",
-                           f"{name} still works in this version and is removed in {REMOVED_IN}. {then}",
-                           fix_url=f"{REFERENCE}#deprecated-settings", scope=f"setting:{name}"))
+        out.append(Problem("setting-removed", "warning", f"{name} is no longer read",
+                           f"{name} was removed in {REMOVED_IN}, so its value is ignored. {then}",
+                           fix_url=f"{REFERENCE}#removed-settings", scope=f"setting:{name}"))
     tls_files = [n for n in ("tls_cert_file", "tls_key_file", "tls_ca_file", "tls_extra_names")
                  if getattr(s, n).strip()]
     if not s.tls_on and tls_files:
@@ -150,24 +148,15 @@ def static_problems(s: Settings, environ: Optional[Mapping[str, str]] = None,
                                "TLS_EXTRA_NAMES only adds names to Forgeyard's own server certificate. With your own "
                                "certificate, the names are the ones it was issued for.",
                                fix_url=f"{REFERENCE}#https", scope="setting:TLS_EXTRA_NAMES"))
-    key_file = next((n.upper() for n in ("forgeyard_secret_key_file", "secret_key_file") if getattr(s, n).strip()), None)
-    if s.forgeyard_secret_key.strip() and key_file:
-        out.append(Problem("secret-key-both", "warning", f"FORGEYARD_SECRET_KEY and {key_file} are both set",
-                           f"FORGEYARD_SECRET_KEY is used and the file named by {key_file} is ignored. "
+    if s.forgeyard_secret_key.strip() and s.forgeyard_secret_key_file.strip():
+        out.append(Problem("secret-key-both", "warning", "FORGEYARD_SECRET_KEY and FORGEYARD_SECRET_KEY_FILE are both set",
+                           "FORGEYARD_SECRET_KEY is used and the file named by FORGEYARD_SECRET_KEY_FILE is ignored. "
                            "Keep only one of them.", fix_url=f"{REFERENCE}#data-and-secrets"))
-    elif (s.forgeyard_secret_key_file.strip() and s.secret_key_file.strip()
-          and s.forgeyard_secret_key_file.strip() != s.secret_key_file.strip()):
-        out.append(Problem("secret-key-both", "warning", "FORGEYARD_SECRET_KEY_FILE and SECRET_KEY_FILE name different files",
-                           "FORGEYARD_SECRET_KEY_FILE is used and SECRET_KEY_FILE (its old name) is ignored. "
-                           "Remove SECRET_KEY_FILE.", fix_url=f"{REFERENCE}#data-and-secrets"))
     if s.agent_offline_seconds < HEARTBEATS_PER_OFFLINE * s.heartbeat_seconds:
-        own = (f"AGENT_HEARTBEAT_SECONDS ({s.agent_heartbeat_seconds})" if s.agent_heartbeat_seconds
-               else f"the heartbeat ({s.heartbeat_seconds} s, its shortest)")
         out.append(Problem("heartbeat-flapping", "warning", "Machines may flap between online and offline",
                            f"AGENT_OFFLINE_SECONDS ({s.agent_offline_seconds}) is less than {HEARTBEATS_PER_OFFLINE} × "
-                           f"{own}: one late heartbeat marks a machine offline. Keep it at least three heartbeats "
-                           "long" + (", or remove AGENT_HEARTBEAT_SECONDS." if s.agent_heartbeat_seconds else "."),
-                           fix_url=f"{REFERENCE}#machines"))
+                           f"the heartbeat ({s.heartbeat_seconds} s, its shortest): one late heartbeat marks a machine "
+                           "offline. Keep it at least three heartbeats long.", fix_url=f"{REFERENCE}#machines"))
     if s.model_allow_private_hosts:
         out.append(Problem("private-hosts-allowed", "warning", "Model sources may use private addresses",
                            "MODEL_ALLOW_PRIVATE_HOSTS=true lets model downloads reach addresses on your network and "
@@ -229,10 +218,6 @@ def database_problems(s: Settings, db) -> list[Problem]:
                            "ADMIN_PASSWORD is only read on the first start, to create the owner, and it stays in the "
                            "environment or .env in plain text. Remove it (and ADMIN_USERNAME).",
                            fix_url=f"{REFERENCE}#accounts-and-sign-in"))
-    if has_owner and s.forgeyard_setup_token:
-        out.append(Problem("setup-token-left", "info", "FORGEYARD_SETUP_TOKEN has no use any more",
-                           "Setup is done, so the setup token is never read again. Remove it.",
-                           fix_url=f"{REFERENCE}#accounts-and-sign-in"))
     rows: dict[str, Optional[ServerSetting]] = {}
     for key, field, env_field, kind in SEEDS:
         if env_field not in s.model_fields_set:
@@ -255,7 +240,7 @@ def database_problems(s: Settings, db) -> list[Problem]:
 
 
 def problems(s: Settings, db=None, environ: Optional[Mapping[str, str]] = None,
-             dotenv: Optional[Iterable[str]] = None) -> list[Problem]:
+             dotenv: Optional[Iterable[str] | Mapping[str, Optional[str]]] = None) -> list[Problem]:
     out = static_problems(s, environ, dotenv)
     if db is not None:
         out += database_problems(s, db)

@@ -126,7 +126,8 @@ def test_fy_dep_002_url_sources_only_from_allowed_hosts(owner, hf):
 
 def test_fy_dep_003_deployment_expands_into_workload_and_route(owner):
     """FY-DEP-003: one deployment = a service workload (runtime "model") + a gateway route; the
-    workloads API cannot create model workloads; deleting either removes both."""
+    workloads API cannot create model workloads; deleting the deployment removes both (1.4: deleting only
+    its workload is refused, FY-DEP-010)."""
     seed_catalog()
     make_node("a100", allowlist=[4], features=MODELS)
     d = deploy(owner, "asr", "faster-whisper-small", "faster-whisper", served_name="whisper-small")["deployment"]
@@ -143,7 +144,8 @@ def test_fy_dep_003_deployment_expands_into_workload_and_route(owner):
                                                 "served_name": "whisper-small"}).status_code == 409
     assert owner.post("/api/deployments", json={"name": "asr", "model": "faster-whisper-small",
                                                 "recipe": "faster-whisper"}).status_code == 409
-    assert owner.delete(f"/api/workloads/{w['id']}").status_code == 200
+    assert owner.delete(f"/api/workloads/{w['id']}").status_code == 409
+    assert owner.delete(f"/api/deployments/{d['id']}").status_code == 200
     db = new_session()
     try:
         assert db.scalars(select(Deployment)).all() == [] and db.scalars(select(GatewayRoute)).all() == []
@@ -234,7 +236,7 @@ def test_fy_dep_007_custom_recipes(owner):
     assert owner.put("/api/recipes/my-whisper", json={"yaml": text.replace("name: my-whisper", "name: other")}).status_code == 422
     assert owner.delete("/api/recipes/vllm").status_code == 409
     names = [x["name"] for x in owner.get("/api/recipes").json()["recipes"]]
-    assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vllm", "vllm-omni-image", "vllm-omni-tts",
+    assert names == ["faster-whisper", "llama-cpp", "sd-cpp", "speaches-tts", "vision", "vllm", "vllm-omni-image", "vllm-omni-tts",
                      "vllm-omni-video",
                      "vllm-pooling", "my-whisper"]
     seed_catalog()
@@ -316,3 +318,86 @@ def test_fy_dep_008_try_it_and_routes(owner):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_fy_dep_009_a_model_workload_names_the_deployment_that_created_it(owner):
+    """FY-DEP-009 (1.4, #36): a model deployment's workload says which deployment created it, in the
+    workload list and on its own page; a plain workload names none."""
+    seed_catalog()
+    make_node("a100", allowlist=[4], features=MODELS)
+    d = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
+    plain = owner.post("/api/workloads", json={"name": "web", "kind": "service", "runtime": {
+        "type": "process", "command": "python3", "args": ["-m", "http.server", "${PORT}"]}, "ports": [{"name": "http"}]})
+    assert plain.status_code == 201, plain.text
+    listed = {w["name"]: w for w in owner.get("/api/workloads").json()["workloads"]}
+    assert listed["embed"]["deployment"] == {"id": d["id"], "name": "embed", "gpus": 1} and listed["embed"]["deployment_id"] == d["id"]
+    assert "deployment" not in listed["web"]
+    one = owner.get(f"/api/workloads/{d['workload']['id']}").json()["workload"]
+    assert one["deployment"] == {"id": d["id"], "name": "embed", "gpus": 1}
+
+
+def test_fy_dep_010_a_deployments_workload_is_stopped_started_and_deleted_through_the_deployment(owner):
+    """FY-DEP-010 (1.4, #36): stop, start and delete on a deployment's own workload are refused with 409
+    managed_by_deployment, naming the deployment, and change nothing; the deployment's own buttons still
+    work, and so do a plain workload's."""
+    seed_catalog()
+    make_node("a100", allowlist=[4], features=MODELS)
+    d = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
+    wid = d["workload"]["id"]
+    for method, path in (("post", f"/api/workloads/{wid}/stop"), ("delete", f"/api/workloads/{wid}")):
+        r = getattr(owner, method)(path)
+        assert r.status_code == 409, (path, r.status_code)
+        detail = r.json()["detail"]
+        assert detail["code"] == "managed_by_deployment" and detail["deployment"] == {"id": d["id"], "name": "embed"}
+        assert "deployment embed" in detail["message"]
+    w = owner.get(f"/api/workloads/{wid}").json()["workload"]
+    assert w["desired_state"] == "running"
+    assert owner.get(f"/api/deployments/{d['id']}").status_code == 200
+    assert owner.post(f"/api/deployments/{d['id']}/stop").status_code == 200
+    r = owner.post(f"/api/workloads/{wid}/start")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "managed_by_deployment"
+    assert owner.get(f"/api/workloads/{wid}").json()["workload"]["desired_state"] == "stopped"
+    assert owner.delete(f"/api/deployments/{d['id']}").status_code == 200
+    assert owner.get(f"/api/workloads/{wid}").status_code == 404
+    plain = owner.post("/api/workloads", json={"name": "web", "kind": "service", "runtime": {
+        "type": "process", "command": "python3", "args": ["-m", "http.server", "${PORT}"]}, "ports": [{"name": "http"}]})
+    pid = plain.json()["workload"]["id"]
+    assert owner.post(f"/api/workloads/{pid}/stop").status_code == 200
+    assert owner.delete(f"/api/workloads/{pid}").status_code == 200
+
+
+def test_fy_dep_011_a_deployment_says_what_its_model_takes_besides_text(owner):
+    """FY-DEP-011 (1.4, #34): a deployment's model carries its modalities, so the pages can list a chat
+    model that reads images as multimodal chat: a list, or None when unknown (added before 1.3)."""
+    from forgeyard.db import CatalogModel
+
+    seed_catalog()
+    make_node("a100", allowlist=[4], features=MODELS)
+    deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")
+    listed = {x["name"]: x for x in owner.get("/api/deployments").json()["deployments"]}
+    assert listed["embed"]["model"]["modalities"] is None
+    db = new_session()
+    try:
+        m = db.scalar(select(CatalogModel).where(CatalogModel.name == "qwen3-embedding-0.6b"))
+        m.meta = {**m.meta, "modalities": ["image", "video"]}
+        db.commit()
+    finally:
+        db.close()
+    listed = {x["name"]: x for x in owner.get("/api/deployments").json()["deployments"]}
+    assert listed["embed"]["model"]["modalities"] == ["image", "video"]
+    one = owner.get(f"/api/deployments/{listed['embed']['id']}").json()["deployment"]
+    assert one["model"]["modalities"] == ["image", "video"]
+
+
+def test_fy_dep_012_a_model_workload_says_how_many_gpus_its_deployment_gives_each_replica(owner):
+    """FY-DEP-012 (1.4): the workload's own spec asks for no GPU (the deployment chooses them), so the
+    workload API gives the deployment's GPUs per replica: 1 on a GPU, 0 on the CPU."""
+    seed_catalog()
+    make_node("a100", allowlist=[4], features=MODELS)
+    gpu = deploy(owner, "embed", "qwen3-embedding-0.6b", "vllm-pooling")["deployment"]
+    cpu = deploy(owner, "small", "qwen3-1.7b-gguf", "llama-cpp", params={"gpus": 0})["deployment"]
+    listed = {w["name"]: w for w in owner.get("/api/workloads").json()["workloads"]}
+    assert listed["embed"]["deployment"]["gpus"] == 1 and not listed["embed"]["spec"]["resources"]["gpus"]["count"]
+    assert listed["small"]["deployment"]["gpus"] == 0
+    assert owner.get(f"/api/workloads/{gpu['workload']['id']}").json()["workload"]["deployment"]["gpus"] == 1
+    assert owner.get(f"/api/workloads/{cpu['workload']['id']}").json()["workload"]["deployment"]["gpus"] == 0

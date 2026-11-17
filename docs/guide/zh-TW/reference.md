@@ -9,7 +9,7 @@
 伺服器啟動時會檢查它的設定：
 
 - **無法使用的值會讓伺服器停止啟動**，並指出是哪個設定、可以填哪些值：`TLS`、`REGISTRATION`、`COOKIE_SECURE`、`GATEWAY_CLOUD_DEFAULT`、`GATEWAY_CLOUD_MAX`、不是數字的數字設定，以及 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 只設了其中一個。
-- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定、有風險的組合，以及[已淘汰的設定](#deprecated-settings)（並指出改用什麼）。
+- **其他出乎意料的情況都只記成警告**，並在[Setup health](#setup-health-checks)顯示給管理員：不是設定的名稱（附上「你是不是指」）、被另一個設定變得沒有作用的設定、有風險的組合，以及還設著的[在 1.4 移除的設定](#removed-settings)（並指出改用什麼）。唯一的例外：已移除的 `SECRET_KEY_FILE` 如果現在會變成另一個金鑰檔，伺服器會停止啟動。
 
 ### 常用設定
 
@@ -48,7 +48,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰（Hugging Face 權杖、供應商金鑰、副本金鑰、工作負載環境變數的值）。請和資料庫分開備份 |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | 加密儲存機密資料的金鑰（Hugging Face 權杖、供應商金鑰、副本金鑰、應用程式環境變數的值）。請和資料庫分開備份 |
 | `FORGEYARD_SECRET_KEY` | — | 直接給金鑰本身（32 位元組的 base64），取代檔案。兩者只設一個：兩個都設的話，會使用這一個，並忽略檔案 |
 
 ### 帳號與登入
@@ -68,6 +68,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
+| `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**Engine images** → **Upload an image**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
 | `AGENT_IMAGE` | — | **Add a machine** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
 ### 模型
@@ -75,7 +76,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
-| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Model sources** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
+| `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **Models → Sources** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
 | `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
 | `VRAM_HEADROOM_MIB` | `512` | 放置副本時，每張卡一律保留不用的記憶體 |
@@ -115,19 +116,17 @@
 
 `EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud policy** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。在管理員儲存之前，這些面板會把來自環境的值標示為 *from .env*。
 
-### 已淘汰的設定
+### 已移除的設定
 
-這些設定在 1.3 仍然有效，**在 1.4 移除**。只要設了其中一個，伺服器啟動時會記下一則警告，指出改用什麼，Setup health 也會列出（`setting-deprecated`）。設著它們時，其他行為都不變。
+**在 1.4 移除。** 這些設定在 1.3.1 標為淘汰，現在已經不再讀取。如果伺服器的環境或 `.env` 裡還設著其中一個，啟動時會記下一則警告，說明它被忽略、改用什麼，Setup health 也會列出（`setting-removed`），直到你把它移除。
 
-| 變數 | 預設值 | 改用 |
-|---|---|---|
-| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`：同樣的值，名稱和 `FORGEYARD_SECRET_KEY` 一致。兩者都設時使用 `FORGEYARD_SECRET_KEY_FILE` |
-| `AGENT_HEARTBEAT_SECONDS` | — | 不需要：agent 每隔 `AGENT_OFFLINE_SECONDS` 的三分之一送出心跳（至少每 2 秒一次），預設是 10 秒。設了的話仍由它決定心跳間隔 |
-| `FORGEYARD_SETUP_TOKEN` | — | 不需要：伺服器會印出一個隨機的設定權杖（設定完成前存在 `data/secrets.json`）。無人值守的第一次啟動請用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` |
-| `USAGE_FLUSH_SECONDS` | `5` | 不需要：記憶體中統計的用量每 5 秒寫入資料庫一次 |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | 不需要：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘） |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | 不需要：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試 |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | 不需要：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰） |
+- `SECRET_KEY_FILE`：改用 `FORGEYARD_SECRET_KEY_FILE`，值不變，只是換成新名稱。如果 `SECRET_KEY_FILE` 指向 `data/secret.key` 以外的金鑰檔，而 `FORGEYARD_SECRET_KEY_FILE` 和 `FORGEYARD_SECRET_KEY` 都沒有設定，**伺服器會拒絕啟動**，而不是改用（或新建）另一把金鑰，並請你改名。你改好之前什麼都不會變動；`secrets reset` 也會拒絕執行。
+- `AGENT_HEARTBEAT_SECONDS`：agent 每隔 `AGENT_OFFLINE_SECONDS` 的三分之一送出心跳，至少每 2 秒一次（預設是 10 秒）。
+- `FORGEYARD_SETUP_TOKEN`：伺服器會印出一個隨機的設定權杖（設定完成前存在 `data/secrets.json`）。無人值守的第一次啟動請用 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`。
+- `USAGE_FLUSH_SECONDS`：記憶體中統計的用量每 5 秒寫入資料庫一次。
+- `PROVIDER_COOLDOWN_SECONDS`：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘）。
+- `PROVIDER_RETRY_AFTER_CAP`：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試。
+- `OPENROUTER_MODELS_URL`：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰）。
 
 ### 單位、零與空白
 
@@ -164,19 +163,19 @@
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info，或 debug 以顯示所有訊息（-v）。 |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | 顯示在 Machines 頁面上的標籤，例如 { rack = "a" }。環境變數格式：rack=a,room=2。逐個 key 合併：旗標優先於環境變數，環境變數優先於檔案。 |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false：只回報硬體，不執行任何東西。 |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run`（以 root 執行且帳號存在時） | agent 以 root 執行時，行程類工作負載使用的無特權帳號。預設：forgeyard-run 帳號存在時就用它（agent 不會自己建立）；沒有的話，以 root 執行的 agent 會拒絕行程類工作負載。 |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run`（以 root 執行且帳號存在時） | agent 以 root 執行時，行程使用的無特權帳號。預設：forgeyard-run 帳號存在時就用它（agent 不會自己建立）；沒有的話，以 root 執行的 agent 會拒絕行程。 |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | 每個行程副本一個目錄。預設：放在狀態目錄旁邊（<state_dir>-work）。 |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | 服務和模型副本使用的主機連接埠。 |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | 公開的連接埠監聽的位址。預設：這台機器連往伺服器時使用的位址。 |
 | `[workloads]` `container_engine` | `FORGEYARD_CONTAINER_ENGINE` | `--container-engine` | `auto` | auto（先試 docker，再試 podman）、docker、podman、none，或容器引擎 CLI 的路徑。 |
-| `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | 行程類工作負載的資源限制方式：systemd（有 CPU 和記憶體上限的 scope；需要在有 systemd 的主機上以 root 執行）、rlimit（沒有 systemd，例如在容器裡），或 auto。 |
+| `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | 行程的資源限制方式：systemd（有 CPU 和記憶體上限的 scope；需要在有 systemd 的主機上以 root 執行）、rlimit（沒有 systemd，例如在容器裡），或 auto。 |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | 每個副本保留的輸出量，單位 MB。 |
 | `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | 連續這麼多分鐘沒有收到新的位元組時，拉取映像檔就算失敗（解開各層時是三倍）。持續有進度的慢速拉取絕不會被中止。 |
 | `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models`（以 root 執行時） | 下載並保存模型和引擎的位置。預設：以 root 執行時是 /srv/forgeyard-models，否則是 ~/.local/share/forgeyard-models。設成空白（""）：這台機器不提供任何模型。在 Docker 映像檔中，容器內外必須是相同路徑。 |
 | `[models]` `local_dirs` | `FORGEYARD_MODEL_LOCAL_DIRS` | `--model-local-dir` | — | 這台機器上 local:// 模型可以使用的目錄。環境變數格式：以逗號分隔。 |
 | `[models]` `allow_private_hosts` | `FORGEYARD_ALLOW_PRIVATE_MODEL_HOSTS` | `--allow-private-model-hosts` | `false` | 允許從私有位址和純 http 下載模型（僅限區域網路內的鏡像站）。 |
 
-**有兩個預設值取決於機器**，和 `install.sh` 的設定一致：agent 以 root 執行時，模型快取是 `/srv/forgeyard-models`（否則是 `~/.local/share/forgeyard-models`）；agent 以 root 執行且 `forgeyard-run` 帳號存在時，行程類工作負載以它執行。agent 不會自己建立這個帳號，`install.sh` 和 agent 映像檔會。`forgeyard agent config` 會把它們標示為 `(default)`。不想讓某台機器提供模型，就把快取設成空白（`--model-cache ""`、`FORGEYARD_MODEL_CACHE=` 或 `cache = ""`）。
+**有兩個預設值取決於機器**，和 `install.sh` 的設定一致：agent 以 root 執行時，模型快取是 `/srv/forgeyard-models`（否則是 `~/.local/share/forgeyard-models`）；agent 以 root 執行且 `forgeyard-run` 帳號存在時，行程以它執行。agent 不會自己建立這個帳號，`install.sh` 和 agent 映像檔會。`forgeyard agent config` 會把它們標示為 `(default)`。不想讓某台機器提供模型，就把快取設成空白（`--model-cache ""`、`FORGEYARD_MODEL_CACHE=` 或 `cache = ""`）。
 
 `server`、`ca_fingerprint`、`ca_file` 和 `name` 是加入時使用的。機器加入之後，它的狀態目錄會記錄要連哪台伺服器、信任哪個 CA：檔案或環境變數裡如果有不同的值，會被回報並忽略；要更改請用 `forgeyard agent trust`。
 
@@ -241,6 +240,9 @@ local_dirs = ["/data/models"]
 | `GET /v1/videos/{id}/content` | 完成的影片，`video/mp4`，從製作它的副本串流過來。只有 `variant=video`；`Range` 請求回應 206 | — |
 | `DELETE /v1/videos/{id}` | 在它的副本上取消製作中的工作，或刪除完成的影片 | — |
 | `POST /v1/videos/sync`、`POST /v1/videos/{id}/remix` | 不提供：一律回應 404 `endpoint_not_supported` | — |
+| `POST /v1/vision/detect` | 物件偵測（1.4）：送一張圖片，傳回方框、標籤和分數。見[視覺](#vision) | 否 |
+| `POST /v1/vision/segment` | 用 SAM 2 分割（1.4）：送一張圖片和一個點或一個方框，傳回 PNG 遮罩 | 否 |
+| `POST /v1/vision/depth` | 深度估計（1.4）：送一張圖片，傳回 16 位元深度圖 | 否 |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
 
@@ -421,6 +423,31 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 /api/playground/videos/options?model=<model>`、`GET` 與 `DELETE /api/playground/videos/{id}`，以及 `GET
 /api/playground/videos/{id}/content`：規則相同，以登入的使用者身分（session cookie 與主控台的 `X-Forgeyard: 1` 標頭），只能看到自己的工作，計為 console。工作存放在伺服器的資料庫裡（資料表 `video_jobs`，migration `0014`）。
 
+### 視覺
+
+`POST /v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`（1.4）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是與伺服器同版本的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
+
+請求是 `multipart/form-data`，帶 `model`、檔案欄位 `image` 和各選項欄位；或是 JSON，帶 `model`、`image`（base64 或 `data:` URI）和選項。PNG、JPEG 或 WebP，最多 20 MiB、4,000 萬像素。閘道檢查有沒有模型和圖片，只換掉 `model`，其餘原樣交給副本；別種任務的模型回 400 `wrong_endpoint`（訊息會寫出它的端點）。
+
+| 端點 | 選項 | 回應 |
+|---|---|---|
+| `detect` | `threshold`（0 到 1，0.5）、`max_detections`（1 到 1,000，100） | `detections`：`[{"label", "score", "box": [x0, y0, x1, y1]}]`，分數高的在前，單位是圖片的像素 |
+| `segment` | `points`（`[[x, y], …]`，最多 16 個）配 `labels`（1 在內、0 在外；省略時全是 1），或 `box`（`[x0, y0, x1, y1]`）；`multimask`（`true`：三個候選遮罩） | `masks`：`[{"score", "area", "box", "png"}]`，最好的在前；每個遮罩是和圖片同尺寸的 1 位元 PNG，base64 |
+| `depth` | 無 | `depth_png`（和圖片同尺寸的 16 位元灰階 PNG，base64，越近越亮）、`min`、`max`、`unit`（相對深度，不是公尺） |
+
+每個回應另有 `model`、`width`、`height`（圖片的）和 `ms`（模型花的時間）。視覺伺服器的錯誤（`{"error": {"message", "code"}}`）照原狀態碼傳回：400 `invalid_image`、`invalid_option`、`missing_prompt`（分割時沒給點或方框）、413 `image_too_large`。
+
+每個有回應的請求會計入（`GET /api/usage` 和 **Usage** 頁）：
+
+| 單位 | 怎麼算 |
+|---|---|
+| `images` | 1：看的那張圖片 |
+| `kilopixels` | 寬 x 高 / 1,000，取自回應 |
+| `busy_ms` | 副本處理它的時間 |
+| tokens | 不計。金鑰的每分鐘 token 數不適用；每分鐘請求數和模型清單照常適用 |
+
+一個副本一次處理一張圖片，其餘依序等待；要更高吞吐量就多開副本。哪些模型算視覺模型、授權規則，見[內建配方](#built-in-recipes)。
+
 ### 標頭
 
 | 標頭 | 方向 | 值 |
@@ -464,7 +491,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 400 | `language_not_supported` | 文字轉語音：把中文、日文或韓文送給 speaches，它會把這些字刪掉 | 改用 Qwen3-TTS 部署 |
 | 400 | `voice_cloning_not_supported` | 文字轉語音：帶了參考錄音、以音訊或連結當聲音、`task_type: "Base"`，或上傳聲音。1.3 不提供 | 使用模型自己的聲音 |
 | 400 | `response_format_not_supported` | 圖片：`response_format: url`。圖片只以 base64 傳回 | 拿掉它，或要求 `b64_json` |
-| 400 | `streaming_not_supported` | 圖片：`stream: true` | 拿掉它 |
+| 400 | `streaming_not_supported` | 圖片與視覺：`stream: true` | 拿掉它 |
+| 400 | `missing_image` | 視覺：沒有檔案欄位 `image`，或 JSON 沒有 `image` | 附上圖片 |
 | 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request* | 少要幾張，或調高 `max_images` |
 | 400 | `image_too_large` | 圖片：某一邊超過部署的 *Largest side* | 要小一點的尺寸，或調高 `max_side` |
 | 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明）。影片：同上，每邊 64 到 2,048，16 或 32 的倍數 | 使用類似訊息建議的尺寸 |
@@ -521,34 +549,59 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 - **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
 - **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
 
+## 應用程式（已淘汰）
+
+應用程式，也就是不是模型的 workload（1.4，#88），已經離開主控台，**1.5 會移除**，並以 migration 移除剩下的應用程式。在那之前，它們仍可透過 API 使用，並會明白告知：
+
+| 已淘汰 | 內容 |
+|---|---|
+| `/api/workloads` 裡屬於應用程式的部分 | `POST /api/workloads`；以及應用程式的 `GET`、`PUT …/gateway`、`POST …/stop`、`POST …/start`、`DELETE` 和 `GET …/replicas/<n>/logs`；清單裡有應用程式時的 `GET /api/workloads` |
+| `GET /api/workloads/templates` | 1.3 的範本 |
+| `/x/<name>/…` | [直通](#the-passthrough-x)，以及主控台自己送到公開視覺應用程式的 `POST /api/playground/vision/<name>/<task>` |
+| 金鑰的 `workloads` 與 `workload_list` | `/api/keys` 仍會接受並回傳，但主控台不再顯示，`GET /api/keys` 也不再列出金鑰可以指定的應用程式 |
+
+- **標頭。** 這些路由的每個回應（包括錯誤）都帶 `Deprecation`（RFC 9745：宣布淘汰的日期，`@<epoch>`），以及一個 `rel="deprecation"` 的 `Link`，指向這一節。沒有 `Sunset` 標頭：1.5 還沒有日期。
+- **紀錄。** 伺服器對三類（應用程式、範本、`/x/`）各自最多每小時記一次警告，並寫出是哪個請求。
+- **Setup health。** 只要還有任何應用程式，`apps-deprecated`（警告）就會列出它們的名稱。
+
+模型部署的 workload（runtime 為 `model`）沒有淘汰：模型就是這樣跑的，讀取它（`GET /api/workloads/<id>`、它的紀錄）不會帶這些標頭。
+
+```http
+HTTP/1.1 200 OK
+Deprecation: @1794787200
+Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
+```
+
+替代做法：把要跑的東西當成模型在 **Serving** 部署；內建引擎跑不了的模型，加一個自訂引擎（**Models → Engines**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[Playground 的視覺模型](#vision)取代 1.3 的視覺範本。
+
 ## 直通（/x/）
 
-程式以 **Workloads** 設定允許的 API 金鑰，在 `https://<server>:7860/x/<name>/<path>?<query>` 呼叫公開的工作負載。和 `/v1` 一樣只接受 `Authorization: Bearer fyk_…`：不接受 cookie、不接受放在查詢字串裡的金鑰、不送 CORS 標頭。
+**1.4 起淘汰，1.5 移除**（[應用程式（已淘汰）](#apps-deprecated)）。程式以 **Apps** 設定允許的 API 金鑰，在 `https://<server>:7860/x/<name>/<path>?<query>` 呼叫公開的應用程式。和 `/v1` 一樣只接受 `Authorization: Bearer fyk_…`：不接受 cookie、不接受放在查詢字串裡的金鑰、不送 CORS 標頭。
 
 ### 路徑與方法
 
 | 項目 | 規則 |
 |---|---|
 | 方法 | `GET`、`HEAD`、`POST`、`PUT`、`PATCH`、`DELETE`、`OPTIONS` |
-| 前綴 | `/x/<name>` 會被拿掉：`/x/<name>/a/b?c=1` 到工作負載那邊是 `/a/b?c=1`，只有 `/x/<name>` 則是 `/` |
+| 前綴 | `/x/<name>` 會被拿掉：`/x/<name>/a/b?c=1` 到應用程式那邊是 `/a/b?c=1`，只有 `/x/<name>` 則是 `/` |
 | 路徑 | 原封不動、逐位元組轉送。以下情況回 400 `invalid_path` 拒絕，絕不正規化：`.` 或 `..` 路徑段、編碼過的 `.`、`/` 或 `\`（`%2e`、`%2f`、`%5c`）、反斜線、控制字元（原始或編碼過的）以及非 ASCII 位元組 |
 | 查詢字串 | 原封不動轉送 |
-| 不轉送 | WebSocket（`Upgrade` 會被拿掉）、gRPC、到工作負載的 HTTP/2 |
+| 不轉送 | WebSocket（`Upgrade` 會被拿掉）、gRPC、到應用程式的 HTTP/2 |
 
 ### 請求與回應標頭
 
 | 標頭 | 方向 | 會怎樣 |
 |---|---|---|
-| `Authorization` | 請求 | 檢查你的 API 金鑰後拿掉；工作負載收到的是副本的內部金鑰，由 agent 的金鑰守門員檢查後拿掉 |
+| `Authorization` | 請求 | 檢查你的 API 金鑰後拿掉；應用程式收到的是副本的內部金鑰，由 agent 的金鑰守門員檢查後拿掉 |
 | `Cookie`、`Forwarded`、`X-Forwarded-*`、`X-Real-IP`、`X-Forgeyard`、`X-Forgeyard-*` | 請求 | 拿掉 |
 | `X-Forwarded-For`、`X-Forwarded-Proto`、`X-Forwarded-Host` | 請求 | 重新設定：用戶端的位址、`https` 或 `http`，以及它呼叫的主機 |
 | `X-Forwarded-Prefix` | 請求 | `/x/<name>` |
-| `X-Request-Id` | 雙向 | 每個請求一個新 id，送給工作負載，也回給用戶端 |
+| `X-Request-Id` | 雙向 | 每個請求一個新 id，送給應用程式，也回給用戶端 |
 | 逐跳標頭（`Connection` 和它列出的標頭、`Keep-Alive`、`TE`、`Trailer`、`Transfer-Encoding`、`Upgrade`、`Expect`、`Proxy-*`） | 雙向 | 拿掉 |
 | `Set-Cookie`、`Access-Control-*`、`Strict-Transport-Security`、`Clear-Site-Data`、`Alt-Svc`、`Service-Worker-Allowed`、`Report-To`、`NEL`、`Date`、`Server` | 回應 | 拿掉（伺服器會送它自己的 `Date` 和 `Server`） |
 | `Content-Security-Policy` | 回應 | 一律是 `sandbox; default-src 'none'; frame-ancestors 'none'` |
 | `X-Content-Type-Options`、`X-Frame-Options`、`Cache-Control`、`Cross-Origin-Resource-Policy`、`Referrer-Policy` | 回應 | 一律是 `nosniff`、`DENY`、`no-store`、`same-origin` 和 `no-referrer` |
-| `Location`、`Content-Location` | 回應 | 路徑，或指向工作負載自己的位址，會改寫到 `/x/<name>` 底下；其他網站和相對參照不變。絕不跟隨轉址 |
+| `Location`、`Content-Location` | 回應 | 路徑，或指向應用程式自己的位址，會改寫到 `/x/<name>` 底下；其他網站和相對參照不變。絕不跟隨轉址 |
 | `X-Forgeyard-Target` | 回應 | `workload:<name>#<replica>` |
 | `Content-Encoding`、`Content-Length` 和其他標頭 | 回應 | 照樣轉送：本文以原始位元組、一到就轉送（壓縮的本文維持壓縮；SSE 和 chunked 回應會串流） |
 
@@ -556,53 +609,53 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 | 限制 | 預設值 | 在哪裡設定 |
 |---|---|---|
-| 最大請求本文 | 32 MiB（超過回 413 `request_too_large`） | 工作負載：**Largest request (MiB)**，1 到 1,024 |
-| 等回應每一段的時間 | 600 秒（第一個位元組之前逾時回 504 `upstream_timeout`） | 工作負載：**Read timeout (s)**，1 到 3,600 |
+| 最大請求本文 | 32 MiB（超過回 413 `request_too_large`） | 應用程式：**Largest request (MiB)**，1 到 1,024 |
+| 等回應每一段的時間 | 600 秒（第一個位元組之前逾時回 504 `upstream_timeout`） | 應用程式：**Read timeout (s)**，1 到 3,600 |
 | 連到副本 | `GATEWAY_CONNECT_TIMEOUT`（5 秒）；連不到的副本會跳過，改試下一個 | 伺服器 |
-| 每個副本同時處理的請求 | 不限（每個副本都滿了時回 429 `workload_busy`） | 工作負載 |
-| 每把金鑰同時進行的請求 | 不限（429 `key_busy`）；在 Playground 裡以每個人計算 | 工作負載 |
+| 每個副本同時處理的請求 | 不限（每個副本都滿了時回 429 `workload_busy`） | 應用程式 |
+| 每把金鑰同時進行的請求 | 不限（429 `key_busy`）；在 Playground 裡以每個人計算 | 應用程式 |
 | 每分鐘請求數 | 金鑰自己的限制（429 `rate_limit_exceeded`）；每分鐘 token 數不適用 | 金鑰 |
 
-每個 429 都帶 `Retry-After`。用戶端離開時，到工作負載的請求會立刻關閉。
+每個 429 都帶 `Retry-After`。用戶端離開時，到應用程式的請求會立刻關閉。
 
 **Usage** 把每個請求記在模型 `x:<name>` 底下：請求數、錯誤（包括回應本身的 5xx）、被限制的請求、送進的位元組（請求本文）和送出的位元組（實際送出的回應本文）、忙碌時間（從送出請求到回應結束）和延遲。
 
 ### /x/ 的錯誤
 
-閘道產生的錯誤和 `/v1` 的格式相同。工作負載本身的回應，包括 401 或 5xx，會原樣轉送。
+閘道產生的錯誤和 `/v1` 的格式相同。應用程式本身的回應，包括 401 或 5xx，會原樣轉送。
 
 | 狀態碼 | `code` | 意思 | 怎麼處理 |
 |---|---|---|---|
 | 400 | `invalid_path` | 路徑有 `.` 路徑段、編碼過的 `.`、`/` 或 `\`、反斜線、控制字元或非 ASCII 位元組 | 不要送這些 |
 | 401 | `missing_api_key`、`invalid_api_key`、`revoked_api_key`、`expired_api_key`、`account_disabled` | 和 `/v1` 相同 | 和 `/v1` 相同 |
-| 403 | `workloads_not_allowed` | 金鑰的 **Workloads** 設定是 *None* | 修改金鑰的設定 |
-| 404 | `workload_not_found` | 對這把金鑰來說沒有這個公開的工作負載：不存在、沒有公開，或不在金鑰的清單裡 | 檢查名稱和金鑰的清單 |
-| 413 | `request_too_large` | 本文超過工作負載的 **Largest request** | 少送一點，或調高限制 |
+| 403 | `workloads_not_allowed` | 金鑰的 **Apps** 設定是 *None* | 修改金鑰的設定 |
+| 404 | `workload_not_found` | 對這把金鑰來說沒有這個公開的應用程式：不存在、沒有公開，或不在金鑰的清單裡 | 檢查名稱和金鑰的清單 |
+| 413 | `request_too_large` | 本文超過應用程式的 **Largest request** | 少送一點，或調高限制 |
 | 429 | `rate_limit_exceeded` | 超過金鑰的每分鐘請求數 | 等 `Retry-After` 秒 |
 | 429 | `workload_busy` | 每個副本進行中的請求都達到 **Requests at once per replica** | 等 `Retry-After` 秒，或增加副本 |
-| 429 | `key_busy` | 這把金鑰對這個工作負載進行中的請求達到 **Requests at once per key** | 等其中一個完成 |
-| 502 | `upstream_unreachable` | 連不到任何副本（它的程式停了或正在重啟） | 看工作負載的輸出 |
+| 429 | `key_busy` | 這把金鑰對這個應用程式進行中的請求達到 **Requests at once per key** | 等其中一個完成 |
+| 502 | `upstream_unreachable` | 連不到任何副本（它的程式停了或正在重啟） | 看應用程式的輸出 |
 | 502 | `upstream_error` | 送到副本的請求失敗 | 重試 |
-| 502 | `replica_refused_key` | 副本的金鑰守門員拒絕了閘道的內部金鑰 | 停止再啟動工作負載 |
-| 503 | `no_ready_replica` | 工作負載已停止、沒有副本就緒，或有副本還不在金鑰守門員後面；訊息會說是哪一種 | 啟動它、等一下，或更新 agent |
-| 504 | `upstream_timeout` | 在工作負載的 **Read timeout** 內沒有回應 | 調高逾時，或檢查工作負載 |
+| 502 | `replica_refused_key` | 副本的金鑰守門員拒絕了閘道的內部金鑰 | 停止再啟動應用程式 |
+| 503 | `no_ready_replica` | 應用程式已停止、沒有副本就緒，或有副本還不在金鑰守門員後面；訊息會說是哪一種 | 啟動它、等一下，或更新 agent |
+| 504 | `upstream_timeout` | 在應用程式的 **Read timeout** 內沒有回應 | 調高逾時，或檢查應用程式 |
 
 已經開始的回應如果中斷，狀態碼就無法再改：連線會在本文完整之前關閉，所以用戶端絕不會把被截斷的本文當成完整的。
 
 ### 從 Playground 呼叫
 
-console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的視覺工作負載，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺工作負載是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#workload-templates)都是這樣。
+1.4 起，console 的 Playground 只提供視覺模型（在它唯一的模型選單裡；Vision 分頁已移除），`GET /api/playground/vision/options` 也不再列出應用程式（`workloads`）。下面的路由在 1.5 之前仍能送到公開的視覺應用程式（已淘汰），就像 1.3 的 Vision 分頁那樣：透過自己的路由，從不經過 `/x/`：這些路由用的是 console 的登入（它的 cookie，`POST` 時還要從 console 自己的來源送出 `X-Forgeyard: 1` 標頭），而 `/x/` 仍然只接受 API 金鑰。任何已登入的人都可以使用。視覺應用程式是指以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務，每個[範本](#app-templates)都是這樣。
 
 | 路由 | 做什麼 |
 |---|---|
-| `GET /api/playground/vision/options` | `workloads`：每個公開視覺工作負載的 `name`、`workload_id`、`task`、`title`、`model`、`licence`、`endpoint`、`path`、`ready`（在金鑰守門員後面的副本數）、`reason`（為什麼沒有就緒的副本）、`max_body_mb`；`tasks`：範本的任務 |
-| `POST /api/playground/vision/<name>/<task>` | 把本文（圖片，multipart）送到工作負載自己的 `POST /v1/<task>`，不會送到別處：沒有其他路徑、方法或查詢字串 |
+| `GET /api/playground/vision/options` | `models`：視覺模型（見[視覺](#vision)）；`tasks`：視覺任務 |
+| `POST /api/playground/vision/<name>/<task>` | 把本文（圖片，multipart）送到應用程式自己的 `POST /v1/<task>`，不會送到別處：沒有其他路徑、方法或查詢字串 |
 
-之後請求依照上面 `/x/` 的規則：同樣的副本和金鑰守門員、請求與回應標頭（cookie 絕不會送到工作負載）、工作負載的 **Largest request**、**Requests at once per replica** 和 **Requests at once per key**（以每個人計算）、它的逾時，以及同樣的錯誤。任務和工作負載的不同，或工作負載不是公開的視覺工作負載，回 404 `workload_not_found`；視覺伺服器沒有的任務回 404 `unknown_task`。用量記在 `x:<name>` 底下，來源是 *console*，算在登入的人身上。
+之後請求依照上面 `/x/` 的規則：同樣的副本和金鑰守門員、請求與回應標頭（cookie 絕不會送到應用程式）、應用程式的 **Largest request**、**Requests at once per replica** 和 **Requests at once per key**（以每個人計算）、它的逾時，以及同樣的錯誤。任務和應用程式的不同，或應用程式不是公開的視覺應用程式，回 404 `workload_not_found`；視覺伺服器沒有的任務回 404 `unknown_task`。用量記在 `x:<name>` 底下，來源是 *console*，算在登入的人身上。
 
-## 工作負載範本
+## 應用程式範本
 
-範本執行伺服器版本的 `docker.io/tonyhuang1101/forgeyard-vision`：tag `X.Y.Z`（CPU，linux/amd64 與 linux/arm64）或 `X.Y.Z-cuda`（CUDA 13.0 的 torch，linux/amd64，NVIDIA 驅動 580 或更新）。它由儲存庫裡的 `images/vision` 建置，相依套件以雜湊值固定，模型以固定的 revision 包在裡面，並以無特權的使用者執行。`GET /api/workloads/templates` 會列出範本，以及每個範本產生的工作負載規格。
+**1.4 起淘汰，1.5 移除。**範本執行伺服器版本的 `docker.io/tonyhuang1101/forgeyard-vision`：tag `X.Y.Z`（CPU，linux/amd64 與 linux/arm64）或 `X.Y.Z-cuda`（CUDA 13.0 的 torch，linux/amd64，NVIDIA 驅動 580 或更新）。它由儲存庫裡的 `images/vision` 建置，相依套件以雜湊值固定，模型以固定的 revision 包在裡面，並以無特權的使用者執行。`GET /api/workloads/templates` 會列出範本，以及每個範本產生的應用程式規格。
 
 | 端點 | 接受 | 回傳 |
 |---|---|---|
@@ -614,21 +667,21 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 
 圖片以 multipart 檔案欄位 `image` 送出（其他欄位當表單欄位，可以是 JSON 值），或以 JSON 本文 `{"image": "<base64 或 data: URI>", …}` 送出；PNG、JPEG 或 WebP，最多 20 MiB、4000 萬像素。每個回應也都有 `model`、`revision`、`width`、`height` 和 `ms`。伺服器的錯誤是 `{"error": {"message", "code"}}`，狀態碼 400（`invalid_image`、`missing_image`、`missing_prompt`、`invalid_option`、`invalid_json`）或 413（`image_too_large`）；經過 `/x/` 時會原樣轉送。
 
-## 工作負載的環境變數
+## 應用程式的環境變數
 
-工作負載的副本從空的環境開始，只拿到它的規格宣告的變數，再加上：
+應用程式的副本從空的環境開始，只拿到它的規格宣告的變數，再加上：
 
 | 變數 | 值 |
 |---|---|
-| `FORGEYARD_WORKLOAD` | 工作負載的名稱 |
+| `FORGEYARD_WORKLOAD` | 應用程式的名稱 |
 | `FORGEYARD_REPLICA` | 副本的 id |
 | `FORGEYARD_REPLICA_INDEX` | 副本的編號，從 0 開始 |
 | `PORT`、`PORT_<NAME>` | 每個宣告的連接埠：行程拿到它必須監聽的主機連接埠；容器拿到它自己的連接埠（引擎會把主機連接埠對應過去）。`PORT` 是第一個 |
 | `CUDA_VISIBLE_DEVICES`、`NVIDIA_VISIBLE_DEVICES`、`CUDA_DEVICE_ORDER` | NVIDIA：只有它自己的卡的 UUID。沒有 GPU 的副本看不到任何卡 |
 | `ROCR_VISIBLE_DEVICES`、`HIP_VISIBLE_DEVICES` | AMD：只有它自己的卡 |
-| `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及工作負載帳號 |
+| `PATH`、`HOME`、`LANG`、`USER`、`LOGNAME` | 只有行程：基本的 `PATH`、以它自己的目錄當 `HOME`、`LANG=C.UTF-8`，以及執行行程的帳號 |
 
-規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面（公開在 `/x/` 的工作負載）是 `127.0.0.1`，否則是 agent 自己的位址。
+規格裡設定 GPU 變數（也包括 `HIP_VISIBLE_DEVICES` 和 `GPU_DEVICE_ORDINAL`）、`PORT`，或任何以 `FORGEYARD_` 或 `PORT_` 開頭的名稱，都會被拒絕。在行程的參數和環境變數的值裡，`${PORT}` 和 `${PORT_<NAME>}` 會換成連接埠。在行程的參數裡，`${BIND_ADDRESS}` 會換成它應該監聽的位址：在 agent 的金鑰守門員後面（公開在 `/x/` 的應用程式）是 `127.0.0.1`，否則是 agent 自己的位址。
 
 ## 透過 API 修改部署
 
@@ -662,7 +715,130 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | 404 | `not_found`、`machine_not_found` | 沒有這個部署，或沒有 `machine_id` 指定的機器 |
 | 403 | | 不是管理員或操作員 |
 
-每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)）。
+每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
+
+## 透過 API 查看機器的模型快取
+
+和其他 `/api` 請求一樣使用主控台的登入工作階段（寫入請求還要帶 `X-Forgeyard: 1` 標頭）。所有登入的人都可以查看；管理員和操作員可以刪除。
+
+| 請求 | 做什麼 |
+|---|---|
+| `GET /api/machines/{id}/cache` | 那台機器快取裡的模型，以它的 agent 最近一次的回報為準 |
+| `POST /api/machines/{id}/cache/remove`，內容 `{"key": "<key>"}` | 刪除一個項目：一個 revision、其中一個 GGUF 檔、一個 URL 模型或一個引擎 |
+| `POST /api/machines/{id}/cache/remove-partial` | 刪除未完成的下載留下的檔案 |
+
+回應有 `free_bytes` 和 `total_bytes`（快取所在的磁碟）、`used_bytes`（快取在上面占了多少，共用的檔案只算一次）、`partial_bytes` 和 `partial_files`、`sizes`（早於 1.4 的 agent 為 false，它只列出 key），以及 `remove_note`（目前為什麼不能刪除，或 `null`）。`models` 列出每個項目：
+
+| 欄位 | 內容 |
+|---|---|
+| `key` | 刪除時要送的值：Hugging Face revision 是 `hub/models--<org>--<name>@<commit>`，從 URL 下載的單一檔案是 `url/<id>` |
+| `kind` | `hf` 或 `url` |
+| `repo`、`revision`、`file` | repository 和 commit，或 URL 模型的檔名 |
+| `bytes`、`files` | 大小和檔案數。兩個 revision 共用的檔案兩邊都會算 |
+| `parts` | 有 GGUF 檔的 revision：每個檔案（分割的模型只算一次，包含所有部分）各有自己的 `key`、`bytes`、`catalog` 和 `used_by`。刪掉最後一個就會刪掉整個 revision |
+| `catalog` | 它對應的目錄模型 |
+| `used_by` | 那台機器上使用它的部署（或應用程式） |
+
+`engines` 列出引擎壓縮檔（`key` 為 `engine/<壓縮檔 SHA-256 的前 16 個十六進位數字>`、`name`、`bytes`、`used_by`）。刪除的回應有 `freed_bytes`（磁碟上釋出的空間）和刪除後的清單（`cache`）。
+
+| 狀態 | `code` | 什麼時候 |
+|---|---|---|
+| 409 | `model_in_use` | 那台機器上有部署正在使用它；`in_use` 會列出是哪些。agent 在刪除前也會再檢查一次 |
+| 409 | `cache_busy` | 那裡正在下載這個模型（刪除未完成的下載時：正在進行任何下載） |
+| 409 | `machine_offline`、`agent_too_old`、`agent_no_answer` | agent 沒有連線、不支援刪除（1.4 之前），或一分鐘內沒有回應 |
+| 409 | `cache_remove_failed` | agent 刪不掉；訊息會說明原因 |
+| 404 | `not_in_cache` | 那台機器沒有回報這個 key |
+| 403 | | 不是管理員或操作員 |
+
+每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含機器、key、模型和 `freed_bytes`。背後是 agent 協定的 feature `cache_admin`（1.4 起的 agent）：agent 列出快取和大小、依要求刪除，並在那台機器上有副本使用這些檔案、或這些檔案正在下載時拒絕。
+
+## 透過 API 先下載模型
+
+與其他 `/api` 請求一樣，用 console 的登入工作階段（寫入時也要送 `X-Forgeyard: 1` header）。所有登入的人都可以查看；admin 和 operator 可以開始和取消下載。
+
+| 請求 | 作用 |
+|---|---|
+| `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | 每台機器，以及它能不能下載這個模型（和配方的引擎） |
+| `POST /api/downloads` 加上 `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | 在每台能下載的機器上開始下載；`engine` 預設開啟，`recipe` 預設是第一個能跑這個模型的配方 |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>` | 先列出進行中的下載，再列出已結束的（最近 100 筆） |
+| `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
+| `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和引擎壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
+
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`）。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+
+一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+
+| 狀態碼 | `code` | 何時 |
+|---|---|---|
+| 409 | `nothing_to_download` | 沒有機器能下載；`skipped` 列出每台機器的 `state` 和 `reason` |
+| 409 | `download_finished` | 取消一個已經結束的下載 |
+| 422 | `local_model` | 本機模型是機器上的目錄：沒有東西要下載 |
+| 422 | `recipe_not_compatible`、`bad_fetch_via` | 配方不能跑這個模型；`fetch_via` 不是這三個之一 |
+| 404 | `not_found` | 沒有這個模型、機器或下載 |
+| 403 | | 不是 admin 或 operator（`fetch-via` 要 admin） |
+
+稽核事件：`model.download_requested`（每台機器一筆，含模型和引擎）、`model.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
+
+背後是 agent 協定的 feature `prefetch`（1.4 起的 agent 和伺服器）。伺服器把每筆排隊中或下載中的列放在 `desired.downloads`，與副本並列：`{id, model, engine?, image?, image_ids?}`（Hugging Face 模型的區塊會帶伺服器用於受限 repository 的 token，和副本一樣只存在記憶體）。agent 用副本下載的同一套程式抓取（相同的鎖、從部分檔案續傳、checksum 和取消；映像檔用 1.3.1 的 pull 進度），不啟動任何東西，同時最多跑兩個，並回報 `status.downloads`（`{id, state, reason, download}`）；下一份清單裡沒有的下載會被取消。Migration `0015` 新增資料表 `model_downloads` 和欄位 `nodes.fetch_via`（所有既有機器都是 `auto`）。
+
+### 經由伺服器下載（轉送）
+
+agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出它的 agent，在 `fetch_via` 為 `auto` 或 `server` 的機器上，desired 副本或下載的每個模型區塊（Hugging Face 或 URL）和引擎壓縮檔區塊都會帶 `relay: {path, mode}`：`mode` 為 `server`（一律經由伺服器；設成這樣，或是 `auto` 且過去一小時內記得連不到那個主機）或 `auto`（先直接下載，遇到網路錯誤後改經由伺服器）。`server` 的模型區塊不帶 `token`。agent 之後向它自己的伺服器下載，絕不會連到伺服器指定的其他主機：
+
+| 請求 | 回傳 |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/model/{檔案路徑}` | Hugging Face 模型的一個檔案 |
+| `GET /agent/v1/relay/{replica\|download}/{id}/model` | URL 模型的檔案 |
+| `GET /agent/v1/relay/{replica\|download}/{id}/engine` | process 變體的引擎壓縮檔 |
+
+`{id}` 是 desired 清單裡副本或下載的 id。請求帶機器憑證（`Authorization: Bearer …`），以及最多一個 `Range: bytes=N-`（或 `N-M`），會轉給來源；回應是來源的 200 或 206，含 `Content-Length` 和 `Content-Range`，以串流傳送，不會存在任何地方。瀏覽器（帶 `Origin` 的請求）一律拒絕。
+
+伺服器只轉送那台機器**目前** desired 狀態裡有的東西：放在那裡且應該執行的副本，或排隊中、下載中的那台機器的下載，而且只限那個模型列出的檔案。來源網址由伺服器自己從目錄項目或配方組出來，使用它自己的 Hugging Face 權杖（或部署的權杖）和它自己的模型來源規則（`MODEL_ALLOW_PRIVATE_HOSTS`、URL 主機）。它每 2 秒檢查一次轉送是否還需要，不需要時就關閉。
+
+| 狀態碼 | `code` | 什麼時候 |
+|---|---|---|
+| 401 | `credential_refused` | 沒有憑證，或憑證已撤銷 |
+| 403 | `relay_off` | 機器設成 `direct`，或它的 agent 不支援 `relay` |
+| 403 | `browser_refused` | 請求帶有 `Origin` |
+| 403 | `source_refused` | 來源拒絕存取（受限模型，而且沒有可用的權杖） |
+| 403 | `source_blocked` | 伺服器的規則不允許來源的位址 |
+| 404 | `relay_not_wanted` | 機器的 desired 狀態裡沒有那個 id、檔案或引擎 |
+| 416 | `bad_range`、`range_not_satisfiable` | 超過一個範圍，或超過結尾 |
+| 429 | `relay_busy` | 那台機器已經有兩個轉送，或全部已有四個；`Retry-After: 5` |
+| 502 | `source_unreachable`、`source_failed` | 伺服器連不到來源，或來源回了錯誤 |
+
+agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇到 429 會等待且不算一次重試，其餘的則像網路錯誤一樣重試。這時它的進度會帶 `download.via: "server"`。
+
+**引擎映像檔**（協定 feature `relay_images`，1.4 起的 agent 和伺服器）。對同時列出它的 agent，desired 裡的副本（在 `spec` 旁邊）或下載，如果引擎映像檔以 digest 釘選、並記錄在 `forgeyard/recipes/images.lock.json`，就會帶 `image_relay: {path, mode}`，模式相同；`path` 是 `/agent/v1/relay/{replica|download}/{id}/image`。只用 tag 指定的映像檔永遠不會有。
+
+| 請求 | 回傳內容 |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/manifest` | 機器平台（依它的 agent 回報的 `platform.arch`）記錄的 manifest，也就是 registry 原本的位元組，附 `Docker-Content-Digest` 和 `Forgeyard-Platform`（`linux/amd64`） |
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/blobs/{digest}` | 那份 manifest 的 config 或其中一層，依 digest；`Range` 同上 |
+
+伺服器依記錄的 digest 取得 manifest，只有位元組的雜湊等於它、而且列的是記錄的 config 時才接受，並把它留在記憶體。blob 從 registry 的 API 取得，使用匿名 pull token（Docker Hub、GHCR、quay.io 和其他會發 token 的 registry），套用和模型檔相同的對外連線規則；registry 轉址到 CDN 時不會帶 token。完整的 blob 經過時會計算雜湊，最後一段要雜湊相符才會送出。agent 會把 manifest 的 digest 和記錄的 id 比對、每個 blob 和它的 digest 比對、config 的 content id 和記錄的比對、它的架構和機器的比對，然後載入一個同時含 OCI image layout（`oci-layout`、`index.json`、`blobs/sha256/…`）和傳統 `manifest.json` 的封存檔，加上 `repo:tag`，再對它執行 `image_ids` 檢查。它的進度是 `phase: "image"` 的 `download`，帶 `layers`、`layers_done`、`via: "server"`，載入時另有 `unpacking`。
+
+| 狀態 | `code` | 何時 |
+|---|---|---|
+| 403 | `relay_off` | 機器設成 `direct`，或它的 agent 不支援 `relay_images` |
+| 404 | `relay_not_in_image` | 那個 digest 不是那份 manifest 的 config 或任何一層 |
+| 409 | `relay_image_not_pinned` | 映像檔沒有以 digest 釘選並記錄 id：請改用上傳 |
+| 409 | `relay_no_platform` | 映像檔沒有那台機器架構的版本 |
+| 502 | `source_failed` | registry 的 manifest 雜湊不等於記錄的 digest，或列的是別的 config |
+
+### 把映像檔上傳到機器
+
+`POST /api/machines/{id}/images`（admin）。內容是 `docker save` 或 `podman save` 寫出的檔案，可以用 gzip 壓縮，必須有 `Content-Length`（沒有時回 411），最大為 `IMAGE_UPLOAD_MAX_GB`（超過回 413）；`X-Filename`（URL 編碼）是稽核紀錄裡的檔名。伺服器送給 agent `image_load {request_id, path, size, name}`（協定 feature `image_load`）；agent 用它的憑證取得 `GET /agent/v1/image-upload/{ticket}`（只能一次；其他機器的憑證得到 404），把它串流進 `docker load` / `podman load`，再回覆 `image_loaded {request_id, ok, reason, images: [{id, tags, content, os, architecture}]}`。回給瀏覽器的是 `{ok, bytes, images}`，每個映像檔帶 `matches: [{recipe, variant, image, how}]`：`how` 是 `checked`（它的 id 或 content id 是那個 recipe 釘選映像檔記錄的）或 `tag`（名稱和只用 tag 指定的 recipe 映像檔相同）。
+
+| 狀態 | `code` | 何時 |
+|---|---|---|
+| 409 | `machine_offline`、`agent_cannot_load` | agent 沒有連線，或沒有 container 引擎、或比 1.4 舊 |
+| 409 | `upload_busy` | 那台機器已經有上傳在進行（全部兩個時回 429） |
+| 400 | `upload_short`、`upload_broken` | 內容提早結束或中斷 |
+| 504 | `agent_no_fetch`、`agent_stalled` | agent 30 秒內沒有開始取得，或 2 分鐘都沒有再取 |
+| 422 | `image_load_failed` | 引擎無法載入（附 agent 的說明） |
+
+稽核事件 `node.image_uploaded`（檔名、大小、`ok`、載入的映像檔或失敗原因）。
 
 ## Setup health 檢查
 
@@ -672,13 +848,12 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 |---|---|---|
 | `setting-unknown` | 警告 | `.env` 裡的某個名稱，或環境裡開頭像設定（`GATEWAY_`、`PROVIDER_`、`EGRESS_`…）或和某個設定非常接近的名稱，並不是設定。它會說出你可能想設的是哪一個 |
 | `tls-setting-ignored` | 警告 | `TLS=off` 時設了 `TLS_*`；沒有自己的憑證卻設了 `TLS_CA_FILE`；使用自己的憑證時設了 `TLS_EXTRA_NAMES` |
-| `setting-deprecated` | 警告 | 設了一個[已淘汰的設定](#deprecated-settings)。它在 1.4 之前仍然有效；這項發現會指出改用什麼 |
-| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和金鑰檔（`FORGEYARD_SECRET_KEY_FILE` 或 `SECRET_KEY_FILE`）都有設定，或兩個檔案設定指向不同的檔案 |
-| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 次心跳（`AGENT_HEARTBEAT_SECONDS`，或最短的 2 秒心跳） |
+| `setting-removed` | 警告 | 還設著一個[在 1.4 移除的設定](#removed-settings)，所以它被忽略。這項發現會指出改用什麼，或改成怎麼運作 |
+| `secret-key-both` | 警告 | `FORGEYARD_SECRET_KEY` 和 `FORGEYARD_SECRET_KEY_FILE` 都有設定 |
+| `heartbeat-flapping` | 警告 | `AGENT_OFFLINE_SECONDS` 小於 2.5 次心跳（小於 5 秒：最短的心跳是 2 秒） |
 | `private-hosts-allowed` | 警告 | `MODEL_ALLOW_PRIVATE_HOSTS`、`PROVIDER_ALLOW_PRIVATE_HOSTS` 或 `MEDIA_ALLOW_PRIVATE_HOSTS` 已開啟 |
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
-| `setup-token-left` | 提示 | 設定完成後，`FORGEYARD_SETUP_TOKEN` 還設定著 |
 | `env-seed-ignored` | 提示 | 某個初始值設定（`MODEL_URL_HOSTS`、`MODEL_LOCAL_DIRS`、`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_*`）和管理員儲存的值不同，而儲存的值優先 |
 | `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
 | `host-loopback` | 錯誤 | `HOST` 是 loopback 位址，卻有機器從其他位址加入（而且前面沒有代理） |
@@ -689,7 +864,8 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
 | `gpus-shared-no-allowlist` | 警告 | 某台機器的顯示卡佔用的記憶體比 Forgeyard 在那裡保留的多出至少 1 GiB，而且沒有人選擇它的 GPU 存取 |
 | `machine-no-models` | 提示 | 某個上線的 agent 沒有模型快取，所以不會有模型放到那裡。如果它有 GPU，則是警告 |
-| `process-workloads-off` | 提示 | 某個上線的 agent 拒絕行程類工作負載；檢查結果會說明原因 |
+| `apps-deprecated` | 警告 | 有應用程式（不是模型的 workload）：它們、它們的 API 和 `/x/` 會在 1.5 移除 |
+| `process-workloads-off` | 提示 | 某個上線的 agent 拒絕行程；檢查結果會說明原因 |
 | `model-cache-full` | 警告 | 某台機器的模型快取磁碟剩餘空間不到 10% |
 | `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
@@ -731,7 +907,7 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | 指令 | 用途 |
 |---|---|
 | `forgeyard agent` | 執行 agent（服務執行的是 `forgeyard agent --config /etc/forgeyard/agent.toml`）。如果有加入權杖但還沒有憑據，會先加入；`--rejoin` 會以新機器的身分重新加入 |
-| `forgeyard agent init [--print] [--force]` | 根據偵測到的內容（GPU、Docker 或 Podman、systemd、工作負載帳號）寫出 `/etc/forgeyard/agent.toml`，並印出內容。`--print` 只印出不寫入。在這裡給的旗標（`--server`、`--ca-fingerprint`、`--model-cache`…）會寫進檔案 |
+| `forgeyard agent init [--print] [--force]` | 根據偵測到的內容（GPU、Docker 或 Podman、systemd、執行行程的帳號）寫出 `/etc/forgeyard/agent.toml`，並印出內容。`--print` 只印出不寫入。在這裡給的旗標（`--server`、`--ca-fingerprint`、`--model-cache`…）會寫進檔案 |
 | `forgeyard agent join --join-token fyj_…` | 用檔案裡的設定加入，儲存憑據後結束。已經加入過：不做任何事；`--rejoin` 會以新機器的身分重新加入 |
 | `forgeyard agent config [--get KEY]` | 列出所有生效中的設定和它們的來源；`--get models.cache` 只印出一個值 |
 | `forgeyard agent trust --server https://… [--ca-fingerprint …]` | 把已加入的機器切換到另一個位址或 CA，並保留它的憑據 |
@@ -751,7 +927,7 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `--server URL` | 伺服器的位址（預設：提供這個腳本的伺服器） |
 | `--name NAME`, `--label KEY=VALUE` | 機器的名稱和標籤（第一次安裝） |
 | `--model-cache DIR` | 模型存放的位置（預設 `/srv/forgeyard-models`） |
-| `--workload-user USER` | 行程類工作負載使用的帳號（預設 `forgeyard-run`，不存在時會自動建立） |
+| `--workload-user USER` | 行程使用的帳號（預設 `forgeyard-run`，不存在時會自動建立） |
 | `--no-start` | 安裝並加入，但不啟動服務 |
 | `--rejoin` | 以新機器的身分重新加入 |
 | `--uninstall [--purge]` | 移除服務和程式；`--purge` 會連設定和憑據一起刪除 |
@@ -778,6 +954,8 @@ console 的 **Playground → Vision** 分頁透過自己的路由呼叫公開的
 | `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
 | | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
+| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `forgeyard-vision:<伺服器版本>-cuda`（torch +cu130） |
+| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `forgeyard-vision:<伺服器版本>` |
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
@@ -797,6 +975,8 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 
 Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
+`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔不以 digest 釘住：variant 用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指的是和伺服器同版本、隨同一個 release 發布的映像檔（見[容器映像檔](#container-images)）。連不到 registry 的機器，用 `docker load` 以那個 tag 載入。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）。
+
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 
 ## 容器映像檔
@@ -808,9 +988,9 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.3.3`（就是那個版本）、`1.3`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.4.0`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
-- **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、工作負載帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
+- **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。
 
 ## 檔案與目錄

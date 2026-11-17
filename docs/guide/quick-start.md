@@ -53,7 +53,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -101,24 +101,24 @@ It prints:
 forgeyard-ca.der: OK
 
 ==> Checking this machine
-Linux x86_64, server https://192.168.1.20:7860, agent 1.3.3.
+Linux x86_64, server https://192.168.1.20:7860, agent 1.4.0.
 
 ==> Checking the server's certificate authority
 The CA matches sha256:3f9a….
 
-==> Downloading the agent 1.3.3
-forgeyard-1.3.3-py3-none-any.whl (335662 bytes, SHA-256 checked).
+==> Downloading the agent 1.4.0
+forgeyard-1.4.0-py3-none-any.whl (335662 bytes, SHA-256 checked).
 NVIDIA driver found: installing NVML support too.
 
 ==> Installing it in /opt/forgeyard/venv
 Installed with uv (uv 0.9.24).
-forgeyard 1.3.3, as /usr/local/bin/forgeyard (try: forgeyard agent config).
+forgeyard 1.4.0, as /usr/local/bin/forgeyard (try: forgeyard agent config).
 
 ==> Account for process workloads
 Created the system account 'forgeyard-run' (no password, no shell, no home).
 
 ==> Settings (/etc/forgeyard/agent.toml)
-# Forgeyard agent settings, written by `forgeyard agent init` (1.3.3).
+# Forgeyard agent settings, written by `forgeyard agent init` (1.4.0).
 …
 # GPUs: 2 x NVIDIA GeForce RTX 4090 (driver 580.95.05). Choose which ones Forgeyard may use on the Machines page.
 …
@@ -133,7 +133,7 @@ INFO forgeyard.agent: Joined https://192.168.1.20:7860 as 'gpu-01'; credential s
 Next, on https://192.168.1.20:7860:
   1. Machines: this machine shows as online within a few seconds.
   2. Change GPU access: choose which cards Forgeyard may use here.
-  3. Models: deploy a model on it. The guide: https://192.168.1.20:7860/guide
+  3. Serving: deploy a model on it. The guide: https://192.168.1.20:7860/guide
 ```
 
 What happened, in order:
@@ -145,8 +145,8 @@ What happened, in order:
 2. Only then was the installer downloaded, over a connection checked against that CA.
 3. The installer downloaded the agent from your server (always the server's own version), checked
    it, and installed it with its own Python in `/opt/forgeyard`.
-4. It created the account `forgeyard-run` that process workloads run as. Workloads never run as
-   root.
+4. It created the account `forgeyard-run` that processes (engines) run as. They never run
+   as root.
 5. It wrote `/etc/forgeyard/agent.toml` from what it found: GPUs, Docker, systemd. Every setting is
    explained in the file.
 6. It traded the join token for this machine's own credential, kept in
@@ -165,7 +165,7 @@ the **Manual** tab uses a Forgeyard checkout and a config file. AMD and CPU-only
 
 By default Forgeyard may use every GPU of the machine. On a machine you share with others:
 
-1. On **Machines**, find the machine and choose **Change GPU access**.
+1. On **Machines**, open the machine and choose **Change GPU access**.
 2. Tick the cards Forgeyard may use, and save.
 
 Cards outside the list are never given to anything Forgeyard runs; the page marks them *not for
@@ -173,7 +173,7 @@ Forgeyard*. Even with all cards allowed, saving the choice once ticks this step 
 
 ## 5. Add a recommended model
 
-1. Open **Models** → **Catalog and recipes** → **Add a model**.
+1. Open **Models** → **Add a model** (on the **Catalog** tab).
 2. **Recommended** lists models known to work. Pick one that fits your machine:
    - a GPU with at least 8 GB free: **Qwen3 0.6B** (1.4 GB download);
    - only a CPU: **Qwen3 1.7B (GGUF, for the CPU)** (1.2 GB download, about 3 GB of RAM).
@@ -183,7 +183,7 @@ Forgeyard*. Even with all cards allowed, saving the choice once ticks this step 
 
 ## 6. Deploy it
 
-1. Choose **Deploy it** (or **Models** → **Deploy a model** and pick the model).
+1. Choose **Deploy it** (or **Serving** → **Deploy a model** and pick the model).
 2. Give the deployment a name, for example `qwen`. It becomes the **model name** programs ask for.
 3. Check **Runs on**: **GPU** for Qwen3 0.6B, **CPU only** for the GGUF model (*Deploy it* chooses
    it for you).
@@ -284,7 +284,8 @@ for what that variable replaces, and for Node.js).
 
 ## What next
 
-- **Usage** shows requests, tokens and latency per key, model and person.
+- **Usage** shows requests, tokens and latency per key, model and person, and charts them per day,
+  week or month.
 - Add people on **Users**: they get a one-time link to set their password. Roles are explained in
   [Concepts](concepts.md#roles).
 - Add more machines the same way; replicas of one deployment spread over them, and the gateway

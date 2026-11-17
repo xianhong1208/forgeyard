@@ -51,6 +51,11 @@ cloud provider.
 13. Videos (1.3, forgeyard/gateway/videogen.py and videojobs.py): /v1/videos is asynchronous: a job is
    checked against each deployment's caps, sent to one replica, which holds it, and its status and
    MP4 are relayed from that replica; it does not go through forward(). Local only.
+14. Vision (1.4, forgeyard/models/vision.py): /v1/vision/detect, /segment and /depth take one image
+   (multipart with `model` and an `image` file, or JSON with `model` and `image` in base64) for a model
+   of that task, passed to the vision server as it came (only `model` changed); its JSON answer is passed
+   back unchanged and counted as one image, its kilopixels and the replica's busy milliseconds. Local
+   only (no provider serves them).
 """
 
 from __future__ import annotations
@@ -76,7 +81,7 @@ from starlette.responses import Response
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
 from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech, videogen
-from forgeyard.gateway.balancer import Target, balancer
+from forgeyard.gateway.balancer import PROVIDER_COOLDOWN, PROVIDER_COOLDOWN_MAX, Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
@@ -98,6 +103,10 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "audio/speech": ("openai-speech", "json"),
     "images/generations": ("openai-images", "json"),
     "videos": ("openai-videos", "video"),   # asynchronous jobs (forgeyard/gateway/videojobs.py), not forward()
+    # 1.4: vision models, one image per request (multipart or JSON)
+    "vision/detect": ("vision-detect", "vision"),
+    "vision/segment": ("vision-segment", "vision"),
+    "vision/depth": ("vision-depth", "vision"),
 }
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
 CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets serve in 1.2
@@ -105,6 +114,7 @@ CLOUD_ENDPOINTS = ("chat/completions", "completions", "embeddings")
 CLIENT_CLOSED = 499  # nginx's code for "the client went away": counted, but not as an error
 LOCAL_ONLY_HEADER = "x-forgeyard-local-only"
 MAX_WAIT_MS = 10_000
+RETRY_AFTER_CAP = 2.0   # with no other target left, a provider's Retry-After up to this is waited for once
 BYTES_PER_TOKEN = 3     # a prompt's size in tokens, estimated on the high side (CJK is ~3 bytes a token)
 
 # Connecting failed, or the connection broke before the replica answered: the request did not get
@@ -310,7 +320,9 @@ def model_names(db: DbSession) -> list[tuple[Route, int]]:
 def endpoint_for(api: str) -> str:
     return {"openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", "rerank": "/v1/rerank",
             "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
-            "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos"}.get(api, "/v1")
+            "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
+            "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment",
+            "vision-depth": "/v1/vision/depth"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:
@@ -512,6 +524,7 @@ class Parsed:
     media: Optional[gmedia.Media] = None           # images, audio, video, files (1.3)
     tts: Optional[speech.Ask] = None               # a text-to-speech request, checked (1.3)
     image: Optional[imagegen.Ask] = None           # an image request, checked (1.3)
+    vision: Optional[str] = None                   # a vision request: its task (1.4)
     size: int = 0                                  # the body's size in bytes (after media were inlined)
 
 
@@ -558,10 +571,31 @@ async def read_body(request: Request, limit: Optional[int] = None) -> bytes:
     return b"".join(chunks)
 
 
-def parse_body(body: bytes, content_type: str, kind: str) -> Parsed:
+def parse_vision(body: bytes, content_type: str) -> Parsed:
+    """A vision request (1.4): multipart with `model` and an `image` file, or a JSON object with `model`
+    and `image` (base64 or a data: URI). The image itself is read by the vision server."""
+    if "multipart/form-data" in (content_type or "").lower():
+        parsed = parse_body(body, content_type, "multipart", what="the image")
+        if not any(p.name == "image" and p.is_file for p in parsed.parts or []):
+            raise GatewayError(400, "missing_image", "Send the image as a file field named 'image'.", param="image")
+        return parsed
+    parsed = parse_body(body, content_type, "json")
+    image = (parsed.obj or {}).get("image")
+    if not isinstance(image, str) or not image.strip():
+        raise GatewayError(400, "missing_image", "Send multipart/form-data with an 'image' file, or JSON with 'image' "
+                                                 "(base64 or a data: URI).", param="image")
+    if parsed.stream:
+        raise GatewayError(400, "streaming_not_supported", "Vision answers do not stream: leave 'stream' out.",
+                           param="stream")
+    return parsed
+
+
+def parse_body(body: bytes, content_type: str, kind: str, *, what: str = "the audio") -> Parsed:
+    if kind == "vision":
+        return parse_vision(body, content_type)
     if kind == "multipart":
         if "multipart/form-data" not in (content_type or "").lower():
-            raise GatewayError(400, "invalid_request", "Send the audio as multipart/form-data.")
+            raise GatewayError(400, "invalid_request", f"Send {what} as multipart/form-data.")
         try:
             boundary, parts = multipart.parse(body, content_type)
         except multipart.MultipartError as e:
@@ -888,6 +922,7 @@ class Job:
         self.made: Optional[imagegen.Made] = None   # images: what the answer held (1.3)
         self.busy_ms: int = 0                       # images: the replica's time on it, times its GPUs
         self.image_draws: Optional[imagegen.Draws] = None
+        self.seen: Optional[tuple[int, int]] = None   # vision: the size of the image the replica answered for (1.4)
         self.queue_key = ""
         self.sent_at = 0.0
         self._ticket: Optional[int] = None
@@ -930,6 +965,11 @@ class Job:
             if self.made is None:      # set only for an answer that held images
                 return None
             return {"images": self.made.images, "kilopixels": self.made.kilopixels, "busy_ms": self.busy_ms}
+        if self.parsed.vision is not None:
+            if self.seen is None:      # set only for a 200 that says the image's size
+                return None
+            w, h = self.seen
+            return {"images": 1, "kilopixels": round(w * h / 1000), "busy_ms": self.busy_ms}
         if tts is not None:
             if not served:
                 return None
@@ -1229,7 +1269,7 @@ class Job:
             if isinstance(result, Response):
                 return result
             failures.append((c, result))
-        cap = self.settings.provider_retry_after_cap
+        cap = RETRY_AFTER_CAP
         waits = [(f.retry_after, i, c) for i, (c, f) in enumerate(failures) if f.retry_after is not None
                  and f.retry_after <= cap]
         if waits and not more:
@@ -1271,7 +1311,7 @@ class Job:
                 strip = True
         obj, _dropped = quirks.outgoing(c.kind, obj, endpoint, c.drop_params)
         body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        cooldown = self.settings.provider_cooldown_seconds
+        cooldown = PROVIDER_COOLDOWN
         try:
             url, host_headers, extensions = await egress.prepare(c.base_url, endpoint, external=c.external,
                                                                  allow_http=c.allow_http)
@@ -1337,7 +1377,7 @@ class Job:
             ra = retry_after(response.headers)
             err = provider_error(c, status, data[:65536], ra)
             if status == 429 or status >= 500:
-                balancer.cool_down(c.key, max(cooldown, min(ra or 0.0, 300.0)))
+                balancer.cool_down(c.key, max(cooldown, min(ra or 0.0, PROVIDER_COOLDOWN_MAX)))
                 log.warning("Provider %s (%s) answered %s (request id %s)%s.", c.provider, c.upstream_model, status, rid,
                             "" if again else "; trying the next target")
                 return Failed("refused" if status in (429, 503) else "unavailable", err, retry_after=ra, status=status)
@@ -1394,10 +1434,42 @@ class Job:
         return Response(content=imagegen.engine_error(status, data), status_code=status,
                         headers={**upstream_retry_after(response), **out_headers}, media_type="application/json")
 
+    async def looked(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
+        """A vision server's answer (1.4): read whole and passed on as it is; a 200 is counted as one image,
+        its kilopixels (the width and height the answer says) and the replica's busy time."""
+        try:
+            data = await unless_gone(self.request.receive, response.aread())
+        except ClientGone:
+            return self.gone()
+        except httpx.TimeoutException:
+            raise GatewayError(504, "upstream_timeout", f"The answer from {who} did not come in time.") from None
+        except httpx.HTTPError as e:
+            raise GatewayError(502, "upstream_error", f"The answer from {who} broke off ({type(e).__name__}).") from None
+        finally:
+            await response.aclose()
+            balancer.release(release)
+        busy = max(0.0, time.monotonic() - self.sent_at)
+        status = response.status_code
+        if status == 200:
+            try:
+                obj = json.loads(data)
+            except (ValueError, UnicodeDecodeError):
+                obj = None
+            w, h = (obj.get("width"), obj.get("height")) if isinstance(obj, dict) else (None, None)
+            if not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in (w, h)):
+                raise GatewayError(502, "upstream_error", f"The answer from {who} is not a vision answer.")
+            self.seen = (w, h)
+            self.busy_ms = int(busy * 1000)
+        self.finish(status, None)
+        return Response(content=data, status_code=status, headers={**upstream_retry_after(response), **out_headers},
+                        media_type="application/json")
+
     async def serve(self, response: httpx.Response, out_headers: dict, strip: bool, *, release: str,
                     who: str) -> Response:
         if self.parsed.image is not None:
             return await self.images(response, out_headers, release, who)
+        if self.parsed.vision is not None:
+            return await self.looked(response, out_headers, release, who)
         is_sse = "text/event-stream" in response.headers.get("content-type", "")
         if is_sse and response.status_code == 200:
             def done(status: int, usage) -> None:

@@ -23,7 +23,7 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
 1. [Quick start](quick-start.md): install the server, trust its certificate, add a machine, choose
    its GPUs, add a recommended model, deploy it, create an API key, and call it with curl and the
    OpenAI SDK.
-2. [Concepts](concepts.md): machines and agents, GPU access, workloads, models and recipes and
+2. [Concepts](concepts.md): machines and agents, GPU access, models and engines and
    estimates, deployments, the gateway and the Playground, API keys and limits and usage, cloud
    providers and tiers, cost and budgets, roles, sign-in and sessions.
 3. [How-to](how-to.md): add an AMD machine or a CPU-only machine, run the agent in Docker, run a
@@ -38,7 +38,7 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
    or a server of your own; route a model to the cloud; when a request spills; which keys may use the
    cloud; what each provider's endpoint cannot do; what leaves your server.
 6. [Reference](reference.md): every server setting, every agent setting, the gateway's endpoints,
-   headers and error codes, a workload's environment, the command line, files and ports.
+   headers and error codes, an app's environment, the command line, files and ports.
 
 ## Conventions
 

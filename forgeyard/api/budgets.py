@@ -4,7 +4,8 @@ and setting the budgets of people and providers.
 - `GET /api/budgets`: this month (UTC), when it resets, and per scope the budget, what was spent and
   what is reserved by requests in flight, with a level (ok, warning at 80%, exhausted at 100%). Your
   own keys and yourself; admins with ?everyone=true: every key and person with a budget or spend
-  this month, and every provider outside your network.
+  this month, and every provider outside your network. Revoked keys are left out (1.4): what they
+  spent stays in their person's and provider's totals.
 - `PUT /api/budgets/people/{id}` and `PUT /api/budgets/providers/{id}`: admins only. A key's budget is
   set with `PATCH /api/keys/{id}` (its owner may set it too, unless an admin locked it).
 
@@ -52,9 +53,10 @@ def get_budgets(everyone: bool = Query(default=False), caller: Caller = Depends(
         b = _of(spend, "key", k.id, k.budget_micros)
         if everyone and k.budget_micros is None and not b["spent_micros"]:
             continue
-        if key_status(k) != "active" and not b["spent_micros"]:
-            continue
-        keys.append({"id": k.public_id, "name": k.name, "prefix": k.prefix, "status": key_status(k),
+        status = key_status(k)
+        if status == "revoked" or (status != "active" and not b["spent_micros"]):
+            continue  # 1.4: a revoked key is never listed; its spend stays in its person's and provider's
+        keys.append({"id": k.public_id, "name": k.name, "prefix": k.prefix, "status": status,
                      "user": {"id": k.user_id, "username": k.user.username if k.user else None},
                      "locked_by": k.budget_locked_by, **b})
     people_q = select(User).order_by(User.username)

@@ -493,8 +493,8 @@ def test_fy_x_015_a_keys_workloads_setting(xw):
     r = api_client(xw.owner, listed).get("/x/hidden/a")
     assert r.status_code == 404
     kid = new_key(xw.owner, "two", workloads="listed", workload_list=["web", "hidden"])["api_key"]["id"]
-    assert xw.owner.get("/api/keys").json()["workloads"] == [
-        {"name": "hidden", "exposed": False, "path": "/x/hidden"}, {"name": "web", "exposed": True, "path": "/x/web"}]
+    # 1.4 (#88): the console no longer offers the setting, so the key list no longer names the apps.
+    assert "workloads" not in xw.owner.get("/api/keys").json()
     for body, code in (({"workloads": "listed", "workload_list": []}, "no_workloads"),
                        ({"workloads": "listed", "workload_list": ["nope"]}, "unknown_workload"),
                        ({"workloads": "all", "workload_list": ["web"]}, "workload_list_unused")):

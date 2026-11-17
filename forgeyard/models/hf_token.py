@@ -56,8 +56,8 @@ def get(db: DbSession) -> Optional[str]:
     try:
         return crypto.unseal(stored, PURPOSE)
     except crypto.SecretError as e:
-        log.warning("The server's Hugging Face token cannot be read (%s); set it again under Models -> Model "
-                    "sources.", e)
+        log.warning("The server's Hugging Face token cannot be read (%s); set it again under Models -> "
+                    "Sources.", e)
         return None
 
 

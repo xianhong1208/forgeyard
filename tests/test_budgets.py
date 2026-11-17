@@ -23,6 +23,7 @@ from tests.conftest import add_user, sign_in
 from tests.gateway_helpers import api_client, new_key, set_state
 from tests.test_cost import GPT
 from tests.test_routing import _Fixed, background, chat, in_flight_soon, mixed  # noqa: F401  (the fixture)
+from tests.waits import wait_until
 
 PW = "quiet-meadow-4821"
 P = pricing.PICOS_PER_MICRO
@@ -375,13 +376,20 @@ def test_fy_bdg_011_failures_release_and_in_flight_requests_hold(priced):
 
 def test_fy_bdg_012_concurrent_requests_do_not_overspend(priced):
     """FY-BDG-012: 12 requests at once against a budget that reserves room for 4: exactly 4 reach the
-    provider and the spend stays within the budget."""
+    provider and the spend stays within the budget. The provider holds its answers until the other 8 have been
+    refused (a gate, not a fixed hold): on a slow runner the first answers used to settle, at less than was
+    reserved, before the last requests had even started, which rightly let a fifth one in."""
     m = priced
     budget = 4 * need() // P + 1
     m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": budget})
     set_state("chat", 0, "starting", "loading")
-    m.cloud.hold = 0.5
+    m.cloud.gate = threading.Event()
     threads = [background(lambda: send(m)) for _ in range(12)]
+    try:
+        wait_until(lambda: sum(not t.is_alive() for t, _ in threads) == 8, "8 requests refused", timeout=30)
+        assert len(m.cloud.posts()) == 4     # held at the provider while the other 8 were refused
+    finally:
+        m.cloud.gate.set()
     for t, _ in threads:
         t.join()
     codes = sorted(out["r"].status_code for _, out in threads)
@@ -553,19 +561,22 @@ def test_fy_bdg_019_a_failed_cloud_attempt_holds_nothing_while_waiting_for_local
     after all, and its reservation is released at once, not held while it waits."""
     m = priced
     m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": 1_000_000})
-    m.engine.hold = 1.2
+    m.engine.hold = 2.0
     t, first = background(lambda: send(m))
     in_flight_soon()
     m.cloud.status = 500
     t2, second = background(lambda: send(m))
-    deadline = time.monotonic() + 5
-    while len(m.cloud.posts()) < 1 and time.monotonic() < deadline:
+    wait_until(lambda: m.cloud.posts(), "the cloud attempt")
+    # The cloud answers 500 and the request goes back to wait for the local replica, still busy with the
+    # first: its reservation must be gone while it waits (a fixed 0.2 s was sometimes too short to see it go
+    # on a busy machine). Held until the first request is done would fail here.
+    deadline = time.monotonic() + 10
+    while ledger._held and t.is_alive() and time.monotonic() < deadline:
         time.sleep(0.01)
-    time.sleep(0.2)
-    held_while_waiting = dict(ledger._held)
+    held_while_waiting, still_waiting = dict(ledger._held), t.is_alive()
     t.join()
     t2.join()
-    assert held_while_waiting == {}
+    assert held_while_waiting == {} and still_waiting
     assert second["r"].status_code == 200 and second["r"].headers["x-forgeyard-target"] == "local:chat#0"
 
 
@@ -575,3 +586,28 @@ def test_fy_bdg_020_dollar_amounts_in_messages():
     from forgeyard.gateway.budgets import usd
     assert [usd(x) for x in (0, 250, 1_215, 10_000, 1_234_567, None)] == \
         ["$0.00", "$0.00025", "$0.001215", "$0.01", "$1.23", "unknown"]
+
+
+def test_fy_bdg_021_revoked_keys_leave_the_budget_lists_and_alerts(priced):
+    """FY-BDG-021 (1.4, #36): a revoked key is no longer listed under Budgets (mine or everyone's), even
+    with spend this month, and an alert queued for it before it was revoked is not written; what it
+    spent stays in its person's and provider's totals."""
+    m = priced
+    m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": (ANSWER_PICOS + need()) // P + 1})
+    set_state("chat", 0, "starting", "loading")
+    assert send(m).status_code == 200
+    assert send(m).status_code == 200                       # 83%: a warning is queued, not written yet
+    recorder.flush()
+    listed = m.owner.get("/api/budgets?everyone=true").json()
+    assert any(k["id"] == m.kid for k in listed["keys"])
+    me = next(p for p in listed["people"] if p["username"] == "owner")
+    spent = me["spent_micros"]
+    assert spent > 0
+    assert m.owner.delete(f"/api/keys/{m.kid}").status_code in (200, 204)
+    ledger.write_alerts()
+    assert audit_actions(m.owner) == []                     # the queued warning of the revoked key is dropped
+    for url in ("/api/budgets", "/api/budgets?everyone=true"):
+        body = m.owner.get(url).json()
+        assert all(k["id"] != m.kid for k in body["keys"]), url
+        assert next(p for p in body["people"] if p["username"] == "owner")["spent_micros"] == spent
+    assert sum(p["spent_micros"] for p in m.owner.get("/api/budgets?everyone=true").json()["providers"]) >= spent

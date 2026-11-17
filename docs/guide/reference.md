@@ -16,7 +16,8 @@ The server checks its settings when it starts:
 - **Anything surprising is logged as a warning** and shown to admins under
   [Setup health](#setup-health-checks): a name that is not a setting ("did you mean"), a setting
   that another one makes useless, risky combinations, and a
-  [deprecated setting](#deprecated-settings), named with what replaces it.
+  [setting removed in 1.4](#removed-settings) that is still set, named with what replaces it. The
+  one exception: a removed `SECRET_KEY_FILE` that would now mean another key file stops the start.
 
 ### Common settings
 
@@ -56,7 +57,7 @@ are fine for almost everyone.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets (Hugging Face tokens, provider keys, replica keys, workload environment values). Back it up apart from the database |
+| `FORGEYARD_SECRET_KEY_FILE` | `data/secret.key` | The key that encrypts stored secrets (Hugging Face tokens, provider keys, replica keys, app environment values). Back it up apart from the database |
 | `FORGEYARD_SECRET_KEY` | — | The key itself (base64 of 32 bytes), instead of a file. Set one of the two: with both, this one is used and the file is ignored |
 
 ### Accounts and sign-in
@@ -76,6 +77,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Agents send a heartbeat every third of it (at least every 2 seconds) |
+| `IMAGE_UPLOAD_MAX_GB` | `64` | The largest image file an admin may upload to a machine from its page (**Engine images** → **Upload an image**), in GiB. The file is streamed through the server to the agent, never stored |
 | `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
 ### Models
@@ -83,7 +85,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
-| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Model sources**, the database wins. Until then the panel marks it *from .env* |
+| `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Sources**, the database wins. Until then the panel marks it *from .env* |
 | `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
 | `VRAM_HEADROOM_MIB` | `512` | Memory always left free on a card when placing replicas |
@@ -127,21 +129,29 @@ Media URLs also follow `EGRESS_PROXY`, `EGRESS_ALLOWED_HOSTS` and `EGRESS_CA_FIL
 when the environment still holds another value. Until an admin saves, those panels mark the values
 that came from the environment as *from .env*.
 
-### Deprecated settings
+### Removed settings
 
-These still work in 1.3 and are **removed in 1.4**. When one is set, the server logs a warning at
-start that names what replaces it, and Setup health lists it (`setting-deprecated`). Nothing else
-changes while they are set.
+**Removed in 1.4.** These settings were deprecated in 1.3.1 and are no longer read. A server that
+still has one set, in the environment or in `.env`, logs a warning at start that it is ignored and
+what to use instead, and Setup health lists it (`setting-removed`) until you remove it.
 
-| Variable | Default | Replaced by |
-|---|---|---|
-| `SECRET_KEY_FILE` | — | `FORGEYARD_SECRET_KEY_FILE`, the same value under a name that matches `FORGEYARD_SECRET_KEY`. With both set, `FORGEYARD_SECRET_KEY_FILE` is used |
-| `AGENT_HEARTBEAT_SECONDS` | — | Nothing: agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS` (at least every 2 seconds), 10 seconds by default. Set, it still decides the heartbeat |
-| `FORGEYARD_SETUP_TOKEN` | — | Nothing: the server prints a random setup token (and keeps it in `data/secrets.json` until setup). For an unattended first start use `ADMIN_USERNAME` and `ADMIN_PASSWORD` |
-| `USAGE_FLUSH_SECONDS` | `5` | Nothing: usage counted in memory is written to the database every 5 seconds |
-| `PROVIDER_COOLDOWN_SECONDS` | `30` | Nothing: a provider target that answered 429 or 5xx, or could not be reached, is tried last for 30 seconds (longer if its `Retry-After` says so, up to 5 minutes) |
-| `PROVIDER_RETRY_AFTER_CAP` | `2` | Nothing: when no other target is left, a `Retry-After` of up to 2 seconds is waited for once |
-| `OPENROUTER_MODELS_URL` | `https://openrouter.ai/api/v1/models` | Nothing: **Refresh prices from OpenRouter** always reads OpenRouter's public list (only when an admin asks; no key is sent) |
+- `SECRET_KEY_FILE`: use `FORGEYARD_SECRET_KEY_FILE`, the same value under its new name. If
+  `SECRET_KEY_FILE` names a key file other than `data/secret.key` and neither
+  `FORGEYARD_SECRET_KEY_FILE` nor `FORGEYARD_SECRET_KEY` is set, **the server refuses to start**
+  instead of using (or making) a different key, and says to rename it. Nothing is changed until
+  you do; `secrets reset` refuses too.
+- `AGENT_HEARTBEAT_SECONDS`: agents send a heartbeat every third of `AGENT_OFFLINE_SECONDS`, at
+  least every 2 seconds (10 seconds by default).
+- `FORGEYARD_SETUP_TOKEN`: the server prints a random setup token (and keeps it in
+  `data/secrets.json` until setup). For an unattended first start use `ADMIN_USERNAME` and
+  `ADMIN_PASSWORD`.
+- `USAGE_FLUSH_SECONDS`: usage counted in memory is written to the database every 5 seconds.
+- `PROVIDER_COOLDOWN_SECONDS`: a provider target that answered 429 or 5xx, or could not be reached,
+  is tried last for 30 seconds (longer if its `Retry-After` says so, up to 5 minutes).
+- `PROVIDER_RETRY_AFTER_CAP`: when no other target is left, a `Retry-After` of up to 2 seconds is
+  waited for once.
+- `OPENROUTER_MODELS_URL`: **Refresh prices from OpenRouter** always reads OpenRouter's public list
+  (only when an admin asks; no key is sent).
 
 ### Units, zero and empty
 
@@ -184,12 +194,12 @@ wrong type; a bad value).
 | `log_level` | `FORGEYARD_LOG_LEVEL` | `-v` | `info` | info, or debug for every message (-v). |
 | `labels` | `FORGEYARD_LABELS` | `--label` | — | Labels shown on the Machines page, e.g. { rack = "a" }. Environment: rack=a,room=2. Merged key by key: a flag wins over the environment, the environment over the file. |
 | `[workloads]` `enabled` | `FORGEYARD_WORKLOADS` | `--no-workloads` | `true` | false: only report hardware, run nothing. |
-| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run` if it exists (as root) | The unprivileged account process workloads run as when the agent runs as root. Default: forgeyard-run if that account exists (never created by the agent); without one, a root agent refuses process workloads. |
+| `[workloads]` `user` | `FORGEYARD_WORKLOAD_USER` | `--workload-user` | `forgeyard-run` if it exists (as root) | The unprivileged account processes (apps and engines) run as when the agent runs as root. Default: forgeyard-run if that account exists (never created by the agent); without one, a root agent refuses process apps. |
 | `[workloads]` `work_dir` | `FORGEYARD_WORK_DIR` | `--work-dir` | — | One directory per process replica. Default: next to the state directory (<state_dir>-work). |
 | `[workloads]` `port_range` | `FORGEYARD_PORT_RANGE` | `--port-range` | `30000-32767` | Host ports for services and model replicas. |
 | `[workloads]` `bind_address` | `FORGEYARD_BIND_ADDRESS` | `--bind-address` | — | The address published ports listen on. Default: this machine's address towards the server. |
 | `[workloads]` `container_engine` | `FORGEYARD_CONTAINER_ENGINE` | `--container-engine` | `auto` | auto (docker, then podman), docker, podman, none, or the engine CLI's path. |
-| `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | How process workloads are limited: systemd (a scope with CPU and memory caps; root on a systemd host), rlimit (no systemd, e.g. in a container), or auto. |
+| `[workloads]` `limits` | `FORGEYARD_LIMITS` | `--limits` | `auto` | How processes are limited: systemd (a scope with CPU and memory caps; root on a systemd host), rlimit (no systemd, e.g. in a container), or auto. |
 | `[workloads]` `log_max_mb` | `FORGEYARD_LOG_MAX_MB` | `--log-max-mb` | `10` | Output kept per replica, in MB. |
 | `[workloads]` `pull_stall_minutes` | `FORGEYARD_PULL_STALL_MINUTES` | `--pull-stall-minutes` | `5` | An image pull fails when no new bytes arrive for this many minutes (three times as long while it unpacks). A slow pull that keeps moving is never stopped. |
 | `[models]` `cache` | `FORGEYARD_MODEL_CACHE` | `--model-cache` | `/srv/forgeyard-models` (as root) | Where models and engines are downloaded and kept. Default: /srv/forgeyard-models as root, else ~/.local/share/forgeyard-models. Empty (""): this machine serves no models. In the Docker image it must be the same path inside and outside the container. |
@@ -198,7 +208,7 @@ wrong type; a bad value).
 
 **Two defaults depend on the machine** and match what `install.sh` sets up: the model cache is
 `/srv/forgeyard-models` when the agent runs as root (`~/.local/share/forgeyard-models` otherwise),
-and process workloads run as `forgeyard-run` when the agent runs as root and that account exists.
+and processes run as `forgeyard-run` when the agent runs as root and that account exists.
 The agent never creates the account; `install.sh` and the agent image do. `forgeyard agent config`
 shows these as `(default)`. To keep a machine from serving models, set the cache to an empty value
 (`--model-cache ""`, `FORGEYARD_MODEL_CACHE=` or `cache = ""`).
@@ -272,6 +282,9 @@ page cannot use a signed-in browser against it.
 | `GET /v1/videos/{id}/content` | The finished video, `video/mp4`, streamed from the replica that made it. `variant=video` only; `Range` requests answer 206 | — |
 | `DELETE /v1/videos/{id}` | Cancels a job at work, or deletes a finished video, on its replica | — |
 | `POST /v1/videos/sync`, `POST /v1/videos/{id}/remix` | Not offered: always 404 `endpoint_not_supported` | — |
+| `POST /v1/vision/detect` | Object detection (1.4): one image, boxes, labels and scores back. See [Vision](#vision) | no |
+| `POST /v1/vision/segment` | Segmentation with SAM 2 (1.4): one image and a point or a box, masks as PNGs back | no |
+| `POST /v1/vision/depth` | Depth estimation (1.4): one image, a 16-bit depth map back | no |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -518,6 +531,42 @@ The Playground's **Video** panel uses `/api/playground/videos` (`POST`, `GET`), 
 the console's `X-Forgeyard: 1` header), for that person's own jobs, counted as console. The jobs are kept
 in the server's database (table `video_jobs`, migration `0014`).
 
+### Vision
+
+`POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` (1.4) take one image for a
+vision model and answer JSON. They are Forgeyard's own API (the OpenAI SDK has none): any HTTP client
+works. One engine serves them, Forgeyard's own vision server (recipe `vision`, the image
+`forgeyard-vision` of the server's version: the CUDA build on NVIDIA, the CPU build elsewhere), with the
+model from the machine's model cache. Local deployments only, never a cloud provider.
+
+The request is `multipart/form-data` with `model`, the image as a file field `image` and the options
+as fields, or JSON with `model`, `image` (base64, or a `data:` URI) and the options. PNG, JPEG or WebP,
+at most 20 MiB and 40 megapixels. The gateway checks that there is a model and an image, changes only
+`model`, and passes the rest to the replica as it came; a model of another task answers 400
+`wrong_endpoint` (the message names its endpoint).
+
+| Endpoint | Options | Answer |
+|---|---|---|
+| `detect` | `threshold` (0 to 1, 0.5), `max_detections` (1 to 1,000, 100) | `detections`: `[{"label", "score", "box": [x0, y0, x1, y1]}]`, best first, in the image's pixels |
+| `segment` | `points` (`[[x, y], …]`, at most 16) with `labels` (1 inside, 0 outside; all 1 when left out), or `box` (`[x0, y0, x1, y1]`); `multimask` (`true`: three candidate masks) | `masks`: `[{"score", "area", "box", "png"}]`, best first; each mask a 1-bit PNG of the image's size, base64 |
+| `depth` | none | `depth_png` (a 16-bit grey PNG of the image's size, base64, nearer is brighter), `min`, `max`, `unit` (relative depth, not metres) |
+
+Every answer also has `model`, `width`, `height` (the image's) and `ms` (the model's time). The vision
+server's errors (`{"error": {"message", "code"}}`) come back with their status: 400 `invalid_image`,
+`invalid_option`, `missing_prompt` (segment without a point or a box), 413 `image_too_large`.
+
+What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
+
+| Unit | How |
+|---|---|
+| `images` | 1: the image looked at |
+| `kilopixels` | Its width x height / 1,000, from the answer |
+| `busy_ms` | The time the replica worked on it |
+| tokens | None. A key's tokens per minute does not apply; its requests per minute and its model list do |
+
+A replica works on one image at a time and keeps the others waiting in order; more throughput is more
+replicas. Which models are vision models, and the licence rule, are under [Built-in recipes](#built-in-recipes).
+
 ### Headers
 
 | Header | Direction | Value |
@@ -563,7 +612,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `language_not_supported` | Text to speech: Chinese, Japanese or Korean text to speaches, which deletes those characters | Use a Qwen3-TTS deployment |
 | 400 | `voice_cloning_not_supported` | Text to speech: a reference recording, a voice given as audio or a link, `task_type: "Base"`, or uploading a voice. Not in 1.3 | Use one of the model's voices |
 | 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
-| 400 | `streaming_not_supported` | Images: `stream: true` | Leave it out |
+| 400 | `streaming_not_supported` | Images and vision: `stream: true` | Leave it out |
+| 400 | `missing_image` | Vision: no file field `image`, or JSON without `image` | Send the image |
 | 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
 | 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
 | 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
@@ -626,10 +676,42 @@ Two more cases:
   it with one last event, an error with the code `upstream_stream_broken`:
   `data: {"error": {…, "code": "upstream_stream_broken"}}`.
 
+## Apps (deprecated)
+
+Apps, the workloads that are not models (1.4, #88), left the console and are **removed in 1.5**, with a
+migration that removes the ones left. Until then they keep working through the API, and say so:
+
+| Deprecated | What |
+|---|---|
+| The apps part of `/api/workloads` | `POST /api/workloads`; and `GET`, `PUT …/gateway`, `POST …/stop`, `POST …/start`, `DELETE` and `GET …/replicas/<n>/logs` of an app; `GET /api/workloads` while it lists an app |
+| `GET /api/workloads/templates` | The 1.3 templates |
+| `/x/<name>/…` | The [passthrough](#the-passthrough-x), and the console's own `POST /api/playground/vision/<name>/<task>` to an exposed vision app |
+| A key's `workloads` and `workload_list` | Still taken and returned by `/api/keys`, but the console no longer shows them, and `GET /api/keys` no longer lists the apps a key could name |
+
+- **Headers.** Every answer of these, errors included, carries `Deprecation` (RFC 9745: the date it was
+  announced, `@<epoch>`) and a `Link` with `rel="deprecation"` to this section. There is no `Sunset`
+  header: 1.5 has no date yet.
+- **Log.** The server logs a warning for each of the three kinds (apps, templates, `/x/`) at most once
+  an hour, naming the request.
+- **Setup health.** `apps-deprecated` (a warning) names the apps while any exists.
+
+A model deployment's workload (runtime `model`) is not deprecated: it is how models run, and reading it
+(`GET /api/workloads/<id>`, its logs) carries no header.
+
+```http
+HTTP/1.1 200 OK
+Deprecation: @1794787200
+Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
+```
+
+Instead: deploy what you run as a model under **Serving**; for a model that no built-in engine runs, add a
+custom engine (**Models → Engines**, a recipe). Then delete each app with `DELETE /api/workloads/<id>`.
+The [Playground's vision models](#vision) replace the 1.3 vision templates.
+
 ## The passthrough (/x/)
 
-Programs call an exposed workload at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
-whose **Workloads** setting allows it. Like `/v1`, it takes `Authorization: Bearer fyk_…` only: no
+**Deprecated in 1.4, removed in 1.5** ([Apps (deprecated)](#apps-deprecated)). Programs call an exposed app at `https://<server>:7860/x/<name>/<path>?<query>` with an API key
+whose **Apps** setting allows it. Like `/v1`, it takes `Authorization: Bearer fyk_…` only: no
 cookies, no key in the query string, no CORS headers.
 
 ### Paths and methods
@@ -637,25 +719,25 @@ cookies, no key in the query string, no CORS headers.
 | What | Rule |
 |---|---|
 | Methods | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
-| Prefix | `/x/<name>` is removed: `/x/<name>/a/b?c=1` reaches the workload as `/a/b?c=1`, and `/x/<name>` alone as `/` |
+| Prefix | `/x/<name>` is removed: `/x/<name>/a/b?c=1` reaches the app as `/a/b?c=1`, and `/x/<name>` alone as `/` |
 | Path | Passed on byte for byte, as it came. Refused with 400 `invalid_path`, never normalised: `.` or `..` segments, an encoded `.`, `/` or `\` (`%2e`, `%2f`, `%5c`), a backslash, control characters (raw or encoded) and non-ASCII bytes |
 | Query | Passed on as it came |
-| Not passed on | WebSockets (`Upgrade` is removed), gRPC, HTTP/2 to the workload |
+| Not passed on | WebSockets (`Upgrade` is removed), gRPC, HTTP/2 to the app |
 
 ### Request and answer headers
 
 | Header | Direction | What happens |
 |---|---|---|
-| `Authorization` | request | Your API key is checked and removed; the workload gets the replica's internal key, which the agent's key guard checks and removes |
+| `Authorization` | request | Your API key is checked and removed; the app gets the replica's internal key, which the agent's key guard checks and removes |
 | `Cookie`, `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `X-Forgeyard`, `X-Forgeyard-*` | request | Removed |
 | `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` | request | Set fresh: the client's address, `https` or `http`, and the host it called |
 | `X-Forwarded-Prefix` | request | `/x/<name>` |
-| `X-Request-Id` | both | A new id per request, sent to the workload and back to the client |
+| `X-Request-Id` | both | A new id per request, sent to the app and back to the client |
 | Hop-by-hop headers (`Connection` and what it names, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Expect`, `Proxy-*`) | both | Removed |
 | `Set-Cookie`, `Access-Control-*`, `Strict-Transport-Security`, `Clear-Site-Data`, `Alt-Svc`, `Service-Worker-Allowed`, `Report-To`, `NEL`, `Date`, `Server` | answer | Removed (the server sends its own `Date` and `Server`) |
 | `Content-Security-Policy` | answer | Always `sandbox; default-src 'none'; frame-ancestors 'none'` |
 | `X-Content-Type-Options`, `X-Frame-Options`, `Cache-Control`, `Cross-Origin-Resource-Policy`, `Referrer-Policy` | answer | Always `nosniff`, `DENY`, `no-store`, `same-origin` and `no-referrer` |
-| `Location`, `Content-Location` | answer | A path, or an address of the workload itself, is rewritten under `/x/<name>`; other sites and relative references stay. Redirects are never followed |
+| `Location`, `Content-Location` | answer | A path, or an address of the app itself, is rewritten under `/x/<name>`; other sites and relative references stay. Redirects are never followed |
 | `X-Forgeyard-Target` | answer | `workload:<name>#<replica>` |
 | `Content-Encoding`, `Content-Length` and the rest | answer | Passed on: the body is relayed as raw bytes as it arrives (compressed bodies stay compressed; SSE and chunked answers stream) |
 
@@ -663,14 +745,14 @@ cookies, no key in the query string, no CORS headers.
 
 | Limit | Default | Set on |
 |---|---|---|
-| Largest request body | 32 MiB (413 `request_too_large` above) | the workload: **Largest request (MiB)**, 1 to 1,024 |
-| Wait for each piece of the answer | 600 s (504 `upstream_timeout` before the first byte) | the workload: **Read timeout (s)**, 1 to 3,600 |
+| Largest request body | 32 MiB (413 `request_too_large` above) | the app: **Largest request (MiB)**, 1 to 1,024 |
+| Wait for each piece of the answer | 600 s (504 `upstream_timeout` before the first byte) | the app: **Read timeout (s)**, 1 to 3,600 |
 | Connecting to a replica | `GATEWAY_CONNECT_TIMEOUT` (5 s); a replica that cannot be reached is skipped for the next one | the server |
-| Requests at once per replica | no limit (429 `workload_busy` when every replica is full) | the workload |
-| Requests at once per key | no limit (429 `key_busy`); in the Playground, per person | the workload |
+| Requests at once per replica | no limit (429 `workload_busy` when every replica is full) | the app |
+| Requests at once per key | no limit (429 `key_busy`); in the Playground, per person | the app |
 | Requests per minute | the key's own limit (429 `rate_limit_exceeded`); tokens per minute do not apply | the key |
 
-Every 429 carries `Retry-After`. A client that goes away closes the request to the workload at once.
+Every 429 carries `Retry-After`. A client that goes away closes the request to the app at once.
 
 **Usage** counts each request under the model `x:<name>`: requests, errors (an answer's own 5xx too),
 limited requests, bytes in (request bodies) and out (answer bodies as sent), busy time (from sending
@@ -678,55 +760,57 @@ the request until the answer ended) and latency.
 
 ### Errors at /x/
 
-Errors from the gateway have the same shape as at `/v1`. An answer from the workload itself, also a
+Errors from the gateway have the same shape as at `/v1`. An answer from the app itself, also a
 401 or a 5xx, is passed on as it is.
 
 | Status | `code` | Means | What to do |
 |---|---|---|---|
 | 400 | `invalid_path` | The path has a dot segment, an encoded `.`, `/` or `\`, a backslash, a control character or non-ASCII bytes | Send the path without them |
 | 401 | `missing_api_key`, `invalid_api_key`, `revoked_api_key`, `expired_api_key`, `account_disabled` | As at `/v1` | As at `/v1` |
-| 403 | `workloads_not_allowed` | The key's **Workloads** setting is *None* | Change the key's setting |
-| 404 | `workload_not_found` | No such exposed workload for this key: it does not exist, is not exposed, or is not on the key's list | Check the name and the key's list |
-| 413 | `request_too_large` | The body is larger than the workload's **Largest request** | Send less, or raise the limit |
+| 403 | `workloads_not_allowed` | The key's **Apps** setting is *None* | Change the key's setting |
+| 404 | `workload_not_found` | No such exposed app for this key: it does not exist, is not exposed, or is not on the key's list | Check the name and the key's list |
+| 413 | `request_too_large` | The body is larger than the app's **Largest request** | Send less, or raise the limit |
 | 429 | `rate_limit_exceeded` | Over the key's requests per minute | Wait `Retry-After` seconds |
 | 429 | `workload_busy` | Every replica has as many requests in flight as **Requests at once per replica** | Wait `Retry-After` seconds, or add replicas |
-| 429 | `key_busy` | The key has as many requests in flight to this workload as **Requests at once per key** | Wait for one to finish |
-| 502 | `upstream_unreachable` | No replica could be connected to (its program is down or restarting) | Check the workload's output |
+| 429 | `key_busy` | The key has as many requests in flight to this app as **Requests at once per key** | Wait for one to finish |
+| 502 | `upstream_unreachable` | No replica could be connected to (its program is down or restarting) | Check the app's output |
 | 502 | `upstream_error` | The request to the replica failed | Retry |
-| 502 | `replica_refused_key` | The replica's key guard refused the gateway's internal key | Stop and start the workload |
-| 503 | `no_ready_replica` | The workload is stopped, or no replica is ready, or a replica is not behind the key guard yet; the message says which | Start it, wait, or update the agent |
-| 504 | `upstream_timeout` | No answer within the workload's **Read timeout** | Raise the timeout, or check the workload |
+| 502 | `replica_refused_key` | The replica's key guard refused the gateway's internal key | Stop and start the app |
+| 503 | `no_ready_replica` | The app is stopped, or no replica is ready, or a replica is not behind the key guard yet; the message says which | Start it, wait, or update the agent |
+| 504 | `upstream_timeout` | No answer within the app's **Read timeout** | Raise the timeout, or check the app |
 
 An answer that breaks off after it started cannot change its status: the connection is closed before
 the body is complete, so a client never takes a cut-off body for a whole one.
 
 ### From the Playground
 
-The console's **Playground → Vision** tab calls exposed vision workloads through routes of its own,
+Since 1.4 the console's Playground offers vision models only (in its one model picker; the Vision tab
+is gone), and `GET /api/playground/vision/options` no longer lists apps (`workloads`). The route below
+still reaches an exposed vision app until 1.5 (deprecated), the way 1.3's Vision tab did: through routes of its own,
 never through `/x/`: they take the console's sign-in (its cookie, and on `POST` the `X-Forgeyard: 1`
 header from the console's own origin), and `/x/` keeps taking API keys only. Anyone signed in may use
-them. A vision workload is an exposed service started with `--task detect`, `--task segment` or
-`--task depth`, as every [template](#workload-templates) is.
+them. A vision app is an exposed service started with `--task detect`, `--task segment` or
+`--task depth`, as every [template](#app-templates) is.
 
 | Route | What it does |
 |---|---|
-| `GET /api/playground/vision/options` | `workloads`: each exposed vision workload's `name`, `workload_id`, `task`, `title`, `model`, `licence`, `endpoint`, `path`, `ready` (replicas behind the key guard), `reason` (why none is ready), `max_body_mb`; `tasks`: the templates' tasks |
-| `POST /api/playground/vision/<name>/<task>` | The body (the image, as multipart) to the workload's own `POST /v1/<task>`, nothing else: no other path, method or query |
+| `GET /api/playground/vision/options` | `models`: the vision models (see [Vision](#vision)); `tasks`: the vision tasks |
+| `POST /api/playground/vision/<name>/<task>` | The body (the image, as multipart) to the app's own `POST /v1/<task>`, nothing else: no other path, method or query |
 
 The request then follows the `/x/` rules above: the same replicas and key guard, request and answer
-headers (the cookie never reaches the workload), the workload's **Largest request**, **Requests at
+headers (the cookie never reaches the app), the app's **Largest request**, **Requests at
 once per replica** and **Requests at once per key** (counted per person), its timeouts, and the same
-errors. Another task than the workload's, or a workload that is not an exposed vision workload, is 404
+errors. Another task than the app's, or an app that is not an exposed vision app, is 404
 `workload_not_found`; a task the vision server does not have is 404 `unknown_task`. Usage is counted
 under `x:<name>` as *console*, for the person signed in.
 
-## Workload templates
+## App templates
 
-The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
+**Deprecated in 1.4, removed in 1.5.** The templates run `docker.io/tonyhuang1101/forgeyard-vision` at the server's version: the tag
 `X.Y.Z` (CPU, linux/amd64 and linux/arm64) or `X.Y.Z-cuda` (torch with CUDA 13.0, linux/amd64, NVIDIA
 driver 580 or newer). Built from `images/vision` in the repository, the dependencies pinned with hashes
 and the models baked in at their revisions; it runs as an unprivileged user. `GET /api/workloads/templates`
-lists the templates with the workload spec each one makes.
+lists the templates with the app spec each one makes.
 
 | Endpoint | Takes | Returns |
 |---|---|---|
@@ -742,25 +826,25 @@ Every answer also has `model`, `revision`, `width`, `height` and `ms`. The serve
 `{"error": {"message", "code"}}` with 400 (`invalid_image`, `missing_image`, `missing_prompt`,
 `invalid_option`, `invalid_json`) or 413 (`image_too_large`); through `/x/` they are passed on as they are.
 
-## Workload environment
+## App environment
 
-A workload's replica starts with an empty environment. It gets only what its spec declares, plus:
+An app's replica starts with an empty environment. It gets only what its spec declares, plus:
 
 | Variable | Value |
 |---|---|
-| `FORGEYARD_WORKLOAD` | The workload's name |
+| `FORGEYARD_WORKLOAD` | The app's name |
 | `FORGEYARD_REPLICA` | The replica's id |
 | `FORGEYARD_REPLICA_INDEX` | The replica's number, from 0 |
 | `PORT`, `PORT_<NAME>` | For each declared port: a process gets the host port it must listen on; a container gets its own port (the engine maps the host port to it). `PORT` is the first one |
 | `CUDA_VISIBLE_DEVICES`, `NVIDIA_VISIBLE_DEVICES`, `CUDA_DEVICE_ORDER` | NVIDIA: the UUIDs of its cards only. A replica without GPUs sees none |
 | `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES` | AMD: its cards only |
-| `PATH`, `HOME`, `LANG`, `USER`, `LOGNAME` | A process only: a basic `PATH`, its own directory as `HOME`, `LANG=C.UTF-8`, and the workload account |
+| `PATH`, `HOME`, `LANG`, `USER`, `LOGNAME` | A process only: a basic `PATH`, its own directory as `HOME`, `LANG=C.UTF-8`, and the app account |
 
 A spec that sets a GPU variable (also `HIP_VISIBLE_DEVICES` and `GPU_DEVICE_ORDINAL`), `PORT`, or
 any name that starts with `FORGEYARD_` or `PORT_` is refused. In a process's arguments and in
 environment values, `${PORT}` and `${PORT_<NAME>}` become the port. In a process's arguments,
 `${BIND_ADDRESS}` becomes the address it should listen on: `127.0.0.1` behind the agent's key guard
-(a workload exposed at `/x/`), else the agent's address.
+(an app exposed at `/x/`), else the agent's address.
 
 ## Change a deployment through the API
 
@@ -800,7 +884,205 @@ Each saved change is audited as `deployment.changed`, with the changes and the r
 /api/deployments/{id}` also gives `pinned` (the machine chosen, or `null`), `rollout` (while replicas
 restart: `{generation, updated, total, next}`) and, per replica, `not_picked_up`: set when the replica
 was placed on a connected machine whose agent has not reported it for 2 minutes
-([A replica stays pending](troubleshooting.md#a-replica-stays-pending)).
+([A replica stays pending](troubleshooting.md#a-replica-stays-pending)), and (1.4)
+`placement_note`: why the replica is on its machine when a machine that could not fetch what it needs
+decided it, such as *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*
+([A machine cannot reach Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)). The
+deployment's `workload` (as in `GET /api/workloads/{id}`) names it back: `deployment: {id, name}`. In
+`placement`, each machine and each placed replica lists `needs` (what it would download there:
+`model`, `engine`, `image`) and, when that machine could not reach one of those sources in the last
+hour, `unreachable`.
+
+## A machine's model cache through the API
+
+For a console session, like the other `/api` requests (writes also send the `X-Forgeyard: 1`
+header). Everyone signed in can look; admins and operators can remove.
+
+| Request | What it does |
+|---|---|
+| `GET /api/machines/{id}/cache` | The models in that machine's cache, as its agent last reported them |
+| `POST /api/machines/{id}/cache/remove` with `{"key": "<key>"}` | Removes one entry: a revision, one GGUF file of it, a URL model or an engine |
+| `POST /api/machines/{id}/cache/remove-partial` | Removes what unfinished downloads left |
+
+The listing has `free_bytes` and `total_bytes` (the cache's disk), `used_bytes` (what the cache takes
+on it, counting shared files once), `partial_bytes` and `partial_files`, `sizes` (false for an agent
+older than 1.4, which lists only keys) and `remove_note` (why nothing can be removed now, or `null`).
+`models` lists each entry:
+
+| Field | What it is |
+|---|---|
+| `key` | What to send to remove it: `hub/models--<org>--<name>@<commit>` for a Hugging Face revision, `url/<id>` for a single file from a URL |
+| `kind` | `hf` or `url` |
+| `repo`, `revision`, `file` | The repository and commit, or the file name of a URL model |
+| `bytes`, `files` | Its size and number of files. A file that two revisions share counts in both |
+| `parts` | For a revision with GGUF files: each file (a split model once, with all its parts) with its own `key`, `bytes`, `catalog` and `used_by`. Removing the last one removes the revision |
+| `catalog` | The catalog models it is |
+| `used_by` | The deployments (or apps) on that machine that use it |
+
+`engines` lists the engine archives (`key` `engine/<first 16 hex digits of the archive's SHA-256>`,
+`name`, `bytes`, `used_by`). A removal answers `freed_bytes` (what was freed on the disk) and the
+listing afterwards (`cache`).
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `model_in_use` | A deployment on that machine uses it; `in_use` names them. The agent checks again before it deletes anything |
+| 409 | `cache_busy` | A download of that model (or, for partial downloads, any download) is in progress there |
+| 409 | `machine_offline`, `agent_too_old`, `agent_no_answer` | The agent is not connected, does not support removing (before 1.4), or did not answer within a minute |
+| 409 | `cache_remove_failed` | The agent could not delete it; the message says why |
+| 404 | `not_in_cache` | The machine does not report that key |
+| 403 | | Not an admin or an operator |
+
+Each removal is audited as `model.cache_removed` with the machine, the key, the model and
+`freed_bytes`. Behind it is the agent protocol feature `cache_admin` (agents from 1.4): the agent
+lists its cache with sizes, removes on request, and refuses while a replica there uses the files or
+while one of their downloads runs.
+
+## Download a model ahead through the API
+
+For a console session, like the other `/api` requests (writes also send the `X-Forgeyard: 1`
+header). Everyone signed in can look; admins and operators start and cancel downloads.
+
+| Request | What it does |
+|---|---|
+| `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | Each machine, and whether it can take this model (and the recipe's engine) |
+| `POST /api/downloads` with `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | Starts a download on each machine that can take it; `engine` is on by default, and `recipe` defaults to the first recipe that serves the model |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>` | The downloads under way first, then the finished ones (the last 100) |
+| `POST /api/downloads/{id}/cancel` | Cancels one under way; its agent stops it at once and keeps what is on disk |
+| `PUT /api/machines/{id}/fetch-via` with `{"fetch_via": "auto"}` | Admins only: how that machine fetches models and engine archives: `auto` (directly, through the server after a network failure), `server` (always through the server) or `direct` (never through it). Its agent gets the new way at once |
+
+Each machine in `targets` has a `state`: `ok`, `cached` (already there), `downloading`, `too_old` (an
+agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB margin is more than the
+cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
+the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
+when no variant of the recipe runs there; and `via`, how the model would come (`direct`, `auto` or
+`server`). The variant is the one the machine would run: a GPU variant
+when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
+
+A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
+`state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
+shape as a deployment replica's, with `via: "server"` while the bytes come through the server),
+`reason`, `via` (`direct`, or `server` once it came through the server), `requested_by`,
+`created_at`, `finished_at` and `waiting` (the machine is offline). Finished ones are kept 30 days, at
+most 20 per machine.
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `nothing_to_download` | No machine can take it; `skipped` lists each with its `state` and `reason` |
+| 409 | `download_finished` | Cancel of a download that already ended |
+| 422 | `local_model` | A local model is a directory on the machines: there is nothing to download |
+| 422 | `recipe_not_compatible`, `bad_fetch_via` | The recipe does not serve the model; a `fetch_via` that is not one of the three |
+| 404 | `not_found` | No such model, machine or download |
+| 403 | | Not an admin or an operator (not an admin, for `fetch-via`) |
+
+Audit events: `model.download_requested` (one per machine, with the model and the engine),
+`model.download_cancelled`, `node.fetch_via_changed`, and `model.checksum_recorded` when the SHA-256 of
+a URL model is recorded: a single GGUF file from a URL has no published checksum, so the first one an
+agent computes after a complete download is kept in the catalog entry (`files[0].sha256` of the model's
+metadata, with `sha256_from`, the machine, and `sha256_at`), and every later download must match it. A
+different one reported later is logged and never replaces it.
+
+Behind it is the agent protocol feature `prefetch` (agents and servers from 1.4). The server lists each
+queued or downloading row in `desired.downloads`, beside the replicas: `{id, model, engine?, image?,
+image_ids?}` (a Hugging Face model's block carries the server's token for gated repositories, kept in
+memory only, as for replicas). The agent fetches it with the code a replica's download uses (the same
+locks, resume from partial files, checksums and cancel; an image with the pull progress of 1.3.1),
+starts nothing, runs at most two at a time and reports `status.downloads` (`{id, state, reason,
+download}`); a download missing from the next list is cancelled. Migration `0015` adds the table
+`model_downloads` and the column `nodes.fetch_via` (`auto` for every existing machine).
+
+### Downloads through the server (the relay)
+
+The agent protocol feature `relay` (agents and servers from 1.4). To an agent that lists it, on a
+machine whose `fetch_via` is `auto` or `server`, every model block (Hugging Face or URL) and engine
+archive block of a desired replica or download carries `relay: {path, mode}`: `mode` is `server`
+(always through the server; set so, or `auto` with a network failure to that host remembered in the
+last hour) or `auto` (directly first, through the server after a network failure). A `server` model
+block carries no `token`. The agent then fetches from its own server, never from a host the server
+names:
+
+| Request | What it returns |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/model/{file path}` | One file of a Hugging Face model |
+| `GET /agent/v1/relay/{replica\|download}/{id}/model` | The file of a URL model |
+| `GET /agent/v1/relay/{replica\|download}/{id}/engine` | The engine archive of a process variant |
+
+`{id}` is the replica's or the download's id from the desired list. The request carries the machine
+credential (`Authorization: Bearer …`) and at most one `Range: bytes=N-` (or `N-M`), which is passed
+on to the source; the answer is the source's 200 or 206 with `Content-Length` and `Content-Range`,
+streamed and stored nowhere. Browsers (any `Origin`) are refused.
+
+The server serves only what the machine's **current** desired state names: a replica placed there
+and wanted running, or a download to it that is queued or under way, and only a file that model
+lists. It builds the source URL itself from the catalog entry or the recipe, with its own Hugging Face
+token (or the deployment's) and its own model-source rules (`MODEL_ALLOW_PRIVATE_HOSTS`, the URL
+hosts). It checks every 2 seconds that the relay is still wanted, and closes it when not.
+
+| Status | `code` | When |
+|---|---|---|
+| 401 | `credential_refused` | No credential, or a revoked one |
+| 403 | `relay_off` | The machine is set to `direct`, or its agent does not speak `relay` |
+| 403 | `browser_refused` | The request has an `Origin` |
+| 403 | `source_refused` | The source refused access (a gated model without a token that works) |
+| 403 | `source_blocked` | The source's address is not allowed by the server's rules |
+| 404 | `relay_not_wanted` | Nothing in the machine's desired state has that id, file or engine |
+| 416 | `bad_range`, `range_not_satisfiable` | More than one range, or past the end |
+| 429 | `relay_busy` | Two relays under way for that machine, or four in all; `Retry-After: 5` |
+| 502 | `source_unreachable`, `source_failed` | The server could not reach the source, or it answered an error |
+
+The agent stops on 401, 403 and 404 (with the server's words), waits out 429 without counting it as a
+try, and retries the rest like a network error. Its progress then has `download.via: "server"`.
+
+**Engine images** (the protocol feature `relay_images`, agents and servers from 1.4). To an agent that
+also lists it, a desired replica (beside its `spec`) or download whose engine image is pinned by digest
+and recorded in `forgeyard/recipes/images.lock.json` carries `image_relay: {path, mode}` with the same
+modes; `path` is `/agent/v1/relay/{replica|download}/{id}/image`. A tag-only image never gets it.
+
+| Request | What it returns |
+|---|---|
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/manifest` | The recorded manifest of the machine's platform (from its agent's `platform.arch`), the registry's exact bytes, with `Docker-Content-Digest` and `Forgeyard-Platform` (`linux/amd64`) |
+| `GET /agent/v1/relay/{replica\|download}/{id}/image/blobs/{digest}` | That manifest's config or one of its layers, by digest; `Range` as above |
+
+The server fetches the manifest by its recorded digest and refuses it unless its bytes hash to it and
+it names the recorded config; it keeps it in memory. Blobs come from the registry's API with an
+anonymous pull token (Docker Hub, GHCR, quay.io and other registries that hand them out), through the
+same egress rules as model files; the token is dropped when the registry redirects to its CDN. A whole
+blob is hashed on its way through and its last piece is sent only when the hash matches. The agent
+checks the manifest's digest against the recorded ids, every blob against its digest, the config's
+content id against the recorded ones and its architecture against the machine's, then loads an
+archive that holds an OCI image layout (`oci-layout`, `index.json`, `blobs/sha256/…`) and the classic
+`manifest.json`, tags it `repo:tag` and runs the `image_ids` check on it. Its progress is a
+`download` with `phase: "image"`, `layers`, `layers_done`, `via: "server"`, and `unpacking` while it loads.
+
+| Status | `code` | When |
+|---|---|---|
+| 403 | `relay_off` | The machine is set to `direct`, or its agent does not speak `relay_images` |
+| 404 | `relay_not_in_image` | The digest is not the config or a layer of that manifest |
+| 409 | `relay_image_not_pinned` | The image is not pinned by digest with recorded ids: upload it instead |
+| 409 | `relay_no_platform` | The image has no build for the machine's architecture |
+| 502 | `source_failed` | The registry's manifest does not hash to the recorded digest, or names another config |
+
+### Uploading an image file to a machine
+
+`POST /api/machines/{id}/images` (admins). The body is the file `docker save` or `podman save` wrote,
+gzip-compressed or not, with `Content-Length` (411 without it) and at most `IMAGE_UPLOAD_MAX_GB`
+(413); `X-Filename` (URL-encoded) names it in the audit log. The server sends the agent `image_load
+{request_id, path, size, name}` (protocol feature `image_load`); the agent fetches `GET
+/agent/v1/image-upload/{ticket}` with its credential (once; another machine's credential gets 404),
+streams it into `docker load` / `podman load`, and answers `image_loaded {request_id, ok, reason,
+images: [{id, tags, content, os, architecture}]}`. The answer to the browser is `{ok, bytes, images}`,
+each image with `matches: [{recipe, variant, image, how}]`: `how` is `checked` (its id or content id is
+one recorded for that recipe's pinned image) or `tag` (a tag-only recipe image named like one of its
+tags).
+
+| Status | `code` | When |
+|---|---|---|
+| 409 | `machine_offline`, `agent_cannot_load` | The agent is not connected, or has no container engine or is older than 1.4 |
+| 409 | `upload_busy` | An upload to that machine is under way (429: two in all) |
+| 400 | `upload_short`, `upload_broken` | The body ended early or broke off |
+| 504 | `agent_no_fetch`, `agent_stalled` | The agent did not start fetching within 30 s, or took nothing for 2 minutes |
+| 422 | `image_load_failed` | The engine could not load it (the agent's words) |
+
+Audited as `node.image_uploaded` (the file name, its size, `ok`, the images loaded or why not).
 
 ## Setup health checks
 
@@ -814,13 +1096,12 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 |---|---|---|
 | `setting-unknown` | warning | A name in `.env`, or one in the environment that starts like a setting (`GATEWAY_`, `PROVIDER_`, `EGRESS_`…) or is very close to one, is not a setting. It says which setting you probably meant |
 | `tls-setting-ignored` | warning | `TLS_*` set with `TLS=off`; `TLS_CA_FILE` without your own certificate; `TLS_EXTRA_NAMES` with your own certificate |
-| `setting-deprecated` | warning | A [deprecated setting](#deprecated-settings) is set. It still works until 1.4; the finding names what replaces it |
-| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and a key file (`FORGEYARD_SECRET_KEY_FILE` or `SECRET_KEY_FILE`) are set, or the two file settings name different files |
-| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 heartbeats (`AGENT_HEARTBEAT_SECONDS`, or the shortest heartbeat of 2 seconds) |
+| `setting-removed` | warning | A [setting removed in 1.4](#removed-settings) is still set, so it is ignored. The finding names what replaces it or what happens instead |
+| `secret-key-both` | warning | Both `FORGEYARD_SECRET_KEY` and `FORGEYARD_SECRET_KEY_FILE` are set |
+| `heartbeat-flapping` | warning | `AGENT_OFFLINE_SECONDS` is under 2.5 heartbeats (under 5 seconds: the shortest heartbeat is 2 seconds) |
 | `private-hosts-allowed` | warning | `MODEL_ALLOW_PRIVATE_HOSTS`, `PROVIDER_ALLOW_PRIVATE_HOSTS` or `MEDIA_ALLOW_PRIVATE_HOSTS` is on |
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
-| `setup-token-left` | note | `FORGEYARD_SETUP_TOKEN` is still set after setup |
 | `env-seed-ignored` | note | A first-value setting (`MODEL_URL_HOSTS`, `MODEL_LOCAL_DIRS`, `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, `GATEWAY_CLOUD_*`) differs from what an admin saved, which wins |
 | `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **I have a backup of key id …** ticks it off; it comes back when the key changes |
 | `host-loopback` | error | `HOST` is a loopback address, but a machine joined from another address (and no proxy is in front) |
@@ -831,7 +1112,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
 | `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
 | `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
-| `process-workloads-off` | note | An online agent refuses process workloads; the finding gives its reason |
+| `apps-deprecated` | warning | Apps (workloads that are not models) exist: they, their API and `/x/` are removed in 1.5 |
+| `process-workloads-off` | note | An online agent refuses to run processes; the finding gives its reason |
 | `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
 | `machine-simulated` | warning | A machine reports simulated hardware |
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
@@ -877,7 +1159,7 @@ already `forgeyard agent`, so add only the rest (`… forgeyard-agent:<version> 
 | Command | What it does |
 |---|---|
 | `forgeyard agent` | Run the agent (the service runs `forgeyard agent --config /etc/forgeyard/agent.toml`). With a join token and no credential yet, it joins first; `--rejoin` joins again as a new machine |
-| `forgeyard agent init [--print] [--force]` | Write `/etc/forgeyard/agent.toml` from what is detected (GPUs, Docker or Podman, systemd, a workload account), and print it. `--print` only prints. Flags given here (`--server`, `--ca-fingerprint`, `--model-cache`…) go into the file |
+| `forgeyard agent init [--print] [--force]` | Write `/etc/forgeyard/agent.toml` from what is detected (GPUs, Docker or Podman, systemd, an app account), and print it. `--print` only prints. Flags given here (`--server`, `--ca-fingerprint`, `--model-cache`…) go into the file |
 | `forgeyard agent join --join-token fyj_…` | Join with the file's settings, save the credential and exit. Already joined: nothing to do; `--rejoin` joins again as a new machine |
 | `forgeyard agent config [--get KEY]` | Every setting in effect and where it came from; `--get models.cache` prints one value |
 | `forgeyard agent trust --server https://… [--ca-fingerprint …]` | Switch a joined machine to another address or CA, keeping its credential |
@@ -897,7 +1179,7 @@ already `forgeyard agent`, so add only the rest (`… forgeyard-agent:<version> 
 | `--server URL` | The server's address (default: the server the script came from) |
 | `--name NAME`, `--label KEY=VALUE` | The machine's name and labels (first install) |
 | `--model-cache DIR` | Where models go (default `/srv/forgeyard-models`) |
-| `--workload-user USER` | The account process workloads run as (default `forgeyard-run`, created when missing) |
+| `--workload-user USER` | The account processes run as (default `forgeyard-run`, created when missing) |
 | `--no-start` | Install and join, but do not start the service |
 | `--rejoin` | Join again as a new machine |
 | `--uninstall [--purge]` | Remove the service and the program; `--purge` also deletes the settings and the credential |
@@ -930,6 +1212,8 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `forgeyard-vision:<server version>-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `forgeyard-vision:<server version>` |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
@@ -967,6 +1251,18 @@ the card's render node; `false`: the render node only, for engines that use only
 values the variant cannot run, such as `{kv_cache: [f8_e4m3]}`; a deployment with one of them is never
 placed on it, and the placement says why).
 
+The `vision` recipe (1.4) runs Forgeyard's own vision server with `--task {task}` (the model's task,
+a placeholder of its own) and `--model {model_path}`. Its image is not pinned by digest: a variant names
+it with `forgeyard_image: vision` (or `vision-cuda`) instead of `image`, which is the image of the
+server's own version, published with the same release (see [Container images](#container-images)). On a
+machine without registry access, `docker load` it under that tag. A model is a vision model when its
+`config.json` names an `…ForObjectDetection` architecture (detect: RT-DETR, D-FINE, DETR without a timm
+backbone…), SAM 2 or 2.1 (segment) or an `…ForDepthEstimation` one (depth: Depth Anything, DPT…). A
+Hugging Face vision model is only added with a permissive licence (Apache-2.0, MIT, BSD): another
+licence, or none, answers 422 `not_a_vision_model` (Depth Anything V2 Base and Large are CC-BY-NC-4.0,
+Ultralytics' YOLO checkpoints AGPL-3.0). Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
+1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU).
+
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
 `openai-videos`, and its `{keep_seconds}` placeholder is the deployment's `keep_minutes` and an hour.
@@ -980,14 +1276,14 @@ Each release publishes two images on Docker Hub, built by CI from the release's 
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.3.3` (exactly that release), `1.3` (its newest patch release), `latest` (the newest
+- **Tags**: `1.4.0` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with
   `DATA_DIR=/data` (a volume), `HOST=0.0.0.0` and `PORT=7860` (exposed), and a health check on
   `/api/health`. [Run the server in Docker](how-to.md#run-the-server-in-docker).
 - **The agent image** runs `forgeyard agent` behind `tini`, as root (it drives the host's Docker),
-  with `FORGEYARD_LIMITS=rlimit`, the workload account `forgeyard-run` (uid 990) and a volume at
+  with `FORGEYARD_LIMITS=rlimit`, the app account `forgeyard-run` (uid 990) and a volume at
   `/var/lib/forgeyard-agent`. [Run the agent in Docker](how-to.md#run-the-agent-in-docker).
 - **Which agent image a server names**: [`AGENT_IMAGE`](#machines), else the published one at the
   server's version. When nothing is published (the namespace in `forgeyard/install/images.py` is

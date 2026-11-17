@@ -54,7 +54,8 @@ describe("trust this server", () => {
     server({ mode: "forgeyard-ca", https: true }, null);
     mount("/trust");
     expect(await screen.findByRole("heading", { name: "Trust this server" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /Why your browser warns/ })).toBeTruthy();
+    // The heading is there at once; the rest once /api/tls has answered.
+    expect(await screen.findByRole("heading", { name: /Why your browser warns/ })).toBeTruthy();
     expect(screen.getByText(/made its own small certificate authority/)).toBeTruthy();
     expect(screen.getByText(Array(32).fill("AB").join(":"))).toBeTruthy();
     expect(screen.getByRole("link", { name: /forgeyard-ca\.crt/ }).getAttribute("href")).toBe("/api/tls/ca.crt");
@@ -84,7 +85,8 @@ describe("trust this server", () => {
     expect(await screen.findByRole("heading", { name: "For admins" })).toBeTruthy();
     expect(screen.getByLabelText("Trust command").textContent).toBe(cmd);
     expect(screen.getByText("localhost, forge.lan, 127.0.0.1")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Back to Forgeyard" })).toBeTruthy();
+    // The link follows the sign-in state, which may arrive after /api/tls.
+    expect(await screen.findByRole("link", { name: "Back to Forgeyard" })).toBeTruthy();
   });
 
   it("FY-WEB-116 plain HTTP: admins see the warning on every page, users do not", async () => {

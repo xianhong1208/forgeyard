@@ -17,9 +17,10 @@ from forgeyard.cli import main as cli_main
 from forgeyard.config import get_settings
 from forgeyard.db import reset_engine
 from forgeyard.security import crypto, tls
-from tests.conftest import OWNER, SETUP_TOKEN
+from tests.conftest import OWNER, SETUP_TOKEN, fast_heartbeat
 from tests.test_agent import LiveServer, _http
 from tests.tls_helpers import LiveTLS, ca_of, free_port, https
+from tests.waits import until
 
 
 def test_fy_trust_001_fingerprint_formats():
@@ -55,7 +56,7 @@ async def _wait(predicate, timeout=10.0):
 @pytest.fixture()
 def tls_server(monkeypatch):
     monkeypatch.setenv(SIMULATION_ENV, "1")
-    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    fast_heartbeat(monkeypatch)
     port = free_port()
     monkeypatch.setenv("HOST", "127.0.0.1")
     monkeypatch.setenv("PORT", str(port))
@@ -128,7 +129,7 @@ def test_fy_trust_003_a_machine_in_the_middle_with_another_ca_is_refused(tls_ser
 
     # The impostor: another data dir, so another CA, on the same address. (Same database and secret
     # key: with PostgreSQL the database is not in the data dir.)
-    monkeypatch.setenv("SECRET_KEY_FILE", str(real_dir / "secret.key"))
+    monkeypatch.setenv("FORGEYARD_SECRET_KEY_FILE", str(real_dir / "secret.key"))
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "mitm"))
     get_settings.cache_clear()
     reset_engine()
@@ -145,7 +146,8 @@ def test_fy_trust_003_a_machine_in_the_middle_with_another_ca_is_refused(tls_ser
             agent = Agent(mitm.url, "fym_x", SimulatedInventory("nvidia-a100x8"), backoff=Backoff(base=0.05, cap=0.1),
                           ca_pem=real_ca)
             run = asyncio.create_task(agent.run())
-            await asyncio.sleep(0.6)
+            # At least one attempt refused (it keeps trying with a short backoff), not a fixed time.
+            await until(lambda: "is not the server this agent trusts" in caplog.text, "the refusal in the log")
             agent.stop()
             await asyncio.wait_for(run, 5)
             return agent.sessions
@@ -190,7 +192,7 @@ def test_fy_trust_004_an_http_agent_upgrades_with_trust_and_keeps_its_credential
             agent = Agent(plain_url, joined["credential"], SimulatedInventory("nvidia-a100x8"),
                           backoff=Backoff(base=0.05, cap=0.1))
             run = asyncio.create_task(agent.run())
-            await asyncio.sleep(0.8)
+            await until(lambda: "forgeyard agent trust --server" in caplog.text, "the advice in the log")
             agent.stop()
             await asyncio.wait_for(run, 5)
             return agent.sessions

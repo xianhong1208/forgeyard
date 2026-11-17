@@ -31,6 +31,37 @@ Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrad
 test fails when the models and migrations drift apart. Test IDs (`FY-…`) are unique across the
 project.
 
+## Writing tests that do not flake
+
+CI runs on small machines (two cores, often busy; the PostgreSQL job the slowest), so a test that
+passes here can fail there now and then. Almost every such failure so far was a test that waited a
+fixed time for something to happen, or read a page before the data it needed had arrived.
+
+- **Wait for the state, not for time.** `tests/waits.py` has `wait_until(predicate, what, timeout=10)`
+  and, in async tests, `await until(...)`: they return as soon as the state is reached and fail naming
+  `what` after the deadline, so the deadline can be generous. To have one request in flight before the
+  next, start it in a thread and wait until the fake engine or app has received it (FY-IGEN-007,
+  FY-X-014, FY-PGV-008), not `time.sleep(0.2)`.
+- **Set up the state before the step that could race past it.** A fake job that must still be at work:
+  make the fake engines hang before asking for it, not after (FY-VID-005).
+- **Fixtures must look current.** The app's liveness sweep runs every 2 s during the tests, so
+  `make_node` says its machine was heard from just now; a machine with no heartbeat went offline
+  under a slow test and the next deploy got 409.
+- **Stopping a process is not instant.** End process groups with `tests/leaks.py`'s `kill_group()`,
+  which waits until every member is gone; the per-test leak check otherwise sees one still dying.
+- **A sleep is fine when time is what the test is about**: a timeout, a stall, "nothing happens
+  within 0.5 s".
+- **UI tests: everything from the API arrives later, and in any order.** Use `await screen.findBy…` or
+  `waitFor` for anything that comes from a fetch (a form shown once its data is there, a select's
+  options from another endpoint, a value set when an answer arrives), and `getBy…` only for what is
+  already known to be on the page. After a save, wait for its message before the next click.
+  `npm run test:jitter` runs the UI tests with every fake fetch answering after a random 0–150 ms
+  (`web/src/test/fetchJitter.ts`): run it a few times after writing UI tests.
+- **Try it under load before CI does**: pin the run to two cores and keep them busy, for example
+  `for i in 1 2 3 4; do taskset -c 2,3 sh -c 'while :; do :; done' & done`, then
+  `taskset -c 2,3 uv run --no-sync python -m pytest -q` (or `npx vitest run`), and kill the four
+  loops afterwards.
+
 ## Layout
 
 | Path | What |
@@ -41,7 +72,7 @@ project.
 | `forgeyard/db.py`, `forgeyard/migrations/` | the database models; Alembic migrations, run on start |
 | `forgeyard/api/` | the HTTP API: `auth` (setup, sign-in, sessions, links), `users`, `audit_log`, `machines`, `workloads`, `onboarding` (Get started), `tls` (the CA download), `install` (`/install.sh` and the wheel), `guide` |
 | `forgeyard/api/models.py`, `deployments.py` | catalog, recipes, sources; deployments, estimate, try it |
-| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground (its Vision tab through `forgeyard/gateway/vision.py`); API keys, their limits, cloud setting and budget, and usage |
+| `forgeyard/api/gateway.py`, `keys.py` | `/v1/*` and the playground (its vision panel through `forgeyard/gateway/vision.py`); API keys, their limits, cloud setting and budget, and usage |
 | `forgeyard/api/providers.py` | cloud providers and their models: add, test, import, prices by hand, clone |
 | `forgeyard/api/routing.py` | routes and their tiers of targets |
 | `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |
@@ -61,13 +92,13 @@ project.
 | `forgeyard/gateway/usage.py`, `errors.py` | usage counted in memory and written to the database; errors in OpenAI's shape |
 | `forgeyard/machines/` | agent protocol, join and stream endpoints, live connections, offline detection |
 | `forgeyard/workloads/` | the workload spec, placement and the GPU allowlist, desired state and status |
-| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list, the server's Hugging Face token |
+| `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list, the server's Hugging Face token, downloads ahead of a deployment (`prefetch.py`, with `api/downloads.py`) |
 | `forgeyard/recipes/` | the built-in engine recipes (YAML), images pinned by digest |
 | `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, HTTPS and the CA, secrets at rest, `secrets reset` |
 | `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`) |
 | `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
-| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks |
+| `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks, downloads ahead of a deployment (`prefetch.py`) |
 | `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, the published images' names (`images.py`), the server image's health check |
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
@@ -76,10 +107,10 @@ project.
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | a release tag publishes both images on Docker Hub |
 | `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
-| `scripts/gpu_probe.py` | checks which NVIDIA GPU a workload sees, through the CUDA driver only |
+| `scripts/gpu_probe.py` | checks which NVIDIA GPU an app sees, through the CUDA driver only |
 | `scripts/accept_tts.py` | the real-hardware acceptance of text to speech (also the `tts` group of `accept_all.py`) |
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
-| `images/vision/` | the vision server behind the workload templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
+| `images/vision/` | the vision server behind the app templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
 | `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

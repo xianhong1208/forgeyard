@@ -13,7 +13,7 @@ Each check is a small function over a `Context` that yields `Finding`s:
 
 `scope` names what it is about (server, machine:3, key:12, route:4, provider:2, deployment:5,
 setting:NAME); `id@scope` is the finding's key, which a snooze remembers. `pages` says where the
-web UI shows it as a banner (machines, keys, providers, models, users, and route:4 or provider:2 for
+web UI shows it as a banner (machines, serving, keys, providers, cloud-models, users, and route:4 or provider:2 for
 a detail page); every finding is also listed under Get started -> Setup health.
 
 Admins only: the findings name machines, keys and people.
@@ -302,7 +302,7 @@ def secret_key_backup(ctx: Context) -> Iterator[Finding]:
     where = (f"the value of {crypto.KEY_ENV}" if crypto.key_from_env() else str(crypto.key_path()))
     yield Finding("secret-key-backup", "warning", f"Back up the secret key (key id {kid})",
                   f"Keep a copy of {where} apart from the database. Without it, the stored Hugging Face tokens, "
-                  "provider keys and workload environment values cannot be read after a restore. "
+                  "provider keys and apps' environment values cannot be read after a restore. "
                   f"Confirm here once you have a backup of key id {kid}.",
                   "/guide/en/how-to#back-up-and-restore", "How to back up", scope=f"secret-key:{kid}")
 
@@ -491,8 +491,8 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
                           pages=("machines",))
         process = (n.runtime_info or {}).get("process") or {}
         if process and not process.get("ok"):
-            yield Finding("process-workloads-off", "info", f"Process workloads are off on {n.name}",
-                          f"The agent refuses process workloads: {process.get('reason') or 'no reason given'}.",
+            yield Finding("process-workloads-off", "info", f"Processes are off on {n.name}",
+                          f"The agent refuses to run apps and engines as processes: {process.get('reason') or 'no reason given'}.",
                           "/guide/en/reference#agent-settings", "Open the reference", scope=f"machine:{n.id}",
                           pages=("machines",))
         cache = n.model_cache or {}
@@ -500,8 +500,10 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
         if isinstance(free, int) and isinstance(total, int) and total > 0 and free < CACHE_FREE_MIN * total:
             yield Finding("model-cache-full", "warning", f"The model cache on {n.name} is nearly full",
                           f"{_size(free)} of {_size(total)} free. New models cannot be downloaded there once it is "
-                          "full: remove models that are no longer deployed, or move the cache to a larger disk.",
-                          "/guide/en/how-to#move-a-model-cache", "How to move a cache", scope=f"machine:{n.id}",
+                          "full: remove models that are no longer deployed (the machine's page, Models in cache), "
+                          "or move the cache to a larger disk.",
+                          "/guide/en/how-to#free-disk-space-on-a-machine", "How to free disk space",
+                          scope=f"machine:{n.id}",
                           pages=("machines",))
 
 
@@ -525,7 +527,26 @@ def offline_with_replicas(ctx: Context) -> Iterator[Finding]:
                           f"{'has' if len(names) == 1 else 'have'} replicas placed there that cannot answer. Start its "
                           "agent again; if the machine is gone for good, revoke it.",
                           "/guide/en/troubleshooting#an-agent-shows-offline", "Why a machine is offline",
-                          scope=f"machine:{n.id}", pages=("machines", "models"))
+                          scope=f"machine:{n.id}", pages=("machines", "serving"))
+
+
+@check
+def apps_deprecated(ctx: Context) -> Iterator[Finding]:
+    """V51 (1.4, #88): apps (workloads that are not models) are deprecated and go in 1.5, with /x/ and the
+    templates. Said while any app exists, so nobody learns it from the upgrade."""
+    from forgeyard import deprecation
+
+    apps = ctx.db.scalars(select(Workload.name).where(Workload.runtime != "model").order_by(Workload.name)).all()
+    if not apps:
+        return
+    yield Finding("apps-deprecated", "warning",
+                  f"{len(apps)} app{'s' if len(apps) != 1 else ''} will stop working in Forgeyard {deprecation.REMOVED_IN}",
+                  f"{_names(apps)} {'is an app' if len(apps) == 1 else 'are apps'}: a workload that is not a model. Apps, "
+                  "their API (/api/workloads, the templates) and the gateway's /x/ are deprecated and removed in "
+                  f"{deprecation.REMOVED_IN}, and the console no longer shows them. Deploy what you need as a model "
+                  "instead (a custom engine runs a model Forgeyard has no engine for), then delete the apps "
+                  "with DELETE /api/workloads/<id>.",
+                  f"{REFERENCE}#apps-deprecated", "What changes", pages=("machines",))
 
 
 # --- models and deployments
@@ -549,7 +570,7 @@ def replica_margin_low(ctx: Context) -> Iterator[Finding]:
                           f"{_size(a.vram_free)} is free on the card that runs {_names(names)}; Forgeyard keeps "
                           f"{_size(floor)}. Other processes use about {_size(outside)} there. If they grow, the "
                           "replica can run out of memory: free memory on the card, or move the deployment.",
-                          "/models", "Open Models", scope=f"gpu:{n.id}:{a.index}", pages=("models", "machines"))
+                          "/serving", "Open Serving", scope=f"gpu:{n.id}:{a.index}", pages=("serving", "machines"))
 
 
 @check
@@ -567,8 +588,8 @@ def deployments_waiting(ctx: Context) -> Iterator[Finding]:
                           f"{_plural(len(stuck), 'replica')} of {d.name} found no machine for over "
                           f"{int(WAITING_AFTER.total_seconds() // 60)} minutes" + (f": {reason}" if reason else ".")
                           + " Free memory, allow more GPUs, or lower its context or concurrency.",
-                          f"/models/deployments/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
-                          pages=("models", f"deployment:{d.id}"))
+                          f"/serving/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
+                          pages=("serving", f"deployment:{d.id}"))
 
 
 @check
@@ -596,8 +617,8 @@ def exclusive_could_share(ctx: Context) -> Iterator[Finding]:
                       f"Replica {r.ordinal} of {d.name} reserves {_size(r.vram)} of the {_size(a.vram_total)} of GPU "
                       f"#{a.index} on {r.node.name}, and keeps the card to itself (exclusive). With Share VRAM the "
                       "rest of the card can hold other models; they then share its compute. Change it with Edit on "
-                      "the deployment (its replicas restart).", f"/models/deployments/{d.id}/edit",
-                      "Change the deployment", scope=f"deployment:{d.id}", pages=("models", f"deployment:{d.id}"))
+                      "the deployment (its replicas restart).", f"/serving/{d.id}/edit",
+                      "Change the deployment", scope=f"deployment:{d.id}", pages=("serving", f"deployment:{d.id}"))
 
 
 # llama.cpp's short and long spellings of the flags Forgeyard sets.
@@ -646,8 +667,8 @@ def extra_args_override(ctx: Context) -> Iterator[Finding]:
                           "deployment's parameters (memory, context, address, key). Repeating "
                           f"{'it' if len(clash) == 1 else 'them'} in Extra engine arguments can break the memory "
                           "estimate, the gateway's connection or the key guard. Use the parameters instead.",
-                          f"/models/deployments/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
-                          pages=("models", f"deployment:{d.id}"))
+                          f"/serving/{d.id}", "Open the deployment", scope=f"deployment:{d.id}",
+                          pages=("serving", f"deployment:{d.id}"))
 
 
 REFUSED = re.compile(r"access refused|HTTP 40[13]\b", re.I)
@@ -670,10 +691,10 @@ def gated_without_token(ctx: Context) -> Iterator[Finding]:
                       f"{d.name} needs a Hugging Face token" if refused else f"{d.name} may not download: no Hugging Face token",
                       f"{m.name} is gated on Hugging Face, and neither the server nor this deployment has a token"
                       + (", so its download was refused." if refused else ": its download will be refused.")
-                      + " Set the server's token under Models → Model sources (after accepting the model's licence on "
+                      + " Set the server's token under Models → Sources (after accepting the model's licence on "
                       "Hugging Face with that account), or give the deployment its own.",
-                      "/models?tab=catalog", "Set the token", scope=f"deployment:{d.id}",
-                      pages=("models", f"deployment:{d.id}"))
+                      "/models?tab=sources", "Set the token", scope=f"deployment:{d.id}",
+                      pages=("serving", f"deployment:{d.id}"))
 
 
 # --- gateway, cloud and money
@@ -731,13 +752,13 @@ def cloud_models_unpriced(ctx: Context) -> Iterator[Finding]:
             yield Finding("cloud-model-unpriced", "error", f"{pm.upstream_model} has no price, and budgets are set",
                           f"Requests to {pm.upstream_model} ({p.name}) are refused with 402 budget_unpriced whenever a "
                           "budget applies, because their cost cannot be reserved. Set its input and output prices, or "
-                          "refresh them from OpenRouter.", f"/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
+                          "refresh them from OpenRouter.", f"/cloud/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
                           pages=("providers", f"provider:{p.id}"))
         else:
             yield Finding("cloud-model-cost-unknown", "info", f"The cost of {pm.upstream_model} is unknown",
                           f"{pm.upstream_model} ({p.name}) has no price, so Usage cannot say what it costs, and it will "
                           "be refused as soon as a budget is set. Set its prices, or refresh them from OpenRouter.",
-                          f"/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
+                          f"/cloud/providers/{p.id}", "Set prices", scope=f"provider-model:{pm.id}",
                           pages=("providers", f"provider:{p.id}"))
 
 
@@ -757,7 +778,7 @@ def providers_setup(ctx: Context) -> Iterator[Finding]:
         if kind.key_required and not p.key_last4:
             yield Finding("provider-no-key", "error", f"{p.name} has no API key",
                           f"{kind.label} needs an API key, and {p.name} has none: every request to it fails.",
-                          f"/providers/{p.id}", "Add the key", scope=f"provider:{p.id}", pages=pages)
+                          f"/cloud/providers/{p.id}", "Add the key", scope=f"provider:{p.id}", pages=pages)
         host = host_of(p.base_url)
         if not host:
             continue
@@ -773,7 +794,7 @@ def providers_setup(ctx: Context) -> Iterator[Finding]:
                               f"{p.name} is marked as inside your network, but its address is public",
                               f"{host} resolves to {_names(found, 2)}. A provider inside your network is used by every "
                               "key, whatever its cloud setting, and no budget applies to it. If it is a third party, "
-                              "tick Outside your network (cloud).", f"/providers/{p.id}", "Open the provider",
+                              "tick Outside your network (cloud).", f"/cloud/providers/{p.id}", "Open the provider",
                               scope=f"provider:{p.id}", pages=pages)
 
 
@@ -804,17 +825,26 @@ def cloud_defaults(ctx: Context) -> Iterator[Finding]:
                       "Only to spill or Allowed, or change the cloud policy.", "/keys", "Open API keys", pages=("keys",))
 
 
+def route_place(r: GatewayRoute) -> tuple[str, tuple[str, ...], str]:
+    """Where the console shows a route (1.4, #81): a deployment's own route is its cloud fallback, on
+    the deployment's page; a name an admin made is on Cloud -> Cloud models."""
+    if r.deployment_id is not None:
+        return (f"/serving/{r.deployment_id}#cloud-fallback",
+                ("serving", f"deployment:{r.deployment_id}", f"route:{r.id}"), "Open its cloud fallback")
+    return f"/cloud/models/{r.id}", ("cloud-models", f"route:{r.id}"), "Open the model name"
+
+
 @check
 def routes_setup(ctx: Context) -> Iterator[Finding]:
     """V41: a cloud tier before the first local one. V42: a cloud tier or spill rule that is never used.
     V43: no usable target. V44: a mixed route whose local deployments are stopped."""
     for r in ctx.routes:
-        url, pages = f"/models/routes/{r.id}", ("models", f"route:{r.id}")
+        url, pages, label = route_place(r)
         usable = [t for t in r.targets if target_usable(t)]
         if not usable:
             yield Finding("route-no-target", "error", f"{r.served_name} has no target that can answer",
                           f"Every target of {r.served_name} is disabled (or its provider is), so it answers 503 "
-                          "no_target.", url, "Open the route", scope=f"route:{r.id}", pages=pages)
+                          "no_target.", url, label, scope=f"route:{r.id}", pages=pages)
             continue
         local = [t for t in usable if is_local(t)]
         cloud = [t for t in usable if is_cloud(t)]
@@ -822,25 +852,25 @@ def routes_setup(ctx: Context) -> Iterator[Finding]:
             yield Finding("route-cloud-before-local", "warning", f"{r.served_name} tries the cloud before local",
                           f"A cloud tier of {r.served_name} comes before its first local tier: keys set to Allowed go "
                           "to the cloud first even when the local replicas are idle, and keys set to Only to spill "
-                          "skip that tier. Move the local tier first unless that is what you want.", url, "Open the route",
+                          "skip that tier. Move the local tier first unless that is what you want.", url, label,
                           scope=f"route:{r.id}", pages=pages)
         if r.local_only and cloud:
             yield Finding("route-cloud-never-used", "info", f"{r.served_name}'s cloud tier is never used",
-                          f"{r.served_name} is Local only, so its cloud targets never get a request.", url, "Open the route",
+                          f"{r.served_name} is Local only, so its cloud targets never get a request.", url, label,
                           scope=f"route:{r.id}", pages=pages)
         elif local and (r.spill_on_long_prompt or (r.wait_ms or 0) > 0) \
                 and not any(t.tier > min(x.tier for x in local) for t in usable):
             rule = "Spill a prompt that is too long" if r.spill_on_long_prompt else "Wait for a free local slot"
             yield Finding("route-cloud-never-used", "info", f"{r.served_name}: {rule} has no effect",
                           f"{r.served_name} has no tier after its local one, so there is nothing to spill to.",
-                          url, "Open the route", scope=f"route:{r.id}", pages=pages)
+                          url, label, scope=f"route:{r.id}", pages=pages)
         if local and cloud:
             deps = [t.deployment for t in local if t.kind == "local" and t.deployment is not None]
             if deps and all(d.workload is not None and d.workload.desired_state == "stopped" for d in deps):
                 yield Finding("route-local-stopped", "warning", f"{r.served_name}'s local deployment is stopped",
                               f"{_names(d.name for d in deps)} {'is' if len(deps) == 1 else 'are'} stopped, so every "
                               f"request to {r.served_name} from a key that may use the cloud goes to the cloud.",
-                              url, "Open the route", scope=f"route:{r.id}", pages=pages)
+                              url, label, scope=f"route:{r.id}", pages=pages)
 
 
 @check
@@ -848,7 +878,7 @@ def budgets_zero(ctx: Context) -> Iterator[Finding]:
     """V45: a budget of $0 blocks every cloud request (empty means no budget)."""
     zero = ([("key", k.id, f"the key {k.name}", "/keys", ("keys",)) for k in ctx.active_keys if k.budget_micros == 0]
             + [("person", u.id, u.username, "/usage?tab=cost", ()) for u in ctx.users if u.budget_micros == 0]
-            + [("provider", p.id, p.name, f"/providers/{p.id}", ("providers", f"provider:{p.id}"))
+            + [("provider", p.id, p.name, f"/cloud/providers/{p.id}", ("providers", f"provider:{p.id}"))
                for p in ctx.providers if p.budget_micros == 0])
     for scope, sid, name, url, pages in zero:
         yield Finding("budget-zero", "info", f"The budget of {name} is $0",
@@ -866,7 +896,7 @@ def prices_stale(ctx: Context) -> Iterator[Finding]:
         yield Finding("prices-stale", "info", f"Prices of {_plural(len(old), 'model')} are over {PRICES_STALE_DAYS} days old",
                       f"{_names(pm.upstream_model for pm in old)} were last refreshed from OpenRouter on "
                       f"{oldest:%Y-%m-%d}. Refresh them so costs and budgets use current prices.",
-                      "/providers", "Refresh prices", pages=("providers",))
+                      "/cloud", "Refresh prices", pages=("providers",))
 
 
 @check

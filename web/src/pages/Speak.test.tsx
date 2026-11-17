@@ -109,8 +109,13 @@ describe("Playground: Speak, raw pcm (1.3)", () => {
     });
     mount("/playground");
     const panel = (await screen.findByRole("heading", { name: "Speak" })).closest("section") as HTMLElement;
-    await waitFor(() => expect((within(panel).getByLabelText("Format") as HTMLSelectElement).value).toBe("wav"));
-    fireEvent.change(within(panel).getByLabelText("Format"), { target: { value: "pcm" } });
+    // Until the model's voices and formats have arrived the select offers only wav (and is disabled), and
+    // their arrival sets the model's default format: choose pcm only after that.
+    const format = within(panel).getByLabelText("Format") as HTMLSelectElement;
+    await waitFor(() => expect(format.disabled).toBe(false));
+    expect(format.value).toBe("wav");
+    fireEvent.change(format, { target: { value: "pcm" } });
+    expect(format.value).toBe("pcm");
     fireEvent.change(within(panel).getByLabelText("Text"), { target: { value: "Raw samples." } });
     fireEvent.click(within(panel).getByRole("button", { name: "Speak" }));
     expect(await within(panel).findByLabelText("The speech")).toBeTruthy();

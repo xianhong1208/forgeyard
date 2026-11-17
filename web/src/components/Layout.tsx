@@ -29,16 +29,20 @@ export function Layout() {
     };
   }, [menu]);
 
+  // 1.4 (#81, #92): Machines, Serving (what runs now), Models (the library), Cloud (cloud providers and
+  // cloud models, admins only, as Providers was), the everyday pages, then the admin pages. Apps left
+  // the console in 1.4 (#88).
+  const admin = user?.role === "admin";
   const links = [
     { to: "/machines", label: "Machines" },
-    { to: "/workloads", label: "Workloads" },
+    { to: "/serving", label: "Serving" },
     { to: "/models", label: "Models" },
+    ...(admin ? [{ to: "/cloud", label: "Cloud" }] : []),
     { to: "/playground", label: "Playground" },
     { to: "/keys", label: "API keys" },
     { to: "/usage", label: "Usage" },
-    ...(user?.role === "admin"
+    ...(admin
       ? [
-          { to: "/providers", label: "Providers" },
           { to: "/users", label: "Users" },
           { to: "/audit", label: "Audit log" },
         ]

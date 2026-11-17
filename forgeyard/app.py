@@ -19,6 +19,7 @@ from forgeyard.api import (
     auth,
     budgets,
     deployments,
+    downloads,
     gateway,
     guide,
     install,
@@ -36,10 +37,11 @@ from forgeyard.api import (
 )
 from forgeyard.bootstrap import bootstrap
 from forgeyard.config import get_settings
+from forgeyard.deprecation import DeprecationMiddleware
 from forgeyard.db import get_engine, new_session
 from forgeyard.gateway import budgets as gateway_budgets, egress as gateway_egress, proxy as gateway_proxy, videojobs
-from forgeyard.gateway.usage import recorder as usage_recorder
-from forgeyard.machines import agent_api, liveness
+from forgeyard.gateway.usage import FLUSH_SECONDS as USAGE_FLUSH_SECONDS, recorder as usage_recorder
+from forgeyard.machines import agent_api, liveness, relay, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_RESTART
 from forgeyard.migrate import upgrade
@@ -83,9 +85,9 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     sweeper = asyncio.create_task(liveness.run_forever())
-    usage_writer = asyncio.create_task(usage_recorder.run_forever(get_settings().usage_flush_seconds))
+    usage_writer = asyncio.create_task(usage_recorder.run_forever(USAGE_FLUSH_SECONDS))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
-    alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(get_settings().usage_flush_seconds))
+    alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(USAGE_FLUSH_SECONDS))
     videos = asyncio.create_task(videojobs.run_forever())  # follows /v1/videos jobs, expires their results (1.3)
     try:
         yield
@@ -112,6 +114,8 @@ def create_app() -> FastAPI:
                   docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json")
     app.add_middleware(GuardMiddleware)
     app.add_middleware(WebSocketHostGuard)
+    # 1.4 (#88): the answers of the deprecated apps API, templates and /x/ say so (forgeyard/deprecation.py).
+    app.add_middleware(DeprecationMiddleware)
 
     @app.exception_handler(HTTPException)
     async def _http_error(_request: Request, exc: HTTPException):
@@ -131,6 +135,7 @@ def create_app() -> FastAPI:
     app.include_router(workloads.router)
     app.include_router(models.router)
     app.include_router(deployments.router)
+    app.include_router(downloads.router)
     app.include_router(keys.router)
     app.include_router(budgets.router)
     app.include_router(providers.router)
@@ -143,6 +148,8 @@ def create_app() -> FastAPI:
     app.include_router(gateway.router)
     app.include_router(passthrough.router)
     app.include_router(agent_api.router)
+    app.include_router(relay.router)
+    app.include_router(upload.router)
     app.include_router(install.router)
     app.include_router(guide.router)
 

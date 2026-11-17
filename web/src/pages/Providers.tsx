@@ -1,6 +1,8 @@
 import { IconArrowLeft, IconCloud, IconCopy, IconCurrencyDollar, IconDownload, IconPlugConnected, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Fragment, useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+
+import { useAuth } from "../auth";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { BudgetMeter } from "../components/BudgetMeter";
@@ -14,6 +16,7 @@ import { num } from "../lib/gateway";
 import { PRICE_FIELDS, PRICE_LABEL, parsePrice, perMillion, priceText, SOURCE_LABEL } from "../lib/prices";
 import type { Egress, Provider, ProviderKind, ProviderModel, ProviderResponse, ProvidersResponse, ProviderWhere, TestResult, UpstreamModel } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { CloudModels } from "./CloudModels";
 
 type Msg = { tone: "ok" | "error"; text: string } | null;
 
@@ -60,13 +63,20 @@ function EgressPanel({ egress }: { egress: Egress }) {
   );
 }
 
-export function ProvidersPage() {
-  const { data, error, reload } = useApi<ProvidersResponse>("/providers");
+// 1.4 (#81): Cloud, two tabs. Providers (the accounts at model APIs, and what leaves this server) and
+// Cloud models (names of their own that an admin made: a provider's model under Forgeyard's keys and
+// limits). A deployment's cloud fallback lives on the deployment's page. Before 1.4 this was the
+// Providers page at /providers, which still opens it.
+export function CloudPage() {
+  const [search, setSearch] = useSearchParams();
+  const tab = search.get("tab") === "models" ? "models" : "providers";
+  const { data, error, reload } = useApi<ProvidersResponse>(tab === "providers" ? "/providers" : null);
   const [adding, setAdding] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
   const [testing, setTesting] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const admin = data?.is_admin ?? false;
+  const { user } = useAuth();
+  const admin = user?.role === "admin";
   const priced = (data?.providers ?? []).some((p) => p.external && p.models.length > 0);
 
   const test = async (p: Provider) => {
@@ -84,9 +94,9 @@ export function ProvidersPage() {
 
   return (
     <>
-      <PageHeader index="07 · Providers" title="Cloud providers"
-        lead="Model APIs outside Forgeyard: OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible server. A route can send requests there when local replicas are busy or down, or serve a cloud model under a name of its own."
-        actions={admin && (
+      <PageHeader index="04 · Cloud" title="Cloud"
+        lead="Model APIs outside Forgeyard: OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible server. A deployment can send requests there when its replicas are busy or down (its cloud fallback, on the deployment's page), and a cloud model can be served under a name of its own."
+        actions={admin && (tab === "providers" ? data && (
           <>
             {priced && (
               <button type="button" className="btn" aria-expanded={refreshing} onClick={() => setRefreshing((v) => !v)}>
@@ -97,14 +107,34 @@ export function ProvidersPage() {
               <IconPlus size={16} aria-hidden="true" /> Add a provider
             </button>
           </>
-        )} />
-      <AdvisorBanner pages={["providers"]} />
+        ) : (
+          <Link to="/cloud/models/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> New cloud model</Link>
+        ))} />
+      <AdvisorBanner pages={[tab === "providers" ? "providers" : "cloud-models"]} />
       <HelpLinks>
-        <HelpLink page="cloud-providers" anchor="add-a-provider">How do I add OpenAI, Anthropic, Gemini or Azure?</HelpLink>
-        <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request go to the cloud?</HelpLink>
-        <HelpLink page="cloud-providers" anchor="what-each-providers-endpoint-cannot-do">What each provider's endpoint cannot do</HelpLink>
-        <HelpLink page="cloud-providers" anchor="cost-and-prices">How cost is counted</HelpLink>
+        {tab === "providers" ? (
+          <>
+            <HelpLink page="cloud-providers" anchor="add-a-provider">How do I add OpenAI, Anthropic, Gemini or Azure?</HelpLink>
+            <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request go to the cloud?</HelpLink>
+            <HelpLink page="cloud-providers" anchor="what-each-providers-endpoint-cannot-do">What each provider's endpoint cannot do</HelpLink>
+            <HelpLink page="cloud-providers" anchor="cost-and-prices">How cost is counted</HelpLink>
+          </>
+        ) : (
+          <>
+            <HelpLink page="cloud-providers" anchor="serve-a-cloud-model-under-a-name-of-its-own">How do I serve a cloud model under a name of its own?</HelpLink>
+            <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">How do I let a deployment spill to the cloud?</HelpLink>
+            <HelpLink page="cloud-providers" anchor="who-may-use-the-cloud">Which keys may use the cloud?</HelpLink>
+          </>
+        )}
       </HelpLinks>
+      <div className="tabs" role="tablist" aria-label="Cloud">
+        <button type="button" role="tab" aria-selected={tab === "providers"} className={tab === "providers" ? "on" : ""}
+          onClick={() => setSearch({})}>Providers</button>
+        <button type="button" role="tab" aria-selected={tab === "models"} className={tab === "models" ? "on" : ""}
+          onClick={() => setSearch({ tab: "models" })}>Cloud models</button>
+      </div>
+      {tab === "models" ? <CloudModels /> : (
+      <>
       {error && <Notice tone="error">{error}</Notice>}
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       {refreshing && <PriceRefresh onClose={() => setRefreshing(false)}
@@ -127,7 +157,7 @@ export function ProvidersPage() {
             <tbody>
               {data.providers.map((p) => (
                 <tr key={p.id} className={p.enabled ? "" : "row-off"}>
-                  <td data-label="Provider"><div className="strong"><Link to={`/providers/${p.id}`}>{p.name}</Link></div><div className="muted small">{p.kind_label}</div></td>
+                  <td data-label="Provider"><div className="strong"><Link to={`/cloud/providers/${p.id}`}>{p.name}</Link></div><div className="muted small">{p.kind_label}</div></td>
                   <td data-label="Base URL" className="mono small cell-url">{p.base_url}</td>
                   <td data-label="Key" className="mono small">{p.key_hint ?? <span className="muted">none</span>}</td>
                   <td data-label="Where"><WhereChip p={p} />
@@ -146,7 +176,7 @@ export function ProvidersPage() {
                       <button type="button" className="btn btn-small" disabled={testing === p.id} onClick={() => void test(p)}>
                         <IconPlugConnected size={14} aria-hidden="true" /> {testing === p.id ? "Testing…" : "Test"}
                       </button>
-                      <Link className="btn btn-quiet btn-small" to={`/providers/${p.id}`}>Open</Link>
+                      <Link className="btn btn-quiet btn-small" to={`/cloud/providers/${p.id}`}>Open</Link>
                     </td>
                   )}
                 </tr>
@@ -156,6 +186,8 @@ export function ProvidersPage() {
         </div>
       )}
       {data && <EgressPanel egress={data.egress} />}
+      </>
+      )}
     </>
   );
 }
@@ -291,18 +323,18 @@ export function ProviderDetailPage() {
     const name = window.prompt("Name of the copy (its key is not copied; enter one for it):", `${p?.name} copy`);
     if (!name) return;
     const r = await api<{ provider: Provider }>(`/providers/${id}/clone`, { method: "POST", body: { name } });
-    navigate(`/providers/${r.provider.id}`);
+    navigate(`/cloud/providers/${r.provider.id}`);
   });
   const remove = () => run(async () => {
     if (!window.confirm(`Delete ${p?.name} and its models? Its key is deleted with it.`)) return;
     await api(`/providers/${id}`, { method: "DELETE" });
-    navigate("/providers", { replace: true });
+    navigate("/cloud", { replace: true });
   });
 
   return (
     <>
-      <p className="crumb"><Link to="/providers"><IconArrowLeft size={14} aria-hidden="true" /> Providers</Link></p>
-      <PageHeader index={`07 · ${p?.kind_label ?? "Provider"}`} title={p?.name ?? "Provider"}
+      <p className="crumb"><Link to="/cloud"><IconArrowLeft size={14} aria-hidden="true" /> Cloud providers</Link></p>
+      <PageHeader index={`04 · ${p?.kind_label ?? "Provider"}`} title={p?.name ?? "Provider"}
         lead={p ? `${p.base_url} · added by ${p.created_by ?? "?"} ${when(p.created_at)}` : undefined}
         actions={p && admin && (
           <>
@@ -382,7 +414,7 @@ function Settings({ p, defaultTimeout, onSaved }: { p: Provider; defaultTimeout?
         headers: parseHeaders(headers), timeout_s: timeout ? Number(timeout) : null };
       if (clearKey) body.clear_api_key = true;
       else if (key.trim()) body.api_key = key.trim();
-      await api(`/providers/${p.id}`, { method: "PATCH", body });
+      await api(`/cloud/providers/${p.id}`, { method: "PATCH", body });
       setKey("");
       onSaved(clearKey ? "Key removed." : key.trim() ? "Saved, with the new key." : "Saved.");
     } catch (err) {

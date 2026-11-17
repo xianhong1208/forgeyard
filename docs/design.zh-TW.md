@@ -48,8 +48,17 @@ server 不需要能連到機器。
 ## Workload
 
 **workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
-可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。在
-**Workloads → New workload** 建立，或用 `POST /api/workloads` 送出 spec：
+可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。模型部署以
+workload（runtime 為 `model`）執行；微調（1.9）也會。
+
+**應用程式離開 Forgeyard**（#88、#89）。使用者自己執行、不是模型的 workload 叫 *app*：1.4（#81）在 console 的 **Apps**，
+用 `POST /api/workloads` 建立，可以公開在 `/x/`。Forgeyard 的重點是執行和管理模型，所以 1.4 把應用程式從 console 拿掉（頁面、範本、
+金鑰的 *Apps at /x/* 設定、Playground 的視覺應用程式），其餘淘汰：`/api/workloads` 屬於應用程式的部分、`GET /api/workloads/templates`
+和 `/x/` 在 1.5 之前照常運作，並明白告知（forgeyard/deprecation.py：每個回應，包括錯誤，都帶 `Deprecation` 標頭（RFC 9745）和指向指南的
+`Link`；伺服器紀錄每類最多每小時警告一次；只要還有應用程式，就有 Setup health 檢查 `apps-deprecated`）。`GET /api/keys` 與 Playground
+的視覺選項不再列出應用程式。1.5 會移除 API、`/x/`、範本和金鑰的設定，並以 migration 移除剩下的應用程式。舊的 console 連結（`/apps…`、
+1.3 的 `/workloads…`）會打開模型的部署或 Machines。**Machines** 仍會列出佔用顯示卡的應用程式名稱（沒有連結），所以使用中的卡不會被顯示成空閒。
+模型部署的 workload 只在 **Serving** 底下看得到，API 也仍然拒絕停止、啟動或刪除它（409 `managed_by_deployment`）。spec：
 
 ```json
 {"name": "web", "kind": "service",
@@ -128,11 +137,19 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
 
 ## 模型
 
-**Models → Deploy a model**：從目錄挑模型與配方、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
-會放到哪裡。一個部署 = 一個 service workload（也出現在 Workloads）加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
+**console 裡的兩個頁面**（1.4，#92）。**Serving**（`/serving`）是現在正在執行的：依種類分組的部署，加上 **Deploy a model**
+（`/serving/deploy`）與每個部署的頁面（`/serving/<id>`，在 `/serving/<id>/edit` 修改）。**Models**（`/models`）是模型庫：
+**Catalog**（預設：可以部署的模型，有 *Download to…* 與 Deploy）、**Engines**（配方：console 說*引擎*，API 和 YAML 檔案仍叫
+*recipe*）與 **Sources**（只有 admin：GGUF 網址的主機、`local://` 目錄、Hugging Face 權杖）。選單是 Machines、Serving、Models、
+Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 09。只有發布過的版本有過的網址會轉址：1.3 的
+`/models/deployments/<id>[/edit]`、`/models/deploy`、`/models?tab=routes` 與 `?tab=deployments` 會打開 Serving；`?tab=catalog`
+就是 Catalog；`/playground?tab=vision` 會打開 Playground 並選好第一個就緒的視覺模型（沒有時則打開它的選單）。只在 1.4 開發期間用過的分頁名稱（`?tab=serving`、`library`、`model-library`）不再支援。
+
+**Serving → Deploy a model**：從目錄挑模型與引擎、設定參數，頁面在建立或下載任何東西之前，就顯示一個 replica 需要多少記憶體、
+會放到哪裡。一個部署 = 一個 service workload 加一條 gateway 路由：程式用它的**模型名稱**從 `/v1` 呼叫
 （見「Gateway 與 API key」）。部署頁顯示這個名稱、用量、每個 replica，並有一個直接檢查單一 replica 的小小 **Try it**。
 
-- **加入模型**（admin），在 **Models → Catalog and recipes → Add a model** 有三種方式：
+- **加入模型**（admin），在 **Models → Add a model**（Catalog 分頁）有三種方式：
   - **Recommended（推薦清單）**：一份精選清單（[forgeyard/models/recommended.yaml](../forgeyard/models/recommended.yaml)，容易修改），
     都是能用內建配方跑的模型，分組：Qwen3（chat 0.6B 到 32B、兩個給 CPU 的 GGUF、Embedding 與 Reranker 0.6B / 4B）、
     其他開放 chat 模型（gpt-oss-20b、Gemma 4 E2B / E4B / 12B / 26B-A4B / 31B、Gemma 3 4B / 12B / 27B、Llama 3.2 3B 與 3.1 8B）、語音轉文字（faster-whisper 用的 Whisper small 與
@@ -161,7 +178,7 @@ replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，�
   `repo:tag@sha256:…`：agent 拉取並執行的是 digest，registry 上的 tag 被改掉也改變不了實際執行的東西；介面顯示 tag。
   要升級引擎：改 tag，執行 `uv run --no-sync python scripts/pin_images.py --write`（從 Docker Hub 或 GHCR 取得多架構 digest，
   並檢查每個 variant 宣稱的平台都在），再檢查 diff；不加 `--write` 則檢查每個 digest 是否仍對應它的 tag。內建映像少了 digest
-  測試就會失敗。admin 可在模型頁加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，估算的 `vision_overhead` / `video_overhead`、文字轉語音用的 `tts` 區塊（引擎能產生的格式與預設格式、串流方式、列出聲音的路徑、預設聲音、gateway 替它補上的請求欄位、能否說中日韓文），以及兩階段引擎用的估算 `codec_overhead` 與 `{gpu_util_main}` / `{gpu_util_codec}` 佔位符。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
+  測試就會失敗。admin 可在 **Models → Engines** 加自訂配方（同樣建議寫 digest）。1.3 為配方加上：`media` 區塊（引擎在對話中接受什麼：`inputs` 為 image、audio、video，以及 `files`）、參數的 `advanced: true`（部署表單收合的 Advanced 區塊）、帶 `if_model` 的 `optional_args`（`mmproj`，或模型接受的某種媒體）與 `{mmproj_file}` 佔位符，估算的 `vision_overhead` / `video_overhead`、文字轉語音用的 `tts` 區塊（引擎能產生的格式與預設格式、串流方式、列出聲音的路徑、預設聲音、gateway 替它補上的請求欄位、能否說中日韓文），以及兩階段引擎用的估算 `codec_overhead` 與 `{gpu_util_main}` / `{gpu_util_codec}` 佔位符。配方新增參數之前建立的部署，會以該參數的預設值產生。內建：
 
   | 配方 | 服務 | 執行在 | 固定版本 |
   |---|---|---|---|
@@ -250,7 +267,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   請求進行中先保留它的 `max_tokens`，避免同時送出的請求一起超過限制。
 - **用量**（**Usage** 頁）：請求數、錯誤、因速率限制被拒的次數、prompt／completion／快取／推理 token、溢出的請求數、延遲 p50／p95，
   可依日期、模型、key、人、來源（API key 或 playground）或本機與雲端分組；**Cost** 分頁再依日期、key、人、模型或供應商顯示費用
-  （見〈費用〉）。在記憶體裡計數，每 `USAGE_FLUSH_SECONDS`（5 秒）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
+  （見〈費用〉）。在記憶體裡計數，每 5 秒（`usage.FLUSH_SECONDS`）、關機時與讀取前寫入，每個 UTC 日期、來源、key、人、模型與目標
   一列。client 中途離開（499）不算錯誤。每個人看自己的，admin 看全部。部署頁顯示最近 7 天。
 - **對話中的圖片、音訊與影片（1.3，** forgeyard/gateway/media.py**）。** vLLM 0.32 與 llama-server（b11977、b12242）會自己下載媒體區塊裡的任何 http(s) 網址，沒有私有位址過濾（vLLM 還會跟隨轉址），而且是從你的網路內部連出去；llama-server 1.0.0 會拒絕私有位址，但那只是多一層保護，不是主要的防護。所以：
   - gateway 走過 `messages[].content[]`，把每個媒體區塊**重建**成同一種形式（`image_url` 與 `video_url` 帶 `data:` URI，`input_audio` 帶 base64），只保留檢查過的欄位；接受 `input_image`、`input_video` 與 `audio_url` 並轉換。文字區塊不變；其他類型與 `*_embeds` 一律拒絕（`invalid_content_part`）；
@@ -273,7 +290,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   - **用量**：每個工作一個請求，在結束時記錄（誰先看到結束誰記錄，只記一次）：做好的影片計入 `media_ms`（長度）與 `busy_ms`（從看到它進入製作中到結束，× 部署占用的 GPU 數）；失敗的算一個錯誤，其他什麼都不算；製作中被刪除的算 499。被拒絕的請求在被拒絕時計入。不計 token、不送雲端。
   - **不用 `/v1/videos/sync`。** vLLM-Omni 的同步路徑要把連線占住好幾分鐘，途中任何代理或用戶端的逾時都會讓它中斷；它和 OpenAI 的 remix 一樣回應 404 `endpoint_not_supported`。
   - **不用 stable-diffusion.cpp 的影片。** 它原生的 `/sdcpp/v1/vid_gen` 也是非同步的，但它產生 WebM、動態 WebP 或 MJPG AVI（沒有 MP4），而且把整段影片以 base64 放在工作的 JSON 裡、留在引擎的記憶體中：不符合同樣的工作模型（每個工作一個 MP4 檔，以 Range 取回並串流）。AMD 與 CPU 上的影片留待之後。
-- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank、語音轉文字、文字轉語音（**Speak**：模型的聲音與格式，附播放器）與圖片（**Image**：提示、部署接受的尺寸、張數，每張圖片附下載連結）、影片（**Video**：提示、部署接受的尺寸與長度、追蹤工作直到做好，然後在頁面上播放並附下載連結，以及這個人之前的影片），以及給公開視覺工作負載用的 **Vision** 分頁（框、點一下或拖一個框得到的遮罩、深度圖；透過 console 自己的路由套用 `/x/` 的規則，1.3）；走同一套路由，以登入的使用者身分
+- **Playground**：在 console 裡用串流 chat（也能附上圖片，以 `data:` URI 送出），也能試 embeddings、rerank、語音轉文字、文字轉語音（**Speak**：模型的聲音與格式，附播放器）與圖片（**Image**：提示、部署接受的尺寸、張數，每張圖片附下載連結）、影片（**Video**：提示、部署接受的尺寸與長度、追蹤工作直到做好，然後在頁面上播放並附下載連結，以及這個人之前的影片），以及視覺模型（框、點一下或拖一個框得到的遮罩、深度圖；1.3 則是給公開視覺工作負載用的 **Vision** 分頁）。1.4 起（#100）沒有分頁：一個模型選單列出已就緒的模型，依種類分組，用 Serving 的名稱與圖示，選到的模型開出它那一類的面板；走同一套路由，以登入的使用者身分
   （cookie 與 CSRF，和 console 其他地方一樣）。不建立任何 API key，用量算在「console」。它的雲端設定對 admin 是 `on`，對其他人是
   server 允許的上限；個人的預算適用，沒有 key 的預算。
 - **不能繞過 gateway 直接用 replica。** 每個模型 replica 都有一把**內部 key**，每次放置都換新。只有 gateway 與 *Try it* 會送出它；
@@ -297,7 +314,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
 
 真機檢查：`scripts/accept_m4.py`。
 
-### 在 /x/ 的 workload（1.3，通用直通）
+### 在 /x/ 的 workload（1.3，通用直通；1.4 淘汰、1.5 移除）
 
 不是對話、嵌入、語音或圖片模型的東西（偵測、分割、深度估計、Triton 或 KServe 模型、FastAPI 或 BentoML 服務），以 service
 workload 執行，並**公開**在 gateway 後面的 **`https://<server>:7860/x/<name>/…`**，使用和 `/v1` 相同的 API key、限制與用量。研究與
@@ -356,7 +373,7 @@ Kong 與 GPUStack 之後決定。
   寫在文件裡（docs/guide/cloud-providers.md），而不是藏起來。**不用 LiteLLM**，不論當函式庫或 sidecar：它在 2026 年兩度在 PyPI
   上被植入惡意程式（3 月的 1.82.7/1.82.8，經由被入侵的 CI 工具；10 月的 1.107.0 與其 Docker 映像，會讀取 proxy 的憑證資料表），
   而且它自己的金鑰與預算系統會和 Forgeyard 的重疊。
-- **供應商**（`providers`、`provider_models`；**Providers** 頁，只有 admin）。供應商包含種類、base URL、加密的金鑰、最多 16 個額外
+- **供應商**（`providers`、`provider_models`；**Cloud → Providers** 頁，只有 admin）。供應商包含種類、base URL、加密的金鑰、最多 16 個額外
   header（不是機密；用來帶金鑰的名稱、`Host` 與 `Cookie` 會被拒絕）、可選的回應逾時（1–3600 秒）、是否**在你的網路外**（依種類預設：
   除了 *OpenAI-compatible server* 都是），以及（只有在網路內時）是否允許純 http。它的每個模型提供 `openai-chat` 或
   `openai-embeddings`，可以額外拿掉參數（`drop_params`），並帶有價格。**Test connection** 帶著金鑰呼叫 `GET {base}/models`；
@@ -385,6 +402,10 @@ Kong 與 GPUStack 之後決定。
   embeddings 路由，模型也要相符。每個登入的人都能讀路由（含是否可用，以及種類：local、mixed 或 cloud）；admin 才能修改（稽核紀錄
   `route.created`、`route.changed`、`route.deleted`）。migration 0009 把既有的每條路由都變成一個第 0 層目標，upstream model
   名稱不變，所以行為完全和以前一樣。
+- **在 console 的位置**（1.4，#81）。部署自己的路由就是它的**雲端備援**，在部署的頁面上編輯；Serving 清單會標出有雲端層的部署
+  （*→ Gemini*）。admin 自己建立的路由在 **Cloud → Cloud models**：裡面有供應商模型的是*雲端模型*，其他列在 *Other names for
+  deployments*；每個部署的頁面會連到它另外回應的名稱。console 用「雲端備援」和「雲端模型」，「路由」只留作 API 的用語
+  （`/api/routes`）。舊網址（`?tab=routes`、`/models/routes/<id>`、`/providers…`）會轉址。
 - **溢出規則，只在第一個 byte 之前。** 這一層 *unavailable*（沒有就緒的副本、每個連線都失敗）、*busy*（每個就緒副本經由這台
   server 處理中的請求數都達到部署的 `concurrency`；名額是原子地取得的，兩個請求不會同時拿到最後一個；`wait_ms` 會先等名額）或
   *refusing*（429 或 503）時，才用下一層。*too long*（估計的提示加上 `max_tokens` 超過部署的 `context`）只有路由選擇時才算。
@@ -394,8 +415,8 @@ Kong 與 GPUStack 之後決定。
   如果本機是忙碌、而之後每一層都失敗，請求最後還是會送到負載最輕的本機副本，不再受 `concurrency` 限制（由引擎排隊），
   並拿掉 `X-Forgeyard-Spilled`。沒有其他目標能取代的本機 429 或 503 會原樣轉回。
 - **雲端層**依權重（加權洗牌）嘗試目標；回應 429 或 5xx、連不上、重新導向或被對外連線規則拒絕的目標會冷卻
-  `PROVIDER_COOLDOWN_SECONDS`（30 秒，或依它的 `Retry-After`／`retry-after-ms`，最多 5 分鐘），排到最後才試，而不是跳過。沒有
-  其他目標時（最後一層），不超過 `PROVIDER_RETRY_AFTER_CAP`（2 秒）的 `Retry-After` 會等一次。供應商的回應會變成：429 → 429
+  30 秒（`balancer.PROVIDER_COOLDOWN`，或依它的 `Retry-After`／`retry-after-ms`，最多 5 分鐘），排到最後才試，而不是跳過。沒有
+  其他目標時（最後一層），不超過 2 秒（`proxy.RETRY_AFTER_CAP`）的 `Retry-After` 會等一次。供應商的回應會變成：429 → 429
   `provider_rate_limited`（附它的 `Retry-After`）；5xx → 502 `provider_error`；401、403 或 407 → 立刻回 502 `provider_auth_failed`，
   不再試其他目標（絕不回 401 讓用戶端以為是自己的金鑰有問題）；重新導向 → 502 `provider_redirect`，絕不跟隨；其他 4xx 保留狀態碼與
   供應商的 `code`，訊息前加上供應商名稱，看起來像金鑰的字串會被拿掉。送出後逾時是 504 `provider_timeout`，不會改試別的。
@@ -429,7 +450,7 @@ Kong 與 GPUStack 之後決定。
   - 費用以皮美元加總，每列用量寫入時取整到微美元，餘數帶到下一次，所以大量很小的請求加起來仍然精確。
 - **價格**存在供應商模型上：輸入、輸出、快取輸入與快取寫入，各自可選，並記錄來源（`manual` 或 `openrouter`）、時間，以及對應的
   OpenRouter id。只有網路外供應商的模型會計價。**Refresh prices from OpenRouter**（admin，`forgeyard/api/prices.py`）讀取 OpenRouter
-  的公開模型清單（`OPENROUTER_MODELS_URL`，不送金鑰，走對外連線規則），回傳預覽：每個模型、它的對應、新舊價格。對應分成 `confirmed`
+  的公開模型清單（`https://openrouter.ai/api/v1/models`，不送金鑰，走對外連線規則），回傳預覽：每個模型、它的對應、新舊價格。對應分成 `confirmed`
   （已存的 id）、`exact`（OpenRouter 供應商自己的 id）、`suggested`（種類的 OpenRouter 廠商加上原名、拿掉日期後綴的名稱，或把版本的
   `-` 換成 `.`；名稱本身有 `/` 時就用它）、`not_listed` 或 `none`；admin 可以輸入一個 id 來比較。**Apply** 會重新讀取清單，只寫入
   勾選、而且價格仍和預覽相同的列（否則以 `changed` 略過），只有要求時才覆蓋手動輸入的價格，並記錄 `provider.prices_refreshed`。
@@ -453,7 +474,7 @@ Kong 與 GPUStack 之後決定。
     OpenAI 的 SDK 會重試 429 但不重試 402，而在月底之前重試也沒有用。
   - **警示。** 預算到 80% 與 100% 時，每個範圍、月份與門檻各一次：`budget_alerts` 資料表（唯一，所以重啟後也只有一次），以及稽核
     事件 `budget.warning` 或 `budget.exhausted`（操作者 `forgeyard`）。在請求預留與結算時檢查，所以預算調低到本月花費以下時，下一個
-    請求就會警示；花費加預留已超過 80% 時被拒絕的請求，算作到達 100%。和用量一起，每 `USAGE_FLUSH_SECONDS` 以及關機時寫入。
+    請求就會警示；花費加預留已超過 80% 時被拒絕的請求，算作到達 100%。和用量一起，每 5 秒以及關機時寫入。
   - `GET /api/budgets`（admin：`?everyone=true`）回傳月份、`resets_at`，以及每個 key、個人與供應商的預算、已花費、已預留、使用比例
     與等級（`ok`、80% 起 `warning`、100% 起 `exhausted`；預算為 0 時是 exhausted）。API keys 頁、**Usage → Cost**（*Budgets this
     month*）與供應商的頁面會顯示它們。
@@ -525,8 +546,8 @@ Kong 與 GPUStack 之後決定。
   `scope` 指出對象（`machine:3`、`key:12`、`route:4`），`pages` 指出 UI 在哪些頁面以橫幅顯示它。*error* 是現在就壞了或不安全，
   *warning* 是可能會花錢、外洩或壞掉，*info* 是沒有作用或出乎意料。拋出例外的檢查會被記錄並略過，所以一個 bug 絕不會蓋掉其他結果。
   檢查清單在指南的參考資料（*Setup health checks*）；有測試確保它完整。
-- **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、API keys、
-  Providers、Models、路由、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
+- **在哪裡顯示**（決策 D8）：**Get started → Setup health** 列出全部，頂端列顯示錯誤與警告的數量，每個頁面（Machines、Serving、API keys、
+  Cloud、雲端模型、部署、Users）以橫幅顯示自己的結果。一般 user 與 operator 都看不到。
 - **延後提醒**是每位 admin、每項結果（`id@scope`）各自的，為期 30 天，存在使用者的 `preferences` JSON（`advisor_snoozed`），
   所以不需要 migration。error 不能延後。延後的結果如果仍然成立，30 天後會再出現。
 - **機密金鑰備份**（決策 D5）：在 admin 勾選 *I have a backup of key id X* 之前一直是警告。勾選是一筆 `server_settings`

@@ -6,6 +6,384 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-11-17
+
+Easier to see, and models on machines without internet. **Machines** are tiles, each with a page that
+maps every card's memory to what holds it; **Serving** lists the running models by kind, and **Models**
+is the library: Catalog, Engines (custom engines added and edited in the console) and Sources. Cloud
+providers and cloud models are on **Cloud**, a deployment's cloud fallback is on its own page, and the
+Playground has one model picker. Usage and cost are charted by day, week or month, and Usage's tables
+stay short on a phone. Vision models (object detection, segmentation, depth) are a model kind of their
+own at `/v1/vision/…`. **Download to…** puts a model and its engine on chosen machines before you deploy
+it; a machine's page lists the models in its cache and removes them; a machine that cannot reach
+Hugging Face, GitHub or a registry gets model files, engine archives and pinned engine images through
+the server, which stores nothing, and admins can upload an image file to it. Placement avoids a machine
+that could not fetch what a replica needs. Apps left the console, and their API, the templates and
+`/x/` are deprecated (removed in 1.5). The API keys page folds revoked keys away, and revoked keys
+leave the budgets. The settings deprecated in 1.3.1 are no longer read. Migration `0015`; rebuild the
+agent images to get the new agent features.
+
+### Added
+
+- **Vision models under Models: object detection, segmentation and depth** (#86, part 1: the engine and
+  the API). They are model kinds of their own (tasks `detect`, `segment`, `depth`), added from Hugging
+  Face and deployed like any other model.
+  - The catalog recognises them from `config.json`: an `…ForObjectDetection` architecture (RT-DETR,
+    D-FINE, DETR without a timm backbone…), SAM 2 / 2.1, or an `…ForDepthEstimation` one (Depth
+    Anything, DPT…); the search's tasks ask Hugging Face for object-detection, mask-generation and
+    depth-estimation models, and a result shows its licence. **Permissive licences only** (Apache-2.0,
+    MIT, BSD), as the 1.3 templates: another licence, or none, is 422 `not_a_vision_model` when it is
+    added, and so is a model of another task or a DETR on a timm backbone.
+  - A built-in recipe `vision` runs Forgeyard's own vision server (`images/vision`), now able to load the
+    model from the machine's model cache (`--model`), so the cache page, offline machines (and *Download
+    to…*, #35) work as for other models: the CUDA build on NVIDIA (7.5+, driver 580+, a shared card), the
+    CPU build elsewhere. Its image is named by the server's version (`forgeyard_image`), not pinned by
+    digest: it is built with the same release. The server asks for the replica's key
+    (`VISION_API_KEY`) on every path but `/health`, behind the agent's key guard.
+  - Estimate: the files plus 1 GiB on a GPU, 1.25 GiB of RAM on a CPU (measured: 0.66 to 1.12 GiB peak).
+  - The gateway answers `POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` by model
+    name: multipart (`model`, an `image` file, the options) or JSON (`image` in base64), only `model`
+    changed, the vision server's JSON passed back. API keys, their model lists and rpm apply; no cloud.
+    Usage counts one image, its kilopixels and the replica's busy time (the existing `images`,
+    `kilopixels` and `busy_ms` units: no migration). A model of another task is 400 `wrong_endpoint`;
+    no image 400 `missing_image`.
+  - **Try it** on a deployment sends a test image (the box around its red square for SAM 2); the
+    Playground's options list the vision models, and the console reaches them at
+    `/api/playground/vision/<task>`.
+  - The three models of the 1.3 templates are recommended (group *Object detection, segmentation and
+    depth*), at the same pinned revisions, on the CPU by default.
+  - `scripts/accept_vision.py` and a `vision` group in `scripts/accept_all.py` check them on real
+    machines. Apps made from the templates keep running as they are.
+- **Vision models in the console** (#86, part 2). **Serving** groups detection,
+  segmentation and depth in one **Vision** section, each row with its task and `/v1/vision/…` path;
+  the **Catalog** shows a vision model's architecture and classes, a search result its licence, and
+  says before adding why a vision model cannot be added (another task, a licence that is not
+  permissive, a timm backbone), with **Add** disabled. The Playground's vision panel sends a vision
+  deployment the picture as you (picked in the Playground's one model picker, #100). **Try it** on a vision deployment sends the test image. The example calls (Get
+  started, API keys, a deployment's page) are curl and httpx with the image as a file field.
+
+- **Download to…: a model, and its engine, on chosen machines before you deploy it** (part of #35).
+  From **Models → Catalog** (a model's row) or a machine's page (**Download a model here…**), pick the
+  machines: each says whether it fits (what it downloads, the free disk, the engine), is already there,
+  is offline, has an agent too old for it, or lacks the disk. **Also the engine** (on by default)
+  fetches, for the chosen recipe, what that machine would run: the engine archive of a process variant,
+  or the image of a container variant with the 1.3.1 pull progress. Nothing is started.
+  - Progress shows under the model's row and on each machine's page, with the words and bar of a
+    deployment's download; **Cancel** stops it at once on the agent and keeps what is on disk, so asking
+    again resumes. A download on a machine that goes offline goes on when its agent is back. Once done,
+    the machine lists the model in its cache and placement prefers it (#71).
+  - Admins and operators start and cancel (D9), audited as `model.download_requested` and
+    `model.download_cancelled`. API: `GET /api/downloads/targets`, `POST /api/downloads`,
+    `GET /api/downloads`, `POST /api/downloads/{id}/cancel`.
+  - **URL models are checked (D8):** a single GGUF file from a URL has no published checksum, so the
+    SHA-256 the agent computes after its first complete download is recorded in the catalog entry
+    (`meta.files[0].sha256`, with the machine and time; audited as `model.checksum_recorded`), and
+    every later download must match it.
+  - **Internet access per machine** (`nodes.fetch_via`: `auto`, `server`, `direct`; admins only,
+    `PUT /api/machines/{id}/fetch-via`, audited as `node.fetch_via_changed`), used by the relay through
+    the server (below).
+  - Agent protocol feature `prefetch`: `desired.downloads` beside the replicas, `status.downloads` back.
+    The agent uses the code a replica's download uses (locks, resume, checksums, cancel) and runs at most
+    two at a time. Agents before 1.4 are listed as "update the agent" (rebuild the agent image); an agent
+    that comes back without the feature fails what it was asked, saying so.
+  - Migration `0015`: table `model_downloads` (what, where, state, progress, who asked, when, why it
+    failed), and `nodes.fetch_via`, `auto` for every machine. Finished downloads are kept 30 days, at
+    most 20 per machine. The downgrade drops both.
+- **Downloads through the server for machines that cannot reach the source** (part of #35, D1/D3). A
+  machine with no internet access of its own (amd-strix behind its SSH tunnel) gets model files and
+  engine archives **through the server**, which fetches them and passes the bytes on, storing nothing.
+  The agent asks the way it already talks to the server: outbound HTTPS with its pinned CA and machine
+  credential, so the tunnel that carries its connection carries this too.
+  - **Internet access for downloads** on the machine's page (admins) now acts: **Auto** (the default)
+    downloads directly and switches to the server after a network failure reaching the source (the
+    name does not resolve, the connection is refused, reset or times out, the network is unreachable;
+    never an HTTP error or a checksum), remembering the host for an hour; **Always through the server**
+    never tries directly; **Direct only** never relays.
+  - `GET /agent/v1/relay/{replica|download}/{id}/model[/{file}]` and `…/engine`: served only for what
+    that machine's current desired state names (a replica placed there and wanted running, or a
+    download to it under way), from the source URL the server builds from the catalog entry or recipe,
+    with the server's (or the deployment's) Hugging Face token and its own model-source rules. `Range`
+    is passed through, the body streamed in 1 MiB chunks with backpressure; a relay that is no longer
+    wanted (download cancelled, deployment removed, machine revoked or set to Direct only) is closed
+    within 2 s. Two relays per machine and four in all (429 with `Retry-After` beyond). One log line per
+    file: what, to which machine, how much, how fast, how it ended.
+  - The agent keeps its own resume, retries, cancel, progress and checks: a relayed file that fails its
+    SHA-256 (or git blob id, or the engine's pinned SHA-256) is refused and deleted. The Hugging Face
+    token is never sent to a machine set to Always through the server; nothing but `Range` goes from the
+    agent to the relay.
+  - Progress says **via the server** (deployment page, Library, machine page; `download.via` and the
+    download's `via`). The Download to… dialog says *via the server* for such a machine.
+  - Placement (#71): a machine whose agent relays and whose setting is not Direct only is no longer
+    avoided for the model or the engine archive of a host it could not reach; the deployment's page says
+    *… could not reach huggingface.co just now; the model comes through the server*. Engine images are
+    not relayed yet (the next #35 change) and still count against it.
+  - Agent protocol feature `relay`: listed by both sides; model and engine blocks carry `relay: {path,
+    mode}`. Older agents are never sent it and download directly as before. Rebuild the agent image.
+- **Engine images through the server, and image uploads** (part of #35, D4). A machine that cannot reach
+  the registry gets a **pinned** engine image through the server too, layer by layer, the way it gets
+  model files; and an admin can upload any image file to a machine from its page.
+  - `GET /agent/v1/relay/{replica|download}/{id}/image/manifest` and `…/image/blobs/{digest}`: the
+    manifest recorded for the machine's platform in `forgeyard/recipes/images.lock.json` (fetched by that
+    digest, refused unless its bytes hash to it and it names the recorded config), and its config and
+    layers by digest, never a digest the manifest does not name. From the registry's API with an
+    anonymous pull token (Docker Hub, GHCR, quay.io), the server's egress rules, `Range` passed through,
+    the token dropped at the CDN redirect; a whole blob is hashed on the way and its last piece held back
+    unless it matches. Images named by a tag only are refused (*upload it instead*), and so is a machine
+    whose architecture the image has no build for. The same desired-state rule, limits and log lines as
+    model files.
+  - The agent pulls first (**Auto**) and switches to the server when the pull cannot reach the registry
+    (remembering the registry for an hour), or goes straight to the server (**Always through the
+    server**). It checks the manifest against the recorded digests, every blob against its digest (a
+    break resumes the layer from what is on disk, under `.partial/image-…` in the model cache), the
+    config's content id and architecture, then streams an archive both Docker stores and Podman load (an
+    OCI image layout plus the classic `manifest.json`, layers as the registry serves them) into `docker
+    load` / `podman load`, tags it with the recipe's tag, runs it only when the #10 id check recognises it,
+    and deletes the pieces. Progress: *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7
+    layers*, then *loading it*.
+  - Placement (#71): a machine whose agent relays images is no longer avoided for a pinned image's
+    registry it could not reach (*… could not reach ghcr.io (for the engine image) just now; the engine
+    image comes through the server*). A tag-only image still counts against it.
+  - **Engine images** on a machine's page, with **Upload an image** (admins): a `docker save` file,
+    gzip-compressed or not, sent with progress through the server, which keeps only a small buffer, into
+    the agent's `docker load` / `podman load` as it arrives (a file that breaks off is never loaded). The
+    dialog lists what was loaded and which recipe's image it is: checked by its recorded ids, named like a
+    tag-only recipe image, or neither. `POST /api/machines/{id}/images`; one upload per machine and two in
+    all; `IMAGE_UPLOAD_MAX_GB` (64); audited as `node.image_uploaded`.
+  - Agent protocol features `relay_images` and `image_load` (listed by both sides; `image_load` /
+    `image_loaded` messages). Older agents pull directly and cannot take uploads, and the machine's page
+    says to update them. Rebuild the agent image.
+  - The registry client that `scripts/pin_images.py` names images with moved into the package
+    (`forgeyard/workloads/registry.py`).
+- **Usage and cost over time** (#33). Both Usage tabs have a line chart (**Over time**, **Cost over
+  time**): per day (30 days), week (13 weeks, from Monday) or month (12 months), UTC, in total or one
+  line per key, model, provider or person (admins, with **Everyone**). The Requests tab charts
+  requests, tokens (in + out, in, out) or errors, and each unit of the newer model kinds once some
+  was counted (media items, characters, images, audio and video length, busy time, workload bytes);
+  the Cost tab charts cost in US dollars. The five largest lines are drawn by name and the rest
+  added up as *Other*; groups with none are left out. A line keeps its colour when another metric
+  re-ranks the lines. Hover or the arrow keys read a period's values aloud and in a tooltip, the
+  legend gives each line's total, and **Show the numbers** lists them as a table. The latest period,
+  still going on, is drawn dashed.
+  - `GET /api/usage/series?step=day|week|month&periods=N&split=none|key|model|provider|user&metric=…`
+    sums the same daily usage rows as the tables, so no data changes: at most 366 days, 104 weeks or
+    36 months. Whose usage follows `GET /api/usage`: your own, everyone's for admins with
+    `everyone=true`.
+- **A machine's page lists the models in its cache, with their sizes, and removes them** (part of
+  #35). **Models in cache** shows each Hugging Face revision (and each GGUF file of a revision with
+  several), single-file models from a URL and engine archives, with their sizes, the catalog models
+  they are and the deployments there that use them; how much the cache takes on its disk and what is
+  free; and the partial downloads.
+  - **Remove** (admins and operators) deletes one like `hf cache rm`: the revision's links, its
+    marker and refs, and only the blobs no other revision links to. **Remove partial downloads**
+    deletes what unfinished downloads left. Each is audited as `model.cache_removed`, with the bytes
+    freed.
+  - Refused while a deployment on that machine uses it (409 `model_in_use`, naming it): the server
+    checks, and the agent checks again before it deletes anything. Never while a download of the
+    same repository (or, for partial downloads, any download) runs there: a download holds a shared
+    lock that the removal takes exclusively, without waiting.
+  - The agent only looks up the key among the models it found on its own disk; no path is ever made
+    from what the server sends.
+  - API: `GET /api/machines/{id}/cache`, `POST …/cache/remove` and `POST …/cache/remove-partial`.
+    The machine list no longer carries the per-model detail.
+  - Agent protocol feature `cache_admin` (`cache_remove`, `cache_prune`, `cache_removed`), and
+    `model_cache` gains `models`, `engines_detail`, `used_bytes`, `partial_bytes`, `partial_files`
+    (kept within 192 KiB, the largest models first). Agents before 1.4 are listed without sizes and
+    without Remove; update them (rebuild the agent image) to remove models. No migration.
+- **Placement knows what a machine can fetch** (#56). Among the machines that fit, a machine that
+  could not reach a source a replica would download from there in the last hour (the model's host,
+  the engine archive's, the image registry) comes last; then replicas spread over machines; then a
+  machine that already has the model in its cache, then one that also has the engine archive or
+  image; then binpack. The model cache used to count only on a tie.
+  - A download that could not reach its source (DNS, connection refused or timed out, network
+    unreachable) is remembered per machine and host for an hour, in memory. HTTP errors, a refused
+    token, checksums and a full disk are not counted.
+  - A replica in backoff because of such a failure is placed again on another machine that fits;
+    a pinned deployment's replica stays and says why. On one machine, a later recipe variant that
+    needs no such fetch (the process engine when ghcr.io is unreachable) is chosen over the first.
+  - The deployment's and workload's pages say why a replica is where it is: *cpu-01 could not reach
+    huggingface.co; placed on cpu-02 instead*. The API gives it as the replica's `placement_note`,
+    and the placement preview gives `needs` and `unreachable` per machine.
+  - Agents list the engine archives they unpacked (`model_cache.engines`); an engine image or
+    archive also counts as on a machine once a replica started from it there. Older agents work
+    as before.
+- **A model workload names the deployment that created it** (part of #36): `GET /api/workloads`
+  gives `deployment: {id, name, gpus}`. In the console a model is seen under Serving only (#81, #92).
+- **Machines and the models' pages redesigned** (#34, #92). **Machines** is one tile per machine with a mark for its
+  kind (NVIDIA GPU, AMD GPU, AMD APU, CPU only), its cards as slots filled from the bottom (what
+  Forgeyard reserved, other use, free), free memory, how many models and apps run there
+  and their names, heartbeat and agent version, under a count of machines per kind. A machine has
+  its own page (`/machines/<id>`): a memory map that splits each card by what holds it, named and
+  with what it reserved; what runs there, with **Deploy here**; GPU access
+  and runtimes; the agent's details; **Revoke** and **Remove**; and only that machine's setup-health
+  findings. **Serving** groups deployments by kind (chat, multimodal chat, embeddings,
+  rerank, speech to text, text to speech, images, video, vision), each with its icon, a line on what it does
+  and its path at `/v1`; a row says where the deployment runs (machine and cards), its memory and its
+  state, and any download, wait or placement note. `GET /api/deployments` gives the model's
+  `modalities`, so a chat model that reads images is listed as multimodal chat.
+
+### Changed
+
+- **One thing in one place: Serving runs the models, Models is the library, cloud settings are on
+  Cloud** (#34, #36, #81, #92; apps left the console, #88). The console only; the API and the data are unchanged.
+  - **Serving** (`/serving`) is a page of its own: the models running now, grouped by kind (the
+    Deployments list of Models before), with **Deploy a model** (`/serving/deploy`). A deployment's
+    page is `/serving/<id>` and it is changed at `/serving/<id>/edit`.
+  - **Models** is the model library only, with three tabs: **Catalog** (the default: the models you
+    can deploy, adding from the recommended list, a Hugging Face search or a source, *Download to…*,
+    Deploy), **Engines** (the recipes: vLLM, llama.cpp, sd.cpp, speaches, vLLM-Omni, vision, their
+    per-hardware variants and custom ones) and **Sources** (admins only: GGUF URL hosts, `local://`
+    directories, the Hugging Face token). The console says *engine*; the API and the recipe files keep
+    *recipe* (`/api/recipes`). An engine's card is short: its version, what it is, the hardware it runs
+    on (NVIDIA, AMD, CPU, *shares a GPU*) and what it serves; the variants, images, requirements and
+    offline commands are behind **Details**. Admins **Add a custom engine** (its recipe YAML, optionally
+    started from a copy of a built-in engine under a free name, the server's refusal shown at the
+    field) and **Edit** or **Delete** a custom one (`PUT` / `DELETE /api/recipes/<name>`; refused while
+    a deployment uses it). A catalog row's source is short (the repository and, for a GGUF file, its
+    quantisation such as `Q4_K_M`; a URL's host and file; a directory's name), the full source and
+    revision in its tooltip, and its actions are stacked so none is clipped. The *Routes and cloud* tab of 1.3 is gone: most of its routes only
+    repeated a deployment.
+  - **A deployment's page holds its cloud fallback**: the tiers and the spill rules that were
+    *Routing and cloud spill*, edited in place by admins and read-only for everyone else, plus the
+    other names it also answers as. In the Serving list, a deployment with a cloud tier shows
+    *→ <provider>*.
+  - **Providers is now Cloud** (`/cloud`), with two tabs: **Providers**, and **Cloud models**, the
+    names an admin made for a provider's model (*New cloud model*). A name an admin made for
+    deployments only (several behind one name, or one under a second name) is listed there too, under
+    *Other names for deployments*. A cloud model's page is `/cloud/models/<id>`, a provider's
+    `/cloud/providers/<id>`.
+  - **A model is seen under Serving only**: its deployment's page has its replicas, output and events,
+    and no longer says *Runs as workload X*; an old link to a model's workload page opens the
+    deployment. **Machines** still shows everything that holds a card: its tiles, memory map and
+    *Running here* name models (linked to the deployment) and apps (named, not linked: #88).
+  - **The Playground has one model picker and no tabs** (#100). The ready models (as before: a ready
+    replica, or a cloud model the person may use) are listed grouped by kind with Serving's labels and
+    icons (Chat, Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video,
+    Vision), each with its task (vision) or *local, then cloud* / *cloud only*; models with no ready
+    replica are no longer listed. Picking one opens its panel, and the address keeps it
+    (`/playground?model=<name>`, without a step in the history). The **Vision** tab is gone: its address
+    `/playground?tab=vision` opens the first ready vision model, or the picker when there is none. With
+    nothing ready, the page says so, names how many deployments are not ready (linking Serving), and
+    sends admins and operators to **Models → Catalog**. The playground's own API is unchanged.
+  - The menu is Machines, Serving, Models, Cloud (admins), Playground, API keys, Usage, Users and Audit
+    log (admins), and the pages are numbered 01 to 09 in that order. "Route" and "workload" left the
+    console's navigation.
+  - 1.3's links open the new places, without a step in the history: `/models/deployments/<id>` (and
+    `/edit`, keeping `#cloud-fallback`), `/models/deploy` (keeping `?model=` and `?machine=`),
+    `/deployments`, `/models?tab=deployments` and `?tab=routes` (Serving), `?tab=catalog` (the
+    Catalog), `/models/routes/<id>`, `/providers` and `/providers/<id>`, and `/workloads…` (a model's
+    workload: its deployment; anything else: Machines). Setup-health findings
+    link to Serving, a deployment's page or its cloud fallback, **Models → Sources** (the Hugging Face
+    token, settings still read from `.env`), a cloud model or `/cloud/providers/<id>`, and show on those
+    pages; Get started's steps open the Catalog and **Serving → Deploy a model**.
+- **A deployment's workload is stopped, started and deleted only through its deployment** (#36):
+  `POST /api/workloads/<id>/stop`, `…/start` and `DELETE /api/workloads/<id>` answer `409
+  managed_by_deployment` (naming the deployment) for a model deployment's workload, which the console
+  shows only as its deployment. Deleting the workload used to delete the deployment and its route with it;
+  stopping it left the deployment's page out of step.
+- **Revoked keys leave the budget lists and alerts** (part of #36): Usage → Cost (*Budgets this
+  month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%
+  alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
+  person's and its provider's budgets.
+- **API keys: revoked keys folded away, shorter rows** (#105). On a server with 172 keys, 163 of them
+  revoked, the page was about 19,000 px tall on a desktop and 75,000 px on a phone. UI only; the API
+  is unchanged.
+  - The list shows the keys that still work. Revoked and expired keys are folded away under one row,
+    **Show N revoked keys** (or *expired*, or *revoked or expired*), which opens them below the active
+    ones and folds them again (**Hide revoked keys**). The same in *Mine* and *Everyone's*; switching
+    between the two folds them again. When every key is revoked, the page says there are no active
+    keys and still offers the row. Usage and the audit log still name them.
+  - *Limits* reads short: only the limits that are set ("3 requests/min", "10k tokens/min"), or
+    *No limits*; the exact values are in its tooltip, and a lock stays next to its limit.
+  - Phones: every value of a key stays in its value column (the token limit, the key's prefix and a
+    revoked key's "by …" used to wrap under the labels), and a revoked key's card has no empty action
+    strip.
+  - Machines: the summary above the tiles counts machines, not cards: *1 NVIDIA machine*, *1 AMD
+    machine*, *2 CPU-only machines* (*AMD GPU* and *AMD APU* when a server has both).
+
+### Deprecated
+
+- **Apps: their API, the templates and `/x/`** (#88), removed in 1.5 (#89) with a migration that removes
+  the apps left. Forgeyard is about running and managing models; an app (a workload that is not a
+  model's) drifts from that. Until 1.5 they keep working, and say so:
+  - the apps part of `/api/workloads` (create; read, expose, stop, start, delete and the logs of an app;
+    the list while it holds an app), `GET /api/workloads/templates`, `/x/<name>/…` and the console's
+    `POST /api/playground/vision/<name>/<task>` answer with `Deprecation: @1794787200` (RFC 9745) and
+    `Link: </guide/en/reference#apps-deprecated>; rel="deprecation"`, errors included; no `Sunset` yet;
+  - the server log warns once an hour at most per kind (apps, templates, `/x/`), naming the request;
+  - **Setup health** warns (`apps-deprecated`) while any app exists, naming them.
+
+  A key's `workloads` and `workload_list` settings stay in the API until 1.5. A model deployment's
+  workload is not deprecated: it is how models run (fine-tuning in 1.9 will run the same way). Use a
+  model deployment instead; a model no built-in engine runs gets a custom engine (**Models → Engines**).
+
+### Removed
+
+- **Apps in the console** (#88). The Apps pages (`/apps`, an app's page, New app and its templates), a
+  key's **Apps at /x/** setting on API keys, and the exposed vision apps in **Playground → Vision**
+  (vision models replace them, #86) are gone. `/apps…` and 1.3's `/workloads…` open a model's
+  deployment, or Machines. **Machines** still names an app that holds a card (not linked), so a card in
+  use is never shown free. `GET /api/keys` no longer lists the apps a key could name (`workloads`), and
+  `GET /api/playground/vision/options` no longer lists the exposed vision apps (`workloads`).
+- **The seven settings deprecated in 1.3.1 are no longer read** (#78): `SECRET_KEY_FILE`,
+  `AGENT_HEARTBEAT_SECONDS`, `FORGEYARD_SETUP_TOKEN`, `USAGE_FLUSH_SECONDS`,
+  `PROVIDER_COOLDOWN_SECONDS`, `PROVIDER_RETRY_AFTER_CAP` and `OPENROUTER_MODELS_URL`. The behaviour
+  is the fixed one they already documented: the heartbeat is a third of `AGENT_OFFLINE_SECONDS` (at
+  least 2 s), usage is written every 5 s, a failed provider target is tried last for 30 s (its
+  `Retry-After` up to 5 min), a `Retry-After` up to 2 s is waited for once, prices come from
+  OpenRouter's public list, the key file is `FORGEYARD_SECRET_KEY_FILE` and the setup token is the
+  generated one.
+  - One still set, in the environment or `.env`, is not ignored silently: the server logs
+    *X is no longer read. X was removed in 1.4, so its value is ignored. Use Y instead …* at start,
+    and Setup health lists it (`setting-removed`, which replaces `setting-deprecated`;
+    `setup-token-left` is gone with its setting).
+  - **Upgrade step:** rename `SECRET_KEY_FILE` to `FORGEYARD_SECRET_KEY_FILE`. Set alone to a key
+    file other than `data/secret.key`, it now stops the start with a message that says so, and
+    `secrets reset` refuses too, rather than the server looking for (or making) another key and
+    calling the real one lost.
+
+### Fixed
+
+- **A pull that failed because the registry could not be reached is read as such, however long the engine's
+  message.** Docker 29 puts the cause ("…: no such host") after the image reference twice over; the agent cut
+  the message at 300 characters before reading it, so the cause was lost: the console never showed it and
+  "Internet access: Auto" never switched to the server. Messages are kept whole until read, and the reason
+  shown keeps their start and their end.
+- **An error the agent did not expect while starting a replica is now that replica's reason** in the console
+  ("the agent failed while starting it (…)"), followed by the usual backoff. It used to read "ended while the
+  agent was not watching", with the cause only in the agent's log.
+- **`agent init` and `install.sh` no longer write an invalid `agent.toml` when a tool's message has several
+  lines.** A note in the file quoted, for example, `podman info`'s multi-line error on a host without a shared
+  mount; its second line was not a comment, so the file was not valid TOML and the install stopped at
+  "writing … agent.toml failed". Every note and header line is now folded into comment lines.
+- **Stopping a replica's key guard no longer waits for a client that stopped reading.** Closing a guard
+  (the agent stops, a replica is removed) used to close each stream gracefully, up to 2 s per side plus 5 s
+  for the listener; it now aborts every open stream first, so it takes well under a second.
+- **Usage's tables no longer go on for pages** (#82). With about 100 models the page was some 48,000
+  px tall on a phone: every row wrapped its name over three or four lines and kept every column.
+  - Every table on Usage (by model, key, person, day, source, local or cloud; on **Cost** by day,
+    key, person, model, provider) lists its top 15 rows by the column it is sorted by, and adds up
+    the rest in one last row, *N others* (latencies do not add up, so that row has none); **Show all
+    N** lists every row. A column's heading sorts by it, again for the other way round. **Cost** is
+    sorted by cost, a table by day starts with the latest day.
+  - On a phone (760 px or less) each row is one line: the name, cut short with the whole name in its
+    tooltip, and the number it is sorted by. Tapping it (or Enter) opens the other columns under it;
+    **Sort by** chooses the order.
+  - At desktop widths, a long name stays on one line (cut short, the whole name in its tooltip), and
+    a table with more columns than fit scrolls sideways inside its frame instead of cutting off the
+    last ones (Busy, Avg, p50 and p95, once images, video or workload traffic were counted).
+  - With the data of a server with 88 models (Requests, by model, 7 days): 48,681 → 2,514 px tall at
+    390 px, 7,561 → 2,075 px at 1,440 px; Cost by model 23,607 → 2,830 px at 390 px.
+- **The catalog's Model column no longer collapses** to a few characters at desktop widths: the model
+  library's table keeps its Model, Architecture and Recipes columns readable and fits at 1440 px.
+- **A long command no longer fills the Workloads list on a phone**: at narrow widths it shows three lines
+  and an ellipsis; the whole command is in its tooltip.
+- **Tests that failed now and then on CI** wait for the state they need instead of a fixed time, or
+  for the data a page fetches instead of reading it at once (image queue, video jobs, the route editor,
+  Speak, a workload's output, and others found the same way). Test machines are heard from when made,
+  so the liveness sweep no longer takes them offline in a slow test, and a killed process group is
+  waited for until it is gone. `npm run test:jitter` runs the UI tests with every faked API answer
+  late and out of order; docs/development.md says how to write tests that do not flake.
+
 ## [1.3.3] — 2026-11-15
 
 The READMEs rewritten (what Forgeyard does, how to install it, a quick start), and the Python examples

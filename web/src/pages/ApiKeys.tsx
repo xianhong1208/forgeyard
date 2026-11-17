@@ -1,5 +1,5 @@
-import { IconKey, IconLock, IconPlus } from "@tabler/icons-react";
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { IconChevronDown, IconChevronUp, IconKey, IconLock, IconPlus } from "@tabler/icons-react";
+import { useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { useAuth } from "../auth";
@@ -9,11 +9,10 @@ import { CopyBox, Field, Notice, PageHeader, TrustHint } from "../components/ui"
 import { api, errorText } from "../lib/api";
 import { budgetInput, LEVEL_LABEL, parseBudget, resetText } from "../lib/budgets";
 import { exact, when } from "../lib/format";
-import { keyModels, num, snippets } from "../lib/gateway";
-import { ACCESS_HELP, ACCESS_LABEL, ACCESS_LEVELS, keyWorkloads } from "../lib/passthrough";
+import { foldLabel, keyLimits, keyModels, num, snippets, splitKeys } from "../lib/gateway";
 import { CLOUD_POLICIES, CUSTOM_HELP, policyOf, policyValue, type CloudPolicy } from "../lib/cloudPolicy";
 import { CLOUD_HELP, CLOUD_LABEL, CLOUD_LEVELS, cloudAbove } from "../lib/routing";
-import type { ApiKey, CloudLevel, CloudSettings, KeyLimits, KeysResponse, NewKeyResponse, WorkloadAccess, WorkloadChoice } from "../lib/types";
+import type { ApiKey, CloudLevel, CloudSettings, KeyLimits, KeysResponse, NewKeyResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
 const EXPIRY = [
@@ -26,6 +25,11 @@ const EXPIRY = [
 
 const STATUS_TONE: Record<ApiKey["status"], string> = { active: "ok", revoked: "off", expired: "wait" };
 
+// The exact limits, for the tooltip of the short ones.
+function limitsTitle(k: ApiKey): string {
+  return `Requests: ${k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"} · Tokens: ${k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}`;
+}
+
 function capText(n: number | null): string {
   return n ? `at most ${num(n)}` : "no cap";
 }
@@ -37,37 +41,6 @@ const NO_CLOUD: CloudSettings = { default: "off", max: "off" };
 
 function CloudChip({ level }: { level: CloudLevel }) {
   return <span className={`chip chip-tone-${CLOUD_TONE[level]}`} title={CLOUD_HELP[level]}>{CLOUD_LABEL[level]}</span>;
-}
-
-// Which workloads at /x/ a key may call (1.3): a radio group, and the workloads to tick for "listed".
-function WorkloadPicks({ id, level, picked, choices, disabled, onLevel, onPicked }: {
-  id: string; level: WorkloadAccess; picked: string[]; choices: WorkloadChoice[]; disabled?: boolean;
-  onLevel: (l: WorkloadAccess) => void; onPicked: (names: string[]) => void;
-}) {
-  const toggle = (n: string) => onPicked(picked.includes(n) ? picked.filter((x) => x !== n) : [...picked, n]);
-  return (
-    <>
-      <div className="cloud-picks" role="radiogroup" aria-label="Which workloads at /x/ may this key call?">
-        {ACCESS_LEVELS.map((l) => (
-          <label key={l} className="card-pick">
-            <input type="radio" name={`wl-${id}`} checked={level === l} disabled={disabled} onChange={() => onLevel(l)} />
-            <span className="strong">{ACCESS_LABEL[l]}</span> <span className="muted small">{ACCESS_HELP[l]}</span>
-          </label>
-        ))}
-      </div>
-      {level === "listed" && (
-        <div className="allowlist-cards" role="group" aria-label="Allowed workloads">
-          {choices.length === 0 && <span className="muted small">No service workloads yet.</span>}
-          {choices.map((c) => (
-            <label key={c.name} className="card-pick">
-              <input type="checkbox" checked={picked.includes(c.name)} disabled={disabled} onChange={() => toggle(c.name)} />
-              <span className="mono">{c.path}</span>{!c.exposed && <span className="muted small">not exposed</span>}
-            </label>
-          ))}
-        </div>
-      )}
-    </>
-  );
 }
 
 // A limit an admin set on someone else's key: its owner cannot change it.
@@ -86,6 +59,12 @@ export function ApiKeysPage() {
   const [issued, setIssued] = useState<NewKeyResponse | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  // Revoked and expired keys are folded away under one row, in Mine and in Everyone's (1.4).
+  const [showOld, setShowOld] = useState(false);
+  const scope = (all: boolean) => {
+    setEveryone(all);
+    setShowOld(false);
+  };
 
   const revoke = async (k: ApiKey) => {
     const whose = everyone && k.user.username ? ` of ${k.user.username}` : "";
@@ -107,7 +86,7 @@ export function ApiKeysPage() {
   return (
     <>
       <PageHeader
-        index="05 · API keys"
+        index="06 · API keys"
         title="API keys"
         lead="Keys for programs that call the models through Forgeyard's OpenAI-compatible gateway. A key is shown once; Forgeyard keeps only a hash of it."
         actions={
@@ -152,8 +131,8 @@ export function ApiKeysPage() {
             <h2 id="keys-title">{everyone ? "Everyone's keys" : "Your keys"}</h2>
             {data.is_admin && (
               <div className="segmented" role="group" aria-label="Whose keys">
-                <button type="button" className={everyone ? "" : "on"} aria-pressed={!everyone} onClick={() => setEveryone(false)}>Mine</button>
-                <button type="button" className={everyone ? "on" : ""} aria-pressed={everyone} onClick={() => setEveryone(true)}>Everyone's</button>
+                <button type="button" className={everyone ? "" : "on"} aria-pressed={!everyone} onClick={() => scope(false)}>Mine</button>
+                <button type="button" className={everyone ? "on" : ""} aria-pressed={everyone} onClick={() => scope(true)}>Everyone's</button>
               </div>
             )}
           </div>
@@ -177,22 +156,26 @@ export function ApiKeysPage() {
               )}
             </div>
           ) : (
-            <div className="table-wrap">
-              <table className="table keys-table">
-                <thead>
-                  <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Budget</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
-                </thead>
-                <tbody>
-                  {data.keys.map((k) => (
-                    <KeyRow key={k.id} k={k} everyone={everyone} isAdmin={data.is_admin} limits={data.limits} cloud={data.cloud ?? NO_CLOUD}
-                      choices={data.workloads ?? []}
-                      editing={editing === k.id} onEdit={() => setEditing(editing === k.id ? null : k.id)}
-                      onSaved={(text) => { setEditing(null); setMessage({ tone: "ok", text }); reload(); }}
-                      onError={(text) => setMessage({ tone: "error", text })} onRevoke={() => void revoke(k)} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <KeysList keys={data.keys} everyone={everyone} showOld={showOld} onToggle={() => setShowOld(!showOld)} empty={(
+              <div className="panel empty-keys">
+                <IconKey size={22} aria-hidden="true" />
+                <p className="muted">
+                  {everyone ? "No active keys: every key is revoked or expired." : "No active keys: every key of yours is revoked or expired."}
+                </p>
+                {!everyone && !creating && (
+                  <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>
+                    <IconPlus size={16} aria-hidden="true" /> Create a key
+                  </button>
+                )}
+              </div>
+            )}>
+              {(k) => (
+                <KeyRow key={k.id} k={k} everyone={everyone} isAdmin={data.is_admin} limits={data.limits} cloud={data.cloud ?? NO_CLOUD}
+                  editing={editing === k.id} onEdit={() => setEditing(editing === k.id ? null : k.id)}
+                  onSaved={(text) => { setEditing(null); setMessage({ tone: "ok", text }); reload(); }}
+                  onError={(text) => setMessage({ tone: "error", text })} onRevoke={() => void revoke(k)} />
+              )}
+            </KeysList>
           )}
         </section>
       )}
@@ -203,8 +186,37 @@ export function ApiKeysPage() {
   );
 }
 
-function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit, onSaved, onError, onRevoke }: {
-  k: ApiKey; everyone: boolean; isAdmin: boolean; limits: KeyLimits; cloud: CloudSettings; choices: WorkloadChoice[]; editing: boolean; onEdit: () => void;
+// The active keys in a table, then one row that opens the revoked and expired ones below them.
+function KeysList({ keys, everyone, showOld, onToggle, empty, children }: {
+  keys: ApiKey[]; everyone: boolean; showOld: boolean; onToggle: () => void; empty: ReactNode; children: (k: ApiKey) => ReactNode;
+}) {
+  const { active, inactive } = splitKeys(keys);
+  const shown = showOld ? [...active, ...inactive] : active;
+  return (
+    <>
+      {active.length === 0 && empty}
+      {shown.length > 0 && (
+        <div className="table-wrap">
+          <table className="table keys-table">
+            <thead>
+              <tr><th>Key</th>{everyone && <th>Owner</th>}<th>Models</th><th>Limits</th><th>Cloud</th><th>Budget</th><th>Last used</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr>
+            </thead>
+            <tbody>{shown.map(children)}</tbody>
+          </table>
+        </div>
+      )}
+      {inactive.length > 0 && (
+        <button type="button" className="keys-fold" aria-expanded={showOld} onClick={onToggle}>
+          {showOld ? <IconChevronUp size={16} aria-hidden="true" /> : <IconChevronDown size={16} aria-hidden="true" />}
+          {foldLabel(inactive, showOld)}
+        </button>
+      )}
+    </>
+  );
+}
+
+function KeyRow({ k, everyone, isAdmin, limits, cloud, editing, onEdit, onSaved, onError, onRevoke }: {
+  k: ApiKey; everyone: boolean; isAdmin: boolean; limits: KeyLimits; cloud: CloudSettings; editing: boolean; onEdit: () => void;
   onSaved: (text: string) => void; onError: (text: string) => void; onRevoke: () => void;
 }) {
   const { user } = useAuth();
@@ -217,10 +229,6 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
   const own = user?.id === k.user.id;
   const lockedBy: Record<LimitName, string | null> = { rpm: k.rpm_locked_by ?? null, tpm: k.tpm_locked_by ?? null };
   const cloudLock = k.cloud_locked_by ?? null;
-  const access: WorkloadAccess = k.workloads ?? "none";
-  const [wlLevel, setWlLevel] = useState<WorkloadAccess>(access);
-  const [wlPicked, setWlPicked] = useState<string[]>(k.workload_list ?? []);
-  const wlLock = k.workloads_locked_by ?? null;
   // Only what changed is sent: an unchanged locked value is not "changed" by its owner saving the other one.
   const patch = (values: Record<LimitName, string>) => {
     const out: Record<string, number | string | string[] | null> = Object.fromEntries((["rpm", "tpm"] as LimitName[])
@@ -229,11 +237,6 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
     if (cloudLevel !== level) out.cloud = cloudLevel;
     const b = parseBudget(budget);
     if (b !== "bad" && b !== (k.budget?.budget_micros ?? null)) out.budget_micros = b;
-    const listNow = [...(k.workload_list ?? [])].sort().join("\n");
-    if (wlLevel !== access || (wlLevel === "listed" && [...wlPicked].sort().join("\n") !== listNow)) {
-      out.workloads = wlLevel;
-      out.workload_list = wlLevel === "listed" ? wlPicked : null;
-    }
     return out;
   };
   const send = async (body: Record<string, number | string | string[] | null>, done: string) => {
@@ -255,7 +258,7 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
       onEdit();
       return;
     }
-    await send(body, `Limits, cloud, budget and workloads of ${k.name} saved.`);
+    await send(body, `Limits, cloud, budget and apps of ${k.name} saved.`);
   };
   const lockHint = (n: LimitName, base: string) => {
     const by = lockedBy[n];
@@ -265,42 +268,54 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
     return base;
   };
   const active = k.status === "active";
+  const limitLines = keyLimits(k);
   return (
     <>
       <tr className={active ? "" : "row-off"}>
+        {/* Every value cell holds one element: on a phone the cell is a label | value grid, and a second
+            child would wrap into the label column. */}
         <td data-label="Key">
-          <div className="strong">{k.name}</div>
-          <div className="mono small muted">{k.prefix}…</div>
+          <div>
+            <div className="strong">{k.name}</div>
+            <div className="mono small muted">{k.prefix}…</div>
+          </div>
         </td>
-        {everyone && <td data-label="Owner" className="mono small">{k.user.username ?? "—"}</td>}
-        <td data-label="Models" className="small">{keyModels(k)}
-          <div className="muted">Workloads: {keyWorkloads(k)}{wlLock && <> <LockChip by={wlLock} /></>}</div></td>
+        {everyone && <td data-label="Owner" className="mono small"><div>{k.user.username ?? "—"}</div></td>}
+        <td data-label="Models" className="small"><div>{keyModels(k)}</div></td>
         <td data-label="Limits" className="small">
-          <div><span className="muted">Requests</span> {k.effective_rpm ? `${num(k.effective_rpm)}/min` : "no limit"}
-            {lockedBy.rpm && <> <LockChip by={lockedBy.rpm} /></>}</div>
-          <div><span className="muted">Tokens</span> {k.effective_tpm ? `${num(k.effective_tpm)}/min` : "no limit"}
-            {lockedBy.tpm && <> <LockChip by={lockedBy.tpm} /></>}</div>
-          {active && (k.this_minute.requests > 0 || k.this_minute.tokens > 0) && (
-            <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
-          )}
+          <div className="key-limits" title={limitsTitle(k)}>
+            {limitLines.map((l) => (
+              <div key={l.text} className={l.none ? "muted" : undefined}>
+                <span className="nowrap">{l.text}</span>{l.locks.map((by, i) => <span key={i}> <LockChip by={by} /></span>)}
+              </div>
+            ))}
+            {active && (k.this_minute.requests > 0 || k.this_minute.tokens > 0) && (
+              <div className="muted">now: {num(k.this_minute.requests)} req · {num(k.this_minute.tokens)} tok</div>
+            )}
+          </div>
         </td>
-        <td data-label="Cloud" className="small"><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}
-          {k.effective_cloud && k.effective_cloud !== level && (
-            <span className="chip chip-tone-off" title="The server's current maximum for people's own keys is lower; this key works as if set to it until the maximum is raised again.">
-              now {CLOUD_LABEL[k.effective_cloud]} (server maximum)
-            </span>
-          )}</td>
+        <td data-label="Cloud" className="small">
+          <div><CloudChip level={level} />{cloudLock && <> <LockChip by={cloudLock} /></>}
+            {k.effective_cloud && k.effective_cloud !== level && (
+              <> <span className="chip chip-tone-off" title="The server's current maximum for people's own keys is lower; this key works as if set to it until the maximum is raised again.">
+                now {CLOUD_LABEL[k.effective_cloud]} (server maximum)
+              </span></>
+            )}</div>
+        </td>
         <td data-label="Budget" className="small">
           <div>
-            {k.budget ? <BudgetMeter b={k.budget} label={`Budget of ${k.name}`} compact /> : <span className="muted">none</span>}
+            {k.status === "revoked" ? <span className="muted">—</span>
+              : k.budget ? <BudgetMeter b={k.budget} label={`Budget of ${k.name}`} compact /> : <span className="muted">none</span>}
             {budgetLock && <LockChip by={budgetLock} />}
           </div>
         </td>
-        <td data-label="Last used" className="small" title={exact(k.last_used_at)}>{k.last_used_at ? when(k.last_used_at) : "never"}</td>
-        <td data-label="Expires" className="small" title={exact(k.expires_at)}>{k.expires_at ? when(k.expires_at) : "never"}</td>
+        <td data-label="Last used" className="small" title={exact(k.last_used_at)}><div>{k.last_used_at ? when(k.last_used_at) : "never"}</div></td>
+        <td data-label="Expires" className="small" title={exact(k.expires_at)}><div>{k.expires_at ? when(k.expires_at) : "never"}</div></td>
         <td data-label="Status">
-          <span className={`chip chip-tone-${STATUS_TONE[k.status]}`}>{k.status}</span>
-          {k.revoked_by && <div className="muted small">by {k.revoked_by}</div>}
+          <div>
+            <span className={`chip chip-tone-${STATUS_TONE[k.status]}`}>{k.status}</span>
+            {k.revoked_by && <div className="muted small">by {k.revoked_by}</div>}
+          </div>
         </td>
         <td className="cell-actions">
           {active && (isAdmin || !everyone) && (
@@ -334,23 +349,9 @@ function KeyRow({ k, everyone, isAdmin, limits, cloud, choices, editing, onEdit,
                   : budgetLock ? `Locked for ${k.user.username ?? "the owner"} (set by ${budgetLock}). Clear it to unlock.`
                     : isAdmin && !own ? `Cloud spend per calendar month (UTC). Saving it locks it for ${k.user.username ?? "the owner"}.`
                       : "Cloud spend per calendar month (UTC). When it is used up, this key stays local. $0 blocks all cloud spend; leave it empty for no budget."} />
-              <fieldset className="allowlist key-workloads">
-                <legend>Workloads at /x/</legend>
-                <WorkloadPicks id={k.id} level={wlLevel} picked={wlPicked} choices={choices} disabled={!isAdmin && !!wlLock}
-                  onLevel={setWlLevel} onPicked={setWlPicked} />
-                <p className="field-hint">{wlLock && !isAdmin ? <>Set by the admin <strong>{wlLock}</strong>; only an admin can change it.</>
-                  : wlLock ? `Locked for ${k.user.username ?? "the owner"} (set by ${wlLock}).`
-                    : isAdmin && !own ? `Saving a change locks it for ${k.user.username ?? "the owner"}.` : ""}</p>
-              </fieldset>
               <div className="row-gap limits-actions">
                 <button type="submit" className="btn btn-primary btn-small"
-                  disabled={(!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock && !!budgetLock && !!wlLock) || (wlLevel === "listed" && wlPicked.length === 0)}>Save limits</button>
-                {isAdmin && wlLock && (
-                  <button type="button" className="btn btn-quiet btn-small"
-                    onClick={() => void send({ workloads: null }, `Workloads setting of ${k.name} unlocked; it is none again.`)}>
-                    <IconLock size={14} aria-hidden="true" /> Unlock workloads
-                  </button>
-                )}
+                  disabled={!isAdmin && !!lockedBy.rpm && !!lockedBy.tpm && !!cloudLock && !!budgetLock}>Save limits</button>
                 {isAdmin && budgetLock && (
                   <button type="button" className="btn btn-quiet btn-small"
                     onClick={() => void send({ budget_micros: null }, `Budget of ${k.name} removed and unlocked.`)}>
@@ -389,12 +390,9 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
   const cloudSettings = data.cloud ?? NO_CLOUD;
   const [cloud, setCloud] = useState<CloudLevel>(cloudSettings.default);
   const [budget, setBudget] = useState("");
-  const [wlLevel, setWlLevel] = useState<WorkloadAccess>("none");
-  const [wlPicked, setWlPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { limits, is_admin: admin } = data;
-  const exposed = (data.workloads ?? []).filter((w) => w.exposed).length;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -411,8 +409,6 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
         body: {
           name: name.trim(), models: all ? null : picked, rpm: rpm ? Number(rpm) : null, tpm: tpm ? Number(tpm) : null,
           expires_in_days: expiry ? Number(expiry) : null, cloud, budget_micros: budgetMicros,
-          // The server's default is none: only a choice is sent.
-          ...(wlLevel !== "none" ? { workloads: wlLevel, workload_list: wlLevel === "listed" ? wlPicked : null } : {}),
         },
       }));
     } catch (err) {
@@ -485,13 +481,9 @@ function CreateKey({ data, onCancel, onCreated }: { data: KeysResponse; onCancel
               placeholder="no budget" hint="What this key may spend at cloud providers per calendar month (UTC). When it is used up, the key stays local. $0 blocks all cloud spend; leave it empty for no budget." />
           </div>
         )}
-        <details className="key-workloads-more">
-          <summary>Workloads at /x/ <span className="muted small">· {ACCESS_LABEL[wlLevel].toLowerCase()}{exposed ? ` · ${exposed} exposed` : ""}</span></summary>
-          <WorkloadPicks id="new" level={wlLevel} picked={wlPicked} choices={data.workloads ?? []} onLevel={setWlLevel} onPicked={setWlPicked} />
-        </details>
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
         <div className="row-gap" style={{ marginTop: 16 }}>
-          <button type="submit" className="btn btn-primary" disabled={busy || !name.trim() || (!all && picked.length === 0) || (wlLevel === "listed" && wlPicked.length === 0)}>
+          <button type="submit" className="btn btn-primary" disabled={busy || !name.trim() || (!all && picked.length === 0)}>
             {busy ? "Creating…" : "Create key"}
           </button>
           <button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button>

@@ -45,7 +45,7 @@ What it shows for each card:
   serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
   1.1.0 or older keeps its GPU allowlist when the key changes.
 
-Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process workload gets
+Models run on AMD with the `vllm` recipe's ROCm image and with `llama-cpp`. A process (an app or an engine) gets
 only its cards in `ROCR_VISIBLE_DEVICES`, and the groups that own `/dev/kfd` and its
 `/dev/dri/renderD*` only when it has a GPU.
 
@@ -62,8 +62,9 @@ of the carve-out and GTT. The deployment's events say which variant it got (`…
 …)`).
 
 A deployment cannot choose the variant itself. To run a card with the other one, add a custom
-recipe (**Models**, *Recipes*, **Add a custom recipe**): a copy of `llama-cpp` under another name, with only the variant you
-want under `variants`.
+engine (**Models → Engines → Add a custom engine**, *Start from a built-in engine*: `llama-cpp`): the copy
+gets another name; keep only the variant you want under `variants` and save. A custom engine's card
+has **Edit** and **Delete** (refused while a deployment uses it).
 
 **From a custom `llama-cpp-vulkan` recipe.** Before 1.3, Vulkan needed a custom recipe; the built-in
 one replaces it. A deployment keeps the recipe it was made with, so deploy the model again with
@@ -157,7 +158,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 Then:
@@ -189,7 +190,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -204,7 +205,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0 inventory
 ```
 
 ### CPU only
@@ -218,7 +219,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 ### Why these options
@@ -229,7 +230,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 - **The model cache at the same path inside and outside** (`-v /srv/forgeyard-models:/srv/forgeyard-models`):
   the agent downloads models into it, then asks the host's Docker to start the engine container
   with the model mounted *by its path on the host*. Different paths would mount nothing.
-- **`/var/run/docker.sock`**: models and container workloads run as containers on the host's Docker,
+- **`/var/run/docker.sock`**: models and container apps run as containers on the host's Docker,
   next to the agent, not inside it. That socket gives full control of the host's Docker, which is
   why the agent's container is trusted like the agent itself.
 - **The `forgeyard-agent` volume** keeps the machine's credential and the pinned CA. Keep it: the
@@ -239,10 +240,10 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   [agent.toml](reference.md#agent-settings). You can also mount a file:
   `-v /etc/forgeyard/agent.toml:/etc/forgeyard/agent.toml:ro`.
 - The agent runs as **root** inside the container: it needs the Docker socket and switches to the
-  unprivileged account `forgeyard-run` for process workloads. Workloads never run as root.
-- There is no systemd in the container, so process workloads are limited with rlimits (the image
-  sets `FORGEYARD_LIMITS=rlimit`). Process workloads run inside the agent's container and stop
-  with it; models and container workloads keep running on the host.
+  unprivileged account `forgeyard-run` for processes. Apps and engines never run as root.
+- There is no systemd in the container, so processes are limited with rlimits (the image
+  sets `FORGEYARD_LIMITS=rlimit`). Processes run inside the agent's container and stop
+  with it; models and apps in containers keep running on the host.
 
 ### Offline machines, or build it yourself
 
@@ -251,8 +252,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.3 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.3.3 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.0 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -271,21 +272,21 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.3.3 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.0 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.3.3`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.4.0`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.3` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
-   process you started. Its container workloads and models keep running.
+   process you started. Its models and apps in containers keep running.
 3. Start the container with the old state directory and the same model cache, and **without** the
    join variables:
 
@@ -295,14 +296,14 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
    agent takes over the containers the old one started (they carry its id, which is in the state
    directory).
 
-Process workloads the old agent started outside the container are not taken over: stop them from
+Processes the old agent started outside the container are not taken over: stop them from
 the UI first.
 
 ## Offline machines
@@ -311,7 +312,14 @@ A machine that cannot reach the registry (no internet access, or a DNS filter th
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
 the deployment stay as they are.
 
-1. **Find the image.** On **Models → Catalog and recipes**, open **Machine without registry access:
+Since 1.4 there are two easier ways, with a 1.4 agent: the built-in recipes' images (all pinned) come
+**through the server** by themselves, layer by layer
+([Give an offline machine models through the server](#give-an-offline-machine-models-through-the-server)),
+and any image file can be **uploaded** from the machine's page
+([Upload an engine image to a machine](#upload-an-engine-image-to-a-machine)). The steps below still
+work, for an older agent or without the server.
+
+1. **Find the image.** On **Models → Engines**, open **Machine without registry access:
    load the image** on the recipe: it lists the image of each container variant with the commands
    below filled in. A machine gets the first variant whose `when` matches its card
    ([Built-in recipes](reference.md#built-in-recipes)): llama.cpp runs an AMD APU (gfx1151, gfx1150,
@@ -353,152 +361,85 @@ them exactly. Another image pinned by digest cannot be checked: on an offline ma
 tag only in your custom recipe. The check needs an agent from this release or later; an older one
 tries to pull.
 
-## Run a service or a task
+## Deploy an object-detection model
 
-Admins and operators run their own programs on the machines as **workloads**: open **Workloads** →
-**New workload**, fill in the form, and choose **Create and start**.
+Object detection, segmentation and depth are model kinds of their own (1.4): you add them to the
+catalog (**Models**) and deploy them from **Serving** like any other model. They run on Forgeyard's own vision
+server (recipe `vision`): the CUDA build on an NVIDIA GPU (one card shared by memory), the CPU build on
+any machine, AMD ones included. The model comes from the machine's model cache, so it is downloaded once
+and an offline machine works once its cache has it.
 
-1. **What:** **Service** (runs until you stop it; restarted when it exits) or **Task** (runs to the
-   end). A **Name**: `a-z`, `0-9` and `-`, unique.
-2. **Run:** **Container** (an **Image**, for example `python:3.13-slim`, with an optional
-   **Entrypoint**) or **Process** (a **Command** on the basic `PATH` or an absolute path, run by the
-   agent as its workload account). **Arguments** go one per line, without shell quoting.
-3. **Where:** a **Machine**, or *Any online machine with room*; **GPUs**: *None*, *How many* (and
-   a **Vendor**), or *These cards* on a chosen machine; **CPU cores**, **Memory** (for example `4Gi`)
-   and **Replicas** (1 to 16, each on one machine).
-4. **Environment:** the variables it needs. It starts from an empty environment; the variables
-   Forgeyard adds are in the [reference](reference.md#workload-environment). Values are stored
-   encrypted.
-5. **Ports and health** (a service): **Add port** for each port it listens on. The agent picks a host
-   port from its range and shows the address on the workload's page. A process listens on `$PORT`
-   (or `${PORT_<NAME>}` in its arguments); a container gives its own port, which the host port maps
-   to. **Health check**: *None*, *HTTP* (a **Path**) or *TCP*. **Restart**: *Always*, *On failure* or
-   *Never*.
-6. **Limits and retries** (a task): **Max duration (s)** stops and fails it when it runs longer;
-   **Retries** after a non-zero exit, with a **Retry backoff (s)** that doubles each time, up to 5
-   minutes.
+1. **Models → Add a model → Recommended**: *Object detection, segmentation and depth* lists RT-DETRv2 R18
+   (detection, the 80 COCO classes), SAM 2.1 Hiera tiny (segmentation) and Depth Anything V2 Small
+   (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
+   or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
+   backbone…), SAM 2 or 2.1, or depth model (Depth Anything, DPT…) with a permissive licence (Apache-2.0,
+   MIT, BSD). Another licence, or none, cannot be added.
+2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
+   half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
+3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
+   sends a test image; the **Playground** (the model under *Vision* in its picker) takes your own pictures.
 
-*Spec that will be sent* shows the JSON the form makes. The workload's page shows each replica, its machine, GPUs and address, the
-events, and the last lines of its output. **Stop** stops every replica (SIGTERM, then SIGKILL after
-10 s) and frees its GPUs; **Start** places them again; **Delete** also removes its history and
-output.
-
-Isolation, in short: a process runs as the unprivileged workload account with only its own cards
-visible; a container gets only its cards, never `--privileged`. See
-[Workloads](concepts.md#workloads).
-
-## Expose a workload at /x/
-
-Call a service's own HTTP API through the gateway, with an API key. Admins and operators do this.
-
-1. **The service listens on loopback.** Behind the agent's key guard a process must listen on
-   `127.0.0.1`: give it `${BIND_ADDRESS}` and `${PORT}` in its arguments, which become `127.0.0.1`
-   and its port. A container listens on its own port as usual (the agent publishes it on loopback).
-   A process that listens on another address is stopped, so it is never reachable around the guard.
-2. **Expose it.** In **New workload**, tick **Expose at** `/x/<name>` under **Gateway**; or, on a
-   running workload's page, **Gateway** → **Expose** → **Save**: its replicas restart behind the
-   guard. **Limits and timeouts** (collapsed) holds the **Port** (default: the first),
-   **Read timeout (s)** (600), **Largest request (MiB)** (32), **Requests at once per replica** and
-   **Requests at once per key** (no limit by default).
-3. **Give a key access.** On **API keys**, a key's **Workloads at /x/**: *Listed workloads* (tick
-   it) or *Every exposed workload*. New keys have *None*.
-4. **Call it.** The workload's page shows its address and a `curl` call. The prefix is stripped:
-   `/x/detector/v1/detect` reaches the service as `/v1/detect`.
+Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
+and the picture as a file field `image`:
 
 ```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
   -H "Authorization: Bearer $FORGEYARD_API_KEY" \
-  -F image=@street.jpg
+  -F model=rtdetr-v2-r18 -F image=@street.jpg -F threshold=0.5
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/segment \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=sam2.1-hiera-tiny -F image=@street.jpg -F 'box=[40, 40, 320, 240]'
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/depth \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=depth-anything-v2-small -F image=@street.jpg
 ```
 
-A service that builds links or redirects can read `X-Forwarded-Prefix` (`/x/<name>`), or set its root
-path. For example, a FastAPI service run with `python3 -m uvicorn` as a process, with the
-**Environment** variable `ROOT_PATH=/x/echo`:
+From Python (vision is Forgeyard's own API: the OpenAI SDK has none, any HTTP client works):
 
 ```python
-# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
-# root_path makes the docs and redirects use the public prefix.
+import base64
 import os
-from fastapi import FastAPI, Request
+import ssl
 
-app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
+import httpx
 
-@app.post("/v1/echo")
-async def echo(request: Request):
-    return {"bytes": len(await request.body())}
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+key = os.environ["FORGEYARD_API_KEY"]
+with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=120,
+                  headers={"Authorization": f"Bearer {key}"}) as fy:
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/detect", data={"model": "rtdetr-v2-r18", "threshold": "0.5"}, files={"image": f})
+    for d in r.json()["detections"]:
+        print(d["label"], round(d["score"], 2), d["box"])  # box: [x0, y0, x1, y1] in pixels
+
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/depth", data={"model": "depth-anything-v2-small"}, files={"image": f})
+    with open("depth.png", "wb") as out:
+        out.write(base64.b64decode(r.json()["depth_png"]))  # 16-bit grey, nearer is brighter
 ```
 
-and these **Arguments**:
+The answers: `detections` (label, score, box), `masks` (score, area, box and a 1-bit PNG each, best
+first) or `depth_png` (with `min` and `max`); each with the image's `width` and `height`. Everything they
+take is in the [reference](reference.md#vision). Usage counts one image per request and its
+kilopixels; a key's model list and requests per minute apply as for any model.
 
-```text
--m
-uvicorn
-app:app
---host
-${BIND_ADDRESS}
---port
-${PORT}
-```
+On a machine that cannot reach Docker Hub, load the vision image under the tag of the server's version
+(Models → Engines → `vision` → *Machine without registry access* gives the commands).
 
-Turning **Expose** off closes `/x/<name>` at once; the guard stays in front of the replicas until the
-workload is restarted. What passes and what is removed is in the
-[reference](reference.md#the-passthrough-x).
+## Try vision in the Playground
 
-## Start a workload from a template
+The Playground's vision panel sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
+as you, without an API key. Everyone signed in may use it; the requests count as `console` under the
+model in **Usage**. There is no Vision tab since 1.4: vision models are in the Playground's one model
+picker, and 1.3's address (`/playground?tab=vision`) opens the first one. Apps made from the 1.3
+templates are not offered here (apps left the console in 1.4 and are
+[removed in 1.5](reference.md#apps-deprecated)).
 
-**Workloads** → **Start from a template** offers ready-made vision APIs. Each runs Forgeyard's own
-vision server image and is exposed at `/x/<name>` straight away:
-
-| Template | Model (licence) | Call |
-|---|---|---|
-| **Object detection** | RT-DETRv2 ResNet-18, `PekingU/rtdetr_v2_r18vd` (Apache-2.0) | `POST /x/detector/v1/detect`: boxes, labels and scores |
-| **Segmentation** | SAM 2.1 Hiera tiny, `facebook/sam2.1-hiera-tiny` (Apache-2.0) | `POST /x/segmenter/v1/segment` with a point or a box: masks |
-| **Depth estimation** | Depth Anything V2 Small, `depth-anything/Depth-Anything-V2-Small-hf` (Apache-2.0) | `POST /x/depth/v1/depth`: a 16-bit depth PNG |
-
-1. Choose **On an NVIDIA GPU** (the image's CUDA build, one card shared by memory, 3 GiB) or **On the
-   CPU** (the CPU build, no GPU). The form opens filled in: the image, the task, the port, the health
-   check and **Expose at** `/x/<name>`. Change anything, for example the name or the machine, then
-   **Create and start**.
-2. Allow an API key to call it (**API keys** → the key's **Workloads at /x/**).
-3. Send an image as a multipart file `image` (or JSON `{"image": "<base64>"}`):
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
-```
-
-Only permissively licensed models are offered: not Ultralytics YOLOv8 or YOLO11 (AGPL-3.0), and only the
-Small Depth Anything V2 (Base and Large are CC-BY-NC-4.0). The models are inside the image, at pinned
-revisions, so a template needs no network once its image is on the machine. For a machine that cannot
-reach Docker Hub, copy the image (the CUDA build needs NVIDIA driver 580 or newer; without a usable GPU
-it runs on the CPU):
-
-```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeyard-vision.tar.gz
-# on the machine without the network:
-gunzip -c forgeyard-vision.tar.gz | sudo docker load
-```
-
-On AMD machines use **On the CPU**: the image has no ROCm build. What each endpoint takes and returns
-is in the [reference](reference.md#workload-templates). To try one without an API key, see
-[Try a vision workload in the Playground](#try-a-vision-workload-in-the-playground).
-
-## Try a vision workload in the Playground
-
-**Playground → Vision** sends a picture to an exposed vision workload (one started from a
-[template](#start-a-workload-from-a-template), or any exposed service started with `--task detect`,
-`--task segment` or `--task depth`), as you, without an API key. Everyone signed in may use it; the
-requests follow the workload's limits and count as `console` under `x:<name>` in **Usage**.
-
-1. Pick the **Workload**: each is listed with its task and model. With none exposed yet, the tab says
-   so; admins and operators get a link to **Start from a template**.
-2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB, or the
-   workload's **Largest request** if that is smaller).
+1. Open the **Model** picker and choose a model under **Vision**: each is listed with its task. Only
+   ready models are listed; with none at all, the Playground says so and admins and operators get a link
+   to the catalog.
+2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
      model found; **Score at least** hides the weaker ones without asking again.
@@ -509,9 +450,9 @@ requests follow the workload's limits and count as `console` under `x:<name>` in
      where it is nearer, in **Colour** or **Grey**. The depth is relative, not metres.
 
 Under the result: which replica answered, the picture's size and the time the model and the whole request
-took. A busy, stopped or too-small workload is said in plain words; nothing reaches `/x/` with your
-console sign-in, which takes API keys only. The routes are in the
-[reference](reference.md#from-the-playground).
+took. A stopped model, or a picture it cannot read, is said in plain words. The console sends it to
+`/api/playground/vision/<task>`, the same as `/v1/vision/<task>` for the signed-in person
+([reference](reference.md#vision)).
 
 ## Send images to a model
 
@@ -623,7 +564,7 @@ a custom recipe whose vulkan variant sets `GGML_VK_DISABLE_COOPMAT: "1"` in its 
 
    Steps, a negative prompt and a seed go in `extra_body`:
    `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`.
-4. **Try it in the Playground:** an image model gets an **Image** tab with a prompt, the sizes the
+4. **Try it in the Playground:** an image model (under *Images* in the picker) gets an **Image** panel with a prompt, the sizes the
    deployment takes and how many images, and a download link under each.
 
 **How long:** seconds per image on an A100; minutes on a CPU. Measured on 16 to 32 cores of a busy
@@ -697,7 +638,7 @@ to download them, and one token for the whole server is enough:
 
 1. On huggingface.co, sign in, open the model's page and accept its licence. Then, under
    **Settings → Access Tokens**, make a token with *Read* access.
-2. Admins: open **Models → Catalog**. Under **Model sources**, paste it into **Hugging Face token**
+2. Admins: open **Models → Sources** and paste it into **Hugging Face token**
    and choose **Save token**. It is stored encrypted with the server's secret key and never shown
    again, only its last four characters.
 3. Add and deploy the model as usual. Inspecting it uses the server's token, and the agent that
@@ -713,10 +654,11 @@ health says when a deployment of a gated model has no token to use (`gated-model
 
 ## Add a cloud provider
 
-Admins: open **Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google Gemini, Azure
-OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test connection**. Add the
-models you want, then put one in a route: open a deployment, choose **Routing and cloud spill**, add
-a tier with the cloud model, and save. Give the keys that may use it a cloud setting other than
+Admins: open **Cloud → Providers**, choose **Add a provider**, pick OpenAI, Anthropic, Google
+Gemini, Azure OpenAI, OpenRouter or *OpenAI-compatible server*, paste the key, and **Test
+connection**. Add the models you want, then use one: open a deployment, and under **Cloud fallback**
+add a cloud tier with the cloud model and save; or serve it under a name of its own with **Cloud →
+Cloud models → New cloud model**. Give the keys that may use it a cloud setting other than
 **Never** on **API keys**, or choose a [cloud policy](#choose-the-cloud-policy-for-keys).
 [Cloud providers](cloud-providers.md#add-a-provider) has the steps for each provider, and what each
 one's endpoint cannot do.
@@ -754,7 +696,7 @@ panel marks the values as *from .env*. Saving replaces them for good.
 
 Admins, once providers are in use:
 
-1. **Set prices.** On **Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
+1. **Set prices.** On **Cloud → Providers**, choose **Refresh prices from OpenRouter**. Check the suggested
    matches, tick the rows to take, and choose **Apply ticked**. For a model OpenRouter does not list,
    open its provider, choose **Prices** on the model, type the prices from the provider's pricing
    page (US dollars per million tokens), and **Save prices**. A cloud model without a price is counted
@@ -812,12 +754,12 @@ From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-
 
 ## Restrict GPUs on a shared machine
 
-1. Open **Machines**, find the machine, choose **Change GPU access**.
+1. Open **Machines**, open the machine, choose **Change GPU access**.
 2. Tick only the cards Forgeyard may use, for example cards 2 and 3, and choose **Save**.
 
 From then on:
 
-- nothing Forgeyard runs is given another card, whatever a workload or deployment asks;
+- nothing Forgeyard runs is given another card, whatever an app or deployment asks;
 - the other cards show *not for Forgeyard*;
 - memory is counted from what each allowed card reports **free**, so what other programs use on the
   same card is respected.
@@ -937,7 +879,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -971,7 +913,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -980,7 +922,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -989,23 +931,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.3.4
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.1
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.4
+  docker.io/tonyhuang1101/forgeyard:1.4.1
 ```
 
-`1.3.4` is exactly that release, `1.3` follows its newest patch release and `latest` the newest
+`1.4.1` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.3.3
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.0
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1013,7 +955,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.3.3 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.0 .`
 
 ## Run the server as a service
 
@@ -1060,7 +1002,12 @@ the journal: `journalctl -u forgeyard -f`.
    Then restart it (`sudo systemctl restart forgeyard`). Database changes run by themselves on
    start. Read the CHANGELOG for anything that needs a step. In Docker: pull the new tag and start
    the same `docker run` with it ([how](#run-the-server-in-docker)).
-3. **The agents**, one by one. Running agents keep their workloads while they restart.
+
+   **To 1.4:** seven settings deprecated in 1.3.1 are no longer read
+   ([the list](reference.md#removed-settings)). Before you restart, rename `SECRET_KEY_FILE` to
+   `FORGEYARD_SECRET_KEY_FILE` if you set it (otherwise the server refuses to start), and remove
+   the others; Setup health lists any that are left.
+3. **The agents**, one by one. Running agents keep their models and apps running while they restart.
    - **Installed** with the one-line install: run it again, without `--join`. It installs the
      server's new version and keeps the settings and the credential:
 
@@ -1090,8 +1037,8 @@ local tier. Admins see the results in three places:
 - **Get started → Setup health** lists every finding, with what to do and a link to where it is
   fixed.
 - **A count in the top bar** shows errors and warnings. It disappears when there are none.
-- **A banner on the page concerned** (Machines, API keys, Providers, Models, a route, a
-  deployment, Users) shows that page's findings.
+- **A banner on the page concerned** (Machines, Serving, API keys, Cloud, a cloud model,
+  a deployment, Users) shows that page's findings.
 
 Users and operators see none of it.
 
@@ -1129,7 +1076,7 @@ saying so. The groups, in the order they run:
 |---|---|
 | `server` | HTTPS with the CA, security headers, a foreign host name (421), the CSRF rule, sign-in back-off on a throwaway account, `/guide`, `/trust`, `/install.sh` |
 | `machines` | each machine is online with its hardware; its GPU allowlist is enforced; join commands pin the CA |
-| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that a workload sees only its card |
+| `workloads` | a process service, tasks (ok, retries, `max_duration`), a container task when the machine has Docker or Podman; on the GPU machine, that an app sees only its card |
 | `models` | deploys small models and waits for them: Qwen3-1.7B GGUF on each CPU machine; a chat, an embedding, a rerank and a speech model on the GPU machine (each skipped if its estimate does not fit); the estimate on the deployment page; **Try it** |
 | `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
 | `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
@@ -1143,7 +1090,7 @@ failed, 2 when the run could not start.
 What to know before you run it:
 
 - **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
-  workloads, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
+  apps, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
   at the end, also after a failure or **Ctrl-C**. Usage rows and audit events of the run stay.
 - **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
   cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
@@ -1166,7 +1113,7 @@ What to know before you run it:
 | What | Why |
 |---|---|
 | `data/forgeyard.db` (or your PostgreSQL database) | everything Forgeyard knows: users, machines, models, deployments, keys, usage |
-| `data/secret.key` | it encrypts stored secrets (Hugging Face tokens, replicas' keys, workload environment values). Keep it **apart** from the database backup |
+| `data/secret.key` | it encrypts stored secrets (Hugging Face tokens, replicas' keys, apps' environment values). Keep it **apart** from the database backup |
 | `data/tls/` | the CA every device and agent trusts. Without it, every device and agent has to trust a new one |
 | `.env` | your settings |
 
@@ -1196,8 +1143,161 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
 It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
-(and any deployment's own), model replicas restart with new internal keys, and workloads with lost
+(and any deployment's own), model replicas restart with new internal keys, and apps with lost
 environment values have to be created again (their events say so).
+
+## Download a model before deploying it
+
+**Download to…** puts a model, and by default its engine, into the model cache of the machines you
+choose now, so a deployment there starts without waiting for the download. Nothing is started.
+Admins and operators can do it.
+
+1. Open **Models** (the **Catalog** tab), and click **Download to…** on the model's row. Or open a machine's
+   page and click **Download a model here…** above **Models in cache**, then pick the model.
+2. Tick the machines. Each line says whether that machine can take it:
+   - **fits**: how much it downloads, the free disk, and the engine it would fetch;
+   - **already here**: the model (and the engine) is in that machine's cache;
+   - **downloading**: a download of this model is already under way there;
+   - **offline**, **no model cache**, **not enough disk** (the model plus a 1 GiB margin);
+   - **update the agent**: an agent older than 1.4 cannot download ahead.
+3. **Also the engine, for the recipe** is on by default. For the recipe you choose (the first one
+   that serves the model, as on the deploy page), it fetches what that machine would run: the engine
+   archive of a process variant, or the image of a container variant, pulled as a deployment pulls
+   it. Untick it to download the model only.
+4. Click **Download to N machines**.
+
+The progress shows under the model's row in the catalog and on each machine's page, with the same
+words and bar as a deployment's download. **Cancel** stops it at once on that machine; what is on
+disk is kept, and **Download to…** again goes on from there. A download on a machine that goes
+offline waits and goes on when its agent is back. When it is done, the machine's **Models in cache**
+lists the model, and placement prefers that machine for a deployment of it.
+
+Each request and each cancel is in the audit log (`model.download_requested`,
+`model.download_cancelled`). A single GGUF file from a URL has no published checksum: its SHA-256 is
+recorded after its first complete download, and every later download must match it
+(`model.checksum_recorded`). The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
+
+A machine that cannot reach Hugging Face or GitHub itself gets the files through the server: see the
+next section.
+
+## Give an offline machine models through the server
+
+A machine with no internet access of its own (behind a firewall, on a DNS filter, or reached only
+through an SSH tunnel) can still download models, engine archives and pinned engine images: **the
+server fetches them and
+passes the bytes on**, storing nothing. The agent asks the server the way it already talks to it,
+outbound, over HTTPS with the CA it pins and its machine credential, so it works through whatever
+already carries the agent's connection (for example an `ssh -R 7860:…` tunnel). Nothing on the
+machine or in the tunnel changes.
+
+1. Open the machine's page (admins). Under **Models in cache**, set **Internet access for downloads**:
+   - **Auto** (the default): downloads directly; once the source cannot be reached from that machine
+     (the name does not resolve, the connection is refused, reset or times out, the network is
+     unreachable), the rest of that download, and the next ones from that host for an hour, come
+     through the server. An HTTP error (a missing file, a refused token) or a checksum mismatch never
+     switches: the server would get the same answer.
+   - **Always through the server**: for a machine that has no internet access at all. It never tries
+     directly, so there is no wait for a failure first.
+   - **Direct only**: never through the server.
+2. Deploy, or use **Download to…**, as usual. The progress says *Downloading the model via the server:
+   … of …* on the deployment's page, under the model in the Catalog and on the machine's page, and a
+   finished download says *Downloaded … via the server*. The **Download to…** dialog says *via the
+   server* for a machine set to always use it.
+
+What stays the same: the agent resumes a download from what is on disk after a break (the server
+passes `Range` on to the source), retries, stops at once on **Cancel**, and checks every file as a
+direct download does (the SHA-256 of large files, the git blob id of small ones, the pinned SHA-256
+of engine archives, the recorded SHA-256 of a URL model). A file changed on the way is refused and
+deleted, so the server is trusted with nothing it could not already do.
+
+What is different:
+
+- The server uses its own Hugging Face token (**Models → Sources**), or the deployment's own,
+  for gated models. Set to **Always through the server**, the machine is never sent a token at all.
+- The server's own rules for model sources apply: https and public addresses only (unless
+  `MODEL_ALLOW_PRIVATE_HOSTS`), and URL models only from the allowed hosts.
+- The server serves only what that machine is meant to download right now (its deployment's replicas
+  and its **Download to…** requests); cancelling a download, or removing the deployment, closes it
+  within seconds. At most two downloads per machine and four in all go through the server at a
+  time; the others wait their turn.
+- Every byte crosses the server's network twice (in from the source, out to the machine), so keep
+  machines that can reach the internet on **Auto** or **Direct only**.
+- Placement no longer avoids such a machine for a model it could not download itself: the
+  deployment's page says *amd-strix could not reach huggingface.co just now; the model comes through
+  the server*, or *amd-strix downloads the model and the engine through the server (its internet
+  access setting)*.
+
+**Engine images** (container variants) come through the server too, when the recipe pins them by
+digest, as every built-in recipe does:
+
+- When the image is not on the machine, the agent pulls it as usual (**Auto**); a pull that cannot reach
+  the registry (`lookup ghcr.io: no such host`, a timeout) switches to the server, and so do the next
+  images from that registry for an hour. Set to **Always through the server**, it never tries the
+  registry.
+- The server reads the image's manifest **for that machine's platform** (amd64, arm64) by the digest
+  Forgeyard recorded for it (`forgeyard/recipes/images.lock.json`), with an anonymous pull token from
+  the registry, and serves that manifest, its config and each of its layers, by digest. It serves no
+  digest that manifest does not name, and checks each whole layer on its way through.
+- The agent checks every piece against its digest, keeps them in its model cache under
+  `.partial/image-…` (a break resumes the layer it was in; **Remove partial downloads** clears them),
+  builds an archive `docker load` and `podman load` both accept, loads it, gives it the recipe's tag,
+  and runs it only when the loaded image matches the recorded ids, as for an image loaded by hand. Then
+  it deletes the pieces.
+- The progress says *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*, then *loading
+  it*. Every layer crosses the server's network twice, like a model file.
+- An image named by a tag only (a custom recipe's, Forgeyard's own vision image of this release)
+  cannot come through the server: there is no recorded digest to check it against. Upload it instead
+  (next section).
+
+The machine's agent must be 1.4 or later; an older one downloads directly whatever the setting says,
+and the setting tells you to update it (also when it relays models but not yet images).
+
+## Upload an engine image to a machine
+
+An admin can put an image on a machine from the console: an image that cannot come through the server
+(a custom recipe's image named by a tag only, an image you built yourself), or one the machine would
+take a long time to pull.
+
+1. On a machine that has the image (or can pull it), save it to a file:
+
+   ```bash
+   sudo docker save ghcr.io/example/engine:1.2 | gzip > engine.tar.gz
+   ```
+
+   `podman save` works too. For a pinned image, pull it by its digest and tag it first, as in
+   [Offline machines](#offline-machines), so the file holds exactly that image under the recipe's tag.
+2. Open the target machine's page → **Engine images** → **Upload an image**, choose the file, and
+   **Upload**. The dialog shows how much has been sent, then *Loading it into …'s container engine*.
+3. When it is loaded, the dialog lists each image the file held: its tags, its id, and which recipe's
+   image it is. *The pinned image of llama-cpp (vulkan), checked by its recorded ids*: deployments
+   there use it with no pull. *Named as the image of …*: a recipe that names it by a tag only uses it
+   as it is. *Not the image of any recipe*: a custom recipe can name it by its tag.
+
+The file goes from your browser through the server straight into the agent, which streams it into
+`docker load` (or `podman load`) as it arrives: the server keeps only a small buffer, and the machine
+needs no other route to your computer. The container engine checks each layer as it loads it; a file
+that breaks off is never loaded. One upload at a time per machine, two in all; the largest file is
+`IMAGE_UPLOAD_MAX_GB` (64 GiB unless set). The machine's agent must be 1.4 or later, with a container
+engine, and online. Every upload, and why one failed, is in the audit log (`node.image_uploaded`).
+
+## Free disk space on a machine
+
+A machine's page lists **Models in cache**: what its agent has downloaded, with sizes. Each Hugging
+Face revision is a row; a revision with several GGUF files has a row for each file under it. Single
+GGUF files from a URL and the engine archives of process engines are listed too. Above the list are
+how much the cache takes on that disk and how much of the disk is free.
+
+- **Remove** deletes one entry from that machine. Admins and operators can do it. It is refused
+  while a deployment there uses the model, and the row says which deployment: stop it first. Files
+  that another revision of the same repository shares stay, as `hf cache rm` does. The next
+  deployment that needs the model there downloads it again.
+- **Remove partial downloads** deletes what unfinished downloads left behind. A download resumes from
+  those files, so remove them only when you do not want that download back. It is refused while a
+  download runs on that machine.
+- An agent older than 1.4 lists its models without sizes and cannot remove them. Update the agent.
+
+Each removal is in the audit log as `model.cache_removed`, with what was removed and how much was
+freed. The API is in [the reference](reference.md#a-machines-model-cache-through-the-api).
 
 ## Move a model cache
 
@@ -1252,7 +1352,7 @@ and `FORGEYARD_MODEL_CACHE`, then recreate the container.
 3. **Remove** takes it off the list. To bring the machine back, join it again with a new token
    (`forgeyard agent join --rejoin --join-token fyj_…`).
 
-Workloads still running on a revoked machine are not stopped by the server, which can no longer
+Models and apps still running on a revoked machine are not stopped by the server, which can no longer
 reach the agent. Stop them on the machine: `docker ps --filter label=forgeyard.agent` lists the
 containers.
 

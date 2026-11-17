@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import type { Provider, ProvidersResponse, RouteInfo, RouteOptions } from "../lib/types";
+import type { Provider, ProvidersResponse } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 const USER = { ...OWNER, id: 2, username: "ursula", role: "user", is_owner: false };
@@ -52,7 +52,7 @@ describe("Providers", () => {
       }
       if (url === "/api/providers") return { status: 200, body: { providers: [PROVIDER], kinds: KINDS, egress: EGRESS, is_admin: true } satisfies ProvidersResponse };
     });
-    mount("/providers");
+    mount("/cloud");
     const row = (await screen.findByRole("link", { name: "openai" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("…9f2c")).toBeTruthy();
     expect(within(row).getByText("cloud")).toBeTruthy();
@@ -71,54 +71,8 @@ describe("Providers", () => {
 
   it("is for admins only", async () => {
     server(() => undefined, USER);
-    mount("/providers");
+    mount("/cloud");
     expect(await screen.findByRole("heading", { name: "Admins only" })).toBeTruthy();
-  });
-});
-
-const ROUTE: RouteInfo = {
-  id: 5, served_name: "chat", api: "openai-chat", upstream_model: "chat", deployment_id: 1, local_only: false, spill_on_long_prompt: false,
-  wait_ms: 0, kind: "local", has_local: true, has_cloud: false, endpoints: [], usable: true,
-  targets: [{ id: 1, tier: 0, kind: "local", weight: 1, enabled: true, upstream_model: "chat", cloud: false, provider_model: null,
-    deployment: { id: 1, name: "chat", served_name: "chat", ready: 1, replicas: 1, concurrency: 2, context: 4096 } }],
-};
-const OPTIONS: RouteOptions = {
-  deployments: [{ id: 1, name: "chat", served_name: "chat", api: "openai-chat" }],
-  provider_models: [{ id: 8, upstream_model: "gpt-4o-mini", display_name: null, api: "openai-chat",
-    provider: { id: 3, name: "openai", kind: "openai", external: true, enabled: true } }],
-};
-
-describe("Route editor", () => {
-  it("adds a cloud tier after the deployment and saves the spill rules", async () => {
-    const puts: Record<string, unknown>[] = [];
-    server((url, init) => {
-      if (url === "/api/routes/5" && init?.method === "PUT") {
-        puts.push(JSON.parse(String(init.body)));
-        return { status: 200, body: { route: ROUTE } };
-      }
-      if (url === "/api/routes/5") return { status: 200, body: { route: ROUTE, is_admin: true } };
-      if (url === "/api/route-options") return { status: 200, body: OPTIONS };
-    });
-    mount("/models/routes/5");
-    expect(await screen.findByText("1/1 ready · 2 at once each")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Add a tier/ }));
-    fireEvent.change(screen.getByLabelText("Add to tier 2"), { target: { value: "provider:8" } });
-    expect(screen.getByText("openai/gpt-4o-mini")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Wait for a free local slot (ms)"), { target: { value: "250" } });
-    fireEvent.click(screen.getByLabelText(/Spill a prompt that is too long/));
-    fireEvent.click(screen.getByRole("button", { name: "Save routing" }));
-    await waitFor(() => expect(puts).toEqual([{ local_only: false, spill_on_long_prompt: true, wait_ms: 250, targets: [
-      { tier: 0, kind: "local", weight: 1, enabled: true, deployment_id: 1 },
-      { tier: 1, kind: "provider", weight: 1, enabled: true, provider_model_id: 8 }] }]));
-    expect(await screen.findByText(/Routing saved/)).toBeTruthy();
-  });
-
-  it("is read-only for everyone else", async () => {
-    server((url) => url === "/api/routes/5" ? { status: 200, body: { route: ROUTE, is_admin: false } } : undefined, USER);
-    mount("/models/routes/5");
-    expect(await screen.findByText("1/1 ready · 2 at once each")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Save routing" })).toBeNull();
-    expect((screen.getByLabelText(/Local only/) as HTMLInputElement).disabled).toBe(true);
   });
 });
 
@@ -138,7 +92,7 @@ describe("Prices", () => {
       }
       if (url === "/api/providers/3") return { status: 200, body: { provider: priced, kinds: KINDS, egress: EGRESS, is_admin: true } };
     });
-    mount("/providers/3");
+    mount("/cloud/providers/3");
     const row = (await screen.findByText("gpt-4o-mini")).closest("tr") as HTMLElement;
     expect(within(row).getByText("$0.15")).toBeTruthy();
     expect(within(row).getByText("$0.60")).toBeTruthy();
@@ -184,7 +138,7 @@ describe("Prices", () => {
       }
       if (url === "/api/providers/3") return { status: 200, body: { provider: priced, kinds: KINDS, egress: EGRESS, is_admin: true } };
     });
-    mount("/providers/3");
+    mount("/cloud/providers/3");
     fireEvent.click(await screen.findByRole("button", { name: /Refresh prices from OpenRouter/ }));
     const dialog = await screen.findByRole("dialog", { name: "Refresh prices from OpenRouter" });
     await within(dialog).findByText(/470 models listed/);

@@ -10,6 +10,9 @@ export const API_ENDPOINT: Record<string, string> = {
   "openai-speech": "/audio/speech",
   "openai-images": "/images/generations",
   "openai-videos": "/videos",
+  "vision-detect": "/vision/detect",
+  "vision-segment": "/vision/segment",
+  "vision-depth": "/vision/depth",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -20,6 +23,9 @@ export const API_KIND: Record<string, string> = {
   "openai-speech": "text to speech",
   "openai-images": "images",
   "openai-videos": "video",
+  "vision-detect": "object detection",
+  "vision-segment": "segmentation",
+  "vision-depth": "depth",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -65,6 +71,20 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
       python: `import time\n\n${sdk}${client}\nvideo = client.videos.create(model="${model}", prompt="A red kite over a green hill", seconds="5")\nwhile video.status in ("queued", "in_progress"):\n    time.sleep(5)\n    video = client.videos.retrieve(video.id)\nif video.status == "completed":\n    client.videos.download_content(video.id).write_to_file("video.mp4")\nelse:\n    print(video.error)`,
     };
   }
+  if (api.startsWith("vision-")) {
+    // 1.4: vision models take one image as a multipart file (or base64 in JSON) and answer JSON; not part
+    // of the OpenAI SDK.
+    const task = api.slice("vision-".length);
+    const extra = task === "segment" ? ` -F 'box=[40, 40, 320, 240]'` : task === "detect" ? " -F threshold=0.5" : "";
+    const field = task === "segment" ? `, "box": "[40, 40, 320, 240]"` : task === "detect" ? `, "threshold": "0.5"` : "";
+    const show = task === "detect" ? `for d in r.json()["detections"]:\n    print(d["label"], d["score"], d["box"])`
+      : task === "segment" ? `print(r.json()["masks"][0]["area"], "pixels")  # each mask: a PNG in base64`
+        : `open("depth.png", "wb").write(base64.b64decode(r.json()["depth_png"]))  # 16-bit, near = bright`;
+    return {
+      curl: `${curl} ${base}/vision/${task} \\\n  -H "Authorization: Bearer ${key}" \\\n  -F model=${model} -F image=@photo.jpg${extra}`,
+      python: `${task === "depth" ? "import base64\n" : ""}${trustUrl ? "import ssl\n" : ""}${task === "depth" || trustUrl ? "\n" : ""}import httpx  # pip install httpx: vision is Forgeyard's own API, not the OpenAI SDK's\n\n${caLines}with open("photo.jpg", "rb") as f:\n    r = httpx.post("${base}/vision/${task}", headers={"Authorization": "Bearer ${key}"},\n                   data={"model": "${model}"${field}}, files={"image": f}${trustUrl ? ", verify=ca" : ""}, timeout=120)\n${show}`,
+    };
+  }
   if (api === "openai-audio") {
     return {
       curl: `${curl} ${base}/audio/transcriptions \\\n  -H "Authorization: Bearer ${key}" \\\n  -F model=${model} -F file=@speech.mp3`,
@@ -89,6 +109,43 @@ export function ms(n: number | null | undefined): string {
 
 export function keyModels(k: ApiKey): string {
   return k.models === null ? "All deployments" : k.models.join(", ");
+}
+
+// A per-minute limit, short: "3 requests/min", "10k tokens/min", "1.5M tokens/min" (1.4).
+export function perMinute(n: number, unit: "request" | "token"): string {
+  const short = n < 1000 ? String(n) : new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n).replace(/K$/, "k");
+  return `${short} ${unit}${n === 1 ? "" : "s"}/min`;
+}
+
+// The limits a key works with, one line each: only the ones set, or "No limits" (1.4). Each line carries
+// the admins who locked it; a lock on a limit that is not set goes on the last line.
+export type LimitLine = { text: string; none: boolean; locks: string[] };
+export function keyLimits(k: Pick<ApiKey, "effective_rpm" | "effective_tpm" | "rpm_locked_by" | "tpm_locked_by">): LimitLine[] {
+  const lines: LimitLine[] = [];
+  const loose: string[] = [];
+  const add = (n: number | null, unit: "request" | "token", lock: string | null | undefined) => {
+    if (n) lines.push({ text: perMinute(n, unit), none: false, locks: lock ? [lock] : [] });
+    else if (lock) loose.push(lock);
+  };
+  add(k.effective_rpm, "request", k.rpm_locked_by);
+  add(k.effective_tpm, "token", k.tpm_locked_by);
+  if (!lines.length) lines.push({ text: "No limits", none: true, locks: [] });
+  lines[lines.length - 1].locks.push(...loose);
+  return lines;
+}
+
+// Keys no longer usable (revoked or expired) are folded away under one row (1.4).
+export function splitKeys<T extends Pick<ApiKey, "status">>(keys: T[]): { active: T[]; inactive: T[] } {
+  return { active: keys.filter((k) => k.status === "active"), inactive: keys.filter((k) => k.status !== "active") };
+}
+
+// "Show 163 revoked keys", "Show 1 expired key", "Show 4 revoked or expired keys".
+export function foldLabel(keys: Pick<ApiKey, "status">[], open: boolean): string {
+  const revoked = keys.some((k) => k.status === "revoked");
+  const expired = keys.some((k) => k.status === "expired");
+  const what = revoked && expired ? "revoked or expired" : expired ? "expired" : "revoked";
+  if (open) return `Hide ${what} keys`;
+  return `Show ${keys.length} ${what} key${keys.length === 1 ? "" : "s"}`;
 }
 
 // Server-sent events from a fetch() body: calls onData with each `data:` payload as it arrives.

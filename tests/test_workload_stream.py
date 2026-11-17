@@ -30,7 +30,9 @@ def recv_type(ws, kind: str, timeout: float = 5.0) -> dict:
 def online(ws, **over) -> dict:
     ws.send_json(hello(features=["workloads"], runtimes=["process", "container"], runtime_info=PROCESS_OK, **over))
     welcome = recv(ws)
-    assert welcome["type"] == "welcome" and welcome["features"] == ["models", "pull_progress", "replica_keys", "workloads"]
+    assert welcome["type"] == "welcome" and welcome["features"] == ["cache_admin", "image_load", "models", "prefetch",
+                                                                     "pull_progress", "relay", "relay_images",
+                                                                     "replica_keys", "workloads"]
     return welcome
 
 

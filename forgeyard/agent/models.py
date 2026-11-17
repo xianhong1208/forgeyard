@@ -15,6 +15,18 @@ machine and shared by every replica there.
   directory mounted read-only, and nothing else of the host.
 - A Hugging Face token arrives with the desired state, is used for these requests only and is
   never written to disk or logged.
+- **Through the server** (1.4, "relay", agent/relay.py): a block with `relay` is fetched from the agent's own
+  server instead, always or after a network failure reaching the source; the same resume, retries, cancel,
+  progress and checks apply, so a relayed file that fails its checksum is refused and deleted like any other.
+  No token goes to the server.
+- **Listing and removing** (1.4, "cache_admin"): `info()` reports each model with its size (a
+  revision, and each GGUF file of it; a single-file model; an engine archive) and the partial
+  downloads. `remove()` deletes one, like `hf cache rm`: the revision's links, its marker and its refs,
+  and only the blobs no other revision links to; `prune_partial()` the partial downloads. Neither
+  runs while a download of the same files is in progress (a download holds a shared lock that a
+  removal takes exclusively, without waiting), nor while a replica here uses them (asked of the
+  supervisor while that lock is held). The key from the server is only looked up among what this
+  agent found on its own disk: no path is ever made from it.
 """
 
 from __future__ import annotations
@@ -26,6 +38,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import shutil
 import stat
 import tarfile
@@ -35,10 +48,11 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
+from forgeyard.agent import relay as relay_client
 from forgeyard.agent.watchdog import Watchdog
-from forgeyard.models import fetch, sources
+from forgeyard.models import cache_keys, fetch, sources
 
 log = logging.getLogger("forgeyard.agent")
 
@@ -47,12 +61,69 @@ RETRIES = 5
 LOCK_POLL = 0.2
 DISK_MARGIN = 1024**3
 MANIFEST_DIR = ".forgeyard"
+# engines/<name>-<sha256[:16]>, as ensure_engine unpacks them (not its .tmp-… directories).
+ENGINE_DIR_RE = re.compile(r"^[A-Za-z0-9._-]+-([0-9a-f]{16})$")
 
 Progress = Callable[[str, int, int, Optional[str]], None]   # phase, done, total, file
 
 
 class CacheError(Exception):
     """The model or engine cannot be made available; the message is shown on the replica."""
+
+
+class CacheRefused(CacheError):
+    """A removal that was not done: `code` is "not_found", "busy" or "in_use" (with the users)."""
+
+    def __init__(self, code: str, message: str, users=()):
+        super().__init__(message)
+        self.code = code
+        self.users = list(users)
+
+
+# What the cache listing may take of a status message (the server accepts 512 KiB in all): the
+# biggest models are kept, the rest summarised as "truncated".
+DETAIL_BUDGET = 192 * 1024
+MAX_ENTRIES = 256
+MAX_PARTS = 64
+URL_DIR_RE = re.compile(r"^[0-9a-f]{24}$")
+
+
+def tree_bytes(path: Path) -> int:
+    """Bytes of the files under a directory (links counted as links, never followed)."""
+    total = 0
+    for top, dirs, files in os.walk(path):
+        for name in files + [d for d in dirs if os.path.islink(os.path.join(top, d))]:
+            try:
+                total += os.lstat(os.path.join(top, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _inside(path: Path, root: Path) -> bool:
+    """`path` (not followed if it is a link) is below `root`, through no linked directory."""
+    parent = os.path.realpath(path.parent)
+    top = os.path.realpath(root)
+    return (parent == top or parent.startswith(top + os.sep)) and path.name not in ("", ".", "..")
+
+
+def _fit(detail: dict) -> dict:
+    """The listing, within DETAIL_BUDGET once serialised: the biggest models first, at most
+    MAX_ENTRIES of them and MAX_PARTS files each; `truncated` when something was left out."""
+    models = sorted(detail["models"], key=lambda e: (-e["bytes"], e["key"]))
+    cut = len(models) > MAX_ENTRIES
+    models = models[:MAX_ENTRIES]
+    for e in models:
+        if len(e.get("parts") or []) > MAX_PARTS:
+            e["parts"] = sorted(e["parts"], key=lambda p: (-p["bytes"], p["file"]))[:MAX_PARTS]
+            cut = True
+    detail = {**detail, "models": models, "engines_detail": detail["engines_detail"][:MAX_ENTRIES]}
+    while models and len(json.dumps(detail)) > DETAIL_BUDGET:
+        models.pop()
+        cut = True
+    if cut:
+        detail["truncated"] = True
+    return detail
 
 
 MAX_UNZIPPED = 16 * 1024**3
@@ -123,7 +194,8 @@ def validate_model(model: dict, local_dirs: list[str]) -> dict:
         if src.kind != "url":
             raise CacheError("bad model URL")
         files = model.get("files") or [{}]
-        out.update(url=url, size=max(0, int(files[0].get("size") or 0)))
+        # The SHA-256 the server recorded after the first complete download of this URL (1.4, D8), if any.
+        out.update(url=url, size=max(0, int(files[0].get("size") or 0)), sha256=_hex(files[0].get("sha256"), 64))
     elif kind == "local":
         path = posixpath.normpath(str(model.get("path") or ""))
         if not sources.local_allowed(path, local_dirs):
@@ -159,6 +231,9 @@ class ModelCache:
         self.local_dirs = [str(d) for d in (local_dirs or [])]
         self._resolver = resolver
         self._disk_usage = disk_usage
+        # 1.4 ("relay"): the agent's client to its server's relay, set once the agent knows its server and
+        # credential (agent/client.py). None: everything is fetched directly.
+        self.relay_client: Optional[relay_client.RelayClient] = None
         self._locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
         self.error: Optional[str] = None
@@ -202,7 +277,132 @@ class ModelCache:
             free, total = du.free, du.total
         except OSError:
             free = total = None
-        return {"ok": True, "free_bytes": free, "total_bytes": total, "cached": self.cached_keys()}
+        return {"ok": True, "free_bytes": free, "total_bytes": total, "cached": self.cached_keys(),
+                "engines": self.cached_engines(), **self.detail()}
+
+    def detail(self) -> dict:
+        """Per model, its size on disk (1.4): what the machine page lists, and what Remove offers.
+
+        - `models`: a Hugging Face revision (`bytes` = its files, as `hf cache ls` counts them: a blob
+          shared with another revision counts in both), with `parts` for its GGUF files when it has
+          any (each removable alone; split files once, with all their parts); a single-file model.
+        - `engines_detail`: the engine archives unpacked here.
+        - `used_bytes`: what the cache really takes on disk (shared blobs once), `partial_bytes` and
+          `partial_files`: what unfinished downloads left behind.
+        """
+        models = []
+        for e in self._entries():
+            out = {k: v for k, v in e.items() if not k.startswith("_")}
+            if "parts" in out:
+                out["parts"] = [{k: v for k, v in p.items() if k != "paths"} for p in out["parts"]]
+            models.append(out)
+        engines = [{"key": cache_keys.engine_key(sha16), "id": sha16, "name": name[:64], "bytes": tree_bytes(d)}
+                   for d, sha16, name in self._engine_dirs()]
+        partial = self._partials()
+        partial_bytes = sum(n for _, n in partial)
+        used = sum(tree_bytes(self.root / d) for d in ("hub", "url", "engines")) + sum(
+            n for p, n in partial if p.parent == self.root / ".partial")
+        return _fit({"models": models, "engines_detail": engines, "used_bytes": used, "partial_bytes": partial_bytes,
+                     "partial_files": len(partial)})
+
+    def _entries(self) -> list[dict]:
+        """The models with a marker, found on this disk (the only list a removal key is looked up in).
+        Keys starting with "_" are the agent's own paths and never leave it."""
+        out = []
+        for marker in sorted((self.root / "hub").glob(f"models--*/{MANIFEST_DIR}/*.json")):
+            rev, base = marker.stem, marker.parent.parent
+            if not sources.REVISION_RE.match(rev) or base.is_symlink():
+                continue
+            try:
+                data = json.loads(marker.read_text())
+            except (OSError, ValueError):
+                continue
+            snap = base / "snapshots" / rev
+            sizes: dict[str, int] = {}
+            missing = 0
+            for f in data.get("files") or []:
+                try:
+                    path = sources.safe_relpath(str(f.get("path")))
+                except (sources.SourceError, AttributeError):
+                    continue
+                try:
+                    sizes[path] = (snap / path).stat().st_size
+                except OSError:
+                    sizes[path], missing = 0, missing + 1
+            key = f"hub/{base.name}@{rev}"
+            repo = data.get("repo") if isinstance(data.get("repo"), str) else None
+            if not repo or _hf_dir_or_none(repo) != f"hub/{base.name}":
+                repo = base.name.removeprefix("models--").replace("--", "/", 1)
+            entry = {"key": key, "kind": "hf", "repo": repo[:200], "revision": rev, "bytes": sum(sizes.values()),
+                     "files": len(sizes), "completed_at": _number(data.get("completed_at")),
+                     "_base": base, "_marker": marker}
+            if missing:
+                entry["missing"] = missing
+            parts = []
+            for c in sources.gguf_choices([{"path": p, "size": n} for p, n in sizes.items()]):
+                paths = sorted(p for p in sizes if cache_keys.same_choice(p, c["path"]))
+                parts.append({"key": f"{key}/{c['path']}", "file": c["path"], "bytes": sum(sizes[p] for p in paths),
+                              "paths": paths})
+            if parts:
+                entry["parts"] = parts
+            out.append(entry)
+        for marker in sorted((self.root / "url").glob(f"*/{MANIFEST_DIR}.json")):
+            d = marker.parent
+            if not URL_DIR_RE.match(d.name) or d.is_symlink():
+                continue
+            try:
+                data = json.loads(marker.read_text())
+            except (OSError, ValueError):
+                continue
+            files = [p for p in d.iterdir() if p.name != marker.name and (p.is_file() or p.is_symlink())]
+            name = data.get("file") if isinstance(data.get("file"), str) else None
+            entry = {"key": f"url/{d.name}", "kind": "url", "file": (name or "")[:200] or None,
+                     "bytes": sum(p.lstat().st_size for p in files), "files": len(files),
+                     "completed_at": _number(data.get("completed_at")), "_dir": d}
+            if _hex(data.get("sha256"), 64):
+                entry["sha256"] = data["sha256"]  # 1.4 (D8): computed after the download
+            out.append(entry)
+        return out
+
+    def _engine_dirs(self) -> list[tuple[Path, str, str]]:
+        """(directory, first 16 hex digits of the archive's SHA-256, name) of each unpacked engine."""
+        try:
+            dirs = sorted(p for p in (self.root / "engines").iterdir() if p.is_dir() and not p.is_symlink())
+        except OSError:
+            return []
+        out = []
+        for d in dirs:
+            m = ENGINE_DIR_RE.match(d.name)
+            if m:
+                out.append((d, m.group(1), d.name[: -len(m.group(1)) - 1]))
+        return out
+
+    def _partials(self) -> list[tuple[Path, int]]:
+        """What unfinished downloads left: files in .partial, and engine directories half unpacked."""
+        out = []
+        roots = [(self.root / ".partial", lambda p: True), (self.root / "engines", lambda p: p.name.startswith(".tmp-"))]
+        for root, wanted in roots:
+            try:
+                items = sorted(root.iterdir())
+            except OSError:
+                continue
+            for p in items:
+                if not wanted(p):
+                    continue
+                try:
+                    out.append((p, tree_bytes(p) if p.is_dir() and not p.is_symlink() else p.lstat().st_size))
+                except OSError:
+                    pass
+        return out
+
+    def cached_engines(self) -> list[str]:
+        """The engine archives unpacked here, by the first 16 hex digits of their SHA-256 (1.4: placement
+        prefers a machine that has the engine a replica needs)."""
+        try:
+            names = sorted(p.name for p in (self.root / "engines").iterdir() if p.is_dir())
+        except OSError:
+            return []
+        return [m.group(1) for m in (ENGINE_DIR_RE.match(n) for n in names) if m][:256]
 
     # ------------------------------------------------------------------ locking
     @contextmanager
@@ -235,6 +435,50 @@ class ModelCache:
         with self._guard:
             lock = self._locks.get(key)
         return bool(lock and lock.locked())
+
+    def _rw_path(self, name: str) -> Path:
+        return self.root / ".locks" / (hashlib.sha256(name.encode()).hexdigest()[:24] + ".rw")
+
+    @contextmanager
+    def _shared(self, name: str, cancel: Optional[threading.Event] = None):
+        """Held by a download for as long as it runs (a flock, so it also holds against another agent
+        sharing this directory, and between this agent's threads). A removal of the same files takes
+        it exclusively; it never waits for one, so a removal only ever delays a download a moment."""
+        with open(self._rw_path(name), "a") as fh:
+            while True:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    _check(cancel)
+                    time.sleep(LOCK_POLL)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    @contextmanager
+    def _exclusive(self, name: str):
+        """The removal's side of `_shared`: True when no download holds it, without waiting."""
+        with open(self._rw_path(name), "a") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    @staticmethod
+    def _files_lock(model: dict) -> str:
+        """The lock over one repository's (or one URL model's) files on disk: every revision of a
+        repository shares its blobs, so a removal of one revision must not run beside a download of
+        another."""
+        if model["kind"] == "hf":
+            return "repo:" + sources.hf_dir(model["repo"])
+        return "url:" + sources.url_dir(model["url"])
 
     # ------------------------------------------------------------------ paths
     def paths(self, model: dict) -> dict:
@@ -272,9 +516,17 @@ class ModelCache:
                              f"(+1 GiB margin), {free / 1024**3:.1f} GiB free")
 
     def _fetch(self, url: str, dest: Path, size: int, *, headers: dict, progress: Progress, phase: str,
-               base: int, total: int, label: str, cancel: threading.Event, sha256: Optional[str] = None) -> None:
+               base: int, total: int, label: str, cancel: threading.Event, sha256: Optional[str] = None,
+               relay: Optional[dict] = None, via: Optional[Callable[[str], None]] = None) -> None:
         """Download url into dest (resuming a partial file), reporting base+done of total (never more
-        than total). A cancel ends the transfer at once, even a read waiting on a stalled connection."""
+        than total). A cancel ends the transfer at once, even a read waiting on a stalled connection.
+
+        `relay` (1.4, {path, mode}): the same bytes from the agent's server instead (agent/relay.py), always
+        ("server") or after a network failure reaching `url` ("auto"); `via("server")` is called when they
+        start coming that way. Only `Range` goes to the server, never `headers` (a token)."""
+        client = self.relay_client if relay is not None else None
+        route = client.route(relay, url) if client is not None else "direct"
+        told = False
         attempt = 0
         while True:
             _check(cancel)
@@ -284,17 +536,23 @@ class ModelCache:
                 have = 0
             if size and have == size:
                 return
-            h = {**headers}
+            h = {**headers} if route == "direct" else {}
             if have:
                 h["Range"] = f"bytes={have}-"
+            if route == "server" and not told:
+                told = True
+                if via is not None:
+                    via("server")
             try:
-                with fetch.open_url(url, self.policy(), headers=h) as resp, Watchdog(resp.abort, cancel):
+                opened = client.open(relay["path"], h) if route == "server" else fetch.open_url(url, self.policy(),
+                                                                                                 headers=h)
+                with opened as resp, Watchdog(resp.abort, cancel):
                     if resp.status == 416 and size and have >= size:
                         return
                     if resp.status >= 400:
                         if resp.status in (401, 403):
                             raise CacheError(f"{label}: access refused (HTTP {resp.status}); a gated model needs a "
-                                             "Hugging Face token (the server's, under Models -> Model sources, "
+                                             "Hugging Face token (the server's, under Models -> Sources, "
                                              "or the deployment's own)")
                         raise fetch.FetchError(f"HTTP {resp.status}", resp.status)
                     if have and resp.status != 206:
@@ -322,14 +580,32 @@ class ModelCache:
                 if size and dest.stat().st_size != size:
                     raise fetch.FetchError(f"incomplete ({dest.stat().st_size} of {size} bytes)")
                 return
+            except relay_client.RelayRefused as e:
+                _check(cancel)
+                raise CacheError(f"{label}: through the server: {e}") from None
+            except relay_client.RelayBusy as e:
+                _check(cancel)
+                log.info("Download of %s: %s; waiting %.0f s.", label, e, e.wait)
+                if cancel.wait(e.wait):
+                    raise Cancelled("cancelled")
             except (fetch.FetchError, OSError, http.client.HTTPException) as e:
                 _check(cancel)  # the cancel itself broke the connection
                 if isinstance(e, fetch.BlockedAddress):
                     raise CacheError(f"{label}: {e}") from None
+                if route == "direct" and client is not None and relay_client.failure_is_network(e):
+                    # "auto": the source cannot be reached from here; the server fetches it instead, resuming
+                    # from what is on disk (and the next files from this host go there at once).
+                    host = (urlsplit(url).hostname or "").lower()
+                    client.mark_unreachable(host)
+                    log.warning("Download of %s: could not reach %s directly (%s); downloading it through the "
+                                "server.", label, host, e)
+                    route = "server"
+                    continue
                 attempt += 1
+                where = "through the server: " if route == "server" else ""
                 if attempt > RETRIES:
-                    raise CacheError(f"{label}: download failed: {e}") from None
-                log.warning("Download of %s failed (%s); retrying (%d of %d).", label, e, attempt, RETRIES)
+                    raise CacheError(f"{label}: download failed: {where}{e}") from None
+                log.warning("Download of %s failed (%s%s); retrying (%d of %d).", label, where, e, attempt, RETRIES)
                 if cancel.wait(min(30, 2 ** attempt)):
                     raise Cancelled("cancelled")
 
@@ -355,8 +631,10 @@ class ModelCache:
                 raise CacheError(f"{label}: content does not match its git blob id")
 
     def ensure_model(self, model: dict, *, token: Optional[str] = None, progress: Optional[Progress] = None,
-                     cancel: Optional[threading.Event] = None) -> dict:
-        """Make the model available in the cache (downloading what is missing); its host paths."""
+                     cancel: Optional[threading.Event] = None, relay: Optional[dict] = None,
+                     via: Optional[Callable[[str], None]] = None) -> dict:
+        """Make the model available in the cache (downloading what is missing); its host paths. `relay` (1.4):
+        the block's relay (agent/relay.py parse), `via` told when the bytes come through the server."""
         progress = progress or (lambda *a: None)
         cancel = cancel or threading.Event()
         if self.error:
@@ -369,15 +647,16 @@ class ModelCache:
                 raise CacheError(f"{p / model['file']} does not exist on this machine")
             return self.paths(model)
         key = sources.cache_key(model)
-        with self._locked(key, cancel):
+        with self._locked(key, cancel), self._shared("partial", cancel), self._shared(self._files_lock(model), cancel):
             if not self.is_cached(model):
                 if model["kind"] == "hf":
-                    self._download_hf(model, token, progress, cancel)
+                    self._download_hf(model, token, progress, cancel, relay, via)
                 else:
-                    self._download_url(model, progress, cancel)
+                    self._download_url(model, progress, cancel, relay, via)
         return self.paths(model)
 
-    def _download_hf(self, model: dict, token: Optional[str], progress: Progress, cancel: threading.Event) -> None:
+    def _download_hf(self, model: dict, token: Optional[str], progress: Progress, cancel: threading.Event,
+                     relay: Optional[dict] = None, via: Optional[Callable[[str], None]] = None) -> None:
         base = self.root / sources.hf_dir(model["repo"])
         blobs = base / "blobs"
         snap = base / "snapshots" / model["revision"]
@@ -415,8 +694,10 @@ class ModelCache:
                 # What the other files have on disk, plus what this one has (the fetch counts it from
                 # its own partial file): each byte once, so a resumed download never passes 100%.
                 others = sum(on_disk(g) for j, g in enumerate(files) if j != i)
+                # Through the server: the same file, named by its path in the model (the server checks it is one).
+                file_relay = {**relay, "path": f"{relay['path']}/{quote(f['path'])}"} if relay else None
                 self._fetch(url, part, f["size"], headers=headers, progress=progress, phase="model", base=others,
-                            total=total, label=f["path"], cancel=cancel)
+                            total=total, label=f["path"], cancel=cancel, relay=file_relay, via=via)
                 self._verify(part, f, f["path"], cancel)
                 os.chmod(part, 0o444)
                 os.replace(part, blob)
@@ -450,7 +731,8 @@ class ModelCache:
         log.info("Cached %s@%s (%d files, %.2f GiB).", model["repo"], model["revision"][:12], len(files),
                  total / 1024**3)
 
-    def _download_url(self, model: dict, progress: Progress, cancel: threading.Event) -> None:
+    def _download_url(self, model: dict, progress: Progress, cancel: threading.Event, relay: Optional[dict] = None,
+                      via: Optional[Callable[[str], None]] = None) -> None:
         base = self.root / sources.url_dir(model["url"])
         base.mkdir(parents=True, exist_ok=True)
         os.chmod(base, 0o755)
@@ -459,16 +741,26 @@ class ModelCache:
         size = model.get("size") or 0
         self._check_space(max(0, size - (part.stat().st_size if part.exists() else 0)))
         self._fetch(model["url"], part, size, headers={}, progress=progress, phase="model", base=0, total=size,
-                    label=name, cancel=cancel)
+                    label=name, cancel=cancel, relay=relay, via=via)
+        # No checksum is published for a file at a URL (1.4, D8): its SHA-256 is computed here and reported
+        # (model_cache.models[].sha256); the server records the first one, and sends it with every later
+        # download of the model, which must then match.
+        got = self._sha256(part, cancel)
+        want = model.get("sha256")
+        if want and got != want:
+            part.unlink(missing_ok=True)
+            raise CacheError(f"{name}: SHA-256 mismatch (got {got[:12]}…, expected {want[:12]}…, recorded after "
+                             "its first download): the file at this URL changed")
         os.chmod(part, 0o444)
         os.replace(part, base / name)
         manifest = base / f"{MANIFEST_DIR}.json"
-        manifest.write_text(json.dumps({"url": model["url"], "file": name, "completed_at": time.time()}))
+        manifest.write_text(json.dumps({"url": model["url"], "file": name, "sha256": got, "completed_at": time.time()}))
         os.chmod(manifest, 0o644)
 
     # ------------------------------------------------------------------ engines (process variants)
     def ensure_engine(self, engine: dict, *, progress: Optional[Progress] = None,
-                      cancel: Optional[threading.Event] = None) -> Path:
+                      cancel: Optional[threading.Event] = None, relay: Optional[dict] = None,
+                      via: Optional[Callable[[str], None]] = None) -> Path:
         """Download, verify and unpack a pinned engine archive; the absolute path of its program."""
         progress = progress or (lambda *a: None)
         cancel = cancel or threading.Event()
@@ -485,12 +777,13 @@ class ModelCache:
         if self.error:
             raise CacheError(self.error)
         final = self.root / "engines" / f"{name}-{sha[:16]}"
-        with self._locked(f"engine:{sha}", cancel):
+        with (self._locked(f"engine:{sha}", cancel), self._shared("partial", cancel),
+              self._shared(f"engine-dir:{sha[:16]}", cancel)):
             if not (final / binary).is_file():
                 part = self.root / ".partial" / f"engine-{sha}.part"
                 self._check_space(512 * 1024**2)
                 self._fetch(url, part, 0, headers={}, progress=progress, phase="engine", base=0, total=0,
-                            label=posixpath.basename(url), cancel=cancel)
+                            label=posixpath.basename(url), cancel=cancel, relay=relay, via=via)
                 got = self._sha256(part, cancel)
                 if got != sha:
                     part.unlink(missing_ok=True)
@@ -522,3 +815,178 @@ class ModelCache:
         if not exe.is_file() or not os.access(exe, os.X_OK):
             raise CacheError(f"the engine archive has no program {binary}")
         return exe
+
+    # ------------------------------------------------------------------ removing (1.4, cache_admin)
+    def remove(self, key: str, in_use: Callable[[dict], list[str]] = lambda target: []) -> int:
+        """Remove one model or engine from the cache; the bytes freed on disk. `in_use(target)` names
+        the replicas here that need what the target would delete (asked while the lock is held, so no
+        download can start using it in between); any name refuses the removal."""
+        if self.error:
+            raise CacheError(self.error)
+        target = cache_keys.parse(key)
+        if target is None:
+            raise CacheRefused("not_found", "That is not a model in this machine's cache.")
+        if target["kind"] == "engine":
+            lock = f"engine-dir:{target['id']}"
+        else:
+            lock = ("repo:" if target["kind"] == "hf" else "url:") + target["dir"]
+        with self._exclusive(lock) as free:
+            if not free:
+                raise CacheRefused("busy", "A download of this model is in progress on this machine. Try again "
+                                           "once it has finished or been cancelled.")
+            if target["kind"] == "engine":
+                dirs = [d for d, sha16, _ in self._engine_dirs() if sha16 == target["id"]]
+                if not dirs:
+                    raise CacheRefused("not_found", "That engine is not in this machine's cache (any more).")
+                self._refuse_if_used(in_use, target)
+                freed = 0
+                for d in dirs:
+                    freed += tree_bytes(d)
+                    shutil.rmtree(d)
+            elif target["kind"] == "url":
+                entry = next((e for e in self._entries() if e["key"] == key), None)
+                if entry is None:
+                    raise CacheRefused("not_found", "That model is not in this machine's cache (any more).")
+                self._refuse_if_used(in_use, target)
+                freed = tree_bytes(entry["_dir"])
+                shutil.rmtree(entry["_dir"])
+            else:
+                base_key = f"{target['dir']}@{target['revision']}"
+                entry = next((e for e in self._entries() if e["key"] == base_key), None)
+                part = None
+                if entry is not None and target.get("file"):
+                    part = next((p for p in entry.get("parts") or [] if p["key"] == key), None)
+                if entry is None or (target.get("file") and part is None):
+                    raise CacheRefused("not_found", "That model is not in this machine's cache (any more).")
+                # One GGUF file of a revision with others; the last one takes the revision with it (what
+                # is left, a projector or a README, serves nothing on its own).
+                paths = set(part["paths"]) if part is not None and len(entry["parts"]) > 1 else None
+                self._refuse_if_used(in_use, {"kind": "hf", "dir": target["dir"], "revision": target["revision"],
+                                              "paths": paths})
+                freed = self._remove_hf(entry, paths)
+        log.info("Removed %s from the model cache (%.2f GiB freed).", key, freed / 1024**3)
+        return freed
+
+    @staticmethod
+    def _refuse_if_used(in_use: Callable[[dict], list[str]], target: dict) -> None:
+        users = sorted(set(in_use(target)))
+        if users:
+            raise CacheRefused("in_use", f"In use by {', '.join(users)} on this machine. Stop it first.", users)
+
+    def _remove_hf(self, entry: dict, paths: Optional[set[str]]) -> int:
+        """Like `hf cache rm`: the revision's links (all, or `paths`), its marker and refs when it goes
+        whole, and each blob they pointed at that no link of another revision (or of the files kept)
+        still points at."""
+        base: Path = entry["_base"]
+        rev = entry["revision"]
+        snap = base / "snapshots" / rev
+        blobs = os.path.realpath(base / "blobs")
+        if paths is None:
+            links = [p for p in snap.rglob("*") if p.is_symlink() or p.is_file()] if snap.is_dir() and not snap.is_symlink() else []
+        else:
+            links = [snap / p for p in sorted(paths)]
+        candidates: set[str] = set()
+        freed = 0
+        for link in links:
+            if not _inside(link, snap):
+                continue
+            if link.is_symlink():
+                real = os.path.realpath(link)
+                if os.path.dirname(real) == blobs:
+                    candidates.add(real)
+                link.unlink()
+            elif link.is_file():
+                freed += link.lstat().st_size
+                link.unlink()
+        marker: Path = entry["_marker"]
+        if paths is None:
+            if snap.is_dir() and not snap.is_symlink():
+                shutil.rmtree(snap)
+            marker.unlink(missing_ok=True)
+            refs = base / "refs"
+            for ref in sorted(refs.rglob("*")) if refs.is_dir() else []:
+                try:
+                    if ref.is_file() and not ref.is_symlink() and ref.read_text().strip() == rev:
+                        ref.unlink()
+                except OSError:
+                    pass
+        else:
+            try:
+                data = json.loads(marker.read_text())
+            except (OSError, ValueError):
+                data = {}
+            data["files"] = [f for f in data.get("files") or [] if isinstance(f, dict) and f.get("path") not in paths]
+            tmp = marker.with_name(f".{marker.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(data))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, marker)
+            for d in sorted({link.parent for link in links}, key=lambda p: len(p.parts), reverse=True):
+                while d != snap and _inside(d, snap):
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        break
+                    d = d.parent
+        still = {os.path.realpath(p) for p in (base / "snapshots").rglob("*") if p.is_symlink()} \
+            if (base / "snapshots").is_dir() else set()
+        for blob in sorted(candidates - still):
+            try:
+                freed += os.lstat(blob).st_size
+                os.unlink(blob)
+            except FileNotFoundError:
+                pass
+        self._drop_if_empty(base)
+        return freed
+
+    @staticmethod
+    def _drop_if_empty(base: Path) -> None:
+        """A repository with nothing left in it goes too (only empty directories are removed)."""
+        for top, dirs, files in os.walk(base, topdown=False):
+            if top == str(base):
+                continue
+            if not files:
+                try:
+                    os.rmdir(top)
+                except OSError:
+                    pass
+        try:
+            base.rmdir()
+        except OSError:
+            pass
+
+    def prune_partial(self) -> int:
+        """Remove what unfinished downloads left behind (they would resume from it); the bytes freed.
+        Refused while any download runs here: one of them may be writing to it."""
+        if self.error:
+            raise CacheError(self.error)
+        with self._exclusive("partial") as free:
+            if not free:
+                raise CacheRefused("busy", "A download is in progress on this machine. Remove the partial "
+                                           "downloads once it has finished or been cancelled.")
+            freed = 0
+            for p, n in self._partials():
+                try:
+                    if p.is_dir() and not p.is_symlink():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+                    freed += n
+                except FileNotFoundError:
+                    pass
+        log.info("Removed the partial downloads from the model cache (%.2f GiB freed).", freed / 1024**3)
+        return freed
+
+
+def _hf_dir_or_none(repo: str) -> Optional[str]:
+    try:
+        return sources.hf_dir(repo)
+    except sources.SourceError:
+        return None
+
+
+def _number(value) -> Optional[float]:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n == n and 0 <= n < 1e11 else None

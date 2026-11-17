@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { Notice } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import {
-  compact, deployLink, emptyPick, fitsLine, nameFor, pickFromList, pickFromSearch,
+  compact, deployLink, emptyPick, fitsLine, nameFor, pickFromList, pickFromSearch, searchLicenceProblem, visionProblem,
   type InspectMeta, type InspectResponse, type Pick, type RecommendedModel, type RecommendedResponse, type SearchResponse, type Suggestion,
 } from "../lib/addmodel";
 import { when } from "../lib/format";
@@ -239,6 +239,7 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
                     </td>
                     <td data-label="What" className="small">
                       {r.task ? TASK_LABEL[r.task] : r.pipeline_tag ?? "unknown task"} · {FORMAT_LABEL[r.format] ?? r.format}
+                      {r.license && <div className="mono muted">{r.license}</div>}
                     </td>
                     <td data-label="Size" className="small">
                       {r.weights_bytes ? bytes(r.weights_bytes) : r.params ? `${compact(r.params)} params` : "—"}
@@ -247,8 +248,9 @@ function HubSearch({ recommended, onPick, onFallback, chosen }: {
                     <td data-label="Updated" className="small">{r.last_modified ? when(r.last_modified) : "—"}</td>
                     <td className="cell-actions">
                       {r.in_catalog ? <span className="chip chip-tone-ok">In the catalog as {r.in_catalog}</span>
+                        : searchLicenceProblem(r) ? <span className="muted small">{searchLicenceProblem(r)}</span>
                         : servable ? <button type="button" className="btn btn-small" onClick={() => onPick(entry ? pickFromList(entry) : pickFromSearch(r))}>Choose</button>
-                          : <span className="muted small" title="No recipe reads this format for this task">Cannot be served</span>}
+                          : <span className="muted small" title="No engine reads this format for this task">Cannot be served</span>}
                     </td>
                   </tr>
                 );
@@ -378,7 +380,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
             <p className="field-hint">
               This model is gated: accept its licence on huggingface.co with your account, then paste a read token from your
               Hugging Face settings. It is used to read the model now and is not stored. To use one token for every gated model,
-              inspecting and downloading, save it as the server's token under Model sources.
+              inspecting and downloading, save it as the server's token under Models → Sources.
             </p>
           </div>
           <button type="button" className="btn" disabled={!f.token.trim() || inspecting} onClick={() => setAsk((cur) => ({ ...cur, round: cur.round + 1 }))}>Read it with this token</button>
@@ -414,11 +416,12 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
           <div className="fact"><dt>Pinned to</dt><dd className="mono small">{meta.revision ? `${meta.revision.slice(0, 12)} (${meta.ref || "main"})` : "—"}</dd></div>
           <div className="fact"><dt>Download</dt><dd>{bytes(meta.size_bytes)} in {meta.file_count} files</dd></div>
           {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
-          {meta.modalities !== undefined && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
+          {meta.vision && <div className="fact"><dt>Vision model</dt><dd className="small">{TASK_LABEL[meta.vision.task]} · {meta.vision.architecture}{meta.vision.labels ? ` · ${meta.vision.labels} classes (${(meta.vision.label_examples ?? []).slice(0, 4).join(", ")}…)` : ""}</dd></div>}
+          {meta.modalities !== undefined && !meta.vision && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
           {meta.license !== undefined && <div className="fact"><dt>Licence</dt><dd className="mono small">{meta.license ?? "not stated"}{meta.gated ? " · gated" : ""}</dd></div>}
           {meta.video && <div className="fact"><dt>Pipeline</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{videoFacts(meta.video, meta.diffusers)}</dd></div>}
           {meta.image && <div className="fact"><dt>{meta.diffusers ? "Pipeline" : "Image model"}</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{imageFacts(meta.image, meta.diffusers)}</dd></div>}
-          {meta.config && <div className="fact"><dt>Shape</dt><dd>{meta.config.layers} layers, {meta.config.kv_heads} KV heads, up to {meta.config.max_context.toLocaleString("en-US")} tokens, {meta.config.dtype}</dd></div>}
+          {meta.config && !meta.vision && <div className="fact"><dt>Shape</dt><dd>{meta.config.layers} layers, {meta.config.kv_heads} KV heads, up to {meta.config.max_context.toLocaleString("en-US")} tokens, {meta.config.dtype}</dd></div>}
         </dl>
       )}
       {meta?.gguf_files && meta.gguf_files.length > 1 && (
@@ -466,9 +469,10 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
               Comes with engine arguments for {Object.keys(f.engine_args).join(", ")}: <code>{Object.values(f.engine_args)[0].slice(0, 2).join(" ")}…</code>
             </p>
           )}
+          {meta && visionProblem(meta, f.task as Task) && <Notice tone="error">{visionProblem(meta, f.task as Task)}</Notice>}
           <div className="form-foot">
             <span className="muted small">Adding downloads nothing yet. Machines fetch the model when it is deployed.</span>
-            <button className="btn btn-primary" disabled={busy || inspecting || (!meta && !isLocal)}>{busy ? "Adding…" : "Add to the catalog"}</button>
+            <button className="btn btn-primary" disabled={busy || inspecting || (!meta && !isLocal) || Boolean(meta && visionProblem(meta, f.task as Task))}>{busy ? "Adding…" : "Add to the catalog"}</button>
           </div>
         </>
       )}
@@ -510,7 +514,7 @@ function SuggestionPanel({ s, device, onDevice }: { s: Suggestion; device: strin
         <p className="suggest-nofit"><IconAlertTriangle size={16} aria-hidden="true" /> {(s.summary ?? "Does not fit on any machine right now.").replace(/([^.])$/, "$1.")}
           {" "}You can still add it; deploy it once a machine has room{cpu ? "" : ", or on more GPUs"}.</p>
       ) : null}
-      <p className="muted small">With the recipe's defaults ({s.recipes.length > 1 ? `also possible: ${s.recipes.filter((r) => r !== s.recipe).join(", ")}; ` : ""}context and concurrency can be changed when deploying).</p>
+      <p className="muted small">With the engine's defaults ({s.recipes.length > 1 ? `also possible: ${s.recipes.filter((r) => r !== s.recipe).join(", ")}; ` : ""}context and concurrency can be changed when deploying).</p>
     </div>
   );
 }

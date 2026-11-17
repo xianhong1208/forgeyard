@@ -71,3 +71,32 @@ export function targetHeader(target: string | null): string | null {
   if (target.startsWith("provider:")) return target.slice(9);
   return target;
 }
+
+// 1.4 (#81): where each route lives in the console. A deployment's own route is its cloud fallback,
+// on the deployment's page. A route an admin made under a name of its own lives on Cloud → Cloud
+// models: with a provider's model in it it is a cloud model; with deployments only it is "another
+// name" for them (several deployments behind one name, or one under a second name).
+export const FALLBACK_ANCHOR = "cloud-fallback";
+
+export function routeHome(r: Pick<RouteInfo, "id" | "deployment_id">): string {
+  return r.deployment_id !== null ? `/serving/${r.deployment_id}#${FALLBACK_ANCHOR}` : `/cloud/models/${r.id}`;
+}
+
+// Among those names: one with a provider's model in it (a provider inside your network counts too).
+export function isCloudModel(r: RouteInfo): boolean {
+  return r.targets.some((t) => t.kind === "provider");
+}
+
+export function ownNames(routes: RouteInfo[]): { cloud: RouteInfo[]; other: RouteInfo[] } {
+  const own = routes.filter((r) => r.deployment_id === null);
+  return { cloud: own.filter(isCloudModel), other: own.filter((r) => !isCloudModel(r)) };
+}
+
+// The providers a deployment's own route sends requests to when it moves on (switched-on provider
+// targets), for the "→ Gemini" mark in the Deployments list.
+export function fallbackProviders(routes: RouteInfo[], deploymentId: number): string[] {
+  const own = routes.find((r) => r.deployment_id === deploymentId);
+  if (!own) return [];
+  const names = own.targets.filter((t) => t.kind === "provider" && t.enabled && t.provider_model).map((t) => t.provider_model!.provider.name);
+  return [...new Set(names)];
+}

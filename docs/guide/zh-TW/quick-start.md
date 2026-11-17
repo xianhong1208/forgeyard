@@ -48,7 +48,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -87,24 +87,24 @@ Forgeyard 接著會顯示 **Get started**：一份接下來步驟的檢查清單
 forgeyard-ca.der: OK
 
 ==> Checking this machine
-Linux x86_64, server https://192.168.1.20:7860, agent 1.3.3.
+Linux x86_64, server https://192.168.1.20:7860, agent 1.4.0.
 
 ==> Checking the server's certificate authority
 The CA matches sha256:3f9a….
 
-==> Downloading the agent 1.3.3
-forgeyard-1.3.3-py3-none-any.whl (335662 bytes, SHA-256 checked).
+==> Downloading the agent 1.4.0
+forgeyard-1.4.0-py3-none-any.whl (335662 bytes, SHA-256 checked).
 NVIDIA driver found: installing NVML support too.
 
 ==> Installing it in /opt/forgeyard/venv
 Installed with uv (uv 0.9.24).
-forgeyard 1.3.3, as /usr/local/bin/forgeyard (try: forgeyard agent config).
+forgeyard 1.4.0, as /usr/local/bin/forgeyard (try: forgeyard agent config).
 
 ==> Account for process workloads
 Created the system account 'forgeyard-run' (no password, no shell, no home).
 
 ==> Settings (/etc/forgeyard/agent.toml)
-# Forgeyard agent settings, written by `forgeyard agent init` (1.3.3).
+# Forgeyard agent settings, written by `forgeyard agent init` (1.4.0).
 …
 # GPUs: 2 x NVIDIA GeForce RTX 4090 (driver 580.95.05). Choose which ones Forgeyard may use on the Machines page.
 …
@@ -119,7 +119,7 @@ INFO forgeyard.agent: Joined https://192.168.1.20:7860 as 'gpu-01'; credential s
 Next, on https://192.168.1.20:7860:
   1. Machines: this machine shows as online within a few seconds.
   2. Change GPU access: choose which cards Forgeyard may use here.
-  3. Models: deploy a model on it. The guide: https://192.168.1.20:7860/guide
+  3. Serving: deploy a model on it. The guide: https://192.168.1.20:7860/guide
 ```
 
 依序發生了這些事：
@@ -127,7 +127,7 @@ Next, on https://192.168.1.20:7860:
 1. 前三行先**不經檢查**下載伺服器的 CA（過程中不會送出任何機密），把它轉回二進位格式，再把它的 SHA-256 和指令裡的指紋比對。如果拿到的是另一個 CA（例如中間有別的機器攔截），一切會在這裡停下，並顯示 `forgeyard-ca.der: FAILED`。
 2. 比對通過後，才透過以這個 CA 驗證的連線下載安裝程式。
 3. 安裝程式從你的伺服器下載 agent（代理程式，版本一律和伺服器相同），檢查後連同它自己的 Python 一起裝到 `/opt/forgeyard`。
-4. 它建立了 `forgeyard-run` 帳號，行程類工作負載都以這個帳號執行。工作負載絕不會以 root 執行。
+4. 它建立了 `forgeyard-run` 帳號，行程（引擎）都以這個帳號執行，絕不會以 root 執行。
 5. 它根據偵測到的 GPU、Docker、systemd 寫出 `/etc/forgeyard/agent.toml`。檔案裡每個設定都有說明。
 6. 它用加入權杖（join token）換到這台機器自己的憑據，存放在 `/var/lib/forgeyard-agent`（權限 0600）。
 7. 它安裝並啟動了 `forgeyard-agent` 服務，這個服務會隨開機啟動，停止時也會自動重新啟動。
@@ -140,14 +140,14 @@ Next, on https://192.168.1.20:7860:
 
 預設情況下，Forgeyard 可以使用機器上的每一張 GPU。如果是和別人共用的機器：
 
-1. 在 **Machines** 找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
+1. 在 **Machines** 點進這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
 2. 勾選 Forgeyard 可以使用的卡，然後儲存。
 
 不在清單上的卡，絕不會分配給 Forgeyard 執行的任何東西；頁面上會把它們標成 *not for Forgeyard*。就算允許所有的卡，只要儲存一次選擇，這個步驟就會打勾。
 
 ## 5. 加入一個推薦的模型
 
-1. 開啟 **Models** → **Catalog and recipes**（目錄與 recipe）→ **Add a model**。
+1. 開啟 **Models** →（**Catalog** 分頁上的）**Add a model**。
 2. **Recommended** 列出已知可以正常運作的模型。挑一個適合你機器的：
    - GPU 至少有 8 GB 可用記憶體：**Qwen3 0.6B**（下載 1.4 GB）；
    - 只有 CPU：**Qwen3 1.7B (GGUF, for the CPU)**（下載 1.2 GB，約需 3 GB RAM）。
@@ -156,7 +156,7 @@ Next, on https://192.168.1.20:7860:
 
 ## 6. 部署它
 
-1. 選擇 **Deploy it**（部署它），或從 **Models** → **Deploy a model** 再挑選模型。
+1. 選擇 **Deploy it**（部署它），或從 **Serving** → **Deploy a model** 再挑選模型。
 2. 為這個部署取個名字，例如 `qwen`。這個名字就是程式呼叫時要用的**模型名稱**。
 3. 確認 **Runs on**（執行於）：Qwen3 0.6B 選 **GPU**，GGUF 模型選 **CPU only**（用 *Deploy it* 會自動幫你選好）。
 4. 頁面會顯示估算結果和它會在哪裡執行。選擇 **Deploy**。
@@ -250,7 +250,7 @@ Hello, how are you?
 
 ## 接下來
 
-- **Usage** 會依金鑰、模型和使用者顯示請求數、token 數和延遲。
+- **Usage** 會依金鑰、模型和使用者顯示請求數、token 數和延遲，並按日、週或月畫成折線圖。
 - 在 **Users** 加入其他人：他們會收到一個一次性連結，用來設定自己的密碼。角色的說明在[概念](concepts.md#roles)。
 - 用同樣的方式加入更多機器；同一個部署的副本會分散到這些機器上，閘道會在它們之間做負載平衡。
 - 有東西不能用？請看[疑難排解](troubleshooting.md)。

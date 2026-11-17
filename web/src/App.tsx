@@ -13,22 +13,22 @@ import { DeploymentDetailPage } from "./pages/DeploymentDetail";
 import { DeploymentEditPage } from "./pages/DeploymentEdit";
 import { GetStartedPage, HomePage } from "./pages/GetStarted";
 import { GuidePage, GuideRedirect } from "./pages/Guide";
+import { MachineDetailPage } from "./pages/MachineDetail";
 import { MachinesPage } from "./pages/Machines";
 import { ModelDeployPage } from "./pages/ModelDeploy";
 import { ModelsPage } from "./pages/Models";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
+import { OldApps } from "./pages/OldApps";
 import { PlaygroundPage } from "./pages/Playground";
-import { ProviderDetailPage, ProvidersPage } from "./pages/Providers";
-import { RouteDetailPage } from "./pages/RouteDetail";
+import { CloudPage, ProviderDetailPage } from "./pages/Providers";
+import { OldProviders, OldRoute, RouteDetailPage } from "./pages/RouteDetail";
 import { RegisterPage } from "./pages/Register";
 import { SetPasswordPage } from "./pages/SetPassword";
+import { OldDeploy, OldDeployment, ServingPage } from "./pages/Serving";
 import { SetupPage } from "./pages/Setup";
 import { TrustPage } from "./pages/Trust";
 import { UsagePage } from "./pages/Usage";
 import { UsersPage } from "./pages/Users";
-import { WorkloadDetailPage } from "./pages/WorkloadDetail";
-import { WorkloadNewPage } from "./pages/WorkloadNew";
-import { WorkloadsPage } from "./pages/Workloads";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { state, loadError, user, ended, reload } = useAuth();
@@ -67,18 +67,29 @@ export default function App() {
         <Route index element={<HomePage />} />
         <Route path="/start" element={<GetStartedPage />} />
         <Route path="/machines" element={<MachinesPage />} />
-        <Route path="/workloads" element={<WorkloadsPage />} />
-        <Route path="/workloads/new" element={<WorkloadNewPage />} />
-        <Route path="/workloads/:id" element={<WorkloadDetailPage />} />
+        <Route path="/machines/:id" element={<MachineDetailPage />} />
+        {/* 1.4 (#88): apps left the console. 1.3's /workloads… and 1.4's /apps… open the model's
+            deployment, or Machines (where an app holding a card is still named). */}
+        <Route path="/apps/*" element={<OldApps />} />
+        <Route path="/workloads/*" element={<OldApps />} />
+        {/* 1.4 (#92): Serving is what runs now, with Deploy a model and each deployment's page; Models
+            is the library (Catalog, Engines, Sources). 1.3's addresses under /models open the new places. */}
+        <Route path="/serving" element={<ServingPage />} />
+        <Route path="/serving/deploy" element={<ModelDeployPage />} />
+        <Route path="/serving/:id" element={<DeploymentDetailPage />} />
+        <Route path="/serving/:id/edit" element={<DeploymentEditPage />} />
         <Route path="/models" element={<ModelsPage />} />
-        <Route path="/models/deploy" element={<ModelDeployPage />} />
-        <Route path="/models/deployments/:id" element={<DeploymentDetailPage />} />
-        <Route path="/models/deployments/:id/edit" element={<DeploymentEditPage />} />
-        <Route path="/models/routes/:id" element={<RouteDetailPage />} />
-        <Route path="/providers" element={<AdminOnly><ProvidersPage /></AdminOnly>} />
-        <Route path="/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />
-        {/* M0-M2 sent "Deployments" to the workloads; model deployments live under Models since M3. */}
-        <Route path="/deployments" element={<Navigate to="/models" replace />} />
+        <Route path="/models/deploy" element={<OldDeploy />} />
+        <Route path="/models/deployments/*" element={<OldDeployment />} />
+        {/* 1.4 (#81): routes live where they belong (a deployment's page, or Cloud → Cloud models), and
+            Providers became Cloud. The old addresses open the new places. */}
+        <Route path="/models/routes/:id" element={<OldRoute />} />
+        <Route path="/cloud" element={<AdminOnly><CloudPage /></AdminOnly>} />
+        <Route path="/cloud/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />
+        <Route path="/cloud/models/:id" element={<RouteDetailPage />} />
+        <Route path="/providers/*" element={<OldProviders />} />
+        {/* M0-M2 sent "Deployments" to the workloads; model deployments were under Models from M3 to 1.3. */}
+        <Route path="/deployments" element={<Navigate to="/serving" replace />} />
         <Route path="/playground" element={<PlaygroundPage />} />
         <Route path="/keys" element={<ApiKeysPage />} />
         <Route path="/usage" element={<UsagePage />} />

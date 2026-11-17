@@ -197,7 +197,7 @@ describe("add a model", () => {
       if (url === "/api/models" && init?.method === "POST") return { status: 201, body: { model: { name: "qwen3-reranker-0.6b" } } };
       return undefined;
     });
-    mount("/models?tab=catalog");
+    mount("/models");
     expect(await screen.findByRole("heading", { name: "Qwen3" })).toBeTruthy();
     expect(screen.getByText("In the catalog as qwen-cpu")).toBeTruthy();
     const gemma = screen.getByText("Gemma 3 4B").closest("li")!;
@@ -218,7 +218,7 @@ describe("add a model", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ source: "hf://Qwen/Qwen3-Reranker-0.6B", name: "qwen3-reranker-0.6b",
       title: "Qwen3 Reranker 0.6B", task: "rerank", engine_args: { "vllm-pooling": ["--hf-overrides", "{}"] } });
     const deployIt = await screen.findByRole("link", { name: "Deploy it" });
-    expect(deployIt.getAttribute("href")).toBe("/models/deploy?model=qwen3-reranker-0.6b&recipe=vllm-pooling&device=gpu");
+    expect(deployIt.getAttribute("href")).toBe("/serving/deploy?model=qwen3-reranker-0.6b&recipe=vllm-pooling&device=gpu");
   });
 
   it("FY-WEB-107 a gated model asks for a token and reads it again with it", async () => {
@@ -230,7 +230,7 @@ describe("add a model", () => {
       }
       return undefined;
     });
-    mount("/models?tab=catalog");
+    mount("/models");
     const gemma = (await screen.findByText("Gemma 3 4B")).closest("li")!;
     await act(async () => fireEvent.click(within(gemma).getByRole("button", { name: "Choose" })));
     expect(await screen.findByText(/is gated or private/)).toBeTruthy();
@@ -258,7 +258,7 @@ describe("add a model", () => {
         if (url === "/api/models/inspect") return { status: 200, body: { ...inspected, meta: { ...inspected.meta, task_hint: "chat" } } };
         return undefined;
       });
-      mount("/models?tab=catalog");
+      mount("/models");
       fireEvent.click(await screen.findByRole("button", { name: "Search Hugging Face" }));
       const searches = () => fetch.mock.calls.filter(([u]) => String(u).startsWith("/api/models/search")).map(([u]) => u);
       fireEvent.change(screen.getByLabelText("Search Hugging Face"), { target: { value: "q" } });
@@ -285,7 +285,7 @@ describe("add a model", () => {
     catalogServer((url) => (url.startsWith("/api/models/search")
       ? { status: 503, body: { detail: { code: "hub_unreachable", message: "Cannot reach Hugging Face from the server (no route). The recommended models still work; a model can also be added by its source." } } }
       : undefined));
-    mount("/models?tab=catalog");
+    mount("/models");
     fireEvent.click(await screen.findByRole("button", { name: "Search Hugging Face" }));
     fireEvent.change(screen.getByLabelText("Search Hugging Face"), { target: { value: "whisper" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Search" })));
@@ -298,7 +298,7 @@ describe("add a model", () => {
     catalogServer((url) => (url === "/api/models/inspect" ? { status: 200, body: { ...inspected, suggestion: { ...suggestion, fits: false,
       machines: [{ name: "a100", status: "online", fits: false, reason: "short", gpus: [], short_by: GIB }], summary: "Nothing can take a replica that needs 3.38 GiB per GPU. a100: short" } } }
       : undefined));
-    mount("/models?tab=catalog");
+    mount("/models");
     const rr = (await screen.findByText("Qwen3 Reranker 0.6B")).closest("li")!;
     await act(async () => fireEvent.click(within(rr).getByRole("button", { name: "Choose" })));
     expect(await screen.findByText(/Nothing can take a replica that needs 3.38 GiB per GPU/)).toBeTruthy();
@@ -308,7 +308,7 @@ describe("add a model", () => {
 
 // ------------------------------------------------------------------ empty pages
 describe("empty pages say what to do", () => {
-  it("FY-WEB-111 Playground, Usage, API keys and Workloads, by role", async () => {
+  it("FY-WEB-111 Playground, Usage and API keys, by role", async () => {
     const fetch = server((url) => {
       if (url === "/api/routes") return { status: 200, body: { routes: [] } };
       if (url.startsWith("/api/usage")) return { status: 200, body: { rows: [], total: { requests: 0, errors: 0, limited: 0, tokens: 0, prompt_tokens: 0, completion_tokens: 0, latency_p50_ms: null, latency_p95_ms: null },
@@ -332,22 +332,19 @@ describe("empty pages say what to do", () => {
     mount("/keys");
     fireEvent.click(await screen.findByRole("button", { name: "Create a key" }));
     expect(await screen.findByLabelText("Name")).toBeTruthy();
-    cleanup();
-    mount("/workloads");
-    expect(await screen.findByText(/A workload is a program you run on your machines/)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "New workload" })).toBeNull();
   });
 
-  it("FY-WEB-112 Models with an empty catalog leads to adding one; the deploy page says the catalog is empty", async () => {
+  it("FY-WEB-112 Serving with an empty catalog leads to adding one; the deploy page says the catalog is empty", async () => {
     catalogServer(() => undefined);
-    mount("/models");
-    const add = await screen.findByRole("button", { name: "Add a model" });
+    mount("/serving");
+    const add = await screen.findByRole("link", { name: "Add a model" });
+    expect(add.getAttribute("href")).toBe("/models");
     fireEvent.click(add);
     expect(await screen.findByRole("heading", { name: "Add a model" })).toBeTruthy();
     cleanup();
     catalogServer((url) => (url === "/api/machines" ? { status: 200, body: { machines: [], server_time: "", heartbeat_interval: 10, offline_after: 30, can_manage: true } } : undefined));
-    mount("/models/deploy");
+    mount("/serving/deploy");
     expect(await screen.findByText(/The catalog is empty, so there is nothing to deploy yet/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Add a model to the catalog" }).getAttribute("href")).toBe("/models?tab=catalog");
+    expect(screen.getByRole("link", { name: "Add a model to the catalog" }).getAttribute("href")).toBe("/models");
   });
 });

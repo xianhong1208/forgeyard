@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router";
 import App from "../App";
 import { AuthProvider } from "../auth";
 import fixture from "../test/machines.json";
+import type { Deployment, Replica, Workload } from "../lib/types";
 import { POLL_MS } from "./Machines";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -22,9 +23,9 @@ function server(route: (url: string, init?: RequestInit) => Reply | undefined, u
   return fetch;
 }
 
-function mount() {
+function mount(path = "/machines") {
   return render(
-    <MemoryRouter initialEntries={["/machines"]}>
+    <MemoryRouter initialEntries={[path]}>
       <AuthProvider>
         <App />
       </AuthProvider>
@@ -42,36 +43,66 @@ afterEach(() => {
 });
 
 describe("machines page", () => {
-  it("FY-WEB-033 shows each machine, its cards, arch and free memory", async () => {
-    server((url) => (url === "/api/machines" ? machines() : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } } : undefined));
+  it("FY-WEB-398 the summary above the tiles counts machines, singular and plural", async () => {
+    const [box] = fixture.machines;
+    const cpuOnly = (id: number, name: string) => ({ ...box, id, name, accelerators: box.accelerators.filter((a) => a.vendor === "cpu") });
+    server((url) => (url === "/api/machines" ? machines({ machines: [...fixture.machines, cpuOnly(7, "cpu-a"), cpuOnly(8, "cpu-b")] as typeof fixture.machines })
+      : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } } : undefined));
     mount();
-    const box = await screen.findByRole("article", { name: "Machine a100-box" });
-    expect(within(box).getByText("online")).toBeTruthy();
-    expect(within(box).getByText("simulated inventory")).toBeTruthy();
-    expect(within(box).getByText("rack=r2")).toBeTruthy();
-    expect(within(box).getByText("8 × NVIDIA A100 80GB PCIe")).toBeTruthy();
-    expect(within(box).getAllByText("NVIDIA A100 80GB PCIe")).toHaveLength(8);
-    expect(within(box).getAllByText("8.0")).toHaveLength(8);
-    expect(within(box).getAllByText(/sm_80/)).toHaveLength(8);
-    // card 0: 4023779328 bytes free of 80 GiB, shown plainly and as a nearly full bar
-    const first = within(box).getAllByRole("listitem")[0];
-    expect(first.textContent).toContain("3.7 GiB free");
-    expect(first.textContent).toContain("of 80 GiB");
-    expect(within(first).getByRole("meter").getAttribute("aria-valuenow")).toBe("95");
-    expect(within(box).getByText("Heartbeat 4 s ago")).toBeTruthy();
+    await screen.findByRole("article", { name: "Machine cpu-b" });
+    const items = within(screen.getByRole("list", { name: "Kinds of machine" })).getAllByRole("listitem").map((li) => li.textContent?.trim());
+    expect(items).toEqual(["1 NVIDIA machine", "1 AMD machine", "2 CPU-only machines", "1 offline"]);
   });
 
-  it("FY-WEB-034 an APU shows gfx1151 and unified memory; an offline machine says since when", async () => {
+  it("FY-WEB-033 a tile per machine: its kind, cards as slots, free memory; its page has the cards' details", async () => {
     server((url) => (url === "/api/machines" ? machines() : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } } : undefined));
-    mount();
+    const view = mount();
+    const box = await screen.findByRole("article", { name: "Machine a100-box" });
+    expect(within(box).getByText("NVIDIA GPU · 8 × A100 80GB PCIe")).toBeTruthy();
+    expect(within(box).getByRole("img", { name: "NVIDIA GPU" })).toBeTruthy();
+    // eight cards and the RAM, each a slot; card 0 has 3.7 GiB free of 80 GiB
+    const slots = within(box).getAllByRole("listitem");
+    expect(slots.map((x) => x.textContent)).toEqual(["#0", "#1", "#2", "#3", "#4", "#5", "#6", "#7", "RAM"]);
+    expect(slots[0].getAttribute("title")).toBe("#0: 3.7 GiB free of 80 GiB");
+    expect(within(box).getByText("heartbeat 4 s ago")).toBeTruthy();
+    expect(within(box).getByText("agent 0.1.0")).toBeTruthy();
+    expect(within(box).getByRole("link", { name: "a100-box" }).getAttribute("href")).toBe("/machines/1");
+    view.unmount();
+
+    mount("/machines/1");
+    expect(await screen.findByRole("heading", { level: 1, name: "a100-box" })).toBeTruthy();
+    expect(screen.getByText("simulated inventory")).toBeTruthy();
+    expect(screen.getByText("rack=r2")).toBeTruthy();
+    expect(screen.getByText("driver 580.178.04")).toBeTruthy();
+    const first = screen.getByRole("group", { name: "GPU #0" });
+    expect(first.textContent).toContain("A100 80GB PCIe · 8.0 sm_80");
+    expect(first.textContent).toContain("3.7 GiB free");
+    expect(first.textContent).toContain("of 80 GiB");
+    expect(screen.getAllByRole("group", { name: /^GPU #/ })).toHaveLength(8);
+    expect(screen.getByRole("group", { name: "RAM" })).toBeTruthy();
+  });
+
+  it("FY-WEB-034 an APU is its own kind and shows gfx1151 and unified memory; an offline machine says since when", async () => {
+    server((url) => (url === "/api/machines" ? machines() : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } } : undefined));
+    const view = mount();
     const strix = await screen.findByRole("article", { name: "Machine strix" });
-    expect(within(strix).getByText("gfx1151")).toBeTruthy();
-    expect(within(strix).getByText("unified memory")).toBeTruthy();
-    // An AMD card's driver is the ROCm version, and says so; NVIDIA keeps "driver".
-    expect(within(strix).getByText("ROCm 7.0.2")).toBeTruthy();
-    expect(within(await screen.findByRole("article", { name: "Machine a100-box" })).getAllByText("driver 580.178.04")).toHaveLength(8);
+    expect(within(strix).getByText("AMD APU · Radeon 8060S")).toBeTruthy();
     expect(within(strix).getByText("offline")).toBeTruthy();
-    expect(within(strix).getByText("Offline · last heartbeat 41 s ago")).toBeTruthy();
+    expect(within(strix).getByText("offline · last heartbeat 41 s ago")).toBeTruthy();
+    expect(within(strix).getByText(/free of .* \(shared\)/)).toBeTruthy();
+    // the summary above the tiles counts the kinds and the offline ones
+    const summary = screen.getByRole("list", { name: "Kinds of machine" });
+    expect(summary.textContent).toContain("1 NVIDIA machine");
+    expect(summary.textContent).toContain("1 AMD machine");
+    expect(summary.textContent).toContain("1 offline");
+    view.unmount();
+
+    mount("/machines/2");
+    const card = await screen.findByRole("group", { name: "GPU #0" });
+    expect(card.textContent).toContain("gfx1151");
+    expect(within(card).getByText("unified memory")).toBeTruthy();
+    // An AMD card's driver is the ROCm version, and says so.
+    expect(screen.getByText("ROCm 7.0.2")).toBeTruthy();
   });
 
   it("FY-WEB-035 Add machine shows the join command once", async () => {
@@ -125,7 +156,8 @@ describe("machines page", () => {
     });
     mount();
     const box = await screen.findByRole("article", { name: "Machine a100-box" });
-    expect(within(box).getByText("online")).toBeTruthy();
+    expect(within(box).queryByText("offline")).toBeNull();
+    expect(within(box).getByText("heartbeat 4 s ago")).toBeTruthy();
     online = false;
     await act(async () => {
       vi.advanceTimersByTime(POLL_MS + 10);
@@ -133,7 +165,7 @@ describe("machines page", () => {
     await waitFor(() => expect(within(screen.getByRole("article", { name: "Machine a100-box" })).getByText("offline")).toBeTruthy());
   });
 
-  it("FY-WEB-038 revoke asks first, then calls the API", async () => {
+  it("FY-WEB-038 revoke is on the machine's page; it asks first, then calls the API", async () => {
     const fetch = server((url, init) => {
       if (url === "/api/machines/1/revoke" && init?.method === "POST") return { status: 200, body: {} };
       if (url === "/api/machines/join-tokens") return { status: 200, body: { tokens: [] } };
@@ -141,8 +173,13 @@ describe("machines page", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    mount();
-    const box = await screen.findByRole("article", { name: "Machine a100-box" });
+    const view = mount();
+    await screen.findByRole("article", { name: "Machine a100-box" });
+    expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull(); // not on the list any more
+    view.unmount();
+    mount("/machines/1");
+    await screen.findByRole("heading", { level: 1, name: "a100-box" });
+    const box = document.body;
     fireEvent.click(within(box).getByRole("button", { name: "Revoke" }));
     expect(confirm).toHaveBeenCalledOnce();
     expect(fetch.mock.calls.some(([u]) => u === "/api/machines/1/revoke")).toBe(false);
@@ -253,7 +290,8 @@ describe("machines page", () => {
 
     // An address the certificate does not cover: a warning naming TLS_EXTRA_NAMES; the command stays.
     type("Server address, as that machine reaches it", "https://192.168.1.21:7860");
-    expect(screen.getByText(/is not in this server's certificate/).textContent).toContain("192.168.1.21");
+    // The certificate's names come from /api/tls, which may answer after the join command.
+    expect((await screen.findByText(/is not in this server's certificate/)).textContent).toContain("192.168.1.21");
     expect(screen.getByText("TLS_EXTRA_NAMES")).toBeTruthy();
     expect(docker()).toContain("-e FORGEYARD_SERVER=https://192.168.1.21:7860");
     fireEvent.click(screen.getByRole("button", { name: "Use this server's address, https://forge.lan:7860" }));
@@ -280,7 +318,7 @@ describe("machines page", () => {
     expect(docker()).toContain("-e FORGEYARD_PORT_RANGE=33000-33002");
   });
 
-  it("FY-WEB-145 with a published agent image: pulled by the command, building and carrying it are advanced", async () => {
+  it("FY-WEB-267 with a published agent image: pulled by the command, building and carrying it are advanced", async () => {
     const image = "docker.io/forgeyard/forgeyard-agent:1.2.0";
     const created = { id: "t4", created_at: "2026-11-09T10:00:00Z", expires_at: "2026-11-09T10:15:00Z", created_by: "owner",
       token: "fyj_secret", server_url: "https://forge.lan:7860", valid_minutes: 15, ca_fingerprint: null, trust_command: null,
@@ -316,5 +354,88 @@ describe("machines page", () => {
     expect(offline.textContent).toContain("Docker finds the image locally and does not pull it.");
     // The engine images go the same way; the guide says how (FY-WEB-170 has the recipe's commands).
     expect(within(offline).getByRole("link", { name: "Offline machines" }).getAttribute("href")).toBe("/guide/en/how-to#offline-machines");
+  });
+});
+
+describe("what runs on a machine (1.4)", () => {
+  const GIB = 1024 ** 3;
+  const KEY4 = fixture.machines[0].accelerators[4].key;
+  const rep = (over: Partial<Replica> = {}): Replica => ({
+    ordinal: 0, id: "r", generation: 1, machine: { id: 1, name: "a100-box", status: "online", connected: true },
+    gpus: [{ index: 4, vendor: "nvidia", model: null, key: KEY4 }], state: "healthy", reason: null, exit_code: null, attempt: 0,
+    restarts: 0, final: false, pid: null, container: null, ports: [], started_at: null, finished_at: null, updated_at: "", ...over,
+  });
+  const wl = (id: number, name: string, r: Replica, runtime: Workload["runtime"] = "container"): Workload => ({
+    id, name, kind: "service", runtime, desired_state: "running", generation: 1, created_by: null, created_at: "", updated_at: "",
+    status: "running", ready: 1, replicas: 1, replica_list: [r],
+    spec: { name, kind: "service", runtime: { type: "container", image: "x", command: null, args: [] }, env: {},
+      resources: { cpu: null, memory: null, gpus: { count: 1, indices: null, vendor: null } }, ports: [], health: null, restart: "always",
+      max_duration: null, retries: 0, retry_backoff: 5, replicas: 1, machine_id: null },
+  });
+  const dep = (id: number, name: string, w: Workload, task: Deployment["model"]["task"]): Deployment => ({
+    id, name, recipe: "vllm", served_name: name, params: {},
+    model: { id, name: `${name}-model`, source: "", task, format: "safetensors", revision: null, file: null, size_bytes: 0 },
+    estimate: { method: "", device: "gpu", gpus: 1, per_gpu: 9 * GIB, ram: 0, amount: 9 * GIB, kv_tokens: null, notes: [], parts: [] },
+    has_token: false, created_by: null, created_at: "", route: null, endpoints: [], workload: w,
+  } as unknown as Deployment);
+  const tasks: Deployment["model"]["task"][] = ["chat", "embed", "rerank", "asr", "tts", "image"];
+  const models = tasks.map((_, i) => wl(20 + i, `m${i}`, rep({ id: `m${i}`, vram: (i + 1) * GIB }), "model"));
+  const deps = models.map((w, i) => dep(30 + i, `dep-${tasks[i]}`, w, tasks[i]));
+  const notebook = wl(9, "notebook", rep({ gpus: [{ index: 2, vendor: "nvidia", model: null, key: fixture.machines[0].accelerators[2].key }] }));
+  const route = (canRun: boolean) => (url: string): Reply | undefined =>
+    url === "/api/machines" ? machines({ can_manage: canRun })
+      : url === "/api/machines/join-tokens" ? { status: 200, body: { tokens: [] } }
+        : url === "/api/workloads" ? { status: 200, body: { workloads: [notebook, ...models], server_time: "", can_manage: canRun } }
+          : url === "/api/deployments" ? { status: 200, body: { deployments: deps, server_time: "", can_manage: canRun } } : undefined;
+
+  it("FY-WEB-223 a tile names what runs there, five at most, and counts them", async () => {
+    server(route(true));
+    mount();
+    const box = await screen.findByRole("article", { name: "Machine a100-box" });
+    expect(await within(box).findByText("7 running")).toBeTruthy();
+    // 1.4 (#88): an app is named (it holds a card) but not linked: apps left the console.
+    const chips = [...box.querySelectorAll(".holder-chip:not(.holder-more)")];
+    expect(chips.map((a) => a.textContent)).toEqual(["notebook", "dep-chat", "dep-embed", "dep-rerank", "dep-asr"]);
+    expect(chips[0].tagName).toBe("SPAN");
+    expect(chips[0].getAttribute("title")).toMatch(/^App notebook: apps are deprecated and removed in 1.5/);
+    expect(chips[1].getAttribute("href")).toBe("/serving/30");
+    expect(within(box).getByText("+2 more")).toBeTruthy();
+    // nothing runs on the offline APU
+    expect(within(screen.getByRole("article", { name: "Machine strix" })).getByText("Nothing runs here yet.")).toBeTruthy();
+  });
+
+  it("FY-WEB-224 a machine's memory map splits each card by what holds it, named, with what it reserved", async () => {
+    server(route(true));
+    mount("/machines/1");
+    const four = await screen.findByRole("group", { name: "GPU #4" });
+    // Each holder is named by its workload first, then by its deployment once /api/deployments has answered.
+    await waitFor(() => expect(within(four).getAllByRole("link").map((a) => a.textContent)).toEqual(
+      ["dep-chat1 GiB", "dep-embed2 GiB", "dep-rerank3 GiB", "dep-asr4 GiB", "dep-tts5 GiB", "dep-image6 GiB"]));
+    const bar = within(four).getAllByRole("img").find((x) => x.classList.contains("membar"))!;
+    expect(bar.getAttribute("aria-label")).toMatch(/^21 GiB reserved by Forgeyard, .* free of 80 GiB$/);
+    expect(bar.querySelector('[title="dep-image: 6 GiB"]')).toBeTruthy();
+    // a card held by an app that declared no memory names it without a size; 1.4 (#88): not linked
+    const two = screen.getByRole("group", { name: "GPU #2" });
+    expect(within(two).queryAllByRole("link")).toHaveLength(0);
+    expect(two.querySelector(".holder-chip")?.textContent).toBe("notebook");
+    expect(within(four).getAllByRole("link")[0].getAttribute("href")).toBe("/serving/30");
+    expect(within(screen.getByRole("group", { name: "GPU #0" })).queryAllByRole("link")).toHaveLength(0);
+    const running = screen.getByRole("region", { name: /Running here/ });
+    expect(within(running).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(running).queryByRole("link", { name: "notebook" })).toBeNull();
+    expect(within(running).getByText("notebook").getAttribute("title")).toMatch(/^App notebook: apps are deprecated/);
+    expect(within(running).getByRole("link", { name: "dep-chat" }).getAttribute("href")).toBe("/serving/30");
+    expect(screen.getByRole("link", { name: "Deploy here" }).getAttribute("href")).toBe("/serving/deploy?machine=1");
+    // 1.4 (#81): Apps is an advanced page; nothing but the Apps page itself offers New app.
+    expect(screen.queryByRole("link", { name: /New app/ })).toBeNull();
+  });
+
+  it("FY-WEB-225 users see a machine's page without Revoke, Remove, Deploy here or New app here", async () => {
+    server(route(false), { ...OWNER, role: "user", is_owner: false });
+    mount("/machines/1");
+    await screen.findByRole("heading", { level: 1, name: "a100-box" });
+    await screen.findByRole("group", { name: "GPU #4" });
+    for (const name of ["Revoke", "Remove", "Change GPU access"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    for (const name of ["Deploy here", "New app here"]) expect(screen.queryByRole("link", { name })).toBeNull();
   });
 });

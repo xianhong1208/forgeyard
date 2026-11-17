@@ -1,8 +1,9 @@
 """Settings, read from the environment (and a `.env` file next to the working directory)."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,21 +13,50 @@ from forgeyard.install.images import reference_error
 
 MIN_HEARTBEAT_SECONDS = 2
 
-# Deprecated in 1.3.1, still read, and removed in 1.4: the setting, the one that replaces it (None:
-# nothing does), and what happens instead. The server warns at start (and Setup health lists it)
-# when one is set.
-DEPRECATED: dict[str, tuple[Optional[str], str]] = {
-    "openrouter_models_url": (None, "Refresh prices from OpenRouter always reads OpenRouter's public list"),
-    "usage_flush_seconds": (None, "usage is written to the database every 5 seconds"),
-    "provider_cooldown_seconds": (None, "a failed provider target is tried last for 30 seconds (longer when its "
-                                        "Retry-After says so)"),
-    "provider_retry_after_cap": (None, "a Retry-After of up to 2 seconds is waited for once"),
-    "forgeyard_setup_token": ("ADMIN_USERNAME and ADMIN_PASSWORD", "for an unattended first start; otherwise use the "
+# Deprecated in 1.3.1 and removed in 1.4: no longer read. The setting, the one that replaces it
+# (None: nothing does), and what happens instead. A server that still has one set says so at start
+# and in Setup health (forgeyard/settings_check.py), and SECRET_KEY_FILE that would now mean another
+# key file stops the start (forgeyard/security/crypto.py).
+REMOVED: dict[str, tuple[Optional[str], str]] = {
+    "OPENROUTER_MODELS_URL": (None, "Refresh prices from OpenRouter always reads OpenRouter's public list"),
+    "USAGE_FLUSH_SECONDS": (None, "usage is written to the database every 5 seconds"),
+    "PROVIDER_COOLDOWN_SECONDS": (None, "a failed provider target is tried last for 30 seconds (longer when its "
+                                        "Retry-After says so, up to 5 minutes)"),
+    "PROVIDER_RETRY_AFTER_CAP": (None, "a Retry-After of up to 2 seconds is waited for once"),
+    "FORGEYARD_SETUP_TOKEN": ("ADMIN_USERNAME and ADMIN_PASSWORD", "for an unattended first start; otherwise use the "
                               "setup token the server prints"),
-    "agent_heartbeat_seconds": ("AGENT_OFFLINE_SECONDS", "agents send a heartbeat every third of it"),
-    "secret_key_file": ("FORGEYARD_SECRET_KEY_FILE", "the same setting under its new name"),
+    "AGENT_HEARTBEAT_SECONDS": ("AGENT_OFFLINE_SECONDS", "agents send a heartbeat every third of it, at least every "
+                                "2 seconds"),
+    "SECRET_KEY_FILE": ("FORGEYARD_SECRET_KEY_FILE", "the same setting under its new name"),
 }
 REMOVED_IN = "1.4"
+
+
+def removed_in_use(environ: Optional[Mapping[str, str]] = None,
+                   dotenv: Optional[Mapping[str, Optional[str]]] = None) -> dict[str, str]:
+    """{NAME: value} for each removed setting that is still set, with a value, in the environment or
+    in `.env` (the one the server reads: next to the working directory). Names are matched without
+    regard to case, as settings are; the environment wins over `.env`, as it does for settings."""
+    environ = os.environ if environ is None else environ
+    if dotenv is None:
+        dotenv = dotenv_values()
+    out: dict[str, str] = {}
+    for source in (dotenv, environ):  # the environment last, so it wins
+        for name, value in source.items():
+            upper = (name or "").upper()
+            if upper in REMOVED and value is not None and str(value).strip():
+                out[upper] = str(value).strip()
+    return out
+
+
+def dotenv_values(path: Path | str = ".env") -> dict[str, Optional[str]]:
+    """The names and values a `.env` file sets ({} when there is none or it cannot be read)."""
+    try:
+        from dotenv import dotenv_values as read
+
+        return {k: v for k, v in read(path).items() if k}
+    except (OSError, UnicodeDecodeError):
+        return {}
 
 
 class Settings(BaseSettings):
@@ -67,14 +97,10 @@ class Settings(BaseSettings):
     forgeyard_secret_key_file: str = ""
     # Or the key itself (base64 of 32 bytes), e.g. from a secrets manager; never written to disk.
     forgeyard_secret_key: str = ""
-    # Deprecated in 1.3.1 (removed in 1.4): the old name of FORGEYARD_SECRET_KEY_FILE.
-    secret_key_file: str = ""
 
     # First-run owner, created at startup instead of through /setup.
     admin_username: str = ""
     admin_password: str = ""
-    # Deprecated in 1.3.1 (removed in 1.4): pins the one-time setup token instead of generating one.
-    forgeyard_setup_token: str = ""
 
     # Self-registration: "off" (default) or "approval" (new accounts wait for an admin).
     registration: str = "off"
@@ -95,8 +121,6 @@ class Settings(BaseSettings):
     # Machines: a machine with nothing heard for this long is shown offline (a server-side check, so a
     # silent network drop counts). Agents send a heartbeat every third of it (at least 2 s).
     agent_offline_seconds: int = 30
-    # Deprecated in 1.3.1 (removed in 1.4): a heartbeat interval of its own instead of offline / 3.
-    agent_heartbeat_seconds: Optional[int] = None
     # The agent image the Machines page puts in its `docker run` (forgeyard/install/images.py). Empty:
     # the published one, docker.io/<namespace>/forgeyard-agent, or a local build while none is
     # published. Without :TAG or @sha256:DIGEST the tag is this server's version. A mirror or a
@@ -109,6 +133,9 @@ class Settings(BaseSettings):
     # Allow model sources on private addresses (and plain http): only for a LAN mirror. Agents
     # need their own --allow-private-model-hosts as well.
     model_allow_private_hosts: bool = False
+    # The largest image file (`docker save`, optionally gzip) an admin may upload to a machine from its page
+    # (1.4); it is streamed through the server to the agent, never stored.
+    image_upload_max_gb: int = Field(default=64, ge=1, le=4096)
     # Initial allowlists; admins change them on the Models page (stored in the database).
     model_url_hosts: str = ""      # hosts allowed for https:// GGUF sources, comma-separated
     model_local_dirs: str = ""     # directories allowed for local:// sources, comma-separated
@@ -138,9 +165,6 @@ class Settings(BaseSettings):
     # Let media URLs point at private or loopback addresses (an image server on your LAN). Link-local
     # and metadata addresses stay refused.
     media_allow_private_hosts: bool = False
-    # Deprecated in 1.3.1 (a constant in 1.4): how often gateway usage counted in memory is written
-    # to the database (seconds).
-    usage_flush_seconds: float = 5.0
 
     # Cloud providers (1.2). Initial values of a key's `cloud` setting; admins change them on the API
     # keys page (stored in the database). default: what a new key gets; max: the most a user may give
@@ -160,14 +184,6 @@ class Settings(BaseSettings):
     provider_connect_timeout: float = 10.0
     # Waiting for a provider's answer headers or the next piece of a stream (a provider can lower it).
     provider_read_timeout: float = 300.0
-    # Deprecated in 1.3.1 (constants in 1.4): a provider target that failed (429, 5xx, no connection)
-    # is tried last for this long, and a provider's Retry-After up to the cap is waited for once,
-    # when no other target is left.
-    provider_cooldown_seconds: float = 30.0
-    provider_retry_after_cap: float = 2.0
-    # Deprecated in 1.3.1 (a constant in 1.4): OpenRouter's public model list, read (without a key,
-    # through the egress rules) only when an admin asks to refresh prices from it.
-    openrouter_models_url: str = "https://openrouter.ai/api/v1/models"
     # Budgets: a cloud request is reserved at its estimated cost before it is sent. Without
     # `max_tokens` in the request, its answer is estimated at this many tokens.
     budget_default_max_tokens: int = Field(default=4096, ge=1, le=10_000_000)
@@ -249,25 +265,15 @@ class Settings(BaseSettings):
 
     @property
     def secret_key_path(self) -> Path:
-        """FORGEYARD_SECRET_KEY_FILE, else the deprecated SECRET_KEY_FILE, else data_dir/secret.key."""
-        for name in (self.forgeyard_secret_key_file, self.secret_key_file):
-            if name.strip():
-                return Path(name.strip())
+        """FORGEYARD_SECRET_KEY_FILE, else data_dir/secret.key."""
+        if self.forgeyard_secret_key_file.strip():
+            return Path(self.forgeyard_secret_key_file.strip())
         return self.data_dir / "secret.key"
 
     @property
     def heartbeat_seconds(self) -> int:
-        """How often agents send a heartbeat: a third of the offline time (at least 2 s), unless the
-        deprecated AGENT_HEARTBEAT_SECONDS says otherwise."""
-        if self.agent_heartbeat_seconds:
-            return int(self.agent_heartbeat_seconds)
+        """How often agents send a heartbeat: a third of the offline time, at least 2 s."""
         return max(MIN_HEARTBEAT_SECONDS, int(self.agent_offline_seconds) // 3)
-
-    def deprecated_in_use(self) -> list[tuple[str, Optional[str], str]]:
-        """(NAME, what replaces it or None, what happens instead) for each deprecated setting that is set
-        (an empty value is not)."""
-        return [(name.upper(), *DEPRECATED[name]) for name in DEPRECATED
-                if name in self.model_fields_set and getattr(self, name) not in ("", None)]
 
     @property
     def tls_extra_name_list(self) -> list[str]:

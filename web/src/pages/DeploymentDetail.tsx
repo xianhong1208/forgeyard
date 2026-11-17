@@ -1,20 +1,24 @@
 import { IconAdjustments, IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
+
+import { useAuth } from "../auth";
 
 import { AdvisorBanner } from "../components/Advisor";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
+import { MODEL_KIND, modelKind } from "../lib/fleet";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
-import { ROUTE_KIND_LABEL, ROUTE_KIND_TONE, spillRules, targetName, tiers } from "../lib/routing";
+import { FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
-import { API_LABEL, TASK_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
-import type { Deployment, DeploymentResponse, LiveCard, TryResponse } from "../lib/types";
+import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
+import type { Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions, RoutesResponse, TryResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
-import { NotPickedUpNotice, Output } from "./WorkloadDetail";
-import { usePoll, WORKLOADS_POLL_MS } from "./Workloads";
+import { RoutingEditor } from "./RouteDetail";
+import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
+import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
 
 export function DeploymentDetailPage() {
   const { id } = useParams();
@@ -39,7 +43,7 @@ export function DeploymentDetailPage() {
     try {
       if (what === "delete") {
         await api(`/deployments/${d.id}`, { method: "DELETE" });
-        navigate("/models", { replace: true });
+        navigate("/serving", { replace: true });
         return;
       }
       await api(`/deployments/${d.id}/${what}`, { method: "POST" });
@@ -55,12 +59,12 @@ export function DeploymentDetailPage() {
   const w = d?.workload;
   return (
     <>
-      <p className="crumb"><Link to="/models"><IconArrowLeft size={14} aria-hidden="true" /> Models</Link></p>
-      <PageHeader index={`03 · ${d ? TASK_LABEL[d.model.task] : "deployment"}`} title={d?.name ?? "Deployment"}
+      <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>
+      <PageHeader index={`02 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
         lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
         actions={d && w && canManage && (
           <>
-            <Link to={`/models/deployments/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
+            <Link to={`/serving/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
             {w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             ) : (
@@ -106,7 +110,8 @@ export function DeploymentDetailPage() {
                             </div>
                           ) : r.not_picked_up ? <div className="cell-stuck">{r.not_picked_up}</div> : r.reason && <div className="cell-reason">{r.reason}</div>}
                         </td>
-                        <td data-label="Machine">{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}</td>
+                        <td data-label="Machine"><div>{r.machine ? <span className="mono">{r.machine.name}</span> : <span className="muted">not placed</span>}
+                          {r.placement_note && <div className="cell-note">{r.placement_note}</div>}</div></td>
                         <td data-label="Device" className="mono">{r.gpus.length ? `GPU ${gpuLabel(r)}` : r.machine ? "CPU" : "—"}</td>
                         <td data-label="Runs" className="mono small" title={r.runs?.image ?? undefined}>{r.runs ? (r.runs.image ? imageTag(r.runs.image) : (Array.isArray(r.runs.command) ? r.runs.command.join(" ") : r.runs.command)) : "—"}
                           {r.pid ? <div className="muted">pid {r.pid}</div> : r.container ? <div className="muted">{r.container}</div> : null}</td>
@@ -123,6 +128,7 @@ export function DeploymentDetailPage() {
             <Memory d={d} />
             <TryIt d={d} />
           </div>
+          {d.routing && <Fallback key={d.routing.id} routing={d.routing} reload={reload} />}
           {canManage && <Output w={w} />}
           <section className="panel" aria-labelledby="events-title">
             <h2 id="events-title">Events</h2>
@@ -150,15 +156,21 @@ function Gateway({ d }: { d: Deployment }) {
         <dt>Endpoint</dt><dd className="mono small">{base}{path}</dd>
         {d.routing && (
           <>
-            <dt>Routing</dt>
+            <dt>Cloud fallback</dt>
             <dd>
-              <span className={`chip chip-tone-${ROUTE_KIND_TONE[d.routing.kind]}`}>{ROUTE_KIND_LABEL[d.routing.kind]}</span>{" "}
-              {tiers(d.routing).map((tier, i) => (
-                <span key={i} className="small">{i === 0 ? "" : " → then "}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
-              ))}
-              <div className="muted small">{spillRules(d.routing)} <Link to={`/models/routes/${d.routing.id}`}>Routing and cloud spill</Link></div>
-              {d.also_in && d.also_in.length > 0 && <div className="muted small">Also a target of: {d.also_in.map((n) => <code key={n}>{n}</code>)}</div>}
+              {tiers(d.routing).length > 1 ? (
+                <span className="small">{tiers(d.routing).slice(1).map((tier, i) => (
+                  <span key={i}>{i === 0 ? "then " : " → then "}<span className="mono">{tier.map(targetName).join(" + ")}</span></span>
+                ))}</span>
+              ) : <span className="muted small">none</span>}{" "}
+              <a className="small" href={`#${FALLBACK_ANCHOR}`}>{d.routing.kind === "local" ? "Add one" : "Change"}</a>
             </dd>
+          </>
+        )}
+        {d.also_in && d.also_in.length > 0 && (
+          <>
+            <dt>Also answers as</dt>
+            <dd><AlsoIn names={d.also_in} /></dd>
           </>
         )}
       </dl>
@@ -196,6 +208,37 @@ function Gateway({ d }: { d: Deployment }) {
         </>
       )}
     </section>
+  );
+}
+
+// The deployment's own route, as its cloud fallback (1.4, #81: it was on the Serving tab of Models). Admins
+// change it here; everyone else sees it.
+function Fallback({ routing, reload }: { routing: RouteInfo; reload: () => void }) {
+  const { user } = useAuth();
+  const admin = user?.role === "admin";
+  const opts = useApi<RouteOptions>(admin ? "/route-options" : null);
+  const { hash } = useLocation();
+  // A link to #cloud-fallback (the Deployments list's mark, the advisor) opens the page at it, once
+  // the section is there.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (hash !== `#${FALLBACK_ANCHOR}` || scrolled.current) return;
+    scrolled.current = true;
+    document.getElementById(FALLBACK_ANCHOR)?.scrollIntoView?.({ block: "start" });
+  }, [hash]);
+  return <RoutingEditor r={routing} admin={admin} opts={admin ? opts.data : null} reload={reload} embedded />;
+}
+
+// Other names an admin made that this deployment answers under: links to them where they live.
+function AlsoIn({ names }: { names: string[] }) {
+  const { data } = useApi<RoutesResponse>("/routes");
+  return (
+    <span className="also-in">
+      {names.map((n) => {
+        const r = data?.routes.find((x) => x.served_name === n);
+        return r ? <Link key={n} className="mono small" to={routeHome(r)}>{n}</Link> : <code key={n}>{n}</code>;
+      })}
+    </span>
   );
 }
 
@@ -250,8 +293,9 @@ function TryIt({ d }: { d: Deployment }) {
       <p className="muted small">One small request straight to a ready replica (with its internal key), to check that replica{api_ === "openai-audio" ? ": an 11-second public-domain clip (JFK, 1961) to transcribe"
         : api_ === "openai-speech" ? ": a short sentence to speak, answered with the length of the audio (try it in the Playground to hear it)"
         : api_ === "openai-images" ? ": one small 256x256 image, answered with its size (try it in the Playground to see it)"
-        : api_ === "openai-videos" ? ": its video API is asked for its jobs, since a video takes minutes (make one in the Playground)" : ""}.</p>
-      {api_ !== "openai-audio" && api_ !== "openai-videos" && (
+        : api_ === "openai-videos" ? ": its video API is asked for its jobs, since a video takes minutes (make one in the Playground)"
+        : api_?.startsWith("vision-") ? `: a small test image (two coloured squares${api_ === "vision-segment" ? ", with a box around the red one" : ""}), answered with a summary (try your own pictures in the Playground)` : ""}.</p>
+      {api_ !== "openai-audio" && api_ !== "openai-videos" && !api_?.startsWith("vision-") && (
         <div className="field"><label htmlFor="try-input">{api_ === "rerank" ? "Query" : "Input"}</label>
           <input id="try-input" value={input} onChange={(e) => setInput(e.target.value)} placeholder={placeholder} maxLength={500} /></div>
       )}

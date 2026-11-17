@@ -13,25 +13,27 @@
 **[使用指南](docs/guide/zh-TW/README.md)** · **[English](README.md)** · **[發展藍圖](ROADMAP.zh-TW.md)** ·
 **[變更紀錄](CHANGELOG.md)**（英文）
 
-![Models 頁面：一台 CPU 機器上的四個部署（對話、看圖對話、圖片生成、文字轉語音），都是 healthy，可以在 /v1 呼叫](docs/images/console-models.png)
+![Serving 頁面：一台 CPU 機器上的四個部署，依種類分組（對話、多模態對話、文字轉語音、圖片），都已就緒，可以在各自的 /v1 路徑呼叫](docs/images/console-serving.png)
 
 ## ✨ 主要功能
 
-- **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本、服務與任務；AMD
-  顯示卡使用 ROCm 或 Vulkan 版本。
+- **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本；AMD
+  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和大小，可刪除那台機器上沒有部署在用的模型。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。連不到 Hugging Face、GitHub 或映像檔 registry 的機器會經由伺服器取得檔案和有釘選的引擎映像檔，伺服器只轉送、不存檔；管理員也可以把映像檔上傳到機器。
 - **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。
-- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量，副本之間會自動容錯移轉。
+- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
-- **任何 HTTP 服務都能用同一套金鑰。** 工作負載的 API 放在 `/x/<name>/…`，有金鑰、限制與用量；現成的範本一步就能啟動物件偵測、影像分割與深度估計的 API。
+- **視覺模型（1.4）。** 物件偵測、影像分割與深度估計在 `/v1/vision/…`，像其他模型一樣部署。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。
-- **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。
+- **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
-## 1.3 的新功能
+## 1.4 的新功能
 
-1.3 加入對話中的圖片、音訊與影片、文字轉語音、圖片與影片生成、`/x/` 的工作負載與視覺範本，伺服器與 agent 映像檔也發布到 Docker
-Hub。1.3.1 可以直接修改部署；1.3.2 與 1.3.3 是修正版。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
+Catalog、Engines、Sources；用量與費用有折線圖；視覺模型（物件偵測、影像分割、深度估計）像其他模型一樣部署。**Download to…**
+可以在部署前先把模型和引擎下載到機器上；連不上網際網路的機器會經由伺服器取得，管理員也能上傳映像檔給它。應用程式（Apps）離開了主控台，它們的
+API 已標為淘汰，1.5 移除。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
 
 ## 🚀 安裝
 
@@ -44,7 +46,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -86,7 +88,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
@@ -98,7 +100,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 
 1. 開啟 `https://192.168.1.20:7860/setup`，輸入設定權杖，建立擁有者。接著開啟 **Trust this server**，在你的裝置上安裝 CA。
 2. **Machines → Add a machine**，在機器上執行那行指令。幾秒內它就會出現。
-3. **Models → Catalog and recipes → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
+3. **Models → Add a model**，挑一個推薦的模型（只有 CPU 的話：*Qwen3 1.7B (GGUF, for the CPU)*），再用 **Deploy it** 部署，名稱取為 `qwen`。
 4. **API keys → New key**。在要呼叫模型的電腦上取得 CA 檔案和 SDK：
 
    ```bash
@@ -145,7 +147,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | 頁面 | 內容 |
 |---|---|
 | [快速入門](docs/guide/zh-TW/quick-start.md) | 從零開始，大約十分鐘完成第一次 `/v1` 呼叫 |
-| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、工作負載、模型、部署與閘道、金鑰、角色 |
+| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、模型、引擎與估算、部署與閘道、金鑰、角色 |
 | [操作指南](docs/guide/zh-TW/how-to.md) | AMD 與純 CPU 機器、用 Docker 跑伺服器與 agent、共用 GPU、自己的憑證、升級、備份 |
 | [雲端供應商](docs/guide/zh-TW/cloud-providers.md) | 把 OpenAI、Anthropic、Gemini、Azure、OpenRouter 或你自己的伺服器放到 `/v1` 後面；請求何時溢出；哪些金鑰可以使用雲端 |
 | [疑難排解](docs/guide/zh-TW/troubleshooting.md) | 在真實機器上遇過的問題與解法 |
@@ -197,6 +199,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | Z-Image-Turbo GGUF | stable-diffusion.cpp（`sd-cpp`） | CPU（行程）；AMD Strix Halo（Vulkan）；NVIDIA A100（CUDA） |
 | **影片生成** | | |
 | Wan2.1-T2V-1.3B | vLLM-Omni（`vllm-omni-video`） | NVIDIA A100 |
+| **視覺（1.4）** | | |
+| RT-DETRv2 R18 與 R50、SAM 2.1 Hiera tiny、Depth Anything V2 Small | Forgeyard 的視覺伺服器（`vision`） | CPU（以行程執行，1.4 映像檔發布之前） |
 | **雲端** | | |
 | Google `gemini-2.5-flash` | 它的 OpenAI 相容端點（provider） | — |
 

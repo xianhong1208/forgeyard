@@ -21,6 +21,7 @@ export function ModelDeployPage() {
   const { data: machines } = useApi<MachinesResponse>("/machines");
   // ?model=…&recipe=…&device=… from "Deploy it" after adding a model (its suggested recipe and device).
   const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "", recipe: search.get("recipe") ?? "",
+    machine: search.get("machine") ?? "",
     device: search.get("device") === "cpu" ? "cpu" : "gpu" }));
   const [est, setEst] = useState<EstimateResponse | null>(null);
   const [estError, setEstError] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export function ModelDeployPage() {
   }, [bodyKey, recipe, hintKey]);
 
   if (user && user.role === "user") {
-    return (<><PageHeader index="03 · Models" title="Deploy a model" /><Notice>Only admins and operators deploy models: a deployment runs code on a machine.</Notice></>);
+    return (<><PageHeader index="02 · Serving" title="Deploy a model" /><Notice>Only admins and operators deploy models: a deployment runs code on a machine.</Notice></>);
   }
 
   const set = <K extends keyof DeployForm>(k: K, v: DeployForm[K]) => setF((cur) => ({ ...cur, [k]: v }));
@@ -71,7 +72,7 @@ export function ModelDeployPage() {
     setError(null);
     try {
       const r = await api<{ deployment: { id: number } }>("/deployments", { method: "POST", body });
-      navigate(`/models/deployments/${r.deployment.id}`);
+      navigate(`/serving/${r.deployment.id}`);
     } catch (err) {
       const machines = err instanceof ApiError ? (err.detail.machines as MachineVerdict[] | undefined) : undefined;
       setError({ text: errorText(err), machines });
@@ -88,13 +89,13 @@ export function ModelDeployPage() {
 
   return (
     <>
-      <p className="crumb"><Link to="/models">← Models</Link></p>
-      <PageHeader index="03 · Models" title="Deploy a model"
-        lead="Pick a model and a recipe; the estimate and where it would go update as you change the parameters. Nothing is downloaded until it is placed." />
+      <p className="crumb"><Link to="/serving">← Serving</Link></p>
+      <PageHeader index="02 · Serving" title="Deploy a model"
+        lead="Pick a model and an engine; the estimate and where it would go update as you change the parameters. Nothing is downloaded until it is placed." />
       {cat && cat.models.length === 0 && (
         <Notice>
           The catalog is empty, so there is nothing to deploy yet.{" "}
-          {cat.can_manage ? <Link to="/models?tab=catalog">Add a model to the catalog</Link> : "An admin adds models to the catalog."}
+          {cat.can_manage ? <Link to="/models">Add a model to the catalog</Link> : "An admin adds models to the catalog."}
         </Notice>
       )}
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label="Deploy a model">
@@ -111,11 +112,11 @@ export function ModelDeployPage() {
                 {model && <p className="field-hint mono">{model.source}{model.file ? ` · ${model.file}` : ""} · {bytes(model.size_bytes)}</p>}
               </div>
               <div className="field">
-                <label htmlFor="d-recipe">Recipe</label>
+                <label htmlFor="d-recipe">Engine</label>
                 <select id="d-recipe" value={view.recipe} onChange={(e) => setF({ ...f, recipe: e.target.value, params: {} })} disabled={!model}>
                   {recipes.map((r) => <option key={r.name} value={r.name}>{r.title} ({r.engine} {r.version})</option>)}
                 </select>
-                {model && recipes.length === 0 && <p className="field-error">No recipe serves {model.format} {TASK_LABEL[model.task]} models.</p>}
+                {model && recipes.length === 0 && <p className="field-error">No engine serves {model.format} {TASK_LABEL[model.task]} models.</p>}
               </div>
             </div>
             <div className="grid-2">
@@ -180,7 +181,7 @@ export function ModelDeployPage() {
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />
                     <p className="field-hint">{cat?.hf_token_set
                       ? "Gated models use the server's token; one here replaces it for this deployment only."
-                      : "Gated models only (or set one for the server under Models → Model sources)."} Sent only to the agent that downloads; never shown again.</p></div>
+                      : "Gated models only (or set one for the server under Models → Sources)."} Sent only to the agent that downloads; never shown again.</p></div>
                 </div>
               </details>
             </section>
@@ -196,7 +197,7 @@ export function ModelDeployPage() {
               <pre className="mono" aria-label="Deployment JSON">{JSON.stringify({ ...body, hf_token: body.hf_token ? "••••" : undefined }, null, 2)}</pre></details>
             <div className="row-gap">
               <button className="btn btn-primary" disabled={busy || !recipe || est?.placement.fits === false}>{busy ? "Deploying…" : "Deploy"}</button>
-              <Link to="/models" className="btn btn-quiet">Cancel</Link>
+              <Link to="/serving" className="btn btn-quiet">Cancel</Link>
             </div>
           </div>
         </div>
@@ -274,7 +275,7 @@ export function ContextHintLine({ hint, value, pinned, onPick }: { hint: Context
 
 export function EstimatePanel({ est, error, pending }: { est: { estimate: Estimate; placement: Placement } | null; error: string | null; pending: boolean }) {
   if (error) return <section className="panel"><h2>Estimate</h2><Notice tone="error">{error}</Notice></section>;
-  if (!est) return <section className="panel"><h2>Estimate</h2><p className="muted small">{pending ? "Estimating…" : "Choose a model and a recipe."}</p></section>;
+  if (!est) return <section className="panel"><h2>Estimate</h2><p className="muted small">{pending ? "Estimating…" : "Choose a model and an engine."}</p></section>;
   const e = est.estimate;
   const total = e.amount || 1;
   return (

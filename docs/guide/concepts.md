@@ -27,16 +27,27 @@ A machine shows **online** while its agent is connected, and **offline** when no
 for 30 seconds (the agent sends a heartbeat every 10). The agent reconnects by itself. An admin can
 **revoke** a machine (its credential stops working at once) or **remove** it.
 
-Stopping or restarting the agent **leaves its workloads running**: a restarted agent finds them and
+Stopping or restarting the agent **leaves its models and apps running**: a restarted agent finds them and
 takes them over. That is why the installed service uses `KillMode=process`.
 
 The agent reads its settings from `/etc/forgeyard/agent.toml`, `FORGEYARD_*` environment variables
 and flags ([all of them](reference.md#agent-settings)).
 
+The **Machines** page shows one tile per machine, with a mark for its kind: **NVIDIA GPU**,
+**AMD GPU**, **AMD APU** (an AMD GPU that shares the system memory, such as the Radeon 8060S) or
+**CPU only**. Its cards are a row of slots filled from the bottom: what Forgeyard reserved, then
+other use (other programs on the card, and apps that declare no memory), then free.
+The tile also says how much memory is free, how many models and apps run there, and their
+names. Above the tiles, a summary counts the machines of each kind and the offline ones: *1 NVIDIA
+machine*, *2 CPU-only machines* (a machine, however many cards it has). Choose a machine for its own page: a **memory map** that splits each card by what holds it
+(named, with what it reserved), what runs there, its GPU access and runtimes, and its agent. Admins
+revoke or remove a machine there.
+
 ## GPU access
 
 By default Forgeyard may use every GPU of a machine. On a machine you share with other people or
-programs, an admin chooses on **Machines** → **Change GPU access** which cards Forgeyard may use. A
+programs, an admin chooses on the machine's page (**Machines** → the machine) → **Change GPU access**
+which cards Forgeyard may use. A
 card outside the list is never given to anything Forgeyard runs.
 
 - A GPU given to an exclusive replica belongs to it alone.
@@ -69,83 +80,95 @@ when sharing would help:
 
 Change it on a deployment with **Edit**: [Change a deployment](how-to.md#change-a-deployment).
 
-## Workloads
+## Apps (deprecated)
 
-A **workload** is something to run on your machines:
+Before 1.4 the console could also run **apps**: programs of your own (a container or a process,
+a service or a one-off task) on your machines, optionally exposed at `/x/<name>` with API keys.
+Forgeyard is about running and managing models, so in 1.4 apps left the console, and **in 1.5 they
+are removed**: their part of the API (`/api/workloads`), the templates and the gateway's `/x/`. Until
+then they keep working through the API only, and say so: every answer carries a `Deprecation` header,
+the server log warns (at most once an hour), and **Setup health** warns while any app exists. Details
+are in the [reference](reference.md#apps-deprecated).
 
-- a **service** runs until you stop it. It is health-checked and restarted when it exits;
-- a **task** runs to the end, with retries and a time limit.
+- To serve a model, deploy it under **Serving**. Object detection, segmentation and depth are
+  [vision models](#vision-models) since 1.4.
+- A model that no built-in engine runs gets a **custom engine** (**Models → Engines → Add a
+  custom engine**): a recipe like the built-in ones, for its container image or program.
 
-Each one has 1 to 16 **replicas**, each on one machine. A workload runs as a **container** (Docker
-or Podman on the machine) or as a **process** (a program started by the agent).
+**Machines** still names an app that holds a card, so a card in use is never shown free. A model
+deployment runs as a workload too (of runtime `model`): that is how models run, and it is not
+deprecated.
 
-Isolation, in short:
+## Models, engines and estimates
 
-- A process runs as an unprivileged account (`forgeyard-run`), never as root, with an empty
-  environment: only what the workload declares, plus its GPU and port variables.
-- A container runs with the engine's defaults plus `no-new-privileges`, never `--privileged`.
-- Limits: containers get `--cpus` and `--memory`; processes get a systemd scope on a systemd host,
-  else rlimits.
+Two pages hold the models. **Serving** is what runs now: the deployments grouped by kind (chat,
+multimodal chat, embeddings, rerank, speech to text, text to speech, images, video, vision), each
+with the path it answers at under `/v1`, and one line per deployment: where it runs (machine and
+cards), its memory and its state. **Deploy a model** is there too, and each deployment has its page
+at `/serving/<id>`. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its
+provider, such as *→ Gemini*; the fallback itself is on the deployment's page.
 
-Only admins and operators create workloads, because whoever can create one can run code on the
-machines. Model deployments are workloads too; most people only deploy models.
-
-## Workloads at /x/
-
-A service workload can be **exposed** behind the gateway: programs then call its own HTTP API at
-`https://<server>:7860/x/<name>/…` with an API key, as they call models at `/v1`. Use it for what is
-not a chat, embedding, speech or image model: object detection, segmentation, depth, Triton or KServe
-models, a FastAPI or BentoML service.
-
-- **Behind the key guard.** An exposed workload runs behind the agent's key guard, like a model
-  replica: the program listens on loopback, the guard holds the published port, and only the gateway
-  gets through. The guard removes the gateway's internal key before the request reaches the program.
-  Every port of the workload is guarded, not only the exposed one.
-- **Keys opt in.** A key's **Workloads** setting says which exposed workloads it may call: *None*
-  (the default, and every key from before 1.3), *Listed workloads* or *Every exposed workload*.
-- **APIs, not web pages.** Answers are sandboxed (`Content-Security-Policy: sandbox`), cookies and
-  CORS headers are removed, and redirects are rewritten under `/x/<name>`. A browser UI (Gradio,
-  Jupyter) does not work at `/x/`. WebSockets and gRPC are not passed on in 1.3, and nothing spills
-  to the cloud.
-- **Counted.** Requests, errors, bytes in and out, busy time and latency go to **Usage** as the
-  model `x:<name>`; the key's requests per minute apply.
-
-Admins and operators expose a workload, when they create it or later on its page. See
-[Expose a workload at /x/](how-to.md#expose-a-workload-at-x).
-
-Three **templates** start the most common vision APIs this way in one step (object detection,
-segmentation, depth), on Forgeyard's own image with permissively licensed models only. See
-[Start a workload from a template](how-to.md#start-a-workload-from-a-template).
-
-## Models, recipes and estimates
+**Models** is the library, what you can deploy, in three tabs: **Catalog** (the default), **Engines**
+and, for admins, **Sources**. Cloud models and providers are on the **Cloud** page (admins). Links
+from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/models/routes/<id>`,
+`/providers`) open the new places.
 
 - The **catalog** lists the models you can deploy. An admin adds one from the **recommended**
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
-- A **recipe** says how to run a kind of model: which engine, which container image (pinned by
-  digest) or release, which parameters, and how much memory it needs. Built in: `vllm` (chat on
+  Each row has **Deploy** and **Download to…**.
+- An **engine** says how to run a kind of model: which program, which container image (pinned by
+  digest) or release, which parameters, and how much memory it needs. The API and the YAML files
+  call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
+  **Engines** tab. Built in: `vllm` (chat on
   NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
+- **Sources** (admins) say where models may come from: the hosts allowed for GGUF URLs, the
+  directories for `local://` models, and the server's Hugging Face token.
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
   part by part, and where it fits, before anything is downloaded.
 - The **model cache** on each machine (`/srv/forgeyard-models` by default, for an agent run as root)
   keeps the downloaded files, checked against their checksums, shared by every replica there.
-  Containers get their model mounted read-only.
+  Containers get their model mounted read-only. The machine's page lists what is in it, with sizes,
+  and removes what no deployment there uses ([Free disk space on a machine](how-to.md#free-disk-space-on-a-machine)).
+  **Download to…** fills it ahead of a deployment, with the engine too
+  ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). A machine
+  that cannot reach Hugging Face or GitHub gets the files **through the server**, which passes them on
+  and stores nothing; the agent checks them as it checks any download. A pinned engine image comes the
+  same way, layer by layer, and an admin can upload any image file to a machine from its page. Whether a
+  model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
-  keeps **one Hugging Face token** (an admin sets it under **Model sources**, stored encrypted) for
+  keeps **one Hugging Face token** (an admin sets it under **Models → Sources**, stored encrypted) for
   inspecting and downloading them; a deployment may bring its own, which wins for it.
 
 ## Deployments and the gateway
 
-A **deployment** runs one model with one recipe, as one or more replicas. Forgeyard:
+A **deployment** runs one model with one engine (recipe), as one or more replicas. Its replicas run as a
+workload of runtime `model`, seen only on the deployment's page (not on **Apps**). Forgeyard:
 
-1. places each replica where it fits: the tightest card that is big enough (whole cards stay free
-   for big models), on machines that already have the model cached when it can, and replicas of
-   one deployment on **different machines** when it can;
-2. refuses a deployment that fits nowhere, and says, machine by machine, why and by how much;
-3. downloads the model on that machine (and pulls the engine's image, if it is not there yet), starts
+1. places each replica where it fits. Among the machines that fit, in this order:
+   - a machine that **could not reach** a source the replica would download from there (the model's
+     host, such as huggingface.co, the engine archive's, such as github.com, or the image registry,
+     such as ghcr.io) in the last hour comes last: it is used only when nothing else fits. A
+     download counts as "could not reach" when the name did not resolve, the connection was refused
+     or timed out, or the network was unreachable; an HTTP error, a refused token or a full disk does
+     not. A machine whose agent can download **through the server** (1.4; its **Internet access for
+     downloads** is **Auto** or **Always through the server**) gets the model, the engine archive and
+     a pinned engine image that way instead, so it is not avoided for them
+     ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server));
+   - replicas of one deployment go on **different machines** when they can;
+   - a machine that already has the **model in its cache** wins, then one that also has the engine
+     (the archive a process engine runs, or the image a container engine runs);
+   - then the tightest card that is big enough (whole cards stay free for big models);
+2. places a replica again on another machine that fits when its download **could not reach its
+   source** where it was (it waits in backoff there): the machine is remembered for an hour as one
+   that cannot reach that host. A deployment pinned to a machine stays there and keeps trying. The
+   replica says why, on its deployment's page: *cpu-01 could not reach huggingface.co; placed on
+   cpu-02 instead*;
+3. refuses a deployment that fits nowhere, and says, machine by machine, why and by how much;
+4. downloads the model on that machine (and pulls the engine's image, if it is not there yet), starts
    the engine and waits until it is healthy. The deployment's page shows how far the download and the
    pull have got; deleting the deployment stops both at once.
 
@@ -159,10 +182,16 @@ The gateway sends each request to the ready replica with the fewest requests in 
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
-The **Playground** tries a model through the same gateway, as you, without an API key: chat (with
-streaming, and images for models that read them), embeddings, rerank and speech to text. Its **Vision**
-tab sends a picture to an exposed vision workload (detection, segmentation, depth) the same way. Its requests count as `console` in Usage, and its
-cloud setting is **Allowed** for admins and, for everyone else, the most they may give their own keys.
+The **Playground** tries a model through the same gateway, as you, without an API key. One **Model**
+picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,
+Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video, Vision), and picking
+one opens its panel: chat (with streaming, and images for models that read them), embeddings, rerank,
+speech to text, **Speak**, **Image**, **Video**, or the vision panel (a picture in; boxes, a mask or a
+depth map out). The address keeps the model (`/playground?model=<name>`); 1.3's Vision tab address
+(`/playground?tab=vision`) opens the first ready vision model, or the picker when there is none. With no
+model ready, the page says so and points to **Models → Catalog** to deploy one. Its requests count as
+`console` in Usage, and its cloud setting is **Allowed** for admins and, for everyone else, the most they
+may give their own keys.
 
 ## Images, audio and video in chat
 
@@ -256,10 +285,38 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - Usage counts **one request per video**, its **length** and the **busy time** (GPU time).
 - Videos stay on your own deployments; they never go to a cloud provider.
 
+## Vision models
+
+Vision models (1.4) look at a picture: **object detection** (boxes, labels and scores: RT-DETR, D-FINE,
+DETR…), **segmentation** (the mask of what a point or a box shows: SAM 2 and 2.1) and **depth
+estimation** (how near every pixel is: Depth Anything, DPT…). They are model kinds like the others: added
+to the catalog from Hugging Face (three are recommended), deployed and listed under
+**Serving → Vision**, tried in the **Playground** (under *Vision* in its model picker), called with an
+API key.
+
+- **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
+  PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,
+  one card shared by memory, or the CPU build on any machine (an AMD machine runs it on its CPU: there
+  is no ROCm build yet). The model comes from the machine's model cache, like every other model.
+- **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
+  is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
+  model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large
+  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added.
+- **Their own API:** `/v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth`, one image per
+  request (multipart, or base64 in JSON) and a JSON answer; masks and depth maps are PNGs in base64.
+  The OpenAI SDK has no such API: any HTTP client calls it.
+- **One image at a time** per replica; the rest wait their turn. More throughput is more replicas.
+- Usage counts **one image per request**, its kilopixels and the busy time. Pictures stay on your own
+  deployments: they never go to a cloud provider, and nothing keeps them.
+
 ## API keys, limits and usage
 
 - Programs call `/v1` with an **API key** (`fyk_…`). Everyone creates their own on **API keys**. A
   key is shown once; the server keeps only its hash.
+- The list on **API keys** shows the keys that still work. Revoked and expired keys are folded away
+  under one row, **Show N revoked keys**, in *Mine* and in *Everyone's*; **Usage** and the **Audit log**
+  still name them. Its *Limits* column shows only the limits a key has ("3 requests/min",
+  "10k tokens/min"), or *No limits*.
 - A key can be limited to some models, have an expiry, and have **limits**: requests per minute and
   tokens per minute. Over a limit, the gateway answers 429 with `Retry-After`.
 - Admins set **defaults** (for keys without their own limits) and **caps** (the most anyone may
@@ -269,15 +326,28 @@ text-to-video pipelines (Wan2.1-T2V-1.3B, Wan2.2-TI2V-5B).
 - **Usage** counts requests, errors, tokens and latency per day, model, key, person, source and
   local or cloud. Everyone sees their own; admins see everyone's. Its **Cost** tab shows what cloud
   requests cost (see below).
+- The table under the chart lists the top 15 rows by the column it is sorted by (requests; cost on
+  **Cost**; the latest days first when grouped by day). The rest are added up in one last row, *N
+  others*, so the table still adds up to the totals; **Show all N** lists every row. Click a column's
+  heading to sort by it, and again for the other way round. On a phone each row is one line, the
+  name and the number it is sorted by; tap it for the other columns, and choose the order with
+  **Sort by**. A long name is cut short: hover it, or open the row, for the whole name.
+- **Over time**, on both tabs, draws one of those numbers as a line chart: per day (the last 30
+  days), week (13 weeks, from Monday) or month (12 months), in total or one line per key, model,
+  provider or person (admins, with **Everyone**). The five largest get a line each and the rest are
+  added up as *Other*. Hover a point or use the arrow keys to read a period's values; **Show the
+  numbers** lists them as a table. Days are UTC, and the latest period is still going on (dashed).
 
 ## Cloud providers and tiers
 
 - A **provider** is a model API outside Forgeyard (OpenAI, Anthropic, Gemini, Azure OpenAI,
   OpenRouter, or an OpenAI-compatible server of yours). Admins add it with its key, which is stored
   encrypted and never shown again.
-- Each model name at `/v1` is a **route**. A route has **targets** in **tiers**: local deployments
-  and providers' models. A deployment's own route starts with one tier, the deployment. An admin
-  can add a cloud model as a second tier, or make a route that is only a cloud model.
+- Each model name at `/v1` is a **route** (in the API). A route has **targets** in **tiers**: local
+  deployments and providers' models. A deployment's own route starts with one tier, the deployment.
+  An admin can add a cloud model as a later tier: the deployment's **cloud fallback**, on its page.
+  An admin can also make a **cloud model**, a name of its own for a provider's model, on
+  **Cloud → Cloud models**.
 - **Local first.** A request goes to the next tier only before its answer starts, and only when the
   local tier is unavailable, **busy** (every replica at its deployment's *Concurrent requests*), or
   answers 429 or 503. A prompt too long for the local context spills only if the route says so.
@@ -319,8 +389,8 @@ have the details.
 
 | Role | Can |
 |---|---|
-| `admin` | everything: users, machines and their GPU access, the model catalog and recipes, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
-| `operator` | run workloads and deploy models; everything a user can |
+| `admin` | everything: users, machines and their GPU access, the model catalog and engines, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
+| `operator` | run apps and deploy models; everything a user can |
 | `user` | look around, use deployed models in the Playground and with their own API keys, see their own usage |
 
 The **owner** is the first account. It is always an admin and cannot be demoted, disabled or

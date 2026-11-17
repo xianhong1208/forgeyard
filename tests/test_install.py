@@ -25,7 +25,7 @@ from forgeyard.agent.inventory import SIMULATION_ENV
 from forgeyard.config import get_settings
 from forgeyard.install import commands, images, wheel
 from forgeyard.security import tls
-from tests.conftest import OWNER, SETUP_TOKEN, make_client
+from tests.conftest import OWNER, SETUP_TOKEN, fast_heartbeat, make_client
 from tests.tls_helpers import LiveTLS, ca_of, free_port, https
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -83,6 +83,73 @@ print(sorted(m for m in mods if m not in sys.stdlib_module_names and not m.start
                "typing_inspection"}
     assert used <= allowed, used - allowed
     assert {r.split(">=")[0] for r in wheel.REQUIRES} == {"websockets", "h11", "pydantic"}
+
+
+AGENT_ALLOWED = {"forgeyard", "websockets", "h11", "pydantic", "pydantic_core", "annotated_types", "typing_extensions",
+                 "typing_inspection"}
+
+
+def _agent_reachable() -> dict[str, str]:
+    """Every forgeyard module the agent's code can import, also from inside a function (a lazy import runs
+    only when that path is taken: an image relayed through the server, say), followed transitively:
+    {module: "the module:line that imports it"}."""
+    import ast
+    import importlib.util
+
+    def origin(mod: str):
+        try:
+            spec = importlib.util.find_spec(mod)
+        except ModuleNotFoundError:
+            return None
+        return Path(spec.origin) if spec and spec.origin and spec.origin.endswith(".py") else None
+
+    def imports(mod: str) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for node in ast.walk(ast.parse(origin(mod).read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+            for n in names:
+                if n.startswith("forgeyard") and origin(n):
+                    out.setdefault(n, node.lineno)
+        return out
+
+    agent_dir = ROOT / "forgeyard" / "agent"
+    start = [".".join(p.relative_to(ROOT).with_suffix("").parts).removesuffix(".__init__")
+             for p in sorted(agent_dir.rglob("*.py"))]
+    via = {m: "" for m in start}
+    todo = list(start)
+    while todo:
+        mod = todo.pop()
+        for n, line in imports(mod).items():
+            if n not in via:
+                via[n] = f"{mod}:{line}"
+                todo.append(n)
+    return via
+
+
+def test_fy_inst_014_every_module_the_agent_can_reach_needs_only_the_wheels_requirements():
+    """FY-INST-014: not only the agent's top-level imports (FY-INST-002) but every forgeyard module its code can
+    import, inside functions too, transitively, uses no third-party package beyond the wheel's requirements.
+    Image relay (1.4) imported the server's `models.reach` lazily, which needs SQLAlchemy: the agent image
+    failed each replica that needed an image through the server with "No module named 'sqlalchemy'"."""
+    via = _agent_reachable()
+    code = f"""
+import importlib, sys
+bad = {{}}
+for mod in {sorted(via)!r}:
+    before = set(sys.modules)
+    importlib.import_module(mod)
+    for m in {{x.split('.')[0] for x in set(sys.modules) - before}}:
+        if m not in sys.stdlib_module_names and not m.startswith('_') and m not in {sorted(AGENT_ALLOWED)!r}:
+            bad.setdefault(m, mod)
+print(repr(bad))
+"""
+    out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=True)
+    bad = eval(out.stdout.strip())  # a dict literal printed by the child
+    assert not bad, {pkg: f"{mod} (reached from {via[mod]})" for pkg, mod in bad.items()}
 
 
 # ------------------------------------------------------------------ the endpoints
@@ -217,7 +284,7 @@ def _python_313() -> bool:
 @pytest.fixture()
 def live(monkeypatch, tmp_path):
     monkeypatch.setenv(SIMULATION_ENV, "1")
-    monkeypatch.setenv("AGENT_HEARTBEAT_SECONDS", "1")
+    fast_heartbeat(monkeypatch)
     port = free_port()
     monkeypatch.setenv("HOST", "127.0.0.1")
     monkeypatch.setenv("PORT", str(port))

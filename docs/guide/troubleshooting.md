@@ -128,9 +128,14 @@ followed by Docker's error (`lookup ghcr.io … no such host`, a timeout, `pull 
 machine cannot reach the registry. When the pull got under way first, the message also says where it
 stopped: `at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`.
 
-**Do:** carry the image over as a file and load it: [Offline machines](how-to.md#offline-machines).
-The recipe's page lists the commands for each of its images. The agent tries again by itself; the
-next start uses the loaded image. If the machine should reach the registry, check its DNS and proxy
+**Do:** with a 1.4 agent, let the server fetch it: set the machine's **Internet access for downloads**
+to **Auto** or **Always through the server**
+([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server)),
+or upload the image file from the machine's page
+([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)). Or carry the
+image over as a file and load it: [Offline machines](how-to.md#offline-machines). The recipe's page
+lists the commands for each of its images. The agent tries again by itself; the next start uses the
+loaded image. If the machine should reach the registry, check its DNS and proxy
 first (`docker pull` of the image there must work).
 
 When the message instead says `… is loaded but Forgeyard has no recorded ids for this image`, the
@@ -207,6 +212,72 @@ network reaches it. At 4 MiB/s, a 16 GB model takes over an hour.
   [Move a model cache](how-to.md#move-a-model-cache));
 - or put the files in a directory on the machine and add them as a `local://` model.
 
+## A machine cannot reach Hugging Face
+
+**You see:** a replica on that machine waits in **backoff** with *Qwen3-1.7B-Q4_K_M.gguf: download
+failed: cannot resolve huggingface.co: …* (or *github.com* for a llama.cpp engine archive, or an
+image that *could not be pulled*), then its deployment's page says *cpu-01 could not reach
+huggingface.co; placed on cpu-02 instead*.
+
+**Why:** the machine is set to **Direct only**, or its agent is older than 1.4 (it cannot download
+through the server). Set to **Auto** (the default) or **Always through the server**, a 1.4 agent gets
+the model and the engine archive through the server instead, and none of this happens (see below).
+
+The agent tries a download five times, a minute in all; when it still could not reach the
+source (the name did not resolve, the connection was refused or timed out, the network was
+unreachable), the server remembers for an hour that this machine cannot reach that host. A replica
+of a deployment that is not pinned to the machine is then placed again on another machine that
+fits, and new replicas that would download from that host go elsewhere first. A machine that
+already has the model (and the engine) needs no download, so it is still used for it.
+
+The replica stays on the machine, and keeps trying, when:
+
+- the deployment is pinned to it: *the deployment is pinned to cpu-01, so the replica stays there
+  and tries again*;
+- no other machine can take it: *no other machine can take it, so it tries again on cpu-01*.
+
+An HTTP error (a missing file, 401 for a gated model), a checksum mismatch or a full disk is not
+counted: another machine would get the same answer.
+
+**Do:**
+
+- let the server download it for the machine: on the machine's page set **Internet access for
+  downloads** to **Auto** or **Always through the server**, and update its agent to 1.4 if the page
+  says so ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server)).
+  The replica's progress then says *via the server*. A pinned engine image comes the same way; an
+  image named by a tag only does not (upload it from the machine's page);
+- let the machine reach the host (DNS, a firewall rule, a proxy route); Forgeyard tries it again
+  for new placements an hour after the last failure, or at once after a server restart;
+- or bring the files to it: copy a model cache from a machine that has the model
+  ([Move a model cache](how-to.md#move-a-model-cache)), `docker load` an engine image (see
+  [A replica fails: the image is not on this machine](#a-replica-fails-the-image-is-not-on-this-machine)),
+  or add the model from a local directory as a `local://` model;
+- or use a mirror the machine can reach (`HF_ENDPOINT`, see
+  [Hugging Face downloads are slow](#hugging-face-downloads-are-slow)).
+
+**Through the server, it still fails:**
+
+- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*, or
+  *… is not an image Forgeyard pinned by digest*: a custom recipe's image named by a tag only. Upload it
+  ([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)).
+- *… has no build for amd-strix's architecture*: the image has no build for that machine's platform
+  (for example arm64); pick a recipe or variant that has one.
+- *the image through the server: … SHA-256 mismatch* (a layer), *the manifest the server sent … is
+  not one of the image's recorded digests*, or *… does not match the recorded ids: not running it*: what
+  arrived is not the pinned image. Nothing was loaded; the server's log says which registry answered.
+
+- *download failed: through the server: the server could not reach huggingface.co: …*: the server
+  cannot reach the source either. Fix the server's network, or use a mirror (`HF_ENDPOINT`).
+- *through the server: huggingface.co refused access (HTTP 401) …*: a gated model; set the server's
+  Hugging Face token under **Models → Sources** (the machine's own token is not used through the
+  server), or give the deployment its own.
+- *through the server: … does not download through the server*: the machine was set to **Direct
+  only** while it downloaded.
+- *SHA-256 mismatch*: the bytes changed on the way (a proxy that rewrites them, a broken disk). The
+  file was deleted; the next try starts it again.
+- The server's log has a line per file it passed on: *Relayed <repo>@<revision>/<file> to amd-strix:
+  812.3 MiB in 41.0 s (19.8 MiB/s), finished.*, or why it ended.
+
 ## vLLM does not start on a shared card
 
 **You see:** a vLLM replica fails soon after it starts, and its output ends with something like
@@ -263,9 +334,9 @@ until room appears (the API's `"wait": true`).
 
 ## A replica stays pending
 
-**You see:** a deployment or workload was placed on a machine (*Replica 0 placed on …*), the machine
+**You see:** a deployment or app was placed on a machine (*Replica 0 placed on …*), the machine
 is online, and the replica stays **pending**: nothing is downloaded or started. After 2 minutes the
-deployment and workload pages say *Replica #0 was never picked up*, with the machine, its agent's
+deployment and app pages say *Replica #0 was never picked up*, with the machine, its agent's
 version and what to do, for example *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes;
 update the agent (the server is 1.3.1)*. An agent gets its work list within a second of a placement
 (or of connecting) and answers every list with the state of each replica, so two minutes of silence
@@ -353,12 +424,12 @@ reached or refused its internal key: usually its agent restarted; it recovers wi
 A model that goes to a cloud provider adds these. The answer's `X-Forgeyard-Target` says whether a
 provider answered.
 
-- `404 model_not_found` for a model listed on **Models**: it is cloud-only, and the key's cloud
+- `404 model_not_found` for a model listed on **Cloud models**: it is cloud-only, and the key's cloud
   setting is not **Allowed**.
 - `400 cloud_only_model`: the request had `X-Forgeyard-Local-Only: 1` (or the route is
   **Local only**), but the model is served only by a cloud provider.
 - `502 provider_auth_failed`: the provider refused Forgeyard's key for it; an admin fixes it on
-  **Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
+  **Cloud → Providers**. `502 provider_blocked`: the egress rules refused the provider's address.
   `502 provider_redirect`: the provider answered with a redirect, which is never followed; check its
   base URL.
 - `429 provider_rate_limited`: every target of the cloud tier was rate limited; wait for
@@ -370,13 +441,15 @@ More in [Cloud providers](cloud-providers.md#troubleshooting).
 
 ## Errors from /x/
 
-- **403 `workloads_not_allowed`:** the key's **Workloads at /x/** is *None*, the default. Change it
+`/x/` is deprecated in 1.4 and removed in 1.5 ([Apps (deprecated)](reference.md#apps-deprecated)).
+
+- **403 `workloads_not_allowed`:** the key's **Apps at /x/** is *None*, the default. Change it
   on **API keys**.
-- **404 `workload_not_found`:** the name is wrong, the workload is not exposed (its page, **Gateway**),
-  or the key lists other workloads.
+- **404 `workload_not_found`:** the name is wrong, the app is not exposed (its page, **Gateway**),
+  or the key lists other apps.
 - **503 `no_ready_replica` and "runs without the agent's key guard":** the replica's agent is older
-  than 1.3, or the workload was exposed while running and has not restarted behind the guard yet.
-  Update the agent, or stop and start the workload.
+  than 1.3, or the app was exposed while running and has not restarted behind the guard yet.
+  Update the agent, or stop and start the app.
 - **The replica stops with "listens beyond loopback":** behind the key guard a process must listen on
   `127.0.0.1`. Use `${BIND_ADDRESS}` in its arguments instead of `0.0.0.0`.
 - **A page, its links or its redirects are wrong:** the prefix is stripped, so the service sees `/`.
@@ -439,7 +512,7 @@ when:
 - the deployment or the route was **deleted**, or its name is not what you think: the name programs
   use is the deployment's name (or the route's), shown as *Model name* on its page.
 
-**Do:** open **Models** and check the model's state; **Start** a stopped deployment. On **API keys**,
+**Do:** open **Serving** and check the model's state; **Start** a stopped deployment. On **API keys**,
 check the key's models and its *Cloud providers* setting.
 
 ## A model is listed but answers 503
@@ -455,11 +528,11 @@ offline. The message gives each replica's state, for example
 **Do:** open the deployment's page. Wait while it downloads or starts (the page shows the progress).
 If a replica keeps failing, its output on that page says why; a machine that is offline is in
 [An agent shows offline](#an-agent-shows-offline). To have such requests go to a cloud provider
-meanwhile, add a cloud tier to the model's route ([Cloud providers](cloud-providers.md#route-a-model-to-the-cloud)).
+meanwhile, give the deployment a cloud fallback on its page ([Cloud providers](cloud-providers.md#give-a-deployment-a-cloud-fallback)).
 
 ## A request does not spill to the cloud
 
-**You see:** a model's route has a cloud tier, but requests still fail (503, 429) or wait while the
+**You see:** a deployment has a cloud fallback, but requests still fail (503, 429) or wait while the
 local replicas are busy or down. The answers carry no `X-Forgeyard-Spilled`.
 
 **Why**, in the order to check:
@@ -612,7 +685,7 @@ price. Under a budget, a model without a price is refused (`402 budget_unpriced`
 
 ## Agent in a container without systemd
 
-**You see:** process workloads fail to start, and the agent's log mentions `systemd-run` or
+**You see:** processes (apps or engines) fail to start, and the agent's log mentions `systemd-run` or
 `Failed to connect to bus`.
 
 **Why:** with `limits = "auto"` the agent uses a systemd scope when it runs as root and finds
@@ -627,7 +700,7 @@ limits = "rlimit"
 ```
 
 or `--limits rlimit`, or `FORGEYARD_LIMITS=rlimit` (the agent's Docker image sets this already).
-Process workloads then get resource limits per process, and their CPU is counted, not capped.
+Processes then get resource limits, and their CPU is counted, not capped.
 
 ## The server refuses a setting, or warns about one
 
@@ -642,7 +715,7 @@ that name. Each line says why and what to do:
 - *is not a setting… Did you mean …?*: a typo, or a setting from another version. Fix the name in
   `.env` or the environment.
 - *is ignored*: another setting makes it useless, e.g. `TLS_CA_FILE` without your own certificate,
-  or `MODEL_URL_HOSTS` after an admin saved **Model sources** (the saved value wins: change it in
+  or `MODEL_URL_HOSTS` after an admin saved **Models → Sources** (the saved value wins: change it in
   the web UI).
 - *ADMIN_PASSWORD is still set*: it is only read on the first start. Remove it from `.env`.
 

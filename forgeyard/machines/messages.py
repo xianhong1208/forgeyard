@@ -4,11 +4,13 @@ model name must never keep a machine from connecting."""
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-from forgeyard.machines.protocol import MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
+from forgeyard.machines.protocol import DOWNLOAD_STATES, MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
+from forgeyard.models.cache_keys import parse
 
 
 def _short(limit: int):
@@ -69,8 +71,9 @@ def _count(value: Any) -> int:
 
 
 def _download(value: Any) -> Optional[dict]:
-    """{"phase": "model"|"engine"|"image", "done": bytes, "total": bytes, "file"?: name, and for an image
-    "layers", "layers_done", "unpacking"}: small, or dropped. `done` never exceeds a known total."""
+    """{"phase": "model"|"engine"|"image", "done": bytes, "total": bytes, "file"?: name, "via"?: "direct" |
+    "server", and for an image "layers", "layers_done", "unpacking"}: small, or dropped. `done` never exceeds a
+    known total."""
     if not isinstance(value, dict):
         return None
     done, total = _bytes(value.get("done")) or 0, _bytes(value.get("total")) or 0
@@ -85,16 +88,92 @@ def _download(value: Any) -> Optional[dict]:
         out["file"] = str(value["file"])[:200]
     if value.get("waiting"):
         out["waiting"] = str(value["waiting"])[:200]
+    # 1.4 ("relay"): how the bytes come: "server" (through the server's relay) or "direct".
+    if value.get("via") in ("direct", "server"):
+        out["via"] = value["via"]
     return out
+
+
+_ENGINE_ID = re.compile(r"^[0-9a-f]{16}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _model_cache(value: Any) -> Optional[dict]:
     if not isinstance(value, dict):
         return None
     cached = [str(k)[:400] for k in (value.get("cached") or []) if isinstance(k, str)][:512]
-    return {"ok": bool(value.get("ok")), "free_bytes": _bytes(value.get("free_bytes")),
-            "total_bytes": _bytes(value.get("total_bytes")), "cached": cached,
-            "reason": (str(value["reason"])[:300] if value.get("reason") else None)}
+    out = {"ok": bool(value.get("ok")), "free_bytes": _bytes(value.get("free_bytes")),
+           "total_bytes": _bytes(value.get("total_bytes")), "cached": cached,
+           "reason": (str(value["reason"])[:300] if value.get("reason") else None)}
+    # 1.4: the engine archives unpacked there, by the first 16 hex digits of their SHA-256.
+    engines = [e for e in (value.get("engines") or []) if isinstance(e, str) and _ENGINE_ID.match(e)][:256]
+    if engines:
+        out["engines"] = engines
+    # 1.4 (cache_admin): each model with its size, the engines, what the cache takes, partial downloads.
+    if isinstance(value.get("models"), list):
+        out["models"] = [e for e in (_cache_model(v) for v in value["models"][:256]) if e is not None]
+        detail = value.get("engines_detail") if isinstance(value.get("engines_detail"), list) else []
+        out["engines_detail"] = [e for e in (_cache_engine(v) for v in detail[:256]) if e is not None]
+        for k in ("used_bytes", "partial_bytes"):
+            out[k] = _bytes(value.get(k))
+        out["partial_files"] = _count(value.get("partial_files"))
+        if value.get("truncated") is True:
+            out["truncated"] = True
+    return out
+
+
+def _text(value: Any, limit: int) -> Optional[str]:
+    return str(value)[:limit] if isinstance(value, str) and value else None
+
+
+def _when(value: Any) -> Optional[float]:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 <= n < 1e11 else None
+
+
+def _cache_model(value: Any) -> Optional[dict]:
+    """One model in an agent's cache: dropped (never cut short) when its key is not a cache key, so a
+    key the server keeps is always one the agent can find again."""
+    if not isinstance(value, dict):
+        return None
+    key = value.get("key")
+    target = parse(key)
+    kind = "hf" if target is not None and target["kind"] == "hf" else "url"
+    if target is None or target["kind"] == "engine" or target.get("file") or value.get("kind") != kind:
+        return None
+    out = {"key": key, "kind": kind, "bytes": _bytes(value.get("bytes")) or 0, "files": _count(value.get("files")),
+           "completed_at": _when(value.get("completed_at"))}
+    if kind == "hf":
+        out["repo"] = _text(value.get("repo"), 200)
+        out["revision"] = target["revision"]
+        if _count(value.get("missing")):
+            out["missing"] = _count(value.get("missing"))
+        parts = []
+        for p in (value.get("parts") or [])[:64] if isinstance(value.get("parts"), list) else []:
+            t = parse(p.get("key")) if isinstance(p, dict) else None
+            if t is None or not t.get("file") or not p["key"].startswith(key + "/"):
+                continue
+            parts.append({"key": p["key"], "file": t["file"], "bytes": _bytes(p.get("bytes")) or 0})
+        if parts:
+            out["parts"] = parts
+    else:
+        out["file"] = _text(value.get("file"), 200)
+        # 1.4 (D8): the SHA-256 the agent computed after it downloaded a URL model; the server records the
+        # first one in the catalog entry, and every later download must match it.
+        sha = value.get("sha256")
+        if isinstance(sha, str) and _SHA256.match(sha):
+            out["sha256"] = sha
+    return out
+
+
+def _cache_engine(value: Any) -> Optional[dict]:
+    t = parse(value.get("key")) if isinstance(value, dict) else None
+    if t is None or t["kind"] != "engine":
+        return None
+    return {"key": value["key"], "id": t["id"], "name": _text(value.get("name"), 64), "bytes": _bytes(value.get("bytes")) or 0}
 
 
 Bytes = Annotated[Optional[int], BeforeValidator(_bytes)]
@@ -212,6 +291,15 @@ class ReplicaStatusIn(_Msg):
     download: Annotated[Optional[dict], BeforeValidator(_download)] = None
 
 
+class DownloadStatusIn(_Msg):
+    """1.4 (prefetch): one download asked for in `desired.downloads`, as the agent has it."""
+
+    id: Annotated[str, _short(32)]
+    state: Literal[DOWNLOAD_STATES]  # type: ignore[valid-type]
+    reason: Annotated[Optional[str], _short(400)] = None
+    download: Annotated[Optional[dict], BeforeValidator(_download)] = None
+
+
 class StatusIn(_Msg):
     v: int
     type: Literal["status"]
@@ -220,6 +308,8 @@ class StatusIn(_Msg):
     replicas: list[ReplicaStatusIn] = Field(default_factory=list, max_length=512)
     # M3: the agent's model cache, when it changed.
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
+    # 1.4 (prefetch): the downloads that changed (all of them in a full report).
+    downloads: list[DownloadStatusIn] = Field(default_factory=list, max_length=256)
 
 
 class LogsIn(_Msg):
@@ -231,3 +321,39 @@ class LogsIn(_Msg):
     text: str = Field(default="", max_length=MAX_LOG_CHARS)
     truncated: bool = False
     reason: Annotated[Optional[str], _short(400)] = None
+
+
+class CacheRemovedIn(_Msg):
+    """1.4 (cache_admin): the answer to cache_remove / cache_prune."""
+
+    v: int
+    type: Literal["cache_removed"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    code: Annotated[Optional[str], _short(32)] = None
+    reason: Annotated[Optional[str], _short(400)] = None
+    freed_bytes: Bytes = None
+    in_use: list[Annotated[str, _short(64)]] = Field(default_factory=list, max_length=32)
+    model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
+
+
+class LoadedImageIn(BaseModel):
+    """One image an uploaded file held, as the agent's engine shows it once loaded (1.4, "image_load")."""
+
+    model_config = ConfigDict(extra="ignore")
+    id: Annotated[str, _short(80)]
+    tags: list[Annotated[str, _short(255)]] = Field(default_factory=list, max_length=16)
+    content: Annotated[Optional[str], _short(80)] = None
+    os: Annotated[Optional[str], _short(32)] = None
+    architecture: Annotated[Optional[str], _short(32)] = None
+
+
+class ImageLoadedIn(_Msg):
+    """1.4 (image_load): the answer to image_load: what the engine loaded from the uploaded file, or why not."""
+
+    v: int
+    type: Literal["image_loaded"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    reason: Annotated[Optional[str], _short(400)] = None
+    images: list[LoadedImageIn] = Field(default_factory=list, max_length=32)

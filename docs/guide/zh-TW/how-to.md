@@ -32,7 +32,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 - **記憶體：**APU 取 VRAM 切割區（在 BIOS 設定）和 GTT 兩者中較大的那個，和 `amd-smi monitor` 顯示的一樣。
 - **識別鍵（key）：**卡有序號時用它的 UUID，否則用 PCI 位址（APU 沒有序號，所以每台機器上的 UUID 都一樣）。用 Forgeyard 1.1.0 或更舊版本加入的機器，識別鍵改變後 GPU 允許清單仍會保留。
 
-在 AMD 上，模型可以用 `vllm` recipe 的 ROCm 映像檔執行，也可以用 `llama-cpp`。行程類工作負載只會在 `ROCR_VISIBLE_DEVICES` 裡拿到自己的卡，而且只有在分配到 GPU 時，才會加入擁有 `/dev/kfd` 和對應 `/dev/dri/renderD*` 的群組。
+在 AMD 上，模型可以用 `vllm` recipe 的 ROCm 映像檔執行，也可以用 `llama-cpp`。行程只會在 `ROCR_VISIBLE_DEVICES` 裡拿到自己的卡，而且只有在分配到 GPU 時，才會加入擁有 `/dev/kfd` 和對應 `/dev/dri/renderD*` 的群組。
 
 `llama-cpp` 會依每張卡選兩個映像檔之一：
 
@@ -43,7 +43,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）和擁有它的群組，不會拿到 `/dev/kfd`。它的記憶體和 ROCm 一樣，用同一個記憶體池檢查：APU 取 carve-out 和 GTT 中較大的那個。部署的事件會寫出它用哪個 variant（`… (vulkan; reserves …)`）。
 
-部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂配方（**Models**、*Recipes*、**Add a custom recipe**）：複製 `llama-cpp`、換個名字，`variants` 底下只留你要的那個。
+部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂引擎（**Models → Engines → Add a custom engine**，*Start from a built-in engine* 選 `llama-cpp`）：複本會換一個名字；`variants` 底下只留你要的那個，再儲存。自訂引擎的卡片上有 **Edit** 和 **Delete**（還有部署在用時會被拒絕）。
 
 **從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
 
@@ -97,7 +97,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 接著：
@@ -129,7 +129,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -140,7 +140,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0 inventory
 ```
 
 ### 純 CPU
@@ -154,26 +154,26 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 ### 為什麼要用這些選項
 
 - **`--network host`**：模型副本在主機的 `127.0.0.1` 上監聽，前面擋著 agent 的金鑰守衛，守衛則監聽副本對外公開的連接埠。只有 agent 和主機共用網路，這兩者才能運作。這也讓 agent 可以在機器自己的位址上公開連接埠。
 - **模型快取在容器內外使用相同路徑**（`-v /srv/forgeyard-models:/srv/forgeyard-models`）：agent 把模型下載到這裡，再請主機的 Docker 啟動引擎容器，並以*主機上的路徑*掛載模型。路徑不同的話，什麼都掛載不到。
-- **`/var/run/docker.sock`**：模型和容器類工作負載是在主機的 Docker 上以容器執行，和 agent 並列，而不是在 agent 裡面。這個 socket 等於完全掌控主機的 Docker，所以 agent 的容器要像 agent 本身一樣被信任。
+- **`/var/run/docker.sock`**：模型和容器類應用程式是在主機的 Docker 上以容器執行，和 agent 並列，而不是在 agent 裡面。這個 socket 等於完全掌控主機的 Docker，所以 agent 的容器要像 agent 本身一樣被信任。
 - **`forgeyard-agent` volume** 保存機器的憑據和釘選的 CA。請保留它：在重新啟動、升級或 `docker rm` 之後執行同一個 `docker run`，就會帶回同一台機器，而且不會再使用加入權杖（紀錄裡會寫明）。沒有它的話，機器就得重新加入。
 - 使用 **`FORGEYARD_*` 變數**而不是旗標：它們和 [agent.toml](reference.md#agent-settings) 裡的設定相同。你也可以掛載一個檔案：`-v /etc/forgeyard/agent.toml:/etc/forgeyard/agent.toml:ro`。
-- agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程類工作負載時切換到無特權帳號 `forgeyard-run`。工作負載絕不會以 root 執行。
-- 容器裡沒有 systemd，所以行程類工作負載用 rlimit 限制資源（映像檔已設定 `FORGEYARD_LIMITS=rlimit`）。行程類工作負載在 agent 的容器裡執行，會隨容器一起停止；模型和容器類工作負載則會繼續在主機上執行。
+- agent 在容器裡以 **root** 執行：它需要 Docker socket，並會在執行行程時切換到無特權帳號 `forgeyard-run`。應用程式和引擎絕不會以 root 執行。
+- 容器裡沒有 systemd，所以行程用 rlimit 限制資源（映像檔已設定 `FORGEYARD_LIMITS=rlimit`）。行程在 agent 的容器裡執行，會隨容器一起停止；模型和容器類應用程式則會繼續在主機上執行。
 
 ### 離線機器，或自己建置映像檔
 
 頁面把這些放在 **Advanced / offline** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.3 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.3.3 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.0 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -187,17 +187,17 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.3.3 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.0 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.3.3`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.4.0`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.3.3`（或像上面那樣用檔案帶過去）。
-2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類工作負載和模型會繼續執行。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0`（或像上面那樣用檔案帶過去）。
+2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類應用程式和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
    ```bash
@@ -206,19 +206,21 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
 
-舊 agent 在容器外啟動的行程類工作負載不會被接手：請先從 UI 停止它們。
+舊 agent 在容器外啟動的行程不會被接手：請先從 UI 停止它們。
 
 ## 離線機器
 
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
 引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
 
-1. **找出映像檔。** 在 **Models → Catalog and recipes**，打開 recipe 上的 **Machine without registry access:
+1.4 起，用 1.4 的 agent 有兩個更簡單的做法：內建 recipe 的映像檔（全部都有釘選）會自動**經由伺服器**一層一層送過去（[經由伺服器把模型送到離線機器](#give-an-offline-machine-models-through-the-server)），任何映像檔也都可以從機器的頁面**上傳**（[把引擎映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）。以下步驟仍然可用，適合較舊的 agent 或不經過伺服器的情況。
+
+1. **找出映像檔。** 在 **Models → Engines**，打開引擎上的 **Machine without registry access:
    load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
    上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
@@ -254,111 +256,68 @@ config），或者當 id 是儲存自己產生的時候，比對它的內容（�
 釘住的映像檔無法檢查：在離線機器上，請在你的自訂 recipe 裡只用 tag 指定它。這項檢查需要這一版或更新的
 agent；舊版 agent 會試著去拉。
 
-## 執行服務或任務
+## 部署物件偵測模型
 
-管理員和操作員可以把自己的程式當成**工作負載**在機器上執行：打開 **Workloads** → **New workload**，填好表單，選 **Create and start**。
+物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**Models**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
 
-1. **What：** **Service**（一直執行到你停止它；結束時會重新啟動）或 **Task**（執行到結束）。**Name**：`a-z`、`0-9` 和 `-`，不能重複。
-2. **Run：** **Container**（一個 **Image**，例如 `python:3.13-slim`，可選填 **Entrypoint**）或 **Process**（基本 `PATH` 上的 **Command** 或絕對路徑，由 agent 以工作負載帳號執行）。**Arguments** 一行一個，不需要 shell 引號。
-3. **Where：** 一台 **Machine**，或 *Any online machine with room*；**GPUs**：*None*、*How many*（再加上 **Vendor**），或在選定的機器上指定 *These cards*；**CPU cores**、**Memory**（例如 `4Gi`）和 **Replicas**（1 到 16 個，每個在一台機器上）。
-4. **Environment：** 它需要的變數。它從空的環境開始；Forgeyard 會加入的變數列在[參考資料](reference.md#workload-environment)。值會加密儲存。
-5. **Ports and health**（服務）：它監聽的每個連接埠都按一次 **Add port**。agent 會從它的範圍挑一個主機連接埠，並把位址顯示在工作負載的頁面上。行程監聽 `$PORT`（參數裡用 `${PORT_<NAME>}`）；容器則填它自己的連接埠，主機連接埠會對應過去。**Health check**：*None*、*HTTP*（一個 **Path**）或 *TCP*。**Restart**：*Always*、*On failure* 或 *Never*。
-6. **Limits and retries**（任務）：**Max duration (s)** 超過時會停止並標為失敗；非零結束時依 **Retries** 重試，**Retry backoff (s)** 每次加倍，最多 5 分鐘。
+1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。
+2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
+3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground**（選單 *Vision* 底下的模型）可以用你自己的照片。
 
-*Spec that will be sent* 會顯示表單產生的 JSON。工作負載的頁面會顯示每個副本、它的機器、GPU 和位址、事件，以及最後幾行輸出。**Stop** 會停止每個副本（先 SIGTERM，10 秒後 SIGKILL）並釋出它的 GPU；**Start** 會重新配置它們；**Delete** 還會刪除它的歷史和輸出。
-
-隔離方式簡述：行程以無特權的工作負載帳號執行，只看得到它自己的卡；容器只拿到它自己的卡，絕不使用 `--privileged`。請見[工作負載](concepts.md#workloads)。
-
-## 在 /x/ 公開工作負載
-
-透過閘道、帶著 API 金鑰呼叫服務自己的 HTTP API。由管理員和操作員設定。
-
-1. **服務監聽 loopback。** 在 agent 的金鑰守門員後面，行程必須監聽 `127.0.0.1`：在它的參數裡用 `${BIND_ADDRESS}` 和 `${PORT}`，它們會變成 `127.0.0.1` 和它的連接埠。容器照常監聽它自己的連接埠（agent 會把它發布在 loopback 上）。監聽其他位址的行程會被停止，所以它永遠不會繞過守門員被連到。
-2. **公開它。** 在 **New workload** 的 **Gateway** 底下勾選 **Expose at** `/x/<name>`；或在執行中工作負載的頁面上，**Gateway** → **Expose** → **Save**：它的副本會在守門員後面重新啟動。**Limits and timeouts**（預設收合）裡有 **Port**（預設：第一個）、**Read timeout (s)**（600）、**Largest request (MiB)**（32）、**Requests at once per replica** 和 **Requests at once per key**（預設不限）。
-3. **讓金鑰可以呼叫。** 在 **API keys** 頁面，金鑰的 **Workloads at /x/**：*Listed workloads*（勾選它）或 *Every exposed workload*。新金鑰是 *None*。
-4. **呼叫它。** 工作負載的頁面會顯示它的位址和一個 `curl` 呼叫。前綴會被拿掉：`/x/detector/v1/detect` 到服務那邊是 `/v1/detect`。
+用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`：
 
 ```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
   -H "Authorization: Bearer $FORGEYARD_API_KEY" \
-  -F image=@street.jpg
+  -F model=rtdetr-v2-r18 -F image=@street.jpg -F threshold=0.5
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/segment \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=sam2.1-hiera-tiny -F image=@street.jpg -F 'box=[40, 40, 320, 240]'
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/depth \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=depth-anything-v2-small -F image=@street.jpg
 ```
 
-會產生連結或轉址的服務，可以讀 `X-Forwarded-Prefix`（`/x/<name>`），或設定它的 root path。例如以行程方式用 `python3 -m uvicorn` 執行的 FastAPI 服務，**Environment** 加上變數 `ROOT_PATH=/x/echo`：
+用 Python（視覺是 Forgeyard 自己的 API：OpenAI SDK 沒有，任何 HTTP 用戶端都可以）：
 
 ```python
-# app.py: a service behind /x/<name>. The gateway strips the prefix, so routes start at /;
-# root_path makes the docs and redirects use the public prefix.
+import base64
 import os
-from fastapi import FastAPI, Request
+import ssl
 
-app = FastAPI(root_path=os.environ.get("ROOT_PATH", ""))
+import httpx
 
-@app.post("/v1/echo")
-async def echo(request: Request):
-    return {"bytes": len(await request.body())}
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+key = os.environ["FORGEYARD_API_KEY"]
+with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=120,
+                  headers={"Authorization": f"Bearer {key}"}) as fy:
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/detect", data={"model": "rtdetr-v2-r18", "threshold": "0.5"}, files={"image": f})
+    for d in r.json()["detections"]:
+        print(d["label"], round(d["score"], 2), d["box"])  # box: [x0, y0, x1, y1] in pixels
+
+    with open("street.jpg", "rb") as f:
+        r = fy.post("/vision/depth", data={"model": "depth-anything-v2-small"}, files={"image": f})
+    with open("depth.png", "wb") as out:
+        out.write(base64.b64decode(r.json()["depth_png"]))  # 16-bit grey, nearer is brighter
 ```
 
-**Arguments** 填：
+回應：`detections`（標籤、分數、方框）、`masks`（每個有分數、面積、方框和一張 1 位元 PNG，最好的在前）或 `depth_png`（附 `min` 和 `max`）；都附圖片的 `width` 和 `height`。它們接受的所有選項見[參考資料](reference.md#vision)。用量每個請求計一張圖片和它的千像素數；金鑰的模型清單和每分鐘請求數照常適用。
 
-```text
--m
-uvicorn
-app:app
---host
-${BIND_ADDRESS}
---port
-${PORT}
-```
+連不到 Docker Hub 的機器，請以伺服器版本的 tag 載入視覺映像檔（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
 
-關掉 **Expose** 會立刻關閉 `/x/<name>`；守門員會一直留在副本前面，直到工作負載重新啟動。哪些東西會通過、哪些會被拿掉，請見[參考資料](reference.md#the-passthrough-x)。
+## 在 Playground 試用視覺
 
-## 從範本開始一個工作負載
+Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在 Playground 唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
 
-**Workloads** → **Start from a template** 提供現成的視覺 API。每個範本都執行 Forgeyard 自己的 vision server 映像檔，並且直接公開在 `/x/<name>`：
-
-| 範本 | 模型（授權） | 呼叫 |
-|---|---|---|
-| **Object detection** | RT-DETRv2 ResNet-18，`PekingU/rtdetr_v2_r18vd`（Apache-2.0） | `POST /x/detector/v1/detect`：框、標籤與分數 |
-| **Segmentation** | SAM 2.1 Hiera tiny，`facebook/sam2.1-hiera-tiny`（Apache-2.0） | `POST /x/segmenter/v1/segment`，給一個點或一個框：遮罩 |
-| **Depth estimation** | Depth Anything V2 Small，`depth-anything/Depth-Anything-V2-Small-hf`（Apache-2.0） | `POST /x/depth/v1/depth`：16 位元的深度 PNG |
-
-1. 選 **On an NVIDIA GPU**（映像檔的 CUDA 版本，以記憶體共用一張卡，3 GiB）或 **On the CPU**（CPU 版本，不用 GPU）。表單會開好並填好：映像檔、任務、連接埠、健康檢查，以及 **Expose at** `/x/<name>`。可以改任何東西，例如名稱或機器，再按 **Create and start**。
-2. 讓 API 金鑰可以呼叫它（**API keys** → 金鑰的 **Workloads at /x/**）。
-3. 以 multipart 檔案欄位 `image` 送出圖片（或 JSON `{"image": "<base64>"}`）：
-
-```bash
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/detector/v1/detect \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F threshold=0.5
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/segmenter/v1/segment \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg -F 'points=[[320, 240]]'
-curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/x/depth/v1/depth \
-  -H "Authorization: Bearer $FORGEYARD_API_KEY" -F image=@street.jpg
-```
-
-只提供寬鬆授權的模型：不用 Ultralytics YOLOv8 或 YOLO11（AGPL-3.0），Depth Anything V2 也只用 Small（Base 和 Large 是 CC-BY-NC-4.0）。模型以固定的 revision 包在映像檔裡，所以映像檔到了機器上之後，範本就不需要網路。連不到 Docker Hub 的機器，請把映像檔複製過去（CUDA 版本需要 NVIDIA 驅動 580 或更新；沒有可用的 GPU 時會改用 CPU）：
-
-```bash
-docker pull docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda
-docker save docker.io/tonyhuang1101/forgeyard-vision:1.3.3-cuda | gzip > forgeyard-vision.tar.gz
-# on the machine without the network:
-gunzip -c forgeyard-vision.tar.gz | sudo docker load
-```
-
-AMD 機器請用 **On the CPU**：映像檔沒有 ROCm 版本。每個端點接受什麼、回傳什麼，請見[參考資料](reference.md#workload-templates)。不用 API 金鑰就想試試看，請見[在 Playground 試用視覺工作負載](#try-a-vision-workload-in-the-playground)。
-
-## 在 Playground 試用視覺工作負載
-
-**Playground → Vision** 以你自己的身分、不需要 API 金鑰，把一張圖片送給公開的視覺工作負載（從[範本](#start-a-workload-from-a-template)啟動的，或任何以 `--task detect`、`--task segment` 或 `--task depth` 啟動的公開服務）。任何已登入的人都可以使用；請求依照工作負載的限制，並在 **Usage** 裡以 `console` 記在 `x:<name>` 底下。
-
-1. 選 **Workload**：每一個都標出它的任務和模型。還沒有公開的工作負載時，分頁會這樣說明；管理員和操作員會看到 **Start from a template** 的連結。
-2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB；工作負載的 **Largest request** 比較小時以它為準）。
+1. 打開 **Model** 選單，在 **Vision** 底下選一個模型：每一個都標出任務。只會列出已就緒的模型；完全沒有時，Playground 會這樣說明，管理員和操作員會看到前往目錄的連結。
+2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。
 3. 接著依任務而定：
    - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。
    - **Segmentation：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
    - **Depth estimation：** 按 **Estimate depth**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **Colour** 或 **Grey**。深度是相對的，不是公尺。
 
-結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。工作負載忙碌、停止或限制太小時，會用白話說明；你的 console 登入不會送到 `/x/`，那裡只接受 API 金鑰。路由請見[參考資料](reference.md#from-the-playground)。
+結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。模型停止了，或讀不了這張圖片時，會用白話說明。主控台把它送到 `/api/playground/vision/<task>`，對已登入的人來說和 `/v1/vision/<task>` 一樣（[參考資料](reference.md#vision)）。
 
 ## 把圖片送給模型
 
@@ -438,7 +397,7 @@ media: {inputs: [image, audio, video], files: false}
 
    步數、負面提示和 seed 放在 `extra_body`：
    `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`。
-4. **在 Playground 試試看：** 圖片模型會有一個 **Image** 分頁，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
+4. **在 Playground 試試看：** 圖片模型（選單的 *Images* 底下）會有一個 **Image** 面板，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
 
 **要多久：** 在 A100 上每張幾秒；在 CPU 上要幾分鐘。在一台忙碌的 x86-64 機器上用 16 到 32 個核心量測：Stable Diffusion 1.5、512x512、20 步大約 100 秒；Z-Image-Turbo（Q4_0）8 步在 512x512 大約 2 分鐘，1024x1024 大約 8.5 分鐘。機器較慢或尺寸較大時，在 **Advanced** 調高 *Timeout*。
 
@@ -486,7 +445,7 @@ media: {inputs: [image, audio, video], files: false}
 有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
 
 1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
-2. 管理員：打開 **Models → Catalog**，在 **Model sources** 下把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+2. 管理員：打開 **Models → Sources**，把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
 3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
 
 部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
@@ -495,7 +454,7 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 加入雲端供應商
 
-管理員：打開 **Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後把其中一個放進路由：打開一個部署，選 **Routing and cloud spill**，新增一層並放入雲端模型，再儲存。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+管理員：打開 **Cloud → Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後使用其中一個：打開一個部署，在 **Cloud fallback** 新增雲端層並放入雲端模型，再儲存；或用 **Cloud → Cloud models → New cloud model** 以自己的名稱提供它。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
 
 **Outside your network (cloud)** 會自動幫你勾好：OpenAI、Anthropic、Gemini、Azure 和 OpenRouter 一律勾選；*OpenAI-compatible server* 則在它的 base URL 是公開位址（或解析成公開位址的名稱）時勾選。私有位址（`10.x`、`172.16–31.x`、`192.168.x`、`100.64–127.x`、loopback、link-local、IPv6 `fc00::/7`），或像 `gpu-box`、`*.local`、`*.lan`、`*.internal` 這樣的名稱則不勾選。表單會說明原因；判斷錯了就自己改。名稱在伺服器上解析不出來時，維持不勾選，並說明無法判斷。
 
@@ -519,7 +478,7 @@ media: {inputs: [image, audio, video], files: false}
 
 管理員在開始使用供應商之後：
 
-1. **設定價格。** 在 **Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
+1. **設定價格。** 在 **Cloud → Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
 2. **查看費用。** **Usage** → **Cost** 依日期、金鑰、個人、模型或供應商顯示費用，以及有多少由本機處理。
 3. **設定預算**，以日曆月（UTC）計，單位是美元：
    - 金鑰：**API keys** → 金鑰的 **Limits** → **Monthly budget (USD)** → **Save limits**。管理員在別人金鑰上設定的值會對擁有者鎖定；**Unlock budget** 會移除它；
@@ -552,12 +511,12 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 在共用機器上限制 GPU
 
-1. 開啟 **Machines**，找到這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
+1. 開啟 **Machines**，點進這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
 2. 只勾選 Forgeyard 可以使用的卡，例如第 2 和第 3 張，然後選擇 **Save**。
 
 從此之後：
 
-- 不管工作負載或部署要求什麼，Forgeyard 執行的任何東西都不會分配到其他卡；
+- 不管應用程式或部署要求什麼，Forgeyard 執行的任何東西都不會分配到其他卡；
 - 其他卡會顯示 *not for Forgeyard*；
 - 記憶體以每張允許使用的卡回報的**可用**量計算，所以其他程式在同一張卡上的使用量會被考慮進去。
 
@@ -659,7 +618,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -677,7 +636,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -685,7 +644,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.3.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -693,26 +652,26 @@ sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
 **升級**靠 tag。先備份，再拉取新版本，用它執行同一個指令；volume 會保留所有資料，資料庫的變更會在啟動時執行：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.3.4
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.1
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.4
+  docker.io/tonyhuang1101/forgeyard:1.4.1
 ```
 
-`1.3.4` 就是那個版本；`1.3` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
+`1.4.1` 就是那個版本；`1.4` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
 
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.3.3
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.0
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**Machines** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.3.3 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.4.0 .`
 
 ## 把伺服器當成服務執行
 
@@ -755,7 +714,9 @@ sudo systemctl enable --now forgeyard
    ```
 
    然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。用 Docker 的話：拉取新的 tag，再用它執行同一個 `docker run`（[做法](#run-the-server-in-docker)）。
-3. **agent**：一台一台來。執行中的 agent 重新啟動時，會保留它的工作負載。
+
+   **升級到 1.4：** 1.3.1 標為淘汰的七個設定已經不再讀取（[清單](reference.md#removed-settings)）。重新啟動之前，如果你設了 `SECRET_KEY_FILE`，請把它改名為 `FORGEYARD_SECRET_KEY_FILE`（否則伺服器會拒絕啟動），其他的則移除；還留著的會列在 Setup health 裡。
+3. **agent**：一台一台來。執行中的 agent 重新啟動時，會保留它的應用程式。
    - **用單行安裝裝的**：再執行一次，但不加 `--join`。它會安裝伺服器的新版本，並保留設定和憑據：
 
      ```bash
@@ -777,7 +738,7 @@ Forgeyard 會檢查自己的設定，找出壞掉、有風險或沒有作用的�
 
 - **Get started → Setup health** 列出每一項檢查結果，附上該怎麼做，以及到修正位置的連結。
 - **頂端列的數字**顯示錯誤和警告的數量。沒有的時候就不會出現。
-- **相關頁面上的橫幅**（Machines、API keys、Providers、Models、路由、部署、Users）顯示那個頁面的檢查結果。
+- **相關頁面上的橫幅**（Machines、Serving、API keys、Cloud、雲端模型、部署、Users）顯示那個頁面的檢查結果。
 
 一般使用者和 operator 都看不到這些。
 
@@ -805,7 +766,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 |---|---|
 | `server` | 用 CA 驗證的 HTTPS、安全性標頭、陌生的主機名稱（421）、CSRF 規則、用一次性帳號測試登入失敗後的等待、`/guide`、`/trust`、`/install.sh` |
 | `machines` | 每台機器都在線上、硬體正確；GPU 允許清單確實生效；加入指令會釘選 CA |
-| `workloads` | 行程類服務、任務（成功、重試、`max_duration`）、機器有 Docker 或 Podman 時的容器任務；在 GPU 機器上，工作負載只看得到分配給它的卡 |
+| `workloads` | 行程類服務、任務（成功、重試、`max_duration`）、機器有 Docker 或 Podman 時的容器任務；在 GPU 機器上，應用程式只看得到分配給它的卡 |
 | `models` | 部署小模型並等它們就緒：每台 CPU 機器上的 Qwen3-1.7B GGUF；GPU 機器上的對話、embedding、rerank 和語音模型（估算放不下的會跳過）；部署頁面上的估算；**Try it** |
 | `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；Playground；用量 |
 | `cloud` | 給了 `--cloud-provider` 才會執行：外溢到雲端、設為 **Never** 的金鑰、只用本地、雲端上限、費用，以及預算和它的警示 |
@@ -816,7 +777,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 
 執行前要知道的事：
 
-- **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、工作負載、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣。這次執行留下的用量紀錄和稽核事件會保留。
+- **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、應用程式、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣。這次執行留下的用量紀錄和稽核事件會保留。
 - **只有一個請求會送到雲端供應商**，內容是固定的一小段提示，費用不到一美分。供應商的每月預算會被改動幾秒鐘再改回原值；其他預算檢查只用這次執行自己的金鑰和使用者。
 - **一次性使用者會有五次登入失敗**：伺服器允許每個位址在 15 分鐘內失敗 30 次，所以連續執行很多次時，中間要等一下。
 - **時間：**機器上已經有模型時大約 15 到 20 分鐘（沒有 GPU 機器時約 3 分鐘）；需要下載的話另外加上下載時間。
@@ -830,7 +791,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | 項目 | 原因 |
 |---|---|
 | `data/forgeyard.db`（或你的 PostgreSQL 資料庫） | Forgeyard 知道的一切：使用者、機器、模型、部署、金鑰、用量 |
-| `data/secret.key` | 它負責加密儲存的機密資料（Hugging Face 權杖、副本的金鑰、工作負載的環境變數值）。請和資料庫備份**分開**存放 |
+| `data/secret.key` | 它負責加密儲存的機密資料（Hugging Face 權杖、副本的金鑰、應用程式的環境變數值）。請和資料庫備份**分開**存放 |
 | `data/tls/` | 每台裝置和每個 agent 信任的 CA。少了它，每台裝置和每個 agent 都得重新信任一個新的 CA |
 | `.env` | 你的設定 |
 
@@ -853,7 +814,83 @@ PostgreSQL：照常使用 `pg_dump`。
 uv run --no-sync python -m forgeyard secrets reset --yes
 ```
 
-它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的工作負載則必須重新建立（它們的事件裡會說明）。
+它會產生一把新的金鑰，並捨棄舊金鑰加密的內容：伺服器的 Hugging Face 權杖（以及各部署自己的）要重新設定，模型副本會用新的內部金鑰重新啟動，環境變數值遺失的應用程式則必須重新建立（它們的事件裡會說明）。
+
+## 部署之前先下載模型
+
+**Download to…**（下載到…）會現在就把模型，以及預設也把它的引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
+
+1. 打開 **Models**（**Catalog** 分頁），在模型那一列按 **Download to…**。或打開機器的頁面，在 **Models in cache** 上方按 **Download a model here…**，再選模型。
+2. 勾選機器。每一行會說明那台機器能不能下載：
+   - **fits**：要下載多少、可用的磁碟空間，以及會一起抓的引擎；
+   - **already here**：模型（和引擎）已經在那台機器的快取裡；
+   - **downloading**：那台機器上已經在下載這個模型；
+   - **offline**、**no model cache**、**not enough disk**（模型加上 1 GiB 的保留空間）；
+   - **update the agent**：1.4 以前的 agent 不能先下載。
+3. **Also the engine, for the recipe** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
+4. 按 **Download to N machines**。
+
+進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**Cancel** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **Download to…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **Models in cache** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
+
+每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
+
+自己連不到 Hugging Face 或 GitHub 的機器，會經由伺服器取得檔案：請看下一節。
+
+## 經由伺服器把模型送到離線機器
+
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型、引擎壓縮檔和有釘選的引擎映像檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。
+
+1. 打開機器的頁面（admin）。在 **Models in cache** 底下設定 **Internet access for downloads**：
+   - **Auto**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
+   - **Always through the server**：給完全沒有網路的機器。它不會先直接試，所以不用先等一次失敗。
+   - **Direct only**：永遠不經由伺服器。
+2. 照常部署，或使用 **Download to…**。進度會在部署的頁面、Catalog 裡模型的下方和機器的頁面上顯示 *Downloading the model via the server: … of …*，完成的下載會顯示 *Downloaded … via the server*。對設成一律經由伺服器的機器，**Download to…** 對話框會標示 *via the server*。
+
+不變的部分：中斷後 agent 會從磁碟上已有的部分繼續下載（伺服器會把 `Range` 轉給來源）、會重試、按 **Cancel** 會立刻停止，而且每個檔案都像直接下載一樣檢查（大檔的 SHA-256、小檔的 git blob id、引擎壓縮檔釘選的 SHA-256、URL 模型記下的 SHA-256）。在路上被改過的檔案會被拒絕並刪除，所以伺服器並沒有因此多了任何它原本做不到的權限。
+
+不同的部分：
+
+- 受限模型由伺服器用它自己的 Hugging Face 權杖（**Models → Sources**），或部署自己的權杖下載。設成 **Always through the server** 的機器完全不會收到權杖。
+- 套用伺服器自己的模型來源規則：只限 https 和公開位址（除非設了 `MODEL_ALLOW_PRIVATE_HOSTS`），URL 模型只限允許的主機。
+- 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **Download to…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
+- 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
+- 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-strix could not reach huggingface.co just now; the model comes through the server*，或 *amd-strix downloads the model and the engine through the server (its internet access setting)*。
+
+**引擎映像檔**（container 變體）在 recipe 以 digest 釘選時也會經由伺服器，所有內建 recipe 都是如此：
+
+- 映像檔不在機器上時，agent 照常 pull（**Auto**）；pull 連不到 registry（`lookup ghcr.io: no such host`、逾時）時改經由伺服器，之後一小時內同一個 registry 的映像檔也一樣。設成 **Always through the server** 時完全不會先試 registry。
+- 伺服器依 Forgeyard 為這個映像檔記下的 digest（`forgeyard/recipes/images.lock.json`），用 registry 發的匿名 pull token 讀取**那台機器平台**（amd64、arm64）的 manifest，再依 digest 提供那份 manifest、它的 config 和每一層。那份 manifest 沒列的 digest 一律不給，完整的一層經過時也會檢查。
+- agent 把每一份都和它的 digest 比對，先放在模型快取的 `.partial/image-…` 底下（中斷後從那一層接續；**Remove partial downloads** 會清掉），組成 `docker load` 和 `podman load` 都接受的封存檔、載入、加上 recipe 的 tag，並且只有在載入的映像檔符合記錄的 id 時才執行，和手動載入的映像檔一樣。之後刪除這些檔案。
+- 進度會顯示 *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*，接著是 *loading it*。每一層都會經過伺服器的網路兩次，和模型檔一樣。
+- 只用 tag 指定的映像檔（自訂 recipe 的、這一版 Forgeyard 自己的 vision 映像檔）不能經由伺服器：沒有記錄的 digest 可以比對。請改用上傳（下一節）。
+
+機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。
+
+## 把引擎映像檔上傳到機器
+
+管理員可以從 console 把映像檔放到機器上：不能經由伺服器的映像檔（自訂 recipe 只用 tag 指定的映像檔、自己建置的映像檔），或那台機器要 pull 很久的映像檔。
+
+1. 在已經有這個映像檔（或能 pull 它）的機器上存成檔案：
+
+   ```bash
+   sudo docker save ghcr.io/example/engine:1.2 | gzip > engine.tar.gz
+   ```
+
+   `podman save` 也可以。有釘選的映像檔請先依 digest pull 並加上 tag，做法和[離線機器](#offline-machines)一樣，這樣檔案裡就是那個映像檔、而且是 recipe 的 tag。
+2. 打開目標機器的頁面 → **Engine images** → **Upload an image**，選擇檔案，按 **Upload**。對話框會顯示已送出多少，接著顯示 *Loading it into …'s container engine*。
+3. 載入完成後，對話框會列出檔案裡的每個映像檔：它的 tag、id，以及它是哪個 recipe 的映像檔。*The pinned image of llama-cpp (vulkan), checked by its recorded ids*：那台機器上的部署不用 pull 就會使用它。*Named as the image of …*：只用 tag 指定它的 recipe 會照樣使用。*Not the image of any recipe*：自訂 recipe 可以用它的 tag 指定它。
+
+檔案從你的瀏覽器經過伺服器直接送到 agent，agent 一邊收一邊把它串流進 `docker load`（或 `podman load`）：伺服器只保留很小的緩衝，機器也不需要其他通往你電腦的路。container 引擎載入時會檢查每一層；中斷的檔案絕不會被載入。每台機器同時只能有一個上傳，全部最多兩個；檔案最大為 `IMAGE_UPLOAD_MAX_GB`（沒設定時是 64 GiB）。機器的 agent 必須是 1.4 以後的版本、有 container 引擎，而且在線上。每次上傳和失敗的原因都會記入稽核紀錄（`node.image_uploaded`）。
+
+## 釋出機器上的磁碟空間
+
+機器的頁面上有 **Models in cache**：列出它的 agent 下載過的東西和大小。每個 Hugging Face revision 一列；有好幾個 GGUF 檔的 revision，底下每個檔案各一列。從 URL 下載的單一 GGUF 檔，以及 process 引擎的引擎壓縮檔也會列出。清單上方是快取在那顆磁碟上占了多少，以及磁碟還剩多少可用空間。
+
+- **Remove** 會從那台機器刪除一個項目，管理員和操作員可以使用。那台機器上有部署正在使用這個模型時會被拒絕，該列也會指出是哪個部署：請先停止它。同一個 repository 的其他 revision 共用的檔案會保留，和 `hf cache rm` 的做法相同。之後需要這個模型的部署會在那裡重新下載。
+- **Remove partial downloads** 會刪除未完成的下載留下的檔案。下載會從這些檔案接續，所以只有在不想再繼續那次下載時才刪除。那台機器上有下載正在進行時會被拒絕。
+- 早於 1.4 的 agent 會列出模型但沒有大小，也不能刪除。請更新 agent。
+
+每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含刪了什麼、釋出了多少空間。API 請見[參考文件](reference.md#a-machines-model-cache-through-the-api)。
 
 ## 搬移模型快取
 
@@ -899,7 +936,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 2. **Machines** → 該機器 → **Revoke**。它的憑據會失效，agent 會被中斷連線並結束（安裝的服務不會再重新啟動它），它的副本也會從閘道上移除。
 3. **Remove** 會把它從清單中移除。如果要把這台機器加回來，請用新的權杖重新加入（`forgeyard agent join --rejoin --join-token fyj_…`）。
 
-伺服器已經連不到被撤銷機器上的 agent，所以不會停止那台機器上仍在執行的工作負載。請在機器上自行停止它們：`docker ps --filter label=forgeyard.agent` 會列出這些容器。
+伺服器已經連不到被撤銷機器上的 agent，所以不會停止那台機器上仍在執行的應用程式。請在機器上自行停止它們：`docker ps --filter label=forgeyard.agent` 會列出這些容器。
 
 ## 解除安裝 agent
 

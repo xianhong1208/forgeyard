@@ -11,13 +11,24 @@
   card is only ever shared with other sharing replicas;
 - CPU replicas: the free RAM, the same way.
 
-**Score**, among the machines that pass:
+**Score**, among the machines that pass, in this order (forgeyard.models.reach, 1.4):
+- a machine that could not reach a source this replica would have to fetch from there (the model's
+  host, the engine archive's or the image registry) in the last hour comes last; it is only used
+  when no other machine fits. Within one machine, a later variant that needs no such fetch is
+  chosen over a first one that does. A machine that relays (its agent speaks "relay", its `fetch_via`
+  is not "direct") gets the model and the engine archive through the server instead, so a failure to
+  reach their source does not count against it (forgeyard.machines.relay);
+- (1.3.1) a replica that is restarted goes back to the machine it ran on, when that machine still
+  takes it;
+- (M4) a machine without another replica of the same deployment, so replicas spread over machines;
+- (1.4) a machine that already has the model in its cache, then the one with fewer other things to
+  fetch (the engine archive or image);
 - model services **binpack**: the card (or machine) left with the least memory after placing
   wins, so big cards stay whole for big models; one-off work (spread) the opposite;
-- on a tie (the same whole GiB left), a machine that already has the model in its cache wins,
-  then the machine name;
-- (1.3.1) before all of that, a replica that is restarted goes back to the machine it ran on, when
-  that machine still takes it.
+- then the machine name.
+
+A replica in backoff because its download failed for a network reason is placed again on another
+machine that fits (unpinned deployments only; a pinned one stays and says why): see fetch_failed.
 
 When nothing fits, every machine says why, and by how much memory it falls short. When exclusive
 cards are what is in the way and the memory would be enough, it says that it fits if both share VRAM
@@ -38,7 +49,8 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, utcnow
 from forgeyard.machines.protocol import FEATURE_ENGINE_ZIP, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
-from forgeyard.models import render, sources
+from forgeyard.machines import relay
+from forgeyard.models import reach, render, sources
 from forgeyard.models.catalog import Context, context_for, deployment_of, model_block
 from forgeyard.models.estimate import EstimateError, gib
 from forgeyard.models.recipes import Variant, variant_matches, variant_params_problem
@@ -59,6 +71,14 @@ class Option:
     cards: list[Accelerator]
     leftover: int          # memory left on the tightest chosen card (or RAM) after placing
     cached: bool
+    # 1.4: what the replica would fetch there [(phase, host)], and the remembered failure to reach one
+    # of those hosts from this machine (it then comes last).
+    needs: list = field(default_factory=list)
+    blocked: Optional[reach.Failure] = None
+    # 1.4 ("relay"): the phases this machine fetches through the server ("model", "engine"), and the remembered
+    # failure to reach their source that no longer blocks it because they come through the server.
+    via_server: list = field(default_factory=list)
+    relayed: Optional[reach.Failure] = None
 
     def describe(self) -> str:
         where = f"GPU {', '.join(f'#{a.index}' for a in self.cards)}" if self.cards else "CPU"
@@ -90,6 +110,11 @@ class Verdict:
             out["gpus"] = [a.index for a in self.option.cards]
             out["cached"] = self.option.cached
             out["leftover"] = self.option.leftover
+            out["needs"] = [phase for phase, _ in self.option.needs]
+            if self.option.blocked is not None:
+                out["unreachable"] = reach.could_not_reach(self.name, self.option.blocked)
+            if self.option.via_server:
+                out["via_server"] = list(self.option.via_server)
         return out
 
 
@@ -103,6 +128,31 @@ def _cached(node: Node, ctx: Context) -> bool:
     except (sources.SourceError, KeyError):
         return False
     return key in ((node.model_cache or {}).get("cached") or [])
+
+
+def _fetches(node: Node, ctx: Context, variant: Variant, cached: bool) -> list[tuple[str, Optional[str]]]:
+    """What one replica with this variant would have to fetch on this machine (1.4)."""
+    try:
+        model = model_block(ctx.model)
+    except (sources.SourceError, KeyError):
+        model = None
+    image = variant.image if variant.runtime == "container" else None
+    return reach.needs(node, cached=cached, model=model, engine=render.engine_block(ctx, variant), image=image)
+
+
+def _option(node: Node, ctx: Context, variant: Variant, cards: list[Accelerator], left: int) -> Option:
+    """A machine that relays (1.4: its agent speaks "relay" and its `fetch_via` is "auto" or "server") is not
+    avoided for a host it could not reach when what comes from there comes through the server instead: the
+    model, the engine archive, and (an agent that also speaks "relay_images", #35 PR 4) a pinned engine image.
+    A tag-only image still counts: only an upload brings it to a machine that cannot pull it."""
+    cached = _cached(node, ctx)
+    needs = _fetches(node, ctx, variant, cached)
+    image = variant.image if variant.runtime == "container" else None
+    direct = [(phase, host) for phase, host in needs if not relay.relays(node, phase, image)]
+    relayed = [(phase, host) for phase, host in needs if relay.relays(node, phase, image)]
+    via_server = [phase for phase, host in relayed if relay.mode(node, host) == "server"]
+    return Option(node, variant, cards, left, cached, needs, reach.blocked(node, direct), via_server,
+                  reach.blocked(node, relayed))
 
 
 def _runtime_problem(node: Node, variant: Variant) -> Optional[str]:
@@ -178,6 +228,9 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
     problems: list[str] = []
     shortfalls: list[tuple[int, str]] = []
     matched_hw = False
+    # A fit that needs a fetch this machine could not make lately: kept, in case no later variant fits
+    # without one (with the cards it showed).
+    fallback: Optional[tuple[Option, list[dict]]] = None
     for variant in ctx.recipe.variants:
         if variant.gpu != want_gpu:
             continue
@@ -211,8 +264,12 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
                 fitting.sort(key=lambda t: (t[0], t[1].index))  # binpack: the fullest that fits
                 chosen = [a for _, a in fitting[:ctx.gpus]]
                 left = min(free for free, a in fitting[:ctx.gpus]) - need
-                v.fits, v.option = True, Option(node, variant, chosen, left, _cached(node, ctx))
-                break
+                opt = _option(node, ctx, variant, chosen, left)
+                if opt.blocked is None:
+                    v.fits, v.option = True, opt
+                    break
+                fallback = fallback or (opt, v.cards)
+                continue
             # Not enough: by how much (memory), or why not at all (cards in use, exclusive).
             usable = sorted((free for free, a in avail if not cards.get(a.key)
                              or (ctx.share == "vram" and all(h.share == "vram" for h in cards.get(a.key, [])))),
@@ -253,10 +310,16 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
             v.cards = [{"index": None, "available": max(0, free), "total": cpu.vram_total, "shared_with":
                         [h.workload for h in ram_holds]}]
             if free >= need:
-                v.fits, v.option = True, Option(node, variant, [], free - need, _cached(node, ctx))
-                break
+                opt = _option(node, ctx, variant, [], free - need)
+                if opt.blocked is None:
+                    v.fits, v.option = True, opt
+                    break
+                fallback = fallback or (opt, v.cards)
+                continue
             shortfalls.append((need - free, f"needs {gib(need)} of RAM, {gib(max(0, free))} available "
                                              f"({gib(need - free)} short)"))
+    if not v.fits and fallback is not None:
+        v.fits, v.option, v.cards = True, fallback[0], fallback[1]
     if v.fits:
         if node.status != "online":
             v.reason = "offline"
@@ -281,11 +344,12 @@ def candidates(db: DbSession, machine_id: Optional[int]) -> list[Node]:
 
 
 def choose(verdicts: list[Verdict], machine_id: Optional[int], strategy: str = "binpack",
-           siblings: Optional[set[int]] = None, prefer: Optional[int] = None) -> Optional[Option]:
-    """The best option: first the machine a restarted replica ran on (`prefer`), when it still takes
-    it; then a machine without another replica of the same deployment (`siblings`: their machines),
-    so replicas spread over machines and the gateway can balance and fail over between them; then
-    binpack; then a machine with the model cached; then by name."""
+           siblings: Optional[set[int]] = None, prefer: Optional[int] = None, avoid: bool = True) -> Optional[Option]:
+    """The best option: first a machine that can fetch what the replica needs (`avoid`; 1.4); then
+    the machine a restarted replica ran on (`prefer`), when it still takes it; then a machine without
+    another replica of the same deployment (`siblings`: their machines), so replicas spread over
+    machines and the gateway can balance and fail over between them; then a machine with the model
+    cached, then with fewer other fetches (1.4); then binpack; then by name."""
     usable = [v.option for v in verdicts if v.fits and (v.status == "online" or v.machine_id == machine_id)]
     if not usable:
         return None
@@ -293,8 +357,8 @@ def choose(verdicts: list[Verdict], machine_id: Optional[int], strategy: str = "
     taken = siblings or set()
 
     def key(o: Option):
-        return (prefer is not None and o.node.id != prefer, o.node.id in taken, sign * (o.leftover // GIB),
-                not o.cached, o.node.name, [a.index for a in o.cards])
+        return (avoid and o.blocked is not None, prefer is not None and o.node.id != prefer, o.node.id in taken,
+                not o.cached, len(o.needs), sign * (o.leftover // GIB), o.node.name, [a.index for a in o.cards])
 
     return min(usable, key=key)
 
@@ -378,6 +442,11 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
         if opt.cards and ctx.recipe.engine == "vllm":
             entry["gpu_memory_utilization"] = render.values(ctx, opt.variant, opt.cards, gpu_context())["gpu_util"]
         entry["previous"] = (prefer or {}).get(i) == opt.node.id
+        entry["needs"] = [phase for phase, _ in opt.needs]
+        if opt.blocked is not None:
+            entry["unreachable"] = reach.could_not_reach(opt.node.name, opt.blocked)
+        if opt.via_server:
+            entry["via_server"] = list(opt.via_server)
         placed.append(entry)
     return {"fits": True, "placed": placed, "machines": [v.as_dict() for v in first or []],
             "share_hint": share_hint(ctx, *hint_card)}
@@ -410,6 +479,7 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
     before = placement.previous(r.id)
     opt = choose(verdicts, ctx.machine_id, siblings=siblings, prefer=before)
     if opt is None:
+        reach.note(r.id, None)
         reason = ("Cannot be placed: " + summary(verdicts, ctx))[:400]
         if reason != r.reason:
             r.reason, r.updated_at = reason, utcnow()
@@ -436,6 +506,8 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
     r.reason = None if opt.node.status == "online" else f"waiting for {opt.node.name} to come online"
     r.updated_at = utcnow()
     placement.forget(r.id)
+    why = placement_note(verdicts, opt, ctx.machine_id, siblings, before)
+    reach.note(r.id, why)
     where = f" with GPU {', '.join(f'#{a.index}' for a in opt.cards)}" if opt.cards else " on the CPU"
     util = ""
     if opt.cards and ctx.recipe.engine == "vllm":
@@ -443,6 +515,70 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
     again = " again, where it ran before," if opt.node.id == before else ""
     event(db, r.workload, "placed", f"Replica {r.ordinal} placed{again} on {opt.node.name}{where} ({opt.variant.name}; "
                                     f"reserves {gib(ctx.amount)}{util}"
-                                    f"{'; model already cached there' if opt.cached else ''}).", r.ordinal)
+                                    f"{'; model already cached there' if opt.cached else ''})."
+                                    + (f" {why}." if why else ""), r.ordinal)
     db.flush()
     return opt.node.id
+
+
+def placement_note(verdicts: list[Verdict], opt: Option, machine_id: Optional[int], siblings: set[int],
+                   prefer: Optional[int]) -> Optional[str]:
+    """Why the replica is where it is, when a failed fetch decided it (1.4): "cpu-01 could not reach
+    huggingface.co; placed on cpu-02 instead", or that no other machine could take it."""
+    if opt.blocked is not None:
+        who = f"{reach.could_not_reach(opt.node.name, opt.blocked)} {reach.ago(opt.blocked)}"
+        if machine_id is not None:
+            return f"{who}; the deployment is pinned to {opt.node.name}, so it tries there anyway"
+        return f"{who}; no other machine can take it, so it tries there again"
+    unaware = choose(verdicts, machine_id, siblings=siblings, prefer=prefer, avoid=False)
+    if unaware is not None and unaware.node.id != opt.node.id and unaware.blocked is not None:
+        return f"{reach.could_not_reach(unaware.node.name, unaware.blocked)}; placed on {opt.node.name} instead"
+    if opt.via_server:
+        what = " and ".join(PHASE_WHAT[p] for p in opt.via_server)
+        if opt.relayed is not None:
+            return f"{reach.could_not_reach(opt.node.name, opt.relayed)} {reach.ago(opt.relayed)}; {what} " \
+                   f"{'comes' if len(opt.via_server) == 1 else 'come'} through the server"
+        return f"{opt.node.name} downloads {what} through the server (its internet access setting)"
+    return None
+
+
+PHASE_WHAT = {"model": "the model", "engine": "the engine", "image": "the engine image"}
+
+
+def fetch_failed(db: DbSession, r: Replica, node: Node) -> bool:
+    """The agent reported the replica in backoff (1.4, #56). When its download failed for a network
+    reason, remember that this machine could not reach that host, and place the replica again on
+    another machine that fits, if any (True: it was unplaced, and is placed by the caller's next
+    placement pass). A pinned deployment's replica stays, and says why."""
+    from forgeyard.workloads.state import event, reset_replica
+
+    f = reach.classify(r, r.reason)
+    if f is None:
+        return False
+    reach.record(node.id, f)
+    dep = deployment_of(db, r.workload_id)
+    ctx = context_for(db, dep) if dep is not None else None
+    if ctx is None:
+        return False
+    who = reach.could_not_reach(node.name, f)
+
+    def say(text: str) -> None:
+        if reach.note_of(r.id) != text:
+            reach.note(r.id, text)
+            event(db, r.workload, "unreachable", f"Replica {r.ordinal}: {text}.", r.ordinal)
+
+    if ctx.machine_id is not None:
+        say(f"{who}; the deployment is pinned to {node.name}, so the replica stays there and tries again")
+        return False
+    siblings = {o.node_id for o in r.workload.replicas if o.id != r.id and o.node_id is not None and not o.final}
+    opt = choose(evaluate(db, ctx, exclude=r.id), None, siblings=siblings)
+    if opt is None or opt.node.id == node.id or opt.blocked is not None:
+        say(f"{who}; no other machine can take it, so it tries again on {node.name}")
+        return False
+    event(db, r.workload, "unplaced", f"Replica {r.ordinal}: {who}: {f.detail}; placing it on another machine.",
+          r.ordinal)
+    reach.note(r.id, None)
+    reset_replica(r, r.generation)
+    r.reason = f"{who}; placing it on another machine"
+    db.flush()
+    return True

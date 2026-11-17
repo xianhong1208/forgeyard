@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import { readEvents, snippets } from "../lib/gateway";
+import { foldLabel, keyLimits, perMinute, readEvents, snippets, splitKeys } from "../lib/gateway";
 import type { ApiKey, KeysResponse, UsageResponse } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -216,7 +216,7 @@ describe("Usage", () => {
     expect(within(totals).getByText("$0.00")).toBeTruthy();               // local
     expect(within(totals).getByText("75%")).toBeTruthy();                 // served locally
     expect(screen.getByText(/2 cloud requests have no price/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Set prices/ }).getAttribute("href")).toBe("/providers");
+    expect(screen.getByRole("link", { name: /Set prices/ }).getAttribute("href")).toBe("/cloud");
     expect(screen.getByText(/1 request was estimated/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Provider" }));
     await waitFor(() => expect(fetch.mock.calls.some(([u]) => u === "/api/usage?days=7&group=provider")).toBe(true));
@@ -248,7 +248,7 @@ describe("Playground", () => {
       }
     });
     mount("/playground");
-    expect(((await screen.findByLabelText("Model")) as HTMLSelectElement).value).toBe("chat");
+    expect((await screen.findByLabelText("Model")).textContent).toContain("chat");
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hi there" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     const convo = screen.getByLabelText("Conversation");
@@ -340,9 +340,11 @@ describe("Playground and the cloud (1.2)", () => {
       }
     }, USER);
     mount("/playground");
-    const select = (await screen.findByLabelText("Model")) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["chat"]);
-    expect(select.options[0].textContent).toContain("local, then cloud");
+    fireEvent.click(await screen.findByLabelText("Model"));
+    const options = within(screen.getByRole("listbox")).getAllByRole("option");
+    expect(options.map((o) => o.querySelector(".picker-option-name")?.textContent)).toEqual(["chat"]);
+    expect(options[0].textContent).toContain("local, then cloud");
+    fireEvent.click(options[0]);
     fireEvent.click(screen.getByLabelText(/Local only/));
     fireEvent.change(screen.getByLabelText("Message"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -375,5 +377,133 @@ describe("gateway helpers", () => {
     const chip = await screen.findByText("now Never (server maximum)");
     expect(chip.getAttribute("title")).toMatch(/maximum for people's own keys is lower/);
     expect(screen.getAllByText(/server maximum/)).toHaveLength(1);
+  });
+});
+
+// Issue #105 (1.4): a server with 172 keys, 163 of them revoked, listed every one in full.
+describe("API keys: revoked keys folded away, shorter rows", () => {
+  const old = (id: string, name: string, over: Partial<ApiKey> = {}) =>
+    key({ id, name, prefix: `fyk_${id}old`, status: "revoked", revoked_at: "2026-11-12T00:00:00Z", revoked_by: "owner", ...over });
+  const table = () => document.querySelector(".keys-table") as HTMLTableElement | null;
+
+  it("FY-WEB-390 limits read short: only the ones set, \"No limits\" when none, k/M for large ones, locks kept", () => {
+    expect(perMinute(3, "request")).toBe("3 requests/min");
+    expect(perMinute(1, "request")).toBe("1 request/min");
+    expect(perMinute(10_000, "token")).toBe("10k tokens/min");
+    expect(perMinute(1_500, "token")).toBe("1.5k tokens/min");
+    expect(perMinute(2_000_000, "token")).toBe("2M tokens/min");
+    expect(perMinute(999, "token")).toBe("999 tokens/min");
+    const lim = (rpm: number | null, tpm: number | null, rl: string | null = null, tl: string | null = null) =>
+      keyLimits({ effective_rpm: rpm, effective_tpm: tpm, rpm_locked_by: rl, tpm_locked_by: tl });
+    expect(lim(null, null)).toEqual([{ text: "No limits", none: true, locks: [] }]);
+    expect(lim(3, null)).toEqual([{ text: "3 requests/min", none: false, locks: [] }]);
+    expect(lim(null, 10_000)).toEqual([{ text: "10k tokens/min", none: false, locks: [] }]);
+    expect(lim(3, 10_000, "owner").map((l) => [l.text, l.locks])).toEqual([["3 requests/min", ["owner"]], ["10k tokens/min", []]]);
+    // a lock on a limit that is not set is not lost
+    expect(lim(null, null, null, "owner")).toEqual([{ text: "No limits", none: true, locks: ["owner"] }]);
+  });
+
+  it("FY-WEB-391 the fold row counts the keys it hides and names what they are: revoked, expired or both", () => {
+    const s = (status: ApiKey["status"]) => ({ status });
+    expect(splitKeys([s("active"), s("revoked"), s("expired"), s("active")])).toEqual({
+      active: [s("active"), s("active")], inactive: [s("revoked"), s("expired")] });
+    expect(foldLabel([s("revoked"), s("revoked")], false)).toBe("Show 2 revoked keys");
+    expect(foldLabel([s("revoked")], false)).toBe("Show 1 revoked key");
+    expect(foldLabel([s("expired")], false)).toBe("Show 1 expired key");
+    expect(foldLabel([s("revoked"), s("expired"), s("revoked")], false)).toBe("Show 3 revoked or expired keys");
+    expect(foldLabel([s("revoked"), s("revoked")], true)).toBe("Hide revoked keys");
+    expect(foldLabel([s("expired"), s("revoked")], true)).toBe("Hide revoked or expired keys");
+  });
+
+  it("FY-WEB-392 revoked and expired keys are folded away by default; the row opens and folds them again", async () => {
+    const gone = old("k2", "old-laptop");
+    const lapsed = key({ id: "k3", name: "trial", prefix: "fyk_k3old", status: "expired", expires_at: "2026-11-11T00:00:00Z" });
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [gone, key(), lapsed] }) } : undefined));
+    mount("/keys");
+    expect(await screen.findByText("fyk_AbCdEfGh…")).toBeTruthy();
+    expect(screen.queryByText("old-laptop")).toBeNull();
+    expect(screen.queryByText("trial")).toBeNull();
+    expect(table()!.querySelectorAll("tbody tr")).toHaveLength(1);
+    const fold = screen.getByRole("button", { name: "Show 2 revoked or expired keys" });
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(fold);
+    expect(screen.getByText("old-laptop")).toBeTruthy();
+    expect(screen.getByText("trial")).toBeTruthy();
+    // active keys first, then the folded ones
+    expect([...table()!.querySelectorAll("tbody tr .strong")].map((x) => x.textContent)).toEqual(["laptop", "old-laptop", "trial"]);
+    const hide = screen.getByRole("button", { name: "Hide revoked or expired keys" });
+    expect(hide.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(hide);
+    expect(screen.queryByText("old-laptop")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show 2 revoked or expired keys" })).toBeTruthy();
+  });
+
+  it("FY-WEB-393 Everyone's keys fold the same way, and switching between Mine and Everyone's folds them again", async () => {
+    const theirs = old("k9", "ursulas-old", { user: { id: 2, username: "ursula" } });
+    server((url) => {
+      if (url === "/api/keys?all=true") return { status: 200, body: keys({ keys: [key(), theirs, old("k8", "my-old")] }) };
+      if (url === "/api/keys") return { status: 200, body: keys({ keys: [key(), old("k8", "my-old")] }) };
+    });
+    mount("/keys");
+    fireEvent.click(await screen.findByRole("button", { name: "Show 1 revoked key" }));
+    expect(screen.getByText("my-old")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Everyone's" }));
+    const fold = await screen.findByRole("button", { name: "Show 2 revoked keys" });
+    expect(screen.queryByText("ursulas-old")).toBeNull();
+    expect(screen.queryByText("my-old")).toBeNull();
+    fireEvent.click(fold);
+    expect(screen.getByText("ursulas-old")).toBeTruthy();
+    expect(screen.getByText("ursula")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Mine" }));
+    expect(await screen.findByRole("button", { name: "Show 1 revoked key" })).toBeTruthy();
+    expect(screen.queryByText("my-old")).toBeNull();
+  });
+
+  it("FY-WEB-394 when every key is revoked the page says there are no active keys, offers a new one, and still opens the old ones", async () => {
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [old("k2", "a"), old("k3", "b")] }) } : undefined), USER);
+    mount("/keys");
+    expect(await screen.findByText(/No active keys/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Create a key/ })).toBeTruthy();
+    expect(table()).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 revoked keys" }));
+    expect(table()!.querySelectorAll("tbody tr")).toHaveLength(2);
+    // no keys at all: the first-key empty state, with no fold row
+    cleanup();
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [] }) } : undefined), USER);
+    mount("/keys");
+    expect(await screen.findByText(/You have no API keys yet/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /revoked/ })).toBeNull();
+    expect(screen.queryByText(/No active keys/)).toBeNull();
+  });
+
+  it("FY-WEB-395 the Limits column shows only the limits set, or \"No limits\"", async () => {
+    const none = key({ id: "k2", name: "free", prefix: "fyk_free", effective_rpm: null, effective_tpm: null });
+    const tok = key({ id: "k3", name: "tok", prefix: "fyk_tok", effective_rpm: null, effective_tpm: 10_000 });
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [key({ effective_rpm: 3 }), none, tok] }) } : undefined));
+    mount("/keys");
+    await screen.findByText("fyk_AbCdEfGh…");
+    const cells = [...table()!.querySelectorAll('td[data-label="Limits"]')].map((td) => td.textContent?.trim());
+    expect(cells).toEqual(["3 requests/min", "No limits", "10k tokens/min"]);
+    // nothing revoked or expired: no fold row at all
+    expect(document.querySelector(".keys-fold")).toBeNull();
+    expect(table()!.textContent).not.toMatch(/no limit\b|Tokens|Requests/);
+    expect(table()!.querySelector('td[data-label="Limits"] [title]')!.getAttribute("title")).toBe("Requests: 3/min · Tokens: no limit");
+  });
+
+  it("FY-WEB-396 on a phone every value stays in its value column: each labelled cell holds one element and no loose text", async () => {
+    const locked = key({ id: "k2", name: "locked", prefix: "fyk_locked", rpm: 5, effective_rpm: 5, effective_tpm: 2_000, rpm_locked_by: "owner", cloud: "on",
+      effective_cloud: "off", cloud_locked_by: "owner", user: { id: 2, username: "ursula" } });
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [key(), locked, old("k3", "gone")] }) } : undefined));
+    mount("/keys");
+    fireEvent.click(await screen.findByRole("button", { name: "Everyone's" }));
+    await waitFor(() => expect(table()!.querySelector('td[data-label="Owner"]')).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Show 1 revoked key" }));
+    const cells = [...table()!.querySelectorAll("td[data-label]")];
+    expect(cells.length).toBeGreaterThan(20);
+    for (const td of cells) {
+      const loose = [...td.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
+      expect({ cell: td.getAttribute("data-label"), elements: td.children.length, loose: loose.length })
+        .toEqual({ cell: td.getAttribute("data-label"), elements: 1, loose: 0 });
+    }
   });
 });

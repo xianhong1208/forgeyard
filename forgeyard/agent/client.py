@@ -21,14 +21,20 @@ from forgeyard import __version__
 from forgeyard.agent import trust
 from forgeyard.agent.backoff import Backoff
 from forgeyard.agent.inventory import Inventory, fingerprint
+from forgeyard.agent.relay import RelayClient
 from forgeyard.machines.protocol import (
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
     CLOSE_REVOKED,
     FATAL_CLOSE_CODES,
+    FEATURE_CACHE_ADMIN,
     FEATURE_ENGINE_ZIP,
     FEATURE_IMAGE_IDS,
+    FEATURE_IMAGE_LOAD,
     FEATURE_MODELS,
+    FEATURE_PREFETCH,
+    FEATURE_RELAY,
+    FEATURE_RELAY_IMAGES,
     FEATURE_REPLICA_GUARD,
     FEATURE_REPLICA_KEYS,
     FEATURE_WORKLOAD_GUARD,
@@ -136,6 +142,12 @@ class Agent:
         self.sessions = 0  # connections that got a welcome (tests and logs)
         # Runs workloads (M2). None: an inventory-only agent, as in M1.
         self.supervisor = supervisor
+        # 1.4 ("relay"): model files, engine archives and images through this server, and image files an admin
+        # uploads ("image_load"), with this credential and the same TLS trust as the connection.
+        self.relay_client = RelayClient(server, self.ssl_context, credential)
+        models = getattr(supervisor, "models", None) if supervisor is not None else None
+        if models is not None:
+            models.relay_client = self.relay_client
         self.server_features: set[str] = set()
         self._answers: set[asyncio.Task] = set()
 
@@ -154,8 +166,14 @@ class Agent:
             msg["runtime_info"] = self.supervisor.runtime_info()
             cache = self.supervisor.model_cache_info()
             if cache is not None:
-                msg["features"].append(FEATURE_MODELS)
+                msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
+                if getattr(self.supervisor.models, "relay_client", None) is not None:
+                    msg["features"].append(FEATURE_RELAY)
+                    if getattr(self.supervisor, "can_relay_images", lambda: False)():
+                        msg["features"].append(FEATURE_RELAY_IMAGES)
                 msg["model_cache"] = cache
+            if getattr(self.supervisor, "can_load_images", lambda: False)():
+                msg["features"].append(FEATURE_IMAGE_LOAD)
         return msg
 
     @property
@@ -286,6 +304,14 @@ class Agent:
                 task = asyncio.create_task(self._answer_logs(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+            elif kind in ("cache_remove", "cache_prune") and self.workloads:
+                task = asyncio.create_task(self._answer_cache(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
+            elif kind == "image_load" and self.workloads:
+                task = asyncio.create_task(self._answer_image_load(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
 
     async def _answer_logs(self, ws, data: dict) -> None:
         replica = str(data.get("replica") or "")
@@ -295,6 +321,47 @@ class Agent:
             answer = {"ok": False, "reason": f"could not read the output: {e}"}
         await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "logs", "request_id": data.get("request_id"),
                                   "replica": replica, **answer}))
+
+    async def _answer_cache(self, ws, data: dict) -> None:
+        """1.4 (cache_admin): remove a model, or the partial downloads, from the model cache."""
+        partial = data.get("type") == "cache_prune"
+        try:
+            answer = await self.supervisor.cache_remove(None if partial else str(data.get("key") or ""),
+                                                        partial=partial)
+        except Exception as e:  # never take the connection down
+            log.exception("Model cache removal failed")
+            answer = {"ok": False, "code": "failed", "reason": f"could not remove it: {e}"[:400]}
+        await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "cache_removed", "request_id": data.get("request_id"),
+                                  **answer}))
+
+    async def _answer_image_load(self, ws, data: dict) -> None:
+        """1.4 ("image_load"): fetch an uploaded image file from the server and load it into the container engine.
+        Only from this agent's own server, by a path of the upload's form."""
+        import threading
+
+        from forgeyard.agent import relay as relay_client
+
+        path = str(data.get("path") or "")
+        size = data.get("size") if isinstance(data.get("size"), int) and data.get("size") > 0 else None
+        answer: dict
+        if not relay_client.UPLOAD_PATH_RE.match(path) or not getattr(self.supervisor, "can_load_images", lambda: False)():
+            answer = {"ok": False, "reason": "this agent cannot load images (no container engine), or the path is wrong"}
+        else:
+            cancel = threading.Event()
+            try:
+                opened = await asyncio.to_thread(self.relay_client.open, path)
+                images = await self.supervisor.load_upload(opened, size, cancel)
+                answer = {"ok": True, "images": images}
+                if not images:
+                    answer = {"ok": False, "reason": "the engine loaded nothing from that file"}
+            except asyncio.CancelledError:
+                cancel.set()
+                raise
+            except Exception as e:  # never take the connection down
+                log.warning("Loading an uploaded image failed: %s", e)
+                answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400]}
+        await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "image_loaded", "request_id": data.get("request_id"),
+                                  **answer}))
 
     async def _status_loop(self, ws) -> None:
         sup = self.supervisor

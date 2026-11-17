@@ -35,6 +35,7 @@ Stopping the agent leaves workloads running. They are stopped from the server.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import threading
 import time
@@ -43,11 +44,13 @@ from typing import Callable, Optional
 
 from pydantic import ValidationError
 
+from forgeyard.agent import relay
 from forgeyard.agent.workloads import health, plan, ports as portlib
 from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
-from forgeyard.machines.protocol import FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
+from forgeyard.agent.workloads.prefetch import Prefetcher
+from forgeyard.machines.protocol import FEATURE_PREFETCH, FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
 from forgeyard.workloads import images
 from forgeyard.workloads.spec import WorkloadSpec
 
@@ -59,6 +62,18 @@ TAIL_CHARS = 8000
 TASK_BACKOFF_CAP = 300
 SERVICE_BACKOFF_CAP = 60
 
+
+
+def _where(ops: dict, probes: dict) -> str:
+    """Each unfinished operation and probe, with the lines it is waiting on."""
+    out = io.StringIO()
+    for kind, tasks in (("operation", ops), ("probe", probes)):
+        for rid, task in tasks.items():
+            if task.done():
+                continue
+            out.write(f"{kind} {rid}:\n")
+            task.print_stack(limit=8, file=out)
+    return out.getvalue()
 
 class Supervisor:
     def __init__(self, state_dir: Path, runtimes: dict, *, port_range: tuple[int, int] = (30000, 32767),
@@ -105,6 +120,10 @@ class Supervisor:
         # key before a request reaches the program, and their health checks never carry it.
         self.strip: set[str] = set()
         self.cancels: dict[str, threading.Event] = {}
+        # 1.4 ("relay"): {replica id: {"model"|"engine": {path, mode}}} from the desired list, and the replicas
+        # whose download is coming through the server right now (their progress says so).
+        self.relays: dict[str, dict] = {}
+        self.via_server: set[str] = set()
         # Why a download or pull in flight was cancelled ({replica id: "cancelled: …"}), for its last report.
         self.cancelled: dict[str, str] = {}
         self.stopping: set[str] = set()
@@ -113,6 +132,8 @@ class Supervisor:
         self.server_features: set[str] = set()
         self.cache_dirty = models is not None
         self.gate_poll = gate_poll
+        # 1.4 ("prefetch"): downloads into the model cache asked for ahead of a deployment.
+        self.prefetch = Prefetcher(self)
 
     # ------------------------------------------------------------------ what the agent tells the server
     def runtime_info(self) -> dict:
@@ -147,6 +168,26 @@ class Supervisor:
             if isinstance(model, dict) and model.get("token"):
                 self.tokens[r["id"]] = str(model["token"])  # kept in memory only, never in a record
                 r = {**r, "model": {k: v for k, v in model.items() if k != "token"}}
+            # 1.4 ("relay"): how to fetch the model and the engine through the server, if this machine may. From
+            # every desired list (the machine's setting may change), kept beside the record, never in it.
+            relays = {}
+            for part in ("model", "engine"):
+                block = r.get(part)
+                if isinstance(block, dict) and "relay" in block:
+                    found = relay.parse(block)
+                    if found is not None:
+                        relays[part] = found
+                    r = {**r, part: {k: v for k, v in block.items() if k != "relay"}}
+            if "image_relay" in r:
+                # 1.4 PR 4 ("relay_images"): the pinned engine image through the server, beside the spec.
+                found = relay.parse_image(r)
+                if found is not None:
+                    relays["image"] = found
+                r = {k: v for k, v in r.items() if k != "image_relay"}
+            if relays:
+                self.relays[r["id"]] = relays
+            else:
+                self.relays.pop(r["id"], None)
             key = r.get("replica_key")
             if "replica_key" in r:
                 r = {k: v for k, v in r.items() if k != "replica_key"}
@@ -164,7 +205,11 @@ class Supervisor:
                 r = {**r, "image_ids": images.parse_check(r["image_ids"])}
             desired[r["id"]] = r
         self.desired = desired
+        for rid in [rid for rid in self.relays if rid not in desired]:
+            self.relays.pop(rid, None)
         self._cancel_unwanted()
+        # 1.4: the downloads asked for ahead of a deployment (none from a server without "prefetch").
+        self.prefetch.set_wanted(msg.get("downloads") or [])
         self.full_due = True
         self._wake.set()
 
@@ -196,10 +241,13 @@ class Supervisor:
         return rec.public(with_tail=self.tails.get(rec.id) if rec.final else None)
 
     def take_report(self) -> Optional[dict]:
+        prefetch = FEATURE_PREFETCH in self.server_features
+        if not prefetch:
+            self.prefetch.changed.clear()  # a server without "prefetch" asks for none and hears of none
         if self.full_ready:
             entries = [self._public(r) for r in self.records.values()] + self.removed
             full, self.full_ready = True, False
-        elif self.changed or self.removed:
+        elif self.changed or self.removed or self.prefetch.changed:
             entries = [self._public(self.records[i]) for i in sorted(self.changed) if i in self.records] + self.removed
             full = False
         else:
@@ -207,10 +255,54 @@ class Supervisor:
         self.changed.clear()
         self.removed = []
         msg = {"v": PROTOCOL_VERSION, "type": "status", "full": full, "replicas": entries}
+        if prefetch:
+            downloads = self.prefetch.take(full)
+            if downloads:
+                msg["downloads"] = downloads
         if self.cache_dirty and self.models is not None:
             self.cache_dirty = False
             msg["model_cache"] = self.models.info()
         return msg
+
+    # ------------------------------------------------------------------ the model cache (1.4, cache_admin)
+    def cache_users(self, target: dict) -> list[str]:
+        """The workloads of the replicas here that need what a cache removal would delete: every one
+        this agent has not finished with (running, starting, downloading, waiting to start, or in
+        backoff) and every one the last desired list wants. Called from the removal's thread while the
+        model's lock is held, on snapshots of the two lists."""
+        from forgeyard.models.cache_keys import engine_uses, model_uses
+
+        users = set()
+        for rec in list(self.records.values()):
+            if rec.final:
+                continue
+            if model_uses(rec.model, target) or engine_uses(rec.engine, target):
+                users.add(rec.workload)
+        for want in list((self.desired or {}).values()):
+            if model_uses(want.get("model"), target) or engine_uses(want.get("engine"), target):
+                users.add(str(want.get("workload") or want.get("id")))
+        return sorted(users)
+
+    async def cache_remove(self, key: Optional[str], *, partial: bool = False) -> dict:
+        """Remove a model (by its cache key) or the partial downloads from this machine's cache; the
+        answer to the server, with the cache as it is afterwards."""
+        from forgeyard.agent.models import CacheError, CacheRefused
+
+        if self.models is None:
+            return {"ok": False, "code": "no_cache", "reason": "This agent has no model cache."}
+        try:
+            if partial:
+                freed = await asyncio.to_thread(self.models.prune_partial)
+            else:
+                freed = await asyncio.to_thread(self.models.remove, str(key or ""), self.cache_users)
+            answer = {"ok": True, "freed_bytes": freed}
+        except CacheRefused as e:
+            answer = {"ok": False, "code": e.code, "reason": str(e), "in_use": e.users}
+        except (CacheError, OSError) as e:
+            log.warning("Could not remove %s from the model cache: %s", "the partial downloads" if partial else key, e)
+            answer = {"ok": False, "code": "failed", "reason": f"could not remove it: {e}"[:400]}
+        answer["model_cache"] = await asyncio.to_thread(self.models.info)
+        return answer
 
     async def logs(self, replica_id: str, lines: int) -> dict:
         rec = self.records.get(replica_id)
@@ -241,6 +333,7 @@ class Supervisor:
         tasks are gone."""
         for event in self.cancels.values():
             event.set()
+        await self.prefetch.close()
         tasks = list(self.ops.values()) + list(self.probes.values())
         for t in tasks:
             t.cancel()
@@ -248,10 +341,27 @@ class Supervisor:
         for rid in list(self.guards):
             await self._close_guard(rid)
 
-    async def settle(self) -> None:
-        """Wait for every operation in flight (tests)."""
-        while self.ops or any(not p.done() for p in self.probes.values()):
-            await asyncio.gather(*self.ops.values(), *self.probes.values(), return_exceptions=True)
+    async def settle(self, timeout: float = 60.0) -> None:
+        """Wait for every operation in flight (tests). It fails instead of waiting for ever: after
+        `timeout` seconds with the operations still running and where each one is, and at once when a
+        finished operation stays listed (it would keep this loop turning)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            pending = [t for t in (*self.ops.values(), *self.probes.values(), *self.prefetch.tasks()) if not t.done()]
+            if not pending:
+                for _ in range(3):  # the done callbacks that take finished operations off self.ops
+                    await asyncio.sleep(0)
+                if any(not t.done() for t in (*self.ops.values(), *self.probes.values(), *self.prefetch.tasks())):
+                    continue
+                if self.ops:
+                    raise RuntimeError(f"settle: finished operations are still listed: {sorted(self.ops)}")
+                return
+            left = deadline - loop.time()
+            if left <= 0:
+                raise TimeoutError(f"settle: still running after {timeout:g} s:\n"
+                               + _where(self.ops, {**self.probes, **{f"download {j.id}": j.task for j in self.prefetch.jobs.values() if j.task is not None}}))
+            await asyncio.wait(pending, timeout=left)
 
     def _save(self, rec: Record) -> None:
         if rec.id in self.records:
@@ -418,6 +528,9 @@ class Supervisor:
             done = min(done, total)  # never "14.54 of 12.93 GiB": a safety net, the cache counts each byte once
         rec.download = {"phase": phase, "done": done, "total": total, **({"file": file} if file else {})}
         what = "the model" if phase == "model" else "the engine"
+        if rec.id in self.via_server:
+            rec.download["via"] = "server"
+            what += " through the server"
         if total:
             rec.reason = f"downloading {what}: {done / 1024**3:.2f} of {total / 1024**3:.2f} GiB ({100 * done // total}%)"
         else:
@@ -435,16 +548,24 @@ class Supervisor:
         def progress(phase, done, total, file):
             loop.call_soon_threadsafe(self._progress, rec.id, phase, done, total, file)
 
+        def via(how: str) -> None:
+            if how == "server":
+                loop.call_soon_threadsafe(self.via_server.add, rec.id)
+
+        relays = self.relays.get(rec.id) or {}
         try:
             if rec.engine is not None:
-                exe = await asyncio.to_thread(self.models.ensure_engine, rec.engine, progress=progress, cancel=cancel)
+                exe = await asyncio.to_thread(self.models.ensure_engine, rec.engine, progress=progress, cancel=cancel,
+                                              relay=relays.get("engine"), via=via)
                 rec.engine_path = str(exe)
+                self.via_server.discard(rec.id)  # the model may come another way
             if rec.model is not None:
                 if not self.models.is_cached(rec.model) and self.models.busy(cache_key(rec.model)):
                     rec.reason = "waiting for another replica's download of the same model"
                     self._notify(rec)
                 rec.paths = await asyncio.to_thread(self.models.ensure_model, rec.model, token=self.tokens.get(rec.id),
-                                                    progress=progress, cancel=cancel)
+                                                    progress=progress, cancel=cancel, relay=relays.get("model"),
+                                                    via=via)
         except Cancelled:
             rec.state, rec.reason, rec.download = "pending", self.cancelled.get(rec.id, "cancelled"), None
             return False
@@ -457,9 +578,35 @@ class Supervisor:
             raise
         finally:
             self.cancels.pop(rec.id, None)
+            self.via_server.discard(rec.id)
             self.cache_dirty = True
         rec.download = None
         return True
+
+    def image_relay(self, found: Optional[dict]):
+        """An engine image through the server (1.4 PR 4, agent/imagerelay.py), when the desired list allows it and
+        this agent has a model cache to stage it in and a client to its server; else None."""
+        client = getattr(self.models, "relay_client", None) if self.models is not None else None
+        if found is None or client is None:
+            return None
+        from forgeyard.agent.imagerelay import ImageRelay
+
+        return ImageRelay(found["path"], found["mode"], client, self.models)
+
+    def can_relay_images(self) -> bool:
+        """The agent may say "relay_images": a client to its server, a model cache, and a container engine."""
+        rt = self.runtimes.get("container")
+        return (self.models is not None and getattr(self.models, "relay_client", None) is not None
+                and rt is not None and hasattr(rt, "load") and bool(rt.info().get("ok")))
+
+    def can_load_images(self) -> bool:
+        rt = self.runtimes.get("container")
+        return rt is not None and hasattr(rt, "load_upload") and bool(rt.info().get("ok"))
+
+    async def load_upload(self, opened, size: Optional[int], cancel: threading.Event) -> list[dict]:
+        """1.4 ("image_load"): an image file an admin uploaded, loaded into the container engine."""
+        rt = self.runtimes.get("container")
+        return await asyncio.to_thread(rt.load_upload, opened, size, cancel)
 
     def _pull_progress(self, rec_id: str, snap: dict) -> None:
         rec = self.records.get(rec_id)
@@ -477,6 +624,8 @@ class Supervisor:
                         "layers_done": int(snap.get("layers_done") or 0)}
             if snap.get("unpacking"):
                 download["unpacking"] = True
+            if snap.get("via") == "server":
+                download["via"] = "server"  # 1.4: through the server's relay
             reason = describe(snap)
         if (rec.reason, rec.download) != (reason, download):
             rec.reason, rec.download = reason, download
@@ -495,8 +644,12 @@ class Supervisor:
         def progress(snap: dict) -> None:
             loop.call_soon_threadsafe(self._pull_progress, rec.id, dict(snap))
 
+        through = self.image_relay((self.relays.get(rec.id) or {}).get("image"))
         try:
-            await asyncio.to_thread(rt.pull, rec, progress, cancel)
+            if through is not None:
+                await asyncio.to_thread(rt.pull, rec, progress, cancel, through)
+            else:
+                await asyncio.to_thread(rt.pull, rec, progress, cancel)
         except PullCancelled:
             rec.state, rec.reason, rec.download = "pending", self.cancelled.get(rec.id, "cancelled"), None
             log.info("Replica %s of %s: image pull %s.", rec.id[:12], rec.workload, rec.reason)
@@ -543,6 +696,21 @@ class Supervisor:
         return rec.guarded or rec.key_env is not None
 
     async def _start(self, rec: Record) -> None:
+        """Start the replica; an unexpected error on the way (a bug, a missing module) ends this attempt with that
+        error as its reason, shown in the console, and the usual backoff follows. Without this the replica was
+        left "starting" with no process or container, and the next pass reported it as "ended while the agent was
+        not watching": the real error was only in the agent's log."""
+        try:
+            await self._start_steps(rec)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - shown, never fatal
+            log.exception("Replica %s of %s: the agent failed while starting it.", rec.id[:12], rec.workload)
+            if rec.id in self.records and rec.state in LIVE:
+                text = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                await self._ended(rec, None, reason=f"the agent failed while starting it ({text})"[:300])
+
+    async def _start_steps(self, rec: Record) -> None:
         rt = self.runtimes[rec.runtime]
         if self._guarded(rec) and rec.id not in self.keys:
             # Its internal key comes with the server's next `desired` (an agent restarted while the

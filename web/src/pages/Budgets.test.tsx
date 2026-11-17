@@ -139,12 +139,35 @@ describe("budgets on Usage → Cost", () => {
     expect(within(panel).getByText(/ursula's budget is used up: it keeps requests local until December 1/)).toBeTruthy();
     expect(within(panel).getByText(/The budget of the key laptop \(ursula\) is past 80%/)).toBeTruthy();
     expect(within(panel).getByRole("meter", { name: /Budget of the provider openai/ }).getAttribute("aria-valuenow")).toBe("12");
-    expect(within(panel).getByRole("link", { name: "openai" }).getAttribute("href")).toBe("/providers/3");
+    expect(within(panel).getByRole("link", { name: "openai" }).getAttribute("href")).toBe("/cloud/providers/3");
     fireEvent.click(within(panel).getByRole("button", { name: "Set budget" }));
     fireEvent.change(within(panel).getByLabelText("Monthly budget of owner (USD)"), { target: { value: "50" } });
     fireEvent.click(within(panel).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(puts).toEqual([["/api/budgets/people/1", { budget_micros: 50_000_000 }]]));
     expect(fetch.mock.calls.some(([u]) => u === "/api/budgets")).toBe(true);
+  });
+
+  it("FY-WEB-218 a revoked key leaves the budget list and its warnings (1.4)", async () => {
+    const revoked = { id: "k2", name: "old-laptop", prefix: "fyk_ZzZzZzZz", status: "revoked", user: { id: 2, username: "ursula" },
+      locked_by: null, ...B(1_000_000, 1_000_000, "exhausted" as const) };
+    server((url) => {
+      if (url.startsWith("/api/budgets")) return { status: 200, body: { ...budgets(), keys: [...budgets().keys, revoked] } };
+      if (url.startsWith("/api/usage")) return { status: 200, body: usage() };
+    });
+    mount("/usage");
+    fireEvent.click(await screen.findByRole("tab", { name: "Cost" }));
+    const panel = (await screen.findByRole("heading", { name: "Budgets this month" })).closest("section") as HTMLElement;
+    expect(within(panel).getByRole("meter", { name: /Budget of the key laptop/ })).toBeTruthy();
+    expect(within(panel).queryByText(/old-laptop/)).toBeNull();
+    expect(within(panel).queryByRole("meter", { name: /Budget of the key old-laptop/ })).toBeNull();
+    cleanup();
+    const gone = key({ id: "k2", name: "old-laptop", status: "revoked", revoked_at: "2026-11-12T00:00:00Z", revoked_by: "owner",
+      budget: B(1_000_000, 1_000_000, "exhausted") });
+    server((url) => (url.startsWith("/api/keys") ? { status: 200, body: keys({ keys: [key(), gone] }) } : undefined), USER);
+    mount("/keys");
+    expect(await screen.findByRole("meter", { name: /Budget of laptop/ })).toBeTruthy();
+    expect(screen.queryByRole("meter", { name: /Budget of old-laptop/ })).toBeNull();
+    expect(screen.queryByText(/old-laptop \(fyk_AbCdEfGh…\): budget/)).toBeNull();
   });
 
   it("people who are not admins see their own budgets and cannot set them", async () => {
@@ -184,7 +207,7 @@ describe("budgets on a provider", () => {
       if (url === "/api/providers/3") return { status: 200, body: { provider: PROVIDER, kinds: KINDS, egress: EGRESS, is_admin: true } };
       if (url === "/api/providers") return { status: 200, body: { providers: [PROVIDER], kinds: KINDS, egress: EGRESS, is_admin: true } };
     });
-    mount("/providers/3");
+    mount("/cloud/providers/3");
     const panel = (await screen.findByRole("heading", { name: "Monthly budget" })).closest("section") as HTMLElement;
     expect(within(panel).getByText(/budget is used up: openai is skipped/)).toBeTruthy();
     expect(within(panel).getByText("$20.00 of $20.00")).toBeTruthy();
@@ -192,7 +215,7 @@ describe("budgets on a provider", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Save budget" }));
     await waitFor(() => expect(puts).toEqual([["/api/budgets/providers/3", { budget_micros: null }]]));
     cleanup();
-    mount("/providers");
+    mount("/cloud");
     const row = (await screen.findByRole("link", { name: "openai" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("budget used up")).toBeTruthy();
   });

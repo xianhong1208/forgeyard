@@ -40,7 +40,6 @@ from forgeyard.db import ApiKey, Deployment, GatewayRoute, Workload, as_utc, get
 from forgeyard.models import routes as mroutes
 from forgeyard.gateway import budgets as gbudgets, keys as gkeys, usage as gusage
 from forgeyard.gateway.limits import key_limiter
-from forgeyard.workloads import expose as wexpose
 
 router = APIRouter(prefix="/api", tags=["keys"])
 
@@ -172,13 +171,6 @@ def _workloads(db: DbSession, level: Optional[str], names: Optional[list[str]]) 
     return level, clean
 
 
-def workload_choices(db: DbSession) -> list[dict]:
-    """The service workloads a key's list can name, and whether each is exposed now."""
-    rows = db.scalars(select(Workload).where(Workload.runtime != "model", Workload.kind == "service")
-                      .order_by(Workload.name)).all()
-    return [{"name": w.name, "exposed": wexpose.of(w) is not None, "path": wexpose.url_path(w.name)} for w in rows]
-
-
 def _get(db: DbSession, key_id: str, caller: Caller) -> ApiKey:
     k = db.scalar(select(ApiKey).where(ApiKey.public_id == key_id).options(selectinload(ApiKey.user)))
     # Someone else's key is "not found" for a non-admin: they cannot even learn that it exists.
@@ -219,7 +211,7 @@ def list_keys(request: Request, all: bool = Query(default=False), caller: Caller
                                         spend.held.get(("person", me.id), 0)),
             "cloud": gkeys.get_cloud(db), "gateway_url": gateway_url(request), "trust_url": trust_page(request),
             "models": [{"name": r.served_name, "api": r.api, "kind": mroutes.route_kind(r)} for r in rows],
-            "workloads": workload_choices(db), **({"env_seeds": _env_seeds(db)} if admin else {})}
+            **({"env_seeds": _env_seeds(db)} if admin else {})}
 
 
 def _env_seeds(db: DbSession) -> dict:
@@ -383,6 +375,31 @@ def get_usage(days: int = Query(default=7, ge=1, le=366), group: str = Query(def
     admin = caller.user.role == "admin"
     scope_user = None if (everyone and admin) else caller.user.id
     out = gusage.summary(db, days=days, user_id=scope_user, group_by=group)
+    out["everyone"] = scope_user is None
+    out["is_admin"] = admin
+    return out
+
+
+@router.get("/usage/series")
+def get_usage_series(step: str = Query(default="day"), periods: int = Query(default=30, ge=1),
+                     split: str = Query(default="none"), metric: str = Query(default="requests"),
+                     everyone: bool = Query(default=False), caller: Caller = Depends(current),
+                     db: DbSession = Depends(get_db)):
+    """Usage over time for the Usage page's charts (1.4): one value per day, week or month, in total or
+    per key, model, provider or person. Whose usage follows GET /api/usage: your own, or everyone's
+    for admins with ?everyone=true."""
+    if step not in gusage.STEPS:
+        raise fail(422, "bad_step", f"step: one of {', '.join(gusage.STEPS)}")
+    if split not in gusage.SPLITS:
+        raise fail(422, "bad_split", f"split: one of {', '.join(gusage.SPLITS)}")
+    if metric not in gusage.SERIES_METRICS:
+        raise fail(422, "bad_metric", f"metric: one of {', '.join(gusage.SERIES_METRICS)}")
+    if periods > gusage.MAX_PERIODS[step]:
+        raise fail(422, "too_many_periods", f"periods: at most {gusage.MAX_PERIODS[step]} for step={step}")
+    gusage.recorder.flush()
+    admin = caller.user.role == "admin"
+    scope_user = None if (everyone and admin) else caller.user.id
+    out = gusage.series(db, step=step, periods=periods, split=split, metric=metric, user_id=scope_user)
     out["everyone"] = scope_user is None
     out["is_admin"] = admin
     return out

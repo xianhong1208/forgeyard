@@ -1,12 +1,21 @@
 import { bytes } from "./machines";
-import type { CatalogModel, Deployment, Medium, Recipe, Replica, Task } from "./types";
+import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task } from "./types";
 
-export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video" };
+// Anything with a download in progress: a replica (M3, 1.3.1) or a download ahead of a deployment (1.4).
+type WithDownload = { download?: DownloadProgress | null };
+
+export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video",
+  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation" };
+
+// 1.4: the tasks of vision models, and the licences they are added with (as the server checks).
+export const VISION_TASKS: Task[] = ["detect", "segment", "depth"];
+export const PERMISSIVE = ["apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause"];
 
 export const API_LABEL: Record<string, string> = {
   "openai-chat": "/v1/chat/completions", "openai-embeddings": "/v1/embeddings", rerank: "/v1/rerank",
   "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
   "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
+  "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment", "vision-depth": "/v1/vision/depth",
 };
 
 export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };
@@ -28,17 +37,24 @@ export function params(n: number | undefined): string {
 }
 
 // "downloading the model: 1.2 of 7.5 GiB (16%)" as a fraction for a bar (never past the end).
-export function downloadFraction(r: Replica): number | null {
+export function downloadFraction(r: WithDownload): number | null {
   const d = r.download;
   if (!d || !d.total) return null;
   return Math.max(0, Math.min(1, d.done / d.total));
 }
 
 // What the bar says: a model or engine download, or an image pull (1.3.1). Never more than the total.
-export function downloadText(r: Replica): string | null {
+export function downloadText(r: WithDownload): string | null {
   const d = r.download;
   if (!d) return null;
   const done = d.total ? Math.min(d.done, d.total) : d.done;
+  if (d.phase === "image" && d.via === "server") {
+    // 1.4: a pinned image through the server's relay, layer by layer, then loaded into the engine.
+    const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
+    if (d.unpacking) return `Pulling the image via the server: loading it${d.layers ? `, ${d.layers} layers` : ""}`;
+    if (d.total) return `Pulling the image via the server: ${bytes(done)} of ${bytes(d.total)}${layers ? `, ${layers}` : ""}`;
+    return layers ? `Pulling the image via the server: ${layers}` : "Pulling the image via the server";
+  }
   if (d.phase === "image") {
     const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
     if (d.unpacking) return `Pulling the image: unpacking, ${layers}`;
@@ -46,7 +62,8 @@ export function downloadText(r: Replica): string | null {
     if (done && layers) return `Pulling the image: ${bytes(done)}, ${layers}`;
     return layers ? `Pulling the image: ${layers}` : "Pulling the image";
   }
-  const what = d.phase === "engine" ? "engine" : "model";
+  // 1.4: through the server's relay, for a machine that cannot reach the source itself.
+  const what = `${d.phase === "engine" ? "engine" : "model"}${d.via === "server" ? " via the server" : ""}`;
   return d.total ? `Downloading the ${what}: ${bytes(done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(done)}`;
 }
 
@@ -155,4 +172,40 @@ export function editBody(f: EditForm, recipe: Recipe): Record<string, unknown> {
   const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
   p.extra_args = extra.length ? extra : null;
   return { params: p, replicas: Number(f.replicas || "1"), machine_id: f.machine ? Number(f.machine) : null };
+}
+
+// ---------------------------------------------------------------- the catalog's source line (1.4, #92)
+const QUANT = /(?:^|[-_.])(i?q\d+(?:_[a-z0-9]+)*|bf16|fp16|f16|f32|fp8|mxfp4(?:_moe)?)$/i;
+const MAX_STEM = 28;
+
+// The quantisation a GGUF file name ends with (Q4_K_M, IQ4_XS, Q8_0, F16, BF16…), split parts
+// (-00001-of-00003) ignored; else the file's stem, shortened.
+export function quantTag(file: string): string {
+  const base = file.split("/").pop() ?? file;
+  const stem = base.replace(/\.gguf$/i, "").replace(/-\d{5}-of-\d{5}$/i, "");
+  const m = QUANT.exec(stem);
+  if (m) return m[1].toUpperCase();
+  return stem.length > MAX_STEM ? `${stem.slice(0, MAX_STEM - 1)}…` : stem;
+}
+
+// The short source under a catalog model's name: the repository (and the quantisation of a single
+// file), a URL's host and file, a local directory's name and file. `full` is everything, for a tooltip.
+export function shortSource(m: Pick<CatalogModel, "kind" | "source" | "file" | "revision" | "mmproj">): { text: string; full: string } {
+  const full = [m.source, m.file, m.mmproj ? `+ ${m.mmproj.path}` : null].filter(Boolean).join(" · ") + (m.revision ? ` @ ${m.revision}` : "");
+  if (m.kind === "url") {
+    let host = m.source;
+    let name = m.file ?? "";
+    try {
+      const u = new URL(m.source);
+      host = u.hostname;
+      name = name || decodeURIComponent(u.pathname.split("/").pop() ?? "");
+    } catch { /* keep the source as it is */ }
+    return { text: name ? `${host} · ${name}` : host, full };
+  }
+  if (m.kind === "local") {
+    const dir = m.source.replace(/^local:\/\//, "").replace(/\/+$/, "").split("/").pop() ?? m.source;
+    return { text: m.file ? `${dir} · ${m.file.split("/").pop()}` : dir, full };
+  }
+  const repo = m.source.replace(/^hf:\/\//, "");
+  return { text: m.file ? `${repo} · ${quantTag(m.file)}` : repo, full };
 }

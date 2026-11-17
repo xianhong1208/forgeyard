@@ -13,7 +13,7 @@ from typing import Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from forgeyard.models import recipes, sources
+from forgeyard.models import recipes, sources, vision
 
 FILE = Path(__file__).with_name("recommended.yaml")
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
@@ -46,7 +46,7 @@ class Entry(BaseModel):
     file: Optional[str] = None
     mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video"]
+    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video", "detect", "segment", "depth"]
     format: Literal["safetensors", "gguf", "ctranslate2", "onnx", "diffusers"]
     recipe: str
     device: Literal["gpu", "cpu"] = "gpu"
@@ -111,10 +111,12 @@ def check(data: dict) -> Recommended:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
-        if e.task in ("tts", "image", "video") and (e.revision is None or not sources.REVISION_RE.match(e.revision)):
+        if e.task in ("tts", "image", "video") + vision.TASKS and (e.revision is None
+                                                                  or not sources.REVISION_RE.match(e.revision)):
             # 1.3: speech, image and video models are pinned to a commit here, so the voices, the component
-            # files and the measured memory stay those of the files that were checked.
-            what = {"tts": "text-to-speech", "image": "image", "video": "video"}[e.task]
+            # files and the measured memory stay those of the files that were checked; 1.4: vision models
+            # too (the revisions the 1.3 templates bake in).
+            what = {"tts": "text-to-speech", "image": "image", "video": "video"}.get(e.task, "vision")
             raise RecommendedError(f"{where}: a {what} entry is pinned to a commit (revision: 40 hex characters)")
         if e.components:
             if e.task != "image" or e.format not in ("gguf", "safetensors"):
@@ -135,6 +137,8 @@ def check(data: dict) -> Recommended:
                 raise RecommendedError(f"{where}: license_from: {err}") from None
         if e.license not in ALLOWED_LICENSES:
             raise RecommendedError(f"{where}: the licence {e.license!r} is not one the recommended list may hold")
+        if e.task in vision.TASKS and e.license not in vision.PERMISSIVE:
+            raise RecommendedError(f"{where}: a vision model has a permissive licence ({', '.join(vision.PERMISSIVE)})")
         if e.mmproj is not None:
             if e.format != "gguf":
                 raise RecommendedError(f"{where}: only a GGUF entry names a projector (mmproj) file")

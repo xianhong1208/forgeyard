@@ -35,6 +35,7 @@ from tests.cloud_helpers import FakeCloud, add_provider, deployment_id, model_id
 from tests.gateway_helpers import LiveServer, api_client, make_ready, new_key
 from tests.model_helpers import add_catalog
 from tests.test_scheduler import MODELS, deploy, replica_row
+from tests.waits import wait_until
 from tests.workload_helpers import make_node
 
 FEATURES = MODELS + ("replica_keys", "replica_guard", "engine_zip")
@@ -415,10 +416,16 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
             except httpx.TimeoutException:
                 results[name] = ("gave up", None, None, time.monotonic())
 
+        def at_the_engine(name: str) -> threading.Thread:
+            # Started, and on the engine: only then is the next one second (a fixed sleep was not enough on
+            # a busy CI machine, where the second request sometimes got to the replica first).
+            t = threading.Thread(target=call, args=(name,))
+            t.start()
+            wait_until(lambda: name in [b["prompt"] for b in img.engines["sd"].bodies()], f"{name} on the engine")
+            return t
+
         t0 = time.monotonic()
-        threads = [threading.Thread(target=call, args=(f"p{i}",)) for i in range(2)]
-        threads[0].start()
-        time.sleep(0.2)
+        threads = [at_the_engine("p0"), threading.Thread(target=call, args=("p1",))]
         threads[1].start()
         for t in threads:
             t.join()
@@ -432,9 +439,7 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
             db.commit()
         finally:
             db.close()
-        threads = [threading.Thread(target=call, args=(f"q{i}",)) for i in range(2)]
-        threads[0].start()
-        time.sleep(0.2)
+        threads = [at_the_engine("q0"), threading.Thread(target=call, args=("q1",))]
         threads[1].start()
         for t in threads:
             t.join()
@@ -450,9 +455,9 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
         finally:
             db.close()
         seen = len(img.engines["sd"].bodies())
-        first = threading.Thread(target=call, args=("r0",))
-        first.start()
-        time.sleep(0.2)
+        img.engines["sd"].hold = 2.0      # r1 gives up (0.3 s) and leaves well before r0 is done
+        first = at_the_engine("r0")
+        img.engines["sd"].hold = 0.8
         call("r1", timeout=0.3)
         first.join()
         assert results["r1"][0] == "gave up" and results["r0"][0] == 200
