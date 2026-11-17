@@ -500,7 +500,7 @@ def _span(rng: Optional[str], size: int) -> Optional[tuple[int, int]]:
         return None
     first = int(m.group(1))
     last = min(int(m.group(2)), size - 1) if m.group(2) is not None else size - 1
-    if first >= size or last < first:
+    if last < first:  # (also a first byte at or past the end)
         return None
     return first, last - first + 1
 

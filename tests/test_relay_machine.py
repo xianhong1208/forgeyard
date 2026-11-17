@@ -517,10 +517,10 @@ def test_fy_rfm_006_who_may_send_a_file(owner):
         for n in ("a", "b", "gone", "url", "t"):
             hub.attach(Connection(nodes[n], loop=loop, features=["relay_source"]))
         hub.attach(Connection(nodes["old"], loop=loop, features=["relay"]))
+        set_node(nodes["t"], model_cache={"ok": True, "cached": [base]})  # the target never sends to itself
         db = new_session()
         try:
             target = db.get(Node, nodes["t"])
-            set_node(nodes["t"], model_cache={"ok": True, "cached": [base]})
             copy = peers.file_copy(db, target, hf_block("https://huggingface.co"), "m.gguf")
             assert copy.item["blob"] == hashlib.sha256(DATA).hexdigest() and copy.algo == "sha256"
             assert [c.name for c in peers.ranked(copy.candidates)] == ["b", "a"]

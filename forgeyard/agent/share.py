@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Optional
 
 from forgeyard.agent import relay as relay_client
-from forgeyard.agent.models import URL_DIR_RE, CacheError, ModelCache, _hex
+from forgeyard.agent.models import CacheError, ModelCache, _hex
 from forgeyard.models import fetch, sources
 
 log = logging.getLogger("forgeyard.agent")
@@ -101,7 +101,7 @@ def find(cache: ModelCache, item: dict) -> tuple[Path, int, str, str, str]:
         return path, size, "sha256" if len(blob) == 64 else "oid", blob, "repo:" + base_rel
     if item.get("kind") == "url":
         d, sha = str(item.get("dir") or ""), _hex(item.get("sha256"), 64)
-        if not URL_DIR_RE.match(d) or not sha:
+        if not sha:
             raise SendRefused("not_found", "not a model file")
         entry = next((e for e in cache._entries() if e["key"] == f"url/{d}"), None)
         if entry is None or entry.get("sha256") != sha or not entry.get("file") or "/" in entry["file"]:
