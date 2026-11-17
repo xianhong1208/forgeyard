@@ -77,7 +77,7 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
 - **Model directory on that machine**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **Machine name**（選填）：這台機器在 **Machines** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
 - **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`；`PUBLIC_URL` 空白時，則是你開啟這個頁面時使用的位址）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
-- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。
+- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。應用程式每公開一個連接埠就佔用範圍內的一個連接埠；模型副本（或公開在 `/x/` 的應用程式）佔用兩個：一個給 agent 的金鑰守衛，一個給守衛後面的引擎。Forgeyard 會計算這些連接埠，所以 3 個連接埠的範圍只放得下一個模型：範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
 
 欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的 tag 就是伺服器自己的版本，所以 agent 和伺服器的版本永遠一致。管理員可以用 [`AGENT_IMAGE`](reference.md#machines) 讓指令改用鏡像站、私有 registry 或指定的 digest。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
 

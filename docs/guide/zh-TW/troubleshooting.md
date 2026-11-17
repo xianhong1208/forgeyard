@@ -205,6 +205,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | 這是 CPU 模型，而可用的 RAM 不夠 |
 | `no container runtime (…)` | recipe 需要 Docker 或 Podman，但這台機器沒有 |
 | `its agent does not serve models` | 這個 agent 沒有設定模型快取（設定裡的 `[models] cache`） |
+| `no free port: 3 of 3 in use (host ports 33000-33002)` | 這台機器的[連接埠範圍](#a-replica-waits-no-free-host-port)都被它的副本佔用了 |
 | `offline` | 這台機器的 agent 沒有連線 |
 
 **做法：** 釋出卡上的記憶體（停掉某些東西）、允許更多卡（[GPU 存取權](how-to.md#restrict-gpus-on-a-shared-machine)）、降低上下文長度或並行數、選擇量化過或較小的模型，或者先部署，讓它等到有空間為止（API 的 `"wait": true`）。
@@ -218,6 +219,20 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 缺少副本需要的功能而把它丟掉的 agent，或卡住的 agent，也會這樣。
 
 **怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。agent 已經是伺服器的版本時，訊息會請你重新啟動它並查看它的紀錄（`journalctl -u forgeyard-agent`，或 `docker logs forgeyard-agent`）。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
+
+## 副本在等待：沒有空的主機連接埠
+
+**你會看到：** 副本沒有被放到任何機器上，部署或應用程式頁面顯示 *Cannot be placed: gpu-02: no free port: 3 of 3 in use (host ports 33000-33002)*，或 *not enough free ports: 2 of 3 in use, it needs 2*。部署預覽中那台機器也會顯示同樣的一行。
+
+**原因：** agent 用它連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠公開服務和模型副本。模型副本佔用兩個（agent 的金鑰守衛聽一個，引擎聽另一個），應用程式每公開一個連接埠佔用一個（公開在 `/x/` 時是兩個）。伺服器會計算機器上副本已佔用的連接埠，並略過沒有足夠空連接埠的機器，就像略過記憶體不夠的機器一樣，而不是把副本送到只能在那裡等待的地方。透過 SSH tunnel 連線的機器常有很小的範圍，因為範圍內的每個連接埠都要轉送。1.4.2 之前的 agent 不會回報它的範圍，它們的連接埠不會被計算。
+
+agent 給不出連接埠的副本（在伺服器開始計算連接埠之前就被放上去的）會回報 *no free host port left in 33000-33002*。如果伺服器的計算也這麼認為，就把它從那台機器拿下來：它會被放到有空間的機器，或帶著上面的原因等待。如果計算結果還有空間，代表 Forgeyard 以外的程式佔用了範圍內的連接埠：agent 會跳過它們，並在 backoff 後再試一次。
+
+**做法：** 停掉那台機器上的某些東西、部署到別台機器，或給 agent 更大的範圍（並轉送或開放那些連接埠，讓伺服器連得到），然後重新啟動 agent：
+
+```bash
+sudo forgeyard agent runtimes   # the last line shows the range the agent uses
+```
 
 ## 來自 /v1 的錯誤：401、403、429、503
 

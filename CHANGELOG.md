@@ -6,6 +6,18 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- Placement counts a machine's free host ports (#125). The agent reports its port range
+  (`FORGEYARD_PORT_RANGE`) in its hello (`runtime_info.ports`; older servers drop it), and the server counts
+  the ports its replicas hold there: one per published port, two behind the agent's key guard (every model
+  replica, an app exposed at `/x/`). A machine without enough free ports is skipped like one without memory,
+  and the plan says why (*no free port: 3 of 3 in use (host ports 33000-33002)*); a replica with nowhere
+  else to go waits unplaced with that reason instead of restarting in backoff on the machine. A replica the
+  agent reports with *no free host port left* is taken off the machine when the server's count agrees.
+  Agents older than 1.4.2 report no range and are not counted, as before. `forgeyard agent runtimes` shows
+  the range. No setting and no migration.
+
 ## [1.4.1] — 2026-11-17
 
 A patch release for machines without internet. A machine that gets its files through the server now gets a
