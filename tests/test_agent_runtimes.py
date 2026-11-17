@@ -1,5 +1,5 @@
 """The agent's runtimes: environment and GPU isolation, the process rules, containers through a
-fake docker CLI (FY-RT-*)."""
+fake docker CLI (FY-ART-*)."""
 
 import asyncio
 import json
@@ -26,8 +26,8 @@ def amd_card(index=1, rocr="GPU-9e3f2a1b4c5d6e7f", minor=129):
 
 
 # ------------------------------------------------------------------ GPU variables
-def test_fy_rt_001_process_gets_only_its_nvidia_card_by_uuid():
-    """FY-RT-001"""
+def test_fy_art_001_process_gets_only_its_nvidia_card_by_uuid():
+    """FY-ART-001"""
     env = plan.gpu_env([A100[4]], "process")
     assert env["CUDA_VISIBLE_DEVICES"] == A100[4]["uuid"] == env["NVIDIA_VISIBLE_DEVICES"]
     assert env["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
@@ -38,8 +38,8 @@ def test_fy_rt_001_process_gets_only_its_nvidia_card_by_uuid():
     assert plan.gpu_env([no_uuid], "process")["CUDA_VISIBLE_DEVICES"] == "3"
 
 
-def test_fy_rt_002_no_gpus_means_every_list_is_empty():
-    """FY-RT-002"""
+def test_fy_art_002_no_gpus_means_every_list_is_empty():
+    """FY-ART-002"""
     env = plan.gpu_env([], "process")
     assert env == {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "", "NVIDIA_VISIBLE_DEVICES": "void",
                    "ROCR_VISIBLE_DEVICES": "", "HIP_VISIBLE_DEVICES": ""}
@@ -47,16 +47,16 @@ def test_fy_rt_002_no_gpus_means_every_list_is_empty():
                                              "ROCR_VISIBLE_DEVICES": "", "HIP_VISIBLE_DEVICES": ""}
 
 
-def test_fy_rt_003_amd_uses_rocr_uuids_and_renumbers_hip():
-    """FY-RT-003"""
+def test_fy_art_003_amd_uses_rocr_uuids_and_renumbers_hip():
+    """FY-ART-003"""
     env = plan.gpu_env([amd_card(1), amd_card(3, rocr="GPU-0000000000000abc", minor=131)], "process")
     assert env["ROCR_VISIBLE_DEVICES"] == "GPU-9e3f2a1b4c5d6e7f,GPU-0000000000000abc"
     assert env["HIP_VISIBLE_DEVICES"] == "0,1" and env["CUDA_VISIBLE_DEVICES"] == ""
     assert plan.gpu_env([amd_card(2, rocr=None)], "process")["ROCR_VISIBLE_DEVICES"] == "2"
 
 
-def test_fy_rt_004_process_env_starts_empty():
-    """FY-RT-004: only the basics, the declared variables, GPUs, ports and identity."""
+def test_fy_art_004_process_env_starts_empty():
+    """FY-ART-004: only the basics, the declared variables, GPUs, ports and identity."""
     env = plan.process_env({"GREETING": "hi", "PATH": "/opt/x:/usr/bin"}, [A100[4]],
                            [{"name": "http", "host_port": 31000, "port": None}], home="/w/r1", user="nobody",
                            replica_id="r1", workload="web", ordinal=0)
@@ -73,8 +73,8 @@ def _proc(tmp_path, **kw):
     return ProcessRuntime(RecordStore(tmp_path / "state"), tmp_path / "work", **kw)
 
 
-def test_fy_rt_005_root_agent_without_workload_user_refuses_processes(tmp_path):
-    """FY-RT-005"""
+def test_fy_art_005_root_agent_without_workload_user_refuses_processes(tmp_path):
+    """FY-ART-005"""
     rt = _proc(tmp_path, euid=lambda: 0)
     assert rt.info()["ok"] is False and "--workload-user" in rt.info()["reason"]
     assert _proc(tmp_path, euid=lambda: 0, workload_user="root").info()["reason"] == "--workload-user must not be root"
@@ -87,8 +87,8 @@ def test_fy_rt_005_root_agent_without_workload_user_refuses_processes(tmp_path):
     assert "needs a root agent" in _proc(tmp_path, limits="systemd").info()["reason"]
 
 
-def test_fy_rt_006_a_refused_runtime_never_starts_anything(tmp_path):
-    """FY-RT-006: the supervisor reports the reason and starts nothing."""
+def test_fy_art_006_a_refused_runtime_never_starts_anything(tmp_path):
+    """FY-ART-006: the supervisor reports the reason and starts nothing."""
     rt = _proc(tmp_path, euid=lambda: 0)
 
     async def scenario():
@@ -101,8 +101,8 @@ def test_fy_rt_006_a_refused_runtime_never_starts_anything(tmp_path):
     asyncio.run(scenario())
 
 
-def test_fy_rt_007_no_agent_env_leaks_into_a_process(tmp_path, monkeypatch):
-    """FY-RT-007: a real process prints its environment: nothing of the agent's is there."""
+def test_fy_art_007_no_agent_env_leaks_into_a_process(tmp_path, monkeypatch):
+    """FY-ART-007: a real process prints its environment: nothing of the agent's is there."""
     monkeypatch.setenv("FY_AGENT_SECRET", "s3cr3t")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws")
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1,2,3,4,5,6,7")
@@ -126,8 +126,8 @@ def test_fy_rt_007_no_agent_env_leaks_into_a_process(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="switching users needs a root agent")
-def test_fy_rt_008_as_root_processes_run_as_the_workload_user(tmp_path):
-    """FY-RT-008: a real root agent, a real switch to nobody, no supplementary groups."""
+def test_fy_art_008_as_root_processes_run_as_the_workload_user(tmp_path):
+    """FY-ART-008: a real root agent, a real switch to nobody, no supplementary groups."""
     work = world_dir()
     try:
         rt = ProcessRuntime(RecordStore(tmp_path / "state"), work / "work", workload_user="nobody",
@@ -150,8 +150,8 @@ def test_fy_rt_008_as_root_processes_run_as_the_workload_user(tmp_path):
         cleanup_world(work)
 
 
-def test_fy_rt_009_memory_cap_without_gpus_only():
-    """FY-RT-009"""
+def test_fy_art_009_memory_cap_without_gpus_only():
+    """FY-ART-009"""
     assert plan.ulimits(512 * 1024**2, []) == ["-c 0", "-v 524288"]
     assert plan.ulimits(512 * 1024**2, [A100[0]]) == ["-c 0"]
     assert plan.ulimits(None, []) == ["-c 0"]
@@ -162,8 +162,8 @@ def test_fy_rt_009_memory_cap_without_gpus_only():
     assert r.returncode == 7
 
 
-def test_fy_rt_010_systemd_scope_argv():
-    """FY-RT-010: limits in a scope, then setpriv to the workload user."""
+def test_fy_art_010_systemd_scope_argv():
+    """FY-ART-010: limits in a scope, then setpriv to the workload user."""
     argv = plan.systemd_argv("forgeyard-abc-1-1", cpu=2.5, memory=4 * 1024**3, uid=65534, gid=65534, groups=[],
                              inner=["/bin/sh", "-c", "x"])
     assert argv[:5] == ["systemd-run", "--scope", "--quiet", "--collect", "--unit=forgeyard-abc-1-1"]
@@ -173,8 +173,8 @@ def test_fy_rt_010_systemd_scope_argv():
     assert argv[-3:] == ["/bin/sh", "-c", "x"]
 
 
-def test_fy_rt_011_log_trim_and_tail(tmp_path):
-    """FY-RT-011: the pair of files never holds more than the budget; the tail spans both."""
+def test_fy_art_011_log_trim_and_tail(tmp_path):
+    """FY-ART-011: the pair of files never holds more than the budget; the tail spans both."""
     d = tmp_path / "logs"
     d.mkdir()
     with open(d / logs.LOG_NAME, "w") as fh:
@@ -194,8 +194,8 @@ def _ctr(tmp_path, fake: FakeDocker, **kw):
     return ContainerRuntime(RecordStore(tmp_path / "state"), agent_id="agent-1", engine=str(fake.path), **kw)
 
 
-def test_fy_rt_012_detect_engine_and_nvidia_support(tmp_path):
-    """FY-RT-012"""
+def test_fy_art_012_detect_engine_and_nvidia_support(tmp_path):
+    """FY-ART-012"""
     fake = FakeDocker(tmp_path / "bin")
     info = detect(str(fake.path), cdi=lambda: False)
     assert info["ok"] and info["engine"] == "docker" and info["nvidia"] and info["gpu_mode"] == "gpus"
@@ -206,8 +206,8 @@ def test_fy_rt_012_detect_engine_and_nvidia_support(tmp_path):
     assert detect("auto", which=lambda n: None)["reason"] == "docker not found; podman not found"
 
 
-def test_fy_rt_013_container_argv_no_gpu(tmp_path):
-    """FY-RT-013: no --privileged, no-new-privileges, ports on one address, env from a file that
+def test_fy_art_013_container_argv_no_gpu(tmp_path):
+    """FY-ART-013: no --privileged, no-new-privileges, ports on one address, env from a file that
     is gone afterwards, no GPU and NVIDIA_VISIBLE_DEVICES=void."""
     fake = FakeDocker(tmp_path / "bin")
     rt = _ctr(tmp_path, fake)
@@ -234,8 +234,8 @@ def test_fy_rt_013_container_argv_no_gpu(tmp_path):
     assert rec.ports == [{"name": "http", "port": 8000, "host_port": 32000, "address": "10.1.2.3"}]
 
 
-def test_fy_rt_014_container_gets_only_its_gpus(tmp_path):
-    """FY-RT-014: --gpus with the assigned UUID only (or CDI devices); AMD: /dev/kfd plus only
+def test_fy_art_014_container_gets_only_its_gpus(tmp_path):
+    """FY-ART-014: --gpus with the assigned UUID only (or CDI devices); AMD: /dev/kfd plus only
     the assigned render node."""
     fake = FakeDocker(tmp_path / "bin")
     rt = _ctr(tmp_path, fake)
@@ -264,8 +264,8 @@ def test_fy_rt_014_container_gets_only_its_gpus(tmp_path):
     assert devices == ["/dev/kfd", "/dev/dri/renderD129"] and "--gpus" not in run
 
 
-def test_fy_rt_015_nvidia_gpu_without_support_fails_clearly(tmp_path):
-    """FY-RT-015"""
+def test_fy_art_015_nvidia_gpu_without_support_fails_clearly(tmp_path):
+    """FY-ART-015"""
     fake = FakeDocker(tmp_path / "bin")
     fake.info({"ServerVersion": "27", "Runtimes": {"runc": {}}})
     rt = ContainerRuntime(RecordStore(tmp_path / "state"), agent_id="a", engine=str(fake.path),
@@ -280,8 +280,8 @@ def test_fy_rt_015_nvidia_gpu_without_support_fails_clearly(tmp_path):
     assert fake.runs() == []
 
 
-def test_fy_rt_016_failed_pull_is_reported(tmp_path):
-    """FY-RT-016"""
+def test_fy_art_016_failed_pull_is_reported(tmp_path):
+    """FY-ART-016"""
     fake = FakeDocker(tmp_path / "bin")
     rt = _ctr(tmp_path, fake)
 
@@ -296,8 +296,8 @@ def test_fy_rt_016_failed_pull_is_reported(tmp_path):
     assert rec.state == "failed" and "pull access denied" in rec.reason
 
 
-def test_fy_rt_017_logs_from_the_engine(tmp_path):
-    """FY-RT-017"""
+def test_fy_art_017_logs_from_the_engine(tmp_path):
+    """FY-ART-017"""
     fake = FakeDocker(tmp_path / "bin")
     rt = _ctr(tmp_path, fake)
 
@@ -312,8 +312,8 @@ def test_fy_rt_017_logs_from_the_engine(tmp_path):
     assert missing["ok"] is False
 
 
-def test_fy_rt_018_status_report_json_fits_the_protocol(tmp_path):
-    """FY-RT-018: what the agent sends is accepted by the server's message model."""
+def test_fy_art_018_status_report_json_fits_the_protocol(tmp_path):
+    """FY-ART-018: what the agent sends is accepted by the server's message model."""
     from forgeyard.machines.messages import StatusIn
 
     rec = Record(id="r1", generation=2, workload="w", ordinal=0, kind="task", runtime="process", spec={},
@@ -324,8 +324,8 @@ def test_fy_rt_018_status_report_json_fits_the_protocol(tmp_path):
     assert parsed.replicas[0].log_tail == "  indented\nlast" and parsed.replicas[0].ports[0].host_port == 31000
 
 
-def test_fy_rt_019_health_probes():
-    """FY-RT-019: HTTP 2xx/3xx healthy, 5xx and refused not; a TCP self-connect is not a service."""
+def test_fy_art_019_health_probes():
+    """FY-ART-019: HTTP 2xx/3xx healthy, 5xx and refused not; a TCP self-connect is not a service."""
     import http.server
     import threading
 
@@ -353,8 +353,8 @@ def test_fy_rt_019_health_probes():
     assert probe("tcp", "127.0.0.1", port, timeout=1).startswith(f"tcp 127.0.0.1:{port}")
 
 
-def test_fy_rt_020_gpu_probe_script(monkeypatch, capsys):
-    """FY-RT-020: scripts/gpu_probe.py formats UUIDs like nvidia-smi and says plainly when there
+def test_fy_art_020_gpu_probe_script(monkeypatch, capsys):
+    """FY-ART-020: scripts/gpu_probe.py formats UUIDs like nvidia-smi and says plainly when there
     is no NVIDIA driver (exit 2). The GPU part runs on a real NVIDIA host."""
     import importlib.util
     from pathlib import Path
@@ -371,8 +371,8 @@ def test_fy_rt_020_gpu_probe_script(monkeypatch, capsys):
     assert "CUDA_VISIBLE_DEVICES=GPU-x" in out and "libcuda.so.1 not found" in out
 
 
-def test_fy_rt_021_a_reused_pid_is_never_mistaken_for_a_replica(tmp_path):
-    """FY-RT-021: after a restart the recorded pid belongs to a stranger (same pid, other start
+def test_fy_art_021_a_reused_pid_is_never_mistaken_for_a_replica(tmp_path):
+    """FY-ART-021: after a restart the recorded pid belongs to a stranger (same pid, other start
     time): it is not adopted as alive and never signalled; another boot counts as gone too."""
     from forgeyard.agent.workloads.process import boot_id, proc_stat
 
@@ -405,8 +405,8 @@ def _start_one(tmp_path, rt, spec):
     return asyncio.run(scenario())
 
 
-def test_fy_rt_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_path, monkeypatch):
-    """FY-RT-022: the image is not local and the CLI's credential helper fails under the agent
+def test_fy_art_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_path, monkeypatch):
+    """FY-ART-022: the image is not local and the CLI's credential helper fails under the agent
     (seen on a real host: `docker run` gave "error getting credentials" for a public ghcr.io
     image). The agent pulls it again with the helpers left out of a copy of the config, keeping
     the rest, then starts the container: one replica, running. Since 1.3.1 the agent pulls before
@@ -433,8 +433,8 @@ def test_fy_rt_022_a_broken_credential_helper_does_not_stop_a_public_pull(tmp_pa
     assert (tmp_path / "state" / "docker-anonymous" / "contexts").is_symlink()
 
 
-def test_fy_rt_023_other_start_failures_are_not_retried_as_a_pull(tmp_path):
-    """FY-RT-023: only the credential-helper failure triggers the anonymous pull; a real refusal
+def test_fy_art_023_other_start_failures_are_not_retried_as_a_pull(tmp_path):
+    """FY-ART-023: only the credential-helper failure triggers the anonymous pull; a real refusal
     (pull access denied, a bad name) is reported as it was, without a second, anonymous pull."""
     fake = FakeDocker(tmp_path / "bin")
     rt = _ctr(tmp_path, fake)
@@ -445,16 +445,16 @@ def test_fy_rt_023_other_start_failures_are_not_retried_as_a_pull(tmp_path):
     assert fake.pulls() == [["pull", "fail/private:1"]] and fake.runs() == []
 
 
-def test_fy_rt_024_anonymous_config_without_a_config_file(tmp_path):
-    """FY-RT-024: no config.json at all still gives a usable empty config (mode 0600, dir 0700)."""
+def test_fy_art_024_anonymous_config_without_a_config_file(tmp_path):
+    """FY-ART-024: no config.json at all still gives a usable empty config (mode 0600, dir 0700)."""
     conf = anonymous_config(str(tmp_path / "nothing-here"), tmp_path / "anon")
     assert json.loads((conf / "config.json").read_text()) == {}
     assert (conf / "config.json").stat().st_mode & 0o777 == 0o600 and conf.stat().st_mode & 0o777 == 0o700
 
 
 @pytest.mark.skipif(os.geteuid() != 0, reason="runs the process as the workload user, which needs a root agent")
-def test_fy_rt_025_what_a_killed_leader_leaves_behind_is_stopped_before_a_restart(tmp_path):
-    """FY-RT-025 (found in the M4 run): the wrapper of a replica is killed but its engine lives on,
+def test_fy_art_025_what_a_killed_leader_leaves_behind_is_stopped_before_a_restart(tmp_path):
+    """FY-ART-025 (found in the M4 run): the wrapper of a replica is killed but its engine lives on,
     holding the port. Before the restart the agent stops the leftovers of the group, also when it
     cannot read their environment (a root agent in a container without CAP_SYS_PTRACE)."""
     import signal
@@ -500,8 +500,8 @@ def test_fy_rt_025_what_a_killed_leader_leaves_behind_is_stopped_before_a_restar
         cleanup_world(work)
 
 
-def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
-    """FY-RT-026: the agent hands the image reference it was sent, digest included, to the engine:
+def test_fy_art_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
+    """FY-ART-026: the agent hands the image reference it was sent, digest included, to the engine:
     `docker run repo:tag@sha256:…` (and the anonymous pull, when needed, pulls the same reference),
     so what runs is exactly the pinned image even if the tag moved on the registry."""
     fake = FakeDocker(tmp_path / "bin")
@@ -514,8 +514,8 @@ def test_fy_rt_026_a_digest_pinned_image_runs_by_its_digest(tmp_path):
     assert [c for c in fake.calls() if c and c[0] == "pull"] == [["pull", pinned]] * 2
 
 
-def test_fy_rt_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_files():
-    """FY-RT-027: systemd_running() starts a throwaway scope with systemd-run: a failure (a container
+def test_fy_art_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_files():
+    """FY-ART-027: systemd_running() starts a throwaway scope with systemd-run: a failure (a container
     that sees the host's systemd files but has no bus), a missing systemd-run, a timeout or an OSError
     all mean "no systemd", and only a scope that really started means yes."""
     import subprocess
@@ -543,8 +543,8 @@ def test_fy_rt_027_limits_auto_probes_systemd_run_instead_of_looking_for_its_fil
     assert process.systemd_running(run(0), lambda name: None) is False and len(calls) == n  # nothing to run
 
 
-def test_fy_rt_028_vulkan_amd_container_gets_the_render_node_only(tmp_path, monkeypatch):
-    """FY-RT-028: an AMD card sent with "kfd": false (a Vulkan engine) gets only its render node and
+def test_fy_art_028_vulkan_amd_container_gets_the_render_node_only(tmp_path, monkeypatch):
+    """FY-ART-028: an AMD card sent with "kfd": false (a Vulkan engine) gets only its render node and
     the group that owns it: no /dev/kfd and not its group. Without the flag (ROCm, or a server
     older than 1.3) /dev/kfd stays, and so does its group."""
     import forgeyard.agent.workloads.container as ctr_mod
