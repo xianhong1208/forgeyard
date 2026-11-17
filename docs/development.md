@@ -31,6 +31,23 @@ Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrad
 test fails when the models and migrations drift apart. Test IDs (`FY-…`) are unique across the
 project.
 
+## Pinned engine images
+
+Every container variant of a built-in recipe names its image as `repo:tag@sha256:<index digest>`, and
+`forgeyard/recipes/images.lock.json` records what a correct copy of it can show (per platform: manifest,
+config and content ids). That is how an agent checks a `docker load`-ed copy, and how the server relays the
+image to a machine without registry access. `scripts/pin_images.py` checks both against the registries
+(exit 1 on any difference); `--write` resolves the tags again and rewrites the recipes and the lock.
+
+- **Bumping an engine:** change the tag in its recipe, run `pin_images.py --write`, review the diff, run the
+  tests.
+- **Forgeyard's own vision image** (`images/vision`, recipe `vision`) is pinned the same way (1.4.1). A
+  release publishes `forgeyard-vision:X.Y.Z` and `X.Y.Z-cuda` from that release's code, so its digest is
+  only known after the tag: **after a release that changed `images/vision`**, a small PR into `dev` changes
+  the two tags in `forgeyard/recipes/vision.yaml` to the new version and runs `pin_images.py --write`
+  (FY-VIS-001 and FY-VIS-019 name the pinned references). A release that did not change it keeps the pin:
+  a server upgrade alone never changes the image a vision model runs.
+
 ## Writing tests that do not flake
 
 CI runs on small machines (two cores, often busy; the PostgreSQL job the slowest), so a test that

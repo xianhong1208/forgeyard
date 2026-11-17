@@ -47,12 +47,16 @@ class RegistryError(fetch.FetchError):
 
 def split_image(image: str) -> tuple[str, str, str, Optional[str]]:
     """'ghcr.io/a/b:tag@sha256:x' -> ('ghcr.io', 'a/b', 'tag', 'sha256:x'); Docker Hub names get
-    'registry-1.docker.io' and 'library/' for official images."""
+    'registry-1.docker.io' (also when named in full, docker.io/…) and 'library/' for official images."""
     ref, _, digest = image.partition("@")
     name, _, tag = ref.rpartition(":") if ":" in ref.split("/")[-1] else (ref, "", "latest")
-    first = name.split("/")[0]
-    if "." in first or ":" in first or first == "localhost":
-        registry, repo = first, name.split("/", 1)[1]
+    first, slash, rest = name.partition("/")
+    if slash and first.lower() in ("docker.io", "index.docker.io"):
+        # Docker Hub named in full (docker.io/acme/x:1): its API is registry-1.docker.io, as for a short name
+        # (https://docker.io/v2/ redirects to the website).
+        registry, repo = "registry-1.docker.io", rest if "/" in rest else f"library/{rest}"
+    elif slash and ("." in first or ":" in first or first == "localhost"):
+        registry, repo = first, rest
     else:
         registry, repo = "registry-1.docker.io", name if "/" in name else f"library/{name}"
     return registry, repo, tag, digest or None

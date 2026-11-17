@@ -295,9 +295,9 @@ to the catalog from Hugging Face (three are recommended), deployed and listed un
 API key.
 
 - **One engine, Forgeyard's own.** The `vision` recipe runs Forgeyard's vision server (transformers on
-  PyTorch) in the `forgeyard-vision` image of the server's own version: the CUDA build on an NVIDIA GPU,
-  one card shared by memory, or the CPU build on any machine (an AMD machine runs it on its CPU: there
-  is no ROCm build yet). The model comes from the machine's model cache, like every other model.
+  PyTorch) in the `forgeyard-vision` image, pinned by digest like every engine: the CUDA build on an
+  NVIDIA GPU, one card shared by memory, or the CPU build on any machine (an AMD machine runs it on its
+  CPU: there is no ROCm build yet). The model comes from the machine's model cache, like every other model.
 - **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
   is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
   model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large

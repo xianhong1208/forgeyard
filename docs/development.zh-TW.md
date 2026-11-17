@@ -27,6 +27,18 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 
 資料表變更一律走 Alembic（`forgeyard/migrations`）；啟動時執行 `upgrade head`，model 與 migration 不一致時會有測試失敗。測試編號（`FY-…`）在整個專案中唯一。
 
+## 以 digest 固定的引擎映像檔
+
+內建配方的每個容器 variant 都以 `repo:tag@sha256:<index digest>` 指定映像檔，`forgeyard/recipes/images.lock.json`
+記下正確副本會有的 id（每個平台的 manifest、config 與 content id）。agent 靠它檢查 `docker load` 載入的副本，伺服器也靠它把映像檔轉送給連不到 registry 的機器。
+`scripts/pin_images.py` 對照 registry 檢查這兩者（有任何不同就以 1 結束）；`--write` 重新解析 tag，改寫配方與 lock。
+
+- **升級引擎：**改配方裡的 tag，執行 `pin_images.py --write`，檢查 diff，跑測試。
+- **Forgeyard 自己的視覺映像檔**（`images/vision`，配方 `vision`）也一樣固定（1.4.1）。release 會用該版的程式碼發布
+  `forgeyard-vision:X.Y.Z` 與 `X.Y.Z-cuda`，所以 digest 要在打 tag 之後才知道：**改過 `images/vision` 的 release 之後**，
+  另開一個小 PR 進 `dev`，把 `forgeyard/recipes/vision.yaml` 的兩個 tag 改成新版本，再執行 `pin_images.py --write`
+  （FY-VIS-001 與 FY-VIS-019 寫著固定的 reference）。沒改到它的 release 就保留原本的固定：單是升級伺服器，視覺模型執行的映像檔永遠不會變。
+
 ## 寫不會時好時壞的測試
 
 CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最慢），所以在這裡會過的測試，到那裡偶爾會失敗。

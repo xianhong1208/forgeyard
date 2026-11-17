@@ -5,7 +5,7 @@ linux/arm64, tagged X.Y.Z, X.Y and latest:
 
     docker.io/<DOCKERHUB_NAMESPACE>/forgeyard         the server (Dockerfile.server)
     docker.io/<DOCKERHUB_NAMESPACE>/forgeyard-agent   the agent (Dockerfile.agent)
-    docker.io/<DOCKERHUB_NAMESPACE>/forgeyard-vision  the workload templates' vision server (images/vision;
+    docker.io/<DOCKERHUB_NAMESPACE>/forgeyard-vision  the vision server (images/vision; the vision recipe pins it;
                                                       X.Y.Z for the CPU, X.Y.Z-cuda for NVIDIA, amd64)
 
 DOCKERHUB_NAMESPACE is the one place the namespace is written: the publish workflow reads it from
@@ -90,6 +90,7 @@ def agent_image(setting: str, version: str, namespace: str | None = None) -> Age
 
 def vision_image(version: str, variant: str = "cpu", namespace: str | None = None) -> str:
     """The vision server's image for a server of `version`: the published one (X.Y.Z, or X.Y.Z-cuda), else
-    a local build's tag (forgeyard-vision:X.Y.Z)."""
+    a local build's tag (forgeyard-vision:X.Y.Z). For the 1.3 workload templates and a custom recipe's
+    `forgeyard_image`; the built-in `vision` recipe pins its image by digest instead (1.4.1, #113)."""
     repository = published_repository(VISION_REPOSITORY, namespace) or VISION_REPOSITORY
     return f"{repository}:{version}{'-cuda' if variant == 'cuda' else ''}"
