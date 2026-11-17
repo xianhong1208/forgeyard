@@ -39,6 +39,7 @@ from forgeyard.models import fetch
 PATH_RE = re.compile(r"^/agent/v1/relay/(replica|download)/[A-Za-z0-9_-]{1,64}/(model|engine)$")
 IMAGE_PATH_RE = re.compile(r"^/agent/v1/relay/(replica|download)/[A-Za-z0-9_-]{1,64}/image$")
 UPLOAD_PATH_RE = re.compile(r"^/agent/v1/image-upload/[A-Za-z0-9_-]{16,64}$")
+IMAGE_SEND_PATH_RE = re.compile(r"^/agent/v1/image-send/[A-Za-z0-9_-]{16,64}$")
 MODES = ("auto", "server")
 UNREACHABLE_TTL = 3600.0
 
@@ -137,20 +138,27 @@ class RelayClient:
                                                context=self.ssl_context or ssl.create_default_context())
         return http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
 
-    def post(self, path: str, chunks, length: int) -> dict:
+    def post(self, path: str, chunks, length: Optional[int]) -> dict:
         """1.4.1 ("relay_source"): POST `length` bytes (from the iterable `chunks`) to <server><path> with the machine
-        credential; the server's JSON answer. Raises RelayRefused (the server refused or ended the send) or
-        fetch.FetchError (the connection failed); SendStopped from `chunks` ends it."""
+        credential; the server's JSON answer. `length` None ("image_save": a `docker save` stream): chunked, and
+        ended cleanly only when `chunks` ends without an error. Raises RelayRefused (the server refused or ended
+        the send) or fetch.FetchError (the connection failed); an error from `chunks` ends it (and goes on up)."""
         conn = self._connection()
         try:
             try:
                 conn.putrequest("POST", self.base + path, skip_accept_encoding=True)
+                size = ("Content-Length", str(length)) if length is not None else ("Transfer-Encoding", "chunked")
                 for k, v in (("User-Agent", f"forgeyard-agent/{__version__}"), ("Authorization", f"Bearer {self._credential}"),
-                             ("Content-Type", "application/octet-stream"), ("Content-Length", str(length))):
+                             ("Content-Type", "application/octet-stream"), size):
                     conn.putheader(k, v)
                 conn.endheaders()
                 for chunk in chunks:
-                    conn.send(chunk)
+                    if length is not None:
+                        conn.send(chunk)
+                    elif chunk:
+                        conn.send(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                if length is None:
+                    conn.send(b"0\r\n\r\n")
                 resp = conn.getresponse()
                 body = resp.read(16 * 1024)
             except (OSError, http.client.HTTPException) as e:

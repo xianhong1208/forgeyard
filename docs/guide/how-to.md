@@ -1312,6 +1312,35 @@ that breaks off is never loaded. One upload at a time per machine, two in all; t
 `IMAGE_UPLOAD_MAX_GB` (64 GiB unless set). The machine's agent must be 1.4 or later, with a container
 engine, and online. Every upload, and why one failed, is in the audit log (`node.image_uploaded`).
 
+To copy an image another machine already has, no file is needed: see the next section.
+
+## Copy an engine image from another machine
+
+An admin can copy an image one machine's container engine has to another machine, through the server
+(1.4.1): a custom recipe's image named by a tag only, an image you built on one machine, or an image a
+machine without registry access needs. Nothing is copied automatically.
+
+1. Open the target machine's page → **Engine images** → **Copy from another machine**.
+2. Choose the machine to copy **From**. Its agent lists the images in its engine: each with its tags, id,
+   size and platform, and which recipe's image it is.
+3. Pick one and **Copy**. The other machine runs `docker save` (or `podman save`) on it, under its own
+   tags, and sends it to the server, which passes it straight into the target's `docker load`, keeping
+   only a small buffer. When it is loaded, the dialog lists what was loaded, which recipe's image it is,
+   and *The same image as on gpu-host (same content id)*: what was loaded is what the other machine has.
+
+What to know:
+
+- **Trust**: an image named by a tag only has no recorded ids, so the target runs whatever the other
+  machine has under that tag. Copy only from a machine you trust. A pinned image is still checked by its
+  recorded ids before it runs.
+- A `docker save` stream has no size ahead and cannot resume: a copy that breaks off starts again from
+  the beginning, and the target loads nothing from a broken one.
+- The limits are the upload's: one copy or upload at a time per target machine, two in all, at most
+  `IMAGE_UPLOAD_MAX_GB`; and one copy at a time from each machine.
+- The machine copied from needs an agent of 1.4.1 or later with a container engine; the target, 1.4 or
+  later with one. Both must be online. Every copy, and why one failed, is in the audit log
+  (`node.image_copied`, with both machines and the ids loaded).
+
 ## Free disk space on a machine
 
 A machine's page lists **Models in cache**: what its agent has downloaded, with sizes. Each Hugging

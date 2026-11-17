@@ -139,7 +139,8 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   and stores nothing; the agent checks them as it checks any download. Since 1.4.1 a model file comes
   from another machine that has it in its cache, still through the server, before the internet. A pinned
   engine image comes the
-  same way, layer by layer, and an admin can upload any image file to a machine from its page. Whether a
+  same way, layer by layer, and an admin can upload any image file to a machine from its page, or copy an
+  image from another machine's engine (1.4.1). Whether a
   model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server
   keeps **one Hugging Face token** (an admin sets it under **Models → Sources**, stored encrypted) for

@@ -31,6 +31,7 @@ from forgeyard.machines.protocol import (
     FEATURE_ENGINE_ZIP,
     FEATURE_IMAGE_IDS,
     FEATURE_IMAGE_LOAD,
+    FEATURE_IMAGE_SAVE,
     FEATURE_MODELS,
     FEATURE_PREFETCH,
     FEATURE_RELAY,
@@ -152,6 +153,7 @@ class Agent:
         self.server_features: set[str] = set()
         self._answers: set[asyncio.Task] = set()
         # 1.4.1 ("relay_source"): sends a cached model file to the server for another machine.
+        self._saving = False  # 1.4.1 ("image_save"): an image being sent for another machine
         self.sender = None
         if models is not None and getattr(models, "root", None) is not None:
             from forgeyard.agent.share import Sender
@@ -183,6 +185,8 @@ class Agent:
                 msg["model_cache"] = cache
             if getattr(self.supervisor, "can_load_images", lambda: False)():
                 msg["features"].append(FEATURE_IMAGE_LOAD)
+            if getattr(self.supervisor, "can_save_images", lambda: False)():
+                msg["features"].append(FEATURE_IMAGE_SAVE)
         return msg
 
     @property
@@ -321,6 +325,11 @@ class Agent:
                 task = asyncio.create_task(self._answer_image_load(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+            elif kind in ("image_list", "image_save") and self.workloads and FEATURE_IMAGE_SAVE in self.server_features:
+                task = asyncio.create_task(self._answer_image_list(ws, data) if kind == "image_list"
+                                           else self._answer_image_save(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
             elif kind == "relay_send" and self.workloads and FEATURE_RELAY_SOURCE in self.server_features:
                 task = asyncio.create_task(self._answer_relay_send(ws, data))
                 self._answers.add(task)
@@ -375,6 +384,76 @@ class Agent:
                 answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400]}
         await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "image_loaded", "request_id": data.get("request_id"),
                                   **answer}))
+
+    def _image_engine(self):
+        rt = self.supervisor.runtimes.get("container") if self.supervisor is not None else None
+        return rt if rt is not None and getattr(self.supervisor, "can_save_images", lambda: False)() else None
+
+    async def _answer_image_list(self, ws, data: dict) -> None:
+        """1.4.1 ("image_save"): the images in the container engine, for an admin who copies one elsewhere."""
+        rt = self._image_engine()
+        try:
+            if rt is None:
+                answer = {"ok": False, "reason": "this agent has no container engine"}
+            else:
+                answer = {"ok": True, "images": await asyncio.to_thread(rt.list_images)}
+        except Exception as e:  # never take the connection down
+            answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400]}
+        await self._send_answer(ws, "image_listed", data, answer)
+
+    async def _answer_image_save(self, ws, data: dict) -> None:
+        """1.4.1 ("image_save"): `docker save` one of the engine's own images (by its id) to this agent's own server,
+        which passes it on to another machine. One at a time."""
+        import threading
+
+        from forgeyard.agent import relay as relay_client
+        from forgeyard.agent.workloads.container import SaveFailed
+        from forgeyard.models import fetch
+
+        rt = self._image_engine()
+        path = str(data.get("path") or "")
+        cancel = threading.Event()
+        sent = {"bytes": 0}
+        if rt is None or not relay_client.IMAGE_SEND_PATH_RE.match(path):
+            answer = {"ok": False, "reason": "this agent cannot save images, or the path is wrong"}
+        elif self._saving:
+            answer = {"ok": False, "reason": "this machine is already sending an image"}
+        else:
+            self._saving = True
+            chunks = None
+            try:
+                entry, chunks = await asyncio.to_thread(rt.save_stream, str(data.get("image") or ""), cancel)
+
+                def counted():
+                    for chunk in chunks:
+                        sent["bytes"] += len(chunk)
+                        yield chunk
+
+                await asyncio.to_thread(self.relay_client.post, path, counted(), None)
+                answer = {"ok": True, "bytes": sent["bytes"], "image": entry}
+                log.info("Sent image %s (%s) to the server for another machine: %.1f MiB.", entry["id"][:19],
+                         ", ".join(entry["tags"]) or "no tag", sent["bytes"] / 1024**2)
+            except asyncio.CancelledError:
+                cancel.set()
+                raise
+            except (SaveFailed, relay_client.RelayRefused, fetch.FetchError, OSError) as e:
+                log.warning("Sending an image to the server stopped: %s", e)
+                answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400], "bytes": sent["bytes"]}
+            except Exception as e:  # never take the connection down
+                log.exception("Sending an image failed")
+                answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400], "bytes": sent["bytes"]}
+            finally:
+                if chunks is not None:
+                    await asyncio.to_thread(chunks.close)  # the engine's save is stopped if it still runs
+                self._saving = False
+        await self._send_answer(ws, "image_saved", data, answer)
+
+    async def _send_answer(self, ws, kind: str, data: dict, answer: dict) -> None:
+        try:
+            await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": kind, "request_id": data.get("request_id"),
+                                      **answer}))
+        except ConnectionClosed:
+            pass  # the server went away; it no longer waits for the answer
 
     async def _answer_relay_send(self, ws, data: dict) -> None:
         """1.4.1 ("relay_source"): send a cached model file to this agent's own server, for another machine."""
