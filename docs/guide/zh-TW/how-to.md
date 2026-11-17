@@ -892,6 +892,23 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 檔案從你的瀏覽器經過伺服器直接送到 agent，agent 一邊收一邊把它串流進 `docker load`（或 `podman load`）：伺服器只保留很小的緩衝，機器也不需要其他通往你電腦的路。container 引擎載入時會檢查每一層；中斷的檔案絕不會被載入。每台機器同時只能有一個上傳，全部最多兩個；檔案最大為 `IMAGE_UPLOAD_MAX_GB`（沒設定時是 64 GiB）。機器的 agent 必須是 1.4 以後的版本、有 container 引擎，而且在線上。每次上傳和失敗的原因都會記入稽核紀錄（`node.image_uploaded`）。
 
+要複製另一台機器已經有的映像檔，不需要檔案：請看下一節。
+
+## 從另一台機器複製引擎映像檔
+
+管理員可以把一台機器的 container 引擎裡的映像檔，經由伺服器複製到另一台機器（1.4.1）：只用 tag 指定的自訂 recipe 映像檔、在某台機器上自己建置的映像檔，或連不到 registry 的機器需要的映像檔。不會自動複製任何東西。
+
+1. 打開目標機器的頁面 → **Engine images** → **Copy from another machine**。
+2. 在 **From** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。
+3. 選一個，按 **Copy**。來源機器會用它自己的 tag 對它執行 `docker save`（或 `podman save`），送給伺服器，伺服器直接轉進目標機器的 `docker load`，只保留很小的緩衝。載入完成後，對話框會列出載入了什麼、它是哪個 recipe 的映像檔，以及 *The same image as on gpu-host (same content id)*：載入的就是來源機器上的那個映像檔。
+
+注意事項：
+
+- **信任**：只用 tag 指定的映像檔沒有記錄的 id，所以目標機器會執行來源機器在那個 tag 底下的任何東西。只從你信任的機器複製。有釘選的映像檔在執行前仍會以記錄的 id 檢查。
+- `docker save` 的資料流事先不知道大小，也不能續傳：中斷的複製會從頭重來，目標機器不會從中斷的資料流載入任何東西。
+- 限制和上傳相同：每台目標機器同時只能有一個複製或上傳，全部最多兩個，最大 `IMAGE_UPLOAD_MAX_GB`；每台來源機器同時只能送一個。
+- 來源機器的 agent 必須是 1.4.1 以後、有 container 引擎；目標機器是 1.4 以後、有 container 引擎。兩台都必須在線上。每次複製和失敗的原因都會記入稽核紀錄（`node.image_copied`，包含兩台機器和載入的 id）。
+
 ## 釋出機器上的磁碟空間
 
 機器的頁面上有 **Models in cache**：列出它的 agent 下載過的東西和大小。每個 Hugging Face revision 一列；有好幾個 GGUF 檔的 revision，底下每個檔案各一列。從 URL 下載的單一 GGUF 檔，以及 process 引擎的引擎壓縮檔也會列出。清單上方是快取在那顆磁碟上占了多少，以及磁碟還剩多少可用空間。

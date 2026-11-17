@@ -1,7 +1,8 @@
 """Machines: everyone signed in can look; admins add (join tokens), revoke and remove, and choose
 which GPUs Forgeyard may assign on each machine and how it reaches the internet (`fetch_via`, 1.4).
 Operators and admins remove models from a machine's model cache (1.4). Admins upload an image file to a
-machine (1.4, forgeyard/machines/upload.py)."""
+machine (1.4, forgeyard/machines/upload.py), and copy an image from one machine to another (1.4.1,
+forgeyard/machines/imagecopy.py)."""
 
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, JoinToken, Node, get_db, new_session, utcnow
 from forgeyard.install import commands as install_commands
-from forgeyard.machines import cache, store, upload
+from forgeyard.machines import cache, imagecopy, store, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED, FETCH_VIA
 from forgeyard.models import prefetch
@@ -338,3 +339,73 @@ async def upload_image(machine_id: int, request: Request):
     await run_in_threadpool(_upload_audit, caller, node, file=name, bytes=size, ok=True,
                             images=[{"id": i.get("id"), "tags": i.get("tags")} for i in items][:8])
     return {"ok": True, "bytes": size, "images": items}
+
+
+# ---------------------------------------------------------------------------- copying an image (1.4.1, #104)
+def _copy_callers(request: Request, target_id: int, source_id: int) -> tuple[Caller, Node, Node]:
+    db = new_session()
+    try:
+        caller = require_admin(current(request, db))
+        target, source = _get(db, target_id), _get(db, source_id)
+        _ = (caller.user.id, caller.user.username, target.id, target.name, source.id, source.name)
+        return caller, target, source
+    finally:
+        db.close()
+
+
+def _copy_audit(caller: Caller, target: Node, source: Node, **detail) -> None:
+    db = new_session()
+    try:
+        audit.record(db, "node.image_copied", actor=caller.user, target=target.name, ip=caller.ip,
+                     machine_id=target.id, from_machine=source.name, from_machine_id=source.id, **detail)
+        db.commit()
+    finally:
+        db.close()
+
+
+@router.get("/{machine_id}/images")
+async def machine_images(machine_id: int, request: Request):
+    """The images in this machine's container engine (1.4.1, admins only), as its agent lists them, each with the
+    recipe image it is (by its recorded ids, or named by a tag-only recipe image): what can be copied from it."""
+    caller, node, _ = await run_in_threadpool(_copy_callers, request, machine_id, machine_id)
+    try:
+        items = await imagecopy.list_images(node)
+    except imagecopy.CopyFailed as e:
+        raise fail(e.status, e.code, e.message) from None
+    return {"machine_id": node.id, "images": await run_in_threadpool(_matches, items[:256])}
+
+
+class ImageCopyIn(BaseModel):
+    source_id: int
+    image: str = Field(min_length=1, max_length=80)
+
+
+@router.post("/{machine_id}/images/copy")
+async def copy_image(machine_id: int, body: ImageCopyIn, request: Request):
+    """Copy an image from another machine to this one (1.4.1, admins only): the source's agent saves it, the server
+    passes it on storing nothing, this machine's agent loads it. Answers what was loaded, which recipe image each
+    one is, and whether it is the image the source has (its content id). Audited as `node.image_copied`."""
+    caller, target, source = await run_in_threadpool(_copy_callers, request, machine_id, body.source_id)
+    limit = get_settings().image_upload_max_gb * upload.UNIT
+    try:
+        answer = await imagecopy.copy(source, target, body.image, limit)
+    except (imagecopy.CopyFailed, upload.UploadFailed) as e:
+        if e.code not in ("bad_image", "same_machine", "source_offline", "source_cannot_save", "source_busy",
+                          "machine_offline", "agent_cannot_load", "upload_busy"):  # refused before a byte moved
+            await run_in_threadpool(_copy_audit, caller, target, source, image=body.image[:80], ok=False,
+                                    reason=e.message[:200])
+        raise fail(e.status, e.code, e.message) from None
+    sent = answer.get("bytes") or 0
+    if not answer.get("ok"):
+        reason = str(answer.get("reason") or "the agent could not load it")[:400]
+        await run_in_threadpool(_copy_audit, caller, target, source, image=body.image[:80], bytes=sent, ok=False,
+                                reason=reason[:200])
+        raise fail(422, "image_load_failed", f"{target.name}: {reason}")
+    saved = answer.get("saved")
+    items = await run_in_threadpool(_matches, list(answer.get("images") or []))
+    items = [{**i, "same_as_source": imagecopy.same_image(saved, i)} for i in items]
+    await run_in_threadpool(_copy_audit, caller, target, source, image=body.image[:80], bytes=sent, ok=True,
+                            images=[{"id": i.get("id"), "tags": i.get("tags"), "content": i.get("content")}
+                                    for i in items][:8])
+    return {"ok": True, "bytes": sent, "images": items, "source": {"id": source.id, "name": source.name},
+            "saved": saved}

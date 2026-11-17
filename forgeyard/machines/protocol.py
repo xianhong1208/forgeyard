@@ -20,6 +20,8 @@ agent -> server
   image_loaded (1.4) answer to image_load: ok or why not, and each image loaded (id, tags, content id)
   relay_sent (1.4.1) answer to relay_send: how the send of a cached model file ended (ok, or not_found |
              busy | corrupt | failed, and why)
+  image_listed (1.4.1) answer to image_list: the images in the agent's container engine
+  image_saved (1.4.1) answer to image_save: how the send of an image ended, and which image it was
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -40,6 +42,9 @@ server -> agent
              on the server and load it into the container engine; answered by `image_loaded`
   relay_send (1.4.1, "relay_source") another machine needs a model file this agent has in its cache: send it
              to `path` on the server; answered by `relay_sent`
+  image_list / image_save (1.4.1, "image_save") list the images in the container engine; `docker save` one
+             of them to `path` on the server (an admin copies it to another machine); answered by
+             `image_listed` / `image_saved`
   error      a refused message; the server closes the connection after it
 
 HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
@@ -49,7 +54,9 @@ archive the machine's desired state names, streamed from their source by the ser
 machine's platform, and its config and layers by digest. (1.4, "image_load") GET
 /agent/v1/image-upload/<ticket>: the bytes of an image file an admin is uploading to this machine.
 (1.4.1, "relay_source") POST /agent/v1/relay-send/<ticket>: the bytes of a cached model file, from the machine
-that has it, which the server pipes into another machine's relay GET.
+that has it, which the server pipes into another machine's relay GET. (1.4.1, "image_save") POST
+/agent/v1/image-send/<ticket>: an image `docker save` writes, chunked, which the server pipes into another
+machine's image-upload GET.
 
 Models (M3) extend it the same way: an agent started with a model cache lists "models"; only
 then does the server place model deployments there, and its desired replicas carry a rendered
@@ -185,9 +192,19 @@ IMAGE_UPLOAD_PATH = "/agent/v1/image-upload"
 # lists it is asked, at most 2 sends at a time.
 FEATURE_RELAY_SOURCE = "relay_source"
 RELAY_SEND_PATH = "/agent/v1/relay-send"
+# 1.4.1 (issue #104, Q4): an admin copies an engine image from one machine to another. To an agent that lists it
+# (it has a container engine), the server sends `image_list {request_id}`, answered by `image_listed {request_id,
+# ok, reason, images: [{id, tags, content, size, created, os, architecture}]}`, and `image_save {request_id, path,
+# image}`: the agent saves the image whose id is `image` (one of its own: it never saves a name the server sends)
+# with its own tags, `docker save` / `podman save`, and POSTs the archive, chunked, to `<its own server><path>`
+# (IMAGE_SEND_PATH/<ticket>, its credential, the CA it pins); it answers `image_saved {request_id, ok, reason,
+# bytes, image}`. The server pipes the body into the other machine's "image_load" (unchanged), keeping nothing.
+# Listed by both sides; only an agent that lists it is asked.
+FEATURE_IMAGE_SAVE = "image_save"
+IMAGE_SEND_PATH = "/agent/v1/image-send"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
                    FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
-                   FEATURE_RELAY_SOURCE)
+                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

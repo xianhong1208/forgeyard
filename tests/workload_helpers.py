@@ -153,7 +153,34 @@ def find_image(ref):
     return None
 
 cmd = args[0] if args else ""
-if cmd == "image" and args[1:2] == ["inspect"]:
+if cmd == "image" and args[1:2] == ["ls"]:
+    # 1.4.1: `image ls -q --no-trunc`, the ids of the local images
+    print("\n".join(img["Id"] for img in state.get("images", [])))
+elif cmd == "save":
+    # 1.4.1: `docker save NAME...`: the archive the image was loaded from (kept by `load`), written out in pieces;
+    # state["save_fail_after"] (bytes): it fails part way, as an engine whose store broke does.
+    import os, time
+    names = [a for a in args[1:] if not a.startswith("-")]
+    img = find_image(names[0]) if names else None
+    if img is None or not (HERE / "saved" / (img["Id"].removeprefix("sha256:") + ".tar")).exists():
+        print("Error response from daemon: reference does not exist", file=sys.stderr)
+        sys.exit(1)
+    data = (HERE / "saved" / (img["Id"].removeprefix("sha256:") + ".tar")).read_bytes()
+    fail_after = state.get("save_fail_after")
+    fcntl.flock(_lock, fcntl.LOCK_UN)  # a long save must not hold up the other calls
+    out = sys.stdout.buffer
+    for off in range(0, len(data), 65536):
+        if fail_after is not None and off >= fail_after:
+            out.flush()
+            time.sleep(0.2)
+            print("Error response from daemon: unexpected EOF", file=sys.stderr)
+            sys.exit(1)
+        out.write(data[off:off + 65536])
+        if state.get("save_delay"):
+            out.flush()
+            time.sleep(state["save_delay"])
+    out.flush()
+elif cmd == "image" and args[1:2] == ["inspect"]:
     img = find_image(args[2])
     if img is None:
         print("Error response from daemon: No such image: " + args[2], file=sys.stderr)
@@ -284,6 +311,8 @@ elif cmd == "load":
             if got != diff_ids[i]:
                 fail(f"Error processing tar file: invalid diffID for layer {i}: calculated {got}, expected {diff_ids[i]}")
         image_id = "sha256:" + hashlib.sha256(cbytes).hexdigest()
+        (HERE / "saved").mkdir(exist_ok=True)  # 1.4.1: what `save` writes back
+        (HERE / "saved" / (image_id.removeprefix("sha256:") + ".tar")).write_bytes(data)
         run_config = dict(config.get("config") or {})
         if state.get("load_alter"):  # an engine that is not what it says: other settings, another id
             run_config["Env"] = list(run_config.get("Env") or []) + ["ALTERED=1"]
@@ -294,7 +323,8 @@ elif cmd == "load":
         state["images"] = [img for img in state.get("images", []) if img["Id"] != image_id]
         state.setdefault("images", []).append({"Id": image_id, "RepoTags": tags, "RepoDigests": [],
                                                "Os": config.get("os"), "Architecture": config.get("architecture"),
-                                               "RootFS": {"Type": "layers", "Layers": diff_ids}, "Config": run_config})
+                                               "RootFS": {"Type": "layers", "Layers": diff_ids}, "Config": run_config,
+                                               "Size": len(data), "Created": config.get("created")})
         for t in tags:
             print("Loaded image: " + t)
         if not tags:
@@ -416,6 +446,14 @@ class FakeDocker:
     def alter_loads(self) -> None:
         """`load` records a different run configuration than the archive's (an engine that is not what it says)."""
         self._update(lambda data: data.update(load_alter=True))
+
+    def save_fails_after(self, n: int) -> None:
+        """`save` writes `n` bytes, then fails (1.4.1)."""
+        self._update(lambda data: data.update(save_fail_after=n))
+
+    def slow_saves(self, seconds: float) -> None:
+        """`save` waits this long after each 64 KiB (1.4.1)."""
+        self._update(lambda data: data.update(save_delay=seconds))
 
     def offline(self) -> None:
         """No registry: `run` of an image that is not local fails as a failed DNS lookup does."""

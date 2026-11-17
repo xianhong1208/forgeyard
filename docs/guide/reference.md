@@ -1132,6 +1132,39 @@ tags).
 
 Audited as `node.image_uploaded` (the file name, its size, `ok`, the images loaded or why not).
 
+### Copying an image from another machine
+
+`GET /api/machines/{id}/images` (admins) asks that machine's agent for the images in its engine (protocol
+feature `image_save`, agents from 1.4.1: `image_list {request_id}`, answered by `image_listed {request_id, ok,
+reason, images}`) and answers `{machine_id, images: [{id, tags, content, size, created, os, architecture,
+matches}]}`, at most 256.
+
+`POST /api/machines/{id}/images/copy` with `{"source_id": 2, "image": "sha256:…"}` (admins) copies one of them to
+machine `id`. The server sends the source `image_save {request_id, path, image}`; its agent saves the image whose
+id is `image` (one of its own: never a name from the server) under its own tags, with `docker save` (Podman:
+`podman save --multi-image-archive` for several tags), and POSTs it, chunked, to `/agent/v1/image-send/{ticket}`
+with its credential (once; another machine's credential gets 404, a second POST 409, a browser 403; every answer
+closes the connection, so a source whose send was ended early stops at once). The server
+pipes it into the target's `image_load` as for an upload (without `size`; the answer to the target is chunked and
+never ends cleanly when the source broke off), and the source answers `image_saved {request_id, ok, reason, bytes,
+image}`. The answer is `{ok, bytes, images, source: {id, name}, saved}`, each image with `matches` and
+`same_as_source` (its content id, else its id, equals the source's; null when there is nothing to compare).
+
+| Status | `code` | When |
+|---|---|---|
+| 422 | `bad_image`, `same_machine` | The image is not named by its id; the source is the target |
+| 409 | `source_offline`, `source_cannot_save` | The source is not connected, or has no container engine or is older than 1.4.1 |
+| 409 | `source_busy` | The source is already sending an image |
+| 409 | `machine_offline`, `agent_cannot_load`, `upload_busy` | The target, as for an upload (429: two in all) |
+| 409 | `image_save_failed` | The source could not save it (its words): not one of its images, or its engine failed |
+| 504 | `source_no_send` | The source did not start sending within 2 minutes |
+| 400 | `upload_broken` | The source's save broke off; nothing was loaded |
+| 413 | `upload_too_large` | The image is larger than `IMAGE_UPLOAD_MAX_GB` |
+| 422 | `image_load_failed` | The target's engine could not load it (the agent's words) |
+
+Audited as `node.image_copied` (the target; `from_machine`, the image asked for, its size, `ok`, the images
+loaded with their content ids, or why not). Refusals before a byte moved are not audited.
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and

@@ -862,6 +862,26 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 稽核事件 `node.image_uploaded`（檔名、大小、`ok`、載入的映像檔或失敗原因）。
 
+### 從另一台機器複製映像檔
+
+`GET /api/machines/{id}/images`（管理員）會向那台機器的 agent 詢問它引擎裡的映像檔（協定 feature `image_save`，1.4.1 起的 agent：`image_list {request_id}`，以 `image_listed {request_id, ok, reason, images}` 回答），回傳 `{machine_id, images: [{id, tags, content, size, created, os, architecture, matches}]}`，最多 256 個。
+
+`POST /api/machines/{id}/images/copy`，內容 `{"source_id": 2, "image": "sha256:…"}`（管理員），把其中一個複製到機器 `id`。伺服器傳給來源 `image_save {request_id, path, image}`；它的 agent 以自己的 tag 儲存 id 為 `image` 的映像檔（必須是它自己的：絕不使用伺服器給的名稱），用 `docker save`（Podman 有多個 tag 時用 `podman save --multi-image-archive`），再以 chunked 方式 POST 到 `/agent/v1/image-send/{ticket}`，帶它的憑證（只能一次；別台機器的憑證會得到 404，第二次 POST 是 409，瀏覽器是 403；每個回應都會關閉連線，所以傳送被提早結束的來源會立刻停止）。伺服器像上傳一樣把它轉進目標機器的 `image_load`（不帶 `size`；給目標機器的回應是 chunked，來源中斷時絕不會正常結束），來源再回 `image_saved {request_id, ok, reason, bytes, image}`。回應是 `{ok, bytes, images, source: {id, name}, saved}`，每個映像檔帶 `matches` 和 `same_as_source`（它的 content id，沒有則用 id，和來源的相同；沒有可比對的則為 null）。
+
+| 狀態 | `code` | 時機 |
+|---|---|---|
+| 422 | `bad_image`、`same_machine` | 映像檔不是用 id 指定；來源就是目標 |
+| 409 | `source_offline`、`source_cannot_save` | 來源沒有連線，或沒有 container 引擎、或比 1.4.1 舊 |
+| 409 | `source_busy` | 來源已經在送一個映像檔 |
+| 409 | `machine_offline`、`agent_cannot_load`、`upload_busy` | 目標機器，同上傳（全部兩個時是 429） |
+| 409 | `image_save_failed` | 來源無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
+| 504 | `source_no_send` | 來源 2 分鐘內沒有開始送 |
+| 400 | `upload_broken` | 來源的儲存中斷；什麼都沒有載入 |
+| 413 | `upload_too_large` | 映像檔超過 `IMAGE_UPLOAD_MAX_GB` |
+| 422 | `image_load_failed` | 目標機器的引擎無法載入（agent 的說明） |
+
+稽核事件 `node.image_copied`（目標機器；`from_machine`、要求的映像檔、大小、`ok`、載入的映像檔和它們的 content id，或失敗原因）。在任何位元組送出前就被拒絕的不會記錄。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。

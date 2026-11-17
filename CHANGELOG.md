@@ -26,6 +26,15 @@ version until 1.0.
   time per source. Progress says *via the server, from <machine>*, a download's `via` is `machine` with its
   `source`, and **Download to…** names the machine that would send it. No setting and no migration. Engine
   archives keep coming from the internet through the server.
+- **Copy an image from another machine** (#104, part 2). On a machine's page, **Engine images → Copy from another
+  machine** (admins): pick a machine and one of the images its agent lists (`GET /api/machines/{id}/images`), and
+  **Copy** (`POST /api/machines/{id}/images/copy`). The source agent (new feature `image_save`) saves the image
+  whose id was asked for, one of its own, under its own tags, and POSTs the `docker save` stream, chunked, to
+  `/agent/v1/image-send/<ticket>`; the server pipes it into the target's image upload (`image_load`, unchanged),
+  keeping nothing. The answer says what was loaded, which recipe's image it is, and whether it is the image the
+  source has (by content id). A save that breaks off never ends the target's stream cleanly, so nothing is loaded.
+  The upload's limits apply, plus one copy at a time per source. Audited as `node.image_copied`. Never automatic:
+  a tag-only image is trusted as the source machine has it.
 
 ### Changed
 
