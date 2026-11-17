@@ -536,7 +536,7 @@ in the server's database (table `video_jobs`, migration `0014`).
 `POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` (1.4) take one image for a
 vision model and answer JSON. They are Forgeyard's own API (the OpenAI SDK has none): any HTTP client
 works. One engine serves them, Forgeyard's own vision server (recipe `vision`, the image
-`forgeyard-vision` of the server's version: the CUDA build on NVIDIA, the CPU build elsewhere), with the
+`forgeyard-vision` pinned by digest: the CUDA build on NVIDIA, the CPU build elsewhere), with the
 model from the machine's model cache. Local deployments only, never a cloud provider.
 
 The request is `multipart/form-data` with `model`, the image as a file field `image` and the options
@@ -1260,8 +1260,8 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
-| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `forgeyard-vision:<server version>-cuda` (torch +cu130) |
-| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `forgeyard-vision:<server version>` |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.0` (linux/amd64 and arm64) |
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
@@ -1300,10 +1300,12 @@ values the variant cannot run, such as `{kv_cache: [f8_e4m3]}`; a deployment wit
 placed on it, and the placement says why).
 
 The `vision` recipe (1.4) runs Forgeyard's own vision server with `--task {task}` (the model's task,
-a placeholder of its own) and `--model {model_path}`. Its image is not pinned by digest: a variant names
-it with `forgeyard_image: vision` (or `vision-cuda`) instead of `image`, which is the image of the
-server's own version, published with the same release (see [Container images](#container-images)). On a
-machine without registry access, `docker load` it under that tag. A model is a vision model when its
+a placeholder of its own) and `--model {model_path}`. Its image is pinned by digest like every other
+engine's (1.4.1), so a loaded copy is checked by its recorded ids and a machine without registry access
+gets it through the server. A server upgrade does not change it: when a release changes the vision server,
+the pin moves to the new image in a later version. A custom recipe may still name the image of the
+server's own version, tag only, with `forgeyard_image: vision` (or `vision-cuda`) instead of `image` (how
+1.4.0's `vision` recipe named it); such an image is neither checked nor relayed. A model is a vision model when its
 `config.json` names an `…ForObjectDetection` architecture (detect: RT-DETR, D-FINE, DETR without a timm
 backbone…), SAM 2 or 2.1 (segment) or an `…ForDepthEstimation` one (depth: Depth Anything, DPT…). A
 Hugging Face vision model is only added with a permissive licence (Apache-2.0, MIT, BSD): another
@@ -1317,7 +1319,9 @@ A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asyn
 
 ## Container images
 
-Each release publishes two images on Docker Hub, built by CI from the release's tag:
+Each release publishes two images on Docker Hub, built by CI from the release's tag (and the vision
+server's, `docker.io/tonyhuang1101/forgeyard-vision`, `X.Y.Z` and `X.Y.Z-cuda`, which the `vision` recipe
+pins by digest):
 
 | Image | What | Platforms |
 |---|---|---|

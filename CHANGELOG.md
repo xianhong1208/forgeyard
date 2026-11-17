@@ -29,9 +29,24 @@ version until 1.0.
 
 ### Changed
 
+- **The vision image is pinned by digest, like every other engine** (#113). The built-in `vision` recipe
+  names `docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:ab60eb21…` (CPU, linux/amd64 and arm64) and
+  `…:1.4.0-cuda@sha256:77344971…` (NVIDIA, linux/amd64) instead of the image of the server's version
+  (`forgeyard_image`), and `images.lock.json` records their ids (`scripts/pin_images.py`). So a copy
+  loaded with `docker load` is checked by its ids, a machine without registry access gets the image
+  through the server (#102), and a server upgrade alone no longer changes the image vision models run:
+  after a release that changes `images/vision`, a small PR moves the pin (docs/development.md, *Pinned
+  engine images*; CONTRIBUTING.md, *Releasing*). `forgeyard_image` still works in a custom recipe (a copy
+  of 1.4.0's recipe), tag only, unchecked and not relayed.
 - The ROADMAP's 1.4.1 row says what was decided: still through the server. Direct transfers between machines
   are in Later.
 - The server accepts up to 32 features in an agent's hello (agents still send at most 16).
+
+### Fixed
+
+- An image named on Docker Hub in full (`docker.io/<org>/<name>:<tag>`) is read from Docker Hub's
+  registry API (`registry-1.docker.io`) by the server's image relay and `scripts/pin_images.py`:
+  `https://docker.io/v2/` is the website's redirect, so such a pinned image could not be relayed or pinned.
 
 ## [1.4.0] — 2026-11-17
 

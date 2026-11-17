@@ -151,11 +151,13 @@ DIGEST_RE = re.compile(r"^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{
 def test_fy_rec_008_every_builtin_image_is_pinned_by_digest():
     """FY-REC-008: every container variant names its image as repo:tag@sha256:<digest> (the tag for
     people, the digest for what runs), so a tag moved on the registry cannot change what an agent
-    runs. Bump with scripts/pin_images.py --write. Forgeyard's own vision image (1.4, forgeyard_image) is the
-    exception: it is built with the same release as the server and named by its version (FY-VIS-001)."""
+    runs. Bump with scripts/pin_images.py --write. Forgeyard's own vision image too (1.4.1, #113): no built-in
+    recipe names an image by the server's version (forgeyard_image) any more."""
+    containers = [v for r, _ in recipes.builtin_recipes().values() for v in r.variants if v.runtime == "container"]
+    assert [v for v in containers if v.forgeyard_image is not None] == []
     images = [(r.name, v.name, v.image) for r, _ in recipes.builtin_recipes().values() for v in r.variants
-              if v.runtime == "container" and v.forgeyard_image is None]
-    assert len(images) == 19
+              if v.runtime == "container"]
+    assert len(images) == 21 and {(n, v) for n, v, _ in images} >= {("vision", "cuda"), ("vision", "cpu")}
     unpinned = [f"{name}/{variant}: {image}" for name, variant, image in images if not DIGEST_RE.match(image or "")]
     assert unpinned == []
     # One tag, one digest: the same tag in two recipes (vllm and vllm-pooling) is the same image.

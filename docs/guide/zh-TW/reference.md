@@ -425,7 +425,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 ### 視覺
 
-`POST /v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`（1.4）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是與伺服器同版本的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`（1.4）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是以 digest 固定的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
 
 請求是 `multipart/form-data`，帶 `model`、檔案欄位 `image` 和各選項欄位；或是 JSON，帶 `model`、`image`（base64 或 `data:` URI）和選項。PNG、JPEG 或 WebP，最多 20 MiB、4,000 萬像素。閘道檢查有沒有模型和圖片，只換掉 `model`，其餘原樣交給副本；別種任務的模型回 400 `wrong_endpoint`（訊息會寫出它的端點）。
 
@@ -976,8 +976,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `sd-cpp`（1.3） | `cuda` | NVIDIA，compute capability 5.0 以上、驅動程式 560 以上 | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda`（build `3bad892`，CUDA 12.6） |
 | | `vulkan` | 所有 AMD GPU 與 APU。只給那張卡的 render node，不給 `/dev/kfd` | `…:master-vulkan`（build `32d516c`，Mesa RADV） |
 | | `cpu-process` | x86_64，以行程執行、不需要 Docker（glibc 2.39 以上：Ubuntu 24.04、Debian 13） | release `master-1043-3be2378` 的 `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`，用它的 SHA-256 檢查。需要 1.3 版 agent（它會解開 `.zip`） |
-| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `forgeyard-vision:<伺服器版本>-cuda`（torch +cu130） |
-| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `forgeyard-vision:<伺服器版本>` |
+| `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda`（torch +cu130） |
+| | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.0`（linux/amd64 與 arm64） |
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
@@ -997,13 +997,13 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 
 Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
-`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔不以 digest 釘住：variant 用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指的是和伺服器同版本、隨同一個 release 發布的映像檔（見[容器映像檔](#container-images)）。連不到 registry 的機器，用 `docker load` 以那個 tag 載入。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）。
+`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 
 ## 容器映像檔
 
-每個版本都會在 Docker Hub 發布兩個映像檔，由 CI 從該版本的 tag 建置：
+每個版本都會在 Docker Hub 發布兩個映像檔，由 CI 從該版本的 tag 建置（還有視覺伺服器的 `docker.io/tonyhuang1101/forgeyard-vision`，`X.Y.Z` 與 `X.Y.Z-cuda`，由 `vision` 配方以 digest 固定）：
 
 | 映像檔 | 內容 | 平台 |
 |---|---|---|

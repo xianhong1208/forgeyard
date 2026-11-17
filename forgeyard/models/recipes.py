@@ -61,8 +61,11 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
       - name: cpu
         when: {vendor: cpu}
         runtime: container
-        forgeyard_image: vision        1.4: Forgeyard's own image of this release (vision, vision-cuda),
-                                       named by the server's version instead of `image`
+        forgeyard_image: vision        1.4, custom recipes only: Forgeyard's own image (vision, vision-cuda)
+                                       at the server's version, tag only, instead of `image`. Kept so
+                                       recipes copied from 1.4.0's vision recipe still load; the
+                                       built-in one names the pinned image (1.4.1), which is checked
+                                       by its recorded ids and can come through the server
       - name: cpu-process
         when: {vendor: cpu, arch: [x86_64]}
         runtime: process
@@ -102,7 +105,8 @@ FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 VISION_APIS = ("vision-detect", "vision-segment", "vision-depth")
 APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images",
         "openai-videos") + VISION_APIS
-# Forgeyard's own images (1.4), named by the server's version: forgeyard/install/images.py.
+# Forgeyard's own images (1.4), named by the server's version: forgeyard/install/images.py. Only custom recipes
+# use these (copies of 1.4.0's vision recipe): the built-in vision recipe pins its image by digest since 1.4.1.
 FORGEYARD_IMAGES = ("vision", "vision-cuda")
 ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed", "diffusers")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
@@ -202,7 +206,8 @@ class Variant(_M):
     when: When
     runtime: Literal["container", "process"]
     image: Optional[str] = Field(default=None, max_length=255)
-    # 1.4: one of Forgeyard's own images instead of `image`, at the server's version (FORGEYARD_IMAGES).
+    # 1.4: one of Forgeyard's own images instead of `image`, at the server's version (FORGEYARD_IMAGES). Tag only,
+    # so not checked by recorded ids nor relayed; custom recipes only since 1.4.1 (FY-VIS-020).
     forgeyard_image: Optional[Literal[FORGEYARD_IMAGES]] = None  # type: ignore[valid-type]
     entrypoint: Optional[list[Annotated[str, Field(max_length=256)]]] = Field(default=None, max_length=8)
     engine: Optional[Engine] = None

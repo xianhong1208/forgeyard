@@ -38,6 +38,12 @@ RTDETR_REV = "5650961749fa93567c0d46fc7f43ea4f9e914107"
 SAM_REV = "de431c4043854a71d8101e17995dfe596bf101a5"
 DEPTH_REV = "5426e4f0f36572d16453bbda7a8389317b1bef99"
 A100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
+# The vision recipe's pinned images (1.4.1, #113): moved by scripts/pin_images.py --write after a release that
+# changed images/vision.
+VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0"
+              "@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6")
+VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda"
+               "@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3")
 
 
 def vision_meta(task: str, repo: str, rev: str, arch: str, size: int, **over) -> dict:
@@ -159,36 +165,85 @@ def spec_of(_owner, name: str) -> dict:
 # ------------------------------------------------------------------ the recipe
 def test_fy_vis_001_the_vision_recipe():
     """FY-VIS-001: the built-in `vision` recipe serves detect, segment and depth as vision-<task> with Forgeyard's
-    own vision image at the server's version (the CUDA build on NVIDIA 7.5+ with driver 580, the CPU build
-    for x86_64 and aarch64), the model from the cache (--model {model_path}) and the replica's key in
-    VISION_API_KEY; a vision task served under another protocol, forgeyard_image beside image, or on a process
-    variant are refused."""
+    own vision image, pinned by digest (1.4.1: the CUDA build on NVIDIA 7.5+ with driver 580, the CPU build for
+    x86_64 and aarch64), the model from the cache (--model {model_path}) and the replica's key in
+    VISION_API_KEY; a vision task served under another protocol, forgeyard_image beside image, an unknown
+    forgeyard_image, or forgeyard_image on a process variant are refused."""
     r = recipes.builtin_recipes()["vision"][0]
     assert r.tasks == ["detect", "segment", "depth"] and r.formats == ["safetensors"]
     assert r.api == {"detect": "vision-detect", "segment": "vision-segment", "depth": "vision-depth"}
     assert r.api_key_env == "VISION_API_KEY" and r.share == "vram" and r.estimate.method == "files"
     assert r.args[:4] == ["--task", "{task}", "--model", "{model_path}"] and "{served_name}" in r.args
-    assert [(v.name, v.image) for v in r.variants] == [("cuda", vision_image(__version__, "cuda")),
-                                                       ("cpu", vision_image(__version__, "cpu"))]
-    assert r.variants[0].image.endswith(f"forgeyard-vision:{__version__}-cuda")
+    assert [(v.name, v.image) for v in r.variants] == [("cuda", VISION_CUDA), ("cpu", VISION_CPU)]
+    assert all(v.forgeyard_image is None for v in r.variants)
     assert variant_matches(r.variants[0], A100) is None
     assert variant_matches(r.variants[0], {**A100, "arch": "7.0"}) is not None       # CUDA 13: Turing and newer
     assert variant_matches(r.variants[0], {**A100, "driver": "575.51"}) is not None
     assert variant_matches(r.variants[1], {"vendor": "cpu", "arch": "aarch64"}) is None
     assert variant_matches(r.variants[0], {"vendor": "amd", "arch": "gfx1151"}) is not None  # AMD: the CPU build
-    # The templates' image is the same one.
-    assert templates.image("cuda") == r.variants[0].image and templates.image("cpu") == r.variants[1].image
     text = recipes.builtin_recipes()["vision"][1]
+    cuda_line, cpu_line = f"    image: {VISION_CUDA}\n", f"    image: {VISION_CPU}\n"
+    assert cuda_line in text and cpu_line in text
     for bad, why in [(text.replace("detect: vision-detect", "detect: openai-chat"), "vision-detect"),
-                     (text.replace("forgeyard_image: vision-cuda", "forgeyard_image: vision-cuda\n    image: x/y:1"),
-                      "instead of image"),
-                     (text.replace("forgeyard_image: vision\n", "forgeyard_image: rocm\n"), "forgeyard_image"),
-                     (text.replace("  - name: cpu\n    when: {vendor: cpu, arch: [x86_64, aarch64]}\n    runtime: container",
-                                   "  - name: cpu\n    when: {vendor: cpu, arch: [x86_64, aarch64]}\n    runtime: process"),
-                      "forgeyard_image")]:
+                     (text.replace(cuda_line, cuda_line + "    forgeyard_image: vision-cuda\n"), "instead of image"),
+                     (text.replace(cpu_line, "    forgeyard_image: rocm\n"), "forgeyard_image"),
+                     (text.replace("    runtime: container\n" + cpu_line,
+                                   "    runtime: process\n    forgeyard_image: vision\n"), "forgeyard_image")]:
         assert bad != text
         with pytest.raises(recipes.RecipeError, match=why):
             recipes.parse_recipe(bad)
+
+
+def test_fy_vis_019_the_vision_image_is_pinned_recorded_and_relayable(monkeypatch):
+    """FY-VIS-019 (#113): the vision recipe's images are pinned by digest and recorded in images.lock.json (the
+    CPU build for linux/amd64 and linux/arm64, the CUDA build for linux/amd64), so a loaded copy is checked by
+    its ids and the server relays them (#102): to an aarch64 machine the arm64 build, from Docker Hub's API
+    (registry-1.docker.io, though the recipe names docker.io). A server of another version runs the same images:
+    only a PR moving the pin changes them."""
+    from forgeyard.machines import relay
+    from forgeyard.workloads import images as image_ids
+
+    lock = image_ids.load_lock()
+    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:")
+    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:")
+    for image, platforms in [(VISION_CPU, {"linux/amd64", "linux/arm64"}), (VISION_CUDA, {"linux/amd64"})]:
+        entry = lock[image]
+        assert entry["index"] == image.partition("@")[2] and set(entry["platforms"]) == platforms
+        assert relay.relayable_image(image)
+    arm = relay.image_target(SimpleNamespace(name="arm", platform={"arch": "aarch64"}), VISION_CPU)
+    assert (arm.registry, arm.repo, arm.platform) == ("registry-1.docker.io", "tonyhuang1101/forgeyard-vision",
+                                                      "linux/arm64")
+    assert arm.manifest == lock[VISION_CPU]["platforms"]["linux/arm64"]["manifest"]
+    # Docker Hub named in full is still Docker Hub's API (https://docker.io/v2/ is the website's redirect).
+    from forgeyard.workloads.registry import split_image
+
+    assert split_image("docker.io/acme/x:1") == split_image("acme/x:1") == ("registry-1.docker.io", "acme/x", "1", None)
+    assert split_image("docker.io/python:3.13") == split_image("python:3.13") == split_image(
+        "index.docker.io/library/python:3.13") == ("registry-1.docker.io", "library/python", "3.13", None)
+    assert split_image("ghcr.io/a/b:t@sha256:" + "0" * 64) == ("ghcr.io", "a/b", "t", "sha256:" + "0" * 64)
+    assert split_image("localhost:5000/x") == ("localhost:5000", "x", "latest", None)
+    # A server upgrade does not move them.
+    text = recipes.builtin_recipes()["vision"][1]
+    monkeypatch.setattr("forgeyard.__version__", "9.9.9")
+    again = recipes.parse_recipe(text, builtin=True)
+    assert [v.image for v in again.variants] == [VISION_CUDA, VISION_CPU]
+
+
+def test_fy_vis_020_forgeyard_image_still_names_the_servers_vision_image_in_a_custom_recipe(monkeypatch):
+    """FY-VIS-020: a custom recipe saved from 1.4.0's vision recipe (forgeyard_image: vision / vision-cuda) still
+    loads, and still names the published image of the server's version, tag only: not recorded, so not
+    relayed (the built-in recipe names the pinned one)."""
+    from forgeyard.machines import relay
+
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: my-vision\n", 1)
+    text = text.replace(f"image: {VISION_CUDA}", "forgeyard_image: vision-cuda").replace(
+        f"image: {VISION_CPU}", "forgeyard_image: vision")
+    r = recipes.parse_recipe(text)
+    assert [v.image for v in r.variants] == [vision_image(__version__, "cuda"), vision_image(__version__, "cpu")]
+    assert r.variants[1].image == f"docker.io/tonyhuang1101/forgeyard-vision:{__version__}"
+    assert not any(relay.relayable_image(v.image) for v in r.variants)
+    monkeypatch.setattr("forgeyard.__version__", "9.9.9")
+    assert recipes.parse_recipe(text).variants[1].image == "docker.io/tonyhuang1101/forgeyard-vision:9.9.9"
 
 
 def test_fy_vis_002_which_configs_are_vision_models():
@@ -308,7 +363,7 @@ def test_fy_vis_005_rendering_and_the_estimate(vis):
     machine; on the A100 the CUDA build on one shared card. The estimate is the files plus the recipe's
     overhead (1 GiB and the CUDA context on a GPU, 1.25 GiB of RAM on a CPU)."""
     det = spec_of(vis.owner, "det")
-    assert det["runtime"]["image"] == vision_image(__version__, "cpu")
+    assert det["runtime"]["image"] == VISION_CPU
     args = det["runtime"]["args"]
     assert args[:4] == ["--task", "detect", "--model", "${MODEL_PATH}"]
     assert args[args.index("--served-name") + 1] == "det" and args[args.index("--port") + 1] == "8000"
@@ -316,7 +371,7 @@ def test_fy_vis_005_rendering_and_the_estimate(vis):
     assert "VISION_API_KEY" not in det["env"]          # set per replica by the agent, never in the spec
     assert det["resources"]["cpu"] == 4.0 and det["resources"]["gpus"]["count"] == 0
     seg = spec_of(vis.owner, "seg")
-    assert seg["runtime"]["image"] == vision_image(__version__, "cuda") and seg["runtime"]["args"][1] == "segment"
+    assert seg["runtime"]["image"] == VISION_CUDA and seg["runtime"]["args"][1] == "segment"
     assert seg["resources"]["gpus"]["count"] == 1 and seg["resources"]["gpus"]["share"] == "vram"
     r = recipes.builtin_recipes()["vision"][0]
     meta = vision_meta("detect", "a/b", RTDETR_REV, "RtDetrV2ForObjectDetection", 80 * MIB)

@@ -638,9 +638,12 @@ that are not permissive, and the built-in `vision` recipe runs the same vision s
 the model-cache mount, so caching, offline machines and placement are those of every model. The gateway
 gives them their own endpoints (`/v1/vision/<task>`, routes of api `vision-<task>`) instead of `/x/`:
 multipart or JSON in, the server's JSON passed back, counted with the image units of 1.3 (`images`,
-`kilopixels`, `busy_ms`), so there is no migration. The recipe's image is Forgeyard's own, named by the
-server's version (`forgeyard_image`) rather than pinned by digest, since it is built by the same release
-and its digest is not known before. The server asks for `VISION_API_KEY` on every path but `/health`;
+`kilopixels`, `busy_ms`), so there is no migration. The recipe's image is Forgeyard's own. In 1.4.0 it
+was named by the server's version (`forgeyard_image`) rather than pinned by digest, since it is built by
+the same release and its digest is not known before; that left it unchecked when loaded and unable to come
+through the server. Since 1.4.1 (#113) the recipe pins it like every engine (`images.lock.json`), and a
+PR after a release that changed `images/vision` moves the pin: a server upgrade alone does not change
+it. `forgeyard_image` stays for custom recipes copied from 1.4.0. The server asks for `VISION_API_KEY` on every path but `/health`;
 the baked-in models stay for the apps made from templates until Apps go (#88).
 
 ### Workloads at /x/ (1.3, generic passthrough; deprecated in 1.4, removed in 1.5)
