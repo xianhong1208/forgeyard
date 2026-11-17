@@ -260,7 +260,7 @@ counted: another machine would get the same answer.
 - *… could not pull …: This image is not pinned by digest, so it cannot come through the server*, or
   *… is not an image Forgeyard pinned by digest*: a custom recipe's image named by a tag only. Upload it
   ([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)).
-- *… has no build for amd-strix's architecture*: the image has no build for that machine's platform
+- *… has no build for amd-01's architecture*: the image has no build for that machine's platform
   (for example arm64); pick a recipe or variant that has one.
 - *the image through the server: … SHA-256 mismatch* (a layer), *the manifest the server sent … is
   not one of the image's recorded digests*, or *… does not match the recorded ids: not running it*: what
@@ -275,7 +275,7 @@ counted: another machine would get the same answer.
   only** while it downloaded.
 - *SHA-256 mismatch*: the bytes changed on the way (a proxy that rewrites them, a broken disk). The
   file was deleted; the next try starts it again.
-- The server's log has a line per file it passed on: *Relayed <repo>@<revision>/<file> to amd-strix:
+- The server's log has a line per file it passed on: *Relayed <repo>@<revision>/<file> to amd-01:
   812.3 MiB in 41.0 s (19.8 MiB/s), finished.*, or why it ended. A file from another machine (1.4.1)
   says *… <file> from gpu-host to …*, and a machine that could not send it is named with why:
   *gpu-host could not send <file> for … (not_found: …); trying the next machine*.

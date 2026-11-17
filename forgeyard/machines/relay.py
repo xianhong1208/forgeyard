@@ -3,7 +3,7 @@ nothing (1.4, issue #35, D1/D3; protocol feature "relay").
 
 The agent calls it outbound, the way it reaches the server for everything else: an HTTPS GET with its
 machine credential as a Bearer token, through the CA it pins, so it works through the same tunnel or NAT
-that carries its WebSocket (amd-strix's `ssh -R`).
+that carries its WebSocket (an `ssh -R` tunnel, say).
 
     GET /agent/v1/relay/{replica|download}/{id}/model/{file path}   a Hugging Face model's file
     GET /agent/v1/relay/{replica|download}/{id}/model               a URL model's file

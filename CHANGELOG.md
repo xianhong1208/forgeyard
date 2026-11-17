@@ -151,7 +151,7 @@ agent images to get the new agent features.
     failed), and `nodes.fetch_via`, `auto` for every machine. Finished downloads are kept 30 days, at
     most 20 per machine. The downgrade drops both.
 - **Downloads through the server for machines that cannot reach the source** (part of #35, D1/D3). A
-  machine with no internet access of its own (amd-strix behind its SSH tunnel) gets model files and
+  machine with no internet access of its own (one behind an SSH tunnel) gets model files and
   engine archives **through the server**, which fetches them and passes the bytes on, storing nothing.
   The agent asks the way it already talks to the server: outbound HTTPS with its pinned CA and machine
   credential, so the tunnel that carries its connection carries this too.

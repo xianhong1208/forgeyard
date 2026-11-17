@@ -1224,8 +1224,8 @@ What is different:
 - Every byte crosses the server's network twice (in from the source, out to the machine), so keep
   machines that can reach the internet on **Auto** or **Direct only**.
 - Placement no longer avoids such a machine for a model it could not download itself: the
-  deployment's page says *amd-strix could not reach huggingface.co just now; the model comes through
-  the server*, or *amd-strix downloads the model and the engine through the server (its internet
+  deployment's page says *amd-01 could not reach huggingface.co just now; the model comes through
+  the server*, or *amd-01 downloads the model and the engine through the server (its internet
   access setting)*.
 
 **From another machine** (1.4.1). Before the server fetches a model file from the internet for such a
