@@ -6,6 +6,16 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-11-17
+
+A patch release for machines without internet. A machine that gets its files through the server now gets a
+model file from another machine that already has it in its cache, still through the server, before the
+internet (#116); an admin can copy an engine image from one machine to another (#117). The vision image is
+pinned by digest like every other engine, so a machine without registry access gets it through the server
+(#115), and a fully named Docker Hub image (`docker.io/<org>/<name>`) can be relayed and pinned
+(`split_image`). Test IDs are unique across the project (#114). No setting and no migration; rebuild the
+agent images to get the new agent features (`relay_source`, `image_save`).
+
 ### Added
 
 - **A model file from another machine, through the server** (#104, part 1). A machine that gets its files

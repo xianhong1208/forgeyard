@@ -237,11 +237,31 @@ Also in 1.4.0: tests that wait for conditions instead of fixed times (#76, #77, 
 that closes in under a second (#98), and `agent init` writing a valid `agent.toml` whatever a tool's
 message holds (#99). **Relay from another machine** that already has the files moved to 1.4.1 (#104).
 
+## Shipped: 1.4.1 (2026-11-17), relay from another machine
+
+1. ✅ **A model file from another machine** (#116, for #104): a machine that gets its files through the
+   server gets a model file from another machine that already has it in its cache, still through the
+   server (no machine opens a port), before the internet. The file is checked against the digest the
+   server holds, and a machine whose copy does not match is skipped for an hour. Progress and
+   **Download to…** name the machine that sends it. Accepted with model files sent from another machine
+   at about 31 MiB/s through an SSH tunnel. Engine archives keep coming from the internet through the
+   server.
+2. ✅ **Copy an engine image from another machine** (#117, for #104): on a machine's page an admin copies
+   an image from another machine's engine, through the server, which keeps nothing; never automatic.
+   Accepted with an engine image copied from one machine to another, loaded with the same content id.
+3. ✅ **The vision image pinned by digest, like every other engine** (#115, for #113): a loaded copy is
+   checked by its ids, a machine without registry access gets it through the server, and a server
+   upgrade alone no longer changes the image vision models run. A Docker Hub image named in full
+   (`docker.io/<org>/<name>`) can now be relayed and pinned (`split_image`). Accepted with a machine
+   without registry access fetching the pinned vision image through the server.
+
+Also in 1.4.1: test IDs unique across the project (#114), and the server accepts up to 32 features in
+an agent's hello. Files sent straight from machine to machine stay in *Later, when there is a need*.
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.4.1: relay from another machine** | A machine that gets its files through the server gets a model file from another machine that already has it in its cache, still through the server (no machine opens a port), before the internet: faster on a LAN, and it spares the server's internet connection. An admin can copy an engine image from one machine to another. Engine archives keep coming from the internet through the server. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
