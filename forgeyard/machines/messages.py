@@ -383,6 +383,11 @@ class ImageListedIn(_Msg):
     ok: bool = False
     reason: Annotated[Optional[str], _short(400)] = None
     images: list[ListedImageIn] = Field(default_factory=list, max_length=256)
+    # 1.4.2 ("image_remove"): the image the agent itself runs from (never removed), and the space where the engine
+    # keeps its images, when the agent can see it.
+    agent_image: Annotated[Optional[str], _short(80)] = None
+    free_bytes: Bytes = None
+    total_bytes: Bytes = None
 
 
 class ImageSavedIn(_Msg):
@@ -395,6 +400,23 @@ class ImageSavedIn(_Msg):
     reason: Annotated[Optional[str], _short(400)] = None
     bytes: Bytes = None
     image: Optional[ListedImageIn] = None
+
+
+class ImageRemovedIn(_Msg):
+    """1.4.2 ("image_remove"): the answer to image_remove: removed (what, the bytes freed, the space after), or why
+    not (code not_found | agent_image | in_use | failed, and what uses it)."""
+
+    v: int
+    type: Literal["image_removed"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    code: Annotated[Optional[str], _short(32)] = None
+    reason: Annotated[Optional[str], _short(400)] = None
+    in_use: list[Annotated[str, _short(128)]] = Field(default_factory=list, max_length=16)
+    image: Optional[ListedImageIn] = None
+    freed_bytes: Bytes = None
+    free_bytes: Bytes = None
+    total_bytes: Bytes = None
 
 
 class ImageLoadedIn(_Msg):

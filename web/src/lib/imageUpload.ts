@@ -82,3 +82,47 @@ export function sameLine(i: CopiedImage, source: string): string {
   if (i.same_as_source === false) return `Not the same image as on ${source}: what was loaded differs from what it has.`;
   return "";
 }
+
+// 1.4.2 (#124): the images a recipe names first, and only those unless the admin asks for all of them (on a shared
+// host the other machine's engine holds other people's images too).
+export function copyChoices(list: ListedImage[], showAll: boolean): ListedImage[] {
+  const named = list.filter((i) => i.matches.length > 0);
+  return showAll ? [...named, ...list.filter((i) => i.matches.length === 0)] : named;
+}
+
+// 1.4.2 (#123): a machine's engine images on its page: the ones a recipe names, and removing one it no longer uses.
+export type EngineImageUser = { name: string; kind: "deployment" | "workload"; id: number };
+export type EngineImage = ListedImage & { used_by: EngineImageUser[]; agent: boolean; remove_note: string | null };
+export type EngineImagesView = {
+  machine_id: number; listed: boolean; note: string | null; images: EngineImage[]; others: number;
+  free_bytes: number | null; total_bytes: number | null; can_remove: boolean; remove_note: string | null;
+};
+export type ImageRemoved = { ok: true; image: ListedImage; freed_bytes: number;
+  free_bytes: number | null; total_bytes: number | null };
+
+// "llama.cpp (cpu), vision (cuda)": the recipes that name it.
+export function recipesLine(i: EngineImage): string {
+  const seen = [...new Set(i.matches.map((x) => `${x.recipe} (${x.variant})`))];
+  const how = i.matches.some((x) => x.how === "checked") ? "pinned, checked by its recorded ids" : "named by its tag";
+  return `${seen.join(", ")} · ${how}`;
+}
+
+// "40 GiB free of 100 GiB" where the engine keeps its images, when the agent can see it.
+export function engineDiskLine(v: { free_bytes: number | null; total_bytes: number | null }): string | null {
+  if (v.free_bytes === null || v.free_bytes === undefined) return null;
+  return v.total_bytes ? `${bytes(v.free_bytes)} free of ${bytes(v.total_bytes)}` : `${bytes(v.free_bytes)} free`;
+}
+
+export function engineRemoveQuestion(machine: string, i: EngineImage): string {
+  const name = i.tags[0] ?? shortId(i.id);
+  const size = i.size ? ` (${bytes(i.size)})` : "";
+  return `Remove ${name}${size} from ${machine}'s container engine? A deployment that needs it pulls or loads it again.`;
+}
+
+// What the console says once an image is gone: up to its size came back (layers another image shares stay), and the
+// space where the engine keeps its images now, when the agent can see it.
+export function removedLine(machine: string, r: ImageRemoved): string {
+  const name = r.image.tags[0] ?? shortId(r.image.id);
+  const disk = engineDiskLine(r);
+  return `Removed ${name} from ${machine}: up to ${bytes(r.freed_bytes)} freed (layers another image shares stay)${disk ? `; now ${disk}` : ""}.`;
+}

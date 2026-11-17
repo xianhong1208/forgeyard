@@ -22,6 +22,7 @@ agent -> server
              busy | corrupt | failed, and why)
   image_listed (1.4.1) answer to image_list: the images in the agent's container engine
   image_saved (1.4.1) answer to image_save: how the send of an image ended, and which image it was
+  image_removed (1.4.2) answer to image_remove: removed (the image, the bytes freed, the space after) or why not
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -45,6 +46,8 @@ server -> agent
   image_list / image_save (1.4.1, "image_save") list the images in the container engine; `docker save` one
              of them to `path` on the server (an admin copies it to another machine); answered by
              `image_listed` / `image_saved`
+  image_remove (1.4.2, "image_remove") remove one engine image by its id (an admin asked); answered by
+             `image_removed`
   error      a refused message; the server closes the connection after it
 
 HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
@@ -202,9 +205,19 @@ RELAY_SEND_PATH = "/agent/v1/relay-send"
 # Listed by both sides; only an agent that lists it is asked.
 FEATURE_IMAGE_SAVE = "image_save"
 IMAGE_SEND_PATH = "/agent/v1/image-send"
+# 1.4.2 (issue #123): an admin removes an engine image a machine no longer uses. To an agent that lists it (it has a
+# container engine), `image_listed` also carries `agent_image` (the id of the image the agent runs from, when it runs
+# in a container of that engine) and `free_bytes` / `total_bytes` (where the engine keeps its images, when the agent
+# can see it). The server sends `image_remove {request_id, image}`, `image` an id from that listing; the agent removes
+# only an image of its own listing, never its own image, never one a replica there uses or any container of the
+# engine uses (refused first; then `docker rmi` / `podman rmi` without -f, by the image's own tags when it has
+# several), and answers `image_removed {request_id, ok, code, reason, in_use, image, freed_bytes,
+# free_bytes, total_bytes}` (code not_found | agent_image | in_use | failed). The server offers only images a recipe
+# names. Listed by both sides; only an agent that lists it is asked.
+FEATURE_IMAGE_REMOVE = "image_remove"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
                    FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
-                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE)
+                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

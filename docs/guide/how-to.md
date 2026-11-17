@@ -1322,7 +1322,8 @@ machine without registry access needs. Nothing is copied automatically.
 
 1. Open the target machine's page → **Engine images** → **Copy from another machine**.
 2. Choose the machine to copy **From**. Its agent lists the images in its engine: each with its tags, id,
-   size and platform, and which recipe's image it is.
+   size and platform, and which recipe's image it is. The dialog shows the images a recipe names (1.4.2);
+   tick **Show all images** for the others, such as other people's images on a shared machine.
 3. Pick one and **Copy**. The other machine runs `docker save` (or `podman save`) on it, under its own
    tags, and sends it to the server, which passes it straight into the target's `docker load`, keeping
    only a small buffer. When it is loaded, the dialog lists what was loaded, which recipe's image it is,
@@ -1359,6 +1360,33 @@ how much the cache takes on that disk and how much of the disk is free.
 
 Each removal is in the audit log as `model.cache_removed`, with what was removed and how much was
 freed. The API is in [the reference](reference.md#a-machines-model-cache-through-the-api).
+
+### Engine images
+
+Engine images take disk space too, and old ones pile up when recipes move to newer images. The machine's
+page lists them under **Engine images** (1.4.2): each image a recipe names, as its agent lists it now (a
+pinned image recognised by its recorded ids, an image a recipe names by a tag only by that tag), with its
+size, the recipes that name it, and the deployments on that machine that use it. Above the list is the free
+space where the engine keeps its images, when the agent can see that directory (an agent in a container
+usually cannot). The engine's other images are only counted: no recipe names them, so they are not
+Forgeyard's.
+
+- **Remove** (admins) deletes one image from that machine. The row asks first, then the agent runs
+  `docker rmi` (or `podman rmi`) on it, never with `-f`. When it is done, the console says how much was
+  freed: up to the image's size, since layers another image shares stay, and the free space after when the
+  agent can see the engine's disk. A deployment that needs the image again pulls it (or gets it through
+  the server, or you load it again).
+- It is refused, and the row says why, while a deployment on that machine uses the image (stop it first),
+  for the image the agent itself runs from, and while any container of the engine uses it, even one
+  Forgeyard did not start (the engine keeps such an image; the message names the container).
+- It is never offered for an image no recipe names.
+- The agent removes only an image of its own listing, by its id: the server never names an image for it to
+  delete. An image with several tags is removed by those tags.
+- An agent older than 1.4.2 lists the images but cannot remove them. Update the agent.
+
+Each removal the agent was asked for is in the audit log as `node.image_removed`, with the image, its
+tags, the recipes that name it, and how much was freed or why it was not removed. The API is in
+[the reference](reference.md#a-machines-engine-images-through-the-api).
 
 ## Move a model cache
 

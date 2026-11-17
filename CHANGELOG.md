@@ -6,6 +6,27 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Remove engine images a machine no longer uses** (#123). A machine's page lists its **Engine images**: each image
+  a recipe names, as its agent lists it now (a pinned image recognised by its recorded ids, a tag-only one by its
+  tag), with its size, the recipes that name it and the deployments on that machine that use it, and the free space
+  where the engine keeps its images when the agent can see it (`GET /api/machines/{id}/engine-images`, everyone
+  signed in). The engine's other images are only counted. **Remove** (admins) asks in the row, then the agent runs
+  `docker rmi` / `podman rmi` without `-f` (`POST /api/machines/{id}/engine-images/remove`, new agent feature
+  `image_remove`: `image_remove` / `image_removed`); the console says how much was freed. Refused, with the reason,
+  while a deployment there uses the image (409 `image_in_use`, naming it), for the image the agent runs from
+  (`agent_image`, which a 1.4.2 agent now reports in `image_listed`), while any container of the engine uses it (the
+  agent checks, naming the container), and never offered for an image no recipe names (`not_an_engine_image`). The
+  agent removes only an image of its own listing, by its id (by its own tags when it has several). An older agent
+  lists the images and says to update it. Audited as `node.image_removed`.
+
+### Changed
+
+- **Copy an image lists engine images first** (#124). The **Copy from another machine** dialog shows the images a
+  recipe names, and only those until **Show all images** is ticked (on a shared machine the other images are other
+  people's).
+
 ## [1.4.1] — 2026-11-17
 
 A patch release for machines without internet. A machine that gets its files through the server now gets a

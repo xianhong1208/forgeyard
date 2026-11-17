@@ -604,6 +604,42 @@ class Supervisor:
         rt = self.runtimes.get("container")
         return rt is not None and hasattr(rt, "save_stream") and bool(rt.info().get("ok"))
 
+    def can_remove_images(self) -> bool:
+        """1.4.2 ("image_remove"): a container engine whose images an admin may remove from the console."""
+        rt = self.runtimes.get("container")
+        return rt is not None and hasattr(rt, "remove_image") and bool(rt.info().get("ok"))
+
+    def image_users(self, entry: dict) -> list[str]:
+        """1.4.2: the workloads of the container replicas here that use this listed image: every one this agent
+        has not finished with, and every one the last desired list wants (it may be about to start)."""
+        rt = self.runtimes.get("container")
+        if rt is None:
+            return []
+        users = set()
+        for rec in list(self.records.values()):
+            if rec.final or rec.runtime != "container":
+                continue
+            if rt.refers(entry, ((rec.spec or {}).get("runtime") or {}).get("image"), rec.image_ids):
+                users.add(rec.workload)
+        for want in list((self.desired or {}).values()):
+            runtime = ((want.get("spec") or {}).get("runtime") or {})
+            if runtime.get("type") == "container" and rt.refers(entry, runtime.get("image"), want.get("image_ids")):
+                users.add(str(want.get("workload") or want.get("id")))
+        return sorted(users)
+
+    async def remove_image(self, image_id: str) -> dict:
+        """1.4.2 ("image_remove"): remove one of the engine's images, as an admin asked; the answer to the server."""
+        from forgeyard.agent.workloads.container import RemoveRefused
+
+        rt = self.runtimes.get("container")
+        if rt is None or not self.can_remove_images():
+            return {"ok": False, "code": "failed", "reason": "this agent has no container engine"}
+        try:
+            return await asyncio.to_thread(rt.remove_image, image_id, self.image_users)
+        except RemoveRefused as e:
+            log.info("Did not remove the image %s: %s", str(image_id)[:19], e)
+            return {"ok": False, "code": e.code, "reason": str(e)[:400], "in_use": e.users}
+
     def can_load_images(self) -> bool:
         rt = self.runtimes.get("container")
         return rt is not None and hasattr(rt, "load_upload") and bool(rt.info().get("ok"))

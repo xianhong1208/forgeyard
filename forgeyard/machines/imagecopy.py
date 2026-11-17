@@ -94,6 +94,12 @@ def _source_conn(node: Node):
 
 async def list_images(node: Node) -> list[dict]:
     """The images in this machine's container engine, as its agent lists them. Raises CopyFailed."""
+    return list((await list_answer(node)).get("images") or [])
+
+
+async def list_answer(node: Node) -> dict:
+    """The agent's whole answer to image_list: its images, and (1.4.2, "image_remove") the image it runs from and the
+    space around them. Raises CopyFailed."""
     conn = _source_conn(node)
     fut = conn.request({"v": PROTOCOL_VERSION, "type": "image_list"})
     try:
@@ -107,7 +113,7 @@ async def list_images(node: Node) -> list[dict]:
         conn.forget(fut)
     if not answer.get("ok"):
         raise CopyFailed(409, "image_list_failed", f"{node.name}: {answer.get('reason') or 'could not list images'}")
-    return list(answer.get("images") or [])
+    return answer
 
 
 def _abort(send: Send) -> None:
