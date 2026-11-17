@@ -244,22 +244,35 @@ def test_fy_relay_038_a_real_agent_loads_an_uploaded_file(monkeypatch, tmp_path,
 
 def test_fy_relay_042_an_uploaded_docker_hub_image_matches_its_recipe_by_the_short_name(owner):
     """FY-RELAY-042: Docker lists a Docker Hub image without "docker.io/" (and an official one without
-    "library/"), while a recipe may name it in full: the vision recipe's image is "docker.io/<namespace>/
-    forgeyard-vision:<version>". An upload of that image matched no recipe on a real machine; names are compared
-    in Docker's full form now. Another registry with the same path is still another image."""
+    "library/"), while a recipe may name it in full: a custom copy of 1.4.0's vision recipe (forgeyard_image) names
+    "docker.io/<namespace>/forgeyard-vision:<version>", tag only. An upload of that image matched no recipe on a
+    real machine; names are compared in Docker's full form now. Another registry with the same path is still
+    another image. The built-in vision recipe pins its image (1.4.1, #113): a copy is "checked" by its ids, a
+    tag alone does not match it."""
     from forgeyard import __version__
     from forgeyard.install.images import vision_image
+    from forgeyard.models import recipes
     from forgeyard.workloads.registry import full_name
 
+    builtin = recipes.builtin_recipes()["vision"][0].variant("cpu").image
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: my-vision\n", 1)
+    text = text.replace(f"image: {builtin}\n", "forgeyard_image: vision\n")
+    r = owner.post("/api/recipes", json={"yaml": text})
+    assert r.status_code == 201, r.text
     full = vision_image(__version__, "cpu")
     assert full.startswith("docker.io/")
     short = full.removeprefix("docker.io/")
+    entry = images.load_lock()[builtin]
     db = new_session()
     try:
         got = upload.recipe_matches(db, {"id": "sha256:" + "1" * 64, "tags": [short]})
-        assert {"recipe": "vision", "variant": "cpu", "image": full, "how": "tag"} in got
-        assert any(m["recipe"] == "vision" for m in upload.recipe_matches(db, {"tags": [full]}))
+        assert {"recipe": "my-vision", "variant": "cpu", "image": full, "how": "tag"} in got
+        assert not any(m["recipe"] == "vision" for m in got)
+        assert any(m["recipe"] == "my-vision" for m in upload.recipe_matches(db, {"tags": [full]}))
         assert not upload.recipe_matches(db, {"tags": ["ghcr.io/" + short]})
+        arm = entry["platforms"]["linux/arm64"]
+        assert {"recipe": "vision", "variant": "cpu", "image": builtin, "how": "checked"} in upload.recipe_matches(
+            db, {"content": arm["content"], "tags": []})
     finally:
         db.close()
     assert full_name("python:3.13") == full_name("docker.io/library/python:3.13") == full_name("docker.io/python:3.13") \

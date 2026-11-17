@@ -2,12 +2,13 @@
 # transformers models from the machine's model cache, answered by the gateway at /v1/vision/detect,
 # /v1/vision/segment and /v1/vision/depth (forgeyard/models/vision.py says which models are which).
 #
-# The image is Forgeyard's own, published with every release as docker.io/<namespace>/forgeyard-vision
-# (X.Y.Z for the CPU, linux/amd64 and arm64; X.Y.Z-cuda for NVIDIA, torch +cu130, driver 580 or newer),
-# so it is named by the server's own version (`forgeyard_image`), not pinned by digest: it is built from
-# the same commit as the server and agent that run it. On a machine without the network, load it with
-# `docker load` under that tag; a tag-only image that is there is used without a pull. AMD GPUs have no
-# build of their own yet: on an AMD machine these models run on its CPU.
+# The image is Forgeyard's own (images/vision), published with a release as docker.io/tonyhuang1101/forgeyard-vision
+# (X.Y.Z for the CPU, linux/amd64 and arm64; X.Y.Z-cuda for NVIDIA, torch +cu130, driver 580 or newer), and
+# pinned here by digest like every other engine (1.4.1, issue #113): scripts/pin_images.py records its ids in
+# images.lock.json, so a `docker load`-ed copy is checked by them and a machine without registry access gets it
+# through the server. A server upgrade does not change it: a release that changes images/vision publishes the
+# new image, and a small PR after it moves the pin (docs/development.md, Releasing). AMD GPUs have no build of
+# their own yet: on an AMD machine these models run on its CPU.
 #
 # The model comes from the model cache like every other model ({model_path}, mounted read-only); the
 # models the image bakes in are for the 1.3 workload templates only. One image at a time per replica (the
@@ -50,8 +51,8 @@ variants:
     # torch +cu130: CUDA 13 runs on Turing (7.5) and newer, with driver 580 or newer.
     when: {vendor: nvidia, compute_capability: ">=7.5", driver: ">=580"}
     runtime: container
-    forgeyard_image: vision-cuda
+    image: docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
-    forgeyard_image: vision
+    image: docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6
