@@ -227,6 +227,23 @@ def _runtime_info(value: Any) -> dict:
     return out
 
 
+# 1.4.2 (#121): how the agent runs (agent/how_it_runs.py). Kept as the agent sent it, within a size limit; the
+# update command (install/update.py) checks every value again when it renders one.
+INSTALL_MAX_BYTES = 32 * 1024
+INSTALL_METHODS = ("container", "install.sh", "manual", "unknown")
+
+
+def _install(value: Any) -> Optional[dict]:
+    if not isinstance(value, dict) or value.get("method") not in INSTALL_METHODS:
+        return None
+    try:
+        if len(json.dumps(value)) > INSTALL_MAX_BYTES:
+            return {"method": value["method"], "known": False, "reason": "the description was too large"}
+    except (TypeError, ValueError):
+        return None
+    return value
+
+
 class HelloIn(_Msg):
     v: int
     type: Literal["hello"]
@@ -243,6 +260,8 @@ class HelloIn(_Msg):
     runtime_info: Annotated[dict, BeforeValidator(_runtime_info)] = Field(default_factory=dict)
     # Added in M3: the model cache (free space, cached models).
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
+    # Added in 1.4.2: how the agent runs, for its update command (older agents do not send it).
+    install: Annotated[Optional[dict], BeforeValidator(_install)] = None
 
 
 class MetricIn(_Msg):

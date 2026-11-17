@@ -1022,11 +1022,63 @@ the journal: `journalctl -u forgeyard -f`.
 
    - **Docker**: `docker pull` the image of the server's new version (the **Machines** page names
      it), then `docker rm -f forgeyard-agent` and the same `docker run` with the new tag. The
-     volume keeps the machine.
+     volume keeps the machine. Each machine's page shows that command, complete
+     ([how](#update-an-agent)).
    - **Manual**: `git pull`, `uv sync`, restart the agent.
 
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
+
+## Update an agent
+
+Every machine's page has an **Update the agent** section. For admins it shows the complete command that brings
+that machine's agent to the server's version, made from what the agent reported about how it runs (agents from
+1.4.2 on report it each time they connect):
+
+- **In Docker**: the agent reads its own container through the engine it already uses: its name, image,
+  network, restart policy, GPUs (`--gpus`), devices and group ids (AMD's `/dev/kfd`, `/dev/dri` and the
+  numeric `--group-add`), mounts and the variables it was given with `-e`. The command pulls the agent image
+  of the server's version, removes the old container and starts the same one on the new image:
+
+   ```bash
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+   sudo docker rm -f forgeyard-agent && \
+   sudo docker run -d \
+     --name forgeyard-agent \
+     --restart always \
+     --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     -e HF_TOKEN="$HF_TOKEN" \
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+   ```
+
+   A machine that gets its files through the server (**Always through the server**) gets the image carried
+   instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there
+   (replace `USER`), then the same `docker rm -f` and `docker run`. The other machines show that way too, under
+   *cannot reach the registry?*.
+- **Installed with install.sh**: the one-line install again, without `--join` ([why](#upgrade-the-server-and-the-agents)).
+- **From a checkout**: `git checkout` of the server's version and `uv sync`; then restart the agent the way you
+  started it.
+
+Copy the command and run it on that machine. Its models and apps keep running while the agent is replaced, and
+the volume (or install.sh's state directory) keeps the machine: it comes back online as itself within seconds.
+
+The agent never reports a secret: not the join token (a joined machine does not need it again), not its
+credential, and not a variable whose name or value looks like one (`…TOKEN`, `…KEY`, `…PASSWORD`, a Hugging
+Face or GitHub token, a URL with a password). Such a variable appears as `-e NAME="$NAME"`: set it in your shell
+first (`export HF_TOKEN=…`), and the page says so. Values that cannot be repeated safely are left out and named.
+
+**An agent older than the server** says so on its tile on **Machines** and on its page: *agent 1.4.0, server
+1.4.2: update*; the hint opens the command. So does an agent of the server's version that lacks a feature such
+an agent offers (built from older code), and **Setup health** lists both. An agent before 1.4.2 does not report
+how it runs: update it by hand once ([how](#upgrade-the-server-and-the-agents)); from then on its page shows the
+command.
 
 ## Check the setup health
 

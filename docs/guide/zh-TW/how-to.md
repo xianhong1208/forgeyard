@@ -727,10 +727,44 @@ sudo systemctl enable --now forgeyard
        sudo sh -s -- --ca-fingerprint sha256:3f9a…
      ```
 
-   - **Docker**：用 `docker pull` 拉取伺服器新版本的映像檔（**Machines** 頁面上有名稱），然後執行 `docker rm -f forgeyard-agent`，再用新的 tag 執行同一個 `docker run`。volume 會保留這台機器。
+   - **Docker**：用 `docker pull` 拉取伺服器新版本的映像檔（**Machines** 頁面上有名稱），然後執行 `docker rm -f forgeyard-agent`，再用新的 tag 執行同一個 `docker run`。volume 會保留這台機器。每台機器的頁面都會顯示完整的指令（[做法](#update-an-agent)）。
    - **手動安裝**：`git pull`、`uv sync`，然後重新啟動 agent。
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
+
+## 更新 agent
+
+每台機器的頁面都有**Update the agent** 區塊。管理員會在這裡看到把這台機器的 agent 更新到伺服器版本的完整指令，它是根據 agent 回報的執行方式產生的（1.4.2 起的 agent 每次連線都會回報）：
+
+- **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
+
+   ```bash
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+   sudo docker rm -f forgeyard-agent && \
+   sudo docker run -d \
+     --name forgeyard-agent \
+     --restart always \
+     --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     -e HF_TOKEN="$HF_TOKEN" \
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+   ```
+
+   經由伺服器取得檔案的機器（**Always through the server**）則改為搬運映像檔：在能連到 Docker Hub 的機器上 `docker save`，透過 `ssh` 直接送進那台機器的 `docker load`（把 `USER` 換掉），再執行同樣的 `docker rm -f` 與 `docker run`。其他機器也會在 *cannot reach the registry?* 底下列出這個做法。
+- **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。
+- **從原始碼執行的**：`git checkout` 伺服器的版本並執行 `uv sync`，然後用你原本的方式重新啟動 agent。
+
+複製指令，在那台機器上執行。替換 agent 時，它的模型與應用程式會繼續執行；volume（或 install.sh 的狀態目錄）會保留這台機器，幾秒內它就會以原本的身分重新上線。
+
+agent 從不回報任何秘密：不回報 join token（已加入的機器不再需要它）、不回報它的憑據，也不回報名稱或值看起來像秘密的變數（`…TOKEN`、`…KEY`、`…PASSWORD`、Hugging Face 或 GitHub 的 token、含密碼的 URL）。這類變數會顯示為 `-e NAME="$NAME"`：請先在 shell 裡設定它（`export HF_TOKEN=…`），頁面上也會提醒。無法安全重現的值會被略過，並列出名稱。
+
+**比伺服器舊的 agent** 會在 **Machines** 的機器方塊與它的頁面上標示：*agent 1.4.0, server 1.4.2: update*；點這個提示就會打開指令。與伺服器同版本、但缺少這個版本 agent 應有功能的 agent（用較舊的程式碼建置）也會標示，**Setup health** 會列出這兩種情況。1.4.2 之前的 agent 不會回報執行方式：請先手動更新一次（[做法](#upgrade-the-server-and-the-agents)）；之後它的頁面就會顯示指令。
 
 ## 檢查設定健康狀態
 

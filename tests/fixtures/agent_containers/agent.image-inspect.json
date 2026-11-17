@@ -1,0 +1,37 @@
+[
+  {
+    "Id": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "RepoTags": [
+      "tonyhuang1101/forgeyard-agent:1.4.0"
+    ],
+    "Os": "linux",
+    "Architecture": "amd64",
+    "Config": {
+      "Env": [
+        "PATH=/opt/forgeyard/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/rocm/bin",
+        "LANG=C.UTF-8",
+        "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+        "PYTHON_VERSION=3.13.9",
+        "PYTHON_SHA256=0000000000000000000000000000000000000000000000000000000000000000",
+        "PYTHONUNBUFFERED=1",
+        "FORGEYARD_LIMITS=rlimit",
+        "FORGEYARD_WORKLOAD_USER=forgeyard-run",
+        "NVIDIA_DRIVER_CAPABILITIES=compute,utility"
+      ],
+      "Entrypoint": [
+        "tini",
+        "--",
+        "forgeyard",
+        "agent"
+      ],
+      "Cmd": null,
+      "Volumes": {
+        "/var/lib/forgeyard-agent": {}
+      },
+      "Labels": {
+        "org.opencontainers.image.title": "Forgeyard agent",
+        "org.opencontainers.image.version": "1.4.0"
+      }
+    }
+  }
+]

@@ -188,6 +188,9 @@ def apply_hello(db: DbSession, node: Node, hello: HelloIn, ip: Optional[str]) ->
     node.runtimes = list(hello.runtimes)
     node.features = list(hello.features)
     node.runtime_info = dict(hello.runtime_info)
+    if hello.install is not None:
+        # 1.4.2 (#121): how the agent runs; admins only see it, as the update command (api/machines.py).
+        node.runtime_info["install"] = hello.install
     from forgeyard.models import prefetch
 
     prefetch.store_cache(db, node, hello.model_cache)

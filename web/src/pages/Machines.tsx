@@ -2,6 +2,7 @@ import { IconCpu, IconPlus, IconServer2 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 
+import { BehindChip } from "../components/AgentUpdate";
 import { AdvisorBanner } from "../components/Advisor";
 import { AddMachineWays } from "../components/AddMachine";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
@@ -323,7 +324,7 @@ function Tile({ m, serverTime, p }: { m: Machine; serverTime: string; p: Placeme
       {p.loaded && <HolderChips list={here} max={5} />}
       <div className="tile-foot">
         <span title={exact(m.last_heartbeat_at)}>{heartbeatText(m, serverTime)}</span>
-        {m.agent_version && <span>agent {m.agent_version}</span>}
+        {m.agent_behind ? <BehindChip m={m} /> : m.agent_version && <span>agent {m.agent_version}</span>}
       </div>
     </article>
   );
