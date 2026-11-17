@@ -312,7 +312,7 @@ def test_fy_pull_010_a_local_or_loaded_image_is_never_pulled(tmp_path, sockdir):
 def test_fy_pull_011_credentials_go_to_the_cli_and_a_broken_helper_is_skipped(tmp_path, sockdir, monkeypatch):
     """FY-PULL-011: the registry wants credentials the API pull did not carry: the CLI pulls (with the
     user's config); its credential helper fails under the agent, so it pulls again anonymously (the
-    behaviour kept from FY-RT-022); the replica runs."""
+    behaviour kept from FY-ART-022); the replica runs."""
     monkeypatch.delenv("DOCKER_CONFIG", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     fake = FakeDocker(tmp_path / "bin")
