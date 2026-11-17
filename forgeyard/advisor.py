@@ -303,7 +303,8 @@ def secret_key_backup(ctx: Context) -> Iterator[Finding]:
     yield Finding("secret-key-backup", "warning", f"Back up the secret key (key id {kid})",
                   f"Keep a copy of {where} apart from the database. Without it, the stored Hugging Face tokens, "
                   "provider keys and apps' environment values cannot be read after a restore. "
-                  f"Confirm here once you have a backup of key id {kid}.",
+                  "Download a backup here (encrypted with a passphrase you choose, with the CA), or confirm here "
+                  f"once you have your own backup of key id {kid}.",
                   "/guide/en/how-to#back-up-and-restore", "How to back up", scope=f"secret-key:{kid}")
 
 

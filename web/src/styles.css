@@ -1078,6 +1078,13 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .trust-platforms .steps { margin-top: 2px; }
 .trust-platforms p { margin: 8px 0; color: var(--ink-2); }
 .trust-admin-lead { margin: 14px 0 10px; color: var(--ink-2); max-width: 75ch; }
+/* 1.4.2 (#127): the secret-key backup dialog. */
+.trust-admin-actions { margin: 0 0 14px; }
+.keybak form, .keybak-done { display: grid; gap: 12px; }
+.keybak .field { margin: 0; }
+.keybak-facts { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 13px; }
+.keybak-done p { margin: 0; }
+@media (max-width: 760px) { .keybak-facts { grid-template-columns: 1fr; gap: 2px 0; } .keybak-facts dd { margin-bottom: 6px; } }
 .trust-hint { margin: 10px 0 0; }
 .trust-upgrade { margin: 4px 0 12px; }
 .trust-upgrade summary { cursor: pointer; width: max-content; max-width: 100%; color: var(--info); }

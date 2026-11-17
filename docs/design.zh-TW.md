@@ -556,7 +556,9 @@ Kong 與 GPUStack 之後決定。
 - **延後提醒**是每位 admin、每項結果（`id@scope`）各自的，為期 30 天，存在使用者的 `preferences` JSON（`advisor_snoozed`），
   所以不需要 migration。error 不能延後。延後的結果如果仍然成立，30 天後會再出現。
 - **機密金鑰備份**（決策 D5）：在 admin 勾選 *I have a backup of key id X* 之前一直是警告。勾選是一筆 `server_settings`
-  （`secret_key_backup`：金鑰 id、誰、何時），和目前的金鑰 id 比對，所以換了新金鑰提醒就會回來。過時的 id 會被拒絕（409），
-  金鑰本身絕不離開 server。
+  （`secret_key_backup`：金鑰 id、誰、何時），和目前的金鑰 id 比對，所以換了新金鑰提醒就會回來。過時的 id 會被拒絕（409）。
+  1.4.2 起（#127）金鑰只有一種方式離開 server：admin 再輸入一次密碼（套用登入延遲、記入稽核）後，連同 CA 的金鑰和憑證，
+  用自己選的通關密語加密下載（Argon2id + AES-256-GCM，有版本且經過驗證的標頭）；下載會寫入同一筆設定（`how: download`）
+  並記入稽核。`secrets restore` 把它放回去。
 - **新設定的規則**寫在 `CONTRIBUTING.md`：預設值要能用、要有文件（有測試比對 `Settings`、`.env.example` 與參考資料）、
   除非必要都算進階設定，而且設錯有風險時要加一項顧問檢查。

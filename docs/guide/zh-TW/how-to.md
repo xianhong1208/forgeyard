@@ -804,11 +804,29 @@ cp -a data/tls data/secret.key .env /backup/
 
 PostgreSQL：照常使用 `pg_dump`。
 
-備份好 `secret.key` 之後，到 **Get started → Setup health** 勾選 **I have a backup of key id …**。在有管理員勾選之前，Setup health 會提醒每一位管理員；金鑰更換後也會再次提醒。金鑰本身絕不會離開伺服器：頁面只會顯示它的 id。
+備份好 `secret.key` 之後，到 **Get started → Setup health** 勾選 **I have a backup of key id …**。在有管理員勾選之前，Setup health 會提醒每一位管理員；金鑰更換後也會再次提醒。
+
+**或從主控台下載金鑰**（1.4.2）。管理員可以把機密金鑰和伺服器的 CA（`ca.key` 和 `ca.crt`）下載成一個檔案，用自己選的通關密語加密：
+
+1. 在 **Get started → Setup health** 的提醒上按 **Download a backup…**，或在 **Trust this server** 頁面的 **For admins** 底下按 **Download a key backup…**。
+2. 再輸入一次你的密碼（輸錯的次數和登入失敗一起計算：錯幾次之後就要等一下），以及兩次備份通關密語：至少 12 個字元，而且不能是你的密碼。請把通關密語記下來：沒有它，任何東西都打不開這個檔案。
+3. 按 **Download the backup**。瀏覽器會存下 `forgeyard-key-backup-<金鑰 id>-<日期>.fykey`。
+
+下載完成就等於勾選了這把金鑰 id 的提醒，並記在稽核紀錄裡（`secret_key.backup_downloaded`）。伺服器不會保留檔案，也不會保留通關密語。請把檔案和資料庫備份分開存放，通關密語也要和檔案分開：兩者合在一起就能讀出所有儲存的機密，並簽出你的裝置信任的憑證。檔案裡沒有伺服器憑證：伺服器啟動時會用 CA 重新產生一張。使用自己憑證（`TLS_CERT_FILE`）或 `TLS=off` 的伺服器沒有 Forgeyard 自己的 CA，檔案裡就只有金鑰；你的憑證請自己備份。檔案格式見[參考](reference.md#the-key-backup-file)。
 
 **每台機器上**（選擇性）：`/var/lib/forgeyard-agent`（憑據；少了它，機器就得用新的權杖重新加入）和 `/etc/forgeyard/agent.toml`。模型快取隨時可以重新下載。
 
-**還原**：停止伺服器，把檔案放回 `data/`（以及 `.env`），再啟動它。如果 `secret.key` 錯了或不見了，伺服器會拒絕啟動並說明原因，而不是把機密資料弄丟。如果金鑰真的遺失了，請停止伺服器，然後用以下指令重新開始：
+**還原**：停止伺服器，把檔案放回 `data/`（以及 `.env`），再啟動它。如果 `secret.key` 錯了或不見了，伺服器會拒絕啟動並說明原因，而不是把機密資料弄丟。
+
+如果用的是從主控台下載的金鑰備份，先把資料庫放回去，然後在伺服器停止的狀態下執行：
+
+```bash
+uv run --no-sync python -m forgeyard secrets restore forgeyard-key-backup-ab12cd34-20261117.fykey
+```
+
+它會詢問通關密語，然後寫入 `data/secret.key`（權限 600）以及 `data/tls/ca.key`（600）和 `ca.crt`（資料夾 700）；加上 `--data-dir DIR` 就寫到另一個資料夾。通關密語錯誤、檔案被改過或不完整時，什麼都不會寫入。如果那裡已經有一把不同的金鑰或 CA，它絕不會直接取代：它會停下來並說明原因；加上 `--force` 才會取代，舊檔案保留為 `<名稱>.replaced-<時間>`。那裡已經是同一把金鑰則沒有問題。`--passphrase-file PATH` 會從檔案的第一行讀取通關密語，給腳本使用。伺服器啟動時一樣會檢查這把金鑰是不是屬於這個資料庫。
+
+如果金鑰真的遺失了，請停止伺服器，然後用以下指令重新開始：
 
 ```bash
 uv run --no-sync python -m forgeyard secrets reset --yes
