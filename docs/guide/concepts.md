@@ -136,7 +136,9 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   **Download to…** fills it ahead of a deployment, with the engine too
   ([Download a model before deploying it](how-to.md#download-a-model-before-deploying-it)). A machine
   that cannot reach Hugging Face or GitHub gets the files **through the server**, which passes them on
-  and stores nothing; the agent checks them as it checks any download. A pinned engine image comes the
+  and stores nothing; the agent checks them as it checks any download. Since 1.4.1 a model file comes
+  from another machine that has it in its cache, still through the server, before the internet. A pinned
+  engine image comes the
   same way, layer by layer, and an admin can upload any image file to a machine from its page. Whether a
   model is on a machine is always what its agent reports, so a model copied there by hand counts too.
 - **Gated** Hugging Face models need a token of an account that accepted their licence. The server

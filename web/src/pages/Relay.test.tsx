@@ -74,6 +74,21 @@ describe("through the server", () => {
     expect(targetDetail(target({ via: "server", model_cached: true, need_bytes: 0 }))).toBe("model already here · 48 GiB free");
   });
 
+  it("FY-WEB-399 a model file from another machine's cache says which machine, in progress, history and the dialog", () => {
+    const rep = (download: Replica["download"]) => ({ download }) as Replica;
+    expect(downloadText(rep({ phase: "model", done: 0.5 * GIB, total: 1.25 * GIB, via: "server", source: "gpu-host" })))
+      .toBe("Downloading the model via the server, from gpu-host: 512 MiB of 1.3 GiB");
+    expect(downloadText(rep({ phase: "model", done: GIB, total: 2 * GIB, via: "direct", source: "gpu-host" }))).toBe("Downloading the model: 1 GiB of 2 GiB");
+    expect(downloadLine(dl({ download: { phase: "model", done: 0.5 * GIB, total: 1.25 * GIB, via: "server", source: "gpu-host" } })))
+      .toBe("Downloading the model via the server, from gpu-host: 512 MiB of 1.3 GiB (40%)");
+    const done = { state: "done" as const, download: null, finished_at: new Date().toISOString() };
+    expect(downloadLine(dl({ ...done, via: "machine", source: { id: 2, name: "gpu-host" } }))).toBe("Downloaded just now via the server, from gpu-host");
+    expect(downloadLine(dl({ ...done, via: "machine", source: null }))).toBe("Downloaded just now via the server, from another machine");
+    expect(targetDetail(target({ via: "server", from_machine: "gpu-host" }))).toBe("1.2 GiB to download · 48 GiB free · via the server, from gpu-host");
+    expect(targetDetail(target({ via: "server", from_machine: null }))).toBe("1.2 GiB to download · 48 GiB free · via the server");
+    expect(targetDetail(target({ via: "auto", from_machine: "gpu-host" }))).toBe("1.2 GiB to download · 48 GiB free");
+  });
+
   it("FY-WEB-388 a machine's page shows its download coming through the server", async () => {
     machinePage(["workloads", "models", "prefetch", "cache_admin", "relay"], "server", [dl()]);
     const bar = await screen.findByRole("progressbar", { name: "Download of qwen3-1.7b-gguf to a100-box" });

@@ -30,7 +30,7 @@ export function targetDetail(t: DownloadTarget): string {
   } else if (t.engine_note) {
     parts.push(`no engine: ${t.engine_note}`);
   }
-  if (t.via === "server" && !t.model_cached) parts.push("via the server");
+  if (t.via === "server" && !t.model_cached) parts.push(t.from_machine ? `via the server, from ${t.from_machine}` : "via the server");
   return parts.join(" · ");
 }
 
@@ -53,7 +53,8 @@ export function downloadLine(d: ModelDownload): string {
     return d.waiting ? `${text} · ${d.waiting}` : text;
   }
   if (d.state === "done") {
-    return `Downloaded ${when(d.finished_at)}${d.via === "server" ? " via the server" : ""}${d.recipe ? `, with the ${d.recipe} engine` : ""}`;
+    const via = d.via === "machine" ? ` via the server, from ${d.source?.name ?? "another machine"}` : d.via === "server" ? " via the server" : "";
+    return `Downloaded ${when(d.finished_at)}${via}${d.recipe ? `, with the ${d.recipe} engine` : ""}`;
   }
   if (d.state === "cancelled") return `${capital(d.reason || "cancelled")} ${when(d.finished_at)}`.trim();
   return `Failed: ${d.reason || "unknown reason"}`;

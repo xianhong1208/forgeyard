@@ -238,7 +238,8 @@ class HelloIn(_Msg):
     simulated: bool = False
     inventory: InventoryIn
     # Added in M2, optional so an M1 agent's hello stays valid.
-    features: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=16)
+    # (1.4.1: up to 32; an agent sends at most 16, which servers up to 1.4.0 accept.)
+    features: list[Annotated[str, _short(32)]] = Field(default_factory=list, max_length=32)
     runtime_info: Annotated[dict, BeforeValidator(_runtime_info)] = Field(default_factory=dict)
     # Added in M3: the model cache (free space, cached models).
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
@@ -335,6 +336,18 @@ class CacheRemovedIn(_Msg):
     freed_bytes: Bytes = None
     in_use: list[Annotated[str, _short(64)]] = Field(default_factory=list, max_length=32)
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
+
+
+class RelaySentIn(_Msg):
+    """1.4.1 (relay_source): how the send of a cached model file to the server ended."""
+
+    v: int
+    type: Literal["relay_sent"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    code: Annotated[Optional[str], _short(32)] = None
+    reason: Annotated[Optional[str], _short(400)] = None
+    bytes: Bytes = None
 
 
 class LoadedImageIn(BaseModel):

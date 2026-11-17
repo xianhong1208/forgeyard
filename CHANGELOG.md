@@ -6,6 +6,33 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **A model file from another machine, through the server** (#104, part 1). A machine that gets its files
+  through the server (**Always through the server**, or **Auto** after the source could not be reached) now
+  gets a model file from another machine that already has it in its cache before the internet. The source
+  agent sends it outbound to its own server (agent feature `relay_source`: the server asks with `relay_send`
+  over the WebSocket, the agent POSTs the bytes to `/agent/v1/relay-send/<ticket>` and answers `relay_sent`),
+  and the server pipes it into the unchanged relay GET of the machine that asked, storing nothing: no agent
+  opens a port, and the machine that asks needs only a 1.4 agent. The file is named to the source by the
+  digest the server holds (the SHA-256 or git blob id of a Hugging Face file, the recorded SHA-256 of a URL
+  model) and looked up only among what that agent found on its own disk; the source holds the model's lock
+  while it sends, so Remove waits. The server picks a machine listing the GGUF file itself, then the one with
+  fewer sends, then the latest heartbeat; one that does not have the file, already sends two or does not start
+  within 10 seconds is skipped for the next, then the internet is used, before the first byte. The server
+  hashes a whole file on its way and holds back the last piece until it matches: a machine whose copy does not
+  match is not asked for that file for an hour, the audit log names it (`node.relay_copy_refused`), and the
+  file starts over from elsewhere. `Range` resumes, the relay's cancel and limits apply, plus two sends at a
+  time per source. Progress says *via the server, from <machine>*, a download's `via` is `machine` with its
+  `source`, and **Download to…** names the machine that would send it. No setting and no migration. Engine
+  archives keep coming from the internet through the server.
+
+### Changed
+
+- The ROADMAP's 1.4.1 row says what was decided: still through the server. Direct transfers between machines
+  are in Later.
+- The server accepts up to 32 features in an agent's hello (agents still send at most 16).
+
 ## [1.4.0] — 2026-11-17
 
 Easier to see, and models on machines without internet. **Machines** are tiles, each with a page that

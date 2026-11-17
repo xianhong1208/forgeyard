@@ -764,9 +764,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
 | `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和引擎壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
 
-`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`）。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`），和 `from_machine`（1.4.1）：會經由伺服器把模型送過來的機器，沒有則為 null。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
 
-一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`，模型經由伺服器從另一台機器的快取取得則是 `machine`，並帶 `source: {id, name}`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
 
 | 狀態碼 | `code` | 何時 |
 |---|---|---|
@@ -808,6 +808,26 @@ agent 協定的 feature `relay`（1.4 起的 agent 和伺服器）。對列出�
 | 502 | `source_unreachable`、`source_failed` | 伺服器連不到來源，或來源回了錯誤 |
 
 agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇到 429 會等待且不算一次重試，其餘的則像網路錯誤一樣重試。這時它的進度會帶 `download.via: "server"`。
+
+**從另一台機器**（協定 feature `relay_source`，1.4.1 起的 agent 和伺服器）。伺服器開啟模型檔的來源之前，會先問另一台有這個檔案的機器。候選機器是：已連線、agent 列出 `relay_source`、回報的快取（`model_cache.cached`）裡有這個模型的 revision（URL 模型則是它的 key，並且在 `model_cache.models` 裡列出和伺服器記錄相同的 SHA-256），而且沒有因為這個檔案被標記的其他機器。列出那個 GGUF 檔本身 key 的機器優先，其次是正在送的檔案比較少的，再其次是最近一次心跳較新的。提出要求的機器，它的請求完全不變。
+
+伺服器透過 WebSocket 傳給選中的機器 `relay_send {request_id, path, item, offset, length}`。`item` 依伺服器持有的 digest 描述檔案：`{kind: "hf", repo, revision, file, blob, size}`（`blob` 是 LFS 檔的 SHA-256，否則是它的 git blob id）或 `{kind: "url", dir, sha256, size}`。agent 只在它自己磁碟上找到的模型裡找這個檔案（revision 的標記檔列出這個檔案、snapshot 連結指向那個 blob、快取裡大小相符的一般檔案；URL 模型的標記檔有那個 SHA-256），送的期間持有模型檔案的鎖（這時移除會回 `busy`），然後 POST 第 `offset` 到 `offset + length - 1` 個位元組：
+
+| 請求 | 作用 |
+|---|---|
+| `POST /agent/v1/relay-send/{ticket}` | 這些位元組，帶機器憑證，`Content-Length` = `length`；全部轉出去之後回 `{"ok": true, "bytes": n}` |
+
+之後它回 `relay_sent {request_id, ok, code, reason, bytes}`，`code` 是 `not_found`、`busy`（已經在送兩個）、`corrupt`（它送出的完整檔案和 digest 不符）或 `failed`。伺服器透過最多 64 段的佇列把內容轉進提出要求的機器的回應；`Content-Length` 和 `Content-Range` 由伺服器依檔案大小產生。回 `not_found` 或 `busy`，或 10 秒內沒有送出任何東西（之後 10 分鐘內不會再被要求送這個檔案）的機器會被跳過，改問下一台，最後才照上面的方式從網際網路取得。完整的檔案在經過時會計算 hash，最後一段保留到相符才送出：副本不符的機器在一小時內不會再被要求送這個檔案，稽核紀錄會記下 `node.relay_copy_refused`（那台機器、檔案、提出要求的機器和兩個 digest），部署的事件也會寫出來，而提出要求的機器對這個檔案的下一次請求會收到完整檔案（200，忽略它的 `Range`），所以會從頭重新下載。每台機器同時最多送兩個。
+
+| 狀態 | `code` | 時機 |
+|---|---|---|
+| 401 | `credential_refused` | 沒有憑證，或憑證已撤銷 |
+| 403 | `browser_refused` | 請求帶有 `Origin` |
+| 404 | `send_not_found` | 這台機器沒有那個 ticket 的傳送（別台機器的憑證、已結束的 ticket） |
+| 409 | `send_claimed`、`send_ended` | 同一個 ticket 第二次 POST；傳送在全部位元組轉出前就結束了 |
+| 400 | `send_length` | `Content-Length` 不是要求的長度 |
+
+這時經由伺服器的進度會帶 `download.source`，也就是送出檔案的機器名稱（由伺服器填入，agent 不能設定）；下載的 `via` 會變成 `machine`，並帶 `source: {id, name}`。Download to… 的 targets 裡，`from_machine` 會寫出哪台機器會經由伺服器把模型送給這台機器。
 
 **引擎映像檔**（協定 feature `relay_images`，1.4 起的 agent 和伺服器）。對同時列出它的 agent，desired 裡的副本（在 `spec` 旁邊）或下載，如果引擎映像檔以 digest 釘選、並記錄在 `forgeyard/recipes/images.lock.json`，就會帶 `image_relay: {path, mode}`，模式相同；`path` 是 `/agent/v1/relay/{replica|download}/{id}/image`。只用 tag 指定的映像檔永遠不會有。
 

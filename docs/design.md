@@ -373,6 +373,15 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   **read-only** into containers (the model's own directory, nothing else); files are read-only for
   processes too. Downloads go through the same guard as the server: https and public addresses
   only, every redirect checked (`--allow-private-model-hosts` for a LAN mirror).
+- **Through the server** (1.4, #35; 1.4.1, #104): a machine set so, or one that could not reach the
+  source, GETs its files from the server's relay, which fetches them and stores nothing. In 1.4.1 the
+  relay first asks another machine whose cache has the model file to send it (`relay_send` over its
+  WebSocket, then an outbound POST of the bytes): agents never accept connections from each other, so
+  every byte still passes the server. The file is named to the source by the digest the server holds
+  and looked up only among what that agent found on its own disk; the server hashes whole files on the
+  way, holds back the last piece until the hash matches, and stops asking a source whose copy did not
+  match; the fallback is machine, next machine, internet, decided before the first byte. Direct
+  agent-to-agent transfers are left for Later.
 - **Who:** admins manage the catalog, recipes and model sources; admins and operators deploy;
   everyone signed in sees deployments and can try them.
 

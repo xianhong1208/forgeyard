@@ -18,6 +18,8 @@ agent -> server
              their SHA-256); older servers ignore it
   logs       (M2) answer to a logs_request: the last lines of a replica's output
   image_loaded (1.4) answer to image_load: ok or why not, and each image loaded (id, tags, content id)
+  relay_sent (1.4.1) answer to relay_send: how the send of a cached model file ended (ok, or not_found |
+             busy | corrupt | failed, and why)
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -36,6 +38,8 @@ server -> agent
              the agent's model cache; answered by `cache_removed` (agent -> server)
   image_load (1.4, "image_load") an admin uploaded an image file to this machine: fetch it from `path`
              on the server and load it into the container engine; answered by `image_loaded`
+  relay_send (1.4.1, "relay_source") another machine needs a model file this agent has in its cache: send it
+             to `path` on the server; answered by `relay_sent`
   error      a refused message; the server closes the connection after it
 
 HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
@@ -44,6 +48,8 @@ archive the machine's desired state names, streamed from their source by the ser
 (1.4, "relay_images") …/image/manifest and …/image/blobs/<digest>: a pinned engine image's manifest for the
 machine's platform, and its config and layers by digest. (1.4, "image_load") GET
 /agent/v1/image-upload/<ticket>: the bytes of an image file an admin is uploading to this machine.
+(1.4.1, "relay_source") POST /agent/v1/relay-send/<ticket>: the bytes of a cached model file, from the machine
+that has it, which the server pipes into another machine's relay GET.
 
 Models (M3) extend it the same way: an agent started with a model cache lists "models"; only
 then does the server place model deployments there, and its desired replicas carry a rendered
@@ -167,8 +173,21 @@ FEATURE_RELAY_IMAGES = "relay_images"
 # server keeps nothing but a small buffer. Listed by both sides; only an agent that lists it is asked.
 FEATURE_IMAGE_LOAD = "image_load"
 IMAGE_UPLOAD_PATH = "/agent/v1/image-upload"
+# 1.4.1 (issue #104): a machine that gets its files through the server gets a model file from another machine
+# that has it in its cache, still through the server, before the internet. An agent that lists it may be asked
+# `relay_send {request_id, path, item, offset, length}`: `item` names one verified file of its cache ({kind: "hf",
+# repo, revision, file, blob, size} or {kind: "url", dir, sha256, size}), which the agent looks up only among what
+# it found on its own disk. It POSTs bytes offset..offset+length-1 of it to `<its own server><path>`
+# (RELAY_SEND_PATH/<ticket>, its machine credential, the CA it pins, Content-Length = length), and answers
+# `relay_sent {request_id, ok, code, reason, bytes}` (code not_found | busy | corrupt | failed). The server
+# pipes the body into the other machine's relay GET (unchanged), hashing whole files on the way; a source whose
+# bytes do not match is not asked for that file again for an hour. Listed by both sides; only an agent that
+# lists it is asked, at most 2 sends at a time.
+FEATURE_RELAY_SOURCE = "relay_source"
+RELAY_SEND_PATH = "/agent/v1/relay-send"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
-                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD)
+                   FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
+                   FEATURE_RELAY_SOURCE)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

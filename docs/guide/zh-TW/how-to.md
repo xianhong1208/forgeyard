@@ -856,6 +856,16 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
 - 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-strix could not reach huggingface.co just now; the model comes through the server*，或 *amd-strix downloads the model and the engine through the server (its internet access setting)*。
 
+**從另一台機器**（1.4.1）。伺服器替這種機器從網際網路抓模型檔之前，會先問快取裡已經有這個模型的機器。其中一台把檔案送給伺服器（和它的 agent 做的其他事一樣，由機器往外連：沒有機器要開 port，tunnel 也不用改），伺服器再轉給要的機器，不存任何檔案。在區域網路上這比網際網路快，也省下伺服器的對外頻寬。不需要任何設定：
+
+- **哪些機器會送**：任何一台 agent 是 1.4.1 以後、而且快取裡列出這個模型的其他機器，不論它自己能不能上網（完全沒有網路的機器也能送）。只會送它下載並檢查過的檔案，而且只依伺服器持有的 digest 指定。URL 模型要等它的 SHA-256 記錄下來後，才會從機器取得。
+- **選哪一台**：先選有那個 GGUF 檔本身的機器，再選正在送的檔案比較少的。沒有那個檔案、已經在送兩個，或 10 秒內沒開始送的機器會被跳過，改問下一台，最後才用網際網路；這些都發生在提出要求的機器收到第一個位元組之前。送到一半中斷的機器會讓那次回應提早結束；下載會從磁碟上已有的部分繼續，伺服器會重新選來源。
+- **檢查**：提出要求的機器照常檢查每個檔案。伺服器也會檢查經過的完整檔案，並保留最後一段直到相符才送出：副本不符的機器在一小時內不會再被要求送那個檔案，稽核紀錄會寫出是哪台（`node.relay_copy_refused`），檔案會從別處重新開始。請從那台送出檔案的機器的快取移除這個模型，再重新下載。
+- **你會看到**：*Downloading the model via the server, from gpu-host: … of …*、*Downloaded … via the server, from gpu-host*，有機器會送時 **Download to…** 會顯示 *via the server, from gpu-host*。
+- 只有經由伺服器取得檔案的機器會用到（**Always through the server**，或 **Auto** 且連不到來源之後）。連得到網際網路的機器仍然直接下載。
+- 受限模型可能這樣送到一台機器而不用到任何 Hugging Face 權杖，因為另一台機器已經有它。和以前一樣，每台機器拿到什麼由伺服器決定。
+- 引擎壓縮檔仍然經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
+
 **引擎映像檔**（container 變體）在 recipe 以 digest 釘選時也會經由伺服器，所有內建 recipe 都是如此：
 
 - 映像檔不在機器上時，agent 照常 pull（**Auto**）；pull 連不到 registry（`lookup ghcr.io: no such host`、逾時）時改經由伺服器，之後一小時內同一個 registry 的映像檔也一樣。設成 **Always through the server** 時完全不會先試 registry。
@@ -864,7 +874,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 進度會顯示 *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*，接著是 *loading it*。每一層都會經過伺服器的網路兩次，和模型檔一樣。
 - 只用 tag 指定的映像檔（自訂 recipe 的、這一版 Forgeyard 自己的 vision 映像檔）不能經由伺服器：沒有記錄的 digest 可以比對。請改用上傳（下一節）。
 
-機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。
+機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。要送檔案給其他機器，agent 必須是 1.4.1 以後的版本；提出要求的機器只要 1.4。
 
 ## 把引擎映像檔上傳到機器
 

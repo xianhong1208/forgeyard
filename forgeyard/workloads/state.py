@@ -198,6 +198,10 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         if st.log_tail is not None:
             r.log_tail = st.log_tail
         r.download = st.download if state in ("starting", "pending") else None
+        if r.download is not None:  # 1.4.1: the machine a file comes from, through the server
+            from forgeyard.machines.peers import label
+
+            r.download = label(r.download, "replica", r.uid)
         health = (r.spec or r.workload.spec or {}).get("health")
         ready = state == "healthy" or (state == "running" and not health)
         if ready and r.ready_at is None:
