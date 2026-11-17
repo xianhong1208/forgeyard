@@ -817,6 +817,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 |---|---|
 | `POST /agent/v1/relay-send/{ticket}` | 這些位元組，帶機器憑證，`Content-Length` = `length`；全部轉出去之後回 `{"ok": true, "bytes": n}` |
 
+每個回應都會關閉連線（`Connection: close`），所以傳送被提早結束時（提出要求的機器離開了、下載被取消），來源會立刻停止寫入。
+
 之後它回 `relay_sent {request_id, ok, code, reason, bytes}`，`code` 是 `not_found`、`busy`（已經在送兩個）、`corrupt`（它送出的完整檔案和 digest 不符）或 `failed`。伺服器透過最多 64 段的佇列把內容轉進提出要求的機器的回應；`Content-Length` 和 `Content-Range` 由伺服器依檔案大小產生。回 `not_found` 或 `busy`，或 10 秒內沒有送出任何東西（之後 10 分鐘內不會再被要求送這個檔案）的機器會被跳過，改問下一台，最後才照上面的方式從網際網路取得。完整的檔案在經過時會計算 hash，最後一段保留到相符才送出：副本不符的機器在一小時內不會再被要求送這個檔案，稽核紀錄會記下 `node.relay_copy_refused`（那台機器、檔案、提出要求的機器和兩個 digest），部署的事件也會寫出來，而提出要求的機器對這個檔案的下一次請求會收到完整檔案（200，忽略它的 `Range`），所以會從頭重新下載。每台機器同時最多送兩個。
 
 | 狀態 | `code` | 時機 |

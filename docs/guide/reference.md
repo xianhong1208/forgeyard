@@ -1053,6 +1053,9 @@ POSTs bytes `offset` to `offset + length - 1`:
 |---|---|
 | `POST /agent/v1/relay-send/{ticket}` | The bytes, with the machine credential and `Content-Length` = `length`; answered `{"ok": true, "bytes": n}` once all of them were passed on |
 
+Every answer closes the connection (`Connection: close`), so a source whose send was ended early (the machine
+that asked went away, the download was cancelled) stops writing at once.
+
 It then answers `relay_sent {request_id, ok, code, reason, bytes}`, `code` being `not_found`, `busy` (two
 sends under way), `corrupt` (a whole file it sent does not hash to its digest) or `failed`. The server
 pipes the body into the asking machine's answer through a queue of at most 64 pieces; `Content-Length` and

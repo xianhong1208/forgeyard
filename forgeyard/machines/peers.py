@@ -409,8 +409,14 @@ def _node_of(credential: Optional[str]) -> Optional[int]:
         db.close()
 
 
+# Every answer closes the connection: when the server ends a send early, the rest of the body would otherwise be
+# read and thrown away (uvicorn keeps a connection alive), so the source would go on sending the whole file. Closed,
+# its next write fails and it stops at once.
+CLOSE = {"Connection": "close"}
+
+
 def _refuse(status: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse({"detail": {"code": code, "message": message}}, status_code=status)
+    return JSONResponse({"detail": {"code": code, "message": message}}, status_code=status, headers=CLOSE)
 
 
 async def _put(pipe: Pipe, chunk) -> bool:
@@ -476,5 +482,5 @@ async def relay_send(ticket: str, request: Request):
             _abort(pipe)
     pipe.first.set()
     if pipe.ended == "finished":
-        return JSONResponse({"ok": True, "bytes": pipe.received})
+        return JSONResponse({"ok": True, "bytes": pipe.received}, headers=CLOSE)
     return _refuse(409, "send_ended", f"The send ended: {pipe.ended}.")

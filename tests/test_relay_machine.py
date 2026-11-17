@@ -186,14 +186,22 @@ def get(w, path: str, credential: str, rng=None, timeout=30) -> tuple[int, dict,
 
 
 def post(w, path: str, credential, body: bytes = b"", length=None, origin=None) -> tuple[int, dict]:
+    """A source's POST. The server answers a refusal at once and closes the connection, so writing the rest of the
+    body may fail: the answer is read all the same, as the agent would."""
     conn = http.client.HTTPConnection("127.0.0.1", w.port, timeout=20)
     try:
-        h = {"Content-Length": str(len(body) if length is None else length)}
+        conn.putrequest("POST", path)
+        conn.putheader("Content-Length", str(len(body) if length is None else length))
         if credential:
-            h["Authorization"] = f"Bearer {credential}"
+            conn.putheader("Authorization", f"Bearer {credential}")
         if origin:
-            h["Origin"] = origin
-        conn.request("POST", path, body=body, headers=h)
+            conn.putheader("Origin", origin)
+        conn.endheaders()
+        try:
+            for i in range(0, len(body), 65536):
+                conn.send(body[i:i + 65536])
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         resp = conn.getresponse()
         return resp.status, json.loads(resp.read() or b"{}")
     finally:
@@ -395,21 +403,33 @@ def test_fy_rfm_004_a_copy_that_does_not_match_is_never_sent_whole_and_its_sourc
 def test_fy_rfm_005_limits_per_source_and_cancel_during_a_send(world, monkeypatch, caplog):
     """FY-RFM-005: a source already sending MAX_PER_SOURCE files is not asked (the internet is used); a cancelled
     download ends a send under way within the relay's recheck: the target's answer ends, the source's POST is
-    ended, and every slot and ticket is given back."""
+    ended (the server closes its connection, so the source stops at once instead of sending the rest of the file
+    to be thrown away), and every slot and ticket is given back."""
     w = world
     caplog.set_level(logging.INFO, logger="forgeyard.relay")
     monkeypatch.setattr(relay, "RECHECK", 0.2)
     row_id, uid = download_row(w.model_id, w.tgt["node_id"])
     url = f"/agent/v1/relay/download/{uid}/model/m.gguf"
     real_post = relay_client.RelayClient.post
+    sends = []
 
     def slow(self, path, chunks, length):
+        record = {"sent": 0, "error": None, "ended": None}
+        sends.append(record)
+
         def trickle():
             for chunk in chunks:
                 for i in range(0, len(chunk), 8192):
-                    time.sleep(0.02)
+                    time.sleep(0.05)
+                    record["sent"] += len(chunk[i:i + 8192])
                     yield chunk[i:i + 8192]
-        return real_post(self, path, trickle(), length)
+        try:
+            return real_post(self, path, trickle(), length)
+        except Exception as e:
+            record["error"] = e
+            raise
+        finally:
+            record["ended"] = time.monotonic()
 
     with source(w):
         connected_source(w, w.src["node_id"])
@@ -437,6 +457,9 @@ def test_fy_rfm_005_limits_per_source_and_cancel_during_a_send(world, monkeypatc
         conn.close()
         wait_until(lambda: peers._sending == {} and peers._pipes == {} and relay.slots.by_node == {},
                    "every slot and ticket given back")
+        wait_until(lambda: sends and sends[-1]["ended"], "the source's send ended", 10)
+        assert sends[-1]["error"] is not None and sends[-1]["sent"] < len(DATA) // 2, sends[-1]
+        assert sends[-1]["ended"] - t0 < 5
         wait_until(lambda: any("no longer wanted" in m and "from src" in m for m in caplog.messages), "the log line")
     assert cdn(w) == [None]  # the cancelled one never went to the internet
 
@@ -466,8 +489,8 @@ def test_fy_rfm_015_a_source_that_stalls_or_sends_too_much_ends_the_answer_short
         connected_source(w, w.src["node_id"])
         t0 = time.monotonic()
         status, _, body = get(w, f"/agent/v1/relay/download/{uid}/model/m.gguf", w.tgt["credential"])
-        # (the last piece that arrived is held back: a whole file is hashed on its way)
-        assert status == 200 and len(DATA) // 3 < len(body) < len(DATA) and body == DATA[:len(body)]
+        # (what arrived, less the last piece, which is held back: a whole file is hashed on its way)
+        assert status == 200 and 0 < len(body) < len(DATA) and body == DATA[:len(body)]
         assert time.monotonic() - t0 < 3.5
     wait_until(lambda: peers._pipes == {} and peers._sending == {}, "the pipe closed")
     # Longer than announced (a server below that does not enforce Content-Length): stopped there.
