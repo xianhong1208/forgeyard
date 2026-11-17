@@ -346,8 +346,8 @@ async def open_copy(target_name: str, copy: FileCopy, offset: int, length: int) 
         finally:
             first.cancel()
         if pipe.first.is_set() and (pipe.received or pipe.ended == "finished"):
-            log.info("%s of %s for %s comes from %s.", "Bytes" if offset or length != copy.size else "All",
-                     copy.label, target_name, cand.name)
+            part = "" if offset == 0 and length == copy.size else f" (bytes {offset}-{offset + length - 1})"
+            log.info("%s%s for %s comes from %s.", copy.label, part, target_name, cand.name)
             return PipeSource(pipe, copy, offset, conn, fut)
         if answer.done() and not answer.cancelled() and answer.exception() is None:
             said = answer.result()
