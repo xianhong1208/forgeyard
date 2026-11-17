@@ -241,7 +241,7 @@ message holds (#99). **Relay from another machine** that already has the files m
 
 | Version | What you get |
 |---|---|
-| **1.4.1: relay from another machine** | A machine that cannot reach the internet gets a model, an engine archive or an image from another machine on its network that already has it, instead of through the server: faster on a LAN, and it spares the server's bandwidth. |
+| **1.4.1: relay from another machine** | A machine that gets its files through the server gets a model file from another machine that already has it in its cache, still through the server (no machine opens a port), before the internet: faster on a LAN, and it spares the server's internet connection. An admin can copy an engine image from one machine to another. Engine archives keep coming from the internet through the server. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
@@ -289,6 +289,9 @@ version is not decided yet.
 - **On-demand cloud GPUs.** A machine is rented when local capacity runs out and released when
   idle. The provider is chosen at that time.
 - **Relay through the agent.** Machines behind NAT can serve without inbound ports.
+- **Files straight from machine to machine.** Model files sent from one agent to another directly, or
+  directly when the machines can reach each other and through the server otherwise, instead of always
+  through the server (1.4.1).
 - **Models larger than one machine.** vLLM with Ray across several machines.
 - **Prefix-aware routing.** Requests that share a long prompt go to the replica that already has
   it cached.

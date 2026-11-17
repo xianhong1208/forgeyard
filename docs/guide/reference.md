@@ -955,13 +955,14 @@ agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB mar
 cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
 the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
 when no variant of the recipe runs there; and `via`, how the model would come (`direct`, `auto` or
-`server`). The variant is the one the machine would run: a GPU variant
+`server`), with `from_machine` (1.4.1) naming the machine that would send it through the server, or null. The variant is the one the machine would run: a GPU variant
 when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
 
 A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
 `state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
 shape as a deployment replica's, with `via: "server"` while the bytes come through the server),
-`reason`, `via` (`direct`, or `server` once it came through the server), `requested_by`,
+`reason`, `via` (`direct`, `server` once it came through the server, or `machine` once the model came from
+another machine's cache through the server, with `source: {id, name}`), `requested_by`,
 `created_at`, `finished_at` and `waiting` (the machine is offline). Finished ones are kept 30 days, at
 most 20 per machine.
 
@@ -1031,6 +1032,53 @@ hosts). It checks every 2 seconds that the relay is still wanted, and closes it 
 
 The agent stops on 401, 403 and 404 (with the server's words), waits out 429 without counting it as a
 try, and retries the rest like a network error. Its progress then has `download.via: "server"`.
+
+**From another machine** (the protocol feature `relay_source`, agents and servers from 1.4.1). Before the
+server opens a model file's source, it asks another machine that has it. The candidates are the other
+machines that are connected, whose agent lists `relay_source`, whose reported cache (`model_cache.cached`)
+has the model's revision (a URL model: its key, listed in `model_cache.models` with the SHA-256 the server
+recorded), and that are not marked for that file. A machine listing the GGUF file's own key comes first,
+then the one with fewer sends under way, then the latest heartbeat. The request of the machine that asks
+does not change.
+
+The server sends the chosen machine `relay_send {request_id, path, item, offset, length}` over its
+WebSocket. `item` describes the file by the digest the server holds: `{kind: "hf", repo, revision, file,
+blob, size}` (`blob` is the SHA-256 of an LFS file, else its git blob id) or `{kind: "url", dir, sha256,
+size}`. The agent looks it up only among the models it found on its own disk (the revision's marker lists
+the file, its snapshot link points at that blob, a regular file of that size inside the cache; a URL model's
+marker has that SHA-256), holds the model's files lock while it sends (a removal answers `busy`), and
+POSTs bytes `offset` to `offset + length - 1`:
+
+| Request | What it does |
+|---|---|
+| `POST /agent/v1/relay-send/{ticket}` | The bytes, with the machine credential and `Content-Length` = `length`; answered `{"ok": true, "bytes": n}` once all of them were passed on |
+
+Every answer closes the connection (`Connection: close`), so a source whose send was ended early (the machine
+that asked went away, the download was cancelled) stops writing at once.
+
+It then answers `relay_sent {request_id, ok, code, reason, bytes}`, `code` being `not_found`, `busy` (two
+sends under way), `corrupt` (a whole file it sent does not hash to its digest) or `failed`. The server
+pipes the body into the asking machine's answer through a queue of at most 64 pieces; `Content-Length` and
+`Content-Range` are its own, from the file's size. A machine that answers `not_found` or `busy`, or sends
+nothing within 10 seconds (it is then not asked for that file for 10 minutes), is skipped for the next
+one, then the source on the internet as above. A whole file is hashed on its way, and its last piece held
+back until it matches: a machine whose copy does not match is not asked for that file for an hour, the
+audit log records `node.relay_copy_refused` (the machine, the file, the machine that asked, both digests),
+a deployment's events say so too, and the next request for that file from the machine that asked is
+answered whole (200, ignoring its `Range`), so it starts the file over. At most two sends per machine.
+
+| Status | `code` | When |
+|---|---|---|
+| 401 | `credential_refused` | No credential, or a revoked one |
+| 403 | `browser_refused` | The request has an `Origin` |
+| 404 | `send_not_found` | No send from this machine with that ticket (another machine's credential, a ticket that ended) |
+| 409 | `send_claimed`, `send_ended` | A second POST for the ticket; the send ended before all its bytes were passed on |
+| 400 | `send_length` | A `Content-Length` other than the length asked for |
+
+Progress through the server then carries `download.source`, the sending machine's name (set by the server;
+an agent cannot), and a download's `via` becomes `machine` with `source: {id, name}`. In the targets of
+Download to…, `from_machine` names the machine that would send the model to a machine that gets it through
+the server.
 
 **Engine images** (the protocol feature `relay_images`, agents and servers from 1.4). To an agent that
 also lists it, a desired replica (beside its `spec`) or download whose engine image is pinned by digest

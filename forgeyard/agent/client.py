@@ -35,6 +35,7 @@ from forgeyard.machines.protocol import (
     FEATURE_PREFETCH,
     FEATURE_RELAY,
     FEATURE_RELAY_IMAGES,
+    FEATURE_RELAY_SOURCE,
     FEATURE_REPLICA_GUARD,
     FEATURE_REPLICA_KEYS,
     FEATURE_WORKLOAD_GUARD,
@@ -150,6 +151,12 @@ class Agent:
             models.relay_client = self.relay_client
         self.server_features: set[str] = set()
         self._answers: set[asyncio.Task] = set()
+        # 1.4.1 ("relay_source"): sends a cached model file to the server for another machine.
+        self.sender = None
+        if models is not None and getattr(models, "root", None) is not None:
+            from forgeyard.agent.share import Sender
+
+            self.sender = Sender(models, self.relay_client)
 
     def stop(self) -> None:
         self._stop.set()
@@ -169,6 +176,8 @@ class Agent:
                 msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
                 if getattr(self.supervisor.models, "relay_client", None) is not None:
                     msg["features"].append(FEATURE_RELAY)
+                    if self.sender is not None:
+                        msg["features"].append(FEATURE_RELAY_SOURCE)
                     if getattr(self.supervisor, "can_relay_images", lambda: False)():
                         msg["features"].append(FEATURE_RELAY_IMAGES)
                 msg["model_cache"] = cache
@@ -312,6 +321,10 @@ class Agent:
                 task = asyncio.create_task(self._answer_image_load(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+            elif kind == "relay_send" and self.workloads and FEATURE_RELAY_SOURCE in self.server_features:
+                task = asyncio.create_task(self._answer_relay_send(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
 
     async def _answer_logs(self, ws, data: dict) -> None:
         replica = str(data.get("replica") or "")
@@ -362,6 +375,28 @@ class Agent:
                 answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400]}
         await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "image_loaded", "request_id": data.get("request_id"),
                                   **answer}))
+
+    async def _answer_relay_send(self, ws, data: dict) -> None:
+        """1.4.1 ("relay_source"): send a cached model file to this agent's own server, for another machine."""
+        import threading
+
+        cancel = threading.Event()
+        try:
+            if self.sender is None:
+                answer = {"ok": False, "code": "not_found", "reason": "this agent has no model cache"}
+            else:
+                answer = await asyncio.to_thread(self.sender.send, data, cancel)
+        except asyncio.CancelledError:
+            cancel.set()
+            raise
+        except Exception as e:  # never take the connection down
+            log.warning("Sending a cached file failed: %s", e)
+            answer = {"ok": False, "code": "failed", "reason": (str(e) or type(e).__name__)[:400]}
+        try:
+            await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "relay_sent", "request_id": data.get("request_id"),
+                                      **answer}))
+        except ConnectionClosed:
+            pass  # the server went away; it no longer waits for the answer
 
     async def _status_loop(self, ws) -> None:
         sup = self.supervisor

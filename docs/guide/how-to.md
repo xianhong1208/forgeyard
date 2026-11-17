@@ -1228,6 +1228,36 @@ What is different:
   the server*, or *amd-strix downloads the model and the engine through the server (its internet
   access setting)*.
 
+**From another machine** (1.4.1). Before the server fetches a model file from the internet for such a
+machine, it asks the machines that already have the model in their cache. One of them sends the file
+to the server, outbound like everything its agent does (no machine opens a port, and nothing in a
+tunnel changes), and the server passes it on, storing nothing. On a LAN that is faster than the
+internet, and it spares the server's internet connection. There is no setting:
+
+- **Which machines send**: any other machine whose agent is 1.4.1 or later and lists the model in its
+  cache, whatever its own internet access (a machine with none can send too). Only files it downloaded
+  and checked are sent, and only by the digest the server holds for them. A URL model comes from a
+  machine only once its SHA-256 is recorded.
+- **Which one**: a machine that has the very GGUF file first, then the one sending fewer files. One
+  that does not have the file, already sends two, or does not start within 10 seconds is skipped for
+  the next one, and then the internet is used, all before the machine that asked gets a byte. A
+  machine that breaks off mid-file ends that answer short; the download resumes from what is on disk,
+  and the server picks a source again.
+- **Checks**: the machine that asked checks every file as always. The server also checks a whole file
+  on its way and holds back its last piece until it matches: a machine whose copy does not match is
+  not asked for that file for an hour, the audit log names it (`node.relay_copy_refused`), and the file
+  starts over from elsewhere. Remove that model from the sending machine's cache and download it again.
+- **What you see**: *Downloading the model via the server, from gpu-host: … of …*, *Downloaded … via the
+  server, from gpu-host*, and in **Download to…** *via the server, from gpu-host* when a machine would
+  send it.
+- Only machines that get their files through the server use it (**Always through the server**, or
+  **Auto** after the source could not be reached). A machine that reaches the internet keeps
+  downloading directly.
+- A gated model can reach a machine this way without any Hugging Face token being used, because another
+  machine already has it. As before, the server decides what each machine gets.
+- Engine archives keep coming from the internet through the server: agents delete an archive once it is
+  unpacked, so no machine has one to send.
+
 **Engine images** (container variants) come through the server too, when the recipe pins them by
 digest, as every built-in recipe does:
 
@@ -1251,7 +1281,8 @@ digest, as every built-in recipe does:
   (next section).
 
 The machine's agent must be 1.4 or later; an older one downloads directly whatever the setting says,
-and the setting tells you to update it (also when it relays models but not yet images).
+and the setting tells you to update it (also when it relays models but not yet images). To send files to
+other machines, an agent must be 1.4.1 or later; the machine that asks needs only 1.4.
 
 ## Upload an engine image to a machine
 

@@ -23,7 +23,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   cache with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
   and its engine on chosen machines before you deploy it, with progress. A machine that cannot reach
   Hugging Face, GitHub or the image registry gets the files and pinned engine images through the server,
-  which passes them on and stores nothing; admins can also upload an image file to a machine.
+  which passes them on and stores nothing, and model files from another machine's cache when one has
+  them; admins can also upload an image file to a machine.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,

@@ -29,7 +29,7 @@ from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
 from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageLoadedIn, InventoryMsgIn, LogsIn,
-                                         StatusIn)
+                                         RelaySentIn, StatusIn)
 from forgeyard.machines.protocol import (
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
@@ -354,6 +354,10 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     loaded = _parse(text, ImageLoadedIn)
                     ok = True
                     conn.answer(loaded.request_id, loaded.model_dump())
+                elif kind == "relay_sent" and workloads:
+                    sent = _parse(text, RelaySentIn)
+                    ok = True
+                    conn.answer(sent.request_id, sent.model_dump())
                 else:
                     raise ValueError(f"unknown message type {kind!r}")
             except _ProtocolMismatch:

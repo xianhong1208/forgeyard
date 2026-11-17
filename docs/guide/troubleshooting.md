@@ -276,7 +276,13 @@ counted: another machine would get the same answer.
 - *SHA-256 mismatch*: the bytes changed on the way (a proxy that rewrites them, a broken disk). The
   file was deleted; the next try starts it again.
 - The server's log has a line per file it passed on: *Relayed <repo>@<revision>/<file> to amd-strix:
-  812.3 MiB in 41.0 s (19.8 MiB/s), finished.*, or why it ended.
+  812.3 MiB in 41.0 s (19.8 MiB/s), finished.*, or why it ended. A file from another machine (1.4.1)
+  says *… <file> from gpu-host to …*, and a machine that could not send it is named with why:
+  *gpu-host could not send <file> for … (not_found: …); trying the next machine*.
+- *gpu-host's copy of <file> does not match its checksum* (the server's log, and `node.relay_copy_refused`
+  in the audit log; the sending machine's own log says *A cached file failed its checksum*): that
+  machine's copy is damaged. The file came from elsewhere; remove the model from that machine's cache
+  (its page) and download it again. It is not asked for that file for an hour.
 
 ## vLLM does not start on a shared card
 

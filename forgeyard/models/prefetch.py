@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import audit
 from forgeyard.db import CatalogModel, ModelDownload, Node, utcnow
+from forgeyard.machines import peers
 from forgeyard.machines.protocol import FEATURE_IMAGE_IDS, FEATURE_MODELS, FEATURE_PREFETCH
 from forgeyard.models import reach, render, sources
 from forgeyard.models.recipes import Recipe, Variant, variant_matches
@@ -137,7 +138,7 @@ def target(db: DbSession, node: Node, model: CatalogModel, recipe: Optional[Reci
            "model_cached": cached, "need_bytes": need, "free_bytes": free, "variant": eng["variant"],
            "engine": ({"kind": "archive", "name": eng["engine"]["name"], "cached": eng["cached"]} if eng["engine"]
                       else {"kind": "image", "name": eng["image"], "cached": eng["cached"]} if eng["image"] else None),
-           "engine_note": eng["note"], "download": None, "via": _via(node, model)}
+           "engine_note": eng["note"], "download": None, "via": _via(node, model), "from_machine": None}
     if node.revoked_at is not None or node.status == "revoked":
         state, note = "revoked", f"{node.name} was revoked."
     elif FEATURE_MODELS not in feats:
@@ -159,7 +160,22 @@ def target(db: DbSession, node: Node, model: CatalogModel, recipe: Optional[Reci
     else:
         state, note = "ok", ("The model is here; downloads the engine." if cached else "")
     out["state"], out["note"] = state, note
+    if out["via"] == "server" and not cached and state == "ok":
+        out["from_machine"] = _from_machine(db, node, model)
     return out
+
+
+def _from_machine(db: DbSession, node: Node, model: CatalogModel) -> Optional[str]:
+    """1.4.1: a machine whose cache has the model and would send it through the server (the dialog says so), if
+    any: the first file's first candidate, as the relay would pick it."""
+    try:
+        block = _block(model)
+    except (KeyError, TypeError):
+        return None
+    first = (block.get("files") or [{}])[0] if isinstance(block.get("files"), list) else {}
+    copy = peers.file_copy(db, node, block, str(first.get("path")) if block.get("kind") == "hf" else None)
+    order = peers.ranked(copy.candidates) if copy is not None else []
+    return order[0].name if order else None
 
 
 def _via(node: Node, model: CatalogModel) -> str:
@@ -300,9 +316,16 @@ def apply_status(db: DbSession, node: Node, reports: list) -> bool:
         if row is None:
             continue  # cancelled here already, or another machine's
         if st.state in ACTIVE:
-            row.state, row.reason, row.download = st.state, st.reason, st.download
+            row.state, row.reason, row.download = st.state, st.reason, peers.label(st.download, "download", row.uid)
             if st.download and st.download.get("via") in ("direct", "server"):
-                row.via = st.download["via"]  # how it came, last (1.4, "relay")
+                via, phase = st.download["via"], st.download.get("phase", "model")
+                # 1.4.1: the model from another machine's cache, through the server ("machine"); the engine
+                # after it does not change how the model came.
+                src = peers.source_of("download", row.uid) if via == "server" and phase == "model" else None
+                if src is not None:
+                    row.via, row.source_node_id = "machine", src[0]
+                elif phase == "model" or row.via != "machine":
+                    row.via, row.source_node_id = via, None  # how it came, last (1.4, "relay")
             continue
         row.state, row.download, row.finished_at = st.state, None, now
         row.reason = None if st.state == "done" else (st.reason or st.state)
@@ -372,7 +395,11 @@ def row_out(row: ModelDownload, connected: Optional[bool] = None) -> dict:
            "machine": {"id": node.id, "name": node.name, "connected": online} if node else None,
            "file": row.file, "recipe": row.recipe, "state": row.state, "via": row.via, "download": row.download,
            "reason": row.reason, "requested_by": row.requested_by, "created_at": row.created_at,
-           "finished_at": row.finished_at, "waiting": None}
+           "finished_at": row.finished_at, "waiting": None, "source": None}
+    # 1.4.1: the machine the model came from, through the server ("machine").
+    src = row.source_node if row.via == "machine" and row.source_node_id is not None else None
+    if src is not None:
+        out["source"] = {"id": src.id, "name": src.name}
     if row.state in ACTIVE and node is not None and not online:
         out["waiting"] = f"waiting for {node.name} to come online; the download goes on from where it was"
     return out

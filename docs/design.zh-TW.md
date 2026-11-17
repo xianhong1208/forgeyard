@@ -214,6 +214,11 @@ Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 
 - **模型快取**在每台機器上（`agent --model-cache DIR`）：以來源 + revision 為 key，目錄結構同 Hugging Face cache，該機器上所有 replica
   共用；由 agent 下載（可續傳、每個檔案以 SHA-256 或 git blob id 驗證、頁面顯示進度），以**唯讀**方式掛進容器（只掛該模型的目錄）；
   對行程也是唯讀檔案。下載和 server 走同一套防護：只接受 https 與公開位址、每次轉址都重新檢查（LAN mirror 用 `--allow-private-model-hosts`）。
+- **經由 server**（1.4，#35；1.4.1，#104）：設成這樣的機器，或連不到來源的機器，向 server 的 relay GET 它的檔案，由 server 去抓、不存檔。
+  1.4.1 起，relay 會先請快取裡有那個模型檔的另一台機器送過來（透過它的 WebSocket 傳 `relay_send`，再由它往外 POST 位元組）：agent 之間
+  從不互相連線，所以每個位元組仍然經過 server。server 只用它持有的 digest 指名檔案，來源 agent 只在自己磁碟上找到的東西裡查找；server 在
+  完整檔案經過時計算 hash，最後一段保留到相符才送出，副本不符的來源就不再被要求；順序是機器、下一台機器、網際網路，在第一個位元組之前決定。
+  agent 之間直接傳檔留到之後（Later）。
 - **權限**：admin 管目錄、配方與模型來源；admin 與 operator 部署；所有登入的人都能看部署並試用。
 
 真機檢查：`scripts/accept_m3.py`。
