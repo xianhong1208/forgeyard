@@ -97,7 +97,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
 ```
 
 接著：
@@ -129,7 +129,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -140,7 +140,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1 inventory
 ```
 
 ### 純 CPU
@@ -154,7 +154,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
 ```
 
 ### 為什麼要用這些選項
@@ -172,8 +172,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **Advanced / offline** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.0 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.1 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.1 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -187,16 +187,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.0 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.1 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.4.0`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.4.1`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.0`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.1`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類應用程式和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -206,7 +206,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.0
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.1
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -618,7 +618,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.0
+  docker.io/tonyhuang1101/forgeyard:1.4.1
 sudo docker logs forgeyard
 ```
 
@@ -636,7 +636,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -644,7 +644,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -652,26 +652,26 @@ sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
 **升級**靠 tag。先備份，再拉取新版本，用它執行同一個指令；volume 會保留所有資料，資料庫的變更會在啟動時執行：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.1
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.2
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.1
+  docker.io/tonyhuang1101/forgeyard:1.4.2
 ```
 
-`1.4.1` 就是那個版本；`1.4` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
+`1.4.2` 就是那個版本；`1.4` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
 
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.0
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.1
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**Machines** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.4.0 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.4.1 .`
 
 ## 把伺服器當成服務執行
 
@@ -854,7 +854,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 套用伺服器自己的模型來源規則：只限 https 和公開位址（除非設了 `MODEL_ALLOW_PRIVATE_HOSTS`），URL 模型只限允許的主機。
 - 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **Download to…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
 - 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
-- 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-strix could not reach huggingface.co just now; the model comes through the server*，或 *amd-strix downloads the model and the engine through the server (its internet access setting)*。
+- 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-01 could not reach huggingface.co just now; the model comes through the server*，或 *amd-01 downloads the model and the engine through the server (its internet access setting)*。
 
 **從另一台機器**（1.4.1）。伺服器替這種機器從網際網路抓模型檔之前，會先問快取裡已經有這個模型的機器。其中一台把檔案送給伺服器（和它的 agent 做的其他事一樣，由機器往外連：沒有機器要開 port，tunnel 也不用改），伺服器再轉給要的機器，不存任何檔案。在區域網路上這比網際網路快，也省下伺服器的對外頻寬。不需要任何設定：
 
