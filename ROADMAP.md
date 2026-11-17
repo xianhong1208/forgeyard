@@ -202,12 +202,46 @@ The owner's decisions for 1.3 (2026-11-11):
    since openai 3.51 no longer installs httpx.
 3. ✅ **Tests fail fast instead of hanging CI** (#69).
 
+## Shipped: 1.4.0 (2026-11-17), easier to see
+
+1. ✅ **Usage and cost charts** (#80, for #33): a line chart on both Usage tabs, per day, week or month,
+   in total or split by key, model, provider or person. Usage's tables list their top rows, sort by any
+   column and keep one line per row on a phone (#84, for #82).
+2. ✅ **Machines and models, redesigned** (#75, for #34): a tile per machine with a mark for its kind
+   (NVIDIA, AMD GPU, AMD APU, CPU only), its cards and what runs there; a page per machine with a memory
+   map of every card; running models grouped by kind, each with its icon and its `/v1` path.
+3. ✅ **One thing in one place** (#85, #93, #101, for #81, #92 and #100): **Serving** for the running
+   models; **Models** as the library, with Catalog, Engines (custom engines added, edited and deleted in
+   the console) and Sources; providers and cloud models on **Cloud**; a deployment's cloud fallback on
+   its own page; one model picker in the Playground. The *Routes and cloud* tab is gone.
+4. ✅ **Vision models under Models** (#90, #91, for #86): object detection, segmentation and depth from
+   Hugging Face (permissive licences only), run by a built-in `vision` engine and called at
+   `/v1/vision/detect`, `/segment` and `/depth` with API keys and usage. Accepted on an NVIDIA A100.
+5. ✅ **Download to…, with relay for offline machines** (#83, #87, #96, #102, #107, for #35): each machine
+   lists the models in its cache with their sizes and removes them; a model and its engine are
+   downloaded to chosen machines before deploying, with progress; a machine that cannot reach the source
+   gets model files, engine archives and pinned engine images **through the server**, which stores
+   nothing (per machine: *Auto*, *Always through the server* or *Direct only*), checked by SHA-256 and
+   image digests; an admin uploads an image file to a machine from its page.
+6. ✅ **Placement knows what a machine can fetch** (#71, for #56): a machine that could not reach a
+   replica's sources comes last, a replica stuck on such a download moves to one that can, and the
+   deployment's page says why a replica is where it is.
+7. ✅ **Clearer pages** (#71, #75, #106, for #36 and #105): a model's workload is seen only through its
+   deployment; revoked keys leave the budget lists and alerts, and the API keys page folds them away.
+8. ✅ **Apps leave the console** (#94, for #88): Forgeyard is about running models. The apps API, the
+   templates and `/x/` are deprecated and say so; they are removed in 1.5 (#89).
+9. ✅ **The settings deprecated in 1.3.1 are no longer read** (#79, for #78).
+
+Also in 1.4.0: tests that wait for conditions instead of fixed times (#76, #77, #97, #103), a key guard
+that closes in under a second (#98), and `agent init` writing a valid `agent.toml` whatever a tool's
+message holds (#99). **Relay from another machine** that already has the files moved to 1.4.1 (#104).
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.4: easier to see** | **Charts:** usage and cost over time as line charts on **Usage**, split by key, model, provider or person, with the day, week and month view. **Machines and models, redesigned:** each machine shows what it is at a glance (an icon per kind: NVIDIA, AMD, APU, CPU), and its page lists the models, workloads and memory on it; models are grouped by kind (chat, multimodal, speech, images, embeddings, rerank) with an icon each; the other pages follow the same layout. **Download to…:** download a model to chosen machines before deploying it, with progress on the model's and each machine's page; each machine lists the models in its cache and their size, and can remove them. A machine that cannot reach the internet gets the model, and engine images, **relayed** by the server or by another machine that has them, checked by SHA-256, with progress too. **Clearer pages:** a model workload says which deployment created it and links to it; revoked keys leave the budget lists and alerts; the *Routes and cloud* and *Catalog and recipes* tabs are renamed after trying a few names and layouts. |
-| **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. |
+| **1.4.1: relay from another machine** | A machine that cannot reach the internet gets a model, an engine archive or an image from another machine on its network that already has it, instead of through the server: faster on a LAN, and it spares the server's bandwidth. |
+| **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
 | **1.8: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
@@ -275,8 +309,8 @@ version is not decided yet.
   `vulkan` variant of `llama-cpp` is for AMD.
 - **Import an image** from a file, for machines that cannot reach a registry. ✅ (#10): an image carried over with `docker save` / `docker load` is checked against the
   ids recorded for the pinned image and used, so the built-in recipes work offline as they are, and
-  each recipe lists the commands. Still to do: uploading an image file through the console to a
-  machine.
+  each recipe lists the commands. Since 1.4 (#102) an admin can also upload an image file to a
+  machine from its page.
 - Tune each recipe's memory overhead from real runs (estimates were 7–39% above actual).
 
 ## Verification still to do

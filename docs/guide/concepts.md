@@ -389,7 +389,7 @@ have the details.
 
 | Role | Can |
 |---|---|
-| `admin` | everything: users, machines and their GPU access, the model catalog and recipes, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
+| `admin` | everything: users, machines and their GPU access, the model catalog and engines, cloud providers and routes, the audit log, everyone's keys, limits and cloud settings |
 | `operator` | run apps and deploy models; everything a user can |
 | `user` | look around, use deployed models in the Playground and with their own API keys, see their own usage |
 

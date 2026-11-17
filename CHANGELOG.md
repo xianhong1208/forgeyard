@@ -6,23 +6,22 @@ version until 1.0.
 
 ## [Unreleased]
 
-### Changed
+## [1.4.0] — 2026-11-17
 
-- **API keys: revoked keys folded away, shorter rows** (#105). On a server with 172 keys, 163 of them
-  revoked, the page was about 19,000 px tall on a desktop and 75,000 px on a phone. UI only; the API
-  is unchanged.
-  - The list shows the keys that still work. Revoked and expired keys are folded away under one row,
-    **Show N revoked keys** (or *expired*, or *revoked or expired*), which opens them below the active
-    ones and folds them again (**Hide revoked keys**). The same in *Mine* and *Everyone's*; switching
-    between the two folds them again. When every key is revoked, the page says there are no active
-    keys and still offers the row. Usage and the audit log still name them.
-  - *Limits* reads short: only the limits that are set ("3 requests/min", "10k tokens/min"), or
-    *No limits*; the exact values are in its tooltip, and a lock stays next to its limit.
-  - Phones: every value of a key stays in its value column (the token limit, the key's prefix and a
-    revoked key's "by …" used to wrap under the labels), and a revoked key's card has no empty action
-    strip.
-  - Machines: the summary above the tiles counts machines, not cards: *1 NVIDIA machine*, *1 AMD
-    machine*, *2 CPU-only machines* (*AMD GPU* and *AMD APU* when a server has both).
+Easier to see, and models on machines without internet. **Machines** are tiles, each with a page that
+maps every card's memory to what holds it; **Serving** lists the running models by kind, and **Models**
+is the library: Catalog, Engines (custom engines added and edited in the console) and Sources. Cloud
+providers and cloud models are on **Cloud**, a deployment's cloud fallback is on its own page, and the
+Playground has one model picker. Usage and cost are charted by day, week or month, and Usage's tables
+stay short on a phone. Vision models (object detection, segmentation, depth) are a model kind of their
+own at `/v1/vision/…`. **Download to…** puts a model and its engine on chosen machines before you deploy
+it; a machine's page lists the models in its cache and removes them; a machine that cannot reach
+Hugging Face, GitHub or a registry gets model files, engine archives and pinned engine images through
+the server, which stores nothing, and admins can upload an image file to it. Placement avoids a machine
+that could not fetch what a replica needs. Apps left the console, and their API, the templates and
+`/x/` are deprecated (removed in 1.5). The API keys page folds revoked keys away, and revoked keys
+leave the budgets. The settings deprecated in 1.3.1 are no longer read. Migration `0015`; rebuild the
+agent images to get the new agent features.
 
 ### Added
 
@@ -285,6 +284,21 @@ version until 1.0.
   month*), the API keys page's budget meter and warnings, `GET /api/budgets`, and the 80% / 100%
   alerts of a key revoked before its alert was written. What a revoked key spent still counts in its
   person's and its provider's budgets.
+- **API keys: revoked keys folded away, shorter rows** (#105). On a server with 172 keys, 163 of them
+  revoked, the page was about 19,000 px tall on a desktop and 75,000 px on a phone. UI only; the API
+  is unchanged.
+  - The list shows the keys that still work. Revoked and expired keys are folded away under one row,
+    **Show N revoked keys** (or *expired*, or *revoked or expired*), which opens them below the active
+    ones and folds them again (**Hide revoked keys**). The same in *Mine* and *Everyone's*; switching
+    between the two folds them again. When every key is revoked, the page says there are no active
+    keys and still offers the row. Usage and the audit log still name them.
+  - *Limits* reads short: only the limits that are set ("3 requests/min", "10k tokens/min"), or
+    *No limits*; the exact values are in its tooltip, and a lock stays next to its limit.
+  - Phones: every value of a key stays in its value column (the token limit, the key's prefix and a
+    revoked key's "by …" used to wrap under the labels), and a revoked key's card has no empty action
+    strip.
+  - Machines: the summary above the tiles counts machines, not cards: *1 NVIDIA machine*, *1 AMD
+    machine*, *2 CPU-only machines* (*AMD GPU* and *AMD APU* when a server has both).
 
 ### Deprecated
 

@@ -42,12 +42,14 @@ them where they fit, and every program calls them at `/v1` with an API key.
   prefers machines that already have the model and engine, avoids one that could not reach Hugging
   Face, GitHub or a registry, and moves a replica stuck on such a download to a machine that can.
 
-## What's new in 1.3
+## What's new in 1.4
 
-1.3 adds images, audio and video in chat, text to speech, image and video generation, apps at
-`/x/` with vision templates, and the server and agent images on Docker Hub. 1.3.1 lets you change a
-deployment in place; 1.3.2 and 1.3.3 are fixes. Every change is in the
-[CHANGELOG](CHANGELOG.md).
+1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
+the running models and a model library (Catalog, Engines, Sources), usage and cost charts, and vision
+models (object detection, segmentation, depth) deployed like any other model. **Download to…** puts a
+model and its engine on machines before you deploy; a machine without internet gets them through the
+server, and admins can upload an image file to it. Apps left the console, and their API is deprecated
+until 1.5. Every change is in the [CHANGELOG](CHANGELOG.md).
 
 ## 🚀 Installation
 
@@ -60,7 +62,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.3.3
+  docker.io/tonyhuang1101/forgeyard:1.4.0
 sudo docker logs forgeyard
 ```
 
@@ -105,7 +107,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.3.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.0
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
