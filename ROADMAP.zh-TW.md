@@ -164,7 +164,7 @@ API」已經不新了：**GPUStack 2.1 到 2.3 已經有雲端供應商、加權
    Catalog、Engines（自訂引擎可在主控台新增、編輯與刪除）與 Sources；供應商與雲端模型在 **Cloud**；部署的雲端備援在它自己的頁面上；
    Playground 只有一個模型選單。*Routes and cloud* 分頁拿掉了。
 4. ✅ **視覺模型放進 Models**（#90、#91，對應 #86）：來自 Hugging Face 的物件偵測、影像分割與深度估計模型（只收寬鬆授權），由內建的
-   `vision` 引擎執行，透過 `/v1/vision/detect`、`/segment` 與 `/depth` 呼叫，有 API 金鑰與用量。已在 NVIDIA A100 上驗收。
+   `vision` 引擎執行，透過 `/v1/vision/detect`、`/segment` 與 `/depth` 呼叫，有 API 金鑰與用量。已在 NVIDIA A100 與 AMD APU 機器的 CPU 上驗收。
 5. ✅ **Download to…，並為離線機器中繼**（#83、#87、#96、#102、#107，對應 #35）：每台機器列出快取中的模型與大小，也能移除它們；
    部署前先把模型和引擎下載到選定的機器，並顯示進度；連不到來源的機器**經由伺服器**取得模型檔、引擎壓縮檔與釘選的引擎映像檔，
    伺服器不留存任何東西（每台機器可選 *Auto*、*Always through the server* 或 *Direct only*），以 SHA-256 與映像檔 digest 檢查；

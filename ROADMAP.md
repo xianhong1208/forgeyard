@@ -216,7 +216,8 @@ The owner's decisions for 1.3 (2026-11-11):
    its own page; one model picker in the Playground. The *Routes and cloud* tab is gone.
 4. ✅ **Vision models under Models** (#90, #91, for #86): object detection, segmentation and depth from
    Hugging Face (permissive licences only), run by a built-in `vision` engine and called at
-   `/v1/vision/detect`, `/segment` and `/depth` with API keys and usage. Accepted on an NVIDIA A100.
+   `/v1/vision/detect`, `/segment` and `/depth` with API keys and usage. Accepted on an NVIDIA A100 and
+   on an AMD APU machine's CPU.
 5. ✅ **Download to…, with relay for offline machines** (#83, #87, #96, #102, #107, for #35): each machine
    lists the models in its cache with their sizes and removes them; a model and its engine are
    downloaded to chosen machines before deploying, with progress; a machine that cannot reach the source
