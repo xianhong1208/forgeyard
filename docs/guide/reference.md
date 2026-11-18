@@ -1165,6 +1165,41 @@ image}`. The answer is `{ok, bytes, images, source: {id, name}, saved}`, each im
 Audited as `node.image_copied` (the target; `from_machine`, the image asked for, its size, `ok`, the images
 loaded with their content ids, or why not). Refusals before a byte moved are not audited.
 
+### A machine's engine images through the API
+
+`GET /api/machines/{id}/engine-images` (everyone signed in, 1.4.2) asks that machine's agent for the images in
+its engine (`image_list`, as above) and answers `{machine_id, listed, note, images, others, free_bytes,
+total_bytes, can_remove, remove_note}`. `images` holds only the images a recipe names, largest first, each as
+listed plus `matches`, `used_by` (the deployments on that machine whose replica runs it: `[{name, kind, id}]`),
+`agent` (the agent runs from it) and `remove_note` (why it cannot be removed now, or null). `others` counts the
+engine's other images. `free_bytes` / `total_bytes`: where the engine keeps its images, when the agent can see
+that directory, else null. `listed` false with a `note` when the agent is offline, cannot list (no container
+engine, older than 1.4.1) or failed.
+
+`POST /api/machines/{id}/engine-images/remove` with `{"image": "sha256:…"}` (admins) removes one. The server lists
+the machine's images again and refuses before asking the agent; then it sends `image_remove {request_id, image}`
+(protocol feature `image_remove`, agents from 1.4.2). The agent removes only an image of its own listing, never
+the image it runs from, one its replicas use or one any container of the engine uses; it runs `docker rmi` /
+`podman rmi` without `-f` (by the image's tags when it has several) and answers `image_removed {request_id, ok,
+code, reason, in_use, image, freed_bytes, free_bytes, total_bytes}`. A 1.4.2 agent's `image_listed`
+also carries `agent_image` (the id of the image it runs from) and `free_bytes` / `total_bytes`. The answer is
+`{ok, image, freed_bytes, free_bytes, total_bytes}`: `freed_bytes` is the image's size (at most that came back:
+layers another image shares stay); `free_bytes` / `total_bytes` are the space after, when the agent can see it.
+
+| Status | `code` | When |
+|---|---|---|
+| 422 | `bad_image` | The image is not named by its id |
+| 409 | `machine_offline`, `agent_too_old` | The agent is not connected, or older than 1.4.2 |
+| 404 | `image_not_found` | The machine does not list that id (any more) |
+| 409 | `not_an_engine_image` | No recipe names the image: it is not Forgeyard's to remove |
+| 409 | `agent_image` | The agent runs from that image |
+| 409 | `image_in_use` | A deployment on that machine uses it (`in_use` names them), or a container of the engine does (the agent's words) |
+| 409 | `image_remove_failed` | The engine did not remove it (its words) |
+| 504 | `agent_no_answer` | The agent did not answer within 5 minutes |
+
+Audited as `node.image_removed` (the image, its tags, the recipes that name it, `ok`, the bytes freed, or the
+agent's `code` and reason) for every removal the agent was asked for; refusals before that are not audited.
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and

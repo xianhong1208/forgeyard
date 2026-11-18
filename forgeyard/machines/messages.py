@@ -215,8 +215,19 @@ class InventoryIn(_Msg):
     collectors: dict[Annotated[str, _short(32)], CollectorStatus] = Field(default_factory=dict, max_length=16)
 
 
+def _port_range(value: Any) -> Optional[dict]:
+    """(1.4.2) {"low": 30000, "high": 32767}: the host ports the agent publishes replicas on, or None."""
+    if not isinstance(value, dict):
+        return None
+    low, high = value.get("low"), value.get("high")
+    if type(low) is not int or type(high) is not int or not 1 <= low <= high <= 65535:
+        return None
+    return {"low": low, "high": high}
+
+
 def _runtime_info(value: Any) -> dict:
-    """{"process": {...}, "container": {...}}: small dicts of what each runtime can do."""
+    """{"process": {...}, "container": {...}}: small dicts of what each runtime can do; (1.4.2) "ports": the
+    agent's host port range (servers before 1.4.2 drop it, so it never reaches them)."""
     if not isinstance(value, dict):
         return {}
     out = {}
@@ -224,6 +235,9 @@ def _runtime_info(value: Any) -> dict:
         item = value.get(name)
         if isinstance(item, dict) and len(json.dumps(item, default=str)) <= 4096:
             out[name] = item
+    ports = _port_range(value.get("ports"))
+    if ports is not None:
+        out["ports"] = ports
     return out
 
 
@@ -402,6 +416,11 @@ class ImageListedIn(_Msg):
     ok: bool = False
     reason: Annotated[Optional[str], _short(400)] = None
     images: list[ListedImageIn] = Field(default_factory=list, max_length=256)
+    # 1.4.2 ("image_remove"): the image the agent itself runs from (never removed), and the space where the engine
+    # keeps its images, when the agent can see it.
+    agent_image: Annotated[Optional[str], _short(80)] = None
+    free_bytes: Bytes = None
+    total_bytes: Bytes = None
 
 
 class ImageSavedIn(_Msg):
@@ -414,6 +433,23 @@ class ImageSavedIn(_Msg):
     reason: Annotated[Optional[str], _short(400)] = None
     bytes: Bytes = None
     image: Optional[ListedImageIn] = None
+
+
+class ImageRemovedIn(_Msg):
+    """1.4.2 ("image_remove"): the answer to image_remove: removed (what, the bytes freed, the space after), or why
+    not (code not_found | agent_image | in_use | failed, and what uses it)."""
+
+    v: int
+    type: Literal["image_removed"]
+    request_id: Annotated[str, _short(32)]
+    ok: bool = False
+    code: Annotated[Optional[str], _short(32)] = None
+    reason: Annotated[Optional[str], _short(400)] = None
+    in_use: list[Annotated[str, _short(128)]] = Field(default_factory=list, max_length=16)
+    image: Optional[ListedImageIn] = None
+    freed_bytes: Bytes = None
+    free_bytes: Bytes = None
+    total_bytes: Bytes = None
 
 
 class ImageLoadedIn(_Msg):

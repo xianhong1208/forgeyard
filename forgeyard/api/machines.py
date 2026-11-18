@@ -1,8 +1,9 @@
 """Machines: everyone signed in can look; admins add (join tokens), revoke and remove, and choose
 which GPUs Forgeyard may assign on each machine and how it reaches the internet (`fetch_via`, 1.4).
 Operators and admins remove models from a machine's model cache (1.4). Admins upload an image file to a
-machine (1.4, forgeyard/machines/upload.py), and copy an image from one machine to another (1.4.1,
-forgeyard/machines/imagecopy.py). Admins see the command that updates a machine's agent (1.4.2,
+machine (1.4, forgeyard/machines/upload.py), copy an image from one machine to another (1.4.1,
+forgeyard/machines/imagecopy.py), and remove an engine image a machine no longer uses (1.4.2,
+forgeyard/machines/engineimages.py). Admins see the command that updates a machine's agent (1.4.2,
 forgeyard/install/update.py); everyone sees whether it is behind the server."""
 
 from __future__ import annotations
@@ -22,12 +23,12 @@ from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, JoinToken, Node, get_db, new_session, utcnow
 from forgeyard.install import commands as install_commands, update as agent_update
-from forgeyard.machines import cache, imagecopy, store, upload
+from forgeyard.machines import cache, engineimages, imagecopy, store, upload
 from forgeyard.machines.hub import hub
-from forgeyard.machines.protocol import CLOSE_REVOKED, FETCH_VIA
+from forgeyard.machines.protocol import CLOSE_REVOKED, FEATURE_IMAGE_REMOVE, FETCH_VIA
 from forgeyard.models import prefetch
 from forgeyard.security import tls
-from forgeyard.workloads import placement, state as wstate
+from forgeyard.workloads import images, placement, state as wstate
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
 
@@ -426,3 +427,95 @@ async def copy_image(machine_id: int, body: ImageCopyIn, request: Request):
                                     for i in items][:8])
     return {"ok": True, "bytes": sent, "images": items, "source": {"id": source.id, "name": source.name},
             "saved": saved}
+
+
+# ---------------------------------------------------------------------------- engine images (1.4.2, #123)
+def _signed_in(request: Request, machine_id: int) -> tuple[Caller, Node]:
+    db = new_session()
+    try:
+        caller = current(request, db)
+        node = _get(db, machine_id)
+        _ = (caller.user.id, caller.user.username, caller.user.role, node.id, node.name, node.features)
+        return caller, node
+    finally:
+        db.close()
+
+
+def _engine_view(node: Node, user, answer: dict) -> dict:
+    db = new_session()
+    try:
+        return engineimages.view(db, node, user, answer)
+    finally:
+        db.close()
+
+
+@router.get("/{machine_id}/engine-images")
+async def machine_engine_images(machine_id: int, request: Request):
+    """The engine images on this machine that a recipe names (everyone signed in), as its agent lists them now: each
+    with its size, the recipes that name it, the deployments there that use it, and whether an admin may remove it.
+    The machine's other images are only counted."""
+    caller, node = await run_in_threadpool(_signed_in, request, machine_id)
+    note = engineimages.listing_note(node)
+    if note is not None:
+        return engineimages.unlisted(node, caller.user, note)
+    try:
+        answer = await imagecopy.list_answer(node)
+    except imagecopy.CopyFailed as e:
+        return engineimages.unlisted(node, caller.user, e.message)
+    return await run_in_threadpool(_engine_view, node, caller.user, answer)
+
+
+class EngineImageRemoveIn(BaseModel):
+    image: str = Field(min_length=1, max_length=80)
+
+
+def _remove_check(node: Node, wanted: str, answer: dict) -> list[dict]:
+    db = new_session()
+    try:
+        item = next((i for i in answer.get("images") or [] if i.get("id") == wanted), None)
+        matches, _ = engineimages.precheck(db, node, item, answer)
+        return matches
+    finally:
+        db.close()
+
+
+def _remove_audit(caller: Caller, node: Node, **detail) -> None:
+    db = new_session()
+    try:
+        audit.record(db, "node.image_removed", actor=caller.user, target=node.name, ip=caller.ip, machine_id=node.id,
+                     **detail)
+        db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/{machine_id}/engine-images/remove")
+async def remove_engine_image(machine_id: int, body: EngineImageRemoveIn, request: Request):
+    """Remove an engine image from this machine (admins only), named by its id as the machine lists it. Refused for
+    an image no recipe names (not Forgeyard's), the agent's own image, and one a replica there uses; the agent checks
+    again and never forces it. Audited as `node.image_removed`."""
+    caller, node = await run_in_threadpool(_upload_caller, request, machine_id)
+    wanted = images.normalize(body.image)
+    if wanted is None:
+        raise fail(422, "bad_image", "Name the image by its id (sha256:…), as the machine lists it.")
+    conn = hub.get(node.id)
+    if conn is None:
+        raise fail(409, "machine_offline", f"{node.name}'s agent is not connected. Try again once it is online.")
+    if FEATURE_IMAGE_REMOVE not in conn.features:
+        raise fail(409, "agent_too_old", f"{node.name}'s agent is too old to remove engine images. Update the agent.")
+    try:
+        answer = await imagecopy.list_answer(node)  # the agent's listing now: only an id of it is ever sent
+    except imagecopy.CopyFailed as e:
+        raise fail(e.status, e.code, e.message) from None
+    matches = await run_in_threadpool(_remove_check, node, wanted, answer)
+    said = await engineimages.ask_remove(node, wanted)
+    item = said.get("image") or next(i for i in answer["images"] if i.get("id") == wanted)
+    detail = {"image": wanted, "tags": list(item.get("tags") or [])[:8],
+              "recipes": sorted({m["recipe"] for m in matches})[:8]}
+    if not said.get("ok"):
+        await run_in_threadpool(_remove_audit, caller, node, ok=False, code=said.get("code"),
+                                reason=str(said.get("reason") or "")[:200], **detail)
+        raise engineimages.refused(node, said)
+    await run_in_threadpool(_remove_audit, caller, node, ok=True, freed_bytes=said.get("freed_bytes") or 0, **detail)
+    return {"ok": True, "image": item, "freed_bytes": said.get("freed_bytes") or 0, "free_bytes": said.get("free_bytes"),
+            "total_bytes": said.get("total_bytes")}

@@ -173,6 +173,10 @@ def _describe_runtimes(info: dict) -> list[str]:
         lines.append(f"container ok: {c.get('engine')} {c.get('version') or ''}; {gpu}{pulls}")
     else:
         lines.append(f"container unavailable: {c.get('reason')}")
+    ports = info.get("ports") or {}
+    if ports.get("low") is not None:
+        lines.append(f"ports     {ports['low']}-{ports['high']} ({ports['high'] - ports['low'] + 1} host ports for services "
+                     "and model replicas; two each behind the key guard)")
     return lines
 
 

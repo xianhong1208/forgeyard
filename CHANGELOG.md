@@ -23,11 +23,52 @@ version until 1.0.
   Every reported value is checked again and shell-quoted; a secret variable is passed as `-e NAME="$NAME"`
   with a note to export it. An agent before 1.4.2 says that it does not report this, with the guide. Stored in
   the machine's existing `runtime_info` (key `install`), never shown in the machine list. No migration.
+
 - **An agent behind the server says so** (#122). The Machines tiles and the machine's page show *agent 1.4.0,
   server 1.4.2: update*, opening the update command; also for an agent of the server's version that lacks a
   feature such an agent declares (built from older code). The machine list carries `agent_behind` and
   `server_version`; **Setup health**'s older-agent finding (V21) covers the missing features too and opens the
   machine's update command.
+
+- **Remove engine images a machine no longer uses** (#123). A machine's page lists its **Engine images**: each image
+  a recipe names, as its agent lists it now (a pinned image recognised by its recorded ids, a tag-only one by its
+  tag), with its size, the recipes that name it and the deployments on that machine that use it, and the free space
+  where the engine keeps its images when the agent can see it (`GET /api/machines/{id}/engine-images`, everyone
+  signed in). The engine's other images are only counted. **Remove** (admins) asks in the row, then the agent runs
+  `docker rmi` / `podman rmi` without `-f` (`POST /api/machines/{id}/engine-images/remove`, new agent feature
+  `image_remove`: `image_remove` / `image_removed`); the console says how much was freed. Refused, with the reason,
+  while a deployment there uses the image (409 `image_in_use`, naming it), for the image the agent runs from
+  (`agent_image`, which a 1.4.2 agent now reports in `image_listed`), while any container of the engine uses it (the
+  agent checks, naming the container), and never offered for an image no recipe names (`not_an_engine_image`). The
+  agent removes only an image of its own listing, by its id (by its own tags when it has several). An older agent
+  lists the images and says to update it. Audited as `node.image_removed`.
+
+### Changed
+
+- **Copy an image lists engine images first** (#124). The **Copy from another machine** dialog shows the images a
+  recipe names, and only those until **Show all images** is ticked (on a shared machine the other images are other
+  people's).
+
+- Placement counts a machine's free host ports (#125). The agent reports its port range
+  (`FORGEYARD_PORT_RANGE`) in its hello (`runtime_info.ports`; older servers drop it), and the server counts
+  the ports its replicas hold there: one per published port, two behind the agent's key guard (every model
+  replica, an app exposed at `/x/`). A machine without enough free ports is skipped like one without memory,
+  and the plan says why (*no free port: 3 of 3 in use (host ports 33000-33002)*); a replica with nowhere
+  else to go waits unplaced with that reason instead of restarting in backoff on the machine. A replica the
+  agent reports with *no free host port left* is taken off the machine when the server's count agrees.
+  Agents older than 1.4.2 report no range and are not counted, as before. `forgeyard agent runtimes` shows
+  the range. No setting and no migration.
+
+### Fixed
+
+- A relay whose source breaks off mid-file reads as such in the server's log (#130). The server writes one
+  warning naming the file, the machine, the source (a host on the internet, or `machine <name>`) and the bytes
+  sent (*Relay of acme/x@1a2b3c4d5e6f/model.gguf to gpu-02 cut short: the source broke off (…); 104857600 of
+  2147483648 bytes sent from huggingface.co in 12.3 s.*), in place of uvicorn's *Exception in ASGI
+  application … Response content shorter than Content-Length*, which read like a server bug. The answer still
+  ends short of its Content-Length (the connection closes), so the agent asks for the rest again as before;
+  only uvicorn's record of such an answer is dropped, every other one of its errors is kept.
+
 
 ## [1.4.1] — 2026-11-17
 

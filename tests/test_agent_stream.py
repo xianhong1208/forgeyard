@@ -26,7 +26,7 @@ def test_fy_ags_001_hello_brings_the_machine_online_with_its_inventory(owner):
         welcome = _online(ws)
         assert welcome == {"v": 1, "type": "welcome", "node_id": j["node_id"], "name": "gpu-box",
                            "server_version": welcome["server_version"], "heartbeat_interval": 10, "offline_after": 30,
-                           "features": ["cache_admin", "image_load", "image_save", "models", "prefetch", "pull_progress", "relay",
+                           "features": ["cache_admin", "image_load", "image_remove", "image_save", "models", "prefetch", "pull_progress", "relay",
                                         "relay_images", "relay_source", "replica_keys", "workloads"]}
         m = machine(owner, j["node_id"])
         assert m["status"] == "online" and m["connected"] is True and m["simulated"] is True

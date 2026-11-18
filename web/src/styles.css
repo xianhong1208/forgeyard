@@ -1594,6 +1594,14 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .upl-progress small { font-size: 12px; color: var(--muted); }
 .img-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .cpy-images { max-height: 320px; overflow-y: auto; }
+/* 1.4.2 (#124): the rest of the other machine's images, on request. */
+.cpy-all { align-items: flex-start; font-size: 13px; }
+.cpy-all input { margin-top: 2px; flex: none; }
+.cpy-all small { display: inline; }
+/* 1.4.2 (#123): removing an engine image asks in its row first. */
+.cacherow-confirm { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bad-soft); }
+.cacherow-confirm p { margin: 0; min-width: 0; flex: 1 1 260px; overflow-wrap: anywhere; color: var(--ink); }
+.cacherow-confirm-act { display: flex; flex-wrap: wrap; gap: 8px; }
 /* 1.4.1: a copy whose size is not known ahead: a bar that moves without a value. */
 .bar-busy > span { width: 30%; animation: bar-busy 1.4s ease-in-out infinite; }
 @keyframes bar-busy { 0% { margin-left: 0; } 50% { margin-left: 70%; } 100% { margin-left: 0; } }
