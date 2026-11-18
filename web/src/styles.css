@@ -1649,3 +1649,58 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 /* 1.4 (#81): Apps is an advanced page, not in the menu; it says where models go first. */
 .apps-note { margin: -6px 0 18px; max-width: 82ch; font-size: 14px; color: var(--ink-2); }
 .apps-note .help-link { display: inline-flex; margin-left: 2px; vertical-align: -3px; }
+
+/* ---------------------------------------------------------------- 1.4.3 (#140): a catalog model's page and an engine's page
+   (layout A+): header, facts, jump links, sections; Files and Parameters fold to one line. */
+.name-link { color: var(--ink); text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.name-link:hover { text-decoration-style: solid; color: var(--info); }
+.lp-header { align-items: center; }
+.lp-header .page-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.lp-head-text { min-width: 0; }
+.lp-kindicon { width: 52px; height: 52px; }
+.lp-sub { margin: 4px 0 0; overflow-wrap: anywhere; }
+.lp-rename { margin-top: 6px; padding-left: 6px; padding-right: 8px; }
+.lp-rename-form { margin-bottom: 16px; max-width: 640px; }
+.lp-rename-form .field { margin-bottom: 10px; }
+.lp-sec { scroll-margin-top: 16px; }
+.lp-note { margin: -6px 0 12px; }
+.lp-facts { grid-template-columns: 130px minmax(0, 1fr); }
+.lp-desc { margin: 0 0 14px; color: var(--ink-2); max-width: 75ch; }
+.lp-ext { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font); font-size: 13px; margin-left: 6px; white-space: nowrap; }
+.lp-api { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; }
+.lp-break { overflow-wrap: anywhere; word-break: break-word; }
+.lp-reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 34ch; }
+.lp-machine { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; }
+.lp-machine:hover .mono { text-decoration: underline; }
+.lp-mstate { margin: 2px 0 0 32px; }
+.lp-machines td, .lp-variants td, .lp-params td, .lp-files td { vertical-align: top; }
+.lp-seg button { min-height: 30px; font-size: 12.5px; font-family: var(--mono); }
+.lp-deps { margin: 0 -22px -22px; border-top: 1px solid var(--line); }
+.lp-deps .deprow:last-child { border-bottom: 0; }
+.lp-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.lp-card { display: grid; gap: 6px; height: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink); text-decoration: none; background: var(--surface); }
+.lp-card:hover { border-color: var(--ink-2); background: var(--surface-2); }
+.lp-card-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lp-card-hw { display: flex; flex-wrap: wrap; gap: 4px; }
+.lp-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lp-jump { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 18px; font-size: 13px; }
+.lp-jump a { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface);
+  color: var(--ink-2); font-weight: 550; white-space: nowrap; text-decoration: none; }
+.lp-jump a:hover { border-color: var(--ink-2); color: var(--ink); }
+.lp-fold-line { margin: 0; font-size: 14px; color: var(--ink-2); overflow-wrap: anywhere; }
+.lp-fold-body { margin-top: 14px; }
+.lp-rot { transform: rotate(180deg); }
+@media (max-width: 760px) {
+  .lp-header { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .lp-kindicon { width: 42px; height: 42px; }
+  .lp-facts { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .lp-facts dd { margin-bottom: 8px; }
+  .lp-deps { margin: 0 -16px -16px; }
+  .lp-reason { max-width: none; }
+  .lp-mstate { margin: 0 0 0 8px; display: inline; }
+  .lp-machines .cell-actions:has(.catalog-actions:empty) { display: none !important; }
+  /* On a phone the jump row scrolls inside itself; the page never scrolls sideways. */
+  .lp-jump { flex-wrap: nowrap; overflow-x: auto; margin-right: -16px; padding-right: 16px; scrollbar-width: none; }
+  .lp-jump::-webkit-scrollbar { display: none; }
+}
+.lp-variant { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }

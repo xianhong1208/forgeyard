@@ -15,6 +15,11 @@
 
 An image is shown when a recipe names it: a pinned image recognised by its recorded ids, or a tag-only image by its
 tag (forgeyard/machines/upload.py recipe_matches). The other images of the engine are only counted.
+
+1.4.3 (issue #140): the server keeps each agent's last listing in `nodes.runtime_info["images"]` ({at, items: [{id,
+tags, content, size}]}), so an engine's page says which machines have its image, also while a machine is offline. Every
+`image_listed` answer replaces it; a removal the agent confirms and an upload it loaded update it. A hello keeps it (the
+agent sends no such key: its own runtime_info is filtered, forgeyard/machines/messages.py).
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from typing import Optional
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.api.deps import fail
-from forgeyard.db import Deployment, Node, Replica, User
+from forgeyard.db import Deployment, Node, Replica, User, utcnow
 from forgeyard.machines import cache, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import FEATURE_IMAGE_REMOVE, FEATURE_IMAGE_SAVE, PROTOCOL_VERSION
@@ -33,6 +38,74 @@ from forgeyard.workloads import images
 
 # Removing a large image takes a while on a slow disk.
 REMOVE_TIMEOUT = 300.0
+# 1.4.3 (#140): the key of the kept listing in nodes.runtime_info, and how many images of it are kept.
+LISTING_KEY = "images"
+MAX_KEPT = 256
+
+
+def _kept_item(i) -> Optional[dict]:
+    """The part of a listed image the matching needs (its id, tags, content id) and its size."""
+    if not isinstance(i, dict) or not isinstance(i.get("id"), str) or not i["id"]:
+        return None
+    size = i.get("size")
+    return {"id": i["id"][:80], "tags": [str(t)[:255] for t in list(i.get("tags") or [])[:16]],
+            "content": i.get("content") if isinstance(i.get("content"), str) else None,
+            "size": size if isinstance(size, int) and size >= 0 else None}
+
+
+def remember(node: Node, answer: dict) -> None:
+    """Keep the agent's listing (its answer to image_list) as the machine's last one."""
+    items = [k for k in (_kept_item(i) for i in list(answer.get("images") or [])[:MAX_KEPT]) if k is not None]
+    info = dict(node.runtime_info or {})
+    info[LISTING_KEY] = {"at": utcnow().isoformat(), "items": items}
+    node.runtime_info = info
+
+
+def kept(node: Node) -> Optional[dict]:
+    """The machine's last listing ({at, items}), or None when it was never listed."""
+    got = (node.runtime_info or {}).get(LISTING_KEY)
+    return got if isinstance(got, dict) and isinstance(got.get("items"), list) else None
+
+
+def forget(node: Node, image_id: str) -> None:
+    """An image the agent removed leaves the kept listing."""
+    got = kept(node)
+    if got is None:
+        return
+    info = dict(node.runtime_info or {})
+    info[LISTING_KEY] = {**got, "items": [i for i in got["items"] if i.get("id") != image_id]}
+    node.runtime_info = info
+
+
+def add_loaded(node: Node, loaded: list) -> None:
+    """Images an upload or a copy loaded join the kept listing (when there is one; else the next listing has them)."""
+    got = kept(node)
+    if got is None:
+        return
+    items = [i for i in got["items"]]
+    have = {i.get("id") for i in items}
+    for raw in loaded:
+        k = _kept_item(raw)
+        if k is not None and k["id"] not in have and len(items) < MAX_KEPT:
+            items.append(k)
+            have.add(k["id"])
+    info = dict(node.runtime_info or {})
+    info[LISTING_KEY] = {**got, "items": items}
+    node.runtime_info = info
+
+
+def image_on(node: Node, image: Optional[str]) -> dict:
+    """Whether this machine has the image, by its last listing: {present: True | False | None (never listed), listed_at,
+    size}. An image a replica pulled there since the server started counts as present (forgeyard/models/reach.py)."""
+    from forgeyard.models import reach
+
+    got = kept(node)
+    item = next((i for i in got["items"] if refers(i, image)), None) if got is not None and image else None
+    present: Optional[bool] = None if got is None else item is not None
+    if not present and image and reach.has_image(node, image):
+        present = True
+    return {"present": present, "listed_at": got.get("at") if got is not None else None,
+            "size": item.get("size") if item is not None else None}
 
 
 def replica_image(r: Replica) -> Optional[str]:

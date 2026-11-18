@@ -9,6 +9,7 @@ import { api, errorText } from "../lib/api";
 import { TARGET_LABEL, TARGET_TONE, downloadLine, isActive, pickable, targetDetail } from "../lib/downloads";
 import { bytes } from "../lib/machines";
 import { downloadFraction } from "../lib/models";
+import { modelHref } from "../lib/pages";
 import type { CatalogModel, CatalogResponse, DownloadTarget, DownloadTargets, ModelDownload } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Notice } from "./ui";
@@ -72,7 +73,7 @@ export function DownloadDialog({ model, machineId, onClose, onStarted }: {
     <div className="dlg-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dlg panel" role="dialog" aria-modal="true" aria-labelledby="dlg-title" ref={box}>
         <div className="dlg-head">
-          <h2 id="dlg-title"><IconDownload size={18} aria-hidden="true" /> Download {model ? title : "a model"} to…</h2>
+          <h2 id="dlg-title"><IconDownload size={18} aria-hidden="true" /> Download {model ? <Link to={modelHref(model.name)} onClick={onClose}>{title}</Link> : "a model"} to…</h2>
           <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label="Close" onClick={onClose}><IconX size={16} aria-hidden="true" /></button>
         </div>
         <p className="small muted dlg-lead">
@@ -175,7 +176,7 @@ export function DownloadList({ list, show, canCancel, onChanged, onError }: {
               <strong className="mono">
                 {show === "machine"
                   ? (d.machine ? <Link to={`/machines/${d.machine.id}`}>{d.machine.name}</Link> : "a removed machine")
-                  : (d.model?.title ?? d.model?.name ?? "a removed model")}
+                  : d.model ? <Link to={modelHref(d.model.name)}>{d.model.title ?? d.model.name}</Link> : "a removed model"}
               </strong>
               <small>{downloadLine(d)}</small>
               {active && frac !== null && (

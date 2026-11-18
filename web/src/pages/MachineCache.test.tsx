@@ -77,7 +77,9 @@ describe("a machine's model cache", () => {
     const items = within(box).getAllByRole("listitem");
     expect(items.map((li) => li.querySelector("strong")?.textContent)).toEqual(["acme/gguf", "m-Q4_K_M.gguf", "m-Q8_0.gguf", "tiny.gguf", "llama-cpp"]);
     expect(within(items[0]).getByText("6 GiB")).toBeTruthy();
-    expect(within(items[0]).getByText(/revision cccccccccccc · 3 files · catalog: qwen-q4/)).toBeTruthy();
+    expect(items[0].querySelector("small")!.textContent).toBe("revision cccccccccccc · 3 files · catalog: qwen-q4");
+    // 1.4.3 (#140): the catalog model opens its page.
+    expect(within(items[0]).getByRole("link", { name: "qwen-q4" }).getAttribute("href")).toBe("/models/qwen-q4");
     expect(items[1].className).toContain("cacherow-part");
     expect(within(box).getByText(/Partial downloads:/)).toBeTruthy();
     expect(within(box).getByRole("button", { name: "Remove partial downloads" })).toBeTruthy();

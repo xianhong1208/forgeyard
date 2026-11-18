@@ -16,6 +16,8 @@ import { GuidePage, GuideRedirect } from "./pages/Guide";
 import { MachineDetailPage } from "./pages/MachineDetail";
 import { MachinesPage } from "./pages/Machines";
 import { ModelDeployPage } from "./pages/ModelDeploy";
+import { EnginePage } from "./pages/EnginePage";
+import { ModelPage } from "./pages/ModelPage";
 import { ModelsPage } from "./pages/Models";
 import { NotFoundPage, AdminsOnly } from "./pages/NotFound";
 import { OldApps } from "./pages/OldApps";
@@ -84,6 +86,11 @@ export default function App() {
         {/* 1.4 (#81): routes live where they belong (a deployment's page, or Cloud → Cloud models), and
             Providers became Cloud. The old addresses open the new places. */}
         <Route path="/models/routes/:id" element={<OldRoute />} />
+        {/* 1.4.3 (#140): a page per catalog model and per engine. The words of the routes above (and engines) are
+            refused as model names by the API, so a model's page never hides one of them. */}
+        <Route path="/models/engines" element={<Navigate to="/models?tab=engines" replace />} />
+        <Route path="/models/engines/:name" element={<EnginePage />} />
+        <Route path="/models/:name" element={<ModelPage />} />
         <Route path="/cloud" element={<AdminOnly><CloudPage /></AdminOnly>} />
         <Route path="/cloud/providers/:id" element={<AdminOnly><ProviderDetailPage /></AdminOnly>} />
         <Route path="/cloud/models/:id" element={<RouteDetailPage />} />

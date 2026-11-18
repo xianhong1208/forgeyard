@@ -301,6 +301,10 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         elif fmt == "safetensors":
             config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=4 * 1024**2))
             out["config"] = config_summary(config)
+            if (task or out["task_hint"]) == "rerank" and isinstance(config, dict) and (
+                    why := sources.reranker_refusal(config)):
+                # 1.4.3 (#147): a text classifier tagged text-classification, like the rerankers.
+                raise InspectError(why)
             out["modalities"] = modalities.from_config(config, paths)
             seen = vision.summary(config) if isinstance(config, dict) else None
             if seen is not None:

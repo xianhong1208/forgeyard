@@ -6,6 +6,65 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.3] — 2026-11-18
+
+Every catalog model and every engine gets its own page in the console (#140): a model's page says where it
+is, whether a copy fits on each machine, what uses it and which engines can run it; an engine's page lists its
+variants, their images and which machines have them. Model and engine names link to these pages from
+everywhere, and an admin can set a model's display name. Zero-shot detectors and text classifiers are refused
+when added, instead of failing later as detection models or rerankers (#147); their support comes with 1.4.4.
+No setting and no migration, and the agents need no update (an agent from 1.4.1 on already lists its images
+for the engine pages).
+
+### Added
+
+- **A page per catalog model and per engine** (#140, layout A+). A model's page, `/models/<name>`: its facts (task,
+  size, licence, what one copy needs, deployments), jump links, **Overview** (source, revision with the Hugging Face
+  link, licence, task and its `/v1` path, architecture), **Machines** right after it (each machine's model cache
+  entry with its size and what uses it, a download under way, whether a copy fits there now with each engine's
+  defaults on a GPU or the CPU, and whether the engine variant's image or program is there; **Deploy here**,
+  **Download here**), **Deployments**, **Engines** and **Files**, folded to one line (the files a machine downloads
+  with their sizes, and the repository's other quantisations and projectors, not downloaded). **Deploy**,
+  **Download to…** and **Remove** are at the top, and an admin sets the model's **display name** (its `title`; the
+  name stays, since deployments record it). An engine's page, `/models/engines/<name>`: **Overview**, **Variants**
+  (image or program, pinned by digest or by tag, what the machine needs, the offline commands), **Machines** (the
+  variant each one would run and whether its image or program is there), **Parameters** folded to one line, and
+  the deployments and catalog models that use it; admins **Edit** and **Delete** a custom engine and **Copy as a
+  custom engine** a built-in one. Everyone signed in may look. Model and engine names link to the pages on the
+  Catalog and Engines tabs, Serving, a deployment's page, a machine's model cache and **Download to…**.
+- `GET /api/models/{name}` (by name, else by id): the model, its files, each machine's cache entry and engine,
+  where it fits per engine and device (the deploy estimate, for everyone signed in to read), and its deployments.
+  `GET /api/recipes/{name}` adds each machine's variant and whether its image or program is there, the deployments
+  and the catalog models that use it; `?refresh=true` has the connected machines list their images first.
+- The server keeps each machine's last image listing (`nodes.runtime_info["images"]`: id, tags, content id, size,
+  when): every `image_listed` answer replaces it, a removal the agent confirms and an upload it loaded update it, and
+  it outlives a reconnect, so an engine's page says which machines have its image while they are offline too. It
+  is not in `GET /api/machines`. No migration (an existing JSON column).
+
+### Changed
+
+- A model can no longer be named `deploy`, `deployments`, `routes`, `engines`, `catalog`, `sources`,
+  `recommended`, `search` or `inspect` (422 `reserved_name`): those are other pages under `/models` in the console,
+  or other paths under `/api/models`.
+
+### Fixed
+
+- **Zero-shot detectors are no longer added as detection models** (#147). Grounding DINO, MM-Grounding-DINO and
+  LLMDet, OWL-ViT, OWLv2 and OmDet-Turbo have architectures ending in `ForObjectDetection`, so the catalog took
+  them as detection models, and their replicas failed: the vision server loads detectors with
+  `AutoModelForObjectDetection`, which does not know them. They are now known by their `model_type` or
+  architecture (transformers' zero-shot detection models, as of the 5.23.0 the vision image pins), and adding
+  or re-tasking one answers 422 `not_a_vision_model`: "a zero-shot (open-vocabulary) detector … support comes
+  with #142". The Add a model preview says so too. One added before this release stays in the catalog (no
+  migration) and deploying it answers the same 422.
+- **Text classifiers are no longer filed as rerankers** (#147). Every model Hugging Face tags
+  `text-classification` was taken as a reranker, because many cross-encoder rerankers are tagged that way. The
+  inspector now applies vLLM's rule to a `…ForSequenceClassification` model's `config.json`: one output
+  (`num_labels` 1, or one `id2label` entry) is a reranker; two labels or more (sentiment, topic, NLI) is a text
+  classifier, and inspecting or adding it as a reranker answers 422 `cannot_inspect` with its labels ("Text
+  classification comes with #144"). bge-reranker, the ms-marco cross-encoders and causal-LM rerankers such as
+  Qwen3-Reranker are added as before. Rows already in the catalog are not changed.
+
 ## [1.4.2] — 2026-11-18
 
 A patch release from running 1.4 on real machines. A machine's page shows the exact command that updates its

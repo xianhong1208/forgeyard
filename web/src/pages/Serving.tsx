@@ -7,6 +7,7 @@ import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Notice, PageHeader } from "../components/ui";
 import { MODEL_KIND, groupByKind, machineKind, whereOnMachine } from "../lib/fleet";
 import { TASK_LABEL, VISION_TASKS, downloadFraction, downloadText, gib } from "../lib/models";
+import { engineHref, modelHref } from "../lib/pages";
 import { FALLBACK_ANCHOR, fallbackProviders } from "../lib/routing";
 import type { CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -138,7 +139,7 @@ function ByKind({ list, machines, canDeploy, routes }: { list: Deployment[]; mac
   );
 }
 
-function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machine[]; cloud: string[] }) {
+export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machine[]; cloud: string[] }) {
   const w = d.workload;
   const tone = STATUS_TONE[w.status];
   const placed = w.replica_list.filter((r) => r.machine);
@@ -163,7 +164,7 @@ function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machin
             </Link>
           )}
         </div>
-        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task}</code> · </>}{d.model.name} · {d.recipe}{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
+        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task}</code> · </>}<Link to={modelHref(d.model.name)}>{d.model.name}</Link> · <Link to={engineHref(d.recipe)}>{d.recipe}</Link>{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
       </div>
       <div className="where">
         {placed.length ? placed.map((r) => {

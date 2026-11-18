@@ -15,10 +15,13 @@ it, what one replica would reserve, and on which machines it would fit right now
 
 from __future__ import annotations
 
+import asyncio
 import re
+from types import SimpleNamespace
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession, selectinload
@@ -26,7 +29,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
-from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, utcnow
+from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, new_session, utcnow
 from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
                               recommended as rec, scheduler, sources, vision)
 from forgeyard.models.catalog import Context
@@ -38,6 +41,11 @@ from forgeyard.workloads import images, placement
 router = APIRouter(prefix="/api", tags=["models"])
 
 MODEL_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$")
+# 1.4.3 (#140): a model's page is /models/<name> in the console, and its API GET /api/models/<name>. These words are
+# other pages there (/models/deploy, /models/deployments/…, /models/routes/…, /models/engines/…) or other API
+# paths (/api/models/recommended, /search, /inspect), so no model is named after them.
+RESERVED_NAMES = frozenset({"deploy", "deployments", "routes", "engines", "catalog", "sources", "recommended",
+                            "search", "inspect"})
 TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
               "image": "Images", "video": "Video", "detect": "Object detection", "segment": "Segmentation",
               "depth": "Depth estimation"}
@@ -361,6 +369,8 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
     name = body.name.strip().lower()
     if not MODEL_NAME_RE.match(name):
         raise fail(422, "bad_name", "name: 1-64 characters, a-z, 0-9, '.', '_' and '-'")
+    if name in RESERVED_NAMES:
+        raise fail(422, "reserved_name", f"{name} names another page of the console: choose another name.")
     if db.scalar(select(CatalogModel.id).where(CatalogModel.name == name)) is not None:
         raise fail(409, "name_taken", f"The catalog already has a model named {name}.")
     engine_args = _engine_args(body.engine_args)
@@ -405,6 +415,31 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
                  revision=m.revision, file=m.file, task=task)
     db.commit()
     return {"model": model_out(m, catalog.all_recipes(db))}
+
+
+def _by_ref(db: DbSession, ref: str) -> CatalogModel:
+    """A catalog model by its name, else by its id."""
+    m = db.scalar(select(CatalogModel).where(CatalogModel.name == ref))
+    if m is None and ref.isdigit():
+        m = db.get(CatalogModel, int(ref))
+    if m is None:
+        raise fail(404, "not_found", f"No model {ref!r} in the catalog.")
+    return m
+
+
+@router.get("/models/{ref}")
+def model_page(ref: str, caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
+    """A catalog model's page (1.4.3, #140; everyone signed in): the model, its files and sizes, each machine's cache
+    entry for it and the engine there, where it fits now with each engine's defaults, and its deployments. Declared
+    after /models/recommended and /models/search, so those stay theirs (and are no model's name)."""
+    from forgeyard.models import pages
+
+    m = _by_ref(db, ref)
+    all_r = catalog.all_recipes(db)
+    names = compatible(m, all_r)
+    return {"model": model_out(m, all_r, _counts(db).get(m.id, 0)), **pages.model_page(db, m, all_r),
+            "recipes": [recipe_out(all_r[n][0]) for n in names],
+            "can_manage": caller.user.role == "admin", "can_deploy": can_run_workloads(caller.user)}
 
 
 class ModelPatch(BaseModel):
@@ -466,12 +501,46 @@ def list_recipes(_: Caller = Depends(current), db: DbSession = Depends(get_db)):
     return {"recipes": [recipe_out(r, t) for r, t in catalog.all_recipes(db).values()]}
 
 
+# How long an engine's page waits for each machine to list its images again (?refresh=true).
+LIST_TIMEOUT = 10.0
+
+
+def _recipe_page(request: Request, name: str, listing: bool) -> dict | list:
+    from forgeyard.models import pages
+
+    db = new_session()
+    try:
+        caller = current(request, db)
+        found = catalog.all_recipes(db).get(name)
+        if found is None:
+            raise fail(404, "not_found", "No such recipe.")
+        if listing:
+            return [SimpleNamespace(id=n.id, name=n.name) for n in pages.listable(db)]
+        return {"recipe": recipe_out(*found), **pages.engine_page(db, found[0]),
+                "can_manage": caller.user.role == "admin"}
+    finally:
+        db.close()
+
+
 @router.get("/recipes/{name}")
-def get_recipe(name: str, _: Caller = Depends(current), db: DbSession = Depends(get_db)):
-    found = catalog.all_recipes(db).get(name)
-    if found is None:
-        raise fail(404, "not_found", "No such recipe.")
-    return {"recipe": recipe_out(*found)}
+async def get_recipe(name: str, request: Request, refresh: bool = Query(default=False)):
+    """An engine (its recipe and YAML) and its page (1.4.3, #140; everyone signed in): each machine with the variant it
+    would run and whether its image (the machine's last image listing) or program (its cache report) is there, and
+    the deployments and catalog models that use it. With ?refresh=true the connected machines list their images
+    again first (each answer is kept)."""
+    from forgeyard.machines import imagecopy
+
+    if refresh:
+        nodes = await run_in_threadpool(_recipe_page, request, name, True)
+
+        async def ask(node) -> None:
+            try:
+                await asyncio.wait_for(imagecopy.list_answer(node), LIST_TIMEOUT)
+            except (imagecopy.CopyFailed, asyncio.TimeoutError):
+                pass   # its last listing stands
+
+        await asyncio.gather(*(ask(n) for n in nodes))
+    return await run_in_threadpool(_recipe_page, request, name, False)
 
 
 class RecipeIn(BaseModel):

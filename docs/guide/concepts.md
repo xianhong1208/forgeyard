@@ -117,12 +117,27 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
   Each row has **Deploy** and **Download to…**.
+- **What a model is for** comes from its Hugging Face task, checked against its `config.json`. Many
+  rerankers are tagged *text classification*, and so are text classifiers; vLLM's rule tells them apart. A
+  model with one output (`num_labels` 1: bge-reranker, the ms-marco cross-encoders) is a reranker; one with
+  two labels or more (sentiment, topic, NLI) is a text classifier, which cannot be added yet (support comes
+  with #144). Rerankers that are language models, such as Qwen3-Reranker, are not affected.
 - An **engine** says how to run a kind of model: which program, which container image (pinned by
   digest) or release, which parameters, and how much memory it needs. The API and the YAML files
   call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
   **Engines** tab. Built in: `vllm` (chat on
   NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
+- Each catalog model has **its own page** (1.4.3), opened from its name: `/models/<name>`. It shows
+  what the model is (source and revision, licence, task, architecture), **which machines have it** in
+  their model cache and **whether it fits** each one now with an engine's defaults, its deployments, the
+  engines that run it, and its files with their sizes. Each engine has one too, `/models/engines/<name>`:
+  its variants (the image or program per kind of hardware, and whether it is pinned by digest), **which
+  machines have that image or program**, its parameters, and the deployments and models that use it.
+  Model and engine names everywhere in the console link to these pages. An admin gives a model a
+  **display name** there; its name stays, because deployments record it, so `deploy`, `deployments`,
+  `routes`, `engines`, `catalog`, `sources`, `recommended`, `search` and `inspect` are not model names.
+  ([Look at a model or an engine](how-to.md#look-at-a-model-or-an-engine).)
 - **Sources** (admins) say where models may come from: the hosts allowed for GGUF URLs, the
   directories for `local://` models, and the server's Hugging Face token.
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
@@ -305,7 +320,11 @@ API key.
 - **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
   is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
   model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large
-  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added.
+  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added. Nor can zero-shot
+  (open-vocabulary) detectors, which find what a text prompt names (Grounding DINO, MM-Grounding-DINO,
+  OWL-ViT, OWLv2, OmDet-Turbo): their architectures end in `ForObjectDetection` too, but the vision server
+  cannot load them yet (support comes with #142). One added before 1.4.3 stays in the catalog and cannot be
+  deployed.
 - **Their own API:** `/v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth`, one image per
   request (multipart, or base64 in JSON) and a JSON answer; masks and depth maps are PNGs in base64.
   The OpenAI SDK has no such API: any HTTP client calls it.

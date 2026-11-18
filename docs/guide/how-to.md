@@ -162,7 +162,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
 ```
 
 Then:
@@ -194,7 +194,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -209,7 +209,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.2 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.3 inventory
 ```
 
 ### CPU only
@@ -223,7 +223,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
 ```
 
 ### Why these options
@@ -256,8 +256,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.2 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.3 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -276,18 +276,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.2 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.3 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.4.2`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.4.3`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -300,7 +300,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.3
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -427,8 +427,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -523,7 +523,8 @@ and an offline machine works once its cache has it.
    (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
    or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
    backbone…), SAM 2 or 2.1, or depth model (Depth Anything, DPT…) with a permissive licence (Apache-2.0,
-   MIT, BSD). Another licence, or none, cannot be added.
+   MIT, BSD). Another licence, or none, cannot be added, nor can a zero-shot detector (Grounding DINO,
+   OWL-ViT, OWLv2…: support comes with #142).
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
 3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
@@ -1031,7 +1032,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.2
+  docker.io/tonyhuang1101/forgeyard:1.4.3
 sudo docker logs forgeyard
 ```
 
@@ -1065,7 +1066,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.2 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1074,7 +1075,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.2 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1083,23 +1084,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.3
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.4
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.3
+  docker.io/tonyhuang1101/forgeyard:1.4.4
 ```
 
-`1.4.3` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
+`1.4.4` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.2
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.3
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1107,7 +1108,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.2 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.3 .`
 
 ## Run the server as a service
 
@@ -1192,7 +1193,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1206,7 +1207,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.3
    ```
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried
@@ -1391,6 +1392,42 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 It makes a new key and drops what the old one encrypted: set the server's Hugging Face token again
 (and any deployment's own), model replicas restart with new internal keys, and apps with lost
 environment values have to be created again (their events say so).
+
+## Look at a model or an engine
+
+Open **Models** and click a model's name in the **Catalog**, or an engine's name on the **Engines** tab
+(names link to these pages everywhere: on **Serving**, on a deployment's page, in a machine's model
+cache, in **Download to…**). Everyone signed in may look.
+
+A **model's page** (`/models/<name>`) has a line of facts (task, size, licence, what one copy needs with
+the first engine's defaults, how many deployments) and links to its sections:
+
+- **Overview**: the source and revision (with a link to Hugging Face), the licence, the task and the path
+  under `/v1` it answers at, the architecture.
+- **Machines**: each machine, whether its model cache has the model (as its agent last reported, with
+  the size there and what uses it), whether a copy **fits** there now (on a GPU, else on the CPU; the
+  deploy page's estimate, with the engine's defaults), and the engine variant it would run with whether
+  that image or program is there. Pick another engine above the table to see its verdicts.
+  **Deploy here** and **Download here** start from that machine.
+- **Deployments** of the model, and the **Engines** that run it (each opens its page).
+- **Files**, folded to one line (how many files a machine downloads, their size, the model file);
+  **Show files** lists them with their sizes, and the repository's other files (other quantisations
+  and projectors) that are not downloaded.
+
+**Deploy**, **Download to…** and **Remove** are at the top, as on the catalog. An admin sets the
+**Display name** there, for example *Qwen3 4B* for `accept-qwen3-4b`; leave it empty to show the name.
+The name itself never changes.
+
+An **engine's page** (`/models/engines/<name>`) has **Overview** (what it serves and at which path, the
+formats it reads, how it shares a GPU), **Variants** (per kind of hardware: the image or program, whether
+the image is pinned by digest, what the machine needs, and the commands to carry an image to a machine
+without registry access), **Machines** (the variant each machine would run, and whether its image is in
+the machine's engine, as the machine last listed its images, or its program in the model cache),
+**Parameters** (folded: their defaults and ranges), and the **deployments** and **catalog models** that use
+it. A connected machine lists its images again when the page opens and its last listing is older than ten
+minutes; **List again** asks now. An offline machine shows its last listing. An admin **edits** or
+**deletes** a custom engine there, and **copies** a built-in one as a custom engine (for example to try a
+newer image).
 
 ## Download a model before deploying it
 

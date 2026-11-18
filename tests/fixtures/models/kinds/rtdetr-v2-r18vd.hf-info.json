@@ -1,0 +1,22 @@
+{
+  "id": "PekingU/rtdetr_v2_r18vd",
+  "pipeline_tag": "object-detection",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "safetensors",
+    "rt_detr_v2",
+    "object-detection",
+    "vision",
+    "en",
+    "dataset:coco",
+    "arxiv:2407.17140",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

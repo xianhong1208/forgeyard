@@ -1,0 +1,92 @@
+{
+  "apply_layernorm_after_vision_backbone": true,
+  "architectures": [
+    "OmDetTurboForObjectDetection"
+  ],
+  "backbone": "swin_tiny_patch4_window7_224",
+  "backbone_config": null,
+  "backbone_depths": [
+    2,
+    2,
+    6,
+    2
+  ],
+  "backbone_embed_dim": 96,
+  "backbone_image_size": 640,
+  "backbone_kwargs": {
+    "always_partition": true,
+    "img_size": 640,
+    "out_indices": [
+      1,
+      2,
+      3
+    ]
+  },
+  "backbone_num_heads": [
+    3,
+    6,
+    12,
+    24
+  ],
+  "backbone_out_indices": [
+    1,
+    2,
+    3
+  ],
+  "backbone_window_size": 7,
+  "batch_norm_eps": 1e-05,
+  "cache_size": 100,
+  "class_distance_type": "cosine",
+  "class_embed_dim": 512,
+  "conv_norm_activation": "gelu",
+  "csp_activation": "silu",
+  "d_model": 256,
+  "decoder_activation": "relu",
+  "decoder_dim_feedforward": 2048,
+  "decoder_dropout": 0.0,
+  "decoder_hidden_dim": 256,
+  "decoder_num_heads": 8,
+  "decoder_num_layers": 6,
+  "decoder_num_points": 4,
+  "disable_custom_kernels": false,
+  "encoder_attention_heads": 8,
+  "encoder_dim_feedforward": 2048,
+  "encoder_dropout": 0.0,
+  "encoder_feedforward_activation": "relu",
+  "encoder_feedforward_dropout": 0.0,
+  "encoder_in_channels": [
+    192,
+    384,
+    768
+  ],
+  "encoder_layers": 1,
+  "encoder_projection_indices": [
+    2
+  ],
+  "eval_size": null,
+  "hidden_expansion": 1,
+  "image_size": 640,
+  "init_std": 0.02,
+  "is_encoder_decoder": true,
+  "layer_norm_eps": 1e-05,
+  "learn_initial_query": false,
+  "model_type": "omdet-turbo",
+  "num_feature_levels": 3,
+  "num_queries": 900,
+  "positional_encoding_temperature": 10000,
+  "task_encoder_hidden_dim": 1024,
+  "text_config": {
+    "model_type": "clip_text_model"
+  },
+  "text_projection_in_dim": 512,
+  "text_projection_out_dim": 512,
+  "torch_dtype": "float32",
+  "transformers_version": "4.45.0.dev0",
+  "use_pretrained_backbone": false,
+  "use_timm_backbone": true,
+  "vision_features_channels": [
+    256,
+    256,
+    256
+  ]
+}

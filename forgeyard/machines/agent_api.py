@@ -145,6 +145,23 @@ def _hello(db: DbSession, node_id: int, hello: HelloIn, ip: str) -> Optional[dic
     return {"node_id": node.id, "name": node.name}
 
 
+def _images_kept(db: DbSession, node_id: int, said) -> None:
+    """1.4.3 (#140): keep the machine's image listing up to date for the engine pages: a listing replaces it, a
+    removal the agent confirmed takes the image out, an upload it loaded adds the images."""
+    from forgeyard.machines import engineimages
+
+    node = _live_node(db, node_id)
+    if node is None:
+        return
+    if isinstance(said, ImageListedIn):
+        engineimages.remember(node, said.model_dump())
+    elif isinstance(said, ImageRemovedIn):
+        if said.image is not None:
+            engineimages.forget(node, said.image.id)
+    else:
+        engineimages.add_loaded(node, [i.model_dump() for i in said.images])
+
+
 def _heartbeat(db: DbSession, node_id: int, hb: HeartbeatIn, ip: str) -> bool:
     node = _live_node(db, node_id)
     if node is None:
@@ -353,6 +370,8 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                 elif kind == "image_loaded" and workloads:
                     loaded = _parse(text, ImageLoadedIn)
                     ok = True
+                    if loaded.ok and loaded.images:
+                        await run_in_threadpool(_db_call, _images_kept, node_id, loaded)
                     conn.answer(loaded.request_id, loaded.model_dump())
                 elif kind == "relay_sent" and workloads:
                     sent = _parse(text, RelaySentIn)
@@ -362,6 +381,8 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     said = _parse(text, {"image_listed": ImageListedIn, "image_saved": ImageSavedIn,
                                          "image_removed": ImageRemovedIn}[kind])
                     ok = True
+                    if kind != "image_saved" and said.ok:  # 1.4.3 (#140): the listing the server keeps
+                        await run_in_threadpool(_db_call, _images_kept, node_id, said)
                     conn.answer(said.request_id, said.model_dump())
                 else:
                     raise ValueError(f"unknown message type {kind!r}")
