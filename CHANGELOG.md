@@ -6,6 +6,19 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-11-18
+
+A patch release from running 1.4 on real machines. A machine's page shows the exact command that updates its
+agent, made from how the agent runs, and an agent behind the server says so (#121, #122). A machine's engine
+images are listed and can be removed when nothing uses them, and **Copy from another machine** lists engine
+images first (#123, #124). Placement counts a machine's free host ports (#125). An admin can download the secret
+key and the CA as one passphrase-encrypted backup from the console, and `forgeyard secrets restore` puts them
+back (#127). A *Docker Hub login* workflow catches a wrong Docker Hub secret before a release, not after the tag
+(#128). The guide walks through a machine without internet access in one place (#129), and a relay whose source
+breaks off reads clearly in the server's log (#130). `scripts/accept_all.py` checks relaying, image upload and
+image copy (#126). No setting and no migration; update the agents to 1.4.2 so that they report how they run
+and their port range, and can remove engine images (`image_remove`).
+
 ### Added
 
 - **Download a backup of the secret key from the console** (#127). Admins only: **Download a backup…** on the
