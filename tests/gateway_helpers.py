@@ -102,6 +102,17 @@ class FakeEngine:
                     return self._json(200, {"id": "r1", "model": body.get("model"), "usage": {"total_tokens": 12},
                                             "results": [{"index": 0, "relevance_score": 0.98},
                                                         {"index": 1, "relevance_score": 0.1}]})
+                if self.path == "/classify":
+                    # vLLM's /classify (1.4.4): no /v1; the most likely label and every label's probability.
+                    texts = body.get("input")
+                    texts = [texts] if isinstance(texts, str) else list(texts or [])
+                    data = [{"index": i, "label": "positive" if "love" in t else "negative",
+                             "probs": [0.1, 0.9] if "love" in t else [0.8, 0.2], "num_classes": 2}
+                            for i, t in enumerate(texts)]
+                    n = sum(len(t.split()) + 2 for t in texts)
+                    return self._json(200, {"id": "classify-1", "object": "list", "created": 1, "model": body.get("model"),
+                                            "data": data, "usage": {"prompt_tokens": n, "total_tokens": n,
+                                                                    "completion_tokens": 0, "prompt_tokens_details": None}})
                 if self.path == "/v1/audio/transcriptions":
                     return self._json(200, {"text": "And so my fellow Americans, ask not."})
                 self._json(404, {"error": "not found"})

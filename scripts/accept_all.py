@@ -22,10 +22,12 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              retries, max_duration), a container task when it has a container engine; GPU isolation
              on the GPU machine (scripts/gpu_probe.py, also in a container on NVIDIA)
   models     deploys MODELS (below), waiting with progress: Qwen3-1.7B GGUF on the CPU machine(s);
-             a chat, an embedding, a rerank and a speech model on the GPU machine, each skipped when
+             a chat, an embedding, a rerank, a text classification (1.4.4) and a speech model on the GPU
+             machine, each skipped when
              its estimate says it does not fit; the estimate against the deployment page; Try it
   gateway    /v1 with the official SDK: the model list and key allowlists, chat, streaming with and
-             without include_usage, completions, embeddings, rerank, transcription, rpm (429), a
+             without include_usage, completions, embeddings, rerank, text classification (/v1/classify:
+             the right language for three texts, prompt tokens, a chat model refused), transcription, rpm (429), a
              revoked key, locked limits, the replicas' key guard, balancing and failover over two
              CPU machines, the Playground, usage rows, a stopped deployment leaving the list
   cloud      only with --cloud-provider: spilling a prompt too long for the local model, keys that
@@ -161,7 +163,14 @@ MODELS = [
                                       "${MODEL_PATH}/chat_template.jinja"]}},
     {"key": "asr", "device": "gpu", "model": "accept-faster-whisper-small", "source": "hf://Systran/faster-whisper-small",
      "task": "asr", "recipe": "faster-whisper", "params": {}},
+    # 1.4.4 (#144): a text classifier (XLM-R, 20 languages, 512 tokens: no context given, so the model's own).
+    {"key": "classify", "device": "gpu", "model": "accept-xlm-roberta-language-detection",
+     "source": "hf://papluca/xlm-roberta-base-language-detection", "task": "classify", "recipe": "vllm-pooling",
+     "params": {}},
 ]
+# What the classify check sends, and the language each text is in (the model's labels).
+CLASSIFY_TEXTS = [("今天天氣很好，我們去公園散步吧。", "zh"), ("Bonjour à tous, comment allez-vous aujourd'hui ?", "fr"),
+                  ("The weather is lovely today, let's go for a walk.", "en")]
 # The relay group's model: the smallest GGUF on Hugging Face that the catalog takes (26 MB), downloaded to
 # one machine through the server and then from that machine's cache to another.
 RELAY_MODEL = {"model": "accept-stories15m-gguf", "source": "hf://ggml-org/tiny-llamas", "file": "stories15M-q8_0.gguf",
@@ -1462,6 +1471,27 @@ def group_gateway(run: Run) -> None:
                   f"{r.status}: {[(x['index'], round(x['relevance_score'], 3)) for x in ranked]}")
     else:
         run.skip("rerank", "no rerank deployment (needs --gpu-machine with room)")
+    if "classify" in deps:
+        auth = {"Authorization": f"Bearer {k_all['key']}", "Content-Type": "application/json"}
+        r = raw(run.args.server + "/v1/classify", "POST", json.dumps({"model": served["classify"],
+                                                                       "input": [t for t, _ in CLASSIFY_TEXTS]}).encode(),
+                auth, run.tls, 120)
+        got = [d.get("label") for d in sorted((r.data or {}).get("data") or [], key=lambda d: d["index"])] if r.status == 200 else []
+        tokens = ((r.data or {}).get("usage") or {}).get("prompt_tokens") if r.status == 200 else None
+        run.check(f"{served['classify']}: /v1/classify names each text's language",
+                  got == [lang for _, lang in CLASSIFY_TEXTS] and bool(tokens),
+                  f"{r.status}: {got}, {tokens} prompt tokens")
+        probs = ((r.data or {}).get("data") or [{}])[0].get("probs") or []
+        run.check(f"{served['classify']}: every label's probability, adding up to 1", len(probs) == 20
+                  and abs(sum(probs) - 1) < 0.01, f"{len(probs)} labels, sum {sum(probs):.3f}")
+        chat_model = next((served[k] for k in ("chat", "cpu") if k in deps), None)
+        if chat_model:
+            r = raw(run.args.server + "/v1/classify", "POST", json.dumps({"model": chat_model, "input": "x"}).encode(),
+                    auth, run.tls, 30)
+            run.check("a chat model at /v1/classify: 400 wrong_endpoint, with structured outputs named",
+                      r.status == 400 and "structured_outputs" in r.text, f"{r.status} {r.text[:80]}")
+    else:
+        run.skip("text classification", "no text classification deployment (needs --gpu-machine with room)")
     if "asr" in deps:
         with CLIP.open("rb") as fh:
             tr = sdk.audio.transcriptions.create(model=served["asr"], file=fh)
@@ -1551,13 +1581,15 @@ def group_gateway(run: Run) -> None:
 def guard_checks(run: Run, api_key: str) -> None:
     probes = {"openai-chat": ("/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
               "openai-embeddings": ("/v1/embeddings", {"input": "x"}),
-              "rerank": ("/v1/rerank", {"query": "q", "documents": ["a"]})}
+              "rerank": ("/v1/rerank", {"query": "q", "documents": ["a"]}),
+              "classify": ("/classify", {"input": "x"})}
     open_paths = (("/invocations", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
-                  ("/rerank", {"query": "q", "documents": ["a"]}), ("/pooling", {"input": "x"}))
+                  ("/rerank", {"query": "q", "documents": ["a"]}), ("/pooling", {"input": "x"}),
+                  ("/classify", {"input": "x"}))
     unreachable = []
     for key, d in run.deps.items():
         api = (d.get("route") or {}).get("api") or ({"asr": "openai-audio", "embed": "openai-embeddings",
-                                                      "rerank": "rerank"}.get(key, "openai-chat"))
+                                                      "rerank": "rerank", "classify": "classify"}.get(key, "openai-chat"))
         for e in d["endpoints"]:
             base = e["url"].rstrip("/")
             what = f"{d['name']} #{e['replica']} on {e['machine']}"
@@ -1582,8 +1614,8 @@ def guard_checks(run: Run, api_key: str) -> None:
                             {"Content-Type": "application/json"}, None, 30)
                     if not (r.status == 401 and "replica_key_required" in r.text):
                         bad[path] = r.status
-                run.check(f"{what}: vLLM's open paths (/invocations, /rerank, /pooling) are guarded", not bad,
-                          f"not 401: {bad}" if bad else "401 on all three")
+                run.check(f"{what}: vLLM's open paths (/invocations, /rerank, /pooling, /classify) are guarded", not bad,
+                          f"not 401: {bad}" if bad else "401 on all four")
     if unreachable:
         run.skip("direct calls to some replica ports", "not reachable from this computer (another network): "
                  + "; ".join(unreachable))

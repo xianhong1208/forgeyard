@@ -12,6 +12,7 @@ import {
   IconScan,
   IconSortDescending,
   IconSpeakerphone,
+  IconTags,
   IconVectorBezier2,
   type Icon,
 } from "@tabler/icons-react";
@@ -30,7 +31,7 @@ const MACHINE_ICON: Record<MachineKind, Icon> = { nvidia: IconGpu, "amd-gpu": Ic
 
 const MODEL_ICON: Record<ModelKind, Icon> = {
   chat: IconBrain, multimodal: IconPhotoScan, embed: IconVectorBezier2, rerank: IconSortDescending,
-  asr: IconMicrophone, tts: IconSpeakerphone, image: IconPhotoAi, video: IconMovie, vision: IconScan,
+  asr: IconMicrophone, tts: IconSpeakerphone, image: IconPhotoAi, video: IconMovie, vision: IconScan, classify: IconTags,
 };
 
 // The machine's kind on a small plate: the shape says GPU, APU or CPU; the tint says NVIDIA, AMD or none.

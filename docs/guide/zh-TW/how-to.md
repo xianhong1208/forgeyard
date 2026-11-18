@@ -518,6 +518,64 @@ media: {inputs: [image, audio, video], files: false}
 
 **要多久：** 每段影片要幾分鐘，每個副本一次做一段；其他的在它上面排隊。影片長或尺寸大時，在 **Advanced** 調高 *Longest job*。
 
+## 文字分類
+
+文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。它在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡。
+
+1. **Models → Add a model → Recommended**：*Text classification* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **Text classification** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
+2. **Deploy**。模型本身的最大長度比引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
+3. 它會出現在 **Serving → Text classification**。部署頁面的 **Try it** 會送一句話；**Playground** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
+
+用 API 金鑰呼叫 `/v1/classify`（Forgeyard 自己的 API，格式和 vLLM 一樣；OpenAI SDK 沒有）：
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "bert-multilingual-sentiment", "input": ["Great phone, fast delivery.", "Broke after a day."]}'
+```
+
+每段文字傳回 `index`、`label`（最可能的標籤）、`probs`（每個標籤的機率，順序和模型的 `config.json` 相同）和 `num_classes`，`usage` 裡有 `prompt_tokens`：
+
+```json
+{"id": "classify-…", "object": "list", "created": 1795000000, "model": "bert-multilingual-sentiment",
+ "data": [{"index": 0, "label": "5 stars", "probs": [0.01, 0.01, 0.04, 0.26, 0.68], "num_classes": 5},
+          {"index": 1, "label": "1 star", "probs": [0.81, 0.14, 0.03, 0.01, 0.01], "num_classes": 5}],
+ "usage": {"prompt_tokens": 19, "total_tokens": 19, "completion_tokens": 0}}
+```
+
+在 Python 裡，任何 HTTP 用戶端都可以：
+
+```python
+import os
+import ssl
+
+import httpx
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+r = httpx.post("https://192.168.1.20:7860/v1/classify", verify=ca,
+               headers={"Authorization": f"Bearer {os.environ['FORGEYARD_API_KEY']}"},
+               json={"model": "xlm-roberta-language-detection", "input": ["今天天氣很好", "Bonjour à tous"]})
+for d in r.json()["data"]:
+    print(d["label"], round(max(d["probs"]), 3))
+```
+
+`truncate_prompt_tokens`（token 數，或 -1 代表模型的最大值）會把太長的文字截短而不是拒絕；一個請求最多 2,048 段文字。
+
+### 用對話模型分到你自己選的標籤
+
+對話模型可以用結構化輸出分類到任何標籤：它只能回答其中一個。在 vLLM 上最簡短的寫法是 `structured_outputs.choice`：
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "qwen3-4b", "temperature": 0,
+       "chat_template_kwargs": {"enable_thinking": false},
+       "messages": [{"role": "user", "content": "Which department should handle this? 我的發票金額開錯了"}],
+       "structured_outputs": {"choice": ["billing", "shipping", "technical", "other"]}}'
+```
+
+回答的 `content` 會是這四個之一。用含 `enum` 的 JSON schema（`response_format: {"type": "json_schema", …}`）在 vLLM、llama.cpp 和雲端供應商上也能做到同樣的事。它比分類模型慢、成本也高，但不需要新模型，而且每個請求的標籤都可以不同。零樣本分類模型（請求裡帶你的標籤的 NLI 模型，也能在 CPU 上執行）會在 1.5 和 transformers 引擎一起推出（#144）。
+
 ## 使用受限（gated）的 Hugging Face 模型
 
 有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：

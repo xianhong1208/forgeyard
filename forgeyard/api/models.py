@@ -31,7 +31,7 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.config import get_settings
 from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, new_session, utcnow
 from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
-                              recommended as rec, scheduler, sources, vision)
+                              recommended as rec, scheduler, sources, textcls, vision)
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
@@ -48,8 +48,8 @@ RESERVED_NAMES = frozenset({"deploy", "deployments", "routes", "engines", "catal
                             "search", "inspect"})
 TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
               "image": "Images", "video": "Video", "detect": "Object detection", "segment": "Segmentation",
-              "depth": "Depth estimation"}
-TASK_WORDS = "chat, embed, rerank, asr, tts, image, video, detect, segment or depth"
+              "depth": "Depth estimation", "classify": "Text classification"}
+TASK_WORDS = "chat, embed, rerank, asr, tts, image, video, detect, segment, depth or classify"
 
 
 def _engine_args(raw) -> dict:
@@ -101,7 +101,7 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
             "gguf_files": (m.meta or {}).get("gguf_files") or [], "created_by": m.created_by, "created_at": m.created_at,
             "voices": list((m.meta or {}).get("voices") or []), "image": image_out(m.meta or {}),
             "video": video_out(m.meta or {}), "vision": vision_out(m.meta or {}),
-            **media_out(m.meta or {}, m.format)}
+            "classify": textcls.out(m.meta or {}), **media_out(m.meta or {}, m.format)}
 
 
 def vision_out(meta: dict) -> Optional[dict]:
@@ -257,7 +257,7 @@ def suggest(db: DbSession, meta: dict, task: Optional[str], recipe_name: Optiona
             device: Optional[str] = None) -> dict:
     """The recipe to serve an inspected (not yet added) model with, what one replica would reserve
     with that recipe's defaults, and where it would fit now."""
-    from forgeyard.api.deployments import normalise_params  # deployments imports this module's neighbours
+    from forgeyard.api.deployments import fit_default_context, normalise_params  # deployments imports this module's neighbours
 
     all_r = catalog.all_recipes(db)
     fmt = meta.get("format")
@@ -276,6 +276,7 @@ def suggest(db: DbSession, meta: dict, task: Optional[str], recipe_name: Optiona
     out: dict = {"recipe": name, "recipes": usable, "device": dev, "devices": (["gpu"] if has_gpu else []) + (["cpu"] if has_cpu else [])}
     try:
         params = normalise_params(recipe, {"gpus": 1 if dev == "gpu" else 0})
+        fit_default_context(recipe, {}, params, meta)
         est = compute_estimate(meta, recipe, params, device=dev, gpu_context=scheduler.gpu_context(), task=task)
     except EstimateError as e:
         out["error"] = str(e)
@@ -390,7 +391,10 @@ def add_model(body: ModelIn, caller: Caller = Depends(require_admin), db: DbSess
                                              "text-to-video pipeline (model_index.json naming WanPipeline).")
     if task == "image" and "video" in meta:
         raise fail(422, "not_an_image_model", "This repository is a video pipeline: add it as a video model.")
-    if task in ("tts", "image", "video") + vision.TASKS:
+    if task == textcls.TASK and "classify" not in meta and meta.get("kind") != "local":
+        # 1.4.4 (#144): a text classifier's labels are read from its config.json (safetensors repositories).
+        raise fail(422, "not_a_text_classifier", textcls.refusal(None))
+    if task in ("tts", "image", "video", textcls.TASK) + vision.TASKS:
         # A speech model's projector (llama.cpp) or audio config is its voice and decoder, not media it
         # takes in chat.
         meta["modalities"] = []
@@ -463,6 +467,8 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
             raise fail(422, "bad_task", f"task: {TASK_WORDS}")
         if body.task in vision.TASKS and body.task != m.task and (why := vision.refusal(body.task, m.meta or {})):
             raise fail(422, "not_a_vision_model", why)
+        if body.task != m.task and (why := _classify_retask(body.task, m)):
+            raise fail(422, "not_a_text_classifier", why)
         m.task = body.task
         changed["task"] = m.task
     if body.engine_args is not None:
@@ -471,6 +477,19 @@ def change_model(model_id: int, body: ModelPatch, caller: Caller = Depends(requi
     audit.record(db, "model.changed", actor=caller.user, target=m.name, ip=caller.ip, model_id=m.id, **changed)
     db.commit()
     return {"model": model_out(m, catalog.all_recipes(db), _counts(db).get(m.id, 0))}
+
+
+def _classify_retask(task: str, m: CatalogModel) -> Optional[str]:
+    """Why a catalog model cannot become a text classification model, or a classifier a reranker (1.4.4, #144), or
+    None. Its labels were read when it was added as a classifier; an entry added as something else has none."""
+    meta = m.meta or {}
+    if task == textcls.TASK and "classify" not in meta and m.kind != "local":
+        return ("Forgeyard read no labels for this model when it was added. Add it again from its source as a text "
+                "classification model, so its config.json is read.")
+    if task == "rerank" and isinstance(meta.get("classify"), dict) and meta["classify"].get("labels", 0) > 1:
+        return (f"This is a text classifier with {meta['classify']['labels']} labels, not a reranker: a reranker has "
+                "one output (num_labels 1 in its config.json).")
+    return None
 
 
 @router.delete("/models/{model_id}")
