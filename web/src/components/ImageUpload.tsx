@@ -34,6 +34,11 @@ export function EngineImagesSection({ m, machines, canManage, onChanged, onError
   const copyNo = copyBlocked(m, machines);
   const loaded = (text: string) => { onChanged(text); reload(); };
   const v = live ? data : null;
+  // 1.4.3 (#140): an engine's page links here ("Copy or upload") as /machines/<id>#engine-images.
+  const here = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (window.location.hash === "#engine-images") here.current?.scrollIntoView?.({ block: "start" });
+  }, []);
   const disk = v ? engineDiskLine(v) : null;
 
   const remove = async (i: EngineImage) => {
@@ -51,7 +56,7 @@ export function EngineImagesSection({ m, machines, canManage, onChanged, onError
   };
 
   return (
-    <section className="panel mk-section" aria-labelledby="mk-images">
+    <section className="panel mk-section" aria-labelledby="mk-images" id="engine-images" ref={here}>
       <div className="panel-head">
         <h2 id="mk-images">Engine images {v && v.listed && <span className="muted small">· {v.images.length}</span>}</h2>
         <span className="cache-head-side">

@@ -1,5 +1,5 @@
 import { IconCpu, IconLock, IconPhoto, IconPlus } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
@@ -13,6 +13,7 @@ import { engineCarry } from "../lib/engineImages";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { HARDWARE_LABEL, engineHardware, freeName, renameRecipe } from "../lib/engines";
+import { engineHref, modelHref } from "../lib/pages";
 import { TASK_LABEL, mediaText, params, shortSource } from "../lib/models";
 import type { CatalogModel, CatalogResponse, DownloadsResponse, ModelDownload, ModelSources, Recipe, RecipeVariant } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -175,7 +176,7 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
     <tr className={downloads.length ? "has-dl" : undefined}>
       <td data-label="Model">
         <div className="cell-stack">
-        <div className="strong">{m.title ?? m.name}</div>
+        <div className="strong"><Link to={modelHref(m.name)} className="name-link">{m.title ?? m.name}</Link></div>
         <div className="mono small muted catalog-src" title={src.full}>{src.text}{m.mmproj ? " + projector" : ""}</div>
         {error && <div className="field-error">{error}</div>}
         </div>
@@ -201,7 +202,8 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
           {m.gated && <span className="muted"><IconLock size={11} aria-hidden="true" /> gated</span>}
         </div>
       </td>
-      <td data-label="Engines" className="mono small">{m.recipes.join(", ") || "none fits"}</td>
+      <td data-label="Engines" className="mono small">{m.recipes.length
+        ? m.recipes.map((r, i) => <span key={r}>{i ? ", " : ""}<Link to={engineHref(r)}>{r}</Link></span>) : "none fits"}</td>
       <td className="cell-actions">
         {/* One column of actions at desktop widths, so the table never clips them (1.4, #92). */}
         <div className="catalog-actions" role="group" aria-label={`Actions for ${m.name}`}>
@@ -243,7 +245,7 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
       {/* Every closed card has the same height (1.4, #92): one header row, two lines of description, one
           row of chips, one line of tasks, and the Details row at the bottom. Only an open card grows. */}
       <header className="engine-head">
-        <h3 className="mono" title={r.name}>{r.name}</h3>
+        <h3 className="mono" title={r.name}><Link to={engineHref(r.name)} className="name-link">{r.name}</Link></h3>
         <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
         {!r.builtin && <span className="chip chip-tone-run engine-custom">custom</span>}
       </header>
@@ -284,7 +286,7 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
 
 // The commands that carry a container image to a machine that cannot reach the registry, for the
 // variant picked (one at a time: the recipe card is narrow and the commands are long).
-function OfflineImages({ name, variants }: { name: string; variants: RecipeVariant[] }) {
+export function OfflineImages({ name, variants }: { name: string; variants: RecipeVariant[] }) {
   const byImage = new Map<string, { names: string[]; checked: boolean }>();
   for (const v of variants) {
     if (v.runtime !== "container" || !v.image) continue;
@@ -332,12 +334,13 @@ function OfflineImages({ name, variants }: { name: string; variants: RecipeVaria
 }
 
 // Add a custom engine, or change a custom one: its recipe as YAML. A new one can start from a copy of a
-// built-in engine under a free name. The server checks the YAML; its message is shown here.
-function EngineForm({ edit, recipes, onDone, onCancel }: {
-  edit: string | null; recipes: Recipe[]; onDone: (text: string) => void; onCancel: () => void;
+// built-in engine under a free name (`from`: that copy at once, as an engine's page's "Copy as a custom engine" does).
+// The server checks the YAML; its message is shown here. onDone gets the message and the engine's name.
+export function EngineForm({ edit, from, recipes, onDone, onCancel }: {
+  edit: string | null; from?: string; recipes: Recipe[]; onDone: (text: string, name: string) => void; onCancel: () => void;
 }) {
   const [text, setText] = useState("");
-  const [start, setStart] = useState("");
+  const [start, setStart] = useState(from ?? "");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(edit !== null);
   const [error, setError] = useState<string | null>(null);
@@ -360,13 +363,20 @@ function EngineForm({ edit, recipes, onDone, onCancel }: {
       setText(renameRecipe(r.recipe.yaml ?? "", freeName(`${name}-custom`, recipes.map((x) => x.name))));
     } catch (e) { setError(errorText(e)); }
   };
+  const first = useRef(from);
+  useEffect(() => {
+    if (edit === null && first.current) void copy(first.current);
+    first.current = undefined;
+    // Once, when the form opens with a copy to start from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
       const r = await api<{ recipe: Recipe }>(edit === null ? "/recipes" : `/recipes/${encodeURIComponent(edit)}`,
         { method: edit === null ? "POST" : "PUT", body: { yaml: text } });
-      onDone(edit === null ? `Engine ${r.recipe.name} added.` : `Engine ${r.recipe.name} saved.`);
+      onDone(edit === null ? `Engine ${r.recipe.name} added.` : `Engine ${r.recipe.name} saved.`, r.recipe.name);
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   return (

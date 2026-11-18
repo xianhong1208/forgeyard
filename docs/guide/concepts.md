@@ -123,6 +123,16 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   **Engines** tab. Built in: `vllm` (chat on
   NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
+- Each catalog model has **its own page** (1.4.3), opened from its name: `/models/<name>`. It shows
+  what the model is (source and revision, licence, task, architecture), **which machines have it** in
+  their model cache and **whether it fits** each one now with an engine's defaults, its deployments, the
+  engines that run it, and its files with their sizes. Each engine has one too, `/models/engines/<name>`:
+  its variants (the image or program per kind of hardware, and whether it is pinned by digest), **which
+  machines have that image or program**, its parameters, and the deployments and models that use it.
+  Model and engine names everywhere in the console link to these pages. An admin gives a model a
+  **display name** there; its name stays, because deployments record it, so `deploy`, `deployments`,
+  `routes`, `engines`, `catalog`, `sources`, `recommended`, `search` and `inspect` are not model names.
+  ([Look at a model or an engine](how-to.md#look-at-a-model-or-an-engine).)
 - **Sources** (admins) say where models may come from: the hosts allowed for GGUF URLs, the
   directories for `local://` models, and the server's Hugging Face token.
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and

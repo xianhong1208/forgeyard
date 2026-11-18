@@ -54,7 +54,8 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
         "gpu_allowlist": n.gpu_allowlist, "features": n.features or [],
         # How the agent runs (1.4.2) stays out of the listing: admins get it as the update command.
-        "runtime_info": {k: v for k, v in (n.runtime_info or {}).items() if k != "install"},
+        # Nor does its kept image listing (1.4.3): the engine pages and the machine's engine images show it.
+        "runtime_info": {k: v for k, v in (n.runtime_info or {}).items() if k not in ("install", "images")},
         # 1.4.2 (#122): why the agent should be updated (older, older protocol, a feature missing), or null.
         "agent_behind": agent_update.behind(n), "server_version": __version__,
         "fetch_via": n.fetch_via or "auto",

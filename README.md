@@ -28,6 +28,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
   An agent older than the server says so, and its machine's page shows the exact command that updates it.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
+- **A page per model and per engine.** A catalog model's page shows which machines have it cached and
+  where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
+  machines already have its image or program.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas.

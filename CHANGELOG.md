@@ -6,6 +6,37 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **A page per catalog model and per engine** (#140, layout A+). A model's page, `/models/<name>`: its facts (task,
+  size, licence, what one copy needs, deployments), jump links, **Overview** (source, revision with the Hugging Face
+  link, licence, task and its `/v1` path, architecture), **Machines** right after it (each machine's model cache
+  entry with its size and what uses it, a download under way, whether a copy fits there now with each engine's
+  defaults on a GPU or the CPU, and whether the engine variant's image or program is there; **Deploy here**,
+  **Download here**), **Deployments**, **Engines** and **Files**, folded to one line (the files a machine downloads
+  with their sizes, and the repository's other quantisations and projectors, not downloaded). **Deploy**,
+  **Download to…** and **Remove** are at the top, and an admin sets the model's **display name** (its `title`; the
+  name stays, since deployments record it). An engine's page, `/models/engines/<name>`: **Overview**, **Variants**
+  (image or program, pinned by digest or by tag, what the machine needs, the offline commands), **Machines** (the
+  variant each one would run and whether its image or program is there), **Parameters** folded to one line, and
+  the deployments and catalog models that use it; admins **Edit** and **Delete** a custom engine and **Copy as a
+  custom engine** a built-in one. Everyone signed in may look. Model and engine names link to the pages on the
+  Catalog and Engines tabs, Serving, a deployment's page, a machine's model cache and **Download to…**.
+- `GET /api/models/{name}` (by name, else by id): the model, its files, each machine's cache entry and engine,
+  where it fits per engine and device (the deploy estimate, for everyone signed in to read), and its deployments.
+  `GET /api/recipes/{name}` adds each machine's variant and whether its image or program is there, the deployments
+  and the catalog models that use it; `?refresh=true` has the connected machines list their images first.
+- The server keeps each machine's last image listing (`nodes.runtime_info["images"]`: id, tags, content id, size,
+  when): every `image_listed` answer replaces it, a removal the agent confirms and an upload it loaded update it, and
+  it outlives a reconnect, so an engine's page says which machines have its image while they are offline too. It
+  is not in `GET /api/machines`. No migration (an existing JSON column).
+
+### Changed
+
+- A model can no longer be named `deploy`, `deployments`, `routes`, `engines`, `catalog`, `sources`,
+  `recommended`, `search` or `inspect` (422 `reserved_name`): those are other pages under `/models` in the console,
+  or other paths under `/api/models`.
+
 ## [1.4.2] — 2026-11-18
 
 A patch release from running 1.4 on real machines. A machine's page shows the exact command that updates its

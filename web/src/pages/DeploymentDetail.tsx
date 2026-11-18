@@ -13,6 +13,7 @@ import { ms, num } from "../lib/gateway";
 import { FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
 import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
+import { engineHref, modelHref } from "../lib/pages";
 import type { Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions, RoutesResponse, TryResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
@@ -61,7 +62,7 @@ export function DeploymentDetailPage() {
     <>
       <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>
       <PageHeader index={`02 · ${d ? MODEL_KIND[modelKind(d)].label : "deployment"}`} title={d?.name ?? "Deployment"}
-        lead={d ? `${d.model.name} with ${d.recipe}, served as “${d.served_name}” · created by ${d.created_by ?? "?"} ${when(d.created_at)}` : undefined}
+        lead={d ? <><Link to={modelHref(d.model.name)}>{d.model.name}</Link> with <Link to={engineHref(d.recipe)}>{d.recipe}</Link>, served as “{d.served_name}” · created by {d.created_by ?? "?"} {when(d.created_at)}</> : undefined}
         actions={d && w && canManage && (
           <>
             <Link to={`/serving/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>

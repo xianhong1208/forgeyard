@@ -11,6 +11,7 @@ import { api, errorText } from "../lib/api";
 import { FETCH_VIA_HINT, FETCH_VIA_LABEL, isActive, recentDownloads } from "../lib/downloads";
 import { cacheRows, diskLine, diskShares, removeBlocked, removeQuestion, userHref, type CacheRow } from "../lib/cache";
 import { bytes } from "../lib/machines";
+import { modelHref } from "../lib/pages";
 import type { DownloadsResponse, FetchVia, Machine, MachineCache } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -187,7 +188,7 @@ function CacheItem({ row, c, busy, onRemove }: { row: CacheRow; c: MachineCache;
         <strong className="mono">{row.title}</strong>
         <small>
           {row.sub}
-          {row.catalog.length > 0 && <> · catalog: {row.catalog.map((x) => x.name).join(", ")}</>}
+          {row.catalog.length > 0 && <> · catalog: {row.catalog.map((x, i) => <span key={x.id}>{i ? ", " : ""}<Link to={modelHref(x.name)}>{x.name}</Link></span>)}</>}
         </small>
       </span>
       <span className="cacherow-use">

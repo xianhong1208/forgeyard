@@ -1392,6 +1392,42 @@ It makes a new key and drops what the old one encrypted: set the server's Huggin
 (and any deployment's own), model replicas restart with new internal keys, and apps with lost
 environment values have to be created again (their events say so).
 
+## Look at a model or an engine
+
+Open **Models** and click a model's name in the **Catalog**, or an engine's name on the **Engines** tab
+(names link to these pages everywhere: on **Serving**, on a deployment's page, in a machine's model
+cache, in **Download to…**). Everyone signed in may look.
+
+A **model's page** (`/models/<name>`) has a line of facts (task, size, licence, what one copy needs with
+the first engine's defaults, how many deployments) and links to its sections:
+
+- **Overview**: the source and revision (with a link to Hugging Face), the licence, the task and the path
+  under `/v1` it answers at, the architecture.
+- **Machines**: each machine, whether its model cache has the model (as its agent last reported, with
+  the size there and what uses it), whether a copy **fits** there now (on a GPU, else on the CPU; the
+  deploy page's estimate, with the engine's defaults), and the engine variant it would run with whether
+  that image or program is there. Pick another engine above the table to see its verdicts.
+  **Deploy here** and **Download here** start from that machine.
+- **Deployments** of the model, and the **Engines** that run it (each opens its page).
+- **Files**, folded to one line (how many files a machine downloads, their size, the model file);
+  **Show files** lists them with their sizes, and the repository's other files (other quantisations
+  and projectors) that are not downloaded.
+
+**Deploy**, **Download to…** and **Remove** are at the top, as on the catalog. An admin sets the
+**Display name** there, for example *Qwen3 4B* for `accept-qwen3-4b`; leave it empty to show the name.
+The name itself never changes.
+
+An **engine's page** (`/models/engines/<name>`) has **Overview** (what it serves and at which path, the
+formats it reads, how it shares a GPU), **Variants** (per kind of hardware: the image or program, whether
+the image is pinned by digest, what the machine needs, and the commands to carry an image to a machine
+without registry access), **Machines** (the variant each machine would run, and whether its image is in
+the machine's engine, as the machine last listed its images, or its program in the model cache),
+**Parameters** (folded: their defaults and ranges), and the **deployments** and **catalog models** that use
+it. A connected machine lists its images again when the page opens and its last listing is older than ten
+minutes; **List again** asks now. An offline machine shows its last listing. An admin **edits** or
+**deletes** a custom engine there, and **copies** a built-in one as a custom engine (for example to try a
+newer image).
+
 ## Download a model before deploying it
 
 **Download to…** puts a model, and by default its engine, into the model cache of the machines you

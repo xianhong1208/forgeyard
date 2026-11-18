@@ -637,3 +637,39 @@ export type AgentUpdate = {
   notes: string[];
   guide: string;
 };
+
+// 1.4.3 (#140): a catalog model's page and an engine's page.
+// The engine a machine would run, and whether its image (the machine's last image listing) or program (its
+// cache report) is there: true / false, null when not known (never listed, no report).
+export type EngineOn = {
+  variant: string | null; runtime: "container" | "process" | null; kind: "image" | "program" | "command" | null;
+  engine_name: string | null; present: boolean | null; listed_at: string | null; note: string | null;
+};
+
+export type ModelFile = { path: string; size: number | null; role: string; downloaded: boolean };
+
+export type ModelPageMachine = {
+  machine_id: number; name: string; status: string; connected: boolean;
+  cache: { reported: boolean; cached: boolean; bytes: number | null; files: number | null; used_by: { kind: string; id: number; name: string }[] };
+  download: ModelDownload | null;
+  engines: Record<string, EngineOn>;
+};
+
+// Where the model fits with an engine's defaults, per device it runs on.
+export type DeviceFit = { estimate?: Estimate; fits?: boolean; machines?: MachineVerdict[]; error?: string };
+
+export type ModelPage = {
+  model: CatalogModel; recipes: Recipe[]; can_manage: boolean; can_deploy: boolean;
+  files: { recorded: boolean; files: ModelFile[]; downloaded_count: number; downloaded_bytes: number };
+  machines: ModelPageMachine[];
+  fits: Record<string, Partial<Record<"gpu" | "cpu", DeviceFit>>>;
+  deployments: { id: number; name: string; recipe: string }[];
+};
+
+export type EnginePageMachine = EngineOn & { machine_id: number; name: string; status: string; connected: boolean; can_list: boolean };
+
+export type EnginePage = {
+  recipe: Recipe; can_manage: boolean; machines: EnginePageMachine[];
+  deployments: { id: number; name: string; model_id: number }[];
+  models: { id: number; name: string; title: string | null }[];
+};
