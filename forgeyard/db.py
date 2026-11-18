@@ -313,7 +313,7 @@ class CatalogModel(Base):
     revision: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)   # the commit it is pinned to
     file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)      # the GGUF file
     format: Mapped[str] = mapped_column(String(16))                       # safetensors | gguf | ctranslate2 | onnx | diffusers
-    api: Mapped[str] = mapped_column(String(32))            # openai-chat | openai-embeddings | rerank | openai-audio | openai-speech | openai-images | openai-videos | vision-detect | vision-segment | vision-depth | vision-classify | classify
+    task: Mapped[str] = mapped_column(String(16))                         # chat | embed | rerank | asr | tts | image | video | detect | segment | depth | image-classify | classify
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     # Extra engine arguments per recipe (e.g. Qwen3-Reranker's --hf-overrides for vllm-pooling).
     engine_args: Mapped[dict] = mapped_column(JSON, default=dict)

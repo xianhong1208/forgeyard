@@ -178,7 +178,7 @@ describe("vision models (1.4, #86)", () => {
     expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/workloads/templates"))).toBe(false);
   });
 
-  it("FY-WEB-496 image classification (1.4.4, #141): its own task and label, in the Vision section, at /v1/vision/classify, with snippets", async () => {
+  it("FY-WEB-506 image classification (1.4.4, #141): its own task and label, in the Vision section, at /v1/vision/classify, with snippets", async () => {
     expect(TASK_LABEL["image-classify"]).toBe("Image classification");
     expect(API_LABEL["vision-classify"]).toBe("/v1/vision/classify");
     expect(catalogKind({ task: "image-classify", modalities: [] })).toBe("vision");

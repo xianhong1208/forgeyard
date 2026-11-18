@@ -5,8 +5,9 @@ web page cannot use a signed-in browser against it; for the same reason the cons
 does not apply (clients are not browsers). The host check (421) does. No CORS headers are sent.
 
 The console's playground (`/api/playground/…`) goes through the same code with the signed-in
-                                                 "/v1/vision/detect, /segment, /depth and /classify, and "
-                                                 "/v1/classify.").response()
+user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Classify view
+(1.4.4) posts to `/api/playground/classify`. Its Vision tab
+reaches vision models (1.4) at `/api/playground/vision/detect|segment|depth|classify` like any /v1 request, and
 exposed vision workloads (1.3, `/api/playground/vision/<workload>/<task>`) the way /x/ does
 (forgeyard/gateway/vision.py).
 

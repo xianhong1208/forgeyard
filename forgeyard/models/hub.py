@@ -72,8 +72,8 @@ def make_query(text: str, task: Optional[str], fmt: Optional[str], limit: int) -
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise ValueError("search: plain text only")
     if task not in (None, "", *TASK_TAGS):
-        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment, depth, classify or "
-                         "image-classify")
+        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment, depth, image-classify "
+                         "or classify")
     if fmt not in (None, "", *FORMATS):
         raise ValueError("format: safetensors, gguf, ctranslate2, onnx or diffusers")
     if not 1 <= int(limit) <= MAX_LIMIT:

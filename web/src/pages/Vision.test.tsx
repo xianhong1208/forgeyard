@@ -345,7 +345,7 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
   const classified = (labels: { label: string; score: number }[], multi = false) =>
     ({ status: 200, body: { model: "m", width: 640, height: 480, ms: 150, labels, multi_label: multi }, headers: { "Content-Type": "application/json" } });
 
-  it("FY-WEB-494: a classifier with fixed classes sends the picture to /classify and lists the best classes with their scores", async () => {
+  it("FY-WEB-504: a classifier with fixed classes sends the picture to /classify and lists the best classes with their scores", async () => {
     const sent: FormData[] = [];
     const urls: string[] = [];
     server((url, init) => {
@@ -373,7 +373,7 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     expect(within(panel).getByText(/2 labels · model 150 ms/)).toBeTruthy();
   });
 
-  it("FY-WEB-495: a zero-shot classifier asks for labels, sends them, and says its scores stand on their own", async () => {
+  it("FY-WEB-505: a zero-shot classifier asks for labels, sends them, and says its scores stand on their own", async () => {
     const sent: FormData[] = [];
     server((url, init) => {
       if (url === "/api/playground/vision/options") return options([...MODELS, VIT, SIG]);

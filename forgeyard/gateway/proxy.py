@@ -57,8 +57,12 @@ cloud provider.
    back unchanged and counted as one image, its kilopixels and the replica's busy milliseconds. Local
    only (no provider serves them). A zero-shot detector (1.4.4, #142) is told what to find with `labels` (a
    list of names, or a comma-separated string in a form); the vision server checks them (400 labels_required
-            "vision-depth": "/v1/vision/depth", "vision-classify": "/v1/vision/classify",
-            "classify": "/v1/classify"}.get(api, "/v1")
+   without them, labels_not_supported for a detector with fixed classes). So is a zero-shot image classifier (1.4.4,
+   #141: CLIP, SigLIP) at /v1/vision/classify, which answers the labels it was given, scored.
+15. Text classification (1.4.4, forgeyard/gateway/classify.py): /v1/classify takes `input` (a text or a list
+   of texts) for a text classification model; the body is checked and rebuilt with the fields Forgeyard knows,
+   sent to the engine's /classify (vLLM serves it without /v1), and the answer passed back, counted in prompt
+   tokens. Local only.
 """
 
 from __future__ import annotations

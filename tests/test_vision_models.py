@@ -759,7 +759,9 @@ def test_fy_vis_029_the_server_and_the_catalog_agree_on_image_classifiers():
     assert vision.API["image-classify"] == "vision-classify" and vision.LABEL["image-classify"] == "Image classification"
     assert proxy.ENDPOINTS["vision/classify"] == ("vision-classify", "vision")
     assert proxy.endpoint_for("vision-classify") == "/v1/vision/classify"
-    assert "classify" not in recipes.TASKS          # text classification (#144) is another kind
+    # Text classification (#144, task classify, /v1/classify) is another kind.
+    assert "classify" not in vision.TASKS and {"classify", "image-classify"} <= set(recipes.TASKS)
+    assert proxy.ENDPOINTS["classify"][0] != proxy.ENDPOINTS["vision/classify"][0]
     for cfg, zs in (({"architectures": ["CLIPModel"]}, True), ({"model_type": "siglip"}, True),
                     ({"architectures": ["CLIPForImageClassification"], "model_type": "clip"}, False),
                     ({"architectures": ["ViTForImageClassification"]}, False)):
