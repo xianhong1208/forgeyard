@@ -36,8 +36,9 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "tts": ("text-to-speech",),
     "image": ("text-to-image",),
     "video": ("text-to-video",),
-    # 1.4, vision models: detection, SAM-style masks, depth
-    "detect": ("object-detection",),
+    # 1.4, vision models: detection (1.4.4: also zero-shot detectors, which find what a request names), SAM-style
+    # masks, depth
+    "detect": ("object-detection", "zero-shot-object-detection"),
     "segment": ("mask-generation",),
     "depth": ("depth-estimation",),
 }

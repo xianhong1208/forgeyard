@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import { boxStyle, checkImage, depthTables, labelColours, promptFrom, shown, toImage } from "../lib/vision";
+import { boxStyle, checkImage, depthTables, labelColours, parseLabels, promptFrom, shown, toImage } from "../lib/vision";
 import { visionError } from "./PlaygroundVision";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -271,5 +271,70 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     expect([...colours.keys()]).toEqual(["cat", "remote", "couch"]);
     expect(new Set(colours.values()).size).toBe(3);
     expect(checkImage(photo("a.webp", "image/webp"), 20)).toBeNull();
+  });
+
+  // 1.4.4 (#142): a zero-shot detector is told what to find.
+  const ZS = { ...mbase, name: "gd", task: "detect", title: "Object detection", endpoint: "/v1/vision/detect", deployment_id: 6,
+    model: "IDEA-Research/grounding-dino-tiny", zero_shot: true };
+  const FOUND = { model: ZS.model, width: 640, height: 480, ms: 3900, detections: [
+    { label: "cat", score: 0.8, box: [10, 54, 317, 475] }, { label: "remote control", score: 0.49, box: [40, 72, 176, 118] },
+    { label: "cat", score: 0.21, box: [0, 0, 640, 480] }] };
+
+  it("FY-WEB-490: a zero-shot detector asks what to find, sends the names as labels, and its slider starts at 0.3", async () => {
+    const sent: FormData[] = [];
+    server((url, init) => {
+      if (url === "/api/playground/vision/options") return options([...MODELS, ZS]);
+      if (url === "/api/playground/vision/detect") {
+        sent.push(init?.body as FormData);
+        return { status: 200, body: FOUND, headers: { "Content-Type": "application/json", "X-Forgeyard-Target": "local:gd#0" } };
+      }
+    }, OWNER, visionRoutes([...MODELS, ZS]));
+    mount("/playground?model=gd");
+    const panel = await panelFor("Object detection");
+    expect(within(panel).getByText(/Finds what you name and draws a box/)).toBeTruthy();
+    await pick(panel, photo());
+    const find = within(panel).getByRole("button", { name: "Find" });
+    expect((find as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(panel).getByLabelText("Find these"), { target: { value: " cat, remote   control,, Cat " } });
+    fireEvent.click(find);
+    const boxes = await within(panel).findByRole("list", { name: "Detected objects" });
+    expect(JSON.parse(sent[0].get("labels") as string)).toEqual(["cat", "remote control"]);
+    expect(sent[0].get("model")).toBe("gd");
+    expect(sent[0].get("threshold")).toBe("0.1");
+    expect(within(boxes).getAllByRole("listitem").map((b) => b.getAttribute("aria-label"))).toEqual(["cat 0.80", "remote control 0.49"]);
+    expect(within(panel).getByText("2 of 3 objects shown")).toBeTruthy();
+    // Enter in the box asks again.
+    fireEvent.change(within(panel).getByLabelText("Find these"), { target: { value: "sofa" } });
+    fireEvent.keyDown(within(panel).getByLabelText("Find these"), { key: "Enter" });
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(JSON.parse(sent[1].get("labels") as string)).toEqual(["sofa"]);
+  });
+
+  it("FY-WEB-491: a detector with fixed classes has no Find these box and sends no labels; the zero-shot refusals read plainly", async () => {
+    const sent: FormData[] = [];
+    server((url, init) => {
+      if (url === "/api/playground/vision/options") return options([...MODELS, ZS]);
+      if (url === "/api/playground/vision/detect") {
+        sent.push(init?.body as FormData);
+        return { status: 200, body: DETECTED, headers: { "Content-Type": "application/json" } };
+      }
+    }, OWNER, visionRoutes([...MODELS, ZS]));
+    mount("/playground?model=det");
+    const panel = await panelFor("Object detection");
+    expect(within(panel).queryByLabelText("Find these")).toBeNull();
+    await pick(panel, photo());
+    fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
+    await within(panel).findByRole("list", { name: "Detected objects" });
+    expect(sent[0].get("labels")).toBeNull();
+    expect(visionError(400, { error: { code: "labels_required", message: "x" } }, 20, "model")).toMatch(/^This model finds what you name/);
+    expect(visionError(400, { error: { code: "labels_not_supported", message: "x" } }, 20, "model")).toMatch(/fixed set of classes/);
+  });
+
+  it("FY-WEB-492: the names typed are checked before anything is sent", () => {
+    expect(parseLabels(" cat , remote  control,, CAT,dog ")).toEqual({ labels: ["cat", "remote control", "dog"], error: null });
+    expect(parseLabels(" , ").error).toMatch(/Name at least one thing/);
+    expect(parseLabels(Array.from({ length: 33 }, (_, i) => `l${i}`).join(",")).error).toBe("At most 32 things at once.");
+    expect(parseLabels("x".repeat(65)).error).toMatch(/longer than 64 characters/);
+    expect(parseLabels("x".repeat(64)).error).toBeNull();
   });
 });

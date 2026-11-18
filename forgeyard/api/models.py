@@ -105,10 +105,13 @@ def model_out(m: CatalogModel, all_recipes: dict, deployments: int = 0) -> dict:
 
 
 def vision_out(meta: dict) -> Optional[dict]:
-    """A vision model's task, architecture and (detection) its classes (1.4), or None."""
+    """A vision model's task, architecture and (detection) its classes (1.4), or None. A zero-shot detector (1.4.4)
+    says so instead of classes: it finds what each request names (a row added before 1.4.3 is known by its config)."""
     v = meta.get("vision") if isinstance(meta.get("vision"), dict) else None
     if v is None:
         return None
+    if vision.is_zero_shot(meta):
+        return {"task": v.get("task") or "detect", "architecture": v.get("architecture"), "zero_shot": True}
     return {k: v.get(k) for k in ("task", "architecture", "labels", "label_examples", "problem") if v.get(k) is not None}
 
 

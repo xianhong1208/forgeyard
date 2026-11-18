@@ -6,6 +6,32 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Detectors that find what you name** (#142). Zero-shot (open-vocabulary) object detectors (Grounding DINO,
+  MM-Grounding-DINO and LLMDet, OWL-ViT, OWLv2), refused by 1.4.3, are detection models now: the
+  same `/v1/vision/detect` takes `labels`, the names to find (a JSON list, or a comma-separated form field;
+  at most 32 of at most 64 characters), and answers boxes for those names in the usual shape. The vision
+  server loads them with `AutoModelForZeroShotObjectDetection` and asks each family its own way (Grounding DINO
+  one lower-case prompt, each box taking the name whose words score it highest; OWL one query per name, OWLv2's
+  boxes scaled to the square it looks at). Without `labels` a zero-shot detector
+  answers 400 `labels_required`; a detector with fixed classes given `labels` answers 400
+  `labels_not_supported`. Default thresholds follow the family (0.3, OWL 0.1). OmDet-Turbo stays refused: its
+  transformers port loads its backbone through timm, which the vision image does not include (the vision server
+  now refuses any `use_timm_backbone` model at start).
+  - The catalog marks them *Finds what you name* (`vision.zero_shot`, no classes); a row added before 1.4.3 is
+    known by the config it kept (no migration). Hugging Face's search for detection also asks for
+    `zero-shot-object-detection`.
+  - Recommended: Grounding DINO tiny, MM-Grounding-DINO tiny and OWLv2 base (Apache-2.0, pinned). Grounding DINO
+    and MM-Grounding-DINO are estimated with 512 MiB more (measured: 2.24 GiB peak on a CPU with 0.64 GiB of
+    files; OWLv2 base 1.13 GiB).
+  - Playground: a **Find these** box for them (comma-separated names, then **Find**; the score slider starts at
+    0.3). **Try it** asks them for the test image's two shapes (or for the words sent as `input`).
+  - They need a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older (the built-in one
+    until its pin moves after the release), deploying one answers 422 `vision_image_too_old`.
+  - `scripts/accept_vision.py` knows `grounding-dino-tiny`, `mm-grounding-dino-tiny` and `owlv2-base`: two cats,
+    a remote and no giraffe on the COCO photo, `labels_required`, and `labels_not_supported` for RT-DETR.
+
 ## [1.4.3] — 2026-11-18
 
 Every catalog model and every engine gets its own page in the console (#140): a model's page says where it

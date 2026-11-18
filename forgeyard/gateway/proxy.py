@@ -55,7 +55,9 @@ cloud provider.
    (multipart with `model` and an `image` file, or JSON with `model` and `image` in base64) for a model
    of that task, passed to the vision server as it came (only `model` changed); its JSON answer is passed
    back unchanged and counted as one image, its kilopixels and the replica's busy milliseconds. Local
-   only (no provider serves them).
+   only (no provider serves them). A zero-shot detector (1.4.4, #142) is told what to find with `labels` (a
+   list of names, or a comma-separated string in a form); the vision server checks them (400 labels_required
+   without them, labels_not_supported for a detector with fixed classes).
 """
 
 from __future__ import annotations

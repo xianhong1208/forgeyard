@@ -338,11 +338,19 @@ agent；舊版 agent 會試著去拉。
 
 物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**Models**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
 
-1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入，零樣本偵測模型（Grounding DINO、OWL-ViT、OWLv2…）也不能（#142 會支援）。
+1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。1.4.4 起清單裡還有三個**找你說的東西**的偵測模型（Grounding DINO tiny、MM-Grounding-DINO tiny、OWLv2 base）：沒有固定類別，每個請求說要找什麼（見下文）。它們需要 1.4.4 起的視覺映像檔。
 2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
 3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground**（選單 *Vision* 底下的模型）可以用你自己的照片。
 
-用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`：
+用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`。找你說的東西的偵測模型另外接受 `labels`，也就是要找的名稱（以逗號分隔的欄位，或 JSON 清單），沒給時會拒絕（400 `labels_required`）：
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=grounding-dino-tiny -F image=@cats.jpg -F 'labels=cat, remote control' -F threshold=0.3
+```
+
+其他種類：
 
 ```bash
 curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
@@ -391,7 +399,7 @@ Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一�
 1. 打開 **Model** 選單，在 **Vision** 底下選一個模型：每一個都標出任務。只會列出已就緒的模型；完全沒有時，Playground 會這樣說明，管理員和操作員會看到前往目錄的連結。
 2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。
 3. 接著依任務而定：
-   - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。
+   - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。找你說的東西的偵測模型（1.4.4）會先問 **Find these**：輸入名稱、以逗號分隔（*cat, remote control*），再按 **Find**；滑桿從 0.3 開始，因為這類模型的分數較低。
    - **Segmentation：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
    - **Depth estimation：** 按 **Estimate depth**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **Colour** 或 **Grey**。深度是相對的，不是公尺。
 

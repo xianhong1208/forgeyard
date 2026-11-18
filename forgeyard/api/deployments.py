@@ -127,9 +127,10 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
         raise fail(422, "incompatible", f"{recipe.name} reads {', '.join(recipe.formats)} models; {m.name} is {m.format}.")
     if m.task not in recipe.tasks:
         raise fail(422, "incompatible", f"{recipe.name} serves {', '.join(recipe.tasks)}; {m.name} is a {m.task} model.")
-    if why := vision.deploy_refusal(m.task, m.meta or {}):
-        # 1.4.3 (#147): a zero-shot detector added before the catalog refused them.
-        raise fail(422, "not_a_vision_model", why)
+    if why := vision.deploy_refusal(m.task, m.meta or {}, recipe):
+        # 1.4.4 (#142): a zero-shot detector the vision server cannot load: one that needs timm (OmDet-Turbo, added
+        # before 1.4.3), or one on a vision image from before 1.4.4.
+        raise fail(422, *why)
     params = normalise_params(recipe, body.params)
     device = "gpu" if params["gpus"] > 0 else "cpu"
     try:
@@ -616,14 +617,18 @@ TRY_IMAGE_SIZE = 256                       # small, so a CPU answers within the 
 
 
 def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[str] = None,
-                draws: Optional[imagegen.Draws] = None) -> tuple[str, bytes, str]:
-    """(path, body, content type) of a small request in the route's protocol."""
+                draws: Optional[imagegen.Draws] = None, zero_shot: bool = False) -> tuple[str, bytes, str]:
+    """(path, body, content type) of a small request in the route's protocol. `zero_shot`: the model is a
+    zero-shot detector, which is told what to find (1.4.4)."""
     if api in VISION_TRY:
-        # 1.4: the test image (two squares); for SAM 2, the box around the red one.
+        # 1.4: the test image (two squares); for SAM 2, the box around the red one; for a zero-shot detector, the
+        # names of the two squares (or the words typed in Try it, comma-separated).
         task = VISION_TRY[api]
         body: dict = {"model": upstream, "image": base64.b64encode(vision.test_png()).decode("ascii")}
         if task == "segment":
             body["box"] = vision.TEST_BOX
+        if task == "detect" and zero_shot:
+            body["labels"] = vision.try_labels(text)
         return f"/v1/vision/{task}", json.dumps(body).encode(), "application/json"
     if api == "openai-images":
         # One small image, in the request shape this engine takes.
@@ -742,7 +747,8 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
     if route.api == "openai-videos":
         return _try_videos(target, replica)
-    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws)
+    zero_shot = d.model is not None and vision.is_zero_shot(d.model.meta or {})
+    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws, zero_shot)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)

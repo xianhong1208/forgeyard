@@ -758,6 +758,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .vis-drop > span { min-width: 0; overflow-wrap: anywhere; }
 .vis-name { overflow-wrap: anywhere; }
 .vis-actions { align-items: center; }
+.vis-find { max-width: 560px; }
+.vis-find input { width: 100%; }
 .vis-threshold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; color: var(--ink-2); }
 .vis-threshold label { font-weight: 600; }
 .vis-threshold input[type="range"] { flex: 1 1 200px; max-width: 360px; accent-color: var(--steel); }

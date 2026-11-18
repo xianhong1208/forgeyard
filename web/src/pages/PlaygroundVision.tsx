@@ -5,8 +5,8 @@ import { HelpLink } from "../components/HelpLink";
 import { Notice } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
 import { answerError, ms } from "../lib/gateway";
-import { DETECT_FLOOR, TASK_HELP, VISION_TYPES, boxStyle, checkImage, depthGradient, depthTables, imageLimitMb, labelColours,
-  pngUri, promptFrom, shown, targets, toImage,
+import { DETECT_FLOOR, MAX_LABELS, START_THRESHOLD, START_THRESHOLD_ZERO_SHOT, TASK_HELP, VISION_TYPES, ZERO_SHOT_HELP, boxStyle,
+  checkImage, depthGradient, depthTables, imageLimitMb, labelColours, parseLabels, pngUri, promptFrom, shown, targets, toImage,
   type Prompt, type VisionAnswer, type VisionOptions, type VisionTarget, type VisionTask } from "../lib/vision";
 import { useApi } from "../lib/useApi";
 
@@ -33,6 +33,10 @@ export function visionError(status: number, body: unknown, limitMb: number, what
       return `The ${what} did not answer in time. A CPU can take a while on a large image; try a smaller one.`;
     case "model_not_found":
       return "This model is no longer deployed. Reload the page to see the ones that are.";
+    case "labels_required":
+      return "This model finds what you name: type one or more things to find, separated by commas.";
+    case "labels_not_supported":
+      return "This detector knows a fixed set of classes and cannot be told what to find.";
     case "workload_not_found":
       return "This app is no longer exposed. Reload the page to see the ones that are.";
   }
@@ -57,7 +61,8 @@ function VisionPanel({ w }: { w: VisionTarget }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const [threshold, setThreshold] = useState(0.5);
+  const [threshold, setThreshold] = useState(w.zero_shot ? START_THRESHOLD_ZERO_SHOT : START_THRESHOLD);
+  const [find, setFind] = useState("");          // a zero-shot detector: what to find, comma-separated (1.4.4)
   const [maskAt, setMaskAt] = useState(0);
   const [colour, setColour] = useState(true);
   const [dragOver, setDragOver] = useState(false);
@@ -85,6 +90,8 @@ function VisionPanel({ w }: { w: VisionTarget }) {
 
   const run = async (prompt?: Prompt) => {
     if (!image || busy) return;
+    const asked = w.zero_shot ? parseLabels(find) : null;
+    if (asked?.error) { setErr(asked.error); return; }
     setBusy(true); setErr(null);
     const ctrl = new AbortController();
     abort.current = ctrl;
@@ -93,6 +100,7 @@ function VisionPanel({ w }: { w: VisionTarget }) {
       const form = new FormData();
       form.append("image", image.file, image.file.name || "image");
       if (w.task === "detect") form.append("threshold", String(DETECT_FLOOR));
+      if (asked) form.append("labels", JSON.stringify(asked.labels));
       if (prompt?.kind === "point") form.append("points", JSON.stringify([prompt.point]));
       if (prompt?.kind === "box") form.append("box", JSON.stringify(prompt.box));
       form.append("model", w.name);
@@ -136,7 +144,7 @@ function VisionPanel({ w }: { w: VisionTarget }) {
         <HelpLink page="how-to" anchor="try-vision-in-the-playground">How it works</HelpLink>
       </div>
       <p className="muted small vis-about">
-        {TASK_HELP[w.task]} <span className="mono">{w.model}</span>{w.licence && <> <span className="chip mono" title="The model's licence">{w.licence}</span></>}
+        {w.zero_shot ? ZERO_SHOT_HELP : TASK_HELP[w.task]} <span className="mono">{w.model}</span>{w.licence && <> <span className="chip mono" title="The model's licence">{w.licence}</span></>}
         {" "}Programs call it at <code>{w.call}</code> with an API key.
       </p>
       <div className={`vis-drop${dragOver ? " on" : ""}${image ? " has-image" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -153,11 +161,19 @@ function VisionPanel({ w }: { w: VisionTarget }) {
         <label htmlFor="vis-file" className="sr-only">Image</label>
       </div>
       {pickErr && <Notice tone="error">{pickErr}</Notice>}
+      {w.zero_shot && (
+        <div className="field vis-find">
+          <label htmlFor="vis-find">Find these</label>
+          <input id="vis-find" value={find} onChange={(e) => setFind(e.target.value)} placeholder="cat, remote control" autoComplete="off"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void run(); } }} aria-describedby="vis-find-help" />
+          <span id="vis-find-help" className="muted small">What to look for, separated by commas (at most {MAX_LABELS}). Plain names work best: “cat”, “red car”.</span>
+        </div>
+      )}
       {image && (
         <div className="row-gap vis-actions">
           {w.task !== "segment" && (busy
             ? <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
-            : <button type="button" className="btn btn-primary" disabled={!w.ready} onClick={() => void run()}>{RUN_LABEL[w.task]}</button>)}
+            : <button type="button" className="btn btn-primary" disabled={!w.ready || (w.zero_shot && !find.trim())} onClick={() => void run()}>{w.zero_shot ? "Find" : RUN_LABEL[w.task]}</button>)}
           {w.task === "segment" && <span className="small" role="note">Click a point on the picture, or drag a box around something.</span>}
           {busy && <span className="muted small" role="status">Waiting for the model…</span>}
           {!w.ready && <span className="muted small">The model has no ready replica.</span>}
