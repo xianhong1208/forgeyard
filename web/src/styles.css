@@ -1418,6 +1418,18 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .tile-mem { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .tile-mem strong { color: var(--ink); }
 .tile-foot { display: flex; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+/* 1.4.2 (#121, #122): an agent behind the server, and its update command. */
+.chip-update { gap: 4px; background: var(--heat-soft); border-color: #f3d39b; color: var(--heat-ink); font-family: inherit; font-weight: 600; text-decoration: none; white-space: normal; height: auto; min-height: 21px; overflow-wrap: anywhere; }
+a.chip-update:hover { border-color: var(--heat-ink); }
+.tile-foot:has(.chip-update) { flex-wrap: wrap; align-items: center; }
+.tile-foot .chip-update { position: relative; z-index: 1; font-size: 12px; white-space: nowrap; } /* above the tile's stretched link */
+.agent-update .update-why { margin: 0 0 10px; }
+.update-steps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 12px; min-width: 0; }
+.update-steps > li { min-width: 0; }
+.update-step-title { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.update-alt { margin-top: 12px; font-size: 13px; }
+.update-alt summary { cursor: pointer; color: var(--ink-2); }
+.update-notes { margin: 12px 0 10px; padding-left: 18px; font-size: 13px; color: var(--muted); display: grid; gap: 4px; }
 .tiles-legend { margin-top: 14px; }
 
 /* A machine's page. */

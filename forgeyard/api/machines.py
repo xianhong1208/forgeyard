@@ -3,7 +3,8 @@ which GPUs Forgeyard may assign on each machine and how it reaches the internet 
 Operators and admins remove models from a machine's model cache (1.4). Admins upload an image file to a
 machine (1.4, forgeyard/machines/upload.py), copy an image from one machine to another (1.4.1,
 forgeyard/machines/imagecopy.py), and remove an engine image a machine no longer uses (1.4.2,
-forgeyard/machines/engineimages.py)."""
+forgeyard/machines/engineimages.py). Admins see the command that updates a machine's agent (1.4.2,
+forgeyard/install/update.py); everyone sees whether it is behind the server."""
 
 from __future__ import annotations
 
@@ -16,12 +17,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard import audit
+from forgeyard import __version__, audit
 from forgeyard.api.deps import Caller, current, fail, public_base, require_admin, require_operator
 from forgeyard.api.tls import agent_commands
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, JoinToken, Node, get_db, new_session, utcnow
-from forgeyard.install import commands as install_commands
+from forgeyard.install import commands as install_commands, update as agent_update
 from forgeyard.machines import cache, engineimages, imagecopy, store, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED, FEATURE_IMAGE_REMOVE, FETCH_VIA
@@ -51,7 +52,11 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "runtimes": n.runtimes or [], "platform": n.platform or {}, "collectors": n.collectors or {},
         "ip": n.ip, "joined_at": n.joined_at, "connected_at": n.connected_at,
         "last_heartbeat_at": n.last_heartbeat_at, "revoked_at": n.revoked_at, "revoked_by": n.revoked_by,
-        "gpu_allowlist": n.gpu_allowlist, "features": n.features or [], "runtime_info": n.runtime_info or {},
+        "gpu_allowlist": n.gpu_allowlist, "features": n.features or [],
+        # How the agent runs (1.4.2) stays out of the listing: admins get it as the update command.
+        "runtime_info": {k: v for k, v in (n.runtime_info or {}).items() if k != "install"},
+        # 1.4.2 (#122): why the agent should be updated (older, older protocol, a feature missing), or null.
+        "agent_behind": agent_update.behind(n), "server_version": __version__,
         "fetch_via": n.fetch_via or "auto",
         # 1.4: the largest image file an admin may upload to a machine (IMAGE_UPLOAD_MAX_GB).
         "image_upload_max_bytes": get_settings().image_upload_max_gb * upload.UNIT,
@@ -148,6 +153,18 @@ def remove_machine(machine_id: int, caller: Caller = Depends(require_admin), db:
     closed = hub.close(machine_id, CLOSE_REVOKED, "removed by an admin")
     placement.place_and_poke(db)
     return {"ok": True, "connection_closed": closed}
+
+
+@router.get("/{machine_id}/agent-update")
+def agent_update_command(machine_id: int, request: Request, _: Caller = Depends(require_admin),
+                         db: DbSession = Depends(get_db)):
+    """1.4.2 (#121): the complete command that brings this machine's agent to the server's version, built from
+    how the agent said it runs (admins only: it names the machine's mounts, devices and settings)."""
+    node = _get(db, machine_id)
+    server = public_base(request)
+    anchor = tls.trust_anchor_pem()
+    fingerprint = tls.fingerprint(anchor) if anchor and server.startswith("https://") else None
+    return agent_update.plan(node, server=server, fingerprint=fingerprint, image=install_commands.agent_image())
 
 
 class AllowlistIn(BaseModel):

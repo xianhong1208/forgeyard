@@ -331,8 +331,13 @@ def _agent_cmd(args) -> int:
                      (cache.get("free_bytes") or 0) / 1024**3, len(cache.get("cached") or []))
         else:
             log.error("Models: %s", cache.get("reason"))
+    from forgeyard.agent import how_it_runs
+
+    install = how_it_runs.for_agent(supervisor, credential=saved["credential"], server=server,
+                                    config_path=str(settings.path) if settings.path else None, state_dir=str(state_dir))
+    log.info("Runs as: %s%s.", install.get("method"), "" if install.get("known") else f" ({install.get('reason')})")
     agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label), supervisor=supervisor,
-                  ca_pem=ca_pem)
+                  ca_pem=ca_pem, install=install)
 
     async def main() -> int:
         loop = asyncio.get_running_loop()

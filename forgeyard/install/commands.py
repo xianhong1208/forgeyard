@@ -61,6 +61,20 @@ def install_command(server: str, token: str, fingerprint: Optional[str]) -> Opti
             f"  sudo sh -s -- --join {token} --ca-fingerprint {fingerprint}")
 
 
+def update_command(server: str, fingerprint: Optional[str]) -> Optional[str]:
+    """1.4.2 (#121): the one-line install run again on a machine that joined: no join token. install.sh then
+    installs the server's version and keeps the settings and the credential."""
+    if not safe_server(server):
+        return None  # install.sh is only served over HTTPS, and only a plain address goes into a pasted line
+    if not fingerprint:
+        return f"curl -fsS {server}/install.sh | sudo sh"
+    return (f"curl -fsSk {server}/api/tls/ca.pem -o forgeyard-ca.pem && \\\n"
+            f"  sed '/-----/d' forgeyard-ca.pem | base64 -d > forgeyard-ca.der && \\\n"
+            f"  echo \"{_hex(fingerprint)}  forgeyard-ca.der\" | sha256sum -c && \\\n"
+            f"  curl -fsS --cacert forgeyard-ca.pem {server}/install.sh | \\\n"
+            f"  sudo sh -s -- --ca-fingerprint {fingerprint}")
+
+
 AMD_GROUPS = ('--group-add "$(getent group video | cut -d: -f3)" '
               '--group-add "$(getent group render | cut -d: -f3)"')
 

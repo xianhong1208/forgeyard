@@ -8,6 +8,28 @@ version until 1.0.
 
 ### Added
 
+- **Update an agent with the exact command, from its machine's page** (#121). An agent now reports how it runs,
+  in `hello.install` (older servers ignore it): in a container, it reads its own container through the engine
+  it already uses (`docker inspect` / `podman inspect` of the container it finds in `/proc/self/mountinfo`):
+  name, image, network, restart policy, `--gpus` from the GPU requests, devices, `--group-add` ids, mounts
+  (including the image's unnamed state volume, by name), the variables given with `-e` (the image's own left
+  out), extra arguments and a few other options; installed with install.sh, its systemd unit, program and
+  agent.toml; otherwise its checkout. It never reports the join token, its credential, or a variable whose
+  name or value looks like a secret (named only), and nothing about a container that is not the agent image.
+  The machine's page (admins, `GET /api/machines/{id}/agent-update`) shows **Update the agent**: for Docker,
+  `docker pull` of the server's agent image, `docker rm -f` and the same `docker run` on it; for a machine that
+  gets its files through the server, `docker save … | ssh … docker load` first (offered to the others too);
+  for install.sh, the one-line install without a join token; for a checkout, `git checkout` and `uv sync`.
+  Every reported value is checked again and shell-quoted; a secret variable is passed as `-e NAME="$NAME"`
+  with a note to export it. An agent before 1.4.2 says that it does not report this, with the guide. Stored in
+  the machine's existing `runtime_info` (key `install`), never shown in the machine list. No migration.
+
+- **An agent behind the server says so** (#122). The Machines tiles and the machine's page show *agent 1.4.0,
+  server 1.4.2: update*, opening the update command; also for an agent of the server's version that lacks a
+  feature such an agent declares (built from older code). The machine list carries `agent_behind` and
+  `server_version`; **Setup health**'s older-agent finding (V21) covers the missing features too and opens the
+  machine's update command.
+
 - **Remove engine images a machine no longer uses** (#123). A machine's page lists its **Engine images**: each image
   a recipe names, as its agent lists it now (a pinned image recognised by its recorded ids, a tag-only one by its
   tag), with its size, the recipes that name it and the deployments on that machine that use it, and the free space

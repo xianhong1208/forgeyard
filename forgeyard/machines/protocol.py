@@ -7,7 +7,9 @@ protocol version `v` and a `type`:
 agent -> server
   hello      first message on every connection: agent version, host, labels, whether the
              inventory is simulated, and the full inventory. (1.4.2) `runtime_info.ports` ({low, high}):
-             the host port range replicas are published on, which placement counts; older servers drop it
+             the host port range replicas are published on, which placement counts; older servers drop it.
+             (1.4.2) `install`: how the agent runs (agent/how_it_runs.py: its container's `docker run`
+             options, install.sh, or a checkout), for its update command; no secrets. Older servers ignore it
   heartbeat  every 10 s: only the values that change (free/used memory, utilisation, temperature)
   inventory  the full inventory again, sent when the hardware changed
 

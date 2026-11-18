@@ -128,8 +128,11 @@ def join(server: str, token: str, *, name: Optional[str] = None, timeout: float 
 class Agent:
     def __init__(self, server: str, credential: str, inventory: Inventory, *, labels: Optional[dict] = None,
                  backoff: Optional[Backoff] = None, heartbeat: float = 10.0,
-                 connector: Callable = connect, supervisor=None, ca_pem: Optional[str] = None):
+                 connector: Callable = connect, supervisor=None, ca_pem: Optional[str] = None,
+                 install: Optional[dict] = None):
         self.server = server
+        # 1.4.2 (#121): how this agent runs (agent/how_it_runs.py), for its update command; sent in hello.
+        self.install = install
         # wss:// is verified against the pinned CA only (agent/trust.py); None: the system store.
         self.ssl_context = trust.context(ca_pem) if server.startswith("https://") else None
         self._https_hint = False
@@ -169,6 +172,8 @@ class Agent:
                "hostname": socket.gethostname(), "labels": self.labels, "platform": platform_info(),
                "runtimes": [], "simulated": self.inventory.simulated,
                "inventory": {"accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}
+        if self.install:
+            msg["install"] = self.install
         if self.supervisor is not None:
             msg["features"] = [FEATURE_WORKLOADS, FEATURE_REPLICA_KEYS, FEATURE_REPLICA_GUARD, FEATURE_IMAGE_IDS,
                                FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD]
