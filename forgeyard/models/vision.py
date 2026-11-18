@@ -9,11 +9,12 @@ server's own `task_of`, so what the catalog accepts is what the server loads):
   Conditional / Deformable DETR, YOLOS, …), loaded with `AutoModelForObjectDetection`. DETR checkpoints
   that use a timm backbone (`use_timm_backbone`) are refused: the vision server has no timm.
   **Zero-shot (open-vocabulary) detectors** (1.4.4, #142: Grounding DINO, MM-Grounding-DINO / LLMDet,
-  OWL-ViT, OWLv2, OmDet-Turbo) are detect models too, marked `zero_shot` ("finds what you name"): their
+  OWL-ViT, OWLv2) are detect models too, marked `zero_shot` ("finds what you name"): their
   architectures end in `ForObjectDetection` as well, but transformers loads them only with
   `AutoModelForZeroShotObjectDetection`, and a request names what to find (`labels`). 1.4.3 (#147) refused
   them; a row added before that is known by the model_type and architectures the catalog kept, so it needs
-  no migration. They run on a vision image from 1.4.4 on (`deploy_refusal`).
+  no migration. They run on a vision image from 1.4.4 on (`deploy_refusal`). OmDet-Turbo is refused: its
+  transformers port loads a timm backbone.
 - **segment**: SAM 2 / 2.1 (`model_type` sam2 or sam2_video, `Sam2…` architectures), a mask for what a
   point or a box shows, loaded with `Sam2Model`.
 - **depth**: an architecture ending in `ForDepthEstimation` (Depth Anything, DPT, GLPN, ZoeDepth, …),
