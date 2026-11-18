@@ -410,22 +410,27 @@ def registrations_pending(ctx: Context) -> Iterator[Finding]:
 # --- machines
 @check
 def agent_outdated(ctx: Context) -> Iterator[Finding]:
-    """V21: an agent older than the server (an older protocol is an error)."""
-    from forgeyard.machines.protocol import PROTOCOL_VERSION
+    """V21: an agent older than the server (an older protocol is an error), or (1.4.2, #122) of the server's
+    version but without a feature such an agent declares (built from older code). The fix opens the machine's
+    update command."""
+    from forgeyard.install.update import behind
 
-    mine = _version(__version__)
     for n in ctx.nodes:
-        old_protocol = n.protocol is not None and n.protocol < PROTOCOL_VERSION
-        theirs = _version(n.agent_version)
-        if not old_protocol and (not theirs or theirs >= mine):
+        why = behind(n)
+        if why is None:
             continue
-        yield Finding("agent-outdated", "error" if old_protocol else "warning",
-                      f"{n.name} runs an older agent ({n.agent_version or 'unknown'})",
-                      f"{n.name} runs agent {n.agent_version or 'of an unknown version'}; the server is {__version__}."
+        old_protocol = why["old_protocol"]
+        if why["older"] or old_protocol:
+            title = f"{n.name} runs an older agent ({n.agent_version or 'unknown'})"
+            detail = (f"{n.name} runs agent {n.agent_version or 'of an unknown version'}; the server is {__version__}."
                       + (" Its protocol is older than the server's, so it cannot work correctly." if old_protocol else
-                         " Upgrade it to get the fixes and features of this release."),
-                      "/guide/en/how-to#upgrade-the-server-and-the-agents", "How to upgrade", scope=f"machine:{n.id}",
-                      pages=("machines",))
+                         " Upgrade it to get the fixes and features of this release."))
+        else:
+            title = f"{n.name}'s agent lacks what this server uses"
+            detail = (f"{n.name} runs agent {n.agent_version}, the server's version, but does not offer "
+                      f"{', '.join(why['missing'])}: it was built from older code. Update it.")
+        yield Finding("agent-outdated", "error" if old_protocol else "warning", title, detail,
+                      f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
 
 
 def _settled_holds(ctx: Context, node: Node):

@@ -63,7 +63,7 @@ afterEach(() => {
 });
 
 describe("secret key backup", () => {
-  it("FY-WEB-440 the passphrase rules and the file name match the server's", () => {
+  it("FY-WEB-445 the passphrase rules and the file name match the server's", () => {
     expect(passphraseProblem("short", "short", "pw")).toMatch(/at least 12/);
     expect(passphraseProblem("aaaaaaaaaaab", "aaaaaaaaaaab", "pw")).toMatch(/more than two/);
     expect(passphraseProblem(PASSPHRASE, PASSPHRASE, PASSPHRASE)).toMatch(/not your password/);
@@ -74,7 +74,7 @@ describe("secret key backup", () => {
     expect(backupFilename(null)).toBeNull();
   });
 
-  it("FY-WEB-441 from the reminder: password and passphrase, the file is saved, how to restore, and the reminder goes", async () => {
+  it("FY-WEB-446 from the reminder: password and passphrase, the file is saved, how to restore, and the reminder goes", async () => {
     let current = report([REMINDER]);
     const fetch = server((url) => {
       if (url === "/api/advisor") return { status: 200, body: current };
@@ -111,7 +111,7 @@ describe("secret key backup", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("FY-WEB-442 a wrong password is said in the dialog, empties the password field and never signs out", async () => {
+  it("FY-WEB-447 a wrong password is said in the dialog, empties the password field and never signs out", async () => {
     const fetch = server((url) => {
       if (url === "/api/advisor") return { status: 200, body: report([REMINDER]) };
       if (url === "/api/secret-key/backup") return { status: 401, body: { detail: { code: "wrong_password", message: "That is not your password." } } };
@@ -130,7 +130,7 @@ describe("secret key backup", () => {
     expect(posts(fetch)).toHaveLength(1);
   });
 
-  it("FY-WEB-443 a passphrase that is too short or not typed the same twice is refused before anything is sent", async () => {
+  it("FY-WEB-448 a passphrase that is too short or not typed the same twice is refused before anything is sent", async () => {
     const fetch = server((url) => (url === "/api/advisor" ? { status: 200, body: report([REMINDER]) } : undefined));
     mount("/start");
     fireEvent.click(await screen.findByRole("button", { name: "Download a backup…" }));
@@ -147,7 +147,7 @@ describe("secret key backup", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("FY-WEB-444 on the Trust page for admins; an account without a password is told why it cannot", async () => {
+  it("FY-WEB-449 on the Trust page for admins; an account without a password is told why it cannot", async () => {
     server((url) => (url === "/api/tls" ? { status: 200, body: { mode: "forgeyard-ca", https: true, hsts: false, server_url: "https://forge.lan:7860", ca: null,
       admin: { trust_command: null, server_certificate: null } } } : url === "/api/advisor" ? { status: 200, body: report([]) } : undefined),
     { ...INFO, has_password: false, includes_ca: false, tls_mode: "own" });

@@ -420,6 +420,35 @@ def reset() -> None:
     _registry = None
 
 
+# ------------------------------------------------------------------ an answer that ends early
+class EndedEarly(Exception):
+    """A relayed answer ends before the bytes its Content-Length promised (the source broke off, sent bytes that
+    do not match, or the relay is no longer wanted). Raised instead of sending the answer's end: the connection
+    closes, and the agent sees a short body and asks for the rest again (or the whole file). The relay's own log
+    line already says why; uvicorn would add "Exception in ASGI application" with a traceback (or "Response
+    content shorter than Content-Length"), which reads like a server bug, so _QuietEndedEarly drops that one
+    record."""
+
+
+class _QuietEndedEarly(logging.Filter):
+    """On uvicorn's error logger: drops its record of a relay that ended early (an EndedEarly), and nothing else."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, EndedEarly)
+
+
+def quiet_uvicorn() -> None:
+    """Install the filter once: when this module is imported with the app (uvicorn's logging setup keeps a logger's
+    filters)."""
+    logger = logging.getLogger("uvicorn.error")
+    if not any(isinstance(f, _QuietEndedEarly) for f in logger.filters):
+        logger.addFilter(_QuietEndedEarly())
+
+
+quiet_uvicorn()
+
+
 # ------------------------------------------------------------------ the endpoint
 def _refuse(status: int, code: str, message: str, headers: Optional[dict] = None) -> JSONResponse:
     return JSONResponse({"detail": {"code": code, "message": message}}, status_code=status, headers=headers)
@@ -574,7 +603,9 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
         if up.headers.get(k):
             out[k] = up.headers[k]
     log.info("Relaying %s to %s%s.", label, name, f" ({rng})" if rng else "")
-    state = {"sent": 0, "why": "finished", "started": time.monotonic(), "done": False}
+    # "broke": the source failed (broke off, ended early, sent bytes that do not match): one warning names it.
+    state = {"sent": 0, "why": "finished", "started": time.monotonic(), "done": False, "broke": False}
+    source = f"machine {host}" if isinstance(up, peers.PipeSource) else host
     # A whole file with a digest (an image blob; 1.4.1, a model file from a machine) is hashed on its way
     # through; its last piece is sent only once the hash matches.
     hasher = _hasher(verify[0], verify[2] or 0) if verify and rng is None and up.status == 200 else None
@@ -591,6 +622,12 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
         await up.close()
         slots.give(node_id)
         took = max(time.monotonic() - state["started"], 1e-6)
+        if state["broke"]:
+            # 1.4.2 (#130): one line, in place of uvicorn's "Response content shorter than Content-Length".
+            whole = out.get("Content-Length")
+            log.warning("Relay of %s to %s cut short: %s; %d%s bytes sent from %s in %.1f s.", src.label, name,
+                        state["why"], state["sent"], f" of {whole}" if whole else "", source, took)
+            return
         mib = state["sent"] / 1024**2
         log.info("Relayed %s to %s: %.1f MiB in %.1f s (%.1f MiB/s), %s.", label, name, mib, took, mib / took,
                  state["why"])
@@ -621,10 +658,12 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
                 if not chunk:
                     if up.remaining():
                         state["why"] = f"the source ended {up.remaining()} bytes early"
+                        state["broke"] = True
                     elif hasher is not None:
                         got = hasher.hexdigest()
                         if got != expect:
                             state["why"] = f"the source's bytes hash to {got[:12]}…, not {expect[:12]}…: not sent"
+                            state["broke"] = True
                             log.warning("Relay of %s to %s: the bytes from %s do not match their digest.", label,
                                         name, host)
                             if copy is not None and up.status == 200 and isinstance(up, peers.PipeSource):
@@ -638,6 +677,7 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
                     hasher.update(chunk)
                     if size is not None and state["sent"] + len(held) + len(chunk) > size:
                         state["why"] = f"the source sent more than the {size} bytes the file has"
+                        state["broke"] = True
                         break
                     chunk, held = held, chunk
                     if not chunk:
@@ -647,6 +687,7 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
         except (OSError, http.client.HTTPException) as e:
             if state["why"] == "finished":
                 state["why"] = f"the source broke off ({e or type(e).__name__})"
+                state["broke"] = True
         except BaseException:
             if state["why"] == "finished":
                 state["why"] = "the machine closed the connection"
@@ -654,6 +695,8 @@ async def _relay(request: Request, kind: str, uid: str, what: str, path: Optiona
         finally:
             stop.set()
             watcher.cancel()
+        if state["why"] != "finished":
+            raise EndedEarly(state["why"])  # never the answer's end: the agent must not take it as whole
 
     return _RelayResponse(body(), finish, status_code=206 if up.status == 206 else 200, headers=out)
 

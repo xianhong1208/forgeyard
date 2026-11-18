@@ -114,6 +114,9 @@ export type Machine = {
   // 1.4: the largest image file an admin may upload to it (IMAGE_UPLOAD_MAX_GB).
   image_upload_max_bytes?: number;
   runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
+  // 1.4.2 (#122): why its agent should be updated (null: it need not be), and the server's version.
+  agent_behind?: AgentBehind | null;
+  server_version?: string;
   model_cache?: { ok?: boolean; free_bytes?: number | null; cached?: string[]; reason?: string | null };
   accelerators: Accelerator[];
 };
@@ -611,4 +614,26 @@ export type DownloadTargets = {
   recipe: string | null;
   machines: DownloadTarget[];
   can_download: boolean;
+};
+
+// 1.4.2 (#122): an agent older than the server, of an older protocol, or without a feature such an agent declares.
+export type AgentBehind = { agent: string | null; server: string; older: boolean; old_protocol: boolean; missing: string[] };
+
+// 1.4.2 (#121): GET /api/machines/{id}/agent-update (admins): the command that updates a machine's agent.
+export type UpdateStep = { title: string; command: string };
+export type AgentUpdate = {
+  machine_id: number;
+  name: string;
+  agent_version: string | null;
+  server_version: string;
+  behind: AgentBehind | null;
+  method: "container" | "install.sh" | "manual" | "unknown" | null;
+  known: boolean;
+  reason: string | null;
+  image: string;
+  offline: boolean;
+  steps: UpdateStep[];
+  alternative: { title: string; steps: UpdateStep[] } | null;
+  notes: string[];
+  guide: string;
 };

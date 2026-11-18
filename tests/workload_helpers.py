@@ -351,12 +351,63 @@ elif cmd == "inspect":
         for ref in args[1:]:
             cid, c = find(ref)
             if c:
-                out.append({"Id": cid, "Name": "/" + c["name"], "Config": {"Labels": c["labels"]}})
+                img = find_image(c["image"])
+                out.append({"Id": cid, "Name": "/" + c["name"], "Config": {"Labels": c["labels"]},
+                            "Image": img["Id"] if img else c["image"]})
         print(json.dumps(out))
 elif cmd == "ps":
-    flt = args[args.index("--filter") + 1].removeprefix("label=")
-    k, v = flt.split("=", 1)
-    print("\n".join(cid[:12] for cid, c in cs.items() if c["labels"].get(k) == v))
+    flt = args[args.index("--filter") + 1]
+    if flt.startswith("ancestor="):
+        # 1.4.2: every container (any state) made from that image
+        img = find_image(flt.removeprefix("ancestor="))
+        hits = [(cid, c) for cid, c in cs.items() if img is not None and (find_image(c["image"]) or {}).get("Id") == img["Id"]]
+    else:
+        k, v = flt.removeprefix("label=").split("=", 1)
+        hits = [(cid, c) for cid, c in cs.items() if c["labels"].get(k) == v]
+    if "--format" in args and args[args.index("--format") + 1] == "{{.Names}}":
+        print("\n".join(c["name"] for _, c in hits))
+    else:
+        print("\n".join(cid if "--no-trunc" in args else cid[:12] for cid, _ in hits))
+elif cmd == "rmi":
+    # 1.4.2: as Docker removes images without -f: an id several tags share is refused; a tag is untagged, and the
+    # image deleted with its last name, unless a container (any state) uses it; state["rmi_fail"] fails every call.
+    if "-f" in args or "--force" in args:
+        print("fake docker: rmi -f is never expected", file=sys.stderr)
+        sys.exit(2)
+    if state.get("rmi_fail"):
+        print("Error response from daemon: " + state["rmi_fail"], file=sys.stderr)
+        sys.exit(1)
+    failed = False
+    for name in args[1:]:
+        img = find_image(name)
+        if img is None:
+            print("Error response from daemon: No such image: " + name, file=sys.stderr)
+            failed = True
+            continue
+        by_id = name.removeprefix("sha256:") == img["Id"].removeprefix("sha256:")
+        tags = img.get("RepoTags") or []
+        users = [cid for cid, c in cs.items() if (find_image(c["image"]) or {}).get("Id") == img["Id"]]
+        if by_id and len(tags) > 1:
+            print(f"Error response from daemon: conflict: unable to delete {img['Id'][7:19]} (must be forced) - image "
+                  "is referenced in multiple repositories", file=sys.stderr)
+            failed = True
+            continue
+        if not by_id and len(tags) > 1:
+            img["RepoTags"] = [t for t in tags if t != name]
+            print("Untagged: " + name)
+            continue
+        if users:
+            what = f'remove repository reference "{name}"' if not by_id else f"delete {img['Id'][7:19]}"
+            print(f"Error response from daemon: conflict: unable to {what} (must force) - container {users[0][:12]} "
+                  f"is using its referenced image {img['Id'][7:19]}", file=sys.stderr)
+            failed = True
+            continue
+        for t in tags:
+            print("Untagged: " + t)
+        state["images"] = [i for i in state.get("images", []) if i["Id"] != img["Id"]]
+        print("Deleted: " + img["Id"])
+    save()
+    sys.exit(1 if failed else 0)
 elif cmd in ("stop", "kill"):
     cid, c = find(args[-1])
     if c:
@@ -454,6 +505,10 @@ class FakeDocker:
     def slow_saves(self, seconds: float) -> None:
         """`save` waits this long after each 64 KiB (1.4.1)."""
         self._update(lambda data: data.update(save_delay=seconds))
+
+    def rmi_fails(self, why: str) -> None:
+        """`rmi` fails with this daemon error (1.4.2)."""
+        self._update(lambda data: data.update(rmi_fail=why))
 
     def offline(self) -> None:
         """No registry: `run` of an image that is not local fails as a failed DNS lookup does."""

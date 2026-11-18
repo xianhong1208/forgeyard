@@ -77,7 +77,7 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
 - **Model directory on that machine**（預設 `/srv/forgeyard-models`）：放模型的目錄，要選空間夠大的磁碟。它會同時填進 `-v` 冒號的兩邊和 `FORGEYARD_MODEL_CACHE`。必須是絕對路徑，不能有空白、引號或冒號。
 - **Machine name**（選填）：這台機器在 **Machines** 上顯示的名稱；留空就用它的主機名稱。可以用英文字母、數字、`.`、`_` 和 `-`，最多 64 個字元。填了會加上 `FORGEYARD_NAME`。
 - **Server address, as that machine reaches it**（預設是這台伺服器的 `PUBLIC_URL`；`PUBLIC_URL` 空白時，則是你開啟這個頁面時使用的位址）：機器要用另一個位址連到伺服器時，就改這一欄：透過 VPN、轉送的連接埠（`https://127.0.0.1:7860`）或另一個區網位址。如果這個主機名稱不在伺服器的憑證裡，頁面會提醒你：把它加進 `TLS_EXTRA_NAMES` 再重新啟動伺服器，或改用憑證裡有的名稱。
-- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。
+- **Advanced → Port range**（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）：服務和模型副本使用的主機連接埠。只有部分連接埠連得到這台機器時才需要設定，例如防火牆開放的 `40000-40099`。伺服器必須連得到這些連接埠。應用程式每公開一個連接埠就佔用範圍內的一個連接埠；模型副本（或公開在 `/x/` 的應用程式）佔用兩個：一個給 agent 的金鑰守衛，一個給守衛後面的引擎。Forgeyard 會計算這些連接埠，所以 3 個連接埠的範圍只放得下一個模型：範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
 
 欄位的值如果 agent 不接受，頁面會顯示錯誤訊息，而不是產生指令。映像檔的 tag 就是伺服器自己的版本，所以 agent 和伺服器的版本永遠一致。管理員可以用 [`AGENT_IMAGE`](reference.md#machines) 讓指令改用鏡像站、私有 registry 或指定的 digest。和頁面一樣，這裡的指令開頭都有 `sudo`；如果是 root，或你的帳號已經在 `docker` 群組裡，就把它拿掉。
 
@@ -727,10 +727,44 @@ sudo systemctl enable --now forgeyard
        sudo sh -s -- --ca-fingerprint sha256:3f9a…
      ```
 
-   - **Docker**：用 `docker pull` 拉取伺服器新版本的映像檔（**Machines** 頁面上有名稱），然後執行 `docker rm -f forgeyard-agent`，再用新的 tag 執行同一個 `docker run`。volume 會保留這台機器。
+   - **Docker**：用 `docker pull` 拉取伺服器新版本的映像檔（**Machines** 頁面上有名稱），然後執行 `docker rm -f forgeyard-agent`，再用新的 tag 執行同一個 `docker run`。volume 會保留這台機器。每台機器的頁面都會顯示完整的指令（[做法](#update-an-agent)）。
    - **手動安裝**：`git pull`、`uv sync`，然後重新啟動 agent。
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
+
+## 更新 agent
+
+每台機器的頁面都有**Update the agent** 區塊。管理員會在這裡看到把這台機器的 agent 更新到伺服器版本的完整指令，它是根據 agent 回報的執行方式產生的（1.4.2 起的 agent 每次連線都會回報）：
+
+- **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
+
+   ```bash
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+   sudo docker rm -f forgeyard-agent && \
+   sudo docker run -d \
+     --name forgeyard-agent \
+     --restart always \
+     --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     -e HF_TOKEN="$HF_TOKEN" \
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+   ```
+
+   經由伺服器取得檔案的機器（**Always through the server**）則改為搬運映像檔：在能連到 Docker Hub 的機器上 `docker save`，透過 `ssh` 直接送進那台機器的 `docker load`（把 `USER` 換掉），再執行同樣的 `docker rm -f` 與 `docker run`。其他機器也會在 *cannot reach the registry?* 底下列出這個做法。
+- **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。
+- **從原始碼執行的**：`git checkout` 伺服器的版本並執行 `uv sync`，然後用你原本的方式重新啟動 agent。
+
+複製指令，在那台機器上執行。替換 agent 時，它的模型與應用程式會繼續執行；volume（或 install.sh 的狀態目錄）會保留這台機器，幾秒內它就會以原本的身分重新上線。
+
+agent 從不回報任何秘密：不回報 join token（已加入的機器不再需要它）、不回報它的憑據，也不回報名稱或值看起來像秘密的變數（`…TOKEN`、`…KEY`、`…PASSWORD`、Hugging Face 或 GitHub 的 token、含密碼的 URL）。這類變數會顯示為 `-e NAME="$NAME"`：請先在 shell 裡設定它（`export HF_TOKEN=…`），頁面上也會提醒。無法安全重現的值會被略過，並列出名稱。
+
+**比伺服器舊的 agent** 會在 **Machines** 的機器方塊與它的頁面上標示：*agent 1.4.0, server 1.4.2: update*；點這個提示就會打開指令。與伺服器同版本、但缺少這個版本 agent 應有功能的 agent（用較舊的程式碼建置）也會標示，**Setup health** 會列出這兩種情況。1.4.2 之前的 agent 不會回報執行方式：請先手動更新一次（[做法](#upgrade-the-server-and-the-agents)）；之後它的頁面就會顯示指令。
 
 ## 檢查設定健康狀態
 
@@ -917,7 +951,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 管理員可以把一台機器的 container 引擎裡的映像檔，經由伺服器複製到另一台機器（1.4.1）：只用 tag 指定的自訂 recipe 映像檔、在某台機器上自己建置的映像檔，或連不到 registry 的機器需要的映像檔。不會自動複製任何東西。
 
 1. 打開目標機器的頁面 → **Engine images** → **Copy from another machine**。
-2. 在 **From** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。
+2. 在 **From** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。對話框只顯示 recipe 指定的映像檔（1.4.2）；勾選 **Show all images** 才會顯示其他的，例如共用機器上別人的映像檔。
 3. 選一個，按 **Copy**。來源機器會用它自己的 tag 對它執行 `docker save`（或 `podman save`），送給伺服器，伺服器直接轉進目標機器的 `docker load`，只保留很小的緩衝。載入完成後，對話框會列出載入了什麼、它是哪個 recipe 的映像檔，以及 *The same image as on gpu-host (same content id)*：載入的就是來源機器上的那個映像檔。
 
 注意事項：
@@ -936,6 +970,18 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 早於 1.4 的 agent 會列出模型但沒有大小，也不能刪除。請更新 agent。
 
 每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含刪了什麼、釋出了多少空間。API 請見[參考文件](reference.md#a-machines-model-cache-through-the-api)。
+
+### 引擎映像檔
+
+引擎映像檔也占磁碟空間，recipe 換成較新的映像檔後，舊的會越積越多。機器的頁面在 **Engine images** 底下列出它們（1.4.2）：agent 目前列出的、由 recipe 指定的每個映像檔（有釘選的映像檔以記錄的 id 辨識，只用 tag 指定的映像檔以那個 tag 辨識），包含大小、指定它的 recipe，以及那台機器上使用它的部署。清單上方是引擎存放映像檔的位置還剩多少空間，前提是 agent 看得到那個目錄（在 container 裡執行的 agent 通常看不到）。引擎裡的其他映像檔只會計數：沒有 recipe 指定它們，所以它們不屬於 Forgeyard。
+
+- **Remove**（管理員）會從那台機器刪除一個映像檔。該列會先詢問，然後 agent 對它執行 `docker rmi`（或 `podman rmi`），絕不加 `-f`。完成後主控台會說明釋出了多少空間：最多是映像檔的大小，因為其他映像檔共用的 layer 會保留；agent 看得到引擎的磁碟時，也會顯示之後的可用空間。之後需要這個映像檔的部署會重新 pull（或經由伺服器取得，或由你再載入一次）。
+- 以下情況會被拒絕，該列也會說明原因：那台機器上有部署正在使用這個映像檔（請先停止它）、agent 本身就是從這個映像檔執行的，以及引擎裡有任何 container 正在使用它，即使不是 Forgeyard 啟動的（引擎會保留這種映像檔；訊息會指出是哪個 container）。
+- 沒有 recipe 指定的映像檔，絕不會提供刪除。
+- agent 只會依 id 刪除它自己清單裡的映像檔：伺服器絕不會指定名稱要它刪除。有好幾個 tag 的映像檔會以那些 tag 刪除。
+- 早於 1.4.2 的 agent 會列出映像檔，但不能刪除。請更新 agent。
+
+每次要求 agent 刪除，都會以 `node.image_removed` 記入稽核紀錄，包含映像檔、它的 tag、指定它的 recipe，以及釋出了多少空間或沒有刪除的原因。API 請見[參考文件](reference.md#a-machines-engine-images-through-the-api)。
 
 ## 搬移模型快取
 

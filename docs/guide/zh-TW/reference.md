@@ -882,6 +882,25 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 稽核事件 `node.image_copied`（目標機器；`from_machine`、要求的映像檔、大小、`ok`、載入的映像檔和它們的 content id，或失敗原因）。在任何位元組送出前就被拒絕的不會記錄。
 
+### 透過 API 查看機器的引擎映像檔
+
+`GET /api/machines/{id}/engine-images`（所有登入的人，1.4.2）會向那台機器的 agent 詢問它引擎裡的映像檔（`image_list`，同上），回傳 `{machine_id, listed, note, images, others, free_bytes, total_bytes, can_remove, remove_note}`。`images` 只包含 recipe 指定的映像檔，由大到小，每個是列出的內容再加上 `matches`、`used_by`（那台機器上副本正在執行它的部署：`[{name, kind, id}]`）、`agent`（agent 從它執行）和 `remove_note`（目前為什麼不能刪除，或 null）。`others` 是引擎裡其他映像檔的數量。`free_bytes` / `total_bytes`：引擎存放映像檔的位置，agent 看得到那個目錄時才有，否則為 null。agent 離線、不能列出（沒有 container 引擎、比 1.4.1 舊）或失敗時，`listed` 為 false 並帶 `note`。
+
+`POST /api/machines/{id}/engine-images/remove`，內容 `{"image": "sha256:…"}`（管理員），刪除其中一個。伺服器會再列一次那台機器的映像檔，在詢問 agent 之前先做檢查；接著傳送 `image_remove {request_id, image}`（協定 feature `image_remove`，1.4.2 起的 agent）。agent 只刪除它自己清單裡的映像檔，絕不刪除它本身執行的映像檔、它的副本使用的映像檔，或引擎裡任何 container 使用的映像檔；它執行 `docker rmi` / `podman rmi`，不加 `-f`（映像檔有好幾個 tag 時以那些 tag 刪除），並回答 `image_removed {request_id, ok, code, reason, in_use, image, freed_bytes, free_bytes, total_bytes}`。1.4.2 的 agent 的 `image_listed` 還會帶 `agent_image`（它執行的映像檔的 id）和 `free_bytes` / `total_bytes`。回應是 `{ok, image, freed_bytes, free_bytes, total_bytes}`：`freed_bytes` 是映像檔的大小（最多釋出這麼多：其他映像檔共用的 layer 會保留）；`free_bytes` / `total_bytes` 是之後的可用空間，agent 看得到時才有。
+
+| 狀態 | `code` | 時機 |
+|---|---|---|
+| 422 | `bad_image` | 映像檔不是用 id 指定 |
+| 409 | `machine_offline`、`agent_too_old` | agent 沒有連線，或比 1.4.2 舊 |
+| 404 | `image_not_found` | 那台機器（已經）沒有列出這個 id |
+| 409 | `not_an_engine_image` | 沒有 recipe 指定這個映像檔：它不屬於 Forgeyard，不能刪除 |
+| 409 | `agent_image` | agent 從這個映像檔執行 |
+| 409 | `image_in_use` | 那台機器上有部署正在使用它（`in_use` 列出它們），或引擎裡有 container 正在使用它（agent 的說明） |
+| 409 | `image_remove_failed` | 引擎沒有刪除它（它的說明） |
+| 504 | `agent_no_answer` | agent 5 分鐘內沒有回答 |
+
+稽核事件 `node.image_removed`（映像檔、它的 tag、指定它的 recipe、`ok`、釋出的位元組，或 agent 的 `code` 和原因），每次要求 agent 刪除都會記錄；在那之前就被拒絕的不會記錄。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。

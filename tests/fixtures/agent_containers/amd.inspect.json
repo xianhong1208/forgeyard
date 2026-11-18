@@ -1,0 +1,173 @@
+[
+  {
+    "Id": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "Created": "2026-11-10T08:00:00.000000000Z",
+    "Path": "tini",
+    "Args": [
+      "--",
+      "forgeyard",
+      "agent"
+    ],
+    "State": {
+      "Status": "running",
+      "Running": true,
+      "Pid": 4242,
+      "ExitCode": 0,
+      "StartedAt": "2026-11-10T08:00:01Z"
+    },
+    "Image": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "ResolvConfPath": "/var/lib/docker/containers/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3/resolv.conf",
+    "HostnamePath": "/var/lib/docker/containers/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3/hostname",
+    "HostsPath": "/var/lib/docker/containers/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3/hosts",
+    "LogPath": "/var/lib/docker/containers/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3-json.log",
+    "Name": "/forgeyard-agent",
+    "RestartCount": 0,
+    "Driver": "overlay2",
+    "Platform": "linux",
+    "HostConfig": {
+      "Binds": [
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "forgeyard-agent:/var/lib/forgeyard-agent",
+        "/srv/forgeyard-models:/srv/forgeyard-models",
+        "/opt/rocm:/opt/rocm:ro"
+      ],
+      "ContainerIDFile": "",
+      "LogConfig": {
+        "Type": "json-file",
+        "Config": {}
+      },
+      "NetworkMode": "host",
+      "PortBindings": {},
+      "RestartPolicy": {
+        "Name": "always",
+        "MaximumRetryCount": 0
+      },
+      "AutoRemove": false,
+      "VolumeDriver": "",
+      "VolumesFrom": null,
+      "CapAdd": null,
+      "CapDrop": null,
+      "CgroupnsMode": "private",
+      "Dns": [],
+      "DnsOptions": [],
+      "DnsSearch": [],
+      "ExtraHosts": null,
+      "GroupAdd": [
+        "44",
+        "110"
+      ],
+      "IpcMode": "private",
+      "Cgroup": "",
+      "Links": null,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyRootfs": false,
+      "SecurityOpt": null,
+      "UTSMode": "",
+      "UsernsMode": "",
+      "ShmSize": 67108864,
+      "Runtime": "runc",
+      "Isolation": "",
+      "Devices": [
+        {
+          "PathOnHost": "/dev/kfd",
+          "PathInContainer": "/dev/kfd",
+          "CgroupPermissions": "rwm"
+        },
+        {
+          "PathOnHost": "/dev/dri",
+          "PathInContainer": "/dev/dri",
+          "CgroupPermissions": "rwm"
+        }
+      ],
+      "DeviceRequests": null,
+      "Init": null
+    },
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/var/run/docker.sock",
+        "Destination": "/var/run/docker.sock",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "volume",
+        "Name": "forgeyard-agent",
+        "Source": "/var/lib/docker/volumes/forgeyard-agent/_data",
+        "Destination": "/var/lib/forgeyard-agent",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      },
+      {
+        "Type": "bind",
+        "Source": "/srv/forgeyard-models",
+        "Destination": "/srv/forgeyard-models",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/opt/rocm",
+        "Destination": "/opt/rocm",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ],
+    "Config": {
+      "Hostname": "gpu-box",
+      "Domainname": "",
+      "User": "",
+      "Tty": false,
+      "Env": [
+        "PATH=/opt/forgeyard/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/rocm/bin",
+        "LANG=C.UTF-8",
+        "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+        "PYTHON_VERSION=3.13.9",
+        "PYTHON_SHA256=0000000000000000000000000000000000000000000000000000000000000000",
+        "PYTHONUNBUFFERED=1",
+        "FORGEYARD_LIMITS=rlimit",
+        "FORGEYARD_WORKLOAD_USER=forgeyard-run",
+        "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+        "FORGEYARD_SERVER=https://192.168.1.20:7860",
+        "FORGEYARD_CA_FINGERPRINT=sha256:3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a",
+        "FORGEYARD_JOIN_TOKEN=fyj_EXAMPLEjoinTOKENexampleJOINtokenEXAMPLE00",
+        "FORGEYARD_MODEL_CACHE=/srv/forgeyard-models",
+        "FORGEYARD_PORT_RANGE=33000-33002",
+        "FORGEYARD_NAME=apu-box"
+      ],
+      "Cmd": null,
+      "Image": "docker.io/tonyhuang1101/forgeyard-agent:1.4.0",
+      "Volumes": {
+        "/var/lib/forgeyard-agent": {}
+      },
+      "WorkingDir": "",
+      "Entrypoint": [
+        "tini",
+        "--",
+        "forgeyard",
+        "agent"
+      ],
+      "OnBuild": null,
+      "Labels": {
+        "org.opencontainers.image.title": "Forgeyard agent",
+        "org.opencontainers.image.version": "1.4.0",
+        "org.opencontainers.image.source": "https://github.com/xianhong1208/forgeyard"
+      }
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "host": {
+          "NetworkID": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  }
+]

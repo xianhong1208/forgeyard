@@ -31,6 +31,7 @@ from forgeyard.machines.protocol import (
     FEATURE_ENGINE_ZIP,
     FEATURE_IMAGE_IDS,
     FEATURE_IMAGE_LOAD,
+    FEATURE_IMAGE_REMOVE,
     FEATURE_IMAGE_SAVE,
     FEATURE_MODELS,
     FEATURE_PREFETCH,
@@ -127,8 +128,11 @@ def join(server: str, token: str, *, name: Optional[str] = None, timeout: float 
 class Agent:
     def __init__(self, server: str, credential: str, inventory: Inventory, *, labels: Optional[dict] = None,
                  backoff: Optional[Backoff] = None, heartbeat: float = 10.0,
-                 connector: Callable = connect, supervisor=None, ca_pem: Optional[str] = None):
+                 connector: Callable = connect, supervisor=None, ca_pem: Optional[str] = None,
+                 install: Optional[dict] = None):
         self.server = server
+        # 1.4.2 (#121): how this agent runs (agent/how_it_runs.py), for its update command; sent in hello.
+        self.install = install
         # wss:// is verified against the pinned CA only (agent/trust.py); None: the system store.
         self.ssl_context = trust.context(ca_pem) if server.startswith("https://") else None
         self._https_hint = False
@@ -168,6 +172,8 @@ class Agent:
                "hostname": socket.gethostname(), "labels": self.labels, "platform": platform_info(),
                "runtimes": [], "simulated": self.inventory.simulated,
                "inventory": {"accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}
+        if self.install:
+            msg["install"] = self.install
         if self.supervisor is not None:
             msg["features"] = [FEATURE_WORKLOADS, FEATURE_REPLICA_KEYS, FEATURE_REPLICA_GUARD, FEATURE_IMAGE_IDS,
                                FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD]
@@ -187,6 +193,8 @@ class Agent:
                 msg["features"].append(FEATURE_IMAGE_LOAD)
             if getattr(self.supervisor, "can_save_images", lambda: False)():
                 msg["features"].append(FEATURE_IMAGE_SAVE)
+            if getattr(self.supervisor, "can_remove_images", lambda: False)():
+                msg["features"].append(FEATURE_IMAGE_REMOVE)
         return msg
 
     @property
@@ -330,6 +338,10 @@ class Agent:
                                            else self._answer_image_save(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+            elif kind == "image_remove" and self.workloads and FEATURE_IMAGE_REMOVE in self.server_features:
+                task = asyncio.create_task(self._answer_image_remove(ws, data))
+                self._answers.add(task)
+                task.add_done_callback(self._answers.discard)
             elif kind == "relay_send" and self.workloads and FEATURE_RELAY_SOURCE in self.server_features:
                 task = asyncio.create_task(self._answer_relay_send(ws, data))
                 self._answers.add(task)
@@ -397,9 +409,22 @@ class Agent:
                 answer = {"ok": False, "reason": "this agent has no container engine"}
             else:
                 answer = {"ok": True, "images": await asyncio.to_thread(rt.list_images)}
+                if FEATURE_IMAGE_REMOVE in self.server_features:
+                    # 1.4.2: which image the agent runs from (never removed), and the space around the images.
+                    answer["agent_image"] = await asyncio.to_thread(rt.agent_image)
+                    answer.update(await asyncio.to_thread(rt.disk))
         except Exception as e:  # never take the connection down
             answer = {"ok": False, "reason": (str(e) or type(e).__name__)[:400]}
         await self._send_answer(ws, "image_listed", data, answer)
+
+    async def _answer_image_remove(self, ws, data: dict) -> None:
+        """1.4.2 ("image_remove"): remove one of the engine's images by its id, as an admin asked."""
+        try:
+            answer = await self.supervisor.remove_image(str(data.get("image") or ""))
+        except Exception as e:  # never take the connection down
+            log.exception("Removing an image failed")
+            answer = {"ok": False, "code": "failed", "reason": (str(e) or type(e).__name__)[:400]}
+        await self._send_answer(ws, "image_removed", data, answer)
 
     async def _answer_image_save(self, ws, data: dict) -> None:
         """1.4.1 ("image_save"): `docker save` one of the engine's own images (by its id) to this agent's own server,

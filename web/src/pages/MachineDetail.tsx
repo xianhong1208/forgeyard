@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { AdvisorBanner } from "../components/Advisor";
+import { AgentUpdateSection, BehindChip } from "../components/AgentUpdate";
 import { HolderChips, HolderIcon, KindMark, MemBar, MemLegend, StatusDot, usePlacement } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { EngineImagesSection } from "../components/ImageUpload";
@@ -111,6 +112,7 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
         <span><strong>{cardLine(m)}</strong></span>
         <span><strong>{bytes(mem.free)}</strong> free of {bytes(mem.total)}{kind === "cpu" ? " RAM" : kind === "amd-apu" ? " (shared)" : ""}</span>
         {m.agent_version && <span>agent {m.agent_version}{platform ? ` · ${platform}` : ""}</span>}
+        <BehindChip m={m} />
         {m.simulated && (
           <span className="chip chip-simulated" title="This agent reports made-up hardware from a fixture (development and tests only).">simulated inventory</span>
         )}
@@ -159,7 +161,7 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
 
       {m.status !== "revoked" && <ModelCacheSection m={m} poll={POLL_MS} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
-      {m.status !== "revoked" && <EngineImagesSection m={m} machines={machines} canManage={canManage} onChanged={onChanged} />}
+      {m.status !== "revoked" && <EngineImagesSection m={m} machines={machines} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
       {m.status !== "revoked" && <GpuAccess m={m} canManage={canManage} onChanged={onChanged} onError={onError} />}
 
@@ -180,6 +182,8 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
           </details>
         )}
       </section>
+
+      <AgentUpdateSection m={m} canManage={canManage} />
       <HelpLinks>
         <HelpLink page="how-to" anchor="restrict-gpus-on-a-shared-machine">Restrict GPUs on a shared machine</HelpLink>
         <HelpLink page="how-to" anchor="free-disk-space-on-a-machine">Free disk space on a machine</HelpLink>
