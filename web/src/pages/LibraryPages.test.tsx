@@ -186,6 +186,7 @@ describe("model and engine pages (1.4.3, #140)", () => {
     await screen.findByRole("heading", { level: 1, name: "qwen3-1.7b-gguf" });
     // No display name: the name is the heading, and the line under it is the source only.
     expect(document.querySelector(".lp-sub")!.textContent).toBe("ggml-org/Qwen3-1.7B-GGUF · Q4_K_M");
+    expect(document.querySelector(".lp-header .eyebrow")!.textContent).toBe("Model · Chat");
     expect(jumpLinks()).toEqual(["Overview", "Machines", "Deployments", "Engines", "Files"]);
     expect(sectionOrder()).toEqual(["overview", "machines", "deployments", "engines", "files"]);
     expect(document.querySelector(".mk-facts")!.textContent).toContain("needs 3.00 GiB per GPU with llama-cpp's defaults");
@@ -269,6 +270,7 @@ describe("model and engine pages (1.4.3, #140)", () => {
     server((url) => url === "/api/recipes/llama-cpp" ? { status: 200, body: enginePage(LLAMA) } : undefined);
     mount("/models/engines/llama-cpp");
     await screen.findByRole("heading", { level: 1, name: "llama-cpp" });
+    expect(document.querySelector(".lp-header .eyebrow")!.textContent).toBe("Engine · Built in");
     expect(jumpLinks()).toEqual(["Overview", "Variants", "Machines", "Parameters", "Deployments and models"]);
     expect(sectionOrder()).toEqual(["overview", "variants", "machines", "params", "deployments", "models"]);
     const variants = document.getElementById("variants")!;

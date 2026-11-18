@@ -77,7 +77,7 @@ function ModelView({ p, machines, deployments, reload }: {
         <div className="mk-title">
           <span className="kindicon lp-kindicon"><ModelKindIcon kind={catalogKind(m)} size={26} /></span>
           <div className="lp-head-text">
-            <p className="eyebrow">03 · Model · {m.task_label}</p>
+            <p className="eyebrow">Model · {m.task_label}</p>
             <h1>{m.title ?? m.name}</h1>
             {/* The name under a display name (the name itself is the heading otherwise). */}
             <p className="mono small muted lp-sub">{m.title && m.title !== m.name ? `${m.name} · ` : ""}{shortSource(m).text}</p>

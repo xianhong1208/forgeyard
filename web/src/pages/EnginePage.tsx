@@ -89,7 +89,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         <div className="mk-title">
           <span className="kindicon lp-kindicon"><IconEngine size={26} stroke={1.6} aria-hidden="true" /></span>
           <div className="lp-head-text">
-            <p className="eyebrow">03 · Engine · {r.builtin ? "built in" : "custom"}</p>
+            <p className="eyebrow">Engine · {r.builtin ? "Built in" : "Custom"}</p>
             <h1 className="mono">{r.name}</h1>
             <p className="small muted lp-sub">{r.title} {r.version}</p>
           </div>
