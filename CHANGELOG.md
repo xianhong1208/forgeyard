@@ -63,6 +63,19 @@ version until 1.0.
 
 ### Changed
 
+- **The guide walks through a machine without internet access in one place** (#129): the new how-to section
+  *Run a machine without internet access* (en and zh-TW) goes from joining such a machine (only the server
+  to reach; the port range through a firewall or an SSH tunnel, counted by placement) through its
+  **Internet access for downloads**, models (through the server, from the internet or from another machine's
+  cache, and where the progress says which), engine images (pinned ones through the server, the vision image
+  too; tag-only ones uploaded or copied; removing old ones) and updating its agent (the carry command), to the
+  troubleshooting it may need. The guide's index, Concepts, the related how-to sections and Troubleshooting
+  link to it. Also fixed on the way: the relay section no longer says the vision image is tag only (pinned
+  since 1.4.1); the offline AMD image-generation note says the image and the model come through the server
+  with a 1.4 agent; the loaded-image check names its version (1.3) instead of "this release"; Troubleshooting
+  explains the relay's *cut short* log line and offers copying a tag-only image; the guide index's How-to
+  summary no longer lists services and tasks (gone from the console in 1.4) and names the 1.4 sections.
+
 - **Copy an image lists engine images first** (#124). The **Copy from another machine** dialog shows the images a
   recipe names, and only those until **Show all images** is ticked (on a shared machine the other images are other
   people's).

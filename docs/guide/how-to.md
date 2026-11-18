@@ -310,7 +310,152 @@ A machine that already joined keeps its identity if the container gets its state
 Processes the old agent started outside the container are not taken over: stop them from
 the UI first.
 
+## Run a machine without internet access
+
+A machine with no internet access of its own (behind a firewall, on a DNS filter, or reached only through
+an SSH tunnel) runs models like any other machine: it needs to reach only the server. Models, engine
+archives and engine images come through the server, or from another machine that already has them, and
+the agent checks every file as it checks a direct download. This section goes through it in order, from
+joining to a deployed model, and links to the sections with the details. In the examples, `amd-01` has no
+internet access and `gpu-01` has.
+
+Give it an agent of the server's version. Downloads through the server need 1.4; sending files to other
+machines, 1.4.1; the update command, counting free ports and removing engine images, 1.4.2. The machine's
+page says when its agent is too old for something.
+
+### Join it
+
+1. **The agent reaches the server, and nothing else.** It connects out, over HTTPS, to the server's
+   address (port 7860 unless you changed it), and everything it downloads later comes over that
+   connection. Add the machine as usual: **Machines** → **Add a machine**. On a machine that cannot reach
+   Docker Hub, bring the agent image as a file
+   ([Offline machines, or build it yourself](#offline-machines-or-build-it-yourself)).
+2. **The server reaches the machine's port range.** Model replicas listen on host ports of the agent's
+   port range (`FORGEYARD_PORT_RANGE`, default `30000-32767`), and the gateway connects to them. Open the
+   range in the firewall, or choose a small range and forward it.
+3. **Through an SSH tunnel**, one connection carries both. From the server's host, `-R` brings the
+   server's port to the machine and each `-L` brings one port of the range back. With the range
+   `33000-33002`:
+
+   ```bash
+   ssh -N -R 7860:127.0.0.1:7860 \
+     -L 33000:127.0.0.1:33000 -L 33001:127.0.0.1:33001 -L 33002:127.0.0.1:33002 \
+     USER@amd-01
+   ```
+
+   Then add the machine with **Server address, as that machine reaches it** set to
+   `https://127.0.0.1:7860` and **Advanced → Port range** set to `33000-33002`
+   ([the form](#run-the-agent-in-docker)).
+
+Placement counts the free ports of the range. A model replica takes two (the agent's key guard and the
+engine behind it), so three ports hold one model; a machine whose range is full is skipped, and a replica
+with nowhere else to go waits ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
+
+### Choose its internet access
+
+On the machine's page (admins), under **Models in cache**, set **Internet access for downloads**
+([details](#give-an-offline-machine-models-through-the-server)):
+
+- **Always through the server**: for a machine with no internet access at all, like `amd-01`. Every
+  model file, engine archive and pinned engine image comes through the server. The agent never tries the
+  source first, so nothing waits for a failure, and the machine is never sent a Hugging Face token.
+- **Auto** (the default): for a machine that usually reaches the internet. It downloads directly. Once a
+  source cannot be reached from the machine (the name does not resolve, the connection is refused, reset
+  or times out, the network is unreachable), the rest of that download, and the next ones from that host
+  or registry for an hour, come through the server. An HTTP error (a missing file, a refused token) or a
+  checksum mismatch never switches: the server would get the same answer.
+- **Direct only**: never through the server. Such a machine that cannot reach a source is placed last for
+  an hour ([A machine cannot reach Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)).
+
+Every byte that comes through the server crosses its network twice, so keep the machines that reach the
+internet on **Auto** or **Direct only**.
+
+### Get models onto it
+
+Deploy as usual, or fill the machine's model cache ahead with **Download to…**, which fetches the engine
+too ([Download a model before deploying it](#download-a-model-before-deploying-it)). Either way each file
+comes through the server, from one of two places:
+
+- **another machine's cache**: when a machine whose agent is 1.4.1 or later (`gpu-01`) has the model, it
+  sends the file to the server, which passes it on. That machine also connects out only; it opens no port.
+  The internet is used only when no machine can send the file
+  ([From another machine](#give-an-offline-machine-models-through-the-server));
+- **the internet**: the server downloads the file from Hugging Face or the model's URL and passes it on. A
+  gated model needs the server's Hugging Face token (**Models → Sources**) or the deployment's own.
+
+Which one it was shows in several places:
+
+- the progress, on the deployment's page, under the model in the catalog and on the machine's page:
+  *Downloading the model via the server: … of …* from the internet, *Downloading the model via the
+  server, from gpu-01: … of …* from that machine's cache, then *Downloaded … via the server* or
+  *Downloaded … via the server, from gpu-01* when it is done;
+- **Download to…**, before you start: *via the server*, or *via the server, from gpu-01*, on the
+  machine's line;
+- the downloads API: `via` is `direct`, `server` or `machine`, with the sending machine in `source`
+  ([the reference](reference.md#download-a-model-ahead-through-the-api));
+- the server's log, one line per file: *Relayed … to amd-01: …*, or *… from gpu-01 to amd-01: …*.
+
+Engine archives (llama.cpp's process variant on a CPU machine, for example) always come from the internet
+through the server: agents delete an archive once it is unpacked, so no machine has one to send.
+
+### Get engine images onto it
+
+- **Pinned images come through the server by themselves.** Every built-in recipe pins its images by
+  digest, Forgeyard's own vision image too (since 1.4.1). The server reads the image for the machine's
+  platform from its registry and passes its layers on; the agent checks each one, loads the image and runs
+  it only when it matches the recorded ids. The progress says *Pulling the image via the server: … of …,
+  … of … layers* ([details](#give-an-offline-machine-models-through-the-server)). So a vision model
+  ([Deploy an object-detection model](#deploy-an-object-detection-model)) deploys on such a machine as it
+  does anywhere.
+- **An image named by a tag only** (a custom recipe's, or one you built) has no recorded digest to check
+  it against, so it cannot come through the server. Put it there from the machine's page →
+  **Engine images**:
+  - **Upload an image**: a `docker save` file from your computer
+    ([Upload an engine image to a machine](#upload-an-engine-image-to-a-machine));
+  - **Copy from another machine**: an image that `gpu-01`'s container engine already has, with no file
+    ([Copy an engine image from another machine](#copy-an-engine-image-from-another-machine)).
+- **Remove old images** on the same page when recipes move to newer ones: **Remove** works on an image
+  no deployment there uses ([Engine images](#engine-images)).
+- An agent older than 1.4 gets none of this: carry the image over as a file and `docker load` it
+  ([Offline machines](#offline-machines)).
+
+### Update its agent
+
+After a server upgrade, the machine's page shows **Update the agent** with the complete command
+([Update an agent](#update-an-agent)). For a machine set to **Always through the server**, the command
+carries the agent image instead of pulling it. Run its first step on a machine that can reach Docker Hub
+(replace `USER`, and the host name if you reach the machine by another):
+
+```bash
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+```
+
+Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
+No `ssh` route to the machine? Save the image to a file and carry it
+([Offline machines, or build it yourself](#offline-machines-or-build-it-yourself)). An agent before 1.4.2
+does not report how it runs: update it that way by hand once, and its page shows the command from then on.
+
+### When something goes wrong
+
+- A download or an image *via the server* fails: each message, and what to do, is under *Through the
+  server, it still fails* in
+  [A machine cannot reach Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face).
+- *Cannot be placed: amd-01: no free port: 3 of 3 in use (host ports 33000-33002)*: the port range is full
+  ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
+- *Relay of … to amd-01 cut short: the source broke off (…)* in the server's log: the source (a host on the
+  internet, a registry, or `machine gpu-01`) stopped in the middle of a file. The agent asks for the rest
+  again by itself and the download goes on from what is on disk; look further only when it keeps
+  happening with the same source (that network, or that machine's agent log).
+- A replica says its image is not on the machine:
+  [A replica fails: the image is not on this machine](troubleshooting.md#a-replica-fails-the-image-is-not-on-this-machine).
+- The machine shows offline: the tunnel or the firewall between it and the server
+  ([An agent shows offline](troubleshooting.md#an-agent-shows-offline)).
+
 ## Offline machines
+
+For the whole path, from joining such a machine to a deployed model, see
+[Run a machine without internet access](#run-a-machine-without-internet-access).
 
 A machine that cannot reach the registry (no internet access, or a DNS filter that blocks `ghcr.io`
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
@@ -362,7 +507,7 @@ are, with no custom recipe that names an image by tag only.
 
 Ids are recorded for every image of the built-in recipes, and for a custom recipe that names one of
 them exactly. Another image pinned by digest cannot be checked: on an offline machine, name it by its
-tag only in your custom recipe. The check needs an agent from this release or later; an older one
+tag only in your custom recipe. The check needs an agent of 1.3 or later; an older one
 tries to pull.
 
 ## Deploy an object-detection model
@@ -581,9 +726,11 @@ machines or large sizes.
 engine arguments for stable-diffusion.cpp (`--cfg-scale 1 --steps 8`); the recommended entries carry
 them. vLLM-Omni reads them from the model itself.
 
-**On an offline AMD machine:** load the `sd-cpp` recipe's Vulkan image with `docker load` (see
-[Offline machines](#offline-machines)). For the model, deploy it once on a machine that can reach
-Hugging Face, then copy its directory from that machine's model cache
+**On an offline AMD machine:** with a 1.4 agent, the `sd-cpp` recipe's Vulkan image (pinned) and the
+model come through the server, the model from another machine's cache when one has it
+([Run a machine without internet access](#run-a-machine-without-internet-access)). With an older agent,
+load the image with `docker load` ([Offline machines](#offline-machines)); for the model, deploy it once on
+a machine that can reach Hugging Face, then copy its directory from that machine's model cache
 (`hub/models--<org>--<name>`, with `tar` or `rsync -a`: it uses relative links) into the same place in
 the offline machine's cache. The deployment there finds it cached and downloads nothing.
 
@@ -1270,7 +1417,7 @@ recorded after its first complete download, and every later download must match 
 (`model.checksum_recorded`). The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
 
 A machine that cannot reach Hugging Face or GitHub itself gets the files through the server: see the
-next section.
+next section, and [Run a machine without internet access](#run-a-machine-without-internet-access).
 
 ## Give an offline machine models through the server
 
@@ -1280,7 +1427,8 @@ server fetches them and
 passes the bytes on**, storing nothing. The agent asks the server the way it already talks to it,
 outbound, over HTTPS with the CA it pins and its machine credential, so it works through whatever
 already carries the agent's connection (for example an `ssh -R 7860:…` tunnel). Nothing on the
-machine or in the tunnel changes.
+machine or in the tunnel changes. For the whole path, from joining such a machine to a deployed model,
+see [Run a machine without internet access](#run-a-machine-without-internet-access).
 
 1. Open the machine's page (admins). Under **Models in cache**, set **Internet access for downloads**:
    - **Auto** (the default): downloads directly; once the source cannot be reached from that machine
@@ -1367,9 +1515,9 @@ digest, as every built-in recipe does:
   it deletes the pieces.
 - The progress says *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*, then *loading
   it*. Every layer crosses the server's network twice, like a model file.
-- An image named by a tag only (a custom recipe's, Forgeyard's own vision image of this release)
-  cannot come through the server: there is no recorded digest to check it against. Upload it instead
-  (next section).
+- An image named by a tag only (a custom recipe's, or one you built) cannot come through the server:
+  there is no recorded digest to check it against. Upload it, or copy it from another machine (next
+  sections). Forgeyard's own vision image is pinned since 1.4.1 and comes through the server.
 
 The machine's agent must be 1.4 or later; an older one downloads directly whatever the setting says,
 and the setting tells you to update it (also when it relays models but not yet images). To send files to

@@ -243,7 +243,8 @@ counted: another machine would get the same answer.
 
 - let the server download it for the machine: on the machine's page set **Internet access for
   downloads** to **Auto** or **Always through the server**, and update its agent to 1.4 if the page
-  says so ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server)).
+  says so ([Give an offline machine models through the server](how-to.md#give-an-offline-machine-models-through-the-server);
+  the whole path for such a machine: [Run a machine without internet access](how-to.md#run-a-machine-without-internet-access)).
   The replica's progress then says *via the server*. A pinned engine image comes the same way; an
   image named by a tag only does not (upload it from the machine's page);
 - let the machine reach the host (DNS, a firewall rule, a proxy route); Forgeyard tries it again
@@ -259,7 +260,9 @@ counted: another machine would get the same answer.
 
 - *… could not pull …: This image is not pinned by digest, so it cannot come through the server*, or
   *… is not an image Forgeyard pinned by digest*: a custom recipe's image named by a tag only. Upload it
-  ([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)).
+  ([Upload an engine image to a machine](how-to.md#upload-an-engine-image-to-a-machine)), or copy it
+  from a machine that has it
+  ([Copy an engine image from another machine](how-to.md#copy-an-engine-image-from-another-machine)).
 - *… has no build for amd-01's architecture*: the image has no build for that machine's platform
   (for example arm64); pick a recipe or variant that has one.
 - *the image through the server: … SHA-256 mismatch* (a layer), *the manifest the server sent … is
@@ -279,6 +282,11 @@ counted: another machine would get the same answer.
   812.3 MiB in 41.0 s (19.8 MiB/s), finished.*, or why it ended. A file from another machine (1.4.1)
   says *… <file> from gpu-host to …*, and a machine that could not send it is named with why:
   *gpu-host could not send <file> for … (not_found: …); trying the next machine*.
+- *Relay of <repo>@<revision>/<file> to amd-01 cut short: the source broke off (…); 104857600 of
+  2147483648 bytes sent from huggingface.co in 12.3 s.* (the server's log, 1.4.2): the source (a host on
+  the internet, a registry, or `machine gpu-host`) stopped in the middle of the file. Nothing is wrong on
+  the server: the agent asks for the rest again and the download goes on from what is on disk. When it
+  keeps happening with the same source, look at that network, or at that machine's agent log.
 - *gpu-host's copy of <file> does not match its checksum* (the server's log, and `node.relay_copy_refused`
   in the audit log; the sending machine's own log says *A cached file failed its checksum*): that
   machine's copy is damaged. The file came from elsewhere; remove the model from that machine's cache

@@ -213,7 +213,85 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
 舊 agent 在容器外啟動的行程不會被接手：請先從 UI 停止它們。
 
+## 讓沒有網路的機器執行模型
+
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），執行模型的方式和其他機器一樣：它只需要連得到伺服器。模型、引擎壓縮檔和引擎映像檔都經由伺服器送過去，或來自已經有它們的另一台機器，agent 也會像直接下載一樣檢查每個檔案。本節從加入機器到部署好模型，依序走過一遍，細節請看各段連結的章節。範例中，`amd-01` 沒有網路，`gpu-01` 有。
+
+請讓它跑和伺服器同版本的 agent。經由伺服器下載需要 1.4；把檔案送給其他機器需要 1.4.1；更新指令、計算空的連接埠和移除引擎映像檔需要 1.4.2。agent 太舊而做不到某件事時，機器的頁面會告訴你。
+
+### 加入機器
+
+1. **agent 只需要連到伺服器。** 它由機器往外連，走 HTTPS 連到伺服器的位址（沒改過的話是 port 7860），之後下載的一切也都走這條連線。照常加入機器：**Machines** → **Add a machine**。連不到 Docker Hub 的機器，請用檔案把 agent 映像檔帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。
+2. **伺服器要連得到這台機器的連接埠範圍。** 模型副本在 agent 連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠上監聽，閘道會連到這些連接埠。請在防火牆開放這個範圍，或選一個小範圍並轉送它。
+3. **透過 SSH tunnel** 時，一條連線就能承載兩個方向。從伺服器所在的主機執行：`-R` 把伺服器的連接埠帶到機器上，每個 `-L` 把範圍內的一個連接埠帶回來。範圍是 `33000-33002` 時：
+
+   ```bash
+   ssh -N -R 7860:127.0.0.1:7860 \
+     -L 33000:127.0.0.1:33000 -L 33001:127.0.0.1:33001 -L 33002:127.0.0.1:33002 \
+     USER@amd-01
+   ```
+
+   接著加入機器時，把 **Server address, as that machine reaches it** 設成 `https://127.0.0.1:7860`，**Advanced → Port range** 設成 `33000-33002`（[表單說明](#run-the-agent-in-docker)）。
+
+排程會計算範圍內空的連接埠。一個模型副本佔用兩個（agent 的金鑰守衛和守衛後面的引擎），所以三個連接埠放得下一個模型；範圍用完的機器會被略過，沒有其他地方可去的副本會等待（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
+
+### 選擇它的網路存取方式
+
+在機器的頁面（admin）的 **Models in cache** 底下，設定 **Internet access for downloads**（[細節](#give-an-offline-machine-models-through-the-server)）：
+
+- **Always through the server**：給完全沒有網路的機器，例如 `amd-01`。每個模型檔、引擎壓縮檔和有釘選的引擎映像檔都經由伺服器取得。agent 不會先試來源，所以不用先等一次失敗，這台機器也完全不會收到 Hugging Face 權杖。
+- **Auto**（預設）：給平常連得到網路的機器。它先直接下載；一旦這台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機或 registry 的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
+- **Direct only**：永遠不經由伺服器。這種機器連不到來源時，一小時內排程會把它排在最後（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。
+
+經由伺服器的每個位元組都會經過伺服器的網路兩次，所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
+
+### 把模型送到機器上
+
+照常部署，或用 **Download to…** 預先把模型放進機器的模型快取，預設也會一起抓引擎（[部署之前先下載模型](#download-a-model-before-deploying-it)）。不論哪一種，每個檔案都經由伺服器，來自以下兩個地方之一：
+
+- **另一台機器的快取**：agent 是 1.4.1 以後的機器（`gpu-01`）快取裡有這個模型時，它把檔案送給伺服器，伺服器再轉過去。那台機器同樣只往外連，不開任何 port。只有在沒有機器能送這個檔案時，才會用到網際網路（[從另一台機器](#give-an-offline-machine-models-through-the-server)）。
+- **網際網路**：伺服器從 Hugging Face 或模型的 URL 下載檔案，再轉過去。受限模型需要伺服器的 Hugging Face 權杖（**Models → Sources**）或部署自己的權杖。
+
+是哪一種，可以在這些地方看到：
+
+- 進度，在部署的頁面、Catalog 裡模型的下方和機器的頁面上：從網際網路是 *Downloading the model via the server: … of …*，從那台機器的快取是 *Downloading the model via the server, from gpu-01: … of …*，完成時是 *Downloaded … via the server* 或 *Downloaded … via the server, from gpu-01*；
+- **Download to…**，開始之前在機器那一行顯示 *via the server* 或 *via the server, from gpu-01*；
+- 下載的 API：`via` 是 `direct`、`server` 或 `machine`，送出的機器在 `source` 裡（[參考資料](reference.md#download-a-model-ahead-through-the-api)）；
+- 伺服器的 log，每個檔案一行：*Relayed … to amd-01: …*，或 *… from gpu-01 to amd-01: …*。
+
+引擎壓縮檔（例如 CPU 機器上 llama.cpp 的 process 變體）一律經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
+
+### 把引擎映像檔送到機器上
+
+- **有釘選的映像檔會自動經由伺服器送過去。** 每個內建 recipe 都用 digest 釘選它的映像檔，Forgeyard 自己的 vision 映像檔也是（1.4.1 起）。伺服器從 registry 讀取適合那台機器平台的映像檔，把各層轉過去；agent 逐一檢查、載入映像檔，只有在符合記錄的 id 時才執行。進度會顯示 *Pulling the image via the server: … of …, … of … layers*（[細節](#give-an-offline-machine-models-through-the-server)）。所以 vision 模型（[部署物件偵測模型](#deploy-an-object-detection-model)）在這種機器上的部署方式和在其他地方一樣。
+- **只用 tag 指定的映像檔**（自訂 recipe 的，或你自己建置的）沒有記錄的 digest 可以比對，所以不能經由伺服器。請從機器的頁面 → **Engine images** 放上去：
+  - **Upload an image**：從你的電腦上傳 `docker save` 存成的檔案（[把引擎映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）；
+  - **Copy from another machine**：複製 `gpu-01` 的容器引擎裡已經有的映像檔，不需要檔案（[從另一台機器複製引擎映像檔](#copy-an-engine-image-from-another-machine)）。
+- recipe 換成較新的映像檔後，在同一頁**移除舊的映像檔**：那台機器上沒有部署在用的映像檔才能 **Remove**（[引擎映像檔](#engine-images)）。
+- 1.4 之前的 agent 都做不到這些：請用檔案把映像檔帶過去，再用 `docker load` 載入（[離線機器](#offline-machines)）。
+
+### 更新它的 agent
+
+伺服器升級後，機器的頁面會在 **Update the agent** 顯示完整的指令（[更新 agent](#update-an-agent)）。設成 **Always through the server** 的機器，指令會改為搬運 agent 映像檔，而不是拉取。在連得到 Docker Hub 的機器上執行第一步（把 `USER` 換掉；如果你用別的名稱連到那台機器，主機名稱也要換）：
+
+```bash
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+```
+
+再到 `amd-01` 上執行第二步：`docker rm -f`，然後用載入的映像檔執行同樣的 `docker run`。沒有 `ssh` 連得到那台機器？把映像檔存成檔案帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。1.4.2 之前的 agent 不會回報它的執行方式：請先用這種方式手動更新一次，之後它的頁面就會顯示指令。
+
+### 出問題時
+
+- 經由伺服器（*via the server*）的下載或映像檔失敗：每種訊息和處理方式，請看[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)裡的「經由伺服器仍然失敗」。
+- *Cannot be placed: amd-01: no free port: 3 of 3 in use (host ports 33000-33002)*：連接埠範圍用完了（[沒有空的主機連接埠](troubleshooting.md#a-replica-waits-no-free-host-port)）。
+- 伺服器的 log 裡有 *Relay of … to amd-01 cut short: the source broke off (…)*：來源（網際網路上的主機、registry，或 `machine gpu-01`）在檔案傳到一半時中斷。agent 會自己要求剩下的部分，下載會從磁碟上已有的部分繼續；只有同一個來源一再發生時才需要深入查看（那段網路，或那台機器的 agent log）。
+- 副本說它的映像檔不在這台機器上：[replica 失敗：映像檔不在這台機器上](troubleshooting.md#a-replica-fails-the-image-is-not-on-this-machine)。
+- 機器顯示離線：檢查它和伺服器之間的 tunnel 或防火牆（[agent 顯示離線](troubleshooting.md#an-agent-shows-offline)）。
+
 ## 離線機器
+
+從加入這種機器到部署好模型的完整流程，請看[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)。
 
 連不到映像檔 registry 的機器（沒有網路，或 DNS 過濾擋掉 `ghcr.io` 或 Docker Hub），也能用內建 recipe，
 引擎映像檔用檔案帶過去就好。recipe 和部署都不用改。
@@ -253,7 +331,7 @@ config），或者當 id 是儲存自己產生的時候，比對它的內容（�
 改向 registry 要釘住的那個。所以內建 recipe 原封不動就能離線用，不需要另寫只用 tag 指定映像檔的自訂 recipe。
 
 內建 recipe 的每個映像檔都有記錄 id；自訂 recipe 只要寫的是完全相同的映像檔參照，也一樣。其他用 digest
-釘住的映像檔無法檢查：在離線機器上，請在你的自訂 recipe 裡只用 tag 指定它。這項檢查需要這一版或更新的
+釘住的映像檔無法檢查：在離線機器上，請在你的自訂 recipe 裡只用 tag 指定它。這項檢查需要 1.3 或更新的
 agent；舊版 agent 會試著去拉。
 
 ## 部署物件偵測模型
@@ -403,7 +481,7 @@ media: {inputs: [image, audio, video], files: false}
 
 **模型自己的設定**（Z-Image-Turbo 需要 CFG 1 與 8 步）對 stable-diffusion.cpp 來說放在目錄項目的引擎參數裡（`--cfg-scale 1 --steps 8`）；推薦的項目都已經帶上了。vLLM-Omni 則從模型本身讀取。
 
-**在離線的 AMD 機器上：** 用 `docker load` 載入 `sd-cpp` 配方的 Vulkan 映像檔（見[離線機器](#offline-machines)）。模型則先在一台連得到 Hugging Face 的機器上部署一次，再把它在那台機器模型快取裡的目錄（`hub/models--<org>--<name>`，用 `tar` 或 `rsync -a`：裡面用的是相對連結）複製到離線機器快取裡的相同位置。那裡的部署會發現已經快取好，什麼都不用下載。
+**在離線的 AMD 機器上：** 用 1.4 的 agent 時，`sd-cpp` 配方的 Vulkan 映像檔（有釘選）和模型都會經由伺服器送過去，有機器的快取裡已經有這個模型時就從那台機器取得（[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)）。用較舊的 agent 時，用 `docker load` 載入映像檔（見[離線機器](#offline-machines)）；模型則先在一台連得到 Hugging Face 的機器上部署一次，再把它在那台機器模型快取裡的目錄（`hub/models--<org>--<name>`，用 `tar` 或 `rsync -a`：裡面用的是相對連結）複製到離線機器快取裡的相同位置。那裡的部署會發現已經快取好，什麼都不用下載。
 
 ## 生成影片
 
@@ -886,11 +964,11 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
 
-自己連不到 Hugging Face 或 GitHub 的機器，會經由伺服器取得檔案：請看下一節。
+自己連不到 Hugging Face 或 GitHub 的機器，會經由伺服器取得檔案：請看下一節，以及[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)。
 
 ## 經由伺服器把模型送到離線機器
 
-自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型、引擎壓縮檔和有釘選的引擎映像檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。
+自己沒有網路的機器（在防火牆後面、DNS 被過濾，或只能透過 SSH tunnel 連到），一樣可以下載模型、引擎壓縮檔和有釘選的引擎映像檔：**由伺服器去抓，再把資料轉給它**，伺服器不存任何檔案。agent 用它原本連伺服器的方式提出要求：由機器往外連，走 HTTPS、使用它釘選的 CA 和機器憑證，所以只要原本能承載 agent 連線的路（例如 `ssh -R 7860:…` tunnel）都能用。機器和 tunnel 都不用改。從加入這種機器到部署好模型的完整流程，請看[讓沒有網路的機器執行模型](#run-a-machine-without-internet-access)。
 
 1. 打開機器的頁面（admin）。在 **Models in cache** 底下設定 **Internet access for downloads**：
    - **Auto**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
@@ -924,7 +1002,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 伺服器依 Forgeyard 為這個映像檔記下的 digest（`forgeyard/recipes/images.lock.json`），用 registry 發的匿名 pull token 讀取**那台機器平台**（amd64、arm64）的 manifest，再依 digest 提供那份 manifest、它的 config 和每一層。那份 manifest 沒列的 digest 一律不給，完整的一層經過時也會檢查。
 - agent 把每一份都和它的 digest 比對，先放在模型快取的 `.partial/image-…` 底下（中斷後從那一層接續；**Remove partial downloads** 會清掉），組成 `docker load` 和 `podman load` 都接受的封存檔、載入、加上 recipe 的 tag，並且只有在載入的映像檔符合記錄的 id 時才執行，和手動載入的映像檔一樣。之後刪除這些檔案。
 - 進度會顯示 *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*，接著是 *loading it*。每一層都會經過伺服器的網路兩次，和模型檔一樣。
-- 只用 tag 指定的映像檔（自訂 recipe 的、這一版 Forgeyard 自己的 vision 映像檔）不能經由伺服器：沒有記錄的 digest 可以比對。請改用上傳（下一節）。
+- 只用 tag 指定的映像檔（自訂 recipe 的，或你自己建置的）不能經由伺服器：沒有記錄的 digest 可以比對。請改用上傳，或從另一台機器複製（接下來兩節）。Forgeyard 自己的 vision 映像檔從 1.4.1 起有釘選，會經由伺服器送過去。
 
 機器的 agent 必須是 1.4 以後的版本；較舊的 agent 不管設定都會直接下載，設定欄位也會提示你更新它（agent 能轉送模型、但還不能轉送映像檔時也會提示）。要送檔案給其他機器，agent 必須是 1.4.1 以後的版本；提出要求的機器只要 1.4。
 
