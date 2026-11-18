@@ -48,6 +48,19 @@ image to a machine without registry access. `scripts/pin_images.py` checks both 
   (FY-VIS-001 and FY-VIS-019 name the pinned references). A release that did not change it keeps the pin:
   a server upgrade alone never changes the image a vision model runs.
 
+## Before a release
+
+The release steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#releasing). One of them guards the image
+publish: `.github/workflows/dockerhub-login.yml` (*Docker Hub login*) runs on every push to `dev` and `main`,
+logs in to Docker Hub with the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, checks with
+`scripts/dockerhub_check.py` that the token may push to `forgeyard`, `forgeyard-agent` and `forgeyard-vision`
+(Docker Hub's token service answers with the actions it grants; nothing is pushed), and logs out. Without
+the secrets it warns and stays green. **Before tagging, its latest run on `main` must be green without a
+warning** (`gh run list --workflow dockerhub-login.yml --branch main --limit 1`); otherwise re-enter both
+secrets (the username is the Docker Hub account name, the token a *Read & Write* access token) and run it
+again by hand (*Actions → Docker Hub login → Run workflow*). It is not a required check and does not run on
+pull requests.
+
 ## Writing tests that do not flake
 
 CI runs on small machines (two cores, often busy; the PostgreSQL job the slowest), so a test that
@@ -122,6 +135,7 @@ fixed time for something to happen, or read a page before the data it needed had
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
 | `Dockerfile.server`, `scripts/server_image_smoke.sh` | the server's container image and its CI smoke test |
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | a release tag publishes both images on Docker Hub |
+| `.github/workflows/dockerhub-login.yml`, `scripts/dockerhub_check.py` | every push to `dev` and `main` checks that the Docker Hub secrets log in and may push ([before a release](#before-a-release)) |
 | `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU an app sees, through the CUDA driver only |

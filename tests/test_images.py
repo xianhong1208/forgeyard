@@ -368,3 +368,150 @@ def test_fy_pub_006_the_namespace_is_a_docker_hub_account_name():
     if ns:
         assert re.fullmatch(r"[a-z0-9]{4,30}", ns), ns
         assert images.published_repository(images.AGENT_REPOSITORY) == f"docker.io/{ns}/forgeyard-agent"
+
+
+# ------------------------------------------------------------------ the Docker Hub login check (#128)
+def _check_module():
+    spec = importlib.util.spec_from_file_location("dockerhub_check", ROOT / "scripts" / "dockerhub_check.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _jwt(payload: dict) -> str:
+    import base64
+    import json
+
+    def part(d: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    return f"{part({'alg': 'RS256'})}.{part(payload)}.c2lnbmF0dXJl"
+
+
+def test_fy_pub_007_the_docker_hub_login_workflow():
+    """FY-PUB-007: dockerhub-login.yml runs on pushes to dev and main and by hand, never on pull requests,
+    with read-only permissions; with both secrets it logs in with the same pinned login action as the
+    publish workflow (and logs out), then runs scripts/dockerhub_check.py with the secrets in its
+    environment only; without them it warns and stays green. Its job is not one of ci.yml's (the
+    ruleset's required checks), and no step echoes a secret."""
+    raw = (ROOT / ".github" / "workflows" / "dockerhub-login.yml").read_text()
+    wf = _workflow("dockerhub-login.yml")
+    on = wf[True]
+    assert on["push"] == {"branches": ["main", "dev"]} and "workflow_dispatch" in on and "pull_request" not in on
+    assert wf["permissions"] == {"contents": "read"}
+    assert set(wf["jobs"]) == {"dockerhub-login"} and not set(wf["jobs"]) & set(_workflow("ci.yml")["jobs"])
+    job = wf["jobs"]["dockerhub-login"]
+    assert job["name"] == "Docker Hub login"
+    assert job["env"]["HAVE_SECRETS"] == "${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}"
+    steps = job["steps"]
+    skip = steps[0]
+    assert skip["if"] == "env.HAVE_SECRETS != 'true'"
+    assert "Docker Hub secrets not set: a release would not push images" in skip["run"] and "::warning" in skip["run"]
+    login = next(s for s in steps if s.get("uses", "").startswith("docker/login-action"))
+    publish_login = next(s for s in _workflow("publish-images.yml")["jobs"]["publish"]["steps"]
+                         if s.get("uses", "").startswith("docker/login-action"))
+    assert login["uses"] == publish_login["uses"] and re.fullmatch(r"docker/login-action@[0-9a-f]{40}", login["uses"])
+    assert login["if"] == "env.HAVE_SECRETS == 'true'"
+    assert login["with"] == {"username": "${{ secrets.DOCKERHUB_USERNAME }}",
+                             "password": "${{ secrets.DOCKERHUB_TOKEN }}", "logout": True}
+    check = next(s for s in steps if "scripts/dockerhub_check.py" in s.get("run", ""))
+    assert check["if"] == "env.HAVE_SECRETS == 'true'"
+    assert check["env"] == {"DOCKERHUB_USERNAME": "${{ secrets.DOCKERHUB_USERNAME }}",
+                            "DOCKERHUB_TOKEN": "${{ secrets.DOCKERHUB_TOKEN }}"}
+    # Secrets reach steps only through `with` and `env`; no run script interpolates one, none pushes.
+    for s in steps:
+        assert "secrets." not in s.get("run", ""), s
+    assert "push" not in {k for s in steps for k in s.get("with", {})}
+    assert "docker push" not in raw and "build-push-action" not in raw
+    fix = next(s for s in steps if s.get("name") == "How to fix it")
+    assert fix["if"] == "failure() && env.HAVE_SECRETS == 'true'" and "Read & Write" in fix["run"]
+
+
+def test_fy_pub_008_the_check_asks_docker_hub_for_push_and_never_prints_a_secret(monkeypatch, capsys, tmp_path):
+    """FY-PUB-008: scripts/dockerhub_check.py asks auth.docker.io for pull,push on the server, agent and
+    vision repositories under the namespace, with the secrets as Basic credentials; it passes only when the
+    token's `access` claim grants push on all three, fails on refused credentials (401) or a missing push
+    (a read-only token), warns and passes without the secrets or when the token says nothing, and never
+    prints the username or the token."""
+    import base64
+    import io
+    import json
+    import urllib.error
+
+    chk = _check_module()
+    monkeypatch.setattr(chk.images, "DOCKERHUB_NAMESPACE", "acmeorg")
+    repos = chk.repositories("acmeorg")
+    assert repos == ["acmeorg/forgeyard", "acmeorg/forgeyard-agent", "acmeorg/forgeyard-vision"]
+    url = chk.token_url(repos)
+    assert url.startswith("https://auth.docker.io/token?service=registry.docker.io&")
+    assert url.count("&scope=repository%3Aacmeorg%2Fforgeyard") == 3 and url.count("%3Apull%2Cpush") == 3
+
+    def access(actions_for: dict[str, list[str]]) -> str:
+        return _jwt({"access": [{"type": "repository", "name": n, "actions": a} for n, a in actions_for.items()]})
+
+    full = access({r: ["pull", "push"] for r in repos})
+    assert chk.granted(full) == {r: {"pull", "push"} for r in repos}
+    assert chk.without_push(chk.granted(full), repos) == []
+    read_only = access({r: ["pull"] for r in repos})
+    assert chk.without_push(chk.granted(read_only), repos) == repos
+    assert chk.without_push(chk.granted(access({repos[0]: ["pull", "push"]})), repos) == repos[1:]
+    assert chk.granted("not-a-jwt") is None and chk.granted("a.b!!.c") is None
+    assert chk.granted(_jwt({"sub": "x"})) is None
+
+    user, secret = "someuser", "fake-token-SECRETVALUE123"
+    sent: list[urllib.request.Request] = []
+    answer: dict = {}
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout):
+        sent.append(req)
+        if answer.get("status"):
+            raise urllib.error.HTTPError(req.full_url, answer["status"], "x", {},
+                                         io.BytesIO(b'{"details":"incorrect username or password"}'))
+        return Resp(json.dumps({"token": answer["token"]}).encode())
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("DOCKERHUB_USERNAME", user)
+    monkeypatch.setenv("DOCKERHUB_TOKEN", secret)
+
+    def run(**ans) -> tuple[int, str]:
+        answer.clear()
+        answer.update(ans)
+        code = chk.main()
+        return code, capsys.readouterr().out
+
+    code, out = run(token=full)
+    assert code == 0 and "push on every published repository" in out
+    assert sent[-1].full_url == url
+    assert sent[-1].get_header("Authorization") == "Basic " + base64.b64encode(f"{user}:{secret}".encode()).decode()
+    code, out = run(token=read_only)
+    assert code == 1 and "::error title=Docker Hub token cannot push::" in out and "Read & Write" in out
+    code, out = run(status=401)
+    assert code == 1 and "::error title=Docker Hub refused the secrets::" in out
+    assert "HTTP 401 (incorrect username or password)" in out
+    code, out = run(token="opaque")
+    assert code == 0 and "::warning title=Push access not checked::" in out
+    basic = base64.b64encode(f"{user}:{secret}".encode()).decode()
+    for ans in ({"token": full}, {"token": read_only}, {"status": 401}, {"token": "opaque"}):
+        code, out = run(**ans)
+        assert secret not in out and user not in out and basic not in out
+    text = summary.read_text()
+    assert "can push to acmeorg/forgeyard" in text and "Docker Hub refused the secrets" in text
+    assert secret not in text and user not in text and basic not in text
+    # Without the secrets (or the namespace) it warns, asks nothing and passes.
+    n = len(sent)
+    monkeypatch.setenv("DOCKERHUB_TOKEN", "")
+    code, out = run(token=full)
+    assert code == 0 and "Docker Hub secrets not set: a release would not push images" in out and len(sent) == n
+    monkeypatch.setenv("DOCKERHUB_TOKEN", secret)
+    monkeypatch.setattr(chk.images, "DOCKERHUB_NAMESPACE", "")
+    code, out = run(token=full)
+    assert code == 0 and "::warning title=No Docker Hub namespace::" in out and len(sent) == n

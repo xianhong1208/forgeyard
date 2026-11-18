@@ -77,6 +77,17 @@ version until 1.0.
   Agents older than 1.4.2 report no range and are not counted, as before. `forgeyard agent runtimes` shows
   the range. No setting and no migration.
 
+- **A wrong Docker Hub secret shows up before a release, not after the tag** (#128). 1.4.0's publish failed
+  half-way on *unauthorized: incorrect username or password*. A new workflow, *Docker Hub login*
+  (`.github/workflows/dockerhub-login.yml`), runs on every push to `dev` and `main` (and by hand): with the
+  secrets set it logs in to Docker Hub with the same pinned action as the publish workflow, asks Docker Hub's
+  token service whether the token may push to `forgeyard`, `forgeyard-agent` and `forgeyard-vision`
+  (`scripts/dockerhub_check.py`: a read-only token or another account's is granted pull only), pushes
+  nothing and logs out; without them it warns *Docker Hub secrets not set: a release would not push images*
+  and stays green. It is not a required check (it does not run on pull requests). CONTRIBUTING.md ›
+  Releasing and docs/development.md: before tagging, its latest run on `main` must be green, and how to fix
+  it when it is not.
+
 ### Fixed
 
 - A relay whose source breaks off mid-file reads as such in the server's log (#130). The server writes one
