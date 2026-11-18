@@ -1138,6 +1138,10 @@ saying so. The groups, in the order they run:
 | `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
 | `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
 | `passthrough` | a small HTTP app exposed at `/x/`: as a process on the CPU machine, in a container on the GPU machine. Keys (none, listed), the path as sent, refused paths, credentials and forwarded headers replaced, the forced sandbox, redirects, streaming, the body limit, rpm, concurrency, the read timeout, the replica's port behind the key guard, usage |
+| `tts`, `img`, `video` | speech, image and video generation on the GPU machine (and the CPU machine where a CPU engine exists): the SDK's calls, formats, caps, the queue, usage and the key guard |
+| `vision` | detection, segmentation and depth models with the vision recipe: the results, refusals, keys and usage |
+| `relay` | models through the server: with the CPU machine's **Internet access for downloads** set to **Always through the server**, **Download to…** of a small GGUF (26 MB) arrives through the server; then a second machine (`--relay-second-machine`, default the second CPU machine, else the GPU machine) gets it from the first machine's cache. Both machines' setting goes back, and the model leaves their caches |
+| `images` | on a machine with Docker or Podman (`--engine-machine`, default the GPU machine): its engine images; an image file of a few KB that the script builds is uploaded, copied to a second machine that takes images (`--second-engine-machine`), and removed with **Remove engine image** (a recipe names it for a few seconds, since only images a recipe names may be removed) |
 | `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
 
 `--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
@@ -1148,7 +1152,10 @@ What to know before you run it:
 
 - **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
   apps, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
-  at the end, also after a failure or **Ctrl-C**. Usage rows and audit events of the run stay.
+  at the end, also after a failure or **Ctrl-C**, with the relay group's model in the machines'
+  caches, their fetch setting, and the images group's image and recipe. Usage rows and audit events
+  of the run stay. Only on an agent older than 1.4.2, which cannot remove images, the tiny image
+  `accept-<run>-image:1` stays, and the report says so.
 - **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
   cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
   checks use the run's own keys and user.

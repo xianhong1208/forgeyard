@@ -61,6 +61,22 @@ version until 1.0.
   agent removes only an image of its own listing, by its id (by its own tags when it has several). An older agent
   lists the images and says to update it. Audited as `node.image_removed`.
 
+- **`scripts/accept_all.py` checks relaying, image upload and image copy** (#126): two new groups after `vision`.
+  `relay`: on the CPU machine (`--relay-machine`) with its `fetch_via` set to `server`, **Download to…** of a 26 MB
+  GGUF (`ggml-org/tiny-llamas`, `stories15M-q8_0.gguf`, model only) must end `done` via `server`, with the file at
+  its size in the machine's model cache; then on a second machine (`--relay-second-machine`, default the second CPU
+  machine, else the GPU machine) the same download must come from the first machine's cache (via `machine`, the
+  source named, and the dialog naming it first). `images`: on a machine with a container engine (`--engine-machine`,
+  default the GPU machine), its engine-image listing; an image file the script builds itself (a few KB, one layer,
+  no Docker needed where it runs) uploaded and loaded (no recipe match, audited, only counted on the machine page,
+  Remove refused as `not_an_engine_image`); copied to a second machine that loads images
+  (`--second-engine-machine`; same content, audited); then removed with **Remove engine image**, for which a custom
+  recipe names it for a few seconds (Forgeyard removes only images a recipe names). Everything is put back at the
+  end, also after a failure: both machines' `fetch_via`, the model in their caches (and the part file of a download
+  it broke off, unless the machine already had partial downloads: those are not the run's to delete, and the report
+  says so), the image and the recipe (an agent older than 1.4.2 cannot remove it: the report says it stays). Without the machines or agent features they
+  need, the checks are skipped with the reason.
+
 ### Changed
 
 - **Copy an image lists engine images first** (#124). The **Copy from another machine** dialog shows the images a
