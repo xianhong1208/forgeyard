@@ -338,7 +338,7 @@ agent；舊版 agent 會試著去拉。
 
 物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**Models**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
 
-1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。
+1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入，零樣本偵測模型（Grounding DINO、OWL-ViT、OWLv2…）也不能（#142 會支援）。
 2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
 3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground**（選單 *Vision* 底下的模型）可以用你自己的照片。
 

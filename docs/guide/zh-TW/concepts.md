@@ -62,6 +62,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 **Models** 是模型庫，也就是可以部署的東西，分成三個分頁：**Catalog**（目錄，預設）、**Engines**（引擎），以及管理員才有的 **Sources**（來源）。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.3 的連結（`/models/deployments/<id>`、`/models/deploy`、`/models?tab=routes`、`/models/routes/<id>`、`/providers`）會打開新的位置。
 
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。每一列都有 **Deploy** 和 **Download to…**。
+- **模型的用途**來自它在 Hugging Face 上的任務，再用它的 `config.json` 核對。很多 reranker 標的是 *text classification*，文字分類模型也是；用 vLLM 的規則分辨：只有一個輸出（`num_labels` 為 1：bge-reranker、ms-marco 的 cross-encoder）是 reranker，兩個以上標籤（情緒、主題、NLI）是文字分類模型，目前還不能加入（#144 會支援）。語言模型型的 reranker（例如 Qwen3-Reranker）不受影響。
 - **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - 目錄裡的每個模型都有**自己的頁面**（1.4.3），點它的名稱就會打開：`/models/<name>`。頁面上有模型的資訊（來源與版本、授權、任務、架構）、**哪些機器的模型快取裡有它**、用引擎的預設值現在**放不放得下**每台機器、它的部署、能執行它的引擎，以及它的檔案和大小。每個引擎也有自己的頁面 `/models/engines/<name>`：它的變體（每種硬體用的映像檔或程式，以及是否以 digest 釘選）、**哪些機器已經有那個映像檔或程式**、它的參數，以及使用它的部署和模型。主控台裡所有模型和引擎的名稱都連到這些頁面。管理員可以在模型頁面設定**顯示名稱**；模型的名稱本身不變，因為部署記錄的是它，所以 `deploy`、`deployments`、`routes`、`engines`、`catalog`、`sources`、`recommended`、`search` 和 `inspect` 不能當模型名稱。（[查看模型或引擎](how-to.md#look-at-a-model-or-an-engine)）
 - **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
@@ -149,7 +150,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入目錄（推薦了三個）、部署後列在 **Serving → Vision**、在 **Playground** 試用（模型選單的 *Vision* 底下）、用 API 金鑰呼叫。
 
 - **只有一種引擎，Forgeyard 自己的。** `vision` 配方在 `forgeyard-vision` 映像檔（和每個引擎一樣以 digest 固定）裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
-- **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。
+- **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。零樣本（開放詞彙）偵測模型也不能加入：它們找的是文字提示說的東西（Grounding DINO、MM-Grounding-DINO、OWL-ViT、OWLv2、OmDet-Turbo），架構名稱也以 `ForObjectDetection` 結尾，但視覺伺服器還不能載入（#142 會支援）。1.4.3 之前加入的會留在目錄裡，但不能部署。
 - **自己的 API：**`/v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`，每個請求一張圖片（multipart，或 JSON 裡的 base64），回應是 JSON；遮罩和深度圖是 base64 的 PNG。OpenAI SDK 沒有這個 API：任何 HTTP 用戶端都能呼叫。
 - 每個副本**一次處理一張圖片**；其餘排隊等候。要更高吞吐量就多開副本。
 - 用量計**每個請求一張圖片**、它的千像素數和忙碌時間。圖片只留在你自己的部署上：絕不送往雲端供應商，也不會被保存。

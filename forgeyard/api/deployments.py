@@ -127,6 +127,9 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
         raise fail(422, "incompatible", f"{recipe.name} reads {', '.join(recipe.formats)} models; {m.name} is {m.format}.")
     if m.task not in recipe.tasks:
         raise fail(422, "incompatible", f"{recipe.name} serves {', '.join(recipe.tasks)}; {m.name} is a {m.task} model.")
+    if why := vision.deploy_refusal(m.task, m.meta or {}):
+        # 1.4.3 (#147): a zero-shot detector added before the catalog refused them.
+        raise fail(422, "not_a_vision_model", why)
     params = normalise_params(recipe, body.params)
     device = "gpu" if params["gpus"] > 0 else "cpu"
     try:

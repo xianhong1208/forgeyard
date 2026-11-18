@@ -117,6 +117,11 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   list, from a **Hugging Face search**, or from a source: `hf://org/name`, a GGUF URL, or
   `local://` a directory on the machines. Adding a model reads its details without downloading it.
   Each row has **Deploy** and **Download to…**.
+- **What a model is for** comes from its Hugging Face task, checked against its `config.json`. Many
+  rerankers are tagged *text classification*, and so are text classifiers; vLLM's rule tells them apart. A
+  model with one output (`num_labels` 1: bge-reranker, the ms-marco cross-encoders) is a reranker; one with
+  two labels or more (sentiment, topic, NLI) is a text classifier, which cannot be added yet (support comes
+  with #144). Rerankers that are language models, such as Qwen3-Reranker, are not affected.
 - An **engine** says how to run a kind of model: which program, which container image (pinned by
   digest) or release, which parameters, and how much memory it needs. The API and the YAML files
   call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
@@ -315,7 +320,11 @@ API key.
 - **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
   is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
   model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large
-  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added.
+  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added. Nor can zero-shot
+  (open-vocabulary) detectors, which find what a text prompt names (Grounding DINO, MM-Grounding-DINO,
+  OWL-ViT, OWLv2, OmDet-Turbo): their architectures end in `ForObjectDetection` too, but the vision server
+  cannot load them yet (support comes with #142). One added before 1.4.3 stays in the catalog and cannot be
+  deployed.
 - **Their own API:** `/v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth`, one image per
   request (multipart, or base64 in JSON) and a JSON answer; masks and depth maps are PNGs in base64.
   The OpenAI SDK has no such API: any HTTP client calls it.

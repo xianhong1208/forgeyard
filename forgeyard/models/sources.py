@@ -413,6 +413,8 @@ def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmpr
 TASK_FROM_PIPELINE = {
     "text-generation": "chat", "text2text-generation": "chat", "image-text-to-text": "chat",
     "feature-extraction": "embed", "sentence-similarity": "embed",
+    # Many cross-encoder rerankers are tagged text-classification (BAAI/bge-reranker-v2-m3); so are text
+    # classifiers, which the inspector tells apart by their number of labels (reranker_refusal).
     "text-ranking": "rerank", "text-classification": "rerank",
     "automatic-speech-recognition": "asr",
     "text-to-speech": "tts",
@@ -430,3 +432,35 @@ def task_hint(pipeline_tag: Optional[str], tags: list[str]) -> Optional[str]:
         if t in TASK_FROM_PIPELINE:
             return TASK_FROM_PIPELINE[t]
     return None
+
+
+# ------------------------------------------------------------------ rerankers and text classifiers (1.4.3)
+def sequence_labels(config: dict) -> Optional[int]:
+    """How many outputs a sequence-classification model's head has, or None when config.json names no
+    …ForSequenceClassification architecture (a causal-LM reranker such as Qwen3-Reranker). As transformers
+    reads it (configuration_utils, 5.x): `id2label` when it is there, else `num_labels`, else 2 (transformers
+    leaves a two-label map out of config.json, it being the default)."""
+    archs = [a for a in config.get("architectures") or [] if isinstance(a, str)]
+    if not any(a.endswith("ForSequenceClassification") for a in archs):
+        return None
+    labels = config.get("id2label")
+    if isinstance(labels, dict) and labels:
+        return len(labels)
+    n = config.get("num_labels")
+    if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+        return n
+    return 2
+
+
+def reranker_refusal(config: dict) -> Optional[str]:
+    """Why a model cannot be served as a reranker (a message), or None. vLLM's rule: a sequence-classification
+    model scores pairs (/rerank, /score) only when it has one output (num_labels 1); with more it is a text
+    classifier (sentiment, topic, NLI…), which Forgeyard does not serve yet."""
+    n = sequence_labels(config)
+    if n is None or n == 1:
+        return None
+    labels = config.get("id2label") if isinstance(config.get("id2label"), dict) else {}
+    names = [str(v)[:40] for _, v in sorted(labels.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0)]
+    shown = f" ({', '.join(names[:6])}{', …' if len(names) > 6 else ''})" if names else ""
+    return (f"This is a text classifier with {n} labels{shown}, not a reranker: a reranker has one output "
+            "(num_labels 1 in its config.json). Text classification comes with #144.")

@@ -1,0 +1,20 @@
+{
+  "id": "iSEE-Laboratory/llmdet_tiny",
+  "pipeline_tag": "zero-shot-object-detection",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "safetensors",
+    "mm-grounding-dino",
+    "zero-shot-object-detection",
+    "vision",
+    "arxiv:2501.18954",
+    "arxiv:2104.12763",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

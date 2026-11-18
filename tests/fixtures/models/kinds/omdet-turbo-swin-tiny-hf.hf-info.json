@@ -1,0 +1,16 @@
+{
+  "id": "omlab/omdet-turbo-swin-tiny-hf",
+  "pipeline_tag": "zero-shot-object-detection",
+  "library_name": null,
+  "tags": [
+    "safetensors",
+    "omdet-turbo",
+    "zero-shot-object-detection",
+    "arxiv:2403.06892",
+    "license:apache-2.0",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

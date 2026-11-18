@@ -1,0 +1,23 @@
+{
+  "id": "BAAI/bge-reranker-v2-m3",
+  "pipeline_tag": "text-classification",
+  "library_name": "sentence-transformers",
+  "tags": [
+    "sentence-transformers",
+    "safetensors",
+    "xlm-roberta",
+    "text-classification",
+    "transformers",
+    "text-embeddings-inference",
+    "multilingual",
+    "arxiv:2312.15503",
+    "arxiv:2402.03216",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}
