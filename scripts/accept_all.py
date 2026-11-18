@@ -57,6 +57,19 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              detector also on the CPU machine: two cats found in the COCO photo (multipart and JSON), the mask
              of a square, a 16-bit depth map, the wrong endpoint, no image, no key, a key without the model,
              the replica's port behind its key
+  relay      models through the server (1.4): on the relay machine (--relay-machine, default the CPU machine)
+             with its fetch_via set to "server", Download to… a small GGUF (RELAY_MODEL, 26 MB): done, "via"
+             server, the file and its size in the machine's model cache; then on a second machine
+             (--relay-second-machine, default the second CPU machine, else the GPU machine) the same download
+             comes from the first machine's cache ("via" machine, the source named). Each machine's fetch_via
+             goes back to what it was and the model leaves both caches
+  images     engine images (1.4): on a machine with a container engine (--engine-machine, default the GPU
+             machine): its engine-images listing; a tiny image file built here (one 1-file layer, no Docker on
+             this computer) uploaded and loaded (its id, no recipe match, audited, only counted in the listing,
+             its removal refused as not an engine image); copied to a second engine machine
+             (--second-engine-machine, default another given machine that can load images; same content as the
+             source, audited); then removed through Remove engine image, with a short-lived custom recipe
+             naming it so that Forgeyard may (no `docker rmi` of an image no recipe names)
   console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
              and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
 
@@ -65,7 +78,10 @@ chosen. A machine that is not given skips what would run on it, saying so.
 
 Everything the run creates is named accept-<run>-… (the run id is printed first) and removed at the
 end, also after a failure or Ctrl-C: deployments, workloads, routes, API keys, the throwaway user,
-and the catalog entries it added (models it found in the catalog stay). A provider's budget goes back
+the catalog entries it added (models it found in the catalog stay), the relay group's model in the
+machines' caches and their fetch_via, the images group's image (accept-<run>-image:1, a few KB) and its
+custom recipe. When a machine's agent cannot remove images (older than 1.4.2), that tiny image stays
+there and the report says so. A provider's budget goes back
 to what it was. Nothing it did not create is changed, except that one budget for a few seconds. Usage
 rows and audit events of the run stay, like those of any request. Objects left by an earlier run
 that was killed are listed at the start, never touched.
@@ -91,6 +107,7 @@ import getpass
 import hashlib
 import http.cookiejar
 import importlib.util
+import io
 import json
 import os
 import re
@@ -101,6 +118,7 @@ import ssl
 import string
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import traceback
@@ -144,6 +162,13 @@ MODELS = [
     {"key": "asr", "device": "gpu", "model": "accept-faster-whisper-small", "source": "hf://Systran/faster-whisper-small",
      "task": "asr", "recipe": "faster-whisper", "params": {}},
 ]
+# The relay group's model: the smallest GGUF on Hugging Face that the catalog takes (26 MB), downloaded to
+# one machine through the server and then from that machine's cache to another.
+RELAY_MODEL = {"model": "accept-stories15m-gguf", "source": "hf://ggml-org/tiny-llamas", "file": "stories15M-q8_0.gguf",
+               "task": "chat"}
+# What the relay and images groups need of an agent (protocol features, forgeyard/machines/protocol.py).
+RELAY_FEATURES = ("models", "prefetch", "relay", "cache_admin")
+IMAGE_FEATURES = ("image_load", "image_save", "image_remove")
 # Images for container workloads (pulled by the machine's container engine when missing).
 CONTAINER_IMAGE = "busybox:1.37"
 CUDA_IMAGE = "nvidia/cuda:12.4.1-base-ubuntu22.04"
@@ -370,6 +395,13 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     ap.add_argument("--gpu-machine", help="a machine with GPUs: GPU workloads and GPU models run there")
     ap.add_argument("--cpu-machine", help="a machine for CPU workloads and the CPU model (may be the GPU machine)")
     ap.add_argument("--second-cpu-machine", help="another machine for the CPU model: balancing and failover")
+    ap.add_argument("--relay-machine", help="the relay group's machine (default: --cpu-machine)")
+    ap.add_argument("--relay-second-machine", help="the machine the relay group copies the model to from the first "
+                    "one's cache (default: --second-cpu-machine, else --gpu-machine when it is another machine)")
+    ap.add_argument("--engine-machine", help="the images group's machine with a container engine (default: "
+                    "--gpu-machine)")
+    ap.add_argument("--second-engine-machine", help="the machine the images group copies the image to (default: "
+                    "another given machine whose agent loads images)")
     ap.add_argument("--cloud-provider", help="an existing provider: the cloud group runs only with it")
     ap.add_argument("--cloud-model", help="its model to use (default: its first chat model)")
     ap.add_argument("--only", help="run only these groups (comma-separated)")
@@ -405,6 +437,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         ap.error("--second-cpu-machine needs --cpu-machine")
     if args.second_cpu_machine and args.second_cpu_machine in (args.cpu_machine, args.gpu_machine):
         ap.error("--second-cpu-machine must be another machine than --cpu-machine and --gpu-machine")
+    for a, b in (("relay_machine", "relay_second_machine"), ("engine_machine", "second_engine_machine")):
+        first = getattr(args, a) or (args.cpu_machine if a == "relay_machine" else args.gpu_machine)
+        if getattr(args, b) and getattr(args, b) == first:
+            ap.error(f"--{b.replace('_', '-')} must be another machine than the first one ({first})")
     if args.cloud_model and not args.cloud_provider:
         ap.error("--cloud-model needs --cloud-provider")
     if args.timeout <= 0:
@@ -592,6 +628,7 @@ class Run:
         self.current = "setup"
         self.version = ""
         self.machines: dict[str, dict] = {}       # role (gpu, cpu, cpu2) -> machine as /api/machines lists it
+        self.named: dict[str, dict] = {}          # the relay and images groups' machines by flag (relay, engine…)
         self.deps: dict[str, dict] = {}           # model key -> ready deployment
         self.models_done = False
         self.cloud_calls = 0
@@ -629,6 +666,9 @@ class Run:
                 self.machines[role] = x
                 return x
         return None
+
+    def machine_by_id(self, mid: int) -> Optional[dict]:
+        return next((x for x in self.admin.ok("GET", "/api/machines")["machines"] if x["id"] == mid), None)
 
     # -- keys, the SDK, the throwaway user
     def new_key(self, what: str, client: Optional[Client] = None, **body) -> dict:
@@ -734,6 +774,12 @@ def start(run: Run, password: str) -> None:
             if name not in machines:
                 raise Refused(f"no machine named {name!r} (have: {', '.join(sorted(machines)) or 'none'})")
             run.machines[role] = machines[name]
+    for role, name in (("relay", a.relay_machine), ("relay2", a.relay_second_machine), ("engine", a.engine_machine),
+                       ("engine2", a.second_engine_machine)):
+        if name:
+            if name not in machines:
+                raise Refused(f"no machine named {name!r} (have: {', '.join(sorted(machines)) or 'none'})")
+            run.named[role] = machines[name]
     if a.cloud_provider:
         names = [p["name"] for p in run.admin.ok("GET", "/api/providers")["providers"]]
         if a.cloud_provider not in names:
@@ -758,6 +804,9 @@ def leftovers(run: Run) -> None:
     for k in run.admin.ok("GET", "/api/keys").get("keys") or []:
         if pat.match(k["name"]) and k["status"] == "active":
             found.append(f"API key {k['name']}")
+    for r in run.admin.ok("GET", "/api/models").get("recipes") or []:
+        if pat.match(str(r.get("name", ""))) and not r.get("builtin"):
+            found.append(f"recipe {r['name']}")
     if found:
         note = ("named like this script's, from an earlier run that was killed (or one still running), not touched: "
                 + ", ".join(found))
@@ -2220,6 +2269,450 @@ def group_vision(run: Run) -> None:
                                key, narrow, image, filename, report)
         run.report.info.setdefault("vision", {})[d["name"]] = report.get(d["name"])
         _delete_deployment(c, d0["id"])
+
+
+# ------------------------------------------------------------------ group: relay
+def missing_features(m: dict, need) -> list[str]:
+    have = set(m.get("features") or [])
+    return [f for f in need if f not in have]
+
+
+def pick_second(candidates: list[Optional[dict]], first: dict, want: Callable[[dict], bool] = lambda m: True) -> Optional[dict]:
+    """The first of the given machines that is another machine than `first` and that `want` takes."""
+    for m in candidates:
+        if m is not None and m["id"] != first["id"] and want(m):
+            return m
+    return None
+
+
+def cache_part(view: dict, repo: str, revision: Optional[str], file: Optional[str]) -> tuple[Optional[dict], Optional[dict]]:
+    """In a machine's model cache (GET /api/machines/{id}/cache): (the entry of this Hugging Face revision, the part
+    that is this GGUF file), each None when it is not there. Without a file the entry is the part."""
+    for e in view.get("models") or []:
+        if e.get("kind") != "hf" or e.get("repo") != repo or (revision and e.get("revision") != revision):
+            continue
+        if not file:
+            return e, e
+        return e, next((p for p in e.get("parts") or [] if p.get("file") == file), None)
+    return None, None
+
+
+def set_fetch_via(run: Run, m: dict, how: str) -> None:
+    """Set a machine's fetch_via, and put it back at the end (registered before it changes)."""
+    c = run.admin
+    before = m.get("fetch_via") or "auto"
+    if before != how:
+        run.cleanup.add(f"fetch_via of {m['name']} back to {before}", c.ok, "PUT",
+                        f"/api/machines/{m['id']}/fetch-via", {"fetch_via": before})
+    got = c.ok("PUT", f"/api/machines/{m['id']}/fetch-via", {"fetch_via": how})["machine"]
+    run.check(f"{m['name']}: fetch_via set to {how} (was {before})", got.get("fetch_via") == how, got.get("fetch_via"))
+
+
+def _cancel_download(c: Client, download_id: int) -> None:
+    r = c.request("POST", f"/api/downloads/{download_id}/cancel")
+    if r.status not in (200, 404, 409):   # 409: it had finished already
+        raise Fail(f"{r.status} {r.code()}")
+
+
+def _remove_cached(c: Client, m: dict, repo: str, revision: Optional[str], file: Optional[str]) -> None:
+    """Remove the model the run downloaded from the machine's cache (nothing to do when it is not there)."""
+    view = c.ok("GET", f"/api/machines/{m['id']}/cache")
+    entry, part = cache_part(view, repo, revision, file)
+    if part is None:
+        return
+    r = c.request("POST", f"/api/machines/{m['id']}/cache/remove", {"key": part["key"]})
+    if r.status not in (200, 404):
+        raise Fail(f"{r.status} {r.code()}: {why(r)}")
+
+
+def _remove_partials(run: Run, m: dict, label: str, wait: float = 25.0, every: float = 2.0) -> None:
+    """After a download the run cancelled: what it left half-downloaded goes (Remove partial downloads). The agent
+    reports its cache with its heartbeat, so the part file may show only after a while (up to `wait` seconds); the
+    agent refuses while its download still winds down (cache_busy): asked again."""
+    c = run.admin
+    deadline = time.monotonic() + wait
+    while True:
+        if c.ok("GET", f"/api/machines/{m['id']}/cache").get("partial_files"):
+            r = c.request("POST", f"/api/machines/{m['id']}/cache/remove-partial")
+            if r.status == 200:
+                return
+            if r.code() != "cache_busy" or time.monotonic() > deadline:
+                raise Fail(f"{label}: {r.status} {r.code()}: {why(r)}")
+        elif time.monotonic() > deadline:
+            return  # nothing was left
+        time.sleep(every)
+
+
+def _partials_after(run: Run, m: dict, row_id: int, before: int) -> None:
+    """The cleanup step for a download's half-downloaded files: only when the machine had none before the run (Remove
+    partial downloads takes them all, and another download's are not the run's to delete); a note otherwise."""
+    rows = run.admin.ok("GET", f"/api/downloads?machine_id={m['id']}")["downloads"]
+    row = next((d for d in rows if d["id"] == row_id), None)
+    if row is not None and row["state"] == "done":
+        return
+    if before:
+        if run.admin.ok("GET", f"/api/machines/{m['id']}/cache").get("partial_files"):
+            run.report.notes.append(f"{m['name']} keeps the partial downloads it had before the run, and maybe the "
+                                    f"one the run broke off: Remove partial downloads on its page")
+        return
+    _remove_partials(run, m, f"partial downloads on {m['name']}")
+
+
+def relay_download(run: Run, m: dict, model: dict, spec: dict, label: str, want_via: str,
+                   source: Optional[dict] = None) -> Optional[dict]:
+    """Download to… `model` on machine `m` (its fetch_via already "server"), checked: started, done, "via" as
+    wanted (and the source machine named), the file and its size in the machine's cache. Returns the finished row."""
+    c = run.admin
+    repo = spec["source"].removeprefix("hf://")
+    t = next((x for x in c.ok("GET", f"/api/downloads/targets?model_id={model['id']}&engine=false")["machines"]
+              if x["machine_id"] == m["id"]), None)
+    run.check(f"{label}: the Download to… dialog says it comes through the server",
+              t is not None and t["state"] == "ok" and t["via"] == "server"
+              and (source is None or t.get("from_machine") == source["name"]),
+              f"{t['state']}, via {t['via']}" + (f", from {t.get('from_machine')}" if source is not None else "")
+              + (f" ({t['note']})" if t.get("note") else "") if t else "the machine is not offered")
+    run.cleanup.add(f"{model['name']} in {m['name']}'s model cache", _remove_cached, c, m, repo, model.get("revision"),
+                    spec.get("file"))
+    partial_before = c.ok("GET", f"/api/machines/{m['id']}/cache").get("partial_files") or 0
+    r = c.request("POST", "/api/downloads", {"model_id": model["id"], "machine_ids": [m["id"]], "engine": False})
+    if r.status != 201:
+        run.check(f"{label}: the download starts", False, f"{r.status} {r.code()}: {why(r)}")
+        return None
+    row = r.data["downloads"][0]
+    run.cleanup.add(f"what download #{row['id']} left half-done on {m['name']}", _partials_after, run, m, row["id"],
+                    partial_before)
+    run.cleanup.add(f"download #{row['id']} on {m['name']}", _cancel_download, c, row["id"])
+    seen = {"via": set(), "row": row}
+
+    def poll():
+        rows = c.ok("GET", f"/api/downloads?model_id={model['id']}&machine_id={m['id']}")["downloads"]
+        x = next((d for d in rows if d["id"] == row["id"]), None)
+        if x is None:
+            raise Fail(f"download #{row['id']} is no longer listed")
+        seen["row"] = x
+        seen["via"].add(x["via"])
+        dl = x.get("download") or {}
+        text = x["state"] + (f" via {x['via']}" if x["via"] else "") + (
+            f" {dl.get('done', 0) / 1024**2:.1f}/{dl.get('total', 0) / 1024**2:.1f} MiB" if dl else "") + (
+            f" from {x['source']['name']}" if x.get("source") else "") + (f" ({x['reason']})" if x.get("reason") else "")
+        if x["state"] in ("failed", "cancelled"):
+            raise Fail(f"download #{row['id']}: {text}")
+        return x["state"] == "done", text
+
+    t0 = time.monotonic()
+    try:
+        run.wait(f"download #{row['id']} to {m['name']}", poll, min(run.args.timeout, 900), every=1)
+    except Fail as e:
+        run.check(f"{label}: the download finishes", False, str(e))
+        return None
+    x = seen["row"]
+    src = (x.get("source") or {}).get("name")
+    run.check(f"{label}: done, the model came via {want_via}" + (f" from {source['name']}" if source else ""),
+              x["via"] == want_via and (source is None or src == source["name"]),
+              f"via {x['via']}" + (f" from {src}" if src else "") + f" in {fmt_seconds(time.monotonic() - t0)}"
+              + (f"; seen while downloading: {sorted(v for v in seen['via'] if v)}" if x["via"] != want_via else ""))
+    holder = {}
+
+    def cached():
+        entry, part = cache_part(c.ok("GET", f"/api/machines/{m['id']}/cache"), repo, model.get("revision"),
+                                 spec.get("file"))
+        holder["e"], holder["p"] = entry, part
+        return part is not None, "listed" if part is not None else "not in the cache report yet"
+
+    try:
+        run.wait(f"{m['name']}'s model cache", cached, 90, every=3)
+    except Fail as e:
+        run.check(f"{label}: the model is in {m['name']}'s cache", False, str(e))
+        return x
+    entry, part = holder["e"], holder["p"]
+    size = model.get("size_bytes") or 0
+    run.check(f"{label}: {m['name']}'s cache lists {spec.get('file') or repo} at its size",
+              part["bytes"] == size and (entry.get("files") or 0) >= 1 and not entry.get("missing"),
+              f"{part['bytes']:,} bytes (catalog {size:,}), {entry.get('files')} file(s) in {repo}@"
+              f"{(entry.get('revision') or '')[:12]}")
+    return x
+
+
+@group("relay", "models through the server: Download to… with fetch_via server, and from another machine's cache")
+def group_relay(run: Run) -> None:
+    c = run.admin
+    first = run.named.get("relay") or run.machine("cpu")
+    if first is None:
+        run.skip("relay through the server", "no --cpu-machine or --relay-machine given")
+        return
+    first = run.machine_by_id(first["id"])
+    if first["status"] != "online":
+        run.skip(f"{first['name']}: relay through the server", f"the machine is {first['status']}")
+        return
+    lack = missing_features(first, RELAY_FEATURES)
+    if lack:
+        run.skip(f"{first['name']}: relay through the server", f"its agent lacks {', '.join(lack)} (older than 1.4: "
+                 "update it)")
+        return
+    spec = RELAY_MODEL
+    ensure_model(run, spec)
+    model = next(x for x in c.ok("GET", "/api/models")["models"] if x["name"] == spec["model"])
+    repo = spec["source"].removeprefix("hf://")
+    if cache_part(c.ok("GET", f"/api/machines/{first['id']}/cache"), repo, model.get("revision"), spec["file"])[1]:
+        run.skip(f"{first['name']}: relay through the server", f"{spec['file']} is already in its model cache (an "
+                 "earlier run?), so there is nothing to download: remove it on the machine's page and run again")
+        return
+    set_fetch_via(run, first, "server")
+    if relay_download(run, first, model, spec, f"{first['name']} through the server", "server") is None:
+        return
+    # From the first machine's cache to a second machine, through the server.
+    second = run.named.get("relay2") or pick_second([run.machine("cpu2"), run.machine("gpu")], first)
+    name = "relay from another machine's cache"
+    if second is None:
+        run.skip(name, "no second machine: give --relay-second-machine (or --second-cpu-machine, or a --gpu-machine "
+                       "that is another machine)")
+        return
+    second = run.machine_by_id(second["id"])
+    if second["status"] != "online":
+        run.skip(f"{second['name']}: {name}", f"the machine is {second['status']}")
+        return
+    if "relay_source" not in (first.get("features") or []):
+        run.skip(f"{second['name']}: {name}", f"{first['name']}'s agent does not send cached files (no relay_source: "
+                                              "older than 1.4.1)")
+        return
+    lack = missing_features(second, RELAY_FEATURES)
+    if lack:
+        run.skip(f"{second['name']}: {name}", f"its agent lacks {', '.join(lack)} (update it)")
+        return
+    if cache_part(c.ok("GET", f"/api/machines/{second['id']}/cache"), repo, model.get("revision"), spec["file"])[1]:
+        run.skip(f"{second['name']}: {name}", f"{spec['file']} is already in its model cache: remove it there and "
+                                              "run again")
+        return
+    set_fetch_via(run, second, "server")
+    relay_download(run, second, model, spec, f"{second['name']} from {first['name']}'s cache", "machine", first)
+
+
+# ------------------------------------------------------------------ group: images
+def image_archive(ref: str, marker: str, arch: str = "amd64") -> tuple[bytes, str]:
+    """A minimal `docker save` archive of one image tagged `ref`, built here (no Docker needed): one layer holding
+    one small file that names the run (`marker`), its config, and manifest.json, as Docker and Podman load them.
+    Returns (the archive, the image id the engine gives it: the sha256 of the config)."""
+    def tar_of(files: dict[str, bytes]) -> bytes:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+            for name, data in files.items():
+                info = tarfile.TarInfo(name)
+                info.size, info.mode, info.mtime = len(data), 0o644, 0
+                tar.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
+
+    layer = tar_of({"forgeyard-accept.txt": f"Forgeyard acceptance run {marker}: safe to delete.\n".encode()})
+    diff = hashlib.sha256(layer).hexdigest()
+    config = json.dumps({"architecture": arch, "os": "linux", "created": "1970-01-01T00:00:00Z",
+                         "config": {"Labels": {"org.forgeyard.accept": marker}},
+                         "rootfs": {"type": "layers", "diff_ids": [f"sha256:{diff}"]},
+                         "history": [{"created": "1970-01-01T00:00:00Z", "created_by": "scripts/accept_all.py"}]},
+                        sort_keys=True, separators=(",", ":")).encode()
+    cid = hashlib.sha256(config).hexdigest()
+    manifest = json.dumps([{"Config": f"{cid}.json", "RepoTags": [ref], "Layers": [f"{diff}/layer.tar"]}]).encode()
+    return tar_of({f"{diff}/layer.tar": layer, f"{cid}.json": config, "manifest.json": manifest}), f"sha256:{cid}"
+
+
+def engine_arch(m: dict) -> str:
+    """The image architecture of a machine's CPU (amd64 unless it says arm64)."""
+    cpu = next((x for x in m.get("accelerators") or [] if x.get("vendor") == "cpu"), {})
+    arch = str(cpu.get("arch") or (m.get("platform") or {}).get("machine") or "").lower()
+    return "arm64" if arch in ("aarch64", "arm64") else "amd64"
+
+
+def cleanup_recipe(name: str, tags: list[str]) -> str:
+    """A custom recipe whose only purpose is to name the uploaded image by its tags (a tag-only container image per
+    tag), so that Remove engine image may remove it: Forgeyard removes only images a recipe names."""
+    variants = "".join(f"  - name: tag{i}\n    when: {{vendor: cpu}}\n    runtime: container\n    image: {t}\n"
+                       for i, t in enumerate(dict.fromkeys(tags)))
+    return (f"name: {name}\ntitle: {name}\ndescription: >-\n  Made by scripts/accept_all.py for a few seconds, to remove the "
+            "image it uploaded. Safe to delete.\nengine: accept\nversion: \"1\"\ntasks: [chat]\nformats: [gguf]\n"
+            "api: {chat: openai-chat}\nport: 8080\nhealth: {path: /health}\nestimate: {method: files}\n"
+            f"variants:\n{variants}")
+
+
+def audited(run: Run, action: str, target: str, **match) -> Optional[dict]:
+    """The newest audit event of this action on this machine whose detail has these values, or None."""
+    events = run.admin.ok("GET", f"/api/audit?action={urllib.parse.quote(action)}&limit=50")["events"]
+    return next((e for e in events if e["action"] == action and e["target"] == target
+                 and all((e.get("detail") or {}).get(k) == v for k, v in match.items())), None)
+
+
+def tagged(items: list[dict], ref: str) -> Optional[dict]:
+    """The image among `items` (as an agent lists them) that carries the tag `ref` (Podman may add localhost/)."""
+    for i in items or []:
+        if any(t == ref or t.endswith("/" + ref) for t in i.get("tags") or []):
+            return i
+    return None
+
+
+class UploadedImage:
+    """The image the images group put on machines, and how it goes again: a short-lived custom recipe names it by
+    its tag, so Remove engine image (the agent's `rmi`, never forced) may take it; then the recipe goes."""
+
+    def __init__(self, run: Run, ref: str):
+        self.run, self.ref = run, ref
+        self.tags: list[str] = [ref]
+        self.on: dict[int, dict] = {}            # machine id -> machine, where it was loaded
+        self.ids: dict[int, str] = {}            # machine id -> the image's id there, as its engine says
+        self.recipe = run.name("image-cleanup")
+        self.recipe_item: Optional[dict] = None
+
+    def loaded(self, m: dict, item: dict) -> None:
+        self.on[m["id"]], self.ids[m["id"]] = m, item["id"]
+        self.tags += [t for t in item.get("tags") or [] if t not in self.tags]
+        self.run.cleanup.add(f"image {self.ref} on {m['name']}", self.remove, m)
+
+    def has(self, m: dict) -> bool:
+        r = self.run.admin.request("GET", f"/api/machines/{m['id']}/images")
+        if r.status != 200:
+            raise Fail(f"cannot list {m['name']}'s images: {r.status} {r.code()}")
+        return any(i.get("id") == self.ids[m["id"]] for i in (r.data or {}).get("images") or [])
+
+    def ensure_recipe(self) -> None:
+        if self.recipe_item is not None and not self.recipe_item["done"]:
+            return
+        c = self.run.admin
+        r = c.request("POST", "/api/recipes", {"yaml": cleanup_recipe(self.recipe, self.tags)})
+        if r.status == 409 and r.code() == "name_taken":
+            c.ok("PUT", f"/api/recipes/{self.recipe}", {"yaml": cleanup_recipe(self.recipe, self.tags)})
+        elif r.status != 201:
+            raise Fail(f"cannot add the recipe that names the image: {r.status} {r.code()}: {why(r)}")
+        self.recipe_item = self.run.cleanup.add(f"recipe {self.recipe}", delete, c, f"/api/recipes/{self.recipe}")
+
+    def drop_recipe(self) -> None:
+        if self.recipe_item is not None:
+            self.run.cleanup.now(self.recipe_item)
+
+    def remove_answer(self, m: dict) -> Resp:
+        return self.run.admin.request("POST", f"/api/machines/{m['id']}/engine-images/remove",
+                                      {"image": self.ids[m["id"]]}, timeout=330)
+
+    def remove(self, m: dict) -> None:
+        """The cleanup step: gone already is fine; an agent that cannot remove images leaves it (said in a note)."""
+        m = self.run.machine_by_id(m["id"]) or m
+        if not self.has(m):
+            return
+        if "image_remove" not in (m.get("features") or []):
+            note = (f"{self.ref} ({self.ids[m['id']][:19]}, a few KB) stays on {m['name']}: its agent cannot remove "
+                    f"images (older than 1.4.2); `docker rmi {self.ref}` there removes it")
+            self.run.report.notes.append(note)
+            return
+        self.ensure_recipe()
+        r = self.remove_answer(m)
+        self.drop_recipe()
+        if r.status != 200:
+            raise Fail(f"{r.status} {r.code()}: {why(r)}")
+
+
+@group("images", "engine images: the listing, an image file uploaded, copied to another machine, removed")
+def group_images(run: Run) -> None:
+    c = run.admin
+    first = run.named.get("engine") or run.machine("gpu")
+    if first is None:
+        run.skip("engine images", "no --gpu-machine or --engine-machine given")
+        return
+    first = run.machine_by_id(first["id"])
+    name = first["name"]
+    cinfo = (first.get("runtime_info") or {}).get("container") or {}
+    if first["status"] != "online":
+        run.skip(f"{name}: engine images", f"the machine is {first['status']}")
+        return
+    lack = missing_features(first, IMAGE_FEATURES)
+    if lack:
+        run.skip(f"{name}: engine images", f"its agent lacks {', '.join(lack)}: "
+                 + (f"it has no container engine ({cinfo.get('reason') or 'not available'})" if not cinfo.get("ok")
+                    else "older than 1.4.2, update it"))
+        return
+    view = c.ok("GET", f"/api/machines/{first['id']}/engine-images")
+    run.check(f"{name}: the machine page lists its engine images", view["listed"] and view["note"] is None
+              and all(i.get("matches") for i in view["images"]),
+              f"{len(view['images'])} engine image(s), {view['others']} other(s)"
+              + (f", {(view.get('free_bytes') or 0) / GIB:.0f} GiB free" if view.get("free_bytes") else "")
+              + (f"; {view['note']}" if view.get("note") else ""))
+    others = view["others"]
+    # An image file uploaded to the machine (#102), built here.
+    ref = f"{run.name('image')}:1"
+    archive, image_id = image_archive(ref, run.tag, engine_arch(first))
+    filename = f"{run.name('image')}.tar"
+    r = c.request("POST", f"/api/machines/{first['id']}/images", archive,
+                  headers={"Content-Type": "application/x-tar", "X-Filename": filename}, timeout=300)
+    img = UploadedImage(run, ref)
+    got = tagged((r.data or {}).get("images"), ref) if r.status == 200 else None
+    if got is not None:
+        img.loaded(first, got)
+    run.check(f"{name}: an image file uploads and loads ({len(archive):,} bytes)", got is not None,
+              f"{r.status} " + (f"{got['id'][:19]}, tags {got.get('tags')}, {got.get('architecture')}" if got
+                                else f"{r.code()}: {why(r)}" if r.status != 200 else f"no image tagged {ref} in "
+                                f"{[i.get('tags') for i in (r.data or {}).get('images') or []]}"))
+    if got is None:
+        return
+    if got["id"] == image_id:
+        run.check(f"{name}: it is the image built here (its id is the config's digest)", True, image_id[:19])
+    else:
+        run.skip(f"{name}: it is the image built here (its id is the config's digest)",
+                 f"information: the engine calls it {got['id'][:19]}, the config is {image_id[:19]} (an engine that "
+                 "keys images by their manifest, e.g. Docker's containerd store)")
+    image_id = got["id"]
+    run.check(f"{name}: no recipe names it (matches: none)", got.get("matches") == [], str(got.get("matches")))
+    ev = audited(run, "node.image_uploaded", name, file=filename)
+    run.check(f"{name}: the upload is in the audit log (node.image_uploaded)", ev is not None and ev["detail"].get("ok"),
+              f"by {ev['actor']}, {ev['detail'].get('bytes')} bytes" if ev else "no event")
+    view = c.ok("GET", f"/api/machines/{first['id']}/engine-images")
+    run.check(f"{name}: an image no recipe names is only counted on the machine page",
+              all(i["id"] != image_id for i in view["images"]) and view["others"] >= others + 1,
+              f"{view['others']} other(s), {others} before")
+    r = img.remove_answer(first)
+    run.check(f"{name}: Remove engine image refuses it (not_an_engine_image)",
+              r.status == 409 and r.code() == "not_an_engine_image", f"{r.status} {r.code()}")
+    # Copied to another machine through the server (#117).
+    candidates = [run.named.get("engine2"), run.machine("cpu2"), run.machine("cpu"), run.machine("gpu")]
+    second = pick_second([run.machine_by_id(m["id"]) if m else None for m in candidates], first,
+                         lambda m: m["status"] == "online" and "image_load" in (m.get("features") or []))
+    if second is None:
+        given = run.named.get("engine2")
+        run.skip("copy the image to another machine", f"{given['name']} cannot take images (offline, or no container "
+                 "engine)" if given else "no other given machine has a container engine (give --second-engine-machine)")
+    else:
+        r = c.request("POST", f"/api/machines/{second['id']}/images/copy", {"source_id": first["id"], "image": image_id},
+                      timeout=600)
+        copied = tagged((r.data or {}).get("images"), ref) if r.status == 200 else None
+        if copied is not None:
+            img.loaded(second, copied)
+        run.check(f"{second['name']}: the image is copied from {name}, the same image",
+                  copied is not None and copied.get("same_as_source") is True and (r.data or {}).get("bytes", 0) > 0,
+                  f"{r.status} " + (f"{(r.data or {}).get('bytes'):,} bytes, same as source: {copied.get('same_as_source')}"
+                                    if copied else f"{r.code()}: {why(r)}"))
+        ev = audited(run, "node.image_copied", second["name"], image=image_id[:80])
+        run.check(f"{second['name']}: the copy is in the audit log (node.image_copied)",
+                  ev is not None and ev["detail"].get("ok") and ev["detail"].get("from_machine") == name,
+                  f"from {ev['detail'].get('from_machine')}, {ev['detail'].get('bytes')} bytes" if ev else "no event")
+    # Removed again: a custom recipe names it for a moment, so Forgeyard may remove it.
+    img.ensure_recipe()
+    for m in list(img.on.values()):
+        m = run.machine_by_id(m["id"]) or m
+        if "image_remove" not in (m.get("features") or []):
+            run.skip(f"{m['name']}: Remove engine image", "its agent cannot remove images (older than 1.4.2): the "
+                     "image stays there, see the notes")
+            continue
+        view = c.ok("GET", f"/api/machines/{m['id']}/engine-images")
+        item = next((i for i in view["images"] if i["id"] == img.ids[m["id"]]), None)
+        run.check(f"{m['name']}: named by a recipe, it is listed as an engine image that may go",
+                  item is not None and item.get("remove_note") is None
+                  and any(x.get("recipe") == img.recipe for x in item.get("matches") or []),
+                  f"matches {[x.get('recipe') + ' (' + x.get('how', '') + ')' for x in (item or {}).get('matches') or []]}"
+                  + (f", {item.get('remove_note')}" if item and item.get("remove_note") else ""))
+        r = img.remove_answer(m)
+        gone = not img.has(m)
+        run.check(f"{m['name']}: Remove engine image removes it", r.status == 200 and gone,
+                  f"{r.status} " + (f"freed {(r.data or {}).get('freed_bytes'):,} bytes" if r.status == 200
+                                    else f"{r.code()}: {why(r)}") + ("" if gone else "; still listed"))
+        ev = audited(run, "node.image_removed", m["name"], image=img.ids[m["id"]])
+        run.check(f"{m['name']}: the removal is in the audit log (node.image_removed)", ev is not None
+                  and ev["detail"].get("ok"), f"recipes {ev['detail'].get('recipes')}" if ev else "no event")
+    img.drop_recipe()
+    r = c.request("GET", f"/api/recipes/{img.recipe}")
+    run.check("the recipe that named it is gone again", r.status == 404, f"{r.status}")
 
 
 @group("console", "the web console in a browser, as an admin and as a plain user")
