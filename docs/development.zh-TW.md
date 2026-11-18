@@ -39,6 +39,17 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
   另開一個小 PR 進 `dev`，把 `forgeyard/recipes/vision.yaml` 的兩個 tag 改成新版本，再執行 `pin_images.py --write`
   （FY-VIS-001 與 FY-VIS-019 寫著固定的 reference）。沒改到它的 release 就保留原本的固定：單是升級伺服器，視覺模型執行的映像檔永遠不會變。
 
+## 發布之前
+
+發布步驟寫在 [CONTRIBUTING.md](../CONTRIBUTING.md#releasing)（英文）。其中一步是守住映像檔的發布：
+`.github/workflows/dockerhub-login.yml`（*Docker Hub login*）在每次推送到 `dev` 與 `main` 時執行，用 repository secrets
+`DOCKERHUB_USERNAME` 與 `DOCKERHUB_TOKEN` 登入 Docker Hub，再以 `scripts/dockerhub_check.py` 確認這個 token 可以推送到
+`forgeyard`、`forgeyard-agent` 與 `forgeyard-vision`（Docker Hub 的 token 服務會回答它給了哪些權限；不推送任何東西），然後登出。
+沒有設定 secrets 時它只發出警告，仍然是綠燈。**打 tag 之前，它在 `main` 上最近一次的執行必須是綠燈且沒有警告**
+（`gh run list --workflow dockerhub-login.yml --branch main --limit 1`）；否則重新輸入兩個 secrets（username 是 Docker Hub
+帳號名稱，token 是 *Read & Write* 的 access token），再手動執行一次（*Actions → Docker Hub login → Run workflow*）。
+它不是必要的檢查，也不在 pull request 上執行。
+
 ## 寫不會時好時壞的測試
 
 CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最慢），所以在這裡會過的測試，到那裡偶爾會失敗。
@@ -105,6 +116,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | agent 的容器映像檔與它的 CI 冒煙測試 |
 | `Dockerfile.server`, `scripts/server_image_smoke.sh` | 伺服器的容器映像檔與它的 CI 冒煙測試 |
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | 推送版本 tag 時，把兩個映像檔發布到 Docker Hub |
+| `.github/workflows/dockerhub-login.yml`, `scripts/dockerhub_check.py` | 每次推送到 `dev` 與 `main` 時，確認 Docker Hub secrets 能登入且可以推送（[發布之前](#發布之前)） |
 | `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](guide/zh-TW/how-to.md#從頭到尾檢查一台伺服器)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查應用程式看到哪張 NVIDIA GPU |
