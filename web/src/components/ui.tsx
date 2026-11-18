@@ -4,7 +4,7 @@ import { Link } from "react-router";
 
 import { useDocumentTitle } from "../lib/title";
 
-export function PageHeader({ index, title, lead, actions }: { index: string; title: string; lead?: string; actions?: ReactNode }) {
+export function PageHeader({ index, title, lead, actions }: { index: string; title: string; lead?: ReactNode; actions?: ReactNode }) {
   useDocumentTitle(title);
   return (
     <header className="page-header">

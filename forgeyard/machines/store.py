@@ -187,7 +187,11 @@ def apply_hello(db: DbSession, node: Node, hello: HelloIn, ip: Optional[str]) ->
     node.platform = dict(hello.platform)
     node.runtimes = list(hello.runtimes)
     node.features = list(hello.features)
+    listed = (node.runtime_info or {}).get("images")
     node.runtime_info = dict(hello.runtime_info)
+    if listed is not None:
+        # 1.4.3 (#140): the machine's last image listing outlives a reconnect (forgeyard/machines/engineimages.py).
+        node.runtime_info["images"] = listed
     if hello.install is not None:
         # 1.4.2 (#121): how the agent runs; admins only see it, as the update command (api/machines.py).
         node.runtime_info["install"] = hello.install
