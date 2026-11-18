@@ -21,6 +21,14 @@ M3 adds VRAM (forgeyard.models.scheduler builds on this for model deployments):
 Placement holds a process-wide lock, so two requests (or the background sweep) never give the
 same card, or the same memory, to two replicas.
 
+1.4.2 (#125): a machine's host ports are a resource too. Its agent reports the range it publishes services
+and model replicas on (`runtime_info["ports"]`, its --port-range); a replica takes one port of it per port it
+publishes, two when the agent's key guard fronts it (the guard's published port and the engine's internal one).
+The ports the replicas already there hold are counted, and a machine without enough free ports is skipped like
+one without memory ("no free port: 3 of 3 in use"). A machine whose agent does not report its range (older
+than 1.4.2) is not counted, as before. Ports something outside Forgeyard holds are not known here: the agent
+skips them when it picks one, and says so if none is left.
+
 1.3.1: a replica that is restarted (started again, or restarted by an edit of its deployment) goes
 back to the machine it ran on when that machine still takes it, instead of the best fit elsewhere
 (`prefer`). And an edit restarts the replicas of a running workload one at a time (`roll`): the next
@@ -101,6 +109,8 @@ class Usage:
     # Memory of released replicas (see usage) that the agent's numbers still show in use, per card
     # key (the CPU row's key for RAM): it is free once they stop.
     credit: dict[str, int] = field(default_factory=dict)
+    # Host ports of the machine's range the replicas hold (1.4.2): see ports_for.
+    ports: int = 0
 
 
 def replica_spec(r: Replica) -> dict:
@@ -132,6 +142,7 @@ def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Opti
                     u.credit[key] = u.credit.get(key, 0) + r.vram
             continue
         spec = replica_spec(r)
+        u.ports += ports_for(spec, guarded=bool(r.secret))
         res = spec.get("resources") or {}
         u.cpu += float(res.get("cpu") or 0)
         u.memory += int(res.get("memory") or 0)
@@ -145,6 +156,65 @@ def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Opti
         if not r.gpus and r.vram:
             u.ram.append(Hold(r.workload.name, "vram", r.vram, _pending(r, seen.get(cpu_key))))
     return u
+
+
+def port_range(node: Optional[Node]) -> Optional[tuple[int, int]]:
+    """The host port range the machine's agent publishes on (1.4.2), or None when it does not say (older agents)."""
+    ports = ((node.runtime_info if node is not None else None) or {}).get("ports")
+    if not isinstance(ports, dict):
+        return None
+    low, high = ports.get("low"), ports.get("high")
+    if type(low) is not int or type(high) is not int or not 1 <= low <= high <= 65535:
+        return None
+    return low, high
+
+
+def ports_for(spec: dict, guarded: bool) -> int:
+    """Host ports one replica takes from its machine's range: one per published port, two when the agent's key
+    guard fronts it (a model replica on an agent with the guard, a workload exposed at /x/): the guard listens
+    on the published port and the program on an internal one, both taken from the range (see the agent's
+    supervisor). A replica is guarded exactly when it has an internal key (`Replica.secret`)."""
+    count = len(spec.get("ports") or [])
+    return count * 2 if guarded else count
+
+
+def port_problem(node: Node, held: int, need: int) -> Optional[str]:
+    """Why the machine has no room in its port range for a replica taking `need` ports, or None (also when its
+    agent does not report the range: not counted, as before 1.4.2)."""
+    span = port_range(node)
+    if span is None or need <= 0:
+        return None
+    total = span[1] - span[0] + 1
+    if held + need <= total:
+        return None
+    where = f"host ports {span[0]}-{span[1]}"
+    if held >= total:
+        return f"no free port: {total} of {total} in use ({where})"
+    return f"not enough free ports: {held} of {total} in use, it needs {need} ({where})"
+
+
+# How the agent says that no port of its range was free (forgeyard.agent.workloads.ports.allocate).
+NO_FREE_PORT = "no free host port left in "
+
+
+def out_of_ports(db: DbSession, r: Replica, node: Node) -> bool:
+    """The agent reported the replica in backoff because no port of its range was free (1.4.2, #125). When this
+    count agrees (the replica was placed before the server counted ports), take it off the machine: it is placed
+    again on a machine with room, or waits unplaced with the reason, instead of restarting there in backoff
+    (True: the caller's next placement pass does that). When the count says there is room, something outside
+    Forgeyard holds the ports: the replica stays, and its agent tries again (False)."""
+    from forgeyard.workloads.state import event, reset_replica
+
+    if not (r.reason or "").startswith(NO_FREE_PORT):  # (a replica fetch_failed moved has no reason left)
+        return False
+    held = usage(db, node.id, exclude=r.id, node=node).ports
+    problem = port_problem(node, held, ports_for(replica_spec(r), guarded=bool(r.secret)))
+    if problem is None:
+        return False
+    event(db, r.workload, "unplaced", f"Replica {r.ordinal}: {node.name} has {problem}; placing it again.", r.ordinal)
+    reset_replica(r, r.generation)
+    db.flush()
+    return True
 
 
 def headroom() -> int:
@@ -257,6 +327,9 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
         if used.memory + res.memory > cpu_row.vram_total:
             free = max(0, cpu_row.vram_total - used.memory)
             return None, f"needs {_size(res.memory)} memory, {_size(free)} free of {_size(cpu_row.vram_total)}"
+    problem = port_problem(node, used.ports, ports_for({"ports": spec.ports}, guarded=exposed))
+    if problem:
+        return None, problem
     container_nvidia = bool(((node.runtime_info or {}).get("container") or {}).get("nvidia"))
     return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards)
 

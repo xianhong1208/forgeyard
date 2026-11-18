@@ -133,7 +133,11 @@ the next machine:
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
 - **Advanced → Port range** (`FORGEYARD_PORT_RANGE`, default `30000-32767`): the host ports for
   services and model replicas. Set it when only some ports reach the machine, for example
-  `40000-40099` opened in a firewall. The server must be able to reach these ports.
+  `40000-40099` opened in a firewall. The server must be able to reach these ports. Each port an app
+  publishes takes one port of the range, and a model replica (or an app exposed at `/x/`) takes two: one
+  for the agent's key guard and one for the engine behind it. Forgeyard counts them, so a range of 3
+  ports holds one model: a machine whose range is full is skipped, and a replica with nowhere else to go
+  waits ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
 
 A field the agent would reject shows its error instead of a command. The image's tag is the
 server's own version, so agent and server always match. An admin can point the command at a mirror,
@@ -1022,11 +1026,63 @@ the journal: `journalctl -u forgeyard -f`.
 
    - **Docker**: `docker pull` the image of the server's new version (the **Machines** page names
      it), then `docker rm -f forgeyard-agent` and the same `docker run` with the new tag. The
-     volume keeps the machine.
+     volume keeps the machine. Each machine's page shows that command, complete
+     ([how](#update-an-agent)).
    - **Manual**: `git pull`, `uv sync`, restart the agent.
 
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
+
+## Update an agent
+
+Every machine's page has an **Update the agent** section. For admins it shows the complete command that brings
+that machine's agent to the server's version, made from what the agent reported about how it runs (agents from
+1.4.2 on report it each time they connect):
+
+- **In Docker**: the agent reads its own container through the engine it already uses: its name, image,
+  network, restart policy, GPUs (`--gpus`), devices and group ids (AMD's `/dev/kfd`, `/dev/dri` and the
+  numeric `--group-add`), mounts and the variables it was given with `-e`. The command pulls the agent image
+  of the server's version, removes the old container and starts the same one on the new image:
+
+   ```bash
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+   sudo docker rm -f forgeyard-agent && \
+   sudo docker run -d \
+     --name forgeyard-agent \
+     --restart always \
+     --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     -e HF_TOKEN="$HF_TOKEN" \
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+   ```
+
+   A machine that gets its files through the server (**Always through the server**) gets the image carried
+   instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there
+   (replace `USER`), then the same `docker rm -f` and `docker run`. The other machines show that way too, under
+   *cannot reach the registry?*.
+- **Installed with install.sh**: the one-line install again, without `--join` ([why](#upgrade-the-server-and-the-agents)).
+- **From a checkout**: `git checkout` of the server's version and `uv sync`; then restart the agent the way you
+  started it.
+
+Copy the command and run it on that machine. Its models and apps keep running while the agent is replaced, and
+the volume (or install.sh's state directory) keeps the machine: it comes back online as itself within seconds.
+
+The agent never reports a secret: not the join token (a joined machine does not need it again), not its
+credential, and not a variable whose name or value looks like one (`…TOKEN`, `…KEY`, `…PASSWORD`, a Hugging
+Face or GitHub token, a URL with a password). Such a variable appears as `-e NAME="$NAME"`: set it in your shell
+first (`export HF_TOKEN=…`), and the page says so. Values that cannot be repeated safely are left out and named.
+
+**An agent older than the server** says so on its tile on **Machines** and on its page: *agent 1.4.0, server
+1.4.2: update*; the hint opens the command. So does an agent of the server's version that lacks a feature such
+an agent offers (built from older code), and **Setup health** lists both. An agent before 1.4.2 does not report
+how it runs: update it by hand once ([how](#upgrade-the-server-and-the-agents)); from then on its page shows the
+command.
 
 ## Check the setup health
 
@@ -1322,7 +1378,8 @@ machine without registry access needs. Nothing is copied automatically.
 
 1. Open the target machine's page → **Engine images** → **Copy from another machine**.
 2. Choose the machine to copy **From**. Its agent lists the images in its engine: each with its tags, id,
-   size and platform, and which recipe's image it is.
+   size and platform, and which recipe's image it is. The dialog shows the images a recipe names (1.4.2);
+   tick **Show all images** for the others, such as other people's images on a shared machine.
 3. Pick one and **Copy**. The other machine runs `docker save` (or `podman save`) on it, under its own
    tags, and sends it to the server, which passes it straight into the target's `docker load`, keeping
    only a small buffer. When it is loaded, the dialog lists what was loaded, which recipe's image it is,
@@ -1359,6 +1416,33 @@ how much the cache takes on that disk and how much of the disk is free.
 
 Each removal is in the audit log as `model.cache_removed`, with what was removed and how much was
 freed. The API is in [the reference](reference.md#a-machines-model-cache-through-the-api).
+
+### Engine images
+
+Engine images take disk space too, and old ones pile up when recipes move to newer images. The machine's
+page lists them under **Engine images** (1.4.2): each image a recipe names, as its agent lists it now (a
+pinned image recognised by its recorded ids, an image a recipe names by a tag only by that tag), with its
+size, the recipes that name it, and the deployments on that machine that use it. Above the list is the free
+space where the engine keeps its images, when the agent can see that directory (an agent in a container
+usually cannot). The engine's other images are only counted: no recipe names them, so they are not
+Forgeyard's.
+
+- **Remove** (admins) deletes one image from that machine. The row asks first, then the agent runs
+  `docker rmi` (or `podman rmi`) on it, never with `-f`. When it is done, the console says how much was
+  freed: up to the image's size, since layers another image shares stay, and the free space after when the
+  agent can see the engine's disk. A deployment that needs the image again pulls it (or gets it through
+  the server, or you load it again).
+- It is refused, and the row says why, while a deployment on that machine uses the image (stop it first),
+  for the image the agent itself runs from, and while any container of the engine uses it, even one
+  Forgeyard did not start (the engine keeps such an image; the message names the container).
+- It is never offered for an image no recipe names.
+- The agent removes only an image of its own listing, by its id: the server never names an image for it to
+  delete. An image with several tags is removed by those tags.
+- An agent older than 1.4.2 lists the images but cannot remove them. Update the agent.
+
+Each removal the agent was asked for is in the audit log as `node.image_removed`, with the image, its
+tags, the recipes that name it, and how much was freed or why it was not removed. The API is in
+[the reference](reference.md#a-machines-engine-images-through-the-api).
 
 ## Move a model cache
 

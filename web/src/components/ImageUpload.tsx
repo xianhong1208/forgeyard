@@ -2,42 +2,73 @@
 // for admins, "Upload an image": a file `docker save` wrote (optionally gzip), streamed through the server,
 // which keeps none of it, into the machine's container engine. The answer says what was loaded, and which
 // recipe's image each one is. 1.4.1 (#104): "Copy from another machine": an image another machine's engine has,
-// saved there and passed on by the server the same way.
-import { IconBox, IconCopy, IconUpload, IconX } from "@tabler/icons-react";
+// saved there and passed on by the server the same way. 1.4.2 (#123): the images a recipe names, listed with their
+// size and the deployments here that use them, and Remove (admins) for one nothing uses; (#124) the copy dialog
+// lists those first, and only those until "Show all images".
+import { IconBox, IconCopy, IconTrash, IconUpload, IconX } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 
 import { api, errorText, notifyUnauthorized } from "../lib/api";
+import { userHref } from "../lib/cache";
 import {
-  UPLOAD_ACCEPT, copyBlocked, copySources, listedLine, matchLine, sameLine, shortId, uploadBlocked, uploadLine,
-  type CopyResult, type ListedImage, type UploadResult,
+  UPLOAD_ACCEPT, copyBlocked, copyChoices, copySources, engineDiskLine, engineRemoveQuestion, listedLine, matchLine,
+  recipesLine, removedLine, sameLine, shortId, uploadBlocked, uploadLine,
+  type CopyResult, type EngineImage, type EngineImagesView, type ImageRemoved, type ListedImage, type UploadResult,
 } from "../lib/imageUpload";
 import { bytes } from "../lib/machines";
 import type { Machine } from "../lib/types";
+import { useApi } from "../lib/useApi";
 import { Notice } from "./ui";
 
-export function EngineImagesSection({ m, machines, canManage, onChanged }: {
-  m: Machine; machines: Machine[]; canManage: boolean; onChanged: (text: string) => void;
+export function EngineImagesSection({ m, machines, canManage, onChanged, onError }: {
+  m: Machine; machines: Machine[]; canManage: boolean; onChanged: (text: string) => void; onError: (text: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copying, setCopying] = useState(false);
+  const live = m.status === "online" && (m.features ?? []).includes("image_save");
+  const { data, error, reload } = useApi<EngineImagesView>(live ? `/machines/${m.id}/engine-images` : null);
+  const [asking, setAsking] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const blocked = uploadBlocked(m);
   const copyNo = copyBlocked(m, machines);
+  const loaded = (text: string) => { onChanged(text); reload(); };
+  const v = live ? data : null;
+  const disk = v ? engineDiskLine(v) : null;
+
+  const remove = async (i: EngineImage) => {
+    setBusy(i.id);
+    try {
+      const r = await api<ImageRemoved>(`/machines/${m.id}/engine-images/remove`, { method: "POST", body: { image: i.id } });
+      onChanged(removedLine(m.name, r));
+    } catch (e) {
+      onError(errorText(e));
+    } finally {
+      setBusy(null);
+      setAsking(null);
+      reload();
+    }
+  };
+
   return (
     <section className="panel mk-section" aria-labelledby="mk-images">
       <div className="panel-head">
-        <h2 id="mk-images">Engine images</h2>
-        {canManage && (
-          <div className="img-actions">
-            <button type="button" className="btn btn-small" disabled={copyNo !== null} title={copyNo ?? undefined}
-              onClick={() => setCopying(true)}>
-              <IconCopy size={14} aria-hidden="true" /> Copy from another machine
-            </button>
-            <button type="button" className="btn btn-small" disabled={blocked !== null} title={blocked ?? undefined}
-              onClick={() => setOpen(true)}>
-              <IconUpload size={14} aria-hidden="true" /> Upload an image
-            </button>
-          </div>
-        )}
+        <h2 id="mk-images">Engine images {v && v.listed && <span className="muted small">· {v.images.length}</span>}</h2>
+        <span className="cache-head-side">
+          {disk && <span className="cache-disk small">{disk}</span>}
+          {canManage && (
+            <span className="img-actions">
+              <button type="button" className="btn btn-small" disabled={copyNo !== null} title={copyNo ?? undefined}
+                onClick={() => setCopying(true)}>
+                <IconCopy size={14} aria-hidden="true" /> Copy from another machine
+              </button>
+              <button type="button" className="btn btn-small" disabled={blocked !== null} title={blocked ?? undefined}
+                onClick={() => setOpen(true)}>
+                <IconUpload size={14} aria-hidden="true" /> Upload an image
+              </button>
+            </span>
+          )}
+        </span>
       </div>
       <p className="small muted img-lead">
         A deployment pulls its engine image itself. A machine that cannot reach the registry gets a pinned image through
@@ -46,9 +77,78 @@ export function EngineImagesSection({ m, machines, canManage, onChanged }: {
         <code className="mono"> docker save IMAGE | gzip &gt; image.tar.gz</code>.
       </p>
       {canManage && blocked && <p className="small muted">{blocked}</p>}
-      {open && <UploadDialog m={m} onClose={() => setOpen(false)} onLoaded={onChanged} />}
-      {copying && <CopyDialog m={m} sources={copySources(m, machines)} onClose={() => setCopying(false)} onLoaded={onChanged} />}
+      {!live && m.status === "online" && <p className="field-hint cache-note">This machine's agent cannot list its engine images: it has no container engine, or it is older than 1.4.1 (update the agent).</p>}
+      {live && !v && !error && <p className="muted small">Asking {m.name} for its engine images…</p>}
+      {live && error && <p className="muted small">{error}</p>}
+      {v && !v.listed && <p className="field-hint cache-note">{v.note}</p>}
+      {v && v.listed && (
+        <>
+          {v.can_remove && v.remove_note && <p className="field-hint cache-note">{v.remove_note}</p>}
+          {v.images.length === 0 ? (
+            <p className="empty-line">No image a recipe names is on this machine.</p>
+          ) : (
+            <ul className="cachelist" aria-label={`Engine images on ${m.name}`}>
+              {v.images.map((i) => (
+                <EngineImageRow key={i.id} i={i} m={m} canRemove={v.can_remove} asking={asking === i.id} busy={busy}
+                  onAsk={() => setAsking(i.id)} onCancel={() => setAsking(null)} onRemove={() => void remove(i)} />
+              ))}
+            </ul>
+          )}
+          {v.others > 0 && (
+            <p className="field-hint cache-note">
+              {v.others} other {v.others === 1 ? "image is" : "images are"} in this machine's engine. No recipe names {v.others === 1 ? "it" : "them"}, so {v.others === 1 ? "it is" : "they are"} not Forgeyard's and {v.others === 1 ? "is" : "are"} not listed here.
+            </p>
+          )}
+        </>
+      )}
+      {open && <UploadDialog m={m} onClose={() => setOpen(false)} onLoaded={loaded} />}
+      {copying && <CopyDialog m={m} sources={copySources(m, machines)} onClose={() => setCopying(false)} onLoaded={loaded} />}
     </section>
+  );
+}
+
+function EngineImageRow({ i, m, canRemove, asking, busy, onAsk, onCancel, onRemove }: {
+  i: EngineImage; m: Machine; canRemove: boolean; asking: boolean; busy: string | null;
+  onAsk: () => void; onCancel: () => void; onRemove: () => void;
+}) {
+  const name = i.tags.length ? i.tags.join(", ") : "(no tag)";
+  return (
+    <li className="cacherow">
+      <span className="runlist-k" aria-hidden="true"><IconBox size={16} stroke={1.7} /></span>
+      <span className="cacherow-main">
+        <strong className="mono">{name}</strong>
+        <small>{recipesLine(i)}</small>
+        <small className="mono">{listedLine({ ...i, size: null })}</small>
+      </span>
+      <span className="cacherow-use">
+        {i.agent && <span className="chip chip-tone-off" title="The agent runs from this image">agent's own image</span>}
+        {i.used_by.map((u) => (
+          userHref(u)
+            ? <Link key={`${u.kind}-${u.id}`} to={userHref(u)!} className="chip chip-tone-run" title={`Used by the ${u.kind} ${u.name} on this machine`}>in use: {u.name}</Link>
+            : <span key={`${u.kind}-${u.id}`} className="chip chip-tone-run" title={`Used by ${u.name} on this machine`}>in use: {u.name}</span>
+        ))}
+      </span>
+      <span className="cacherow-size mono">{i.size === null ? "size unknown" : bytes(i.size)}</span>
+      {canRemove && (
+        <span className="cacherow-act">
+          <button type="button" className="btn btn-danger btn-small" disabled={i.remove_note !== null || busy !== null || asking}
+            title={i.remove_note ?? `Remove ${name} from ${m.name}'s engine`} aria-label={`Remove ${name}`} onClick={onAsk}>
+            <IconTrash size={14} aria-hidden="true" /> Remove
+          </button>
+        </span>
+      )}
+      {asking && (
+        <div className="cacherow-confirm" role="group" aria-label={`Remove ${name}?`}>
+          <p className="small">{engineRemoveQuestion(m.name, i)}</p>
+          <span className="cacherow-confirm-act">
+            <button type="button" className="btn btn-quiet btn-small" disabled={busy !== null} onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger btn-small" disabled={busy !== null} onClick={onRemove}>
+              <IconTrash size={14} aria-hidden="true" /> {busy === i.id ? "Removing…" : "Remove the image"}
+            </button>
+          </span>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -182,9 +282,12 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
   const [phase, setPhase] = useState<CopyPhase>("pick");
   const [result, setResult] = useState<CopyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const source = sources.find((x) => x.id === from) ?? null;
   const busy = phase === "copying";
+  const shown = list === null ? null : copyChoices(list, showAll);
+  const hidden = list === null ? 0 : list.length - copyChoices(list, false).length;
 
   useEffect(() => {
     box.current?.querySelector<HTMLElement>("select, button")?.focus();
@@ -193,7 +296,7 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
     if (from === null) return;
     let live = true;
     api<{ images: ListedImage[] }>(`/machines/${from}/images`)
-      .then((r) => { if (live) { setList(r.images); setImage(r.images[0]?.id ?? null); } })
+      .then((r) => { if (live) { setList(r.images); setImage(copyChoices(r.images, false)[0]?.id ?? null); } })
       .catch((e) => { if (live) setListError(errorText(e)); });
     return () => { live = false; };
   }, [from]);
@@ -239,7 +342,7 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
           <label htmlFor="cpy-from">From</label>
           <select id="cpy-from" value={from ?? ""} disabled={busy || phase === "done"}
             onChange={(e) => {
-              setFrom(Number(e.target.value)); setList(null); setListError(null); setImage(null);
+              setFrom(Number(e.target.value)); setList(null); setListError(null); setImage(null); setShowAll(false);
               setPhase("pick"); setError(null); setResult(null);
             }}>
             {sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -248,10 +351,13 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
         {listError && <Notice tone="error">{listError}</Notice>}
         {!listError && list === null && <p className="small muted">Asking {source?.name ?? "the machine"} for its images…</p>}
         {list !== null && list.length === 0 && <p className="small muted">{source?.name} has no images.</p>}
-        {list !== null && list.length > 0 && phase !== "done" && (
+        {shown !== null && list !== null && list.length > 0 && shown.length === 0 && phase !== "done" && (
+          <p className="small muted">No image on {source?.name} is one a recipe names.</p>
+        )}
+        {shown !== null && shown.length > 0 && phase !== "done" && (
           <fieldset className="dlg-machines cpy-images">
-            <legend>Images on {source?.name}</legend>
-            {list.map((i) => (
+            <legend>{showAll ? `Images on ${source?.name}` : `Engine images on ${source?.name} (named by a recipe)`}</legend>
+            {shown.map((i) => (
               <label key={i.id} className="dlg-target">
                 <input type="radio" name="cpy-image" value={i.id} checked={image === i.id} disabled={busy}
                   onChange={() => setImage(i.id)} />
@@ -263,6 +369,18 @@ function CopyDialog({ m, sources, onClose, onLoaded }: {
               </label>
             ))}
           </fieldset>
+        )}
+        {list !== null && hidden > 0 && phase !== "done" && (
+          <label className="check cpy-all">
+            <input type="checkbox" checked={showAll} disabled={busy} onChange={(e) => {
+              const all = e.target.checked;
+              setShowAll(all);
+              if (!all && image !== null && !copyChoices(list, false).some((i) => i.id === image)) {
+                setImage(copyChoices(list, false)[0]?.id ?? null);
+              }
+            }} />
+            <span>Show all images <small className="muted">({hidden} more that no recipe names, such as other people's on a shared machine)</small></span>
+          </label>
         )}
         {busy && source && (
           <div className="upl-progress" role="status">
