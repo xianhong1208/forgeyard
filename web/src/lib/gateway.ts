@@ -13,6 +13,7 @@ export const API_ENDPOINT: Record<string, string> = {
   "vision-detect": "/vision/detect",
   "vision-segment": "/vision/segment",
   "vision-depth": "/vision/depth",
+  "vision-classify": "/vision/classify",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -26,6 +27,7 @@ export const API_KIND: Record<string, string> = {
   "vision-detect": "object detection",
   "vision-segment": "segmentation",
   "vision-depth": "depth",
+  "vision-classify": "image classification",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -78,6 +80,7 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     const extra = task === "segment" ? ` -F 'box=[40, 40, 320, 240]'` : task === "detect" ? " -F threshold=0.5" : "";
     const field = task === "segment" ? `, "box": "[40, 40, 320, 240]"` : task === "detect" ? `, "threshold": "0.5"` : "";
     const show = task === "detect" ? `for d in r.json()["detections"]:\n    print(d["label"], d["score"], d["box"])`
+      : task === "classify" ? `for c in r.json()["labels"]:\n    print(c["label"], c["score"])`
       : task === "segment" ? `print(r.json()["masks"][0]["area"], "pixels")  # each mask: a PNG in base64`
         : `open("depth.png", "wb").write(base64.b64decode(r.json()["depth_png"]))  # 16-bit, near = bright`;
     return {

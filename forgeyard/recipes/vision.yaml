@@ -1,6 +1,7 @@
 # Object detection, segmentation and depth (1.4) with Forgeyard's own vision server (images/vision):
 # transformers models from the machine's model cache, answered by the gateway at /v1/vision/detect,
-# /v1/vision/segment and /v1/vision/depth (forgeyard/models/vision.py says which models are which).
+# /v1/vision/segment, /v1/vision/depth and (1.4.4, image classification) /v1/vision/classify
+# (forgeyard/models/vision.py says which models are which; image-classify needs a vision image from 1.4.4 on).
 #
 # The image is Forgeyard's own (images/vision), published with a release as docker.io/tonyhuang1101/forgeyard-vision
 # (X.Y.Z for the CPU, linux/amd64 and arm64; X.Y.Z-cuda for NVIDIA, torch +cu130, driver 580 or newer), and
@@ -19,14 +20,14 @@
 name: vision
 title: Forgeyard vision server
 description: >-
-  Object detection, segmentation (SAM 2) and depth estimation with transformers models, behind
-  /v1/vision/detect, /v1/vision/segment and /v1/vision/depth. Small: shares a GPU by default, and
-  runs well on a CPU.
+  Object detection, segmentation (SAM 2), depth estimation and image classification with transformers
+  models, behind /v1/vision/detect, /v1/vision/segment, /v1/vision/depth and /v1/vision/classify. Small:
+  shares a GPU by default, and runs well on a CPU.
 engine: forgeyard-vision
 version: "1.4"
-tasks: [detect, segment, depth]
+tasks: [detect, segment, depth, image-classify]
 formats: [safetensors]
-api: {detect: vision-detect, segment: vision-segment, depth: vision-depth}
+api: {detect: vision-detect, segment: vision-segment, depth: vision-depth, image-classify: vision-classify}
 upstream_model: served_name
 share: vram
 port: 8000

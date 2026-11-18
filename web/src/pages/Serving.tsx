@@ -22,7 +22,7 @@ const KINDS = [
   { icon: IconSpeakerphone, name: "Text to speech", detail: "Qwen3-TTS on vLLM-Omni, llama.cpp TTS GGUFs, Kokoro on speaches" },
   { icon: IconPhotoAi, name: "Images", detail: "diffusers pipelines on vLLM-Omni; stable-diffusion.cpp on AMD (Vulkan), NVIDIA (CUDA) and CPUs" },
   { icon: IconMovie, name: "Video", detail: "Wan text-to-video pipelines on vLLM-Omni (NVIDIA), as jobs at /v1/videos" },
-  { icon: IconScan, name: "Vision", detail: "Object detection, segmentation and depth on Forgeyard's vision server (CPU or NVIDIA), at /v1/vision/…" },
+  { icon: IconScan, name: "Vision", detail: "Object detection, segmentation, depth and image classification on Forgeyard's vision server (CPU or NVIDIA), at /v1/vision/…" },
 ];
 
 // 1.3's addresses under Models (/models/deploy, /models/deployments/<id>[/edit]) open the same page
@@ -164,7 +164,7 @@ export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines:
             </Link>
           )}
         </div>
-        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task}</code> · </>}<Link to={modelHref(d.model.name)}>{d.model.name}</Link> · <Link to={engineHref(d.recipe)}>{d.recipe}</Link>{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
+        <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task === "image-classify" ? "classify" : d.model.task}</code> · </>}<Link to={modelHref(d.model.name)}>{d.model.name}</Link> · <Link to={engineHref(d.recipe)}>{d.recipe}</Link>{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
       </div>
       <div className="where">
         {placed.length ? placed.map((r) => {

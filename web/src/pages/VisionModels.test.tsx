@@ -9,6 +9,8 @@ import App from "../App";
 import { AuthProvider } from "../auth";
 import { searchLicenceProblem, visionProblem, type SearchResult } from "../lib/addmodel";
 import { snippets } from "../lib/gateway";
+import { API_LABEL, TASK_LABEL } from "../lib/models";
+import { catalogKind } from "../lib/pages";
 import type { CatalogResponse, Deployment, Replica } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -67,7 +69,7 @@ describe("vision models (1.4, #86)", () => {
     mount("/serving");
     const sec = await screen.findByRole("region", { name: "Vision · 3" });
     expect(within(sec).getByText("/v1/vision/…")).toBeTruthy();
-    expect(within(sec).getByText("Object detection, segmentation and depth")).toBeTruthy();
+    expect(within(sec).getByText("Object detection, segmentation, depth and image classification")).toBeTruthy();
     const det = within(sec).getByRole("group", { name: "Deployment det" });
     expect(within(det).getByText("/v1/vision/detect")).toBeTruthy();
     expect(within(det).getByText("Object detection")).toBeTruthy();
@@ -175,4 +177,24 @@ describe("vision models (1.4, #86)", () => {
     expect(screen.queryByText("Start from a template")).toBeNull();
     expect(fetch.mock.calls.some(([u]) => String(u).startsWith("/api/workloads/templates"))).toBe(false);
   });
+
+  it("FY-WEB-496 image classification (1.4.4, #141): its own task and label, in the Vision section, at /v1/vision/classify, with snippets", async () => {
+    expect(TASK_LABEL["image-classify"]).toBe("Image classification");
+    expect(API_LABEL["vision-classify"]).toBe("/v1/vision/classify");
+    expect(catalogKind({ task: "image-classify", modalities: [] })).toBe("vision");
+    const c = snippets("http://h/v1", "k", "vit", "vision-classify");
+    expect(c.curl).toContain("http://h/v1/vision/classify");
+    expect(c.python).toContain('for c in r.json()["labels"]:');
+    const dep = visionDep(6, "vit", "detect", "vit-base-patch16-224");
+    dep.model.task = "image-classify";
+    dep.route = { served_name: "vit", api: "vision-classify", upstream_model: "vit" };
+    server((url) => url === "/api/deployments" ? { status: 200, body: { deployments: [dep], server_time: "", can_manage: true } }
+      : url === "/api/machines" ? { status: 200, body: { machines: [] } } : undefined);
+    mount("/serving");
+    const sec = await screen.findByRole("region", { name: "Vision · 1" });
+    const row = within(sec).getByRole("group", { name: "Deployment vit" });
+    expect(within(row).getByText("/v1/vision/classify")).toBeTruthy();
+    expect(within(row).getByText("Image classification")).toBeTruthy();
+  });
 });
+

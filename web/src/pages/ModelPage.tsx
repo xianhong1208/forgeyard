@@ -12,7 +12,7 @@ import { Crumb, EngineCards, FoldButton, Jump, MachineCell, Section } from "../c
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
-import { API_LABEL, gib, mediaText, params, shortSource } from "../lib/models";
+import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource } from "../lib/models";
 import { catalogKind, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
 import type { CatalogModel, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelPage as Page, ModelPageMachine } from "../lib/types";
@@ -41,7 +41,7 @@ export function ModelPage() {
 
 function apiPath(p: Page): string | null {
   const m = p.model;
-  if (m.task === "detect" || m.task === "segment" || m.task === "depth") return `/v1/vision/${m.task}`;
+  if (VISION_TASKS.includes(m.task)) return `/v1/vision/${m.task === "image-classify" ? "classify" : m.task}`;
   const r = p.recipes[0];
   return r ? API_LABEL[r.api[m.task]] ?? null : null;
 }

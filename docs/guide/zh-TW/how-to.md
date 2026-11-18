@@ -392,6 +392,28 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 
 連不到 Docker Hub 的機器，會和其他固定的引擎映像檔一樣經由伺服器取得視覺映像檔（[離線機器](#offline-machines)）；也可以在那台機器上載入（Models → Engines → `vision` → *Machine without registry access* 會給出指令）。
 
+## 圖片分類
+
+圖片分類（1.4.4）是一種獨立的模型，*Image classification*（任務 `image-classify`），由同一個視覺伺服器在 `/v1/vision/classify` 回應；它不是文字分類（`/v1/classify`）。模型有兩類：
+
+- **固定類別：** ViT、ConvNeXt V2、DINOv2 分類器…（`…ForImageClassification` 模型）有自己的類別清單，常見的是 ImageNet 的 1,000 類，回應其中最符合的幾個。
+- **零樣本：** CLIP 和 SigLIP 2 把圖片分到每個請求送來的標籤（`labels`）之中，每個標籤讀成「This is a photo of …」（`template` 可以改）。SigLIP 每個標籤各自評分（`multi_label: true`：可能好幾個都符合，也可能都不符合）；CLIP 的分數加起來是 1。
+
+1. **Models → Add a model → Recommended → Image classification** 列出 SigLIP 2 base 和 LAION 的 CLIP ViT-B/32（零樣本）、ViT base、ConvNeXt V2 tiny 和 DINOv2 small（ImageNet 類別），都是 Apache-2.0 或 MIT。也可以用 **Image classification** 任務搜尋 Hugging Face。
+2. 像其他視覺模型一樣**部署**：CPU 就夠了（四個執行緒每張圖片 0.1 到 0.4 秒）。需要 1.4.4 起的視覺映像檔。
+3. 呼叫它：
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=vit-base-patch16-224 -F image=@cats.jpg -F top_k=3
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=siglip2-base -F image=@cats.jpg -F 'labels=cats on a sofa, a dog, an invoice'
+```
+
+回應：`labels`，最好的在前，每個是 `{"label", "score"}`，以及 `multi_label`。零樣本分類器沒給 `labels` 時回 400 `labels_required`；固定類別的分類器收到 `labels` 回 400 `labels_not_supported`。
+
 ## 在 Playground 試用視覺
 
 Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在 Playground 唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
@@ -402,6 +424,7 @@ Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一�
    - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。找你說的東西的偵測模型（1.4.4）會先問 **Find these**：輸入名稱、以逗號分隔（*cat, remote control*），再按 **Find**；滑桿從 0.3 開始，因為這類模型的分數較低。
    - **Segmentation：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
    - **Depth estimation：** 按 **Estimate depth**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **Colour** 或 **Grey**。深度是相對的，不是公尺。
+   - **Image classification（1.4.4）：** 按 **Classify**，列出最符合的類別，每個分數有一條長條。零樣本分類器會先要你輸入 **Labels**，以逗號分隔（*a cat, a dog, a screenshot*）。
 
 結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。模型停止了，或讀不了這張圖片時，會用白話說明。主控台把它送到 `/api/playground/vision/<task>`，對已登入的人來說和 `/v1/vision/<task>` 一樣（[參考資料](reference.md#vision)）。
 

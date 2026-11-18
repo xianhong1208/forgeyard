@@ -242,6 +242,7 @@ local_dirs = ["/data/models"]
 | `POST /v1/videos/sync`、`POST /v1/videos/{id}/remix` | 不提供：一律回應 404 `endpoint_not_supported` | — |
 | `POST /v1/vision/detect` | 物件偵測（1.4）：送一張圖片，傳回方框、標籤和分數；零樣本偵測模型（1.4.4）用 `labels` 告訴它要找什麼。見[視覺](#vision) | 否 |
 | `POST /v1/vision/segment` | 用 SAM 2 分割（1.4）：送一張圖片和一個點或一個方框，傳回 PNG 遮罩 | 否 |
+| `POST /v1/vision/classify` | 圖片分類（1.4.4）：送一張圖片，傳回最符合的類別和分數；零樣本分類器（CLIP、SigLIP）由 `labels` 給它可選的標籤 | 否 |
 | `POST /v1/vision/depth` | 深度估計（1.4）：送一張圖片，傳回 16 位元深度圖 | 否 |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
@@ -425,7 +426,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 ### 視覺
 
-`POST /v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`（1.4）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是以 digest 固定的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
+`POST /v1/vision/detect`、`/v1/vision/segment`、`/v1/vision/depth`（1.4）和 `/v1/vision/classify`（1.4.4，圖片分類，任務 `image-classify`）接受一張圖片給視覺模型，回應 JSON。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）：任何 HTTP 用戶端都能用。由 Forgeyard 自己的視覺伺服器提供（配方 `vision`，映像檔是以 digest 固定的 `forgeyard-vision`：NVIDIA 上用 CUDA 版，其他用 CPU 版），模型來自機器的模型快取。只由本機部署提供，絕不送往雲端供應商。
 
 請求是 `multipart/form-data`，帶 `model`、檔案欄位 `image` 和各選項欄位；或是 JSON，帶 `model`、`image`（base64 或 `data:` URI）和選項。PNG、JPEG 或 WebP，最多 20 MiB、4,000 萬像素。閘道檢查有沒有模型和圖片，只換掉 `model`，其餘原樣交給副本；別種任務的模型回 400 `wrong_endpoint`（訊息會寫出它的端點）。
 
@@ -434,8 +435,9 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `detect` | `threshold`（0 到 1；0.5，零樣本偵測模型 0.3，OWL 0.1）、`max_detections`（1 到 1,000，100）；`labels`（1.4.4）：零樣本偵測模型要找的東西，名稱清單或以逗號分隔的字串，最多 32 個、每個最多 64 個字元 | `detections`：`[{"label", "score", "box": [x0, y0, x1, y1]}]`，分數高的在前，單位是圖片的像素；零樣本偵測模型的 `label` 是送出的名稱之一，原樣傳回 |
 | `segment` | `points`（`[[x, y], …]`，最多 16 個）配 `labels`（1 在內、0 在外；省略時全是 1），或 `box`（`[x0, y0, x1, y1]`）；`multimask`（`true`：三個候選遮罩） | `masks`：`[{"score", "area", "box", "png"}]`，最好的在前；每個遮罩是和圖片同尺寸的 1 位元 PNG，base64 |
 | `depth` | 無 | `depth_png`（和圖片同尺寸的 16 位元灰階 PNG，base64，越近越亮）、`min`、`max`、`unit`（相對深度，不是公尺） |
+| `classify` | `top_k`（1 到 1,000；5，零樣本分類器是它的全部標籤）；`labels`（只有零樣本分類器能用，而且一定要給：可選的標籤，格式同 `detect`）；`template`（零樣本：`This is a photo of {}.`，用一個 `{}` 放標籤，最多 200 個字元） | `labels`：`[{"label", "score"}]`，最好的在前；`multi_label`（`true`：每個分數各自獨立，用 sigmoid，SigLIP 和多標籤分類器就是這樣；`false`：分數加起來是 1） |
 
-每個回應另有 `model`、`width`、`height`（圖片的）和 `ms`（模型花的時間）。視覺伺服器的錯誤（`{"error": {"message", "code"}}`）照原狀態碼傳回：400 `invalid_image`、`invalid_option`、`missing_prompt`（分割時沒給點或方框）、`labels_required`（零樣本偵測模型沒給 `labels`）、`labels_not_supported`（固定類別的偵測模型收到 `labels`）、413 `image_too_large`。
+每個回應另有 `model`、`width`、`height`（圖片的）和 `ms`（模型花的時間）。視覺伺服器的錯誤（`{"error": {"message", "code"}}`）照原狀態碼傳回：400 `invalid_image`、`invalid_option`、`missing_prompt`（分割時沒給點或方框）、`labels_required`（零樣本偵測模型沒給 `labels`）、`labels_not_supported`（固定類別的偵測模型或分類器收到 `labels`；兩者都是 1.4.4）、413 `image_too_large`。
 
 **零樣本偵測模型（1.4.4，#142）**（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OWL-ViT、OWLv2）找的是每個請求說的東西，而不是固定的類別清單：目錄標示 *Finds what you name*（`vision.zero_shot`）。送簡單的名稱，`labels: ["cat", "remote control"]`（或表單欄位 `labels=cat, remote control`）；重複和空的名稱會被去掉。視覺伺服器依各家族的方式詢問（Grounding DINO 是一句小寫提示「cat. remote control.」，每個方框取分數最高的那個名稱；OWL 是每個名稱一個查詢），所以名稱會照送出的樣子傳回。它們的分數比固定類別的偵測模型低：從 0.3（Grounding DINO）或 0.1 到 0.2（OWLv2）開始。它們需要 1.4.4 起的視覺映像檔：內建配方的固定映像檔移過去之前，部署會回 422 `vision_image_too_old`（指定較新映像檔或本機建置的自訂配方可以執行）。
 
@@ -495,8 +497,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 400 | `response_format_not_supported` | 圖片：`response_format: url`。圖片只以 base64 傳回 | 拿掉它，或要求 `b64_json` |
 | 400 | `streaming_not_supported` | 圖片與視覺：`stream: true` | 拿掉它 |
 | 400 | `missing_image` | 視覺：沒有檔案欄位 `image`，或 JSON 沒有 `image` | 附上圖片 |
-| 400 | `labels_required` | 視覺（1.4.4）：沒告訴零樣本偵測模型要找什麼 | 送 `labels` |
-| 400 | `labels_not_supported` | 視覺（1.4.4）：固定類別的偵測模型收到 `labels` | 拿掉 `labels`，或改用零樣本偵測模型 |
+| 400 | `labels_required` | 視覺（1.4.4）：沒告訴零樣本偵測模型要找什麼，或沒給零樣本分類器它的標籤 | 送 `labels` |
+| 400 | `labels_not_supported` | 視覺（1.4.4）：固定類別的偵測模型或分類器收到 `labels` | 拿掉 `labels`，或改用零樣本模型 |
 | 400 | `too_many_images` | 圖片：`n` 超過部署的 *Images per request* | 少要幾張，或調高 `max_images` |
 | 400 | `image_too_large` | 圖片：某一邊超過部署的 *Largest side* | 要小一點的尺寸，或調高 `max_side` |
 | 400 | `invalid_size` | 圖片：`size` 不是 `WIDTHxHEIGHT`（每邊 64 到 8,192），或某一邊不是模型接受的倍數（16 或 64；訊息會說明）。影片：同上，每邊 64 到 2,048，16 或 32 的倍數 | 使用類似訊息建議的尺寸 |
@@ -1056,7 +1058,7 @@ stable-diffusion.cpp 只用每次建置都會移動的 tag（`master-vulkan`、`
 
 Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`arch`：AMD 的 gfx target 或 CPU 架構；`compute_capability` 與 `driver`：像 `>=8.0` 這樣的比較）、`runtime`（`container` 或 `process`）、`image` 與 `entrypoint`（容器）、行程用的 `engine`（`url`、`sha256`、`binary`：agent 下載的 release）或 `command`（已安裝的程式）、取代配方設定的 `args` 與 `env`，以及 `amd_kfd`（AMD 容器；預設 `true`：給 `/dev/kfd` 和那張卡的 render node；`false`：只給 render node，給只用 Vulkan 的引擎），以及 `unsupported`（1.3.1，這個 variant 不能執行的參數值，例如 `{kv_cache: [f8_e4m3]}`：帶有這些值的部署不會被放到這個 variant 上，放置結果會說明原因）。
 
-`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。零樣本（開放詞彙）偵測模型，也就是用 `model_type` 或架構認出的 transformers 零樣本偵測模型（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OmDet-Turbo、OWL-ViT、OWLv2），是標上 `zero_shot` 的 detect 模型（1.4.4，#142；1.4.3 會拒絕它們，1.4.3 之前加入的靠目錄存下的 config 認出，不需要遷移）。OmDet-Turbo 和用 timm backbone 的 DETR 一樣被拒絕：它的 transformers 版本經由 timm 載入 backbone（加入時，或部署 1.4.3 之前加入的時候，回 422 `not_a_vision_model`）。它們需要 1.4.4 起的視覺映像檔：配方的 `forgeyard-vision` 映像檔比較舊時，部署或估算會回 422 `vision_image_too_old`，寫出兩個版本；其他名稱的映像檔（本機建置）照原樣接受。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）；Grounding DINO 和 MM-Grounding-DINO 再加 512 MiB（文字編碼器和 800 像素的特徵：0.64 GiB 的檔案在 CPU 上峰值 2.24 GiB，1.4.4）。
+`vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。零樣本（開放詞彙）偵測模型，也就是用 `model_type` 或架構認出的 transformers 零樣本偵測模型（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OmDet-Turbo、OWL-ViT、OWLv2），是標上 `zero_shot` 的 detect 模型（1.4.4，#142；1.4.3 會拒絕它們，1.4.3 之前加入的靠目錄存下的 config 認出，不需要遷移）。OmDet-Turbo 和用 timm backbone 的 DETR 一樣被拒絕：它的 transformers 版本經由 timm 載入 backbone（加入時，或部署 1.4.3 之前加入的時候，回 422 `not_a_vision_model`）。圖片分類器（1.4.4，#141，任務 `image-classify`）是 `config.json` 寫的是 `…ForImageClassification` 架構（固定類別：ViT、ConvNeXt V2、DINOv2…；timm 權重 `timm_wrapper` 會被拒絕）或 CLIP 類架構（標上 `zero_shot`：CLIP、SigLIP、SigLIP 2、ALIGN、AltCLIP、Chinese-CLIP、MetaCLIP 2）的模型，以 `vision-classify` 提供。零樣本偵測模型和圖片分類器需要 1.4.4 起的視覺映像檔：配方的 `forgeyard-vision` 映像檔比較舊時，部署或估算會回 422 `vision_image_too_old`，寫出兩個版本；其他名稱的映像檔（本機建置）照原樣接受。CLIP 儲存庫裡 transformers 權重旁邊的 OpenCLIP 權重（`open_clip_*`）不會被讀取，也不會下載。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）；Grounding DINO 和 MM-Grounding-DINO 再加 512 MiB（文字編碼器和 800 像素的特徵：0.64 GiB 的檔案在 CPU 上峰值 2.24 GiB，1.4.4）。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
 

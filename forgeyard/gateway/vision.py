@@ -98,11 +98,13 @@ def model_options(db: DbSession) -> list[dict]:
         m = d.model if d is not None else None
         task = apis[row.api]
         out.append({"name": row.served_name, "task": task, "title": vision_models.LABEL[task],
-                    "endpoint": f"/v1/vision/{task}", "deployment_id": row.deployment_id,
+                    "endpoint": f"/v1/{vision_models.ENDPOINT[task]}", "deployment_id": row.deployment_id,
                     "model": ((m.meta or {}).get("repo") or m.source) if m is not None else None,
                     "licence": (m.meta or {}).get("license") if m is not None else None,
                     # 1.4.4 (#142): a zero-shot detector finds what the request names (`labels`)
-                    "zero_shot": bool(m is not None and task == "detect" and vision_models.is_zero_shot(m.meta or {})),
+                    # (1.4.4, #141) and a zero-shot image classifier the labels to choose from
+                    "zero_shot": bool(m is not None and task in ("detect", "image-classify")
+                                      and vision_models.is_zero_shot(m.meta or {})),
                     "ready": ready, "running": running, "reason": None if ready else route.reason})
     return out
 

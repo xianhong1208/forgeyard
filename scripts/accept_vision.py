@@ -12,7 +12,10 @@ cpu, default: gpu when the machine has an allowed GPU):
      found above 0.8; --image to use another), as multipart and as JSON; a zero-shot detector (1.4.4, #142) on the
      same photo told to find a cat, a remote control and a giraffe (both cats above 0.5, a remote, no giraffe),
      as multipart (a comma-separated field) and as JSON, and without labels (400 labels_required), while a
-     detector with fixed classes given labels is 400 labels_not_supported; segmentation with a box around the
+     detector with fixed classes given labels is 400 labels_not_supported; classification (1.4.4, #141) of the photo:
+     a zero-shot classifier among "cats on a sofa", "a dog", "a car", "an invoice" (the cats first; top_k 2 as
+     JSON; without labels 400 labels_required), one with ImageNet classes (a cat class first; labels 400
+     labels_not_supported); segmentation with a box around the
      red square of a generated image (the mask covers the square); depth on the photo (a 16-bit PNG of the
      photo's size, far and near differ). Each call is timed;
   3. the refusals: no key (401), the wrong task's endpoint (400 wrong_endpoint), no image (400), a key whose
@@ -28,7 +31,8 @@ leftovers of an earlier run are removed first, so it can be run again.
 Models it knows (--only; the first three are the default, every one is recommended but rtdetr-v2-r50):
   rtdetr-v2-r18, sam2.1-hiera-tiny, depth-anything-v2-small, rtdetr-v2-r50 (a larger detector, Apache-2.0),
   and the zero-shot detectors (1.4.4, they need a vision image from 1.4.4 on): grounding-dino-tiny,
-  mm-grounding-dino-tiny, owlv2-base
+  mm-grounding-dino-tiny, owlv2-base; the image classifiers (1.4.4, the same): siglip2-base and clip-vit-b-32-laion
+  (zero-shot), vit-base-patch16-224 and convnextv2-tiny-22k-224 (ImageNet classes)
 
 The vision image is the one the `vision` recipe pins by digest (1.4.1: docker.io/tonyhuang1101/forgeyard-vision,
 X.Y.Z or X.Y.Z-cuda, recorded in images.lock.json): the machine pulls it, or gets it through the server. To try
@@ -76,9 +80,20 @@ MODELS = {
                                "revision": "ef2053aa1e0cc9d9cee1df31ca919ee9aae4fc8e", "task": "detect", "zero_shot": True},
     "owlv2-base": {"source": "hf://google/owlv2-base-patch16-ensemble",
                    "revision": "cfd3195ba4ea9592eec887ded089f4c08eff231d", "task": "detect", "zero_shot": True},
+    # 1.4.4 (#141): image classification, zero-shot (told the labels) and with the ImageNet classes
+    "siglip2-base": {"source": "hf://google/siglip2-base-patch16-224", "revision": "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2",
+                     "task": "image-classify", "zero_shot": True},
+    "clip-vit-b-32-laion": {"source": "hf://laion/CLIP-ViT-B-32-laion2B-s34B-b79K",
+                            "revision": "1a25a446712ba5ee05982a381eed697ef9b435cf", "task": "image-classify", "zero_shot": True},
+    "vit-base-patch16-224": {"source": "hf://google/vit-base-patch16-224", "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
+                             "task": "image-classify"},
+    "convnextv2-tiny-22k-224": {"source": "hf://facebook/convnextv2-tiny-22k-224",
+                                "revision": "9cba4896e97bb86b1eb609e482a2149d84f345bc", "task": "image-classify"},
 }
 FIND = ["cat", "remote control", "giraffe"]     # what a zero-shot detector is told to find on the cats photo
-OTHER = {"detect": "depth", "segment": "detect", "depth": "segment"}
+OTHER = {"detect": "depth", "segment": "detect", "depth": "segment", "image-classify": "detect"}
+PATH = {"detect": "detect", "segment": "segment", "depth": "depth", "image-classify": "classify"}   # /v1/vision/<path>
+CLASSES = ["cats on a sofa", "a dog", "a car", "an invoice"]   # what a zero-shot classifier chooses among
 
 
 # ------------------------------------------------------------------ images
@@ -227,6 +242,33 @@ def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narro
         check(f"{name}: labels for a detector with fixed classes: 400 labels_not_supported",
               s == 400 and code(data) == "labels_not_supported", f"{s} {code(data)}"
               + (" (a vision image from before 1.4.4 ignores labels)" if s == 200 else ""), info=s == 200)
+    elif task == "image-classify" and spec.get("zero_shot"):
+        body, ctype = multipart({"model": name, "labels": ", ".join(CLASSES)}, image, filename)
+        s, data, t = post(base + "classify", body, ctype, key)
+        top = data.get("labels") or []
+        check(f"{name}: classify {filename} among {', '.join(CLASSES)}: the cats first, every label scored",
+              s == 200 and top and top[0].get("label") == CLASSES[0] and len(top) == len(CLASSES) and data.get("model") == name,
+              f"{s} in {t:.2f} s: {[(o.get('label'), o.get('score')) for o in top]} multi_label {data.get('multi_label')}")
+        info["classify_s"] = round(t, 3)
+        jb = json.dumps({"model": name, "image": base64.b64encode(image).decode(), "labels": CLASSES, "top_k": 2}).encode()
+        s, data2, t = post(base + "classify", jb, "application/json", key)
+        check(f"{name}: the same as JSON with top_k 2 (the two best)", s == 200 and data2.get("labels") == top[:2],
+              f"{s} in {t:.2f} s")
+        jb = json.dumps({"model": name, "image": base64.b64encode(image).decode()}).encode()
+        s, data, _ = post(base + "classify", jb, "application/json", key)
+        check(f"{name}: no labels: 400 labels_required", s == 400 and code(data) == "labels_required", f"{s} {code(data)}")
+    elif task == "image-classify":
+        body, ctype = multipart({"model": name, "top_k": "3"}, image, filename)
+        s, data, t = post(base + "classify", body, ctype, key)
+        top = data.get("labels") or []
+        check(f"{name}: classify {filename}: a cat first, three classes",
+              s == 200 and len(top) == 3 and "cat" in str(top[0].get("label")) and data.get("model") == name,
+              f"{s} in {t:.2f} s: {[(o.get('label'), o.get('score')) for o in top]}")
+        info["classify_s"] = round(t, 3)
+        jb = json.dumps({"model": name, "image": base64.b64encode(image).decode(), "labels": ["cat"]}).encode()
+        s, data, _ = post(base + "classify", jb, "application/json", key)
+        check(f"{name}: labels for a classifier with fixed classes: 400 labels_not_supported",
+              s == 400 and code(data) == "labels_not_supported", f"{s} {code(data)}")
     elif task == "segment":
         sq = square_png()
         jb = json.dumps({"model": name, "image": base64.b64encode(sq).decode(), "box": [40, 40, 120, 120]}).encode()
@@ -256,25 +298,26 @@ def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narro
         info["depth_s"] = round(t, 3)
     # Refusals.
     tiny = json.dumps({"model": name, "image": base64.b64encode(square_png()).decode()}).encode()
-    s, data, _ = post(base + task, tiny, "application/json", None)
+    s, data, _ = post(base + PATH[task], tiny, "application/json", None)
     check(f"{name}: no key: 401", s == 401, f"{s} {code(data)}")
-    s, data, _ = post(base + OTHER[task], tiny, "application/json", key)
-    check(f"{name}: /v1/vision/{OTHER[task]} for a {task} model: 400 wrong_endpoint", s == 400 and code(data) == "wrong_endpoint",
+    s, data, _ = post(base + PATH[OTHER[task]], tiny, "application/json", key)
+    check(f"{name}: /v1/vision/{PATH[OTHER[task]]} for a {task} model: 400 wrong_endpoint", s == 400 and code(data) == "wrong_endpoint",
           f"{s} {code(data)}")
-    s, data, _ = post(base + task, json.dumps({"model": name}).encode(), "application/json", key)
+    s, data, _ = post(base + PATH[task], json.dumps({"model": name}).encode(), "application/json", key)
     check(f"{name}: no image: 400 missing_image", s == 400 and code(data) == "missing_image", f"{s} {code(data)}")
     if narrow is None:
         check(f"{name}: a key without the model: 403", True, "no other model to allow on this server", info=True)
     else:
-        s, data, _ = post(base + task, tiny, "application/json", narrow)
+        s, data, _ = post(base + PATH[task], tiny, "application/json", narrow)
         check(f"{name}: a key without the model: 403", s == 403 and code(data) == "model_not_allowed", f"{s} {code(data)}")
     rep = d["workload"]["replica_list"][0]
     port = next(iter(rep.get("ports") or []), {})
     if port.get("host_port") and port.get("address"):
-        url = f"http://{port['address']}:{port['host_port']}/v1/vision/{task}"
+        url = f"http://{port['address']}:{port['host_port']}/v1/vision/{PATH[task]}"
         s, data, _ = post(url, tiny, "application/json", None, timeout=15)
         check(f"{name}: the replica's own port without its key: refused", s in (0, 401), f"{s} {code(data)}")
-    return 1 if task == "depth" else 2   # a refused request (400) is not counted
+    # Answered requests (a refused one, 400, is not counted): one for depth and a classifier with fixed classes.
+    return 1 if task == "depth" or (task == "image-classify" and not spec.get("zero_shot")) else 2
 
 
 def usage_of(c: Client, key_name: str) -> dict:

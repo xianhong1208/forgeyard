@@ -1,7 +1,7 @@
 """Forgeyard's vision server itself (images/vision/app.py, 1.4): the replica key on every path but /health, the task's
 two paths only, the served name in answers, and a model directory checked against its task before anything is loaded
 (FY-VIS-016 to 018); zero-shot detectors (1.4.4, #142): labels checked, required by them and refused by the others,
-each family asked its own way, a timm backbone refused (FY-VIS-023 to 027). It needs torch, transformers and Pillow (the image's own
+each family asked its own way, a timm backbone refused (FY-VIS-023 to 027); image classification (1.4.4, #141), with fixed classes or zero-shot (FY-VIS-033, 034). It needs torch, transformers and Pillow (the image's own
 environment): skipped where they are not installed (Forgeyard's own test environment); run it with the vision
 server's dependencies (images/vision/requirements-cpu.txt plus pytest and httpx)."""
 
@@ -245,3 +245,91 @@ def test_fy_vis_027_a_timm_backbone_is_refused_before_loading(tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({"architectures": ["GroundingDinoForObjectDetection"],
                                                       "model_type": "grounding-dino", "use_timm_backbone": False}))
     mod.check_model_dir("detect", tmp_path)
+
+
+# ------------------------------------------------------------------ image classification (1.4.4, #141)
+def _classifier(mod, zero_shot: bool, sigmoid: bool, logits, id2label=None):
+    """A Classify worker with a stub model answering `logits`; records what the processor got."""
+    c = mod.Classify.__new__(mod.Classify)
+    c.zero_shot, c.sigmoid, c.device, c.path = zero_shot, sigmoid, "cpu", Path("/m")
+    c.lock = __import__("threading").Lock()
+
+    class Proc(_Stub):
+        def __call__(self, **kw):
+            self.calls.append(kw)
+            return _Stub(to=lambda device: {})
+
+    c.processor = Proc()
+    out = _Stub(logits_per_image=torch.tensor([logits]), logits=torch.tensor([logits]))
+    c.model = _Stub(config=_Stub(id2label=id2label or {}))
+    c.model.__class__.__call__ = lambda self, **kw: out
+    return c
+
+
+def test_fy_vis_033_classify_scores_the_labels_the_way_each_model_does():
+    """FY-VIS-033: a zero-shot classifier scores each label sent, put in the template ("This is a photo of {}." or the
+    request's), with a softmax over the labels (CLIP) or a sigmoid each (SigLIP, padded to 64 tokens), all labels by
+    default, best first, `top_k` fewer; a classifier with fixed classes names its id2label classes, the 5 best by
+    default, a sigmoid each for a multi-label model. A zero-shot one without labels is 400 labels_required, a fixed one
+    with labels 400 labels_not_supported, and a template without one {} is 400 invalid_option."""
+    mod = load()
+    img = Image.new("RGB", (64, 48))
+    clip = _classifier(mod, True, False, [1.0, 3.0, 2.0])
+    out = clip.run(img, {"labels": ["a dog", "a cat", "a car"]})
+    assert [d["label"] for d in out["labels"]] == ["a cat", "a car", "a dog"] and out["multi_label"] is False
+    assert round(sum(d["score"] for d in out["labels"]), 3) == 1.0 and out["labels"][0]["score"] == 0.6652
+    assert clip.processor.calls[-1]["text"] == ["This is a photo of a dog.", "This is a photo of a cat.",
+                                                "This is a photo of a car."]
+    assert clip.processor.calls[-1]["padding"] is True
+    clip.run(img, {"labels": "a dog, a cat, a car", "top_k": 1, "template": "a {} on a sofa"})
+    assert clip.processor.calls[-1]["text"][1] == "a a cat on a sofa"
+    assert len(clip.run(img, {"labels": ["a dog", "a cat", "a car"], "top_k": "2"})["labels"]) == 2
+    sig = _classifier(mod, True, True, [0.0, -10.0, 2.0])
+    out = sig.run(img, {"labels": ["x", "y", "z"]})
+    assert out["multi_label"] is True and [d["score"] for d in out["labels"]] == [0.8808, 0.5, 0.0]
+    assert sig.processor.calls[-1]["padding"] == "max_length" and sig.processor.calls[-1]["max_length"] == 64
+    fixed = _classifier(mod, False, False, [float(i) for i in range(8)], {i: f"class {i}" for i in range(8)})
+    out = fixed.run(img, {})
+    assert [d["label"] for d in out["labels"]] == ["class 7", "class 6", "class 5", "class 4", "class 3"]
+    assert "text" not in fixed.processor.calls[-1]
+    multi = _classifier(mod, False, True, [2.0, -2.0], {0: "nsfw", 1: "normal"})
+    assert multi.run(img, {"top_k": 2}) == {"labels": [{"label": "nsfw", "score": 0.8808}, {"label": "normal", "score": 0.1192}],
+                                            "multi_label": True}
+    for worker, fields, code in ((clip, {}, "labels_required"), (fixed, {"labels": ["cat"]}, "labels_not_supported"),
+                                 (clip, {"labels": ["cat"], "template": "no slot"}, "invalid_option"),
+                                 (clip, {"labels": ["cat"], "template": "{} and {}"}, "invalid_option"),
+                                 (clip, {"labels": ["cat"], "top_k": 0}, "invalid_option")):
+        with pytest.raises(mod.Refused) as e:
+            worker.run(img, fields)
+        assert (e.value.status, e.value.code) == (400, code), fields
+
+
+def test_fy_vis_034_a_classifier_answers_at_classify_and_is_known_by_its_config(tmp_path, monkeypatch):
+    """FY-VIS-034: an image-classify server answers /v1/vision/classify and /v1/classify (not /v1/vision/image-classify);
+    which configs are classifiers: …ForImageClassification (fixed), a CLIP-like architecture or, with none, its
+    model_type (zero-shot), not a fine-tuned SigLIP head; the server refuses another task's directory, and
+    image-classify without --model (no model is baked in for it)."""
+    mod = load()
+
+    class Worker:
+        lock = __import__("threading").Lock()
+
+        def run(self, img, fields):
+            return {"labels": [{"label": "cat", "score": 0.9}], "multi_label": False}
+
+    c = TestClient(mod.create_app("image-classify", Path("/x"), "cpu", model_dir=Path("/m"), served_name="vit", worker=Worker()))
+    for path in ("/v1/vision/classify", "/v1/classify"):
+        r = c.post(path, files={"image": ("a.png", png(), "image/png")})
+        assert r.status_code == 200 and r.json()["labels"][0]["label"] == "cat" and r.json()["model"] == "vit", path
+    assert c.post("/v1/vision/image-classify", files={"image": ("a.png", png(), "image/png")}).status_code == 404
+    assert c.get("/").json()["endpoints"] == ["/v1/vision/classify", "/v1/classify"]
+    assert mod.zero_shot_classifier({"model_type": "siglip"}) and mod.zero_shot_classifier({"architectures": ["CLIPModel"]})
+    assert not mod.zero_shot_classifier({"architectures": ["SiglipForImageClassification"], "model_type": "siglip"})
+    assert not mod.zero_shot_classifier({"architectures": ["BlipModel"], "model_type": "blip"})
+    (tmp_path / "config.json").write_text(json.dumps({"architectures": ["ViTForImageClassification"]}))
+    mod.check_model_dir("image-classify", tmp_path)
+    with pytest.raises(SystemExit, match="image-classify model"):
+        mod.check_model_dir("detect", tmp_path)
+    monkeypatch.setattr("sys.argv", ["app.py", "--task", "image-classify", "--device", "cpu"])
+    with pytest.raises(SystemExit, match="no model baked"):
+        mod.main()

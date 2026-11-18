@@ -152,6 +152,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - **只有一種引擎，Forgeyard 自己的。** `vision` 配方在 `forgeyard-vision` 映像檔（和每個引擎一樣以 digest 固定）裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
 - **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。
 - **找你說的東西的偵測模型（1.4.4）：** 零樣本（開放詞彙）偵測模型（Grounding DINO、MM-Grounding-DINO、OWL-ViT、OWLv2）沒有固定的類別清單：每個請求說要找什麼（`labels: ["cat", "remote control"]`），同一個 `/v1/vision/detect` 就傳回這些名稱的方框。目錄標示 *Finds what you name*；它們需要 1.4.4 起的視覺映像檔。
+- **圖片分類（1.4.4）：** 獨立的一種模型（任務 `image-classify`，在 `/v1/vision/classify`；文字分類是另一種）：固定類別的分類器（ViT、ConvNeXt V2、DINOv2：ImageNet 類別）回應自己類別中最符合的，零樣本分類器（CLIP、SigLIP 2）則在每個請求送來的 `labels` 中選。它們需要 1.4.4 起的視覺映像檔。
 - **自己的 API：**`/v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`，每個請求一張圖片（multipart，或 JSON 裡的 base64），回應是 JSON；遮罩和深度圖是 base64 的 PNG。OpenAI SDK 沒有這個 API：任何 HTTP 用戶端都能呼叫。
 - 每個副本**一次處理一張圖片**；其餘排隊等候。要更高吞吐量就多開副本。
 - 用量計**每個請求一張圖片**、它的千像素數和忙碌時間。圖片只留在你自己的部署上：絕不送往雲端供應商，也不會被保存。

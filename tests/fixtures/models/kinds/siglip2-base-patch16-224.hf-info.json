@@ -1,0 +1,21 @@
+{
+  "id": "google/siglip2-base-patch16-224",
+  "pipeline_tag": "zero-shot-image-classification",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "safetensors",
+    "siglip",
+    "vision",
+    "zero-shot-image-classification",
+    "arxiv:2502.14786",
+    "arxiv:2303.15343",
+    "arxiv:2209.06794",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

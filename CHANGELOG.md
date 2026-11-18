@@ -8,6 +8,24 @@ version until 1.0.
 
 ### Added
 
+- **Image classification** (#141), a model kind of its own: *Image classification*, task `image-classify` (text
+  classification, #144, is another kind), answered at `POST /v1/vision/classify` by the vision server.
+  - Classifiers with fixed classes (`…ForImageClassification`: ViT, ConvNeXt V2, DINOv2…) answer their best
+    classes; zero-shot ones (CLIP-like: CLIP, SigLIP, SigLIP 2, ALIGN, AltCLIP, Chinese-CLIP, MetaCLIP 2) score the
+    `labels` each request sends, put in a `template` ("This is a photo of {}."), with a sigmoid each (SigLIP,
+    `multi_label: true`) or a softmax (CLIP). `top_k` (5; zero-shot: all labels). `labels_required` /
+    `labels_not_supported` as for detection; a timm checkpoint (`timm_wrapper`) is refused.
+  - Keys, model lists, rpm and usage (one image, its kilopixels, busy time) as for the other vision routes;
+    Hugging Face search asks for `image-classification` and `zero-shot-image-classification`; OpenCLIP's own
+    copy beside LAION's transformers weights (`open_clip_*`) is neither read nor downloaded.
+  - Recommended group *Image classification*: SigLIP 2 base, LAION CLIP ViT-B/32 (MIT), ViT base, ConvNeXt V2 tiny,
+    DINOv2 small with its ImageNet head.
+  - Playground: a classify view (labels for zero-shot models, scores as bars); Try it asks a zero-shot classifier
+    to choose among three test classes. The vision image of 1.4.4 or later is needed (422 `vision_image_too_old`
+    on an older one, which has no such task).
+  - `scripts/accept_vision.py`: `siglip2-base`, `clip-vit-b-32-laion`, `vit-base-patch16-224`,
+    `convnextv2-tiny-22k-224`.
+
 - **Detectors that find what you name** (#142). Zero-shot (open-vocabulary) object detectors (Grounding DINO,
   MM-Grounding-DINO and LLMDet, OWL-ViT, OWLv2), refused by 1.4.3, are detection models now: the
   same `/v1/vision/detect` takes `labels`, the names to find (a JSON list, or a comma-separated form field;

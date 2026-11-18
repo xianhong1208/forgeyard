@@ -129,7 +129,7 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
         raise fail(422, "incompatible", f"{recipe.name} serves {', '.join(recipe.tasks)}; {m.name} is a {m.task} model.")
     if why := vision.deploy_refusal(m.task, m.meta or {}, recipe):
         # 1.4.4 (#142): a zero-shot detector the vision server cannot load: one that needs timm (OmDet-Turbo, added
-        # before 1.4.3), or one on a vision image from before 1.4.4.
+        # before 1.4.3), or one on a vision image from before 1.4.4; an image classifier (#141) on such an image too.
         raise fail(422, *why)
     params = normalise_params(recipe, body.params)
     device = "gpu" if params["gpus"] > 0 else "cpu"
@@ -629,7 +629,9 @@ def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[st
             body["box"] = vision.TEST_BOX
         if task == "detect" and zero_shot:
             body["labels"] = vision.try_labels(text)
-        return f"/v1/vision/{task}", json.dumps(body).encode(), "application/json"
+        if task == "image-classify" and zero_shot:
+            body["labels"] = vision.try_labels(text, vision.TEST_CLASSES)   # 1.4.4 (#141)
+        return f"/v1/{vision.ENDPOINT[task]}", json.dumps(body).encode(), "application/json"
     if api == "openai-images":
         # One small image, in the request shape this engine takes.
         side = TRY_IMAGE_SIZE if draws is None else max(draws.multiple, TRY_IMAGE_SIZE // draws.multiple * draws.multiple)

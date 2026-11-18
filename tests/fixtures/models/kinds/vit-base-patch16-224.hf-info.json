@@ -1,0 +1,26 @@
+{
+  "id": "google/vit-base-patch16-224",
+  "pipeline_tag": "image-classification",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "pytorch",
+    "tf",
+    "jax",
+    "safetensors",
+    "vit",
+    "image-classification",
+    "vision",
+    "dataset:imagenet-1k",
+    "dataset:imagenet-21k",
+    "arxiv:2010.11929",
+    "arxiv:2006.03677",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

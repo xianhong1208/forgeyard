@@ -43,7 +43,9 @@ CONTAINER_ROOT = "/models"
 
 # Weight formats a safetensors deployment does not need (they would double the download).
 _OTHER_WEIGHTS = ("*.bin", "*.pt", "*.pth", "*.h5", "*.msgpack", "*.ot", "*.onnx", "*.onnx_data", "*.tflite",
-                  "*.mlmodel", "*.gguf", "*.ckpt", "*.npz", "*.pkl")
+                  "*.mlmodel", "*.gguf", "*.ckpt", "*.npz", "*.pkl",
+                  # OpenCLIP's own copy of a CLIP model beside the transformers one (LAION's CLIP repositories, 1.4.4)
+                  "open_clip_*")
 _OTHER_DIRS = ("onnx/", "openvino/", "coreml/", "original/", "tf_model/", "flax_model/")
 
 
@@ -183,6 +185,11 @@ def container_paths(model: dict) -> dict:
 def _matches(path: str, patterns) -> bool:
     name = posixpath.basename(path)
     return any(fnmatch.fnmatch(name, p) for p in patterns)
+
+
+def other_weights(path: str) -> bool:
+    """A weights file a safetensors model does not load (another framework's copy, OpenCLIP's, …): not downloaded."""
+    return _matches(path, _OTHER_WEIGHTS) or any(path.startswith(d) for d in _OTHER_DIRS)
 
 
 def detect_format(paths: list[str], library: Optional[str] = None) -> str:
@@ -400,7 +407,7 @@ def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmpr
             if path != chosen and not (m and c and m.group(1) == c.group(1) and m.group(3) == c.group(3)):
                 continue
         elif fmt == "safetensors":
-            if _matches(path, _OTHER_WEIGHTS) or any(path.startswith(d) for d in _OTHER_DIRS):
+            if other_weights(path):
                 continue
         out.append(f)
     if fmt == "gguf" and not out:
@@ -423,6 +430,7 @@ TASK_FROM_PIPELINE = {
     # 1.4, vision models (forgeyard/models/vision.py)
     "object-detection": "detect", "mask-generation": "segment", "depth-estimation": "depth",
     "zero-shot-object-detection": "detect",   # 1.4.4 (#142): Grounding DINO, OWLv2, …: they find what a request names
+    "image-classification": "image-classify", "zero-shot-image-classification": "image-classify",   # 1.4.4 (#141)
 }
 
 

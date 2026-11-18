@@ -5,10 +5,14 @@ import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task }
 type WithDownload = { download?: DownloadProgress | null };
 
 export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video",
-  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation" };
+  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation", "image-classify": "Image classification" };
 
 // 1.4: the tasks of vision models, and the licences they are added with (as the server checks).
-export const VISION_TASKS: Task[] = ["detect", "segment", "depth"];
+export const VISION_TASKS: Task[] = ["detect", "segment", "depth", "image-classify"];
+export type VisionTaskName = "detect" | "segment" | "depth" | "image-classify";
+export function isVisionTask(t: Task): t is VisionTaskName {
+  return VISION_TASKS.includes(t);
+}
 export const PERMISSIVE = ["apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause"];
 
 export const API_LABEL: Record<string, string> = {
@@ -16,6 +20,7 @@ export const API_LABEL: Record<string, string> = {
   "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
   "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
   "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment", "vision-depth": "/v1/vision/depth",
+  "vision-classify": "/v1/vision/classify",
 };
 
 export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };

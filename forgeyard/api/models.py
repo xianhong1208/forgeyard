@@ -48,8 +48,8 @@ RESERVED_NAMES = frozenset({"deploy", "deployments", "routes", "engines", "catal
                             "search", "inspect"})
 TASK_LABEL = {"chat": "Chat", "embed": "Embeddings", "rerank": "Rerank", "asr": "Speech to text", "tts": "Text to speech",
               "image": "Images", "video": "Video", "detect": "Object detection", "segment": "Segmentation",
-              "depth": "Depth estimation"}
-TASK_WORDS = "chat, embed, rerank, asr, tts, image, video, detect, segment or depth"
+              "depth": "Depth estimation", "image-classify": "Image classification"}
+TASK_WORDS = "chat, embed, rerank, asr, tts, image, video, detect, segment, depth or image-classify"
 
 
 def _engine_args(raw) -> dict:

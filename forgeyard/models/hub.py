@@ -41,6 +41,8 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "detect": ("object-detection", "zero-shot-object-detection"),
     "segment": ("mask-generation",),
     "depth": ("depth-estimation",),
+    # 1.4.4 (#141): classifiers with fixed classes and CLIP-like zero-shot ones
+    "image-classify": ("image-classification", "zero-shot-image-classification"),
 }
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 EXPAND = ("downloads", "likes", "lastModified", "gated", "private", "pipeline_tag", "library_name", "tags",
@@ -68,7 +70,7 @@ def make_query(text: str, task: Optional[str], fmt: Optional[str], limit: int) -
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise ValueError("search: plain text only")
     if task not in (None, "", *TASK_TAGS):
-        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment or depth")
+        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment, depth or image-classify")
     if fmt not in (None, "", *FORMATS):
         raise ValueError("format: safetensors, gguf, ctranslate2, onnx or diffusers")
     if not 1 <= int(limit) <= MAX_LIMIT:
