@@ -1185,15 +1185,50 @@ PostgreSQL: `pg_dump` as usual.
 
 Once `secret.key` is backed up, tick **I have a backup of key id …** under **Get started → Setup
 health**. Until an admin does, Setup health reminds every admin, and it reminds them again when
-the key changes. The key itself never leaves the server: the page shows only its id.
+the key changes.
+
+**Or download the key from the console** (1.4.2). An admin can download the secret key and the
+server's CA (`ca.key` and `ca.crt`) as one file, encrypted with a passphrase they choose:
+
+1. Click **Download a backup…** on the reminder under **Get started → Setup health**, or **Download a
+   key backup…** under **For admins** on **Trust this server**.
+2. Type your password again (wrong passwords count like failed sign-ins: after a few, you wait), and
+   a backup passphrase twice: at least 12 characters, not your password. Write the passphrase down:
+   nothing can open the file without it.
+3. Click **Download the backup**. The browser saves `forgeyard-key-backup-<key id>-<date>.fykey`.
+
+The download ticks off the reminder for that key id and is recorded in the audit log
+(`secret_key.backup_downloaded`). The server keeps neither the file nor the passphrase. Keep the
+file apart from the database backup and the passphrase apart from the file: together they read
+every stored secret and sign certificates your devices trust. The server certificate is not in it:
+the server makes a new one from the CA when it starts. A server with your own certificate
+(`TLS_CERT_FILE`) or `TLS=off` has no CA of Forgeyard's, so the file holds only the key; back up
+your certificate yourself. The file's format is in
+[Reference](reference.md#the-key-backup-file).
 
 **On each machine** (optional): `/var/lib/forgeyard-agent` (the credential; without it the machine
 joins again with a new token) and `/etc/forgeyard/agent.toml`. The model cache can always be
 downloaded again.
 
 **Restore**: stop the server, put the files back in `data/` (and `.env`), start it. With a wrong or
-missing `secret.key` the server refuses to start and says so, instead of losing the secrets. If the
-key is really lost, stop the server and start over with:
+missing `secret.key` the server refuses to start and says so, instead of losing the secrets.
+
+From a key backup downloaded from the console, put the database back first, then, with the server
+stopped:
+
+```bash
+uv run --no-sync python -m forgeyard secrets restore forgeyard-key-backup-ab12cd34-20261117.fykey
+```
+
+It asks for the passphrase and writes `data/secret.key` (mode 600) and `data/tls/ca.key` (600) and
+`ca.crt` (folders 700); `--data-dir DIR` writes into another data folder. A wrong passphrase, a
+changed or cut-off file writes nothing. It never replaces a different key or CA that is already
+there: it stops and says so, and `--force` replaces them, keeping the old files as
+`<name>.replaced-<time>`. The same key already there is fine. `--passphrase-file PATH` reads the
+passphrase from a file's first line, for scripts. When the server starts it checks that the key
+belongs to the database, as always.
+
+If the key is really lost, stop the server and start over with:
 
 ```bash
 uv run --no-sync python -m forgeyard secrets reset --yes

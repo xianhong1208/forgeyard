@@ -6,7 +6,8 @@ server's setup, with a link to where it is fixed.
 - `POST /api/advisor/snooze`: snooze an info or warning finding for 30 days, for this admin only
   (stored in their preferences), or wake it again. Errors cannot be snoozed.
 - `POST /api/advisor/secret-key-backup`: an admin confirms a backup of the secret key with the id
-  shown. The reminder comes back when the key changes. The key itself never leaves the server.
+  shown. The reminder comes back when the key changes. This endpoint never sends the key; a download
+  of a passphrase-encrypted backup (forgeyard/api/secret_key.py) confirms it too.
 """
 
 from __future__ import annotations

@@ -916,7 +916,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
 | `env-seed-ignored` | 提示 | 某個初始值設定（`MODEL_URL_HOSTS`、`MODEL_LOCAL_DIRS`、`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_*`）和管理員儲存的值不同，而儲存的值優先 |
-| `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
+| `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。按 **Download a backup…**（用通關密語加密的檔案，見[金鑰備份檔](#the-key-backup-file)）或勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
 | `host-loopback` | 錯誤 | `HOST` 是 loopback 位址，卻有機器從其他位址加入（而且前面沒有代理） |
 | `public-url-unset` | 提示 | 其他機器連得到這台伺服器，`PUBLIC_URL` 卻是空白。如果你是以 `127.0.0.1` 或 `localhost` 開啟頁面，則是警告 |
 | `certificate-name-missing` | 錯誤 | 你自己的憑證沒有包含 `PUBLIC_URL` 的主機 |
@@ -959,7 +959,21 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 |---|---|
 | `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`，或單獨的 `python -m forgeyard`）。資料庫的變更會在啟動時執行 |
 | `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器）。沒有 `--yes` 時只說明會捨棄什麼 |
+| `python -m forgeyard secrets restore FILE` | 從主控台下載的金鑰備份放回機密金鑰和 CA（請先停止伺服器）。會詢問通關密語。`--data-dir DIR`：寫到另一個資料夾；`--force`：取代那裡已有的不同金鑰或 CA（舊檔案保留為 `<名稱>.replaced-<時間>`）；`--passphrase-file PATH`：從檔案的第一行讀取通關密語。通關密語錯誤、檔案損壞或那裡已有不同的金鑰時，結束代碼為 2，什麼都不寫入 |
 | `python -m forgeyard --version` | 顯示版本 |
+
+### 金鑰備份檔
+
+**Download a backup…**（管理員，1.4.2）呼叫 `POST /api/secret-key/backup`（JSON：`password`、`passphrase`、`passphrase_confirm`），回應 `forgeyard-key-backup-<金鑰 id>-<YYYYMMDD>.fykey`，帶 `Content-Disposition: attachment` 和 `Cache-Control: no-store`。密碼的檢查和登入一樣（相同的延遲機制；密碼錯誤回應 401 `wrong_password`，並以 `secret_key.backup_failed` 記入稽核紀錄）；通關密語需要 12 到 1024 個字元、兩種以上不同的字元，而且不能和密碼相同（422）。`GET /api/secret-key` 會說明備份裡有什麼。檔案：
+
+| 位元組 | 內容 |
+|---|---|
+| 0–7 | `FYKEYBK` 加一個零位元組 |
+| 8–9 | N，標頭的長度（big-endian） |
+| 10 … 10+N | 標頭，UTF-8 JSON：`format` `forgeyard-key-backup`、`version` 1、`kdf`（`name` `argon2id`、`memory_kib` 65536、`iterations` 3、`lanes` 4、`salt`：16 個隨機位元組，base64）、`cipher`（`name` `aes-256-gcm`、`nonce`：12 個隨機位元組，base64）、`kid`、`created_at` |
+| 其餘 | AES-256-GCM 密文，後面接 16 位元組的 tag |
+
+32 位元組的加密金鑰是通關密語（正規化為 Unicode NFC、以 UTF-8 編碼）用標頭的 salt 和參數做 Argon2id（RFC 9106）得到的。附加資料（associated data）是密文之前的所有位元組，所以標頭被改過和密文被改過一樣會失敗。明文是 JSON：`kid`、`secret_key`（base64url，和 `secret.key` 相同）、`tls`（`{"ca.key": PEM, "ca.crt": PEM}`，沒有 Forgeyard 自己的 CA 時為 `null`）、`created_at` 和 `server_version`。`secrets restore` 只讀取第 1 版，拒絕低於上述值、或高於 1 GiB 記憶體、16 次、16 lanes 的 KDF 參數，並在寫入任何東西之前檢查金鑰和它的 id 相符、CA 的金鑰和它的憑證相符。
 
 ### agent
 

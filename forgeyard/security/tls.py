@@ -2,7 +2,8 @@
 
 On first start with TLS on (the default) and no certificate of your own, the server makes:
 
-    data_dir/tls/ca.key      the CA's private key (EC P-256), mode 0600, never leaves this machine
+    data_dir/tls/ca.key      the CA's private key (EC P-256), mode 0600; leaves this machine only in an
+                             admin's passphrase-encrypted key backup (security/keybackup.py)
     data_dir/tls/ca.crt      the CA certificate (10 years): what browsers and agents trust, once
     data_dir/tls/server.key  the server's private key, mode 0600
     data_dir/tls/server.crt  the server certificate, signed by the CA, valid 397 days

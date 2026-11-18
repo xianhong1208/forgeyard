@@ -8,6 +8,24 @@ version until 1.0.
 
 ### Added
 
+- **Download a backup of the secret key from the console** (#127). Admins only: **Download a backup…** on the
+  setup advisor's "Back up the secret key" reminder, or **Download a key backup…** under **For admins** on
+  **Trust this server**. The admin types their password again (checked like a sign-in: wrong ones count toward
+  the same back-off and are audited as `secret_key.backup_failed`, answered 401 `wrong_password` so the console
+  does not sign out) and a passphrase of their own, twice (12+ characters, not the password). The answer
+  (`POST /api/secret-key/backup`, `Cache-Control: no-store`, an attachment named
+  `forgeyard-key-backup-<key id>-<date>.fykey`) holds the secret key and, with Forgeyard's own CA, `ca.key` and
+  `ca.crt`, sealed with AES-256-GCM under an Argon2id key (64 MiB, 3 passes, 4 lanes, random salt and nonce;
+  the versioned header is authenticated too). Not the server certificate: the server makes it again from the CA.
+  The server keeps neither the file nor the passphrase; the download is audited
+  (`secret_key.backup_downloaded`, key id, never the passphrase) and ticks off the reminder for that key id.
+  `GET /api/secret-key` says what a backup holds. The format is in the guide's reference.
+
+- **`python -m forgeyard secrets restore FILE`** puts the key and the CA back (asks for the passphrase;
+  `--data-dir`, `--passphrase-file`). It writes nothing on a wrong passphrase or a changed, cut-off or unknown
+  file, never replaces a different key or CA without `--force` (which keeps the old files as
+  `<name>.replaced-<time>`), and writes the keys with mode 600 in folders with mode 700.
+
 - **Update an agent with the exact command, from its machine's page** (#121). An agent now reports how it runs,
   in `hello.install` (older servers ignore it): in a container, it reads its own container through the engine
   it already uses (`docker inspect` / `podman inspect` of the container it finds in `/proc/self/mountinfo`):

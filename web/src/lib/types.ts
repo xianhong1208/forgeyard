@@ -25,6 +25,17 @@ export type AuthState = {
 
 export type TlsMode = "forgeyard-ca" | "own" | "off";
 
+// GET /api/secret-key (admins): what a backup of the secret key holds (1.4.2, #127).
+export type SecretKeyInfo = {
+  kid: string;
+  source: "file" | "env";
+  includes_ca: boolean;
+  tls_mode: TlsMode;
+  has_password: boolean;
+  passphrase_min: number;
+  backed_up: { kid: string; by: string; at: string; how?: string } | null;
+};
+
 export type TlsInfo = {
   mode: TlsMode;
   https: boolean;

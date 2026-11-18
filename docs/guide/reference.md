@@ -1219,7 +1219,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
 | `env-seed-ignored` | note | A first-value setting (`MODEL_URL_HOSTS`, `MODEL_LOCAL_DIRS`, `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, `GATEWAY_CLOUD_*`) differs from what an admin saved, which wins |
-| `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **I have a backup of key id …** ticks it off; it comes back when the key changes |
+| `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **Download a backup…** (a passphrase-encrypted file, see [The key backup file](#the-key-backup-file)) or **I have a backup of key id …** ticks it off; it comes back when the key changes |
 | `host-loopback` | error | `HOST` is a loopback address, but a machine joined from another address (and no proxy is in front) |
 | `public-url-unset` | note | `PUBLIC_URL` is empty on a server other machines can reach. A warning when you opened the page as `127.0.0.1` or `localhost` |
 | `certificate-name-missing` | error | Your own certificate does not name `PUBLIC_URL`'s host |
@@ -1262,7 +1262,33 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 |---|---|
 | `uv run python main.py` | Start the server (same as `python -m forgeyard serve`, or `python -m forgeyard` alone). Database changes run on start |
 | `python -m forgeyard secrets reset --yes` | The secret key is lost: make a new one and drop what it encrypted (stop the server first). Without `--yes` it only says what it would drop |
+| `python -m forgeyard secrets restore FILE` | Put back the secret key and the CA from a key backup downloaded from the console (stop the server first). Asks for the passphrase. `--data-dir DIR`: another data folder; `--force`: replace a different key or CA already there (the old files are kept as `<name>.replaced-<time>`); `--passphrase-file PATH`: the passphrase from a file's first line. Exit 2, nothing written, on a wrong passphrase, a damaged file or a different key already there |
 | `python -m forgeyard --version` | The version |
+
+### The key backup file
+
+**Download a backup…** (admins, 1.4.2) answers `POST /api/secret-key/backup` (JSON `password`,
+`passphrase`, `passphrase_confirm`) with `forgeyard-key-backup-<key id>-<YYYYMMDD>.fykey`,
+`Content-Disposition: attachment` and `Cache-Control: no-store`. The password is checked like a
+sign-in (the same back-off; a wrong one answers 401 `wrong_password` and is audited as
+`secret_key.backup_failed`); the passphrase needs 12 to 1024 characters, more than two different
+ones, and must not be the password (422). `GET /api/secret-key` says what a backup holds. The file:
+
+| Bytes | What |
+|---|---|
+| 0–7 | `FYKEYBK` and a zero byte |
+| 8–9 | N, the header's length (big-endian) |
+| 10 … 10+N | The header, UTF-8 JSON: `format` `forgeyard-key-backup`, `version` 1, `kdf` (`name` `argon2id`, `memory_kib` 65536, `iterations` 3, `lanes` 4, `salt`: 16 random bytes, base64), `cipher` (`name` `aes-256-gcm`, `nonce`: 12 random bytes, base64), `kid`, `created_at` |
+| the rest | AES-256-GCM ciphertext, then its 16-byte tag |
+
+The 32-byte encryption key is Argon2id (RFC 9106) of the passphrase, normalised to Unicode NFC and
+encoded as UTF-8, with the header's salt and parameters. The associated data is every byte before
+the ciphertext, so a changed header fails like a changed ciphertext. The plain text is JSON:
+`kid`, `secret_key` (base64url, as in `secret.key`), `tls` (`{"ca.key": PEM, "ca.crt": PEM}`, or
+`null` without Forgeyard's own CA), `created_at` and `server_version`. `secrets restore` reads
+version 1 only, refuses KDF parameters below these or above 1 GiB of memory, 16 passes or 16 lanes,
+and checks that the key matches its id and the CA's key matches its certificate before it writes
+anything.
 
 ### The agent
 

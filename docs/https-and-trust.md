@@ -23,7 +23,7 @@ and a server certificate signed by it, in `data/tls/`:
 
 | File | What it is |
 |---|---|
-| `ca.key` | The CA's private key (EC P-256), mode 0600. It never leaves this machine. |
+| `ca.key` | The CA's private key (EC P-256), mode 0600. It leaves this machine only in a key backup an admin downloads, encrypted with their passphrase. |
 | `ca.crt` | The CA certificate, valid for 10 years. This is what devices and agents trust. |
 | `server.key` | The server's private key, mode 0600. |
 | `server.crt` | The server certificate (397 days), followed by the CA certificate. |
@@ -331,8 +331,11 @@ message, instead of failing later or making a new key over the old secrets.
 Upgrading from 1.0 encrypts the existing values once, in migration `0008_encrypt_secrets`. This
 is the only place plain-text values are read; after it, a value that is not encrypted is an error.
 
-**If the key is lost:** restore `data/secret.key` from your backup. If there is no backup, stop
-the server and run:
+**If the key is lost:** restore `data/secret.key` from your backup, or, from a key backup an admin
+downloaded from the console (**Download a backup…**, a file encrypted with a passphrase they chose;
+format in the guide's [reference](guide/reference.md#the-key-backup-file)), run
+`uv run --no-sync python -m forgeyard secrets restore <file>` with the server stopped. If there is
+no backup, stop the server and run:
 
 ```bash
 uv run --no-sync python -m forgeyard secrets reset --yes
@@ -355,6 +358,12 @@ It refuses to run when the key is not actually lost.
 | The database (`data/forgeyard.db`, or your PostgreSQL) | Everything Forgeyard knows |
 | `data/secret.key` (or your `FORGEYARD_SECRET_KEY`) | Without it, the encrypted secrets above are gone. Keep it **apart** from the database backup: together they reveal those secrets. |
 | `data/tls/` (above all `ca.key` and `ca.crt`) | Without them, a new CA is needed: every device and every agent has to trust it again (`agent trust` with the new fingerprint). The server refuses to make one silently while certificates are still there. |
+
+An admin can download the key and the CA's `ca.key` and `ca.crt` as one file from the console
+(**Get started → Setup health → Download a backup…**, or **Trust this server → For admins**): Argon2id
+and AES-256-GCM with a passphrase the admin chooses, after typing their password again. The server
+certificate is left out on purpose: the server makes it again from the CA on its first start, with
+the names of the machine it runs on, and nothing pins it.
 
 ## Settings
 

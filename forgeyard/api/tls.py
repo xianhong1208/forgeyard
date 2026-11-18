@@ -2,7 +2,8 @@
 
 Everything here except the admin details is public on purpose: a device has to fetch the CA before
 it can trust the server, so before anyone signs in on it. A CA certificate is public information
-(every TLS client receives it); its private key never leaves data_dir/tls.
+(every TLS client receives it); its private key leaves data_dir/tls only in an admin's
+passphrase-encrypted key backup (api/secret_key.py).
 """
 
 from __future__ import annotations
