@@ -6,6 +6,41 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Text classification** (#144, vLLM part): a model kind of its own, *Text classification* (task `classify`). A
+  sequence classifier with two labels or more (sentiment, language, toxicity…) is added to the catalog with its
+  labels, deployed on `vllm-pooling` (vLLM's pooling runner, which picks the classify task by itself), listed under
+  **Serving → Text classification**, tried in the **Playground** (texts, one per line; every label's probability as
+  a bar, most likely first) and on the deployment's page (**Try it**), and called at **`POST /v1/classify`** in vLLM's
+  shape (`input`: a text or up to 2,048; `data[{index, label, probs, num_classes}]`, `usage`). The gateway checks the
+  body, sends the engine only `model`, `input`, `truncate_prompt_tokens` and `use_activation` at its `/classify`,
+  counts prompt tokens like embeddings, and never sends it to a cloud provider. Three recommended models, MIT or
+  Apache-2.0: multilingual sentiment (1 to 5 stars), language detection (20 languages) and toxic comments (6 labels,
+  scored on their own). Hugging Face search has the task too. The guide says how a chat model classifies into labels
+  you choose with structured outputs (`structured_outputs.choice`, or a JSON schema `enum`). No migration: the
+  labels live in the catalog entry's details, like a vision model's classes.
+- A chat model called at `/v1/classify` answers 400 `wrong_endpoint` with how to classify with structured outputs.
+
+### Changed
+
+- A text classifier tagged *text classification* is read as one (1.4.3 refused it as a reranker): one output
+  (`num_labels` 1) is still a reranker and two labels or more a classifier, and neither becomes the other.
+  Refused as text classifiers, with the reason: zero-shot (NLI) models and DeBERTa, DistilBERT or BART classifiers,
+  which vLLM 0.32 does not run (the transformers engine and zero-shot come in 1.5), and regression heads.
+- A deployment that names no context starts at the model's own maximum when that is shorter than the engine's
+  default (a 512-token classifier or cross-encoder on `vllm-pooling`, whose default is 8192), in the console's
+  deploy form, the API and the suggestion shown when a model is added. A context that is named is checked as
+  before.
+
+### Fixed
+
+- RoBERTa and XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold
+  512 tokens: the catalog now says 512 (BGE-M3 and its reranker: 8192, not 8194). Choosing the old maximum as the
+  context would have overflowed the position table in vLLM. Models already in the catalog keep the number they were
+  added with.
+- The get-started page told vision examples to `pip install openai`; they use httpx, as rerank does.
+
 ## [1.4.3] — 2026-11-18
 
 Every catalog model and every engine gets its own page in the console (#140): a model's page says where it

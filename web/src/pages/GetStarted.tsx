@@ -156,7 +156,7 @@ function ExampleCall({ c }: { c: Checklist }) {
         <button type="button" role="tab" aria-selected={tab === "curl"} className={tab === "curl" ? "on" : ""} onClick={() => setTab("curl")}>curl</button>
       </div>
       <pre className="snippet" aria-label={`${tab} example`}>{tab === "python" ? call.python : call.curl}</pre>
-      <p className="muted small">Python needs <code>pip install {c.example?.api === "rerank" ? "httpx" : "openai"}</code>. Requests show up under Usage within a few seconds.</p>
+      <p className="muted small">Python needs <code>pip install {c.example && (c.example.api === "rerank" || c.example.api === "classify" || c.example.api.startsWith("vision-")) ? "httpx" : "openai"}</code>. Requests show up under Usage within a few seconds.</p>
     </section>
   );
 }

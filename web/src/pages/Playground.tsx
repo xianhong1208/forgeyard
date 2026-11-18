@@ -11,7 +11,7 @@ import { IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmR
 import { MODEL_KIND, type ModelKind } from "../lib/fleet";
 import { firstVision, pickerDetail, pickerGroups, routeReady } from "../lib/playground";
 import { targetHeader } from "../lib/routing";
-import type { DeploymentsResponse, RouteInfo, RoutesResponse } from "../lib/types";
+import type { ClassifyAnswer, DeploymentsResponse, RouteInfo, RoutesResponse, TextClassifier } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Videos } from "./PlaygroundVideo";
 import { VisionModelPanel } from "./PlaygroundVision";
@@ -98,6 +98,8 @@ export function PlaygroundPage() {
       {route?.api === "openai-chat" && <Chat key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-embeddings" && <Embeddings key={route.served_name} model={route.served_name} />}
       {route?.api === "rerank" && <Rerank key={route.served_name} model={route.served_name} />}
+      {route?.api === "classify" && <Classify key={route.served_name} model={route.served_name}
+        labels={deps.data?.deployments.find((d) => d.id === route.deployment_id)?.model.classify ?? null} />}
       {route?.api === "openai-audio" && <Transcribe key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-speech" && <Speak key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-images" && <Imagine key={route.served_name} model={route.served_name} />}
@@ -420,6 +422,84 @@ function Rerank({ model }: { model: string }) {
         </ol>
       )}
     </section>
+  );
+}
+
+const CLASSIFY_SAMPLE = "I love how quiet this laptop is.\nThe delivery was late and the box was crushed.\n這家餐廳的服務很好，下次還會再來。";
+
+// Text classification (1.4.4): texts, one per line, to /v1/classify; for each, every label's probability, the
+// most likely first (the names come from the model's config.json, kept in the catalog).
+function Classify({ model, labels }: { model: string; labels: TextClassifier | null }) {
+  const [text, setText] = useState(CLASSIFY_SAMPLE);
+  const [out, setOut] = useState<{ texts: string[]; answer: ClassifyAnswer; took: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const list = text.split("\n").map((t) => t.trim()).filter(Boolean);
+  const go = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr(null); setOut(null);
+    const started = performance.now();
+    try {
+      const res = await post("classify", { model, input: list });
+      if (!res.ok) { setErr(await failure(res)); return; }
+      setOut({ texts: list, answer: await res.json(), took: performance.now() - started });
+    } catch { setErr("Cannot reach the Forgeyard server."); } finally { setBusy(false); }
+  };
+  const multi = labels?.problem === "multi_label_classification";
+  return (
+    <section className="panel play" aria-labelledby="cls-title">
+      <h2 id="cls-title">Text classification</h2>
+      <p className="muted small">
+        {labels?.labels ? `${labels.labels} labels${labels.label_names?.length ? `: ${labels.label_names.slice(0, 6).join(", ")}${labels.label_names.length > 6 ? ", …" : "."}` : "."} ` : ""}
+        {multi ? "Each label is scored on its own (multi-label), so the probabilities do not add up to 1." : "The probabilities of the labels add up to 1."}
+      </p>
+      <form onSubmit={go}>
+        <div className="field"><label htmlFor="cls-input">Texts, one per line</label><textarea id="cls-input" rows={4} value={text} onChange={(e) => setText(e.target.value)} /></div>
+        <button type="submit" className="btn btn-primary" disabled={busy || !list.length} style={{ marginTop: 10 }}>{busy ? "Waiting…" : "Classify"}</button>
+      </form>
+      {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
+      {out && (
+        <>
+          <ol className="cls-results" aria-label="Labels">
+            {[...out.answer.data].sort((a, b) => a.index - b.index).map((d) => (
+              <ClassifyResult key={d.index} text={out.texts[d.index] ?? ""} d={d} names={labels?.label_names ?? []} />
+            ))}
+          </ol>
+          <p className="muted small">{out.answer.usage?.prompt_tokens != null ? `${out.answer.usage.prompt_tokens} tokens · ` : ""}{ms(out.took)}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+const CLASSIFY_SHOWN = 5;
+
+function ClassifyResult({ text, d, names }: { text: string; d: ClassifyAnswer["data"][number]; names: string[] }) {
+  const [all, setAll] = useState(false);
+  // Without the names (a local model), the engine still names the most likely label.
+  const top = d.probs.indexOf(Math.max(...d.probs));
+  const ranked = d.probs.map((p, i) => ({ i, p, name: names[i] ?? (i === top && d.label ? d.label : `label ${i}`) }))
+    .sort((a, b) => b.p - a.p);
+  const shown = all ? ranked : ranked.slice(0, CLASSIFY_SHOWN);
+  return (
+    <li className="cls-item">
+      <p className="cls-text">{text}</p>
+      <p className="cls-top"><strong>{d.label ?? ranked[0]?.name}</strong> <span className="mono small">{(ranked[0]?.p ?? 0).toFixed(3)}</span></p>
+      <ul className="cls-bars" aria-label={`Probabilities for text ${d.index + 1}`}>
+        {shown.map((r) => (
+          <li key={r.i}>
+            <span className="cls-name" title={r.name}>{r.name}</span>
+            <span className="cls-bar" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(1, r.p)) * 100}%` }} /></span>
+            <span className="mono small">{r.p.toFixed(3)}</span>
+          </li>
+        ))}
+      </ul>
+      {ranked.length > CLASSIFY_SHOWN && (
+        <button type="button" className="linkish small" onClick={() => setAll(!all)}>
+          {all ? "Show the top five" : `Show all ${ranked.length} labels`}
+        </button>
+      )}
+    </li>
   );
 }
 

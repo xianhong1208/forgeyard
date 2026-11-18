@@ -285,6 +285,7 @@ page cannot use a signed-in browser against it.
 | `POST /v1/vision/detect` | Object detection (1.4): one image, boxes, labels and scores back. See [Vision](#vision) | no |
 | `POST /v1/vision/segment` | Segmentation with SAM 2 (1.4): one image and a point or a box, masks as PNGs back | no |
 | `POST /v1/vision/depth` | Depth estimation (1.4): one image, a 16-bit depth map back | no |
+| `POST /v1/classify` | Text classification (1.4.4): texts, each one's label and probabilities back. See [Text classification](#text-classification) | no |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
 
@@ -566,6 +567,32 @@ What is counted, per request that was answered (in `GET /api/usage` and on **Usa
 
 A replica works on one image at a time and keeps the others waiting in order; more throughput is more
 replicas. Which models are vision models, and the licence rule, are under [Built-in recipes](#built-in-recipes).
+
+### Text classification
+
+`POST /v1/classify` (1.4.4) takes texts for a text classification model and answers in vLLM's shape. It is
+Forgeyard's own API (the OpenAI SDK has none). The engine is vLLM's pooling runner (recipe `vllm-pooling`);
+the gateway sends the request to the replica's `/classify`. Local deployments only, never a cloud provider.
+
+| Field | What |
+|---|---|
+| `model` | The model's name |
+| `input` | A text, or a list of 1 to 2,048 texts; none of them empty. Token ids are refused |
+| `truncate_prompt_tokens` | Optional: cut each text to this many tokens (at least 1), or -1 for the model's maximum. Without it, a text longer than the deployment's context is refused by the engine |
+| `use_activation` | Optional, `true` or `false`: `false` gives the raw scores (logits) instead of probabilities |
+
+The gateway sends only these fields (any other is dropped); `messages` (vLLM's chat form) answers 400. A
+model of another kind answers 400 `wrong_endpoint` naming its endpoint (for a chat model, also how it
+classifies with structured outputs).
+
+The answer: `data` holds one entry per text, in order: `index`, `label` (the most likely), `probs` (every
+label's probability, in the order of the model's `config.json`; a `multi_label_classification` model
+scores each on its own, so they do not add up to 1) and `num_classes`; and `usage` with `prompt_tokens`.
+The label names are on the catalog entry (`GET /api/models/<name>`, `classify.label_names`).
+
+| Unit | How |
+|---|---|
+| tokens | `prompt_tokens` from the engine's answer, as for embeddings. A key's tokens per minute applies |
 
 ### Headers
 
@@ -1359,9 +1386,26 @@ recipe with only the variants you want can.
 
 `vllm-pooling` serves a sequence-classification model (`…ForSequenceClassification`) as a reranker only
 when it has one output, as vLLM decides: `id2label` in its `config.json` has one entry, or `num_labels` is 1
-(1.4.3, #147). One with two labels or more is a text classifier: inspecting or adding it as a reranker
-answers 422 `cannot_inspect` with its labels (support comes with #144). A reranker that is a language model
+(1.4.3, #147). One with two labels or more is a text classifier (task `classify`, 1.4.4): inspecting or adding
+it as a reranker answers 422 `cannot_inspect` with its labels. A reranker that is a language model
 (Qwen3-Reranker) is not affected.
+
+As a text classifier (1.4.4, #144), `vllm-pooling` takes an architecture vLLM 0.32.0 runs natively with a
+classification head: `BertForSequenceClassification`, `RobertaForSequenceClassification`,
+`XLMRobertaForSequenceClassification`, `ModernBertForSequenceClassification`,
+`GteNewForSequenceClassification`, `GPT2ForSequenceClassification`, `JambaForSequenceClassification`,
+`LlamaBidirectionalForSequenceClassification`. vLLM's pooling runner picks the classify task by itself for
+them (no flag). Refused when added, with the reason (422 `cannot_inspect`): one output (a reranker), a
+regression head, a zero-shot (NLI) model (labels such as entailment and contradiction) and any other
+architecture (DeBERTa, DistilBERT, BART: the transformers engine in 1.5). A repository without a
+`config.json` to read (GGUF, ONNX) answers 422 `not_a_text_classifier`. A model added as another kind
+cannot become a text classifier (its labels were not read: add it again), and a text classifier cannot
+become a reranker.
+
+The context of a deployment that names none starts at the model's own maximum when that is shorter than
+the recipe's default (1.4.4): a 512-token BERT classifier gets `--max-model-len 512`, not 8192. RoBERTa and
+XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold 512
+tokens (BGE-M3: 8192).
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 

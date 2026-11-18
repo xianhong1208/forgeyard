@@ -38,10 +38,10 @@ def raw() -> dict:
 def test_fy_rcm_001_the_shipped_list(owner):
     """FY-RCM-001: the file loads and covers what was asked for: Qwen3 chat in six sizes plus a CPU
     GGUF, Qwen3 embedding and reranker 0.6B/4B, gpt-oss, Gemma 3 and Llama marked gated, Qwen3-VL
-    (1.3), Whisper small and large-v3-turbo, BGE-M3 and its reranker."""
+    (1.3), Whisper small and large-v3-turbo, BGE-M3 and its reranker, and (1.4.4) text classifiers."""
     data = rec.load()
     assert [g.id for g in data.groups] == ["qwen3", "llm", "vision", "speech", "tts", "images", "video",
-                                                    "detection", "retrieval"]
+                                                    "detection", "retrieval", "text-classification"]
     by = {e.name: e for e in data.models}
     for size in ("0.6b", "1.7b", "4b", "8b", "14b", "32b"):
         assert by[f"qwen3-{size}"].recipe == "vllm" and by[f"qwen3-{size}"].task == "chat"

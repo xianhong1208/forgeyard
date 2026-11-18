@@ -4,7 +4,8 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     name: vllm                       a-z, 0-9, '-'; unique
     engine, version, title, description
     tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image, video,
-                                     detect, segment, depth (1.4, vision: forgeyard/models/vision.py)
+                                     detect, segment, depth (1.4, vision: forgeyard/models/vision.py),
+                                     classify (1.4.4, text classification: forgeyard/models/textcls.py)
     formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx,
                                      diffusers (a repository with model_index.json)
     api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
@@ -100,11 +101,11 @@ BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
 VISION_TASKS = ("detect", "segment", "depth")
-TASKS = ("chat", "embed", "rerank", "asr", "tts", "image", "video") + VISION_TASKS
+TASKS = ("chat", "embed", "rerank", "asr", "tts", "image", "video") + VISION_TASKS + ("classify",)
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 VISION_APIS = ("vision-detect", "vision-segment", "vision-depth")
 APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images",
-        "openai-videos") + VISION_APIS
+        "openai-videos") + VISION_APIS + ("classify",)
 # Forgeyard's own images (1.4), named by the server's version: forgeyard/install/images.py. Only custom recipes
 # use these (copies of 1.4.0's vision recipe): the built-in vision recipe pins its image by digest since 1.4.1.
 FORGEYARD_IMAGES = ("vision", "vision-cuda")
@@ -535,6 +536,8 @@ class Recipe(_M):
         for task in VISION_TASKS:
             if task in self.tasks and self.api.get(task) != f"vision-{task}":
                 raise ValueError(f"api: {task} is served as vision-{task}")
+        if "classify" in self.tasks and self.api.get("classify") != "classify":
+            raise ValueError("api: classify is served as classify")
         if "video" in self.tasks and len(self.tasks) > 1:
             raise ValueError("tasks: a video recipe serves only the video task (its jobs have their own API)")
         return self
