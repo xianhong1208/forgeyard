@@ -57,13 +57,13 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 ## 模型、引擎與估算
 
-模型放在兩個頁面。**Serving** 是現在正在執行的：依種類（chat、多模態 chat、嵌入、重排序、語音轉文字、文字轉語音、圖片、影片、視覺）把部署分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**Deploy a model** 也在這裡，每個部署的頁面在 `/serving/<id>`。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。
+模型放在兩個頁面。**Serving** 是現在正在執行的：依種類（chat、多模態 chat、嵌入、重排序、文字分類、語音轉文字、文字轉語音、圖片、影片、視覺）把部署分組，每組標出它在 `/v1` 底下回應的路徑，每個部署一行：在哪裡執行（機器和顯示卡）、記憶體和狀態。**Deploy a model** 也在這裡，每個部署的頁面在 `/serving/<id>`。有[雲端備援](#cloud-providers-and-tiers)的部署會標出它的供應商，例如 *→ Gemini*；備援本身在部署的頁面上。
 
 **Models** 是模型庫，也就是可以部署的東西，分成三個分頁：**Catalog**（目錄，預設）、**Engines**（引擎），以及管理員才有的 **Sources**（來源）。雲端模型和供應商在 **Cloud** 頁面（管理員）。1.3 的連結（`/models/deployments/<id>`、`/models/deploy`、`/models?tab=routes`、`/models/routes/<id>`、`/providers`）會打開新的位置。
 
 - **目錄**列出你可以部署的模型。管理員可以從**推薦**清單、**Hugging Face 搜尋**，或從某個來源加入模型：`hf://org/name`、一個 GGUF 網址，或用 `local://` 指向機器上的某個目錄。加入模型時只會讀取它的資訊，不會下載。每一列都有 **Deploy** 和 **Download to…**。
-- **模型的用途**來自它在 Hugging Face 上的任務，再用它的 `config.json` 核對。很多 reranker 標的是 *text classification*，文字分類模型也是；用 vLLM 的規則分辨：只有一個輸出（`num_labels` 為 1：bge-reranker、ms-marco 的 cross-encoder）是 reranker，兩個以上標籤（情緒、主題、NLI）是文字分類模型，目前還不能加入（#144 會支援）。語言模型型的 reranker（例如 Qwen3-Reranker）不受影響。
-- **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入與重排序）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
+- **模型的用途**來自它在 Hugging Face 上的任務，再用它的 `config.json` 核對。很多 reranker 標的是 *text classification*，文字分類模型也是；用 vLLM 的規則分辨：只有一個輸出（`num_labels` 為 1：bge-reranker、ms-marco 的 cross-encoder）是 reranker，兩個以上標籤（情緒、語言、有害內容）是[文字分類模型](#text-classification)（1.4.4），絕不會被當成 reranker。語言模型型的 reranker（例如 Qwen3-Reranker）不受影響。
+- **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入、重排序與文字分類）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - 目錄裡的每個模型都有**自己的頁面**（1.4.3），點它的名稱就會打開：`/models/<name>`。頁面上有模型的資訊（來源與版本、授權、任務、架構）、**哪些機器的模型快取裡有它**、用引擎的預設值現在**放不放得下**每台機器、它的部署、能執行它的引擎，以及它的檔案和大小。每個引擎也有自己的頁面 `/models/engines/<name>`：它的變體（每種硬體用的映像檔或程式，以及是否以 digest 釘選）、**哪些機器已經有那個映像檔或程式**、它的參數，以及使用它的部署和模型。主控台裡所有模型和引擎的名稱都連到這些頁面。管理員可以在模型頁面設定**顯示名稱**；模型的名稱本身不變，因為部署記錄的是它，所以 `deploy`、`deployments`、`routes`、`engines`、`catalog`、`sources`、`recommended`、`search` 和 `inspect` 不能當模型名稱。（[查看模型或引擎](how-to.md#look-at-a-model-or-an-engine)）
 - **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
 - **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
@@ -83,11 +83,11 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 3. 如果哪裡都放不下，就拒絕這個部署，並逐台機器說明原因和差多少；
 4. 在那台機器上下載模型（如果引擎的映像檔還不在，也會拉取它）、啟動引擎，並等到它變成健康狀態。部署的頁面會顯示下載和拉取的進度；刪除部署會立刻停止這兩者。
 
-每個就緒的部署都以它的模型名稱，在 **`https://<server>:7860/v1`**（也就是**閘道**）以 OpenAI API 提供服務：`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/score`、`/v1/audio/transcriptions` 和 `/translations`。`/v1/models` 列出你的金鑰可以用的模型；部署停止後，它會從清單消失，直到再次啟動為止，除非它的路由能把請求送到你的金鑰可以用的雲端供應商。
+每個就緒的部署都以它的模型名稱，在 **`https://<server>:7860/v1`**（也就是**閘道**）以 OpenAI API 提供服務：`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/score`、`/v1/audio/transcriptions` 和 `/translations`，以及 Forgeyard 自己的 `/v1/classify`（文字分類）。`/v1/models` 列出你的金鑰可以用的模型；部署停止後，它會從清單消失，直到再次啟動為止，除非它的路由能把請求送到你的金鑰可以用的雲端供應商。
 
 閘道會把每個請求送到正在處理中請求數最少的就緒副本；如果某個副本沒有回應，就改送下一個。副本無法繞過閘道直接使用：每個副本都有一把只有閘道知道的內部金鑰，agent 會拒絕送到副本連接埠的其他所有請求。
 
-**Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型。一個 **Model** 選單列出已就緒的模型，像 **Serving** 一樣依種類分組，用同樣的名稱和圖示（Chat、Multimodal chat、Embeddings、Rerank、Speech to text、Text to speech、Images、Video、Vision）；選一個就會開出它的面板：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序、語音轉文字、**Speak**、**Image**、**Video**，或視覺面板（送一張圖片，得到方框、遮罩或深度圖）。網址會記住選的模型（`/playground?model=<name>`）；1.3 的 Vision 分頁網址（`/playground?tab=vision`）會開出第一個就緒的視覺模型，沒有時就打開選單。沒有任何就緒的模型時，頁面會這樣說明，並指向 **Models → Catalog** 去部署一個。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
+**Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型。一個 **Model** 選單列出已就緒的模型，像 **Serving** 一樣依種類分組，用同樣的名稱和圖示（Chat、Multimodal chat、Embeddings、Rerank、Text classification、Speech to text、Text to speech、Images、Video、Vision）；選一個就會開出它的面板：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序、文字分類（輸入文字，每段文字的各標籤機率以長條顯示）、語音轉文字、**Speak**、**Image**、**Video**，或視覺面板（送一張圖片，得到方框、遮罩或深度圖）。網址會記住選的模型（`/playground?model=<name>`）；1.3 的 Vision 分頁網址（`/playground?tab=vision`）會開出第一個就緒的視覺模型，沒有時就打開選單。沒有任何就緒的模型時，頁面會這樣說明，並指向 **Models → Catalog** 去部署一個。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
 
 ## 對話中的圖片、音訊與影片
 
@@ -155,6 +155,16 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - **自己的 API：**`/v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`，每個請求一張圖片（multipart，或 JSON 裡的 base64），回應是 JSON；遮罩和深度圖是 base64 的 PNG。OpenAI SDK 沒有這個 API：任何 HTTP 用戶端都能呼叫。
 - 每個副本**一次處理一張圖片**；其餘排隊等候。要更高吞吐量就多開副本。
 - 用量計**每個請求一張圖片**、它的千像素數和忙碌時間。圖片只留在你自己的部署上：絕不送往雲端供應商，也不會被保存。
+
+## 文字分類
+
+文字分類模型（1.4.4）替一段文字從固定的一組標籤裡挑一個：情緒、語言、有害內容、主題。它是附有分類頭的小型編碼器（1 億到 6 億參數），所以在 GPU 上每秒能處理上千段文字，標籤和分數穩定，成本只有對話模型的一小部分。
+
+- **一個引擎：**`vllm-pooling`（vLLM 的 pooling runner，和嵌入、重排序模型用同一個映像檔），在 NVIDIA GPU 上執行，以記憶體共用一張卡（同一個配方的 ROCm 版本應該也能在 AMD GPU 上執行，尚未測試）。目前還沒有 CPU 引擎：給 CPU 用的 transformers 引擎在 1.5（#144）。
+- **哪些模型：**目錄會讀 `config.json`。vLLM 能當分類模型執行的架構（BERT、RoBERTa、XLM-RoBERTa、ModernBERT、GTE、GPT-2、Jamba：`…ForSequenceClassification`），而且有兩個以上標籤。標籤會存在目錄項目裡，顯示在模型的頁面上。不接受：只有一個輸出的模型（那是 reranker）、迴歸（regression）頭、零樣本（NLI）模型（標籤是 entailment 和 contradiction：請求裡要帶標籤，1.5 才支援），以及 DeBERTa、DistilBERT 或 BART 分類模型（vLLM 不支援；同樣在 1.5）。
+- **它自己的 API：**`/v1/classify`，格式和 vLLM 一樣：`input` 是一段文字或一串文字；每段都會傳回最可能的 `label`，以及每個標籤的機率（`probs`，順序和 `config.json` 相同）。訓練成同時給多個標籤的模型（`multi_label_classification`，例如 toxic-bert）會各自評分每個標籤，所以機率加起來不一定是 1。
+- **現在就想用自己的標籤：**對話模型已經能用結構化輸出分到你指定的任何標籤：在 `/v1/chat/completions` 把標籤放進 `structured_outputs.choice`（vLLM），或用 JSON schema 的 `enum`（vLLM、llama.cpp、雲端供應商）。比分類模型慢、成本也高，但不用另外部署。見[操作指南](how-to.md#classify-text)。
+- 用量計它的 **prompt token**，和嵌入一樣。文字只留在你自己的部署上：絕不送往雲端供應商。
 
 ## API 金鑰、限制與用量
 

@@ -133,7 +133,7 @@ def node_out(node: Node) -> dict:
 # ------------------------------------------------------------------ where a model fits
 def fits(db: DbSession, m: CatalogModel, recipe: Recipe) -> dict:
     """For each device the engine runs on: the estimate with its defaults and each machine's verdict now."""
-    from forgeyard.api.deployments import normalise_params  # deployments imports this module's neighbours
+    from forgeyard.api.deployments import fit_default_context, normalise_params  # deployments imports this module's neighbours
     from fastapi import HTTPException
 
     out: dict = {}
@@ -142,6 +142,7 @@ def fits(db: DbSession, m: CatalogModel, recipe: Recipe) -> dict:
     for dev in devices:
         try:
             params = normalise_params(recipe, {"gpus": 1 if dev == "gpu" else 0})
+            fit_default_context(recipe, {}, params, m.meta or {})
             est = compute_estimate(m.meta or {}, recipe, params, device=dev, gpu_context=scheduler.gpu_context(),
                                    task=m.task)
         except EstimateError as e:

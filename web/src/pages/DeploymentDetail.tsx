@@ -287,7 +287,8 @@ function TryIt({ d }: { d: Deployment }) {
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const placeholder = api_ === "openai-chat" ? "In one short sentence: what is a GPU?" : api_ === "openai-embeddings"
-    ? "Forgeyard runs models on your own machines." : api_ === "rerank" ? "What is the capital of France?" : "";
+    ? "Forgeyard runs models on your own machines." : api_ === "rerank" ? "What is the capital of France?"
+    : api_ === "classify" ? "Forgeyard runs models on your own machines, and that is great." : "";
   return (
     <section className="panel" aria-labelledby="try-title">
       <h2 id="try-title">Try it</h2>

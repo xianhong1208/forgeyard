@@ -39,7 +39,7 @@ export function ModelDeployPage() {
   const view: DeployForm = {
     ...f, recipe: recipe?.name ?? "", name: f.name || (model ? slug(model.name) : ""),
     device: recipe && !recipe.devices.includes(f.device) ? recipe.devices[0] : f.device,
-    params: { ...recipeDefaults(recipe), ...f.params },
+    params: { ...recipeDefaults(recipe, model?.summary?.max_context), ...f.params },
   };
 
   const body = deployBody(view, recipe);

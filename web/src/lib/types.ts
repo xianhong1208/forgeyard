@@ -295,7 +295,8 @@ export type LogsResponse = { source: "live" | "stored"; text: string; truncated:
 
 // ---------------------------------------------------------------- models (M3)
 // 1.4 (#86): detect, segment and depth are vision models (Forgeyard's vision server, /v1/vision/<task>).
-export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "detect" | "segment" | "depth";
+// 1.4.4 (#144): classify is text classification (vLLM's pooling runner, /v1/classify).
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "detect" | "segment" | "depth" | "classify";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -343,8 +344,20 @@ export type CatalogModel = {
   vision?: { task: "detect" | "segment" | "depth"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string;
     // 1.4.4 (#142): a zero-shot detector, which finds what each request names (no classes of its own)
     zero_shot?: boolean } | null;
+  // 1.4.4, text classifiers: the architecture, how many labels, their names in index order, the problem type
+  // (multi_label_classification: each label's probability on its own).
+  classify?: TextClassifier | null;
   // 1.3, video models: the native size and frame rate, and the pipeline's components.
   video?: VideoModel | null;
+};
+
+export type TextClassifier = { architecture?: string; labels?: number; label_names?: string[]; problem?: string };
+
+// /v1/classify's answer (vLLM's shape): each input's most likely label and every label's probability.
+export type ClassifyAnswer = {
+  model?: string;
+  data: { index: number; label: string | null; probs: number[]; num_classes: number }[];
+  usage?: { prompt_tokens?: number; total_tokens?: number };
 };
 
 export type VideoModel = {
@@ -413,7 +426,9 @@ export type Deployment = {
   id: number; name: string; recipe: string; served_name: string; params: Record<string, unknown>;
   model: { id: number; name: string; source: string; task: Task; format: string; revision: string | null; file: string | null; size_bytes: number;
     // 1.4: what it takes in chat besides text (null: unknown), so a chat model can be listed as multimodal.
-    modalities?: Medium[] | null };
+    modalities?: Medium[] | null;
+    // 1.4.4: a text classifier's labels (names in index order), for the Playground.
+    classify?: TextClassifier | null };
   estimate: Estimate; has_token: boolean; created_by: string | null; created_at: string;
   route: { served_name: string; api: string; upstream_model: string } | null;
   endpoints: Endpoint[]; workload: Workload; cards?: LiveCard[];

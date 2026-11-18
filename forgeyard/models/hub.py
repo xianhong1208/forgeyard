@@ -41,6 +41,8 @@ TASK_TAGS: dict[str, tuple[str, ...]] = {
     "detect": ("object-detection", "zero-shot-object-detection"),
     "segment": ("mask-generation",),
     "depth": ("depth-estimation",),
+    # 1.4.4: text classifiers (the rerankers tagged text-classification come last, see rank)
+    "classify": ("text-classification",),
 }
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
 EXPAND = ("downloads", "likes", "lastModified", "gated", "private", "pipeline_tag", "library_name", "tags",
@@ -68,7 +70,7 @@ def make_query(text: str, task: Optional[str], fmt: Optional[str], limit: int) -
     if any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise ValueError("search: plain text only")
     if task not in (None, "", *TASK_TAGS):
-        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment or depth")
+        raise ValueError("task: chat, embed, rerank, asr, tts, image, video, detect, segment, depth or classify")
     if fmt not in (None, "", *FORMATS):
         raise ValueError("format: safetensors, gguf, ctranslate2, onnx or diffusers")
     if not 1 <= int(limit) <= MAX_LIMIT:
@@ -148,9 +150,22 @@ def summarise(m: dict) -> Optional[dict]:
 def rank(q: Query, s: dict) -> tuple:
     """Most downloaded first. A rerank search also asks for text classification (where many
     rerankers are filed), which brings in sentiment and topic classifiers: models with "rerank" in
-    their name come first."""
-    reranker = q.task == "rerank" and "rerank" in s["id"].lower()
-    return (not reranker, -s["downloads"])
+    their name come first. A text classification search (1.4.4) puts them last."""
+    reranker = "rerank" in s["id"].lower()
+    if q.task == "rerank":
+        return (not reranker, -s["downloads"])
+    if q.task == "classify":
+        return (reranker, -s["downloads"])
+    return (False, -s["downloads"])
+
+
+def as_task(q: Query, s: dict) -> dict:
+    """A result found by a rerank or text classification search is shown as that kind when Hugging Face's tags
+    allow both (text-classification): which one it is shows when it is inspected (its number of labels)."""
+    if q.task in ("rerank", "classify") and s.get("task") in ("rerank", "classify"):
+        if q.task == "rerank" or s.get("pipeline_tag") == "text-classification":
+            return {**s, "task": q.task}
+    return s
 
 
 class Hub:
@@ -194,7 +209,7 @@ class Hub:
                 s = summarise(m) if isinstance(m, dict) else None
                 if s and s["id"] not in merged:
                     merged[s["id"]] = s
-        results = sorted(merged.values(), key=lambda s: rank(q, s))[: q.limit]
+        results = [as_task(q, s) for s in sorted(merged.values(), key=lambda s: rank(q, s))[: q.limit]]
         with self._lock:
             if len(self._cache) >= CACHE_ENTRIES:
                 for k in [k for k, (exp, _) in self._cache.items() if exp <= now] or list(self._cache)[:CACHE_ENTRIES // 4]:

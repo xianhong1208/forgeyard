@@ -243,6 +243,7 @@ local_dirs = ["/data/models"]
 | `POST /v1/vision/detect` | 物件偵測（1.4）：送一張圖片，傳回方框、標籤和分數；零樣本偵測模型（1.4.4）用 `labels` 告訴它要找什麼。見[視覺](#vision) | 否 |
 | `POST /v1/vision/segment` | 用 SAM 2 分割（1.4）：送一張圖片和一個點或一個方框，傳回 PNG 遮罩 | 否 |
 | `POST /v1/vision/depth` | 深度估計（1.4）：送一張圖片，傳回 16 位元深度圖 | 否 |
+| `POST /v1/classify` | 文字分類（1.4.4）：送文字，傳回每段的標籤和機率。見[文字分類](#text-classification) | 否 |
 
 `/v1` 底下的其他路徑都回 404 `unknown_endpoint`。
 
@@ -449,6 +450,25 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | tokens | 不計。金鑰的每分鐘 token 數不適用；每分鐘請求數和模型清單照常適用 |
 
 一個副本一次處理一張圖片，其餘依序等待；要更高吞吐量就多開副本。哪些模型算視覺模型、授權規則，見[內建配方](#built-in-recipes)。
+
+### 文字分類
+
+`POST /v1/classify`（1.4.4）把文字送給文字分類模型，以 vLLM 的格式回應。這是 Forgeyard 自己的 API（OpenAI SDK 沒有）。引擎是 vLLM 的 pooling runner（配方 `vllm-pooling`）；閘道把請求送到副本的 `/classify`。只由本機部署提供，絕不送往雲端供應商。
+
+| 欄位 | 說明 |
+|---|---|
+| `model` | 模型名稱 |
+| `input` | 一段文字，或 1 到 2,048 段文字；每段都不能是空的。不接受 token id |
+| `truncate_prompt_tokens` | 選用：把每段文字截到這麼多 token（至少 1），或 -1 代表模型的最大值。沒有它時，比部署的 context 長的文字會被引擎拒絕 |
+| `use_activation` | 選用，`true` 或 `false`：`false` 傳回原始分數（logits）而不是機率 |
+
+閘道只送出這些欄位（其他欄位會被丟掉）；`messages`（vLLM 的對話格式）回 400。其他種類的模型回 400 `wrong_endpoint`，並說出它的端點（對話模型還會說明怎麼用結構化輸出分類）。
+
+回應：`data` 依序每段文字一項：`index`、`label`（最可能的）、`probs`（每個標籤的機率，順序和模型的 `config.json` 相同；`multi_label_classification` 模型各自評分每個標籤，所以加起來不一定是 1）和 `num_classes`；`usage` 裡有 `prompt_tokens`。標籤名稱在目錄項目上（`GET /api/models/<name>` 的 `classify.label_names`）。
+
+| 單位 | 怎麼算 |
+|---|---|
+| tokens | 引擎回應裡的 `prompt_tokens`，和嵌入一樣。金鑰的每分鐘 token 數照常適用 |
 
 ### 標頭
 
@@ -1036,7 +1056,11 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda`（torch +cu130） |
 | | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.0`（linux/amd64 與 arm64） |
 
-`vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤（#144 會支援）。語言模型型的 reranker（Qwen3-Reranker）不受影響。
+`vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型（任務 `classify`，1.4.4）：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤。語言模型型的 reranker（Qwen3-Reranker）不受影響。
+
+當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
+
+部署沒有指定 context 時，如果模型本身的最大長度比配方的預設短，就從模型的最大值開始（1.4.4）：512 個 token 的 BERT 分類模型會得到 `--max-model-len 512`，而不是 8192。RoBERTa 和 XLM-RoBERTa 模型的位置從 padding index 之後開始算，所以 514 個位置嵌入只放得下 512 個 token（BGE-M3：8192）。
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 

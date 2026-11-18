@@ -58,6 +58,10 @@ cloud provider.
    only (no provider serves them). A zero-shot detector (1.4.4, #142) is told what to find with `labels` (a
    list of names, or a comma-separated string in a form); the vision server checks them (400 labels_required
    without them, labels_not_supported for a detector with fixed classes).
+15. Text classification (1.4.4, forgeyard/gateway/classify.py): /v1/classify takes `input` (a text or a list
+   of texts) for a text classification model; the body is checked and rebuilt with the fields Forgeyard knows,
+   sent to the engine's /classify (vLLM serves it without /v1), and the answer passed back, counted in prompt
+   tokens. Local only.
 """
 
 from __future__ import annotations
@@ -82,7 +86,8 @@ from starlette.responses import Response
 
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
-from forgeyard.gateway import budgets, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech, videogen
+from forgeyard.gateway import (budgets, classify, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech,
+                               videogen)
 from forgeyard.gateway.balancer import PROVIDER_COOLDOWN, PROVIDER_COOLDOWN_MAX, Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -109,7 +114,11 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "vision/detect": ("vision-detect", "vision"),
     "vision/segment": ("vision-segment", "vision"),
     "vision/depth": ("vision-depth", "vision"),
+    # 1.4.4: text classification (forgeyard/gateway/classify.py)
+    "classify": ("classify", "json"),
 }
+# Where an engine serves an endpoint when it is not /v1/<endpoint>: vLLM's /classify has no /v1.
+UPSTREAM_PATHS = {"classify": classify.UPSTREAM_PATH}
 USAGE_ENDPOINTS = ("chat/completions", "completions")  # streamed ones can report usage at the end
 CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets serve in 1.2
 CLOUD_ENDPOINTS = ("chat/completions", "completions", "embeddings")
@@ -324,7 +333,7 @@ def endpoint_for(api: str) -> str:
             "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
             "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
             "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment",
-            "vision-depth": "/v1/vision/depth"}.get(api, "/v1")
+            "vision-depth": "/v1/vision/depth", "classify": "/v1/classify"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:
@@ -354,9 +363,18 @@ def check_access(caller: KeyCaller, route: Optional[Route], model: str, endpoint
         raise GatewayError(403, "model_not_allowed", f"This API key may not use the model {model!r}.", param="model")
     need = ENDPOINTS[endpoint][0]
     if route.api != need:
+        hint = (" A chat model classifies text with structured outputs: give the labels as "
+                "structured_outputs.choice at /v1/chat/completions.") if endpoint == "classify" and \
+            route.api == "openai-chat" else ""
         raise GatewayError(400, "wrong_endpoint", f"{model!r} is served at {endpoint_for(route.api)}, "
-                                                  f"not /v1/{endpoint}.", param="model")
+                                                  f"not /v1/{endpoint}.{hint}", param="model")
     return route
+
+
+def fit_classify(parsed: "Parsed") -> None:
+    """Text classification (1.4.4): check the body; the engine gets only the fields Forgeyard knows."""
+    if parsed.obj is not None:
+        parsed.obj = classify.check(parsed.obj)
 
 
 # ------------------------------------------------------------------ media and body size (1.3)
@@ -1194,7 +1212,8 @@ class Job:
                 timeout = httpx.Timeout(connect=self.settings.gateway_connect_timeout, read=g.draws.timeout,
                                         write=60.0, pool=30.0)
             try:
-                req = http.build_request("POST", f"{pick.url}/v1/{self.endpoint}", content=body, headers=headers,
+                path = UPSTREAM_PATHS.get(self.endpoint, f"/v1/{self.endpoint}")
+                req = http.build_request("POST", f"{pick.url}{path}", content=body, headers=headers,
                                          timeout=timeout)
                 self.sent_at = time.monotonic()
                 response = await unless_gone(self.request.receive, http.send(req, stream=True))

@@ -413,9 +413,10 @@ def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmpr
 TASK_FROM_PIPELINE = {
     "text-generation": "chat", "text2text-generation": "chat", "image-text-to-text": "chat",
     "feature-extraction": "embed", "sentence-similarity": "embed",
-    # Many cross-encoder rerankers are tagged text-classification (BAAI/bge-reranker-v2-m3); so are text
-    # classifiers, which the inspector tells apart by their number of labels (reranker_refusal).
-    "text-ranking": "rerank", "text-classification": "rerank",
+    # Text classifiers are tagged text-classification (1.4.4, #144); so are many cross-encoder rerankers
+    # (BAAI/bge-reranker-v2-m3). The inspector tells them apart by their number of labels (one: a reranker).
+    # Zero-shot (NLI) models are classifiers too, refused until 1.5 (forgeyard/models/textcls.py).
+    "text-ranking": "rerank", "text-classification": "classify", "zero-shot-classification": "classify",
     "automatic-speech-recognition": "asr",
     "text-to-speech": "tts",
     "text-to-image": "image",
@@ -435,7 +436,7 @@ def task_hint(pipeline_tag: Optional[str], tags: list[str]) -> Optional[str]:
     return None
 
 
-# ------------------------------------------------------------------ rerankers and text classifiers (1.4.3)
+# ------------------------------------------------------------------ rerankers and text classifiers (1.4.3, 1.4.4)
 def sequence_labels(config: dict) -> Optional[int]:
     """How many outputs a sequence-classification model's head has, or None when config.json names no
     …ForSequenceClassification architecture (a causal-LM reranker such as Qwen3-Reranker). As transformers
@@ -456,7 +457,7 @@ def sequence_labels(config: dict) -> Optional[int]:
 def reranker_refusal(config: dict) -> Optional[str]:
     """Why a model cannot be served as a reranker (a message), or None. vLLM's rule: a sequence-classification
     model scores pairs (/rerank, /score) only when it has one output (num_labels 1); with more it is a text
-    classifier (sentiment, topic, NLI…), which Forgeyard does not serve yet."""
+    classifier (sentiment, topic, NLI…), added as one (task classify, 1.4.4) and never as a reranker."""
     n = sequence_labels(config)
     if n is None or n == 1:
         return None
@@ -464,4 +465,4 @@ def reranker_refusal(config: dict) -> Optional[str]:
     names = [str(v)[:40] for _, v in sorted(labels.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0)]
     shown = f" ({', '.join(names[:6])}{', …' if len(names) > 6 else ''})" if names else ""
     return (f"This is a text classifier with {n} labels{shown}, not a reranker: a reranker has one output "
-            "(num_labels 1 in its config.json). Text classification comes with #144.")
+            "(num_labels 1 in its config.json). Add it as a text classification model.")
