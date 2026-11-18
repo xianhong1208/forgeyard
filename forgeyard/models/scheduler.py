@@ -9,7 +9,9 @@
   memory as its agent reported it, minus Forgeyard reservations not yet in that number, minus a
   headroom. Cards are exclusive unless the deployment shares VRAM (`share: vram`), and a shared
   card is only ever shared with other sharing replicas;
-- CPU replicas: the free RAM, the same way.
+- CPU replicas: the free RAM, the same way;
+- (1.4.2) a free host port in the machine's range for the replica (two behind the agent's key guard), when its
+  agent reports the range (forgeyard.workloads.placement.port_problem).
 
 **Score**, among the machines that pass, in this order (forgeyard.models.reach, 1.4):
 - a machine that could not reach a source this replica would have to fetch from there (the model's
@@ -199,11 +201,22 @@ def _share_fits(ctx: Context, avail: list[tuple[int, Accelerator]], cards: dict[
              "both": ctx.share == "exclusive" and bool(exclusive)}, text)
 
 
+def guarded(node: Node, ctx: Context) -> bool:
+    """Does a replica of this deployment on this machine get an internal key, and so the agent's key guard in
+    front of it (see place_replica)?"""
+    return bool(ctx.recipe.api_key_env) or FEATURE_REPLICA_GUARD in (node.features or [])
+
+
+# Every model replica publishes one port (render: "http").
+MODEL_PORTS = {"ports": [{"name": "http"}]}
+
+
 def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[int] = None,
                   extra: Optional[dict[str, list[Hold]]] = None, release: Collection[int] = (),
-                  credit: Optional[dict[str, int]] = None) -> Verdict:
+                  credit: Optional[dict[str, int]] = None, ports: int = 0) -> Verdict:
     """Can this machine take one replica, and where. `release`: replicas that restart (an edit) and so
-    hold nothing; `credit`: memory per card that a replica restarting right now still uses there."""
+    hold nothing; `credit`: memory per card that a replica restarting right now still uses there; `ports`:
+    host ports that replicas planned before this one (a preview) would take there."""
     v = Verdict(node.id, node.name, node.status, False)
     if node.revoked_at is not None or node.status == "revoked":
         v.reason = "revoked"
@@ -321,6 +334,12 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
     if not v.fits and fallback is not None:
         v.fits, v.option, v.cards = True, fallback[0], fallback[1]
     if v.fits:
+        # 1.4.2 (#125): the memory is there; is a port? Without one the agent could only wait in backoff.
+        problem = placement.port_problem(node, used.ports + ports, placement.ports_for(MODEL_PORTS, guarded(node, ctx)))
+        if problem:
+            v.fits, v.option, v.reason = False, None, problem
+            return v
+    if v.fits:
         if node.status != "online":
             v.reason = "offline"
         return v
@@ -365,9 +384,11 @@ def choose(verdicts: list[Verdict], machine_id: Optional[int], strategy: str = "
 
 def evaluate(db: DbSession, ctx: Context, *, exclude: Optional[int] = None,
              extra: Optional[dict[int, dict[str, list[Hold]]]] = None, release: Collection[int] = (),
-             credit: Optional[tuple[int, dict[str, int]]] = None) -> list[Verdict]:
+             credit: Optional[tuple[int, dict[str, int]]] = None, ports: Optional[dict[int, int]] = None
+             ) -> list[Verdict]:
     return [evaluate_node(db, n, ctx, exclude=exclude, extra=(extra or {}).get(n.id), release=release,
-                          credit=credit[1] if credit is not None and credit[0] == n.id else None)
+                          credit=credit[1] if credit is not None and credit[0] == n.id else None,
+                          ports=(ports or {}).get(n.id, 0))
             for n in candidates(db, ctx.machine_id)]
 
 
@@ -413,11 +434,12 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
     `release` and `prefer` (an edit, 1.3.1): the deployment's own replicas restart, so they hold
     nothing, and replica i goes back to machine prefer[i] when that machine still takes it."""
     extra: dict[int, dict[str, list[Hold]]] = {}
+    ports: dict[int, int] = {}
     placed = []
     first: Optional[list[Verdict]] = None
     hint_card: tuple[Optional[Accelerator], Optional[str]] = (None, None)
     for i in range(ctx.replicas):
-        verdicts = evaluate(db, ctx, extra=extra, release=release)
+        verdicts = evaluate(db, ctx, extra=extra, release=release, ports=ports)
         if first is None:
             first = verdicts
         opt = choose(verdicts, ctx.machine_id, siblings={p["machine_id"] for p in placed},
@@ -436,6 +458,7 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
             holds.setdefault(a.key, []).append(hold)
         if not opt.cards:
             holds.setdefault("__ram__", []).append(hold)
+        ports[opt.node.id] = ports.get(opt.node.id, 0) + placement.ports_for(MODEL_PORTS, guarded(opt.node, ctx))
         entry = {"replica": i, "machine": opt.node.name, "machine_id": opt.node.id, "variant": opt.variant.name,
                  "runtime": opt.variant.runtime, "image": opt.variant.image, "gpus": [a.index for a in opt.cards],
                  "cached": opt.cached, "leftover": opt.leftover, "online": opt.node.status == "online"}
@@ -499,8 +522,7 @@ def place_replica(db: DbSession, r: Replica, credit: Optional[tuple[int, dict[st
     # A fresh internal key for every placement (M4): only the gateway, which adds it, can use the
     # engine. An agent with the key guard requires it on every path, whatever the engine; elsewhere
     # only an engine that reads a key (the recipe's api_key_env) gets one.
-    guard = FEATURE_REPLICA_GUARD in (opt.node.features or [])
-    r.secret = secrets.token_urlsafe(32) if (ctx.recipe.api_key_env or guard) else None
+    r.secret = secrets.token_urlsafe(32) if guarded(opt.node, ctx) else None
     r.state = "pending"
     r.download = None
     r.reason = None if opt.node.status == "online" else f"waiting for {opt.node.name} to come online"

@@ -6,7 +6,8 @@ protocol version `v` and a `type`:
 
 agent -> server
   hello      first message on every connection: agent version, host, labels, whether the
-             inventory is simulated, and the full inventory
+             inventory is simulated, and the full inventory. (1.4.2) `runtime_info.ports` ({low, high}):
+             the host port range replicas are published on, which placement counts; older servers drop it
   heartbeat  every 10 s: only the values that change (free/used memory, utilisation, temperature)
   inventory  the full inventory again, sent when the hardware changed
 

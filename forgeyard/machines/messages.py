@@ -215,8 +215,19 @@ class InventoryIn(_Msg):
     collectors: dict[Annotated[str, _short(32)], CollectorStatus] = Field(default_factory=dict, max_length=16)
 
 
+def _port_range(value: Any) -> Optional[dict]:
+    """(1.4.2) {"low": 30000, "high": 32767}: the host ports the agent publishes replicas on, or None."""
+    if not isinstance(value, dict):
+        return None
+    low, high = value.get("low"), value.get("high")
+    if type(low) is not int or type(high) is not int or not 1 <= low <= high <= 65535:
+        return None
+    return {"low": low, "high": high}
+
+
 def _runtime_info(value: Any) -> dict:
-    """{"process": {...}, "container": {...}}: small dicts of what each runtime can do."""
+    """{"process": {...}, "container": {...}}: small dicts of what each runtime can do; (1.4.2) "ports": the
+    agent's host port range (servers before 1.4.2 drop it, so it never reaches them)."""
     if not isinstance(value, dict):
         return {}
     out = {}
@@ -224,6 +235,9 @@ def _runtime_info(value: Any) -> dict:
         item = value.get(name)
         if isinstance(item, dict) and len(json.dumps(item, default=str)) <= 4096:
             out[name] = item
+    ports = _port_range(value.get("ports"))
+    if ports is not None:
+        out["ports"] = ports
     return out
 
 

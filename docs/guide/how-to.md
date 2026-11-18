@@ -133,7 +133,11 @@ the next machine:
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
 - **Advanced → Port range** (`FORGEYARD_PORT_RANGE`, default `30000-32767`): the host ports for
   services and model replicas. Set it when only some ports reach the machine, for example
-  `40000-40099` opened in a firewall. The server must be able to reach these ports.
+  `40000-40099` opened in a firewall. The server must be able to reach these ports. Each port an app
+  publishes takes one port of the range, and a model replica (or an app exposed at `/x/`) takes two: one
+  for the agent's key guard and one for the engine behind it. Forgeyard counts them, so a range of 3
+  ports holds one model: a machine whose range is full is skipped, and a replica with nowhere else to go
+  waits ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
 
 A field the agent would reject shows its error instead of a command. The image's tag is the
 server's own version, so agent and server always match. An admin can point the command at a mirror,

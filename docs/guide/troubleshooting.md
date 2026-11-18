@@ -332,6 +332,7 @@ line says why it was not chosen:
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | a CPU model, and not enough free RAM |
 | `no container runtime (…)` | the recipe needs Docker or Podman, which the machine does not have |
 | `its agent does not serve models` | the agent has no model cache (`[models] cache` in its settings) |
+| `no free port: 3 of 3 in use (host ports 33000-33002)` | every port of the machine's [port range](#a-replica-waits-no-free-host-port) is held by its replicas |
 | `offline` | the machine's agent is not connected |
 
 **Do:** free memory on a card (stop something), allow more cards ([GPU access](how-to.md#restrict-gpus-on-a-shared-machine)),
@@ -362,6 +363,32 @@ restarting the agent (`sudo systemctl restart forgeyard-agent`, or `docker resta
 makes it take its work at once. When the agent already runs the server's version, the message says
 to restart it and look at its log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`). **Setup health** flags agents older than the server, and replicas
 that waited for a machine for more than 15 minutes.
+
+## A replica waits: no free host port
+
+**You see:** a replica is not placed, and the deployment or app page says *Cannot be placed: gpu-02: no free
+port: 3 of 3 in use (host ports 33000-33002)*, or *not enough free ports: 2 of 3 in use, it needs 2*. The
+deploy preview gives the same line for that machine.
+
+**Why:** an agent publishes services and model replicas on the host ports of its port range
+(`FORGEYARD_PORT_RANGE`, default `30000-32767`). A model replica takes two of them (the agent's key guard
+listens on one, the engine on the other), an app one per port it publishes (two when it is exposed at
+`/x/`). The server counts the ports the machine's replicas hold and skips a machine without enough free
+ones, like a machine without memory, instead of sending a replica that could only wait there. A small
+range is common on a machine reached through an SSH tunnel, where every port in the range is forwarded.
+Agents older than 1.4.2 do not report their range, and their ports are not counted.
+
+A replica the agent could not give a port (it was placed before its server counted ports) reports
+*no free host port left in 33000-33002*. When the count agrees, the server takes it off that machine: it
+goes to a machine with room, or waits with the reason above. When the count says there is room, a program
+outside Forgeyard holds ports of the range: the agent skips them, and tries again in backoff.
+
+**Do:** stop something on that machine, deploy to another machine, or give the agent a larger range
+(and forward or open those ports so the server can reach them), then restart the agent:
+
+```bash
+sudo forgeyard agent runtimes   # the last line shows the range the agent uses
+```
 
 ## Errors from /v1: 401, 403, 429, 503
 
