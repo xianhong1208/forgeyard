@@ -1,0 +1,29 @@
+{
+  "id": "cross-encoder/ms-marco-MiniLM-L6-v2",
+  "pipeline_tag": "text-ranking",
+  "library_name": "sentence-transformers",
+  "tags": [
+    "sentence-transformers",
+    "pytorch",
+    "jax",
+    "onnx",
+    "safetensors",
+    "openvino",
+    "bert",
+    "text-classification",
+    "transformers",
+    "text-ranking",
+    "en",
+    "dataset:sentence-transformers/msmarco",
+    "base_model:cross-encoder/ms-marco-MiniLM-L12-v2",
+    "base_model:quantized:cross-encoder/ms-marco-MiniLM-L12-v2",
+    "license:apache-2.0",
+    "text-embeddings-inference",
+    "endpoints_compatible",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

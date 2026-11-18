@@ -1,0 +1,26 @@
+{
+  "id": "cross-encoder/nli-deberta-v3-base",
+  "pipeline_tag": "zero-shot-classification",
+  "library_name": "sentence-transformers",
+  "tags": [
+    "sentence-transformers",
+    "pytorch",
+    "onnx",
+    "safetensors",
+    "deberta-v2",
+    "text-classification",
+    "transformers",
+    "zero-shot-classification",
+    "en",
+    "dataset:nyu-mll/multi_nli",
+    "dataset:stanfordnlp/snli",
+    "base_model:microsoft/deberta-v3-base",
+    "base_model:quantized:microsoft/deberta-v3-base",
+    "license:apache-2.0",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

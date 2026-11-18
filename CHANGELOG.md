@@ -6,6 +6,24 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Zero-shot detectors are no longer added as detection models** (#147). Grounding DINO, MM-Grounding-DINO and
+  LLMDet, OWL-ViT, OWLv2 and OmDet-Turbo have architectures ending in `ForObjectDetection`, so the catalog took
+  them as detection models, and their replicas failed: the vision server loads detectors with
+  `AutoModelForObjectDetection`, which does not know them. They are now known by their `model_type` or
+  architecture (transformers' zero-shot detection models, as of the 5.23.0 the vision image pins), and adding
+  or re-tasking one answers 422 `not_a_vision_model`: "a zero-shot (open-vocabulary) detector … support comes
+  with #142". The Add a model preview says so too. One added before this release stays in the catalog (no
+  migration) and deploying it answers the same 422.
+- **Text classifiers are no longer filed as rerankers** (#147). Every model Hugging Face tags
+  `text-classification` was taken as a reranker, because many cross-encoder rerankers are tagged that way. The
+  inspector now applies vLLM's rule to a `…ForSequenceClassification` model's `config.json`: one output
+  (`num_labels` 1, or one `id2label` entry) is a reranker; two labels or more (sentiment, topic, NLI) is a text
+  classifier, and inspecting or adding it as a reranker answers 422 `cannot_inspect` with its labels ("Text
+  classification comes with #144"). bge-reranker, the ms-marco cross-encoders and causal-LM rerankers such as
+  Qwen3-Reranker are added as before. Rows already in the catalog are not changed.
+
 ## [1.4.2] — 2026-11-18
 
 A patch release from running 1.4 on real machines. A machine's page shows the exact command that updates its

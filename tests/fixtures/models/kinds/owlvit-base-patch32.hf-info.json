@@ -1,0 +1,19 @@
+{
+  "id": "google/owlvit-base-patch32",
+  "pipeline_tag": "zero-shot-object-detection",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "pytorch",
+    "safetensors",
+    "owlvit",
+    "zero-shot-object-detection",
+    "vision",
+    "arxiv:2205.06230",
+    "license:apache-2.0",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}
