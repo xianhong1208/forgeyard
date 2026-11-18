@@ -1,8 +1,9 @@
 """Kinds of models that look like others (1.4.3, #147): zero-shot (open-vocabulary) object detectors, whose
 architectures end in ForObjectDetection like the detectors the vision server loads (refused in 1.4.3, supported
 since 1.4.4 as detect models marked zero_shot, #142), and text classifiers, tagged text-classification like many
-cross-encoder rerankers (support comes with #144). The configs and Hugging Face answers are the real ones, saved
-from the repositories in tests/fixtures/models/kinds (FY-KIND-*)."""
+cross-encoder rerankers (served as text classification models since 1.4.4, #144: tests/test_text_classify.py). The
+configs and Hugging Face answers are the real ones, saved from the repositories in tests/fixtures/models/kinds
+(FY-KIND-*)."""
 
 from __future__ import annotations
 
@@ -263,9 +264,10 @@ def test_fy_kind_007_which_vision_images_run_zero_shot_detectors():
 # ------------------------------------------------------------------ text classifiers and rerankers
 def test_fy_kind_005_one_label_is_a_reranker_more_is_a_classifier():
     """FY-KIND-005: vLLM's rule on the real configs: bge-reranker-v2-m3 and ms-marco-MiniLM (one label) are
-    rerankers; DistilBERT SST-2 (2 labels) and an NLI cross-encoder (3) are text classifiers, refused with
-    their labels and #144; Qwen3-Reranker (a causal LM) is no sequence classifier at all. The count is read as
-    transformers reads it: id2label first, then num_labels, then its default of 2."""
+    rerankers; DistilBERT SST-2 (2 labels) and an NLI cross-encoder (3) are text classifiers, refused as rerankers
+    with their labels (1.4.4: "add it as a text classification model"); Qwen3-Reranker (a causal LM) is no sequence
+    classifier at all. The count is read as transformers reads it: id2label first, then num_labels, then its
+    default of 2."""
     assert sources.sequence_labels(config("bge-reranker-v2-m3")) == 1
     assert sources.sequence_labels(config("ms-marco-minilm-l6-v2")) == 1
     assert sources.reranker_refusal(config("bge-reranker-v2-m3")) is None
@@ -275,9 +277,10 @@ def test_fy_kind_005_one_label_is_a_reranker_more_is_a_classifier():
     assert sources.sequence_labels(config("distilbert-sst-2")) == 2
     assert sources.reranker_refusal(config("distilbert-sst-2")) == (
         "This is a text classifier with 2 labels (NEGATIVE, POSITIVE), not a reranker: a reranker has one output "
-        "(num_labels 1 in its config.json). Text classification comes with #144.")
+        "(num_labels 1 in its config.json). Add it as a text classification model.")
     nli = sources.reranker_refusal(config("nli-deberta-v3-base"))
-    assert nli.startswith("This is a text classifier with 3 labels (contradiction, entailment, neutral)") and "#144" in nli
+    assert nli.startswith("This is a text classifier with 3 labels (contradiction, entailment, neutral)")
+    assert nli.endswith("Add it as a text classification model.")
     seq = {"architectures": ["BertForSequenceClassification"]}
     assert sources.sequence_labels(seq) == 2                                     # transformers' default
     assert sources.sequence_labels({**seq, "num_labels": 1}) == 1
@@ -293,8 +296,10 @@ def test_fy_kind_006_adding_a_text_classifier_as_a_reranker_is_refused(owner, hf
     """FY-KIND-006: rerankers tagged text-classification (bge-reranker-v2-m3) or text-ranking (ms-marco-MiniLM, and
     the causal-LM Qwen3-Reranker) are inspected and added as rerank models, as before; a sentiment model tagged
     text-classification, and an NLI model (its tags say text-classification too), are refused when inspected
-    or added (422 cannot_inspect naming #144), whether the task comes from Hugging Face or rerank is asked for.
-    Asked for another task, the classifier is not read as a reranker."""
+    or added (422 cannot_inspect). 1.4.4 (#144): without a task they are read as text classifiers, and these two
+    are refused as such (vLLM runs neither DistilBERT nor DeBERTa; an NLI model needs labels in the request);
+    asked as rerankers, they are refused with their labels. Asked for another task, the classifier's hint stays
+    text classification."""
     for repo_id in ("BAAI/bge-reranker-v2-m3", "cross-encoder/ms-marco-MiniLM-L6-v2", "Qwen/Qwen3-Reranker-0.6B"):
         assert inspect(hf, repo_id)["task_hint"] == "rerank", repo_id
     for name, source in [("bge-rr", "hf://BAAI/bge-reranker-v2-m3"), ("msmarco", "hf://cross-encoder/ms-marco-MiniLM-L6-v2"),
@@ -302,21 +307,24 @@ def test_fy_kind_006_adding_a_text_classifier_as_a_reranker_is_refused(owner, hf
         r = owner.post("/api/models", json={"name": name, "source": source})
         assert r.status_code == 201, (name, r.text)
         assert r.json()["model"]["task"] == "rerank" and "vllm-pooling" in r.json()["model"]["recipes"], name
-    for repo_id, task in [("distilbert/distilbert-base-uncased-finetuned-sst-2-english", None),
-                          ("cross-encoder/nli-deberta-v3-base", None), ("cross-encoder/nli-deberta-v3-base", "rerank")]:
-        with pytest.raises(inspector.InspectError, match="text classifier .*#144"):
+    sst2, nli = "distilbert/distilbert-base-uncased-finetuned-sst-2-english", "cross-encoder/nli-deberta-v3-base"
+    for repo_id, task, why in [(sst2, None, "cannot run DistilBertForSequenceClassification"),
+                               (nli, None, "zero-shot \\(NLI\\) model"),
+                               (sst2, "rerank", "text classifier with 2 labels"),
+                               (nli, "rerank", "text classifier with 3 labels")]:
+        with pytest.raises(inspector.InspectError, match=why):
             inspect(hf, repo_id, task)
-    for name, source, task in [("sst2", "hf://distilbert/distilbert-base-uncased-finetuned-sst-2-english", None),
-                               ("sst2-rr", "hf://distilbert/distilbert-base-uncased-finetuned-sst-2-english", "rerank"),
-                               ("nli", "hf://cross-encoder/nli-deberta-v3-base", None)]:
+    for name, source, task, why in [("sst2", f"hf://{sst2}", None, "cannot run DistilBertForSequenceClassification"),
+                                    ("sst2-rr", f"hf://{sst2}", "rerank", "text classifier with 2 labels"),
+                                    ("nli", f"hf://{nli}", None, "zero-shot (NLI) model")]:
         r = owner.post("/api/models", json={"name": name, "source": source, **({"task": task} if task else {})})
         assert r.status_code == 422, (name, r.text)
         d = r.json()["detail"]
-        assert d["code"] == "cannot_inspect" and "text classifier with" in d["message"], name
-        assert "Text classification comes with #144." in d["message"]
-    prev = owner.post("/api/models/inspect", json={"source": "hf://distilbert/distilbert-base-uncased-finetuned-sst-2-english"})
+        assert d["code"] == "cannot_inspect" and why in d["message"], name
+        assert ("#144" in d["message"]) == (task is None), name
+    prev = owner.post("/api/models/inspect", json={"source": f"hf://{sst2}", "task": "rerank"})
     assert prev.status_code == 422 and "NEGATIVE, POSITIVE" in prev.json()["detail"]["message"]
-    other = inspect(hf, "distilbert/distilbert-base-uncased-finetuned-sst-2-english", "embed")
-    assert other["task_hint"] == "rerank" and other["format"] == "safetensors"
+    other = inspect(hf, sst2, "embed")
+    assert other["task_hint"] == "classify" and other["format"] == "safetensors" and "classify" not in other
     names = {m["name"] for m in owner.get("/api/models").json()["models"]}
     assert {"bge-rr", "msmarco", "qwen-rr"} <= names and not names & {"sst2", "sst2-rr", "nli"}

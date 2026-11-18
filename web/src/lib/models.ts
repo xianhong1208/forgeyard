@@ -5,7 +5,8 @@ import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task }
 type WithDownload = { download?: DownloadProgress | null };
 
 export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video",
-  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation", "image-classify": "Image classification" };
+  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation", classify: "Text classification",
+  "image-classify": "Image classification" };
 
 // 1.4: the tasks of vision models, and the licences they are added with (as the server checks).
 export const VISION_TASKS: Task[] = ["detect", "segment", "depth", "image-classify"];
@@ -21,6 +22,7 @@ export const API_LABEL: Record<string, string> = {
   "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
   "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment", "vision-depth": "/v1/vision/depth",
   "vision-classify": "/v1/vision/classify",
+  classify: "/v1/classify",
 };
 
 export const MEDIUM_LABEL: Record<Medium, string> = { image: "Images", audio: "Audio", video: "Video" };
@@ -100,10 +102,14 @@ export function emptyDeploy(): DeployForm {
     vram: "", token: "", extraArgs: "", params: {} };
 }
 
-export function recipeDefaults(recipe: Recipe | undefined): Record<string, string> {
+// The recipe's defaults; with the model's own longest context (1.4.4), a context default longer than that starts at
+// it instead (a 512-token classifier on a recipe whose default is 8192), as the server does.
+export function recipeDefaults(recipe: Recipe | undefined, modelMax?: number | null): Record<string, string> {
   const out: Record<string, string> = {};
   if (!recipe) return out;
   for (const [k, p] of Object.entries(recipe.params)) out[k] = String(p.default);
+  const ctx = recipe.params.context;
+  if (ctx && modelMax && typeof ctx.default === "number" && ctx.default > modelMax) out.context = String(Math.max(ctx.min ?? 1, modelMax));
   return out;
 }
 

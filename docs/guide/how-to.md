@@ -830,6 +830,75 @@ the offline machine's cache. The deployment there finds it cached and downloads 
 **How long:** minutes per video, one at a time per replica; the others wait their turn on it.
 Raise *Longest job* under **Advanced** for long or large videos.
 
+## Classify text
+
+Text classification (1.4.4) labels texts with a small, fast model: sentiment, the language, toxicity. It
+runs on vLLM's pooling runner (recipe `vllm-pooling`) on a GPU, one card shared by memory.
+
+1. **Models → Add a model → Recommended**: *Text classification* lists a multilingual sentiment model (1 to
+   5 stars), a language detector (20 languages, Chinese among them) and a toxicity model (6 labels, each
+   scored on its own), MIT or Apache-2.0. Or search Hugging Face with the task **Text classification**: a
+   BERT, RoBERTa, XLM-RoBERTa or ModernBERT classifier with two labels or more can be added. The catalog
+   shows its labels; a reranker (one output), a zero-shot (NLI) model and DeBERTa or DistilBERT classifiers
+   are refused with the reason.
+2. **Deploy** it. The context starts at the model's own maximum when that is shorter than the engine's
+   default (512 tokens for these BERT-sized models). About 2 GiB on a shared card.
+3. It shows up under **Serving → Text classification**. **Try it** on its page sends one sentence; the
+   **Playground** takes your own texts, one per line, and shows every label's probability.
+
+Call it with an API key at `/v1/classify` (Forgeyard's own API, vLLM's shape: the OpenAI SDK has none):
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "bert-multilingual-sentiment", "input": ["Great phone, fast delivery.", "Broke after a day."]}'
+```
+
+```json
+{"id": "classify-…", "object": "list", "created": 1795000000, "model": "bert-multilingual-sentiment",
+ "data": [{"index": 0, "label": "5 stars", "probs": [0.01, 0.01, 0.04, 0.26, 0.68], "num_classes": 5},
+          {"index": 1, "label": "1 star", "probs": [0.81, 0.14, 0.03, 0.01, 0.01], "num_classes": 5}],
+ "usage": {"prompt_tokens": 19, "total_tokens": 19, "completion_tokens": 0}}
+```
+
+From Python, with any HTTP client:
+
+```python
+import os
+import ssl
+
+import httpx
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+r = httpx.post("https://192.168.1.20:7860/v1/classify", verify=ca,
+               headers={"Authorization": f"Bearer {os.environ['FORGEYARD_API_KEY']}"},
+               json={"model": "xlm-roberta-language-detection", "input": ["今天天氣很好", "Bonjour à tous"]})
+for d in r.json()["data"]:
+    print(d["label"], round(max(d["probs"]), 3))
+```
+
+`truncate_prompt_tokens` (a number of tokens, or -1 for the model's maximum) cuts longer texts instead of
+refusing them; up to 2,048 texts per request.
+
+### Classify with a chat model, into labels you choose
+
+A chat model classifies into any labels with structured outputs: it can only answer one of them. On vLLM
+the shortest form is `structured_outputs.choice`:
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "qwen3-4b", "temperature": 0,
+       "chat_template_kwargs": {"enable_thinking": false},
+       "messages": [{"role": "user", "content": "Which department should handle this? 我的發票金額開錯了"}],
+       "structured_outputs": {"choice": ["billing", "shipping", "technical", "other"]}}'
+```
+
+The answer's `content` is one of the four. A JSON schema with an `enum` does the same on vLLM, llama.cpp
+and cloud providers (`response_format: {"type": "json_schema", …}`). It is slower and costlier than a
+classifier, but needs no new model, and labels can change per request. Zero-shot classifiers (NLI models
+with your labels in the request, on the CPU too) come with the transformers engine in 1.5 (#144).
+
 ## Use gated Hugging Face models
 
 Some models (Llama, Gemma 3, FLUX.1-schnell…) are *gated*: Hugging Face serves them only to an

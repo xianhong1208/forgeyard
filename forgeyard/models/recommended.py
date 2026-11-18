@@ -46,7 +46,7 @@ class Entry(BaseModel):
     file: Optional[str] = None
     mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video", "detect", "segment", "depth",
+    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video", "detect", "segment", "depth", "classify",
                   "image-classify"]
     format: Literal["safetensors", "gguf", "ctranslate2", "onnx", "diffusers"]
     recipe: str
@@ -112,12 +112,13 @@ def check(data: dict) -> Recommended:
                 sources.safe_relpath(e.file)
             except sources.SourceError as err:
                 raise RecommendedError(f"{where}: {err}") from None
-        if e.task in ("tts", "image", "video") + vision.TASKS and (e.revision is None
-                                                                  or not sources.REVISION_RE.match(e.revision)):
+        if e.task in ("tts", "image", "video", "classify") + vision.TASKS and (
+                e.revision is None or not sources.REVISION_RE.match(e.revision)):
             # 1.3: speech, image and video models are pinned to a commit here, so the voices, the component
             # files and the measured memory stay those of the files that were checked; 1.4: vision models
-            # too (the revisions the 1.3 templates bake in).
-            what = {"tts": "text-to-speech", "image": "image", "video": "video"}.get(e.task, "vision")
+            # too (the revisions the 1.3 templates bake in); 1.4.4: text classifiers (their labels).
+            what = {"tts": "text-to-speech", "image": "image", "video": "video",
+                    "classify": "text classification"}.get(e.task, "vision")
             raise RecommendedError(f"{where}: a {what} entry is pinned to a commit (revision: 40 hex characters)")
         if e.components:
             if e.task != "image" or e.format not in ("gguf", "safetensors"):
@@ -140,6 +141,8 @@ def check(data: dict) -> Recommended:
             raise RecommendedError(f"{where}: the licence {e.license!r} is not one the recommended list may hold")
         if e.task in vision.TASKS and e.license not in vision.PERMISSIVE:
             raise RecommendedError(f"{where}: a vision model has a permissive licence ({', '.join(vision.PERMISSIVE)})")
+        if e.task == "classify" and e.license not in vision.PERMISSIVE:
+            raise RecommendedError(f"{where}: a text classifier has a permissive licence ({', '.join(vision.PERMISSIVE)})")
         if e.mmproj is not None:
             if e.format != "gguf":
                 raise RecommendedError(f"{where}: only a GGUF entry names a projector (mmproj) file")

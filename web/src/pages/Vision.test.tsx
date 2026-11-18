@@ -280,7 +280,7 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     { label: "cat", score: 0.8, box: [10, 54, 317, 475] }, { label: "remote control", score: 0.49, box: [40, 72, 176, 118] },
     { label: "cat", score: 0.21, box: [0, 0, 640, 480] }] };
 
-  it("FY-WEB-490: a zero-shot detector asks what to find, sends the names as labels, and its slider starts at 0.3", async () => {
+  it("FY-WEB-500: a zero-shot detector asks what to find, sends the names as labels, and its slider starts at 0.3", async () => {
     const sent: FormData[] = [];
     server((url, init) => {
       if (url === "/api/playground/vision/options") return options([...MODELS, ZS]);
@@ -310,7 +310,7 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     expect(JSON.parse(sent[1].get("labels") as string)).toEqual(["sofa"]);
   });
 
-  it("FY-WEB-491: a detector with fixed classes has no Find these box and sends no labels; the zero-shot refusals read plainly", async () => {
+  it("FY-WEB-501: a detector with fixed classes has no Find these box and sends no labels; the zero-shot refusals read plainly", async () => {
     const sent: FormData[] = [];
     server((url, init) => {
       if (url === "/api/playground/vision/options") return options([...MODELS, ZS]);
@@ -330,7 +330,7 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     expect(visionError(400, { error: { code: "labels_not_supported", message: "x" } }, 20, "model")).toMatch(/fixed set of classes/);
   });
 
-  it("FY-WEB-492: the names typed are checked before anything is sent", () => {
+  it("FY-WEB-502: the names typed are checked before anything is sent", () => {
     expect(parseLabels(" cat , remote  control,, CAT,dog ")).toEqual({ labels: ["cat", "remote control", "dog"], error: null });
     expect(parseLabels(" , ").error).toMatch(/Name at least one thing/);
     expect(parseLabels(Array.from({ length: 33 }, (_, i) => `l${i}`).join(",")).error).toBe("At most 32 things at once.");

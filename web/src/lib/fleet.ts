@@ -65,20 +65,21 @@ export function memoryRows(m: Machine): Accelerator[] {
 
 // ---------------------------------------------------------------- model kinds
 
-export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "vision";
+export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "classify" | "asr" | "tts" | "image" | "video" | "vision";
 
 export const MODEL_KIND: Record<ModelKind, { label: string; api: string; hint: string }> = {
   chat: { label: "Chat", api: "/v1/chat/completions", hint: "Text in, text out" },
   multimodal: { label: "Multimodal chat", api: "/v1/chat/completions", hint: "Chat that also reads images, audio or video" },
   embed: { label: "Embeddings", api: "/v1/embeddings", hint: "Text to vectors, for search" },
   rerank: { label: "Rerank", api: "/v1/rerank", hint: "Orders documents by relevance" },
+  classify: { label: "Text classification", api: "/v1/classify", hint: "Labels a text: sentiment, language, toxicity…" },
   asr: { label: "Speech to text", api: "/v1/audio/transcriptions", hint: "Transcription" },
   tts: { label: "Text to speech", api: "/v1/audio/speech", hint: "Voices" },
   image: { label: "Images", api: "/v1/images/generations", hint: "Text to image" },
   video: { label: "Video", api: "/v1/videos", hint: "Text to video, as jobs" },
   vision: { label: "Vision", api: "/v1/vision/…", hint: "Object detection, segmentation, depth and image classification" },
 };
-export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "asr", "tts", "image", "video", "vision"];
+export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "classify", "asr", "tts", "image", "video", "vision"];
 
 // A chat model that takes images, audio or video is multimodal chat.
 export function modelKind(d: Deployment): ModelKind {

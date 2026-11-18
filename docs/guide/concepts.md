@@ -102,7 +102,8 @@ deprecated.
 ## Models, engines and estimates
 
 Two pages hold the models. **Serving** is what runs now: the deployments grouped by kind (chat,
-multimodal chat, embeddings, rerank, speech to text, text to speech, images, video, vision), each
+multimodal chat, embeddings, rerank, text classification, speech to text, text to speech, images, video,
+vision), each
 with the path it answers at under `/v1`, and one line per deployment: where it runs (machine and
 cards), its memory and its state. **Deploy a model** is there too, and each deployment has its page
 at `/serving/<id>`. A deployment with a [cloud fallback](#cloud-providers-and-tiers) shows its
@@ -120,13 +121,13 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
 - **What a model is for** comes from its Hugging Face task, checked against its `config.json`. Many
   rerankers are tagged *text classification*, and so are text classifiers; vLLM's rule tells them apart. A
   model with one output (`num_labels` 1: bge-reranker, the ms-marco cross-encoders) is a reranker; one with
-  two labels or more (sentiment, topic, NLI) is a text classifier, which cannot be added yet (support comes
-  with #144). Rerankers that are language models, such as Qwen3-Reranker, are not affected.
+  two labels or more (sentiment, language, toxicity) is a [text classifier](#text-classification) (1.4.4),
+  never a reranker. Rerankers that are language models, such as Qwen3-Reranker, are not affected.
 - An **engine** says how to run a kind of model: which program, which container image (pinned by
   digest) or release, which parameters, and how much memory it needs. The API and the YAML files
   call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
   **Engines** tab. Built in: `vllm` (chat on
-  NVIDIA and AMD), `vllm-pooling` (embeddings and rerank), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
+  NVIDIA and AMD), `vllm-pooling` (embeddings, rerank and text classification), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
   `faster-whisper` (speech to text).
 - Each catalog model has **its own page** (1.4.3), opened from its name: `/models/<name>`. It shows
   what the model is (source and revision, licence, task, architecture), **which machines have it** in
@@ -193,7 +194,8 @@ workload of runtime `model`, seen only on the deployment's page (not on **Apps**
 
 Every ready deployment answers at **`https://<server>:7860/v1`**, the **gateway**, under its model
 name, with the OpenAI API: `/v1/models`, `/v1/chat/completions`, `/v1/completions`,
-`/v1/embeddings`, `/v1/rerank`, `/v1/score`, `/v1/audio/transcriptions` and `/translations`.
+`/v1/embeddings`, `/v1/rerank`, `/v1/score`, `/v1/audio/transcriptions` and `/translations`, and
+Forgeyard's `/v1/classify` (text classification).
 `/v1/models` lists the models your key may use; a stopped deployment leaves the list until it is
 started again, unless its route can send the request to a cloud provider your key may use.
 
@@ -203,9 +205,9 @@ that only the gateway knows, and the agent refuses every other request on the re
 
 The **Playground** tries a model through the same gateway, as you, without an API key. One **Model**
 picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,
-Multimodal chat, Embeddings, Rerank, Speech to text, Text to speech, Images, Video, Vision), and picking
-one opens its panel: chat (with streaming, and images for models that read them), embeddings, rerank,
-speech to text, **Speak**, **Image**, **Video**, or the vision panel (a picture in; boxes, a mask or a
+Multimodal chat, Embeddings, Rerank, Text classification, Speech to text, Text to speech, Images, Video,
+Vision), and picking one opens its panel: chat (with streaming, and images for models that read them),
+embeddings, rerank, text classification (texts in, each one's labels as bars out), speech to text, **Speak**, **Image**, **Video**, or the vision panel (a picture in; boxes, a mask or a
 depth map out). The address keeps the model (`/playground?model=<name>`); 1.3's Vision tab address
 (`/playground?tab=vision`) opens the first ready vision model, or the picker when there is none. With no
 model ready, the page says so and points to **Models → Catalog** to deploy one. Its requests count as
@@ -335,6 +337,32 @@ API key.
 - **One image at a time** per replica; the rest wait their turn. More throughput is more replicas.
 - Usage counts **one image per request**, its kilopixels and the busy time. Pictures stay on your own
   deployments: they never go to a cloud provider, and nothing keeps them.
+
+## Text classification
+
+A text classifier (1.4.4) gives a text one of a fixed set of labels: sentiment, language, toxicity, a
+topic. It is a small encoder (100 to 600 M parameters) with a classification head, so it answers thousands
+of texts a second on a GPU with stable labels and scores, at a fraction of a chat model's cost.
+
+- **One engine:** `vllm-pooling` (vLLM's pooling runner, the image the embedding and rerank models use) on
+  an NVIDIA GPU, one card shared by memory (the recipe's ROCm variant should serve AMD GPUs too, not tested
+  yet). There is no CPU engine yet: the transformers engine for the CPU comes in 1.5 (#144).
+- **Which models:** the catalog reads `config.json`. An architecture vLLM runs as a classifier (BERT,
+  RoBERTa, XLM-RoBERTa, ModernBERT, GTE, GPT-2, Jamba: `…ForSequenceClassification`) with two labels or
+  more. The labels are kept with the catalog entry and shown on the model's page. Not accepted: a model with
+  one output (it is a reranker), a regression head, a zero-shot (NLI) model (its labels are entailment and
+  contradiction: it needs the labels in the request, which comes with 1.5), and DeBERTa, DistilBERT or BART
+  classifiers (vLLM does not run them; 1.5 too).
+- **Its own API:** `/v1/classify`, vLLM's shape: `input` is a text or a list of texts; each comes back
+  with its most likely `label` and the probabilities of every label (`probs`, in the order of
+  `config.json`). A model trained for several labels at once (`multi_label_classification`, such as
+  toxic-bert) scores each label on its own, so its probabilities do not add up to 1.
+- **Labels of your own, today:** a chat model already classifies into any labels you name, with
+  structured outputs: give the labels as `structured_outputs.choice` (vLLM) or as a JSON schema `enum`
+  (vLLM, llama.cpp, cloud providers) at `/v1/chat/completions`. Slower and costlier than a classifier, but
+  nothing to deploy. See [the how-to](how-to.md#classify-text).
+- Usage counts its **prompt tokens**, like embeddings. Texts stay on your own deployments: they never go to
+  a cloud provider.
 
 ## API keys, limits and usage
 

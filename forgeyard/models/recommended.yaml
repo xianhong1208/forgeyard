@@ -10,11 +10,11 @@
 #   title         what people see
 #   source        hf://<org>/<name>
 #   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech, image,
-#                 video and vision (detect, segment, depth, image-classify) entries are pinned to a commit (their voices,
-#                 files and measured memory belong to it)
+#                 video, vision (detect, segment, depth, image-classify) and text classification entries are pinned
+#                 to a commit (their voices, files, labels and measured memory belong to it)
 #   file          GGUF (and image models' safetensors files) only: which file of the repository
 #   group         one of the groups below
-#   task          chat | embed | rerank | asr | tts | image | video | detect | segment | depth |
+#   task          chat | embed | rerank | asr | tts | image | video | detect | segment | depth | classify |
 #                 image-classify
 #   format        safetensors | gguf | ctranslate2 | onnx | diffusers (what the repository holds)
 #   recipe        the recipe suggested for it (it must serve that task and format)
@@ -69,6 +69,9 @@ groups:
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
+  - id: text-classification
+    title: Text classification
+    description: Small models that give a text one of a fixed set of labels (sentiment, language, toxicity) at /v1/classify, on vLLM on an NVIDIA GPU. Much faster than asking a chat model. MIT and Apache-2.0 only.
 
 models:
   # ---------------------------------------------------------------- Qwen3
@@ -466,6 +469,44 @@ models:
     download_gib: 2.1
     memory_gib: 4.3
     note: Multilingual reranker that pairs with BGE-M3.
+
+  # ---------------------------------------------------------------- Text classification (1.4.4)
+  - name: bert-multilingual-sentiment
+    title: Multilingual sentiment (1 to 5 stars)
+    source: hf://nlptown/bert-base-multilingual-uncased-sentiment
+    revision: 8f6f4e3a8f70be4b65d3a4a8762b6d781cda240d
+    license: mit
+    group: text-classification
+    task: classify
+    format: safetensors
+    recipe: vllm-pooling
+    download_gib: 0.6
+    memory_gib: 2.0
+    note: Product-review sentiment as 1 to 5 stars, in English, Dutch, German, French, Spanish and Italian. 512 tokens.
+  - name: xlm-roberta-language-detection
+    title: Language detection (20 languages)
+    source: hf://papluca/xlm-roberta-base-language-detection
+    revision: 9865598389ca9d95637462f743f683b51d75b87b
+    license: mit
+    group: text-classification
+    task: classify
+    format: safetensors
+    recipe: vllm-pooling
+    download_gib: 1.0
+    memory_gib: 2.4
+    note: Which of 20 languages a text is in, Chinese, Japanese and English among them. 512 tokens.
+  - name: toxic-bert
+    title: Toxic comments (6 labels)
+    source: hf://unitary/toxic-bert
+    revision: 4d6c22e74ba2fdd26bc4f7238f50766b045a0d94
+    license: apache-2.0
+    group: text-classification
+    task: classify
+    format: safetensors
+    recipe: vllm-pooling
+    download_gib: 0.4
+    memory_gib: 1.8
+    note: Toxic, severe toxic, obscene, threat, insult and identity hate, each scored on its own. English, 512 tokens.
 
   # ---------------------------------------------------------------- Text to speech
   - name: qwen3-tts-0.6b

@@ -37,10 +37,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
-- **More than chat.** Images, audio and video in chat, embeddings and rerank, speech to text, text to
-  speech, image generation, video generation as jobs, and vision models: object detection (1.4.4: also
-  detectors that find what you name), segmentation, depth and (1.4.4) image classification at
-  `/v1/vision/…`, deployed like any other model.
+- **More than chat.** Images, audio and video in chat, embeddings and rerank, text classification at
+  `/v1/classify` (1.4.4), speech to text, text to speech, image generation, video generation as jobs, and
+  vision models: object detection (1.4.4: also detectors that find what you name), segmentation, depth and
+  (1.4.4) image classification at `/v1/vision/…`, deployed like any other model.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted. Admins download the key and the CA
   as one passphrase-encrypted backup file from the console (1.4.2).

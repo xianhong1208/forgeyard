@@ -362,7 +362,7 @@ describe("model and engine pages (1.4.3, #140)", () => {
     expect(within(card).getByRole("link", { name: "llama-cpp" }).getAttribute("href")).toBe("/models/engines/llama-cpp");
   });
 
-  it("FY-WEB-493 a zero-shot detector's page and catalog row say it finds what you name instead of its classes (1.4.4, #142)", async () => {
+  it("FY-WEB-503 a zero-shot detector's page and catalog row say it finds what you name instead of its classes (1.4.4, #142)", async () => {
     const zs = { ...MODEL, name: "gdino", task: "detect", task_label: "Object detection", format: "safetensors", file: null, recipes: ["vision"],
       summary: { architecture: "GroundingDinoForObjectDetection" }, vision: { task: "detect", architecture: "GroundingDinoForObjectDetection", zero_shot: true } } as CatalogModel;
     const rt = { ...zs, id: 8, name: "rtdetr", summary: { architecture: "RtDetrV2ForObjectDetection" },

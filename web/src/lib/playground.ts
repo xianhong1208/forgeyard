@@ -11,6 +11,7 @@ import type { Deployment, RouteInfo } from "./types";
 const API_MODEL_KIND: Record<string, ModelKind> = {
   "openai-chat": "chat", "openai-embeddings": "embed", rerank: "rerank", "openai-audio": "asr", "openai-speech": "tts",
   "openai-images": "image", "openai-videos": "video", "vision-detect": "vision", "vision-segment": "vision", "vision-depth": "vision", "vision-classify": "vision",
+  classify: "classify",
 };
 
 export function routeKind(r: RouteInfo, deployments: Deployment[]): ModelKind | null {
