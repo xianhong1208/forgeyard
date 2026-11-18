@@ -31,6 +31,7 @@ from forgeyard.api import (
     prices,
     providers,
     routing,
+    secret_key as secret_key_api,
     tls as tls_api,
     users,
     workloads,
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(onboarding.router)
     app.include_router(advisor_api.router)
     app.include_router(tls_api.router)
+    app.include_router(secret_key_api.router)
     app.include_router(gateway.console)
     app.include_router(gateway.router)
     app.include_router(passthrough.router)

@@ -990,8 +990,11 @@ Two images, both built from this repository and published on Docker Hub by
   applies comes back after 30 days.
 - **Secret-key backup** (decision D5): a warning until an admin ticks *I have a backup of key id X*.
   The tick is one `server_settings` row (`secret_key_backup`: the key id, who and when), compared
-  with the current key id, so a new key brings the reminder back. A stale id is refused (409), and
-  the key itself never leaves the server.
+  with the current key id, so a new key brings the reminder back. A stale id is refused (409). Since
+  1.4.2 (#127) the key also leaves the server one way: an admin, after typing their password again
+  (sign-in back-off, audited), downloads it with the CA's key and certificate sealed under a
+  passphrase they choose (Argon2id + AES-256-GCM, versioned authenticated header); the download
+  writes the same row (`how: download`) and is audited. `secrets restore` puts it back.
 - **Rules for new settings** are in `CONTRIBUTING.md`: a default that works, documented (a test
   compares `Settings` with `.env.example` and the reference), advanced unless essential, and an
   advisor check when getting it wrong is risky.

@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Link, useLocation } from "react-router";
 
 import { api, errorText } from "../lib/api";
+import { KeyBackupButton } from "./KeyBackup";
 import { SEVERITY_LABEL, asReport, backupKid, fixHref, forPage, summary, worst, type AdvisorReport, type Finding, type Severity } from "../lib/advisor";
 
 // The setup advisor for admins: one report, fetched by the shell and shared by the nav badge, the
@@ -116,8 +117,9 @@ function FindingActions({ f, compact }: { f: Finding; compact?: boolean }) {
   return (
     <div className="finding-actions">
       {!here && <Link to={href} className={`btn btn-small${compact ? " btn-quiet" : ""}`}>{f.fix_label}</Link>}
+      {kid && <KeyBackupButton className={`btn btn-small${compact ? " btn-quiet" : ""}`} onDone={a.reload} />}
       {kid && (
-        <button type="button" className="btn btn-small" disabled={busy} onClick={() => void run(() => a.confirmBackup(kid))}>
+        <button type="button" className="btn btn-small btn-quiet" disabled={busy} onClick={() => void run(() => a.confirmBackup(kid))}>
           <IconCircleCheck size={15} aria-hidden="true" /> I have a backup of key id {kid}
         </button>
       )}
