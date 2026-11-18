@@ -523,7 +523,8 @@ and an offline machine works once its cache has it.
    (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
    or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
    backbone…), SAM 2 or 2.1, or depth model (Depth Anything, DPT…) with a permissive licence (Apache-2.0,
-   MIT, BSD). Another licence, or none, cannot be added.
+   MIT, BSD). Another licence, or none, cannot be added, nor can a zero-shot detector (Grounding DINO,
+   OWL-ViT, OWLv2…: support comes with #142).
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
 3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page

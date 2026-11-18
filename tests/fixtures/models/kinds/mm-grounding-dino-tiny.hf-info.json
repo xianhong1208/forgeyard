@@ -1,0 +1,20 @@
+{
+  "id": "openmmlab-community/mm_grounding_dino_tiny_o365v1_goldg_v3det",
+  "pipeline_tag": "zero-shot-object-detection",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "safetensors",
+    "mm-grounding-dino",
+    "zero-shot-object-detection",
+    "vision",
+    "arxiv:2401.02361",
+    "arxiv:2104.12763",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

@@ -7,7 +7,10 @@ server's own `task_of`, so what the catalog accepts is what the server loads):
 
 - **detect**: an architecture ending in `ForObjectDetection` (RT-DETR / RT-DETRv2, D-FINE, DETR,
   Conditional / Deformable DETR, YOLOS, …), loaded with `AutoModelForObjectDetection`. DETR checkpoints
-  that use a timm backbone (`use_timm_backbone`) are refused: the vision server has no timm.
+  that use a timm backbone (`use_timm_backbone`) are refused: the vision server has no timm. So are
+  zero-shot (open-vocabulary) detectors (Grounding DINO, MM-Grounding-DINO / LLMDet, OWL-ViT, OWLv2,
+  OmDet-Turbo, 1.4.3, #147): their architectures end in `ForObjectDetection` too, but transformers loads
+  them only with `AutoModelForZeroShotObjectDetection`, and they find what a text prompt names (#142).
 - **segment**: SAM 2 / 2.1 (`model_type` sam2 or sam2_video, `Sam2…` architectures), a mask for what a
   point or a box shows, loaded with `Sam2Model`.
 - **depth**: an architecture ending in `ForDepthEstimation` (Depth Anything, DPT, GLPN, ZoeDepth, …),
@@ -31,6 +34,23 @@ PIPELINE_TAGS = {"object-detection": "detect", "mask-generation": "segment", "de
 SEGMENT_TYPES = ("sam2", "sam2_video")
 PERMISSIVE = ("apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause")
 
+# Zero-shot (open-vocabulary) detectors: transformers' MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING_NAMES in the
+# version the vision image pins (5.23.0, images/vision/requirements-*.txt), model_type -> architecture. None of
+# them is in MODEL_FOR_OBJECT_DETECTION_MAPPING_NAMES, so AutoModelForObjectDetection cannot load them. Matched
+# by model_type and by architecture, so a checkpoint that spells one of the two differently is still caught.
+# FY-KIND-002 fails when the image's transformers moves: check the mapping again then.
+ZERO_SHOT_CHECKED_WITH = "5.23.0"
+ZERO_SHOT_DETECT = {
+    "grounding-dino": "GroundingDinoForObjectDetection",
+    "mm-grounding-dino": "MMGroundingDinoForObjectDetection",     # also LLMDet's checkpoints
+    "omdet-turbo": "OmDetTurboForObjectDetection",
+    "owlv2": "Owlv2ForObjectDetection",
+    "owlvit": "OwlViTForObjectDetection",
+}
+_ZERO_SHOT_ARCHS = {a.lower() for a in ZERO_SHOT_DETECT.values()}
+ZERO_SHOT_PROBLEM = ("it is a zero-shot (open-vocabulary) detector, which finds what a text prompt names; "
+                     "support comes with #142")
+
 
 def task_of(config: dict) -> Optional[str]:
     """The vision task a transformers config.json is for, or None."""
@@ -42,6 +62,14 @@ def task_of(config: dict) -> Optional[str]:
     if any(a.endswith("ForDepthEstimation") for a in archs):
         return "depth"
     return None
+
+
+def zero_shot(config: dict) -> bool:
+    """A zero-shot (open-vocabulary) object detector: its model_type or one of its architectures is one of
+    transformers' zero-shot detection models (ZERO_SHOT_DETECT)."""
+    kind = str(config.get("model_type") or "").strip().lower().replace("_", "-")
+    archs = [a.lower() for a in config.get("architectures") or [] if isinstance(a, str)]
+    return kind in ZERO_SHOT_DETECT or any(a in _ZERO_SHOT_ARCHS for a in archs)
 
 
 def summary(config: dict) -> Optional[dict]:
@@ -59,6 +87,9 @@ def summary(config: dict) -> Optional[dict]:
         out["label_examples"] = names[:8]
     if task == "detect" and config.get("use_timm_backbone"):
         out["problem"] = "it uses a timm backbone (use_timm_backbone), which Forgeyard's vision server does not include"
+    if task == "detect" and zero_shot(config):
+        out["zero_shot"] = True
+        out["problem"] = ZERO_SHOT_PROBLEM
     return out
 
 
@@ -79,6 +110,20 @@ def refusal(task: str, meta: dict) -> Optional[str]:
     if lic not in PERMISSIVE:
         return (f"Vision models are added with a permissive licence only ({', '.join(PERMISSIVE)}); this one's card says "
                 f"{lic or 'no licence'}.")
+    return None
+
+
+def deploy_refusal(task: str, meta: dict) -> Optional[str]:
+    """Why a vision model already in the catalog cannot be deployed (a message), or None: a zero-shot detector
+    added before 1.4.3 refused them (#147), read from what the catalog kept of its config.json (its model_type
+    and architectures). Nothing is migrated: such a row stays in the catalog, its deployments are refused."""
+    if task != "detect" or meta.get("kind") == "local":
+        return None
+    cfg = meta.get("config") if isinstance(meta.get("config"), dict) else {}
+    v = meta.get("vision") if isinstance(meta.get("vision"), dict) else {}
+    archs = [a for a in list(cfg.get("architectures") or []) + [v.get("architecture")] if isinstance(a, str)]
+    if v.get("zero_shot") or zero_shot({"model_type": cfg.get("model_type"), "architectures": archs}):
+        return f"This model cannot run on Forgeyard's vision server: {ZERO_SHOT_PROBLEM}."
     return None
 
 

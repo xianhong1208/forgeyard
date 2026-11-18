@@ -1,0 +1,19 @@
+{
+  "id": "google/owlv2-base-patch16-ensemble",
+  "pipeline_tag": "zero-shot-object-detection",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "pytorch",
+    "safetensors",
+    "owlv2",
+    "zero-shot-object-detection",
+    "vision",
+    "arxiv:2306.09683",
+    "license:apache-2.0",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

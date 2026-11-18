@@ -1357,6 +1357,12 @@ recipe with only the variants you want can.
 | `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda` (torch +cu130) |
 | | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.0` (linux/amd64 and arm64) |
 
+`vllm-pooling` serves a sequence-classification model (`…ForSequenceClassification`) as a reranker only
+when it has one output, as vLLM decides: `id2label` in its `config.json` has one entry, or `num_labels` is 1
+(1.4.3, #147). One with two labels or more is a text classifier: inspecting or adding it as a reranker
+answers 422 `cannot_inspect` with its labels (support comes with #144). A reranker that is a language model
+(Qwen3-Reranker) is not affected.
+
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
 `llama-cpp` runs llama.cpp **1.0.0** (1.3.1), its first release with a semantic version. The release's
@@ -1404,7 +1410,10 @@ server's own version, tag only, with `forgeyard_image: vision` (or `vision-cuda`
 backbone…), SAM 2 or 2.1 (segment) or an `…ForDepthEstimation` one (depth: Depth Anything, DPT…). A
 Hugging Face vision model is only added with a permissive licence (Apache-2.0, MIT, BSD): another
 licence, or none, answers 422 `not_a_vision_model` (Depth Anything V2 Base and Large are CC-BY-NC-4.0,
-Ultralytics' YOLO checkpoints AGPL-3.0). Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
+Ultralytics' YOLO checkpoints AGPL-3.0). So does a zero-shot (open-vocabulary) detector, one of
+transformers' zero-shot detection models known by its `model_type` or architecture (Grounding DINO,
+MM-Grounding-DINO and LLMDet, OmDet-Turbo, OWL-ViT, OWLv2; support comes with #142), when it is added or
+re-tasked, and, for one added before 1.4.3, when it is deployed. Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
 1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
