@@ -152,7 +152,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：**
 
-- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）。之後副本的進度會顯示 *via the server*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
+- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)；這種機器的完整流程：[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)）。之後副本的進度會顯示 *via the server*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
 - 讓這台機器連得到那個主機（DNS、防火牆規則、proxy 路由）；Forgeyard 會在最後一次失敗一小時後，或伺服器重新啟動後，再把新的副本放到這台機器上試試；
 - 或把檔案帶過去：從已經有這個模型的機器複製模型快取（[搬移模型快取](how-to.md#move-a-model-cache)）、用 `docker load` 載入引擎映像檔（請看[副本失敗：映像檔不在這台機器上](#a-replica-fails-the-image-is-not-on-this-machine)），或把模型從本機目錄以 `local://` 模型的方式加入；
 - 或使用這台機器連得到的鏡像站（`HF_ENDPOINT`，請看 [Hugging Face 下載很慢](#hugging-face-downloads-are-slow)）。
@@ -163,10 +163,11 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 - *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
 - *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
 - *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
-- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。
+- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)），或從有它的機器複製（[從另一台機器複製引擎映像檔](how-to.md#copy-an-engine-image-from-another-machine)）。
 - *… has no build for amd-01's architecture*：映像檔沒有那台機器平台（例如 arm64）的版本；請選有這個版本的 recipe 或變體。
 - *the image through the server: … SHA-256 mismatch*（某一層）、*the manifest the server sent … is not one of the image's recorded digests*，或 *… does not match the recorded ids: not running it*：收到的不是釘選的映像檔。什麼都沒有載入；伺服器的 log 會寫出是哪個 registry 回應的。
 - 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-01: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。從另一台機器來的檔案（1.4.1）會寫 *… <file> from gpu-host to …*，送不出來的機器會寫出名稱和原因：*gpu-host could not send <file> for … (not_found: …); trying the next machine*。
+- *Relay of <repo>@<revision>/<file> to amd-01 cut short: the source broke off (…); 104857600 of 2147483648 bytes sent from huggingface.co in 12.3 s.*（伺服器的 log，1.4.2）：來源（網際網路上的主機、registry，或 `machine gpu-host`）在檔案傳到一半時中斷。伺服器沒有出錯：agent 會再要求剩下的部分，下載會從磁碟上已有的部分繼續。同一個來源一再發生時，請檢查那段網路，或那台機器的 agent log。
 - *gpu-host's copy of <file> does not match its checksum*（伺服器的 log，稽核紀錄裡的 `node.relay_copy_refused`；送出檔案的機器自己的 log 會寫 *A cached file failed its checksum*）：那台機器上的副本壞了。檔案已改從別處取得；請從那台機器的快取（它的頁面）移除這個模型再重新下載。一小時內不會再要求它送這個檔案。
 
 ## vLLM 在共用的卡上無法啟動

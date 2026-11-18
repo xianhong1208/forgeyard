@@ -1,0 +1,75 @@
+name: Docker Hub login
+
+# Checks that the repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN would still let a release push
+# its images (#128): 1.4.0's publish failed half-way on a wrong token, found only after the tag. On every
+# push to dev and main (and by hand, after re-entering the secrets) it logs in to Docker Hub with the same
+# action as publish-images.yml, asks Docker Hub whether the token may push to the three published
+# repositories (scripts/dockerhub_check.py), pushes nothing and logs out. Without the secrets it warns
+# and ends green, as publish-images.yml does.
+#
+# Its own workflow, not a job in ci.yml: ci.yml also runs on pull requests, which get no secrets from a
+# fork, and the ruleset's required checks come from ci.yml; this check is not one of them, so a Docker
+# Hub outage or an expired token never blocks a merge. The release steps (CONTRIBUTING.md › Releasing)
+# say to look at its latest run before tagging.
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-login-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dockerhub-login:
+    name: Docker Hub login
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HAVE_SECRETS: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - name: Secrets not set
+        if: env.HAVE_SECRETS != 'true'
+        run: |
+          echo "::warning title=Docker Hub secrets not set::Docker Hub secrets not set: a release would not push images"
+          {
+            echo "### Docker Hub secrets not set"
+            echo
+            echo "A release would not push images: set the repository secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v5
+        if: env.HAVE_SECRETS == 'true'
+
+      - name: Log in to Docker Hub (pushes nothing)
+        if: env.HAVE_SECRETS == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          logout: true
+
+      - name: Push access to the published repositories
+        if: env.HAVE_SECRETS == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: python3 scripts/dockerhub_check.py
+
+      - name: How to fix it
+        if: failure() && env.HAVE_SECRETS == 'true'
+        run: |
+          fix="Re-enter both repository secrets (Settings → Secrets and variables → Actions):"
+          fix="$fix DOCKERHUB_USERNAME is the Docker Hub account name (not the email),"
+          fix="$fix DOCKERHUB_TOKEN a personal access token with Read & Write."
+          fix="$fix Then run this workflow again (Actions → Docker Hub login → Run workflow)."
+          echo "::error title=A release would fail to push::$fix"
+          {
+            echo "### A release would fail to push"
+            echo
+            echo "$fix"
+          } >> "$GITHUB_STEP_SUMMARY"
