@@ -282,12 +282,29 @@ an agent's hello. Files sent straight from machine to machine stay in *Later, wh
 Also in 1.4.2: a relay whose source breaks off mid-file reads as one clear line in the server's log
 (#136, for #130), and `scripts/accept_all.py` checks relaying, image upload and image copy (#139, for #126).
 
+## Shipped: 1.4.3 (2026-11-18), a page per model and per engine
+
+1. ✅ **A page per catalog model** (#151, for #140): `/models/<name>` shows the model's source, revision,
+   licence, task and architecture, then the machines (each one's model cache entry, a download under way,
+   whether a copy fits there now on a GPU or the CPU, and whether the engine's image or program is there),
+   its deployments, the engines that can run it and its files, with **Deploy**, **Download to…** and
+   **Remove**. An admin sets its display name; the name stays, since deployments record it, and nine names
+   that are other pages under `/models` are reserved.
+2. ✅ **A page per engine** (#151, for #140): `/models/engines/<name>` shows its variants (image or program,
+   pinned by digest or by tag, what a machine needs, the offline commands), which machines have them, its
+   parameters, and the deployments and catalog models that use it. The server keeps each machine's last image
+   listing, so the page answers for machines that are offline too. Model and engine names link to these pages
+   everywhere in the console.
+3. ✅ **Models that would fail are refused when added** (#150, for #147): zero-shot (open-vocabulary)
+   detectors are no longer taken as detection models, and sequence classifiers with more than one label are
+   no longer filed as rerankers. Both come with 1.4.4.
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.4.3: a page per model and per engine** | Each catalog model gets its own page: its source, revision, licence and task, its files and sizes, which machines have it and whether it fits each, the deployments that use it and the engines that can run it, with Deploy, **Download to…** and Remove. Each engine gets one too: its variants (CUDA, ROCm, Vulkan, CPU) with their images and whether each is pinned, which machines have them, its parameters and defaults, and the deployments and models that use it. |
-| **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. |
+| **1.4.4: more kinds of models, part 1** | **Zero-shot object detection** (#142): `/v1/vision/detect` takes an optional `labels` list and finds the objects named in it, with the same answer, on Forgeyard's vision image (Grounding DINO, OWLv2, MM-Grounding-DINO). **Text classification** (#144): small classifier models on vLLM's pooling engine at `/v1/classify`, on a GPU. **Image classification** (#141): image classification and zero-shot image classification (CLIP and SigLIP 2) at `/v1/vision/classify` on the vision image. Permissive licences only. |
+| **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. **More kinds of models, part 2:** image embeddings (#141), image-to-image and image-to-video (#143), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
 | **1.8: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
