@@ -137,7 +137,11 @@ class Supervisor:
 
     # ------------------------------------------------------------------ what the agent tells the server
     def runtime_info(self) -> dict:
-        return {name: rt.info() for name, rt in self.runtimes.items()}
+        """What each runtime can do, and (1.4.2) the host port range replicas are published on: the server
+        counts the ports its replicas hold there when it places one (servers before 1.4.2 drop it)."""
+        info = {name: rt.info() for name, rt in self.runtimes.items()}
+        info["ports"] = {"low": self.port_range[0], "high": self.port_range[1]}
+        return info
 
     def available(self) -> list[str]:
         return [name for name, rt in self.runtimes.items() if rt.info().get("ok")]

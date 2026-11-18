@@ -27,6 +27,27 @@ version until 1.0.
   recipe names, and only those until **Show all images** is ticked (on a shared machine the other images are other
   people's).
 
+- Placement counts a machine's free host ports (#125). The agent reports its port range
+  (`FORGEYARD_PORT_RANGE`) in its hello (`runtime_info.ports`; older servers drop it), and the server counts
+  the ports its replicas hold there: one per published port, two behind the agent's key guard (every model
+  replica, an app exposed at `/x/`). A machine without enough free ports is skipped like one without memory,
+  and the plan says why (*no free port: 3 of 3 in use (host ports 33000-33002)*); a replica with nowhere
+  else to go waits unplaced with that reason instead of restarting in backoff on the machine. A replica the
+  agent reports with *no free host port left* is taken off the machine when the server's count agrees.
+  Agents older than 1.4.2 report no range and are not counted, as before. `forgeyard agent runtimes` shows
+  the range. No setting and no migration.
+
+### Fixed
+
+- A relay whose source breaks off mid-file reads as such in the server's log (#130). The server writes one
+  warning naming the file, the machine, the source (a host on the internet, or `machine <name>`) and the bytes
+  sent (*Relay of acme/x@1a2b3c4d5e6f/model.gguf to gpu-02 cut short: the source broke off (…); 104857600 of
+  2147483648 bytes sent from huggingface.co in 12.3 s.*), in place of uvicorn's *Exception in ASGI
+  application … Response content shorter than Content-Length*, which read like a server bug. The answer still
+  ends short of its Content-Length (the connection closes), so the agent asks for the rest again as before;
+  only uvicorn's record of such an answer is dropped, every other one of its errors is kept.
+
+
 ## [1.4.1] — 2026-11-17
 
 A patch release for machines without internet. A machine that gets its files through the server now gets a

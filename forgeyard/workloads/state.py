@@ -229,6 +229,13 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
             elif state == "backoff" and before != (r.state, r.reason, r.exit_code) \
                     and scheduler.fetch_failed(db, r, node):
                 desired_changed = True  # 1.4: it could not fetch here; it is placed elsewhere
+        if state == "backoff":
+            from forgeyard.workloads import placement
+
+            # Also when nothing changed: the agent reports a replica stuck there again after it reconnects, the
+            # first time its range is known (an agent updated to 1.4.2).
+            if placement.out_of_ports(db, r, node):
+                desired_changed = True  # 1.4.2: no port of the machine's range is free; placed again or waits
     if msg.full:
         reported = {s.id for s in msg.replicas}
         for r in rows.values():
