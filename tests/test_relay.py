@@ -395,3 +395,136 @@ def test_fy_relay_009_placement_no_longer_avoids_a_machine_that_relays(owner):
     assert {m["name"]: m for m in d4["placement"]["machines"]}["cpu-a"]["via_server"] == ["model", "engine"]
     node = Node(id=a, features=["workloads", "models", "relay"], fetch_via="auto")
     assert relay.relays(node, "model") and relay.relays(node, "engine") and not relay.relays(node, "image")
+
+
+class Records(logging.Handler):
+    """Every record a logger lets through (uvicorn's error logger does not propagate to caplog's handler)."""
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+    def texts(self) -> list[str]:
+        return [r.getMessage() + (f" {r.exc_info[1]!r}" if r.exc_info else "") for r in self.records]
+
+
+def test_fy_relay_043_a_source_that_breaks_off_reads_as_such_in_the_log(monkeypatch, caplog):
+    """FY-RELAY-043 (over real HTTP, issue #130): the internet source breaks off mid-file. The agent still sees a
+    short body (it asks for the rest again); the server's log has one line naming the file, the machine, the source
+    and the bytes sent, and nothing from uvicorn ("Exception in ASGI application" / "Response content shorter than
+    Content-Length"). Other records of uvicorn's error logger still pass."""
+    from tests.conftest import OWNER, SETUP_TOKEN
+    from tests.test_agent import LiveServer, _free_port, _http
+    from forgeyard.agent.client import join
+
+    hf = FakeHF(Repo("acme/small", REV, {"small.gguf": DATA}))
+    hf.fail_after = 100_000
+    monkeypatch.setenv("HF_ENDPOINT", hf.url)
+    monkeypatch.setenv("MODEL_ALLOW_PRIVATE_HOSTS", "1")
+    get_settings.cache_clear()
+    port = _free_port()
+    caplog.set_level(logging.INFO, logger="forgeyard.relay")
+    uvicorn_log = logging.getLogger("uvicorn.error")
+    seen = Records()
+    try:
+        with LiveServer(port):
+            uvicorn_log.addHandler(seen)  # after the server's logging setup, which replaces the handlers
+            _, cookie = _http(port, "POST", "/api/auth/setup",
+                              {"setup_token": SETUP_TOKEN, "username": OWNER[0], "password": OWNER[1]})
+            j = join(f"http://127.0.0.1:{port}", _http(port, "POST", "/api/machines/join-tokens", {}, cookie)[0]["token"],
+                     name="relayer")
+            set_node(j["node_id"], features=RELAY)
+            _, uid = _download_row(small_model(), j["node_id"])
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+            conn.request("GET", f"/agent/v1/relay/download/{uid}/model/small.gguf", headers=bearer(j["credential"]))
+            resp = conn.getresponse()
+            assert resp.status == 200 and resp.headers["Content-Length"] == str(len(DATA))
+            got = b""
+            try:
+                while chunk := resp.read1(65536):
+                    got += chunk
+            except (http.client.IncompleteRead, OSError):
+                pass
+            conn.close()
+            assert got == DATA[:100_000]  # the connection closed short of its Content-Length: never a whole file
+            wait_until(lambda: relay.slots.by_node == {}, "the slot given back")
+            wait_until(lambda: any("cut short" in m for m in caplog.messages), "the log line")
+            lines = [r for r in caplog.records if r.name == "forgeyard.relay" and "small.gguf to relayer" in r.getMessage()
+                     and not r.getMessage().startswith("Relaying")]
+            assert len(lines) == 1, [r.getMessage() for r in lines]
+            line = lines[0]
+            assert line.levelno == logging.WARNING
+            assert line.getMessage().startswith(f"Relay of acme/small@bbbbbbbbbbbb/small.gguf to relayer cut short: the "
+                                                f"source ended {len(DATA) - 100_000} bytes early; 100000 of {len(DATA)} "
+                                                "bytes sent from 127.0.0.1 in ")
+            uvicorn_log.error("an unrelated error")  # the filter drops only a relay's early end
+            wait_until(lambda: "an unrelated error" in seen.texts(), "the unrelated record")
+            assert not any("ASGI" in t or "Content-Length" in t or "EndedEarly" in t for t in seen.texts()), seen.texts()
+    finally:
+        uvicorn_log.removeHandler(seen)
+        hf.close()
+
+
+def test_fy_relay_044_a_source_that_sends_too_much_is_cut_short_and_only_that_is_kept_from_uvicorn(owner, monkeypatch,
+                                                                                                   caplog):
+    """FY-RELAY-044 (#130): a source that sends more bytes than the file has is cut short, with the one line; the
+    filter on uvicorn's error logger drops only a relay's early end (EndedEarly), and is installed once."""
+    from tests.machines_helpers import joined
+
+    a = joined(owner, "dock")
+    data = b"x" * 1000
+
+    class Up:
+        """What the source's opener returns (a fetch.Response, read in a thread)."""
+        status = 200
+        headers = {"Content-Length": "1000"}
+
+        def __init__(self):
+            self.left = [data]
+
+        def read1(self, n):
+            return self.left.pop() if self.left else b""
+
+        def remaining(self):
+            return 0
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    src = relay.Source(url="https://registry.example/v2/acme/x/blobs/sha256:" + "a" * 64, policy=None, label="acme/x blob",
+                       digest="sha256:" + hashlib.sha256(data).hexdigest(), size=990, opener=lambda headers: Up())
+    monkeypatch.setattr(relay, "_start", lambda credential, kind, uid, what, path: (a["node_id"], "dock", src))
+    caplog.set_level(logging.INFO, logger="forgeyard.relay")
+    got = b""
+    with agent_client(owner).stream("GET", f"/agent/v1/relay/download/{'u' * 32}/image/blobs/sha256:{'a' * 64}",
+                                    headers=bearer(a["credential"])) as r:
+        assert r.status_code == 200
+        try:
+            for chunk in r.iter_bytes():
+                got += chunk
+        except relay.EndedEarly:
+            pass  # the in-process client raises what the app raised; uvicorn closes the connection instead
+    assert got == b""
+    wait_until(lambda: relay.slots.by_node == {}, "the slot given back")
+    lines = [m for m in caplog.messages if "acme/x blob to dock" in m and not m.startswith("Relaying")]
+    assert len(lines) == 1 and lines[0].startswith(
+        "Relay of acme/x blob to dock cut short: the source sent more than the 990 bytes the file has; 0 of 1000 bytes "
+        "sent from registry.example in ") and lines[0].endswith(" s."), lines
+    quiet = relay._QuietEndedEarly()
+
+    def record(exc):
+        return logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "Exception in ASGI application\n", None,
+                                 (type(exc), exc, None) if exc else None)
+
+    assert quiet.filter(record(relay.EndedEarly("the source broke off"))) is False
+    assert quiet.filter(record(RuntimeError("Response content shorter than Content-Length"))) is True
+    assert quiet.filter(record(None)) is True
+    relay.quiet_uvicorn()
+    relay.quiet_uvicorn()
+    assert sum(isinstance(f, relay._QuietEndedEarly) for f in logging.getLogger("uvicorn.error").filters) == 1

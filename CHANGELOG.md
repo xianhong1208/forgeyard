@@ -6,6 +6,16 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- A relay whose source breaks off mid-file reads as such in the server's log (#130). The server writes one
+  warning naming the file, the machine, the source (a host on the internet, or `machine <name>`) and the bytes
+  sent (*Relay of acme/x@1a2b3c4d5e6f/model.gguf to gpu-02 cut short: the source broke off (…); 104857600 of
+  2147483648 bytes sent from huggingface.co in 12.3 s.*), in place of uvicorn's *Exception in ASGI
+  application … Response content shorter than Content-Length*, which read like a server bug. The answer still
+  ends short of its Content-Length (the connection closes), so the agent asks for the rest again as before;
+  only uvicorn's record of such an answer is dropped, every other one of its errors is kept.
+
 ## [1.4.1] — 2026-11-17
 
 A patch release for machines without internet. A machine that gets its files through the server now gets a
