@@ -53,8 +53,9 @@ models (object detection, segmentation, depth) deployed like any other model. **
 model and its engine on machines before you deploy; a machine without internet gets them through the
 server, and admins can upload an image file to it. Apps left the console, and their API is deprecated
 until 1.5. 1.4.1 lets such a machine get a model file from another machine's cache, and an admin copy an
-engine image from one machine to another, both still through the server. Every change is in the
-[CHANGELOG](CHANGELOG.md).
+engine image from one machine to another, both still through the server. 1.4.2 shows on a machine's page
+the exact command that updates its agent, lists its engine images and removes old ones, and counts free host
+ports when placing replicas. Every change is in the [CHANGELOG](CHANGELOG.md).
 
 ## 🚀 Installation
 
@@ -67,7 +68,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.1
+  docker.io/tonyhuang1101/forgeyard:1.4.2
 sudo docker logs forgeyard
 ```
 
@@ -112,7 +113,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
