@@ -28,7 +28,7 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn,
+from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn, ImageRemovedIn,
                                          ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn)
 from forgeyard.machines.protocol import (
     CLOSE_BAD_MESSAGE,
@@ -358,8 +358,9 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     sent = _parse(text, RelaySentIn)
                     ok = True
                     conn.answer(sent.request_id, sent.model_dump())
-                elif kind in ("image_listed", "image_saved") and workloads:
-                    said = _parse(text, ImageListedIn if kind == "image_listed" else ImageSavedIn)
+                elif kind in ("image_listed", "image_saved", "image_removed") and workloads:
+                    said = _parse(text, {"image_listed": ImageListedIn, "image_saved": ImageSavedIn,
+                                         "image_removed": ImageRemovedIn}[kind])
                     ok = True
                     conn.answer(said.request_id, said.model_dump())
                 else:

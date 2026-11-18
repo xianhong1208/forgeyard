@@ -899,7 +899,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 管理員可以把一台機器的 container 引擎裡的映像檔，經由伺服器複製到另一台機器（1.4.1）：只用 tag 指定的自訂 recipe 映像檔、在某台機器上自己建置的映像檔，或連不到 registry 的機器需要的映像檔。不會自動複製任何東西。
 
 1. 打開目標機器的頁面 → **Engine images** → **Copy from another machine**。
-2. 在 **From** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。
+2. 在 **From** 選要複製的來源機器。它的 agent 會列出引擎裡的映像檔：每個映像檔的 tag、id、大小、平台，以及它是哪個 recipe 的映像檔。對話框只顯示 recipe 指定的映像檔（1.4.2）；勾選 **Show all images** 才會顯示其他的，例如共用機器上別人的映像檔。
 3. 選一個，按 **Copy**。來源機器會用它自己的 tag 對它執行 `docker save`（或 `podman save`），送給伺服器，伺服器直接轉進目標機器的 `docker load`，只保留很小的緩衝。載入完成後，對話框會列出載入了什麼、它是哪個 recipe 的映像檔，以及 *The same image as on gpu-host (same content id)*：載入的就是來源機器上的那個映像檔。
 
 注意事項：
@@ -918,6 +918,18 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - 早於 1.4 的 agent 會列出模型但沒有大小，也不能刪除。請更新 agent。
 
 每次刪除都會以 `model.cache_removed` 記入稽核紀錄，包含刪了什麼、釋出了多少空間。API 請見[參考文件](reference.md#a-machines-model-cache-through-the-api)。
+
+### 引擎映像檔
+
+引擎映像檔也占磁碟空間，recipe 換成較新的映像檔後，舊的會越積越多。機器的頁面在 **Engine images** 底下列出它們（1.4.2）：agent 目前列出的、由 recipe 指定的每個映像檔（有釘選的映像檔以記錄的 id 辨識，只用 tag 指定的映像檔以那個 tag 辨識），包含大小、指定它的 recipe，以及那台機器上使用它的部署。清單上方是引擎存放映像檔的位置還剩多少空間，前提是 agent 看得到那個目錄（在 container 裡執行的 agent 通常看不到）。引擎裡的其他映像檔只會計數：沒有 recipe 指定它們，所以它們不屬於 Forgeyard。
+
+- **Remove**（管理員）會從那台機器刪除一個映像檔。該列會先詢問，然後 agent 對它執行 `docker rmi`（或 `podman rmi`），絕不加 `-f`。完成後主控台會說明釋出了多少空間：最多是映像檔的大小，因為其他映像檔共用的 layer 會保留；agent 看得到引擎的磁碟時，也會顯示之後的可用空間。之後需要這個映像檔的部署會重新 pull（或經由伺服器取得，或由你再載入一次）。
+- 以下情況會被拒絕，該列也會說明原因：那台機器上有部署正在使用這個映像檔（請先停止它）、agent 本身就是從這個映像檔執行的，以及引擎裡有任何 container 正在使用它，即使不是 Forgeyard 啟動的（引擎會保留這種映像檔；訊息會指出是哪個 container）。
+- 沒有 recipe 指定的映像檔，絕不會提供刪除。
+- agent 只會依 id 刪除它自己清單裡的映像檔：伺服器絕不會指定名稱要它刪除。有好幾個 tag 的映像檔會以那些 tag 刪除。
+- 早於 1.4.2 的 agent 會列出映像檔，但不能刪除。請更新 agent。
+
+每次要求 agent 刪除，都會以 `node.image_removed` 記入稽核紀錄，包含映像檔、它的 tag、指定它的 recipe，以及釋出了多少空間或沒有刪除的原因。API 請見[參考文件](reference.md#a-machines-engine-images-through-the-api)。
 
 ## 搬移模型快取
 
