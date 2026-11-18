@@ -36,7 +36,8 @@ Catalog、Engines、Sources；用量與費用有折線圖；視覺模型（物�
 可以在部署前先把模型和引擎下載到機器上；連不上網際網路的機器會經由伺服器取得，管理員也能上傳映像檔給它。應用程式（Apps）離開了主控台，它們的
 API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器的快取取得模型檔，管理員也能把引擎映像檔從一台機器複製到另一台，
 兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的引擎映像檔並能刪除舊的，
-安排副本時也會計算還有多少空的主機連接埠。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+安排副本時也會計算還有多少空的主機連接埠。1.4.3 讓目錄裡的每個模型和每個引擎都有自己的頁面：
+它在哪些機器上、每台機器放不放得下、誰在使用它。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
 
 ## 🚀 安裝
 
@@ -49,7 +50,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.2
+  docker.io/tonyhuang1101/forgeyard:1.4.3
 sudo docker logs forgeyard
 ```
 
@@ -91,7 +92,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

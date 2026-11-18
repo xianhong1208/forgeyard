@@ -6,6 +6,16 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.3] — 2026-11-18
+
+Every catalog model and every engine gets its own page in the console (#140): a model's page says where it
+is, whether a copy fits on each machine, what uses it and which engines can run it; an engine's page lists its
+variants, their images and which machines have them. Model and engine names link to these pages from
+everywhere, and an admin can set a model's display name. Zero-shot detectors and text classifiers are refused
+when added, instead of failing later as detection models or rerankers (#147); their support comes with 1.4.4.
+No setting and no migration, and the agents need no update (an agent from 1.4.1 on already lists its images
+for the engine pages).
+
 ### Added
 
 - **A page per catalog model and per engine** (#140, layout A+). A model's page, `/models/<name>`: its facts (task,
