@@ -88,6 +88,24 @@ Maintainers only. On a release branch off `dev`: bump the version in `pyproject.
 date the `CHANGELOG.md` section, and open the release pull request into `dev`. After it merges,
 `main` follows `dev`, and the annotated tag `vX.Y.Z` goes on that commit.
 
+**Before tagging, check the Docker Hub secrets.** Every push to `dev` and `main` runs
+`.github/workflows/dockerhub-login.yml` (*Docker Hub login*): with the secrets set it logs in to Docker Hub,
+asks Docker Hub whether the token may push to the three published repositories
+(`scripts/dockerhub_check.py`), pushes nothing and logs out; without them it ends green with the warning
+*Docker Hub secrets not set: a release would not push images*. The latest run on `main` (or on `dev`, just
+before the release pull request) must be green without that warning:
+
+```bash
+gh run list --workflow dockerhub-login.yml --branch main --limit 1
+```
+
+When it is red (*unauthorized: incorrect username or password*, *Docker Hub refused the secrets* or *Docker
+Hub token cannot push*), re-enter both secrets under *Settings → Secrets and variables → Actions*:
+`DOCKERHUB_USERNAME` is the Docker Hub account name (not the email address), `DOCKERHUB_TOKEN` a Docker Hub
+personal access token with *Read & Write*. Then run it again by hand (*Actions → Docker Hub login → Run
+workflow*) and tag only once it is green. It is not a required check: it does not run on pull requests,
+which get no secrets.
+
 Pushing the tag runs `.github/workflows/publish-images.yml`, which publishes both images on Docker
 Hub (`docker.io/tonyhuang1101/forgeyard` and `docker.io/tonyhuang1101/forgeyard-agent`) for linux/amd64
 and linux/arm64, tagged `X.Y.Z`, `X.Y` and `latest` (a pre-release only `X.Y.Z`), with provenance
