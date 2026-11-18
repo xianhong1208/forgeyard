@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { useAuth } from "../auth";
 import { Mark } from "../components/Mark";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
+import { KeyBackupButton } from "../components/KeyBackup";
 import { CopyBox, Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { exact } from "../lib/format";
@@ -220,6 +221,11 @@ function AdminPart({ info }: { info: TlsInfo }) {
           <dd className="mono small">{[...cert.names, ...cert.ips].join(", ")}</dd>
         </dl>
       )}
+      <p className="trust-admin-lead">
+        Back up the secret key{info.mode === "forgeyard-ca" ? " and this certificate authority" : ""} as one file, encrypted with a passphrase you
+        choose: with it, a server restored on another machine reads its stored secrets{info.mode === "forgeyard-ca" ? ", and every device and agent keeps trusting it" : ""}.
+      </p>
+      <div className="trust-admin-actions"><KeyBackupButton label="Download a key backup…" /></div>
       {a.trust_command && (
         <>
           <p className="trust-admin-lead">An agent that joined before this server used HTTPS keeps reconnecting over plain HTTP and stays offline. Run this once on its machine, in the Forgeyard folder, then restart the agent. It keeps its credential: no new join token.</p>

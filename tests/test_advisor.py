@@ -338,16 +338,27 @@ def test_fy_adv_008_people_waiting_for_approval(owner, monkeypatch):
 
 
 # ------------------------------------------------------------------ machines
+# Every feature a fully equipped agent of this version declares: one list, kept in step with the agent by
+# FY-UPD-017.
+from tests.test_agent_update import FULL as FULL_FEATURES  # noqa: E402
+
+
 def test_fy_adv_009_agents_older_than_the_server(owner):
     """FY-ADV-009 (V21): an older agent version is a warning, an older protocol an error; the same
-    version (or a newer one, or none reported) is fine."""
-    a = node("same")
+    version (or a newer one, or none reported) is fine. (1.4.2, #122) The server's version without a feature
+    such an agent declares is a warning too; every finding opens the machine's update command."""
+    a = node("same", features=FULL_FEATURES)
     b = node("newer", agent_version="99.0.0")
     c = node("older", agent_version="1.0.9")
-    d = node("old-protocol", protocol=0)
-    found = {f.scope: f.severity for f in findings().get("agent-outdated", [])}
-    assert found == {f"machine:{c}": "warning", f"machine:{d}": "error"}
+    d = node("old-protocol", protocol=0, features=FULL_FEATURES)
+    e = node("stale-build", features=("workloads", "models"))
+    got = findings().get("agent-outdated", [])
+    found = {f.scope: f.severity for f in got}
+    assert found == {f"machine:{c}": "warning", f"machine:{d}": "error", f"machine:{e}": "warning"}
     assert f"machine:{a}" not in found and f"machine:{b}" not in found
+    stale = next(f for f in got if f.scope == f"machine:{e}")
+    assert "lacks" in stale.title and "cache_admin" in stale.detail
+    assert {(f.fix_url, f.fix_label) for f in got} == {(f"/machines/{n}#update", "Update command") for n in (c, d, e)}
     assert advisor._version("v1.2.10rc1") == (1, 2, 10) and advisor._version("dev") == ()
 
 

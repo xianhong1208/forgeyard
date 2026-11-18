@@ -16,7 +16,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "accept_all.py"
 ORDER = ["server", "machines", "workloads", "models", "gateway", "cloud", "tts", "img", "video", "passthrough",
-         "vision", "console"]
+         "vision", "relay", "images", "console"]
 
 
 @pytest.fixture(scope="module")
@@ -30,12 +30,12 @@ def acc():
 
 
 def test_fy_acc_001_groups_in_order_and_their_needs(acc):
-    """FY-ACC-001: the twelve groups run in this order (1.3 adds tts, img, video and passthrough, 1.4 vision);
-    gateway and cloud need the models group, tts, img, video, passthrough and vision make their own."""
+    """FY-ACC-001: the fourteen groups run in this order (1.3 adds tts, img, video and passthrough, 1.4 vision,
+    relay and images); gateway and cloud need the models group, the others make their own."""
     assert list(acc.GROUPS) == ORDER
     assert acc.GROUPS["gateway"].needs == ("models",) and acc.GROUPS["cloud"].needs == ("models",)
     assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "workloads", "models", "tts", "img", "video",
-                                                  "passthrough", "vision", "console"))
+                                                  "passthrough", "vision", "relay", "images", "console"))
 
 
 def test_fy_acc_002_arguments(acc):
@@ -72,7 +72,7 @@ def test_fy_acc_003_plan_keeps_what_a_chosen_group_needs(acc):
     plan = acc.plan_groups([], ["models", "console"], ORDER, needs)
     assert plan == [("server", ""), ("machines", ""), ("workloads", ""), ("models", "needed by gateway"),
                     ("gateway", ""), ("cloud", ""), ("tts", ""), ("img", ""), ("video", ""), ("passthrough", ""),
-                    ("vision", "")]
+                    ("vision", ""), ("relay", ""), ("images", "")]
     assert acc.plan_groups(["cloud", "gateway"], [], ORDER, needs) == [
         ("models", "needed by gateway"), ("gateway", ""), ("cloud", "")]
     with pytest.raises(ValueError, match="unknown group 'x'"):
@@ -293,3 +293,210 @@ def test_fy_acc_015_the_http_library_is_the_one_the_sdk_is_built_on(monkeypatch)
         monkeypatch.setitem(sys.modules, "openai", sdk)
         assert accept_m3.sdk_httpx() is lib, root
 
+
+
+def test_fy_acc_016_the_image_file_it_uploads_is_one_an_engine_loads(acc, tmp_path):
+    """FY-ACC-016: the images group's image file is built here, without Docker: a `docker save` archive (manifest.json,
+    the config, one layer of one small file) that the tests' Docker CLI loads, checking each layer against the
+    config's diff id, as the real engines do; its id is the config's digest, it carries the tag and the run's mark,
+    the same input gives the same bytes, and another run gives another image."""
+    import hashlib
+    import io
+    import tarfile
+
+    from tests.workload_helpers import FakeDocker
+
+    data, image_id = acc.image_archive("accept-ab12-image:1", "ab12")
+    tar = tarfile.open(fileobj=io.BytesIO(data))
+    names = sorted(m.name for m in tar.getmembers())
+    manifest = json.loads(tar.extractfile("manifest.json").read())
+    assert len(manifest) == 1 and manifest[0]["RepoTags"] == ["accept-ab12-image:1"]
+    config = tar.extractfile(manifest[0]["Config"]).read()
+    assert image_id == "sha256:" + hashlib.sha256(config).hexdigest()
+    layer = tar.extractfile(manifest[0]["Layers"][0]).read()
+    assert json.loads(config)["rootfs"]["diff_ids"] == ["sha256:" + hashlib.sha256(layer).hexdigest()]
+    assert b"ab12" in tarfile.open(fileobj=io.BytesIO(layer)).extractfile("forgeyard-accept.txt").read()
+    assert names == sorted([manifest[0]["Config"], manifest[0]["Layers"][0], "manifest.json"])
+    assert json.loads(config)["architecture"] == "amd64" and len(data) <= 20 * 1024  # two tar records
+    assert acc.image_archive("accept-ab12-image:1", "ab12") == (data, image_id)
+    assert acc.image_archive("accept-cd34-image:1", "cd34")[1] != image_id
+    arm = tarfile.open(fileobj=io.BytesIO(acc.image_archive("x:1", "m", "arm64")[0]))
+    arm_config = json.loads(arm.extractfile(json.loads(arm.extractfile("manifest.json").read())[0]["Config"]).read())
+    assert arm_config["architecture"] == "arm64"
+    fake = FakeDocker(tmp_path / "bin")
+    import subprocess
+
+    out = subprocess.run([str(fake.path), "load"], input=data, capture_output=True, check=True)
+    assert out.stdout.decode().strip() == "Loaded image: accept-ab12-image:1"
+    listed = subprocess.run([str(fake.path), "image", "ls", "-q", "--no-trunc"], capture_output=True, text=True)
+    assert listed.stdout.split() == [image_id]
+    assert acc.engine_arch({"accelerators": [{"vendor": "cpu", "arch": "aarch64"}]}) == "arm64"
+    assert acc.engine_arch({"accelerators": [{"vendor": "cpu", "arch": "x86_64"}]}) == "amd64"
+    assert acc.engine_arch({"accelerators": [], "platform": {"machine": "arm64"}}) == "arm64"
+
+
+def test_fy_acc_017_the_relay_and_images_groups_machines(acc):
+    """FY-ACC-017: the relay and images groups take their machines from the CPU and GPU machines unless named; a
+    second machine must be another one; --only picks each group alone (they need no deployments)."""
+    a = acc.parse_args(["--only", "relay,images"])
+    assert a.plan == [("relay", ""), ("images", "")]
+    assert (a.relay_machine, a.relay_second_machine, a.engine_machine, a.second_engine_machine) == (None,) * 4
+    b = acc.parse_args(["--relay-machine", "r1", "--relay-second-machine", "r2", "--engine-machine", "e1",
+                        "--second-engine-machine", "e2"])
+    assert (b.relay_machine, b.relay_second_machine, b.engine_machine, b.second_engine_machine) == ("r1", "r2", "e1", "e2")
+    for bad in (["--relay-machine", "r", "--relay-second-machine", "r"], ["--cpu-machine", "c", "--relay-second-machine", "c"],
+                ["--gpu-machine", "g", "--second-engine-machine", "g"], ["--engine-machine", "e", "--second-engine-machine", "e"]):
+        with pytest.raises(SystemExit) as e:
+            acc.parse_args(bad)
+        assert e.value.code == 2, bad
+    one, two, three = {"id": 1, "name": "a"}, {"id": 2, "name": "b"}, {"id": 3, "name": "c", "ok": True}
+    assert acc.pick_second([None, one, two], one) == two
+    assert acc.pick_second([one], one) is None
+    assert acc.pick_second([two, three], one, lambda m: m.get("ok")) == three
+    assert acc.missing_features({"features": ["models", "relay"]}, acc.RELAY_FEATURES) == ["prefetch", "cache_admin"]
+
+
+def test_fy_acc_018_finding_the_model_and_the_image_it_made(acc):
+    """FY-ACC-018: the relay group finds its GGUF file in a machine's cache listing by repository, revision and file
+    (not another revision, not another file of the repository); the images group finds its image by its tag (also
+    as Podman names it, localhost/…); the recipe that lets it be removed is one the server accepts and names each tag."""
+    from forgeyard.models.recipes import parse_recipe
+
+    view = {"models": [
+        {"kind": "hf", "repo": "ggml-org/tiny-llamas", "revision": "old", "files": 1,
+         "parts": [{"key": "k-old", "file": "stories15M-q8_0.gguf", "bytes": 1}]},
+        {"kind": "url", "file": "stories15M-q8_0.gguf", "key": "url/x"},
+        {"kind": "hf", "repo": "ggml-org/tiny-llamas", "revision": "rev", "files": 2,
+         "parts": [{"key": "k-q4", "file": "stories15M-q4_0.gguf", "bytes": 2},
+                   {"key": "k-q8", "file": "stories15M-q8_0.gguf", "bytes": 3}]}]}
+    entry, part = acc.cache_part(view, "ggml-org/tiny-llamas", "rev", "stories15M-q8_0.gguf")
+    assert entry["revision"] == "rev" and part["key"] == "k-q8"
+    assert acc.cache_part(view, "ggml-org/tiny-llamas", "new", "stories15M-q8_0.gguf") == (None, None)
+    assert acc.cache_part(view, "ggml-org/tiny-llamas", "rev", "stories260K.gguf")[1] is None
+    assert acc.cache_part({}, "a/b", None, None) == (None, None)
+    assert acc.RELAY_MODEL["source"] == "hf://ggml-org/tiny-llamas" and acc.RELAY_MODEL["file"].endswith(".gguf")
+    items = [{"id": "sha256:1", "tags": ["busybox:1.37"]}, {"id": "sha256:2", "tags": ["localhost/accept-ab12-image:1"]}]
+    assert acc.tagged(items, "accept-ab12-image:1")["id"] == "sha256:2"
+    assert acc.tagged(items, "image:1") is None and acc.tagged(None, "x:1") is None
+    r = parse_recipe(acc.cleanup_recipe("accept-ab12-image-cleanup", ["accept-ab12-image:1", "localhost/accept-ab12-image:1",
+                                                                     "accept-ab12-image:1"]))
+    assert r.name == "accept-ab12-image-cleanup"
+    assert [(v.runtime, v.image) for v in r.variants] == [("container", "accept-ab12-image:1"),
+                                                          ("container", "localhost/accept-ab12-image:1")]
+
+
+class FakeAdmin:
+    """The admin's Client, played here: answers by (method, path) from a table, records every call."""
+
+    def __init__(self, acc, answers: dict):
+        self.acc, self.answers, self.calls = acc, answers, []
+
+    def request(self, method, path, body=None, **kw):
+        self.calls.append((method, path, body))
+        got = self.answers.get((method, path.split("?")[0]))
+        status, data = got(body) if callable(got) else (got or (404, {"detail": {"code": "not_found"}}))
+        return self.acc.Resp(status, {}, json.dumps(data).encode())
+
+    def ok(self, method, path, body=None, **kw):
+        r = self.request(method, path, body)
+        if not 200 <= r.status < 300:
+            raise self.acc.Fail(f"{method} {path} -> {r.status}")
+        return r.data
+
+
+def test_fy_acc_019_what_the_new_groups_skip_and_how_the_image_goes_again(acc):
+    """FY-ACC-019: without a machine for them, or with an agent too old, the relay and images groups say so as SKIP
+    (never FAIL); the uploaded image's cleanup adds a recipe naming its tags, removes it through Remove engine image,
+    deletes the recipe again, and does nothing when the image is gone; on an agent that cannot remove images it
+    leaves the tiny image and says so in a note."""
+    run = acc.Run(acc.parse_args(["--server", "https://127.0.0.1:9"]), None)
+    run.run_group(acc.GROUPS["relay"], "")
+    run.run_group(acc.GROUPS["images"], "")
+    old = {"id": 7, "name": "old-box", "status": "online", "features": ["models", "workloads"],
+           "runtime_info": {"container": {"ok": False, "reason": "docker not found"}}}
+    run.admin = FakeAdmin(acc, {("GET", "/api/machines"): (200, {"machines": [old]})})
+    run.machines = {"cpu": old, "gpu": old}
+    run.run_group(acc.GROUPS["relay"], "")
+    run.run_group(acc.GROUPS["images"], "")
+    got = [(c.group, c.status, c.detail) for c in run.report.checks]
+    assert [s for _, s, _ in got] == ["SKIP"] * 4, got
+    assert "no --cpu-machine or --relay-machine" in got[0][2] and "no --gpu-machine or --engine-machine" in got[1][2]
+    assert "prefetch, relay, cache_admin" in got[2][2] and "docker not found" in got[3][2]
+
+    box = {"id": 3, "name": "box", "status": "online", "features": list(acc.IMAGE_FEATURES)}
+    state = {"images": [{"id": "sha256:aa", "tags": ["accept-ab12-image:1"]}], "recipes": set()}
+
+    def remove(body):
+        named = any("accept-ab12-image:1" in r for r in state["recipes"])
+        if not named:
+            return 409, {"detail": {"code": "not_an_engine_image"}}
+        state["images"] = [i for i in state["images"] if i["id"] != body["image"]]
+        return 200, {"ok": True, "freed_bytes": 10}
+
+    def add_recipe(body):
+        state["recipes"].add(body["yaml"])
+        return 201, {}
+
+    def del_recipe(body):
+        state["recipes"].clear()
+        return 200, {}
+
+    fake = FakeAdmin(acc, {("GET", "/api/machines"): lambda b: (200, {"machines": [box]}),
+                           ("GET", "/api/machines/3/images"): lambda b: (200, {"images": state["images"]}),
+                           ("POST", "/api/machines/3/engine-images/remove"): remove,
+                           ("POST", "/api/recipes"): add_recipe,
+                           ("DELETE", f"/api/recipes/{run.name('image-cleanup')}"): del_recipe})
+    run.admin = fake
+    img = acc.UploadedImage(run, "accept-ab12-image:1")
+    img.loaded(box, {"id": "sha256:aa", "tags": ["accept-ab12-image:1"]})
+    assert img.remove_answer(box).code() == "not_an_engine_image"
+    assert run.cleanup.run()[-1]["ok"] is True
+    assert state["images"] == [] and state["recipes"] == set()
+    order = [(m, p) for m, p, _ in fake.calls if m != "GET"]
+    assert order == [("POST", "/api/machines/3/engine-images/remove"), ("POST", "/api/recipes"),
+                     ("POST", "/api/machines/3/engine-images/remove"), ("DELETE", f"/api/recipes/{run.name('image-cleanup')}")]
+    img.remove(box)  # gone already: nothing asked
+    assert [(m, p) for m, p, _ in fake.calls if m != "GET"] == order
+
+    state["images"] = [{"id": "sha256:bb", "tags": ["accept-ab12-image:1"]}]
+    box["features"] = ["image_load", "image_save"]
+    img2 = acc.UploadedImage(run, "accept-ab12-image:1")
+    img2.loaded(box, state["images"][0])
+    img2.remove(box)
+    assert state["images"] and "stays on box" in run.report.notes[-1] and "docker rmi accept-ab12-image:1" in \
+        run.report.notes[-1]
+
+
+def test_fy_acc_020_a_broken_off_download_leaves_nothing_but_never_takes_others(acc, monkeypatch):
+    """FY-ACC-020: after a download the run broke off, its part file goes with Remove partial downloads, once the
+    agent's cache report shows it (it comes with the heartbeat) and once the agent stops refusing (cache_busy); a
+    finished download needs nothing; a machine that had partial downloads before the run keeps them all (Remove
+    partial downloads would take those too), and the report says so."""
+    monkeypatch.setattr(acc.time, "sleep", lambda s: None)
+    run = acc.Run(acc.parse_args(["--server", "https://127.0.0.1:9"]), None)
+    box = {"id": 4, "name": "box"}
+    reports = iter([0, 0, 1, 1, 1])
+    answers = iter([(409, {"detail": {"code": "cache_busy"}}), (200, {"ok": True, "freed_bytes": 5})])
+    rows = {"state": "cancelled"}
+    fake = FakeAdmin(acc, {("GET", "/api/machines/4/cache"): lambda b: (200, {"partial_files": next(reports)}),
+                           ("POST", "/api/machines/4/cache/remove-partial"): lambda b: next(answers),
+                           ("GET", "/api/downloads"): lambda b: (200, {"downloads": [{"id": 9, **rows}]})})
+    run.admin = fake
+    acc._partials_after(run, box, 9, 0)
+    posts = [p for m, p, _ in fake.calls if m == "POST"]
+    assert posts == ["/api/machines/4/cache/remove-partial"] * 2
+    fake.calls.clear()
+    rows["state"] = "done"
+    acc._partials_after(run, box, 9, 0)
+    assert [p.split("?")[0] for m, p, _ in fake.calls] == ["/api/downloads"]
+    rows["state"] = "cancelled"
+    reports = iter([3])
+    fake.calls.clear()
+    acc._partials_after(run, box, 9, 2)
+    assert all(m == "GET" for m, _, _ in fake.calls) and "box keeps the partial downloads" in run.report.notes[-1]
+    clock = iter(range(0, 1000, 10))
+    monkeypatch.setattr(acc.time, "monotonic", lambda: next(clock))
+    reports = iter([0] * 10)
+    fake.calls.clear()
+    acc._remove_partials(run, box, "x", wait=25)    # nothing shows within the wait: nothing asked
+    assert all(m == "GET" for m, _, _ in fake.calls)

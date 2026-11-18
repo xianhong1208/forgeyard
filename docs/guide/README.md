@@ -14,6 +14,7 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
 | Set Forgeyard up for the first time | [Quick start](quick-start.md): about 10 minutes, plus the model download |
 | Understand machines, deployments, keys and roles | [Concepts](concepts.md) |
 | Add an AMD or CPU-only machine, run the server or the agent in Docker, upgrade, back up | [How-to](how-to.md) |
+| Run a machine that has no internet access of its own | [Run a machine without internet access](how-to.md#run-a-machine-without-internet-access) |
 | Add OpenAI, Anthropic, Gemini or Azure, and let a model spill to the cloud | [Cloud providers](cloud-providers.md) |
 | Fix something that does not work | [Troubleshooting](troubleshooting.md) |
 | Look up a setting or a command | [Reference](reference.md) |
@@ -26,11 +27,13 @@ server. It works without internet access. [繁體中文版](zh-TW/README.md)
 2. [Concepts](concepts.md): machines and agents, GPU access, models and engines and
    estimates, deployments, the gateway and the Playground, API keys and limits and usage, cloud
    providers and tiers, cost and budgets, roles, sign-in and sessions.
-3. [How-to](how-to.md): add an AMD machine or a CPU-only machine, run the agent in Docker, run a
-   service or a task, add a cloud provider, track and limit cloud spend, restrict GPUs on a shared
-   machine, add people, use your own certificate or a reverse proxy, run the server in Docker or as a service,
-   upgrade, back up and restore, move a model cache, rotate keys, revoke a machine, uninstall the
-   agent.
+3. [How-to](how-to.md): add an AMD machine or a CPU-only machine, run the agent in Docker,
+   [run a machine without internet access](how-to.md#run-a-machine-without-internet-access), deploy
+   vision models, speech, images and videos, add a cloud provider, track and limit cloud spend, change a
+   deployment, restrict GPUs on a shared machine, add people, use your own certificate or a reverse
+   proxy, run the server in Docker or as a service, upgrade and update an agent, back up and restore,
+   download a model ahead, give a machine engine images, free disk space, move a model cache, rotate
+   keys, revoke a machine, uninstall the agent.
 4. [Troubleshooting](troubleshooting.md): problems seen on real machines, with their symptom, cause
    and fix: certificates, offline agents, downloads, memory, every error from `/v1`, programs that
    do not trust the CA, missing models, spill and cost.

@@ -9,6 +9,8 @@
     python -m forgeyard agent trust --server https://forge.lan:7860 --ca-fingerprint sha256:...
                                                    # an agent that joined over http: switch to https
     python -m forgeyard secrets reset --yes        # the secret key is lost: start over (see docs)
+    python -m forgeyard secrets restore FILE [--data-dir DIR] [--force]
+                                                   # put back a key backup downloaded from the console
     python -m forgeyard agent inventory [--json] [--raw]                           # what it detects
     python -m forgeyard agent runtimes [--workload-user nobody]                     # what it can run
 """
@@ -173,6 +175,10 @@ def _describe_runtimes(info: dict) -> list[str]:
         lines.append(f"container ok: {c.get('engine')} {c.get('version') or ''}; {gpu}{pulls}")
     else:
         lines.append(f"container unavailable: {c.get('reason')}")
+    ports = info.get("ports") or {}
+    if ports.get("low") is not None:
+        lines.append(f"ports     {ports['low']}-{ports['high']} ({ports['high'] - ports['low'] + 1} host ports for services "
+                     "and model replicas; two each behind the key guard)")
     return lines
 
 
@@ -327,8 +333,13 @@ def _agent_cmd(args) -> int:
                      (cache.get("free_bytes") or 0) / 1024**3, len(cache.get("cached") or []))
         else:
             log.error("Models: %s", cache.get("reason"))
+    from forgeyard.agent import how_it_runs
+
+    install = how_it_runs.for_agent(supervisor, credential=saved["credential"], server=server,
+                                    config_path=str(settings.path) if settings.path else None, state_dir=str(state_dir))
+    log.info("Runs as: %s%s.", install.get("method"), "" if install.get("known") else f" ({install.get('reason')})")
     agent = Agent(server, saved["credential"], inventory, labels=_labels(args.label), supervisor=supervisor,
-                  ca_pem=ca_pem)
+                  ca_pem=ca_pem, install=install)
 
     async def main() -> int:
         loop = asyncio.get_running_loop()
@@ -463,12 +474,80 @@ def _init_cmd(args) -> int:
     return 0
 
 
+def _read_passphrase(args) -> Optional[str]:
+    """From --passphrase-file (its first line), else asked for without echo."""
+    if args.passphrase_file:
+        text = Path(args.passphrase_file).read_text(encoding="utf-8")
+        return text.splitlines()[0] if text else ""
+    import getpass
+
+    try:
+        return getpass.getpass("Backup passphrase: ")
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+def _restore_cmd(args) -> int:
+    """`secrets restore FILE`: put back the secret key (and the CA) from a backup downloaded from the
+    console. Run it with the server stopped. Overwrites nothing different unless --force, and then keeps
+    the old files as <name>.replaced-<time>."""
+    from forgeyard.config import get_settings
+    from forgeyard.security import crypto, keybackup
+
+    log = logging.getLogger("forgeyard")
+    logging.getLogger("alembic").setLevel(logging.WARNING)  # imported along the way: its setup lines are noise here
+    path = Path(args.file)
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        log.error("Cannot read %s: %s", path, e.strerror or e)
+        return 2
+    try:
+        header, _, _ = keybackup.read_header(data)
+    except keybackup.BackupError as e:
+        log.error("%s Nothing was written.", e)
+        return 2
+    passphrase = _read_passphrase(args)
+    if not passphrase:
+        log.error("No passphrase given. Nothing was written.")
+        return 2
+    try:
+        contents = keybackup.open_backup(data, passphrase)
+    except keybackup.BackupError as e:
+        log.error("%s Nothing was written.", e)
+        return 2
+    if args.data_dir:
+        data_dir = Path(args.data_dir)
+        key_path = data_dir / "secret.key"
+    else:
+        settings = get_settings()
+        data_dir, key_path = settings.data_dir, settings.secret_key_path
+    try:
+        plan = keybackup.plan(contents, key_path, data_dir / "tls", force=args.force)
+    except keybackup.RestoreConflict as e:
+        log.error("%s. Nothing was written. Is this the right data directory? To replace them (the old files are kept as "
+                  "<name>.replaced-<time>), run it again with --force.", e)
+        return 2
+    for line in keybackup.apply(contents, plan):
+        log.info("%s", line[0].upper() + line[1:] + ".")
+    if contents.tls is None:
+        log.info("The backup holds no certificate authority (the server it came from did not use Forgeyard's own CA).")
+    if crypto.key_from_env() and not args.data_dir:
+        log.warning("%s is set: the server uses it instead of %s. Remove it, or set it to the restored key.",
+                    crypto.KEY_ENV, key_path)
+    log.info("Restored key id %s (backup made %s). Start the server: it checks that this key belongs to the database.",
+             contents.kid, header.get("created_at", "?"))
+    return 0
+
+
 def _secrets_cmd(args) -> int:
     from forgeyard.security import secrets_reset
 
     log = logging.getLogger("forgeyard")
+    if args.secrets_command == "restore":
+        return _restore_cmd(args)
     if args.secrets_command != "reset":
-        log.error("Usage: python -m forgeyard secrets reset --yes")
+        log.error("Usage: python -m forgeyard secrets reset --yes | secrets restore FILE")
         return 2
     if not args.yes:
         log.error("This throws away every stored secret that cannot be read without the lost key: Hugging Face "
@@ -529,6 +608,15 @@ def build_parser() -> argparse.ArgumentParser:
     sec_sub = sec.add_subparsers(dest="secrets_command")
     reset = sec_sub.add_parser("reset", help="the key is lost: make a new one and drop what it encrypted")
     reset.add_argument("--yes", action="store_true", help="really do it")
+    restore = sec_sub.add_parser("restore", help="put back the secret key and the CA from a backup downloaded from the "
+                                                 "console (asks for its passphrase; run it with the server stopped)")
+    restore.add_argument("file", help="the backup file (forgeyard-key-backup-<key id>-<date>.fykey)")
+    restore.add_argument("--data-dir", metavar="DIR",
+                         help="the server's data directory (default: DATA_DIR, and FORGEYARD_SECRET_KEY_FILE for the key)")
+    restore.add_argument("--force", action="store_true",
+                         help="replace a different key or CA already there (the old files are kept as <name>.replaced-<time>)")
+    restore.add_argument("--passphrase-file", metavar="PATH",
+                         help="read the passphrase from this file's first line instead of asking (for scripts)")
     return parser
 
 

@@ -20,11 +20,12 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **One control plane for NVIDIA, AMD and CPU machines.** Each machine runs model replicas on the
   cards you allow; AMD cards run ROCm or Vulkan builds. Each machine's page maps every card's memory
   to the models that hold it, and lists the models in its
-  cache with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
+  cache and its engine images with their sizes, to remove the ones no deployment there uses. **Download to…** puts a model
   and its engine on chosen machines before you deploy it, with progress. A machine that cannot reach
   Hugging Face, GitHub or the image registry gets the files and pinned engine images through the server,
   which passes them on and stores nothing, and model files from another machine's cache when one has
   them; admins can also upload an image file to a machine, or copy an image from another machine.
+  An agent older than the server says so, and its machine's page shows the exact command that updates it.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
@@ -37,7 +38,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   speech, image generation, video generation as jobs, and vision models: object detection,
   segmentation and depth at `/v1/vision/…` (1.4), deployed like any other model.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
-  fingerprint when they join, and stored secrets are encrypted.
+  fingerprint when they join, and stored secrets are encrypted. Admins download the key and the CA
+  as one passphrase-encrypted backup file from the console (1.4.2).
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging
@@ -51,8 +53,9 @@ models (object detection, segmentation, depth) deployed like any other model. **
 model and its engine on machines before you deploy; a machine without internet gets them through the
 server, and admins can upload an image file to it. Apps left the console, and their API is deprecated
 until 1.5. 1.4.1 lets such a machine get a model file from another machine's cache, and an admin copy an
-engine image from one machine to another, both still through the server. Every change is in the
-[CHANGELOG](CHANGELOG.md).
+engine image from one machine to another, both still through the server. 1.4.2 shows on a machine's page
+the exact command that updates its agent, lists its engine images and removes old ones, and counts free host
+ports when placing replicas. Every change is in the [CHANGELOG](CHANGELOG.md).
 
 ## 🚀 Installation
 
@@ -65,7 +68,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.1
+  docker.io/tonyhuang1101/forgeyard:1.4.2
 sudo docker logs forgeyard
 ```
 
@@ -110,7 +113,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:

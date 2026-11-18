@@ -6,6 +6,141 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.2] — 2026-11-18
+
+A patch release from running 1.4 on real machines. A machine's page shows the exact command that updates its
+agent, made from how the agent runs, and an agent behind the server says so (#121, #122). A machine's engine
+images are listed and can be removed when nothing uses them, and **Copy from another machine** lists engine
+images first (#123, #124). Placement counts a machine's free host ports (#125). An admin can download the secret
+key and the CA as one passphrase-encrypted backup from the console, and `forgeyard secrets restore` puts them
+back (#127). A *Docker Hub login* workflow catches a wrong Docker Hub secret before a release, not after the tag
+(#128). The guide walks through a machine without internet access in one place (#129), and a relay whose source
+breaks off reads clearly in the server's log (#130). `scripts/accept_all.py` checks relaying, image upload and
+image copy (#126). No setting and no migration; update the agents to 1.4.2 so that they report how they run
+and their port range, and can remove engine images (`image_remove`).
+
+### Added
+
+- **Download a backup of the secret key from the console** (#127). Admins only: **Download a backup…** on the
+  setup advisor's "Back up the secret key" reminder, or **Download a key backup…** under **For admins** on
+  **Trust this server**. The admin types their password again (checked like a sign-in: wrong ones count toward
+  the same back-off and are audited as `secret_key.backup_failed`, answered 401 `wrong_password` so the console
+  does not sign out) and a passphrase of their own, twice (12+ characters, not the password). The answer
+  (`POST /api/secret-key/backup`, `Cache-Control: no-store`, an attachment named
+  `forgeyard-key-backup-<key id>-<date>.fykey`) holds the secret key and, with Forgeyard's own CA, `ca.key` and
+  `ca.crt`, sealed with AES-256-GCM under an Argon2id key (64 MiB, 3 passes, 4 lanes, random salt and nonce;
+  the versioned header is authenticated too). Not the server certificate: the server makes it again from the CA.
+  The server keeps neither the file nor the passphrase; the download is audited
+  (`secret_key.backup_downloaded`, key id, never the passphrase) and ticks off the reminder for that key id.
+  `GET /api/secret-key` says what a backup holds. The format is in the guide's reference.
+
+- **`python -m forgeyard secrets restore FILE`** puts the key and the CA back (asks for the passphrase;
+  `--data-dir`, `--passphrase-file`). It writes nothing on a wrong passphrase or a changed, cut-off or unknown
+  file, never replaces a different key or CA without `--force` (which keeps the old files as
+  `<name>.replaced-<time>`), and writes the keys with mode 600 in folders with mode 700.
+
+- **Update an agent with the exact command, from its machine's page** (#121). An agent now reports how it runs,
+  in `hello.install` (older servers ignore it): in a container, it reads its own container through the engine
+  it already uses (`docker inspect` / `podman inspect` of the container it finds in `/proc/self/mountinfo`):
+  name, image, network, restart policy, `--gpus` from the GPU requests, devices, `--group-add` ids, mounts
+  (including the image's unnamed state volume, by name), the variables given with `-e` (the image's own left
+  out), extra arguments and a few other options; installed with install.sh, its systemd unit, program and
+  agent.toml; otherwise its checkout. It never reports the join token, its credential, or a variable whose
+  name or value looks like a secret (named only), and nothing about a container that is not the agent image.
+  The machine's page (admins, `GET /api/machines/{id}/agent-update`) shows **Update the agent**: for Docker,
+  `docker pull` of the server's agent image, `docker rm -f` and the same `docker run` on it; for a machine that
+  gets its files through the server, `docker save … | ssh … docker load` first (offered to the others too);
+  for install.sh, the one-line install without a join token; for a checkout, `git checkout` and `uv sync`.
+  Every reported value is checked again and shell-quoted; a secret variable is passed as `-e NAME="$NAME"`
+  with a note to export it. An agent before 1.4.2 says that it does not report this, with the guide. Stored in
+  the machine's existing `runtime_info` (key `install`), never shown in the machine list. No migration.
+
+- **An agent behind the server says so** (#122). The Machines tiles and the machine's page show *agent 1.4.0,
+  server 1.4.2: update*, opening the update command; also for an agent of the server's version that lacks a
+  feature such an agent declares (built from older code). The machine list carries `agent_behind` and
+  `server_version`; **Setup health**'s older-agent finding (V21) covers the missing features too and opens the
+  machine's update command.
+
+- **Remove engine images a machine no longer uses** (#123). A machine's page lists its **Engine images**: each image
+  a recipe names, as its agent lists it now (a pinned image recognised by its recorded ids, a tag-only one by its
+  tag), with its size, the recipes that name it and the deployments on that machine that use it, and the free space
+  where the engine keeps its images when the agent can see it (`GET /api/machines/{id}/engine-images`, everyone
+  signed in). The engine's other images are only counted. **Remove** (admins) asks in the row, then the agent runs
+  `docker rmi` / `podman rmi` without `-f` (`POST /api/machines/{id}/engine-images/remove`, new agent feature
+  `image_remove`: `image_remove` / `image_removed`); the console says how much was freed. Refused, with the reason,
+  while a deployment there uses the image (409 `image_in_use`, naming it), for the image the agent runs from
+  (`agent_image`, which a 1.4.2 agent now reports in `image_listed`), while any container of the engine uses it (the
+  agent checks, naming the container), and never offered for an image no recipe names (`not_an_engine_image`). The
+  agent removes only an image of its own listing, by its id (by its own tags when it has several). An older agent
+  lists the images and says to update it. Audited as `node.image_removed`.
+
+- **`scripts/accept_all.py` checks relaying, image upload and image copy** (#126): two new groups after `vision`.
+  `relay`: on the CPU machine (`--relay-machine`) with its `fetch_via` set to `server`, **Download to…** of a 26 MB
+  GGUF (`ggml-org/tiny-llamas`, `stories15M-q8_0.gguf`, model only) must end `done` via `server`, with the file at
+  its size in the machine's model cache; then on a second machine (`--relay-second-machine`, default the second CPU
+  machine, else the GPU machine) the same download must come from the first machine's cache (via `machine`, the
+  source named, and the dialog naming it first). `images`: on a machine with a container engine (`--engine-machine`,
+  default the GPU machine), its engine-image listing; an image file the script builds itself (a few KB, one layer,
+  no Docker needed where it runs) uploaded and loaded (no recipe match, audited, only counted on the machine page,
+  Remove refused as `not_an_engine_image`); copied to a second machine that loads images
+  (`--second-engine-machine`; same content, audited); then removed with **Remove engine image**, for which a custom
+  recipe names it for a few seconds (Forgeyard removes only images a recipe names). Everything is put back at the
+  end, also after a failure: both machines' `fetch_via`, the model in their caches (and the part file of a download
+  it broke off, unless the machine already had partial downloads: those are not the run's to delete, and the report
+  says so), the image and the recipe (an agent older than 1.4.2 cannot remove it: the report says it stays). Without the machines or agent features they
+  need, the checks are skipped with the reason.
+
+### Changed
+
+- **The guide walks through a machine without internet access in one place** (#129): the new how-to section
+  *Run a machine without internet access* (en and zh-TW) goes from joining such a machine (only the server
+  to reach; the port range through a firewall or an SSH tunnel, counted by placement) through its
+  **Internet access for downloads**, models (through the server, from the internet or from another machine's
+  cache, and where the progress says which), engine images (pinned ones through the server, the vision image
+  too; tag-only ones uploaded or copied; removing old ones) and updating its agent (the carry command), to the
+  troubleshooting it may need. The guide's index, Concepts, the related how-to sections and Troubleshooting
+  link to it. Also fixed on the way: the relay section no longer says the vision image is tag only (pinned
+  since 1.4.1); the offline AMD image-generation note says the image and the model come through the server
+  with a 1.4 agent; the loaded-image check names its version (1.3) instead of "this release"; Troubleshooting
+  explains the relay's *cut short* log line and offers copying a tag-only image; the guide index's How-to
+  summary no longer lists services and tasks (gone from the console in 1.4) and names the 1.4 sections.
+
+- **Copy an image lists engine images first** (#124). The **Copy from another machine** dialog shows the images a
+  recipe names, and only those until **Show all images** is ticked (on a shared machine the other images are other
+  people's).
+
+- Placement counts a machine's free host ports (#125). The agent reports its port range
+  (`FORGEYARD_PORT_RANGE`) in its hello (`runtime_info.ports`; older servers drop it), and the server counts
+  the ports its replicas hold there: one per published port, two behind the agent's key guard (every model
+  replica, an app exposed at `/x/`). A machine without enough free ports is skipped like one without memory,
+  and the plan says why (*no free port: 3 of 3 in use (host ports 33000-33002)*); a replica with nowhere
+  else to go waits unplaced with that reason instead of restarting in backoff on the machine. A replica the
+  agent reports with *no free host port left* is taken off the machine when the server's count agrees.
+  Agents older than 1.4.2 report no range and are not counted, as before. `forgeyard agent runtimes` shows
+  the range. No setting and no migration.
+
+- **A wrong Docker Hub secret shows up before a release, not after the tag** (#128). 1.4.0's publish failed
+  half-way on *unauthorized: incorrect username or password*. A new workflow, *Docker Hub login*
+  (`.github/workflows/dockerhub-login.yml`), runs on every push to `dev` and `main` (and by hand): with the
+  secrets set it logs in to Docker Hub with the same pinned action as the publish workflow, asks Docker Hub's
+  token service whether the token may push to `forgeyard`, `forgeyard-agent` and `forgeyard-vision`
+  (`scripts/dockerhub_check.py`: a read-only token or another account's is granted pull only), pushes
+  nothing and logs out; without them it warns *Docker Hub secrets not set: a release would not push images*
+  and stays green. It is not a required check (it does not run on pull requests). CONTRIBUTING.md ›
+  Releasing and docs/development.md: before tagging, its latest run on `main` must be green, and how to fix
+  it when it is not.
+
+### Fixed
+
+- A relay whose source breaks off mid-file reads as such in the server's log (#130). The server writes one
+  warning naming the file, the machine, the source (a host on the internet, or `machine <name>`) and the bytes
+  sent (*Relay of acme/x@1a2b3c4d5e6f/model.gguf to gpu-02 cut short: the source broke off (…); 104857600 of
+  2147483648 bytes sent from huggingface.co in 12.3 s.*), in place of uvicorn's *Exception in ASGI
+  application … Response content shorter than Content-Length*, which read like a server bug. The answer still
+  ends short of its Content-Length (the connection closes), so the agent asks for the rest again as before;
+  only uvicorn's record of such an answer is dropped, every other one of its errors is kept.
+
+
 ## [1.4.1] — 2026-11-17
 
 A patch release for machines without internet. A machine that gets its files through the server now gets a

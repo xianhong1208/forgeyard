@@ -258,10 +258,35 @@ message holds (#99). **Relay from another machine** that already has the files m
 Also in 1.4.1: test IDs unique across the project (#114), and the server accepts up to 32 features in
 an agent's hello. Files sent straight from machine to machine stay in *Later, when there is a need*.
 
+## Shipped: 1.4.2 (2026-11-18), running 1.4 on real machines
+
+1. ✅ **Update an agent with the exact command** (#135, for #121 and #122): an agent reports how it runs
+   (its container, install.sh or a checkout), and its machine's page shows the command that brings it to
+   the server's version, with the `docker save | ssh | docker load` step for a machine without internet.
+   It never reports a token or a secret. An agent behind the server says so on the Machines tiles, on its
+   page and in **Setup health**, and opens that command.
+2. ✅ **Engine images on a machine's page** (#134, for #123 and #124): each image a recipe names, with its
+   size and what uses it, removable by an admin when nothing on the machine uses it (never the agent's own
+   image, never one a container uses). **Copy from another machine** lists engine images first.
+3. ✅ **Placement counts free host ports** (#133, for #125): the agent reports its port range, and a machine
+   without a free port is skipped like one without memory, with the reason in the plan, instead of a
+   replica restarting in backoff there.
+4. ✅ **A backup of the secret key from the console** (#132, for #127): an admin downloads the secret key
+   and Forgeyard's own CA as one file encrypted with a passphrase of their own, and
+   `python -m forgeyard secrets restore` puts them back.
+5. ✅ **A wrong Docker Hub secret shows up before a release** (#137, for #128): a *Docker Hub login*
+   workflow on every push to `dev` and `main` checks that the token may push the three images.
+6. ✅ **A machine without internet access, in one place in the guide** (#138, for #129): joining it, its
+   internet access, models, engine images, updating its agent and troubleshooting.
+
+Also in 1.4.2: a relay whose source breaks off mid-file reads as one clear line in the server's log
+(#136, for #130), and `scripts/accept_all.py` checks relaying, image upload and image copy (#139, for #126).
+
 ## Next
 
 | Version | What you get |
 |---|---|
+| **1.4.3: a page per model and per engine** | Each catalog model gets its own page: its source, revision, licence and task, its files and sizes, which machines have it and whether it fits each, the deployments that use it and the engines that can run it, with Deploy, **Download to…** and Remove. Each engine gets one too: its variants (CUDA, ROCm, Vulkan, CPU) with their images and whether each is pinned, which machines have them, its parameters and defaults, and the deployments and models that use it. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. |
 | **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
 | **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |

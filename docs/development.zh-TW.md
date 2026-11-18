@@ -39,6 +39,17 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
   另開一個小 PR 進 `dev`，把 `forgeyard/recipes/vision.yaml` 的兩個 tag 改成新版本，再執行 `pin_images.py --write`
   （FY-VIS-001 與 FY-VIS-019 寫著固定的 reference）。沒改到它的 release 就保留原本的固定：單是升級伺服器，視覺模型執行的映像檔永遠不會變。
 
+## 發布之前
+
+發布步驟寫在 [CONTRIBUTING.md](../CONTRIBUTING.md#releasing)（英文）。其中一步是守住映像檔的發布：
+`.github/workflows/dockerhub-login.yml`（*Docker Hub login*）在每次推送到 `dev` 與 `main` 時執行，用 repository secrets
+`DOCKERHUB_USERNAME` 與 `DOCKERHUB_TOKEN` 登入 Docker Hub，再以 `scripts/dockerhub_check.py` 確認這個 token 可以推送到
+`forgeyard`、`forgeyard-agent` 與 `forgeyard-vision`（Docker Hub 的 token 服務會回答它給了哪些權限；不推送任何東西），然後登出。
+沒有設定 secrets 時它只發出警告，仍然是綠燈。**打 tag 之前，它在 `main` 上最近一次的執行必須是綠燈且沒有警告**
+（`gh run list --workflow dockerhub-login.yml --branch main --limit 1`）；否則重新輸入兩個 secrets（username 是 Docker Hub
+帳號名稱，token 是 *Read & Write* 的 access token），再手動執行一次（*Actions → Docker Hub login → Run workflow*）。
+它不是必要的檢查，也不在 pull request 上執行。
+
 ## 寫不會時好時壞的測試
 
 CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最慢），所以在這裡會過的測試，到那裡偶爾會失敗。
@@ -95,16 +106,17 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單、伺服器的 Hugging Face 權杖 |
 | `forgeyard/recipes/` | 內建的引擎 recipe（YAML），映像檔以 digest 固定 |
 | `forgeyard/security/` | 密碼、工作階段、速率限制、host／CSRF middleware、HTTPS 與 CA、靜態加密的機密、`secrets reset` |
-| `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`） |
+| `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`）、它的執行方式（`how_it_runs.py`，用於更新指令） |
 | `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
 | `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
 | `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門、紀錄、健康檢查 |
-| `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |
+| `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、agent 的更新指令與是否落後（`update.py`）、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | agent 的容器映像檔與它的 CI 冒煙測試 |
 | `Dockerfile.server`, `scripts/server_image_smoke.sh` | 伺服器的容器映像檔與它的 CI 冒煙測試 |
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | 推送版本 tag 時，把兩個映像檔發布到 Docker Hub |
+| `.github/workflows/dockerhub-login.yml`, `scripts/dockerhub_check.py` | 每次推送到 `dev` 與 `main` 時，確認 Docker Hub secrets 能登入且可以推送（[發布之前](#發布之前)） |
 | `scripts/accept_all.py` | 完整的回歸驗收：在你自己的伺服器和機器上檢查每一項已發布的功能（[做法](guide/zh-TW/how-to.md#從頭到尾檢查一台伺服器)） |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | 在實際機器上的驗收，透過 API 與官方 OpenAI SDK |
 | `scripts/gpu_probe.py` | 只透過 CUDA driver 檢查應用程式看到哪張 NVIDIA GPU |

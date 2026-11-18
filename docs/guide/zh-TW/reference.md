@@ -882,6 +882,25 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 稽核事件 `node.image_copied`（目標機器；`from_machine`、要求的映像檔、大小、`ok`、載入的映像檔和它們的 content id，或失敗原因）。在任何位元組送出前就被拒絕的不會記錄。
 
+### 透過 API 查看機器的引擎映像檔
+
+`GET /api/machines/{id}/engine-images`（所有登入的人，1.4.2）會向那台機器的 agent 詢問它引擎裡的映像檔（`image_list`，同上），回傳 `{machine_id, listed, note, images, others, free_bytes, total_bytes, can_remove, remove_note}`。`images` 只包含 recipe 指定的映像檔，由大到小，每個是列出的內容再加上 `matches`、`used_by`（那台機器上副本正在執行它的部署：`[{name, kind, id}]`）、`agent`（agent 從它執行）和 `remove_note`（目前為什麼不能刪除，或 null）。`others` 是引擎裡其他映像檔的數量。`free_bytes` / `total_bytes`：引擎存放映像檔的位置，agent 看得到那個目錄時才有，否則為 null。agent 離線、不能列出（沒有 container 引擎、比 1.4.1 舊）或失敗時，`listed` 為 false 並帶 `note`。
+
+`POST /api/machines/{id}/engine-images/remove`，內容 `{"image": "sha256:…"}`（管理員），刪除其中一個。伺服器會再列一次那台機器的映像檔，在詢問 agent 之前先做檢查；接著傳送 `image_remove {request_id, image}`（協定 feature `image_remove`，1.4.2 起的 agent）。agent 只刪除它自己清單裡的映像檔，絕不刪除它本身執行的映像檔、它的副本使用的映像檔，或引擎裡任何 container 使用的映像檔；它執行 `docker rmi` / `podman rmi`，不加 `-f`（映像檔有好幾個 tag 時以那些 tag 刪除），並回答 `image_removed {request_id, ok, code, reason, in_use, image, freed_bytes, free_bytes, total_bytes}`。1.4.2 的 agent 的 `image_listed` 還會帶 `agent_image`（它執行的映像檔的 id）和 `free_bytes` / `total_bytes`。回應是 `{ok, image, freed_bytes, free_bytes, total_bytes}`：`freed_bytes` 是映像檔的大小（最多釋出這麼多：其他映像檔共用的 layer 會保留）；`free_bytes` / `total_bytes` 是之後的可用空間，agent 看得到時才有。
+
+| 狀態 | `code` | 時機 |
+|---|---|---|
+| 422 | `bad_image` | 映像檔不是用 id 指定 |
+| 409 | `machine_offline`、`agent_too_old` | agent 沒有連線，或比 1.4.2 舊 |
+| 404 | `image_not_found` | 那台機器（已經）沒有列出這個 id |
+| 409 | `not_an_engine_image` | 沒有 recipe 指定這個映像檔：它不屬於 Forgeyard，不能刪除 |
+| 409 | `agent_image` | agent 從這個映像檔執行 |
+| 409 | `image_in_use` | 那台機器上有部署正在使用它（`in_use` 列出它們），或引擎裡有 container 正在使用它（agent 的說明） |
+| 409 | `image_remove_failed` | 引擎沒有刪除它（它的說明） |
+| 504 | `agent_no_answer` | agent 5 分鐘內沒有回答 |
+
+稽核事件 `node.image_removed`（映像檔、它的 tag、指定它的 recipe、`ok`、釋出的位元組，或 agent 的 `code` 和原因），每次要求 agent 刪除都會記錄；在那之前就被拒絕的不會記錄。
+
 ## Setup health 檢查
 
 管理員會在 **Get started → Setup health** 看到這些檢查結果，頂端列會顯示錯誤和警告的數量，相關的頁面也會以橫幅顯示。一般使用者和 operator 都看不到。每項檢查都在頁面要求時，根據設定、資料庫和各 agent 最後一次的回報執行。*錯誤*會一直顯示到修好為止；*警告*或*提示*（API 裡是 `info`）管理員可以延後 30 天，只對自己隱藏。使用方式：[檢查設定健康狀態](how-to.md#check-the-setup-health)。
@@ -897,7 +916,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `cookie-not-secure` | 警告 | 伺服器使用 HTTPS，但設定了 `COOKIE_SECURE=false` |
 | `admin-password-left` | 警告 | 擁有者已經存在，`ADMIN_PASSWORD` 卻還設定著 |
 | `env-seed-ignored` | 提示 | 某個初始值設定（`MODEL_URL_HOSTS`、`MODEL_LOCAL_DIRS`、`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_*`）和管理員儲存的值不同，而儲存的值優先 |
-| `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
+| `secret-key-backup` | 警告 | 還沒有管理員確認已備份目前的機密金鑰。按 **Download a backup…**（用通關密語加密的檔案，見[金鑰備份檔](#the-key-backup-file)）或勾選 **I have a backup of key id …** 就會消失；金鑰更換後會再出現 |
 | `host-loopback` | 錯誤 | `HOST` 是 loopback 位址，卻有機器從其他位址加入（而且前面沒有代理） |
 | `public-url-unset` | 提示 | 其他機器連得到這台伺服器，`PUBLIC_URL` 卻是空白。如果你是以 `127.0.0.1` 或 `localhost` 開啟頁面，則是警告 |
 | `certificate-name-missing` | 錯誤 | 你自己的憑證沒有包含 `PUBLIC_URL` 的主機 |
@@ -940,7 +959,21 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 |---|---|
 | `uv run python main.py` | 啟動伺服器（等同 `python -m forgeyard serve`，或單獨的 `python -m forgeyard`）。資料庫的變更會在啟動時執行 |
 | `python -m forgeyard secrets reset --yes` | 機密金鑰遺失時使用：產生一把新的，並捨棄舊金鑰加密的內容（請先停止伺服器）。沒有 `--yes` 時只說明會捨棄什麼 |
+| `python -m forgeyard secrets restore FILE` | 從主控台下載的金鑰備份放回機密金鑰和 CA（請先停止伺服器）。會詢問通關密語。`--data-dir DIR`：寫到另一個資料夾；`--force`：取代那裡已有的不同金鑰或 CA（舊檔案保留為 `<名稱>.replaced-<時間>`）；`--passphrase-file PATH`：從檔案的第一行讀取通關密語。通關密語錯誤、檔案損壞或那裡已有不同的金鑰時，結束代碼為 2，什麼都不寫入 |
 | `python -m forgeyard --version` | 顯示版本 |
+
+### 金鑰備份檔
+
+**Download a backup…**（管理員，1.4.2）呼叫 `POST /api/secret-key/backup`（JSON：`password`、`passphrase`、`passphrase_confirm`），回應 `forgeyard-key-backup-<金鑰 id>-<YYYYMMDD>.fykey`，帶 `Content-Disposition: attachment` 和 `Cache-Control: no-store`。密碼的檢查和登入一樣（相同的延遲機制；密碼錯誤回應 401 `wrong_password`，並以 `secret_key.backup_failed` 記入稽核紀錄）；通關密語需要 12 到 1024 個字元、兩種以上不同的字元，而且不能和密碼相同（422）。`GET /api/secret-key` 會說明備份裡有什麼。檔案：
+
+| 位元組 | 內容 |
+|---|---|
+| 0–7 | `FYKEYBK` 加一個零位元組 |
+| 8–9 | N，標頭的長度（big-endian） |
+| 10 … 10+N | 標頭，UTF-8 JSON：`format` `forgeyard-key-backup`、`version` 1、`kdf`（`name` `argon2id`、`memory_kib` 65536、`iterations` 3、`lanes` 4、`salt`：16 個隨機位元組，base64）、`cipher`（`name` `aes-256-gcm`、`nonce`：12 個隨機位元組，base64）、`kid`、`created_at` |
+| 其餘 | AES-256-GCM 密文，後面接 16 位元組的 tag |
+
+32 位元組的加密金鑰是通關密語（正規化為 Unicode NFC、以 UTF-8 編碼）用標頭的 salt 和參數做 Argon2id（RFC 9106）得到的。附加資料（associated data）是密文之前的所有位元組，所以標頭被改過和密文被改過一樣會失敗。明文是 JSON：`kid`、`secret_key`（base64url，和 `secret.key` 相同）、`tls`（`{"ca.key": PEM, "ca.crt": PEM}`，沒有 Forgeyard 自己的 CA 時為 `null`）、`created_at` 和 `server_version`。`secrets restore` 只讀取第 1 版，拒絕低於上述值、或高於 1 GiB 記憶體、16 次、16 lanes 的 KDF 參數，並在寫入任何東西之前檢查金鑰和它的 id 相符、CA 的金鑰和它的憑證相符。
 
 ### agent
 
@@ -1030,7 +1063,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.4.1`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.4.2`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。

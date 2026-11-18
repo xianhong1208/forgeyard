@@ -27,6 +27,12 @@ agent's own server instead (agent/imagerelay.py) when the machine is set so, or 
 reach the registry ("auto"), then streamed into `docker load` / `podman load`, tagged, and run only when
 choose_image recognises it by its recorded ids. `load()` is also what an image file uploaded by an admin
 goes through ("image_load").
+
+Removing an engine image (1.4.2, #123, "image_remove"): only by an id from the agent's own listing, never the
+image the agent itself runs from, never one a replica here uses or any container of the engine uses (checked
+first, then `docker rmi` / `podman rmi` without `-f`, so the engine refuses it too). An image with several tags is
+removed by its own tags (the engine refuses an id that several names share); a name from the server is never
+used.
 """
 
 from __future__ import annotations
@@ -74,6 +80,36 @@ SAVE_CHUNK = 1024 * 1024
 
 class SaveFailed(Exception):
     """An image could not be saved (or no longer): the message is safe to show."""
+
+
+class RemoveRefused(Exception):
+    """1.4.2 ("image_remove"): an image is not removed, and why (safe to show). `code`: not_found | agent_image |
+    in_use | failed; `users` names what uses it."""
+
+    def __init__(self, code: str, message: str, users: Optional[list[str]] = None):
+        super().__init__(message)
+        self.code, self.users = code, list(users or [])[:16]
+
+
+# Where Docker and Podman mount a container's own files (/etc/hostname, /etc/hosts, /etc/resolv.conf) from: the
+# container's id is in the path. Docker: …/containers/<id>/hostname; Podman: …/overlay-containers/<id>/userdata/….
+_OWN_MOUNTS = ("/etc/hostname", "/etc/hosts", "/etc/resolv.conf")
+_CONTAINER_DIR_RE = re.compile(r"/(?:containers|overlay-containers)/([0-9a-f]{64})(?:/|$)")
+
+
+def own_container_id(mountinfo: Path = Path("/proc/self/mountinfo")) -> Optional[str]:
+    """The id of the container this process runs in, from the mounts the engine made for it; None outside one."""
+    try:
+        text = mountinfo.read_text(errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) > 4 and parts[4] in _OWN_MOUNTS:
+            m = _CONTAINER_DIR_RE.search(parts[3])
+            if m:
+                return m.group(1)
+    return None
 
 
 def listed_image(item: dict) -> dict:
@@ -257,6 +293,10 @@ def detect(engine: str = "auto", run: Runner = _run, which=shutil.which, cdi=nvi
             info = {}
         kind = "podman" if "podman" in Path(path).name or "host" in info and "version" in info else "docker"
         out = {"ok": True, "engine": kind, "path": path, "socket": engine_socket(kind, info)}
+        # 1.4.2: where the engine keeps its images, for the free space around them (when the agent can see it).
+        root = info.get("DockerRootDir") if kind == "docker" else (info.get("store") or {}).get("graphRoot")
+        if isinstance(root, str) and root.startswith("/"):
+            out["root"] = root
         if kind == "docker":
             out["version"] = info.get("ServerVersion")
             runtimes = sorted((info.get("Runtimes") or {}).keys())
@@ -309,9 +349,11 @@ class ContainerRuntime:
         self.engine = self._info.get("path") or "docker"
         self.socket: Optional[str] = self._info.get("socket")
         self._chosen: dict[str, tuple[str, str]] = {}  # replica id -> what pull() decided, for start()
+        self.mountinfo = Path("/proc/self/mountinfo")  # 1.4.2: how the agent finds its own container
+        self._agent_image: Optional[tuple[str]] = None    # (id or "",) once looked up
 
     def info(self) -> dict:
-        out = {k: v for k, v in self._info.items() if k not in ("path", "socket")}
+        out = {k: v for k, v in self._info.items() if k not in ("path", "socket", "root")}
         if self._info.get("ok"):
             out["pulls"] = "engine API" if self.socket else "CLI"
         return out
@@ -695,6 +737,105 @@ class ContainerRuntime:
                     end()
 
         return entry, chunks()
+
+    # ------------------------------------------------------------------ removing an engine image (1.4.2, #123)
+    def agent_image(self) -> Optional[str]:
+        """The id of the image the agent itself runs from (it runs in a container of this engine), else None.
+        Looked up once: the agent's own container does not change while it runs."""
+        if self._agent_image is None:
+            found = ""
+            cid = own_container_id(self.mountinfo) if self._info.get("ok") else None
+            if cid:
+                try:
+                    r = self._cli("inspect", "--type", "container", cid)
+                    items = json.loads(r.stdout or "[]") if r.returncode == 0 else []
+                except (OSError, subprocess.TimeoutExpired, ValueError):
+                    items = []
+                if isinstance(items, list) and items and isinstance(items[0], dict):
+                    found = images.normalize(items[0].get("Image")) or ""
+            self._agent_image = (found,)
+        return self._agent_image[0] or None
+
+    def disk(self) -> dict:
+        """The free and total space where the engine keeps its images, when the agent can see that directory
+        (an agent in a container usually cannot): {} otherwise."""
+        root = self._info.get("root")
+        if not root or not os.path.isdir(root):
+            return {}
+        try:
+            du = shutil.disk_usage(root)
+        except OSError:
+            return {}
+        return {"free_bytes": du.free, "total_bytes": du.total}
+
+    def refers(self, entry: dict, image: Optional[str], check: Optional[dict] = None) -> bool:
+        """Whether a replica whose spec names `image` (with the recorded ids `check`) uses this listed image: by
+        the ids, by its tag, or as the engine resolves the reference (a digest it was pulled by)."""
+        if not image:
+            return False
+        if check and (entry.get("id") in (check.get("ids") or []) or
+                      (entry.get("content") and entry["content"] in (check.get("content") or []))):
+            return True
+        from forgeyard.workloads.registry import full_name, tag_ref
+
+        if full_name(tag_ref(image)) in {full_name(t) for t in entry.get("tags") or []}:
+            return True
+        found = self._image(image)
+        return found is not None and images.normalize(found.get("Id")) == entry.get("id")
+
+    def containers_of(self, image_id: str) -> list[str]:
+        """The names of every container of the engine (any, not only this agent's) made from this image or one built
+        on it. Raises RemoveRefused when the engine cannot say."""
+        bare = image_id.removeprefix("sha256:")
+        try:
+            r = self._cli("ps", "-a", "--no-trunc", "--filter", f"ancestor={bare}", "--format", "{{.Names}}")
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise RemoveRefused("failed", f"could not check which containers use it: {e}") from None
+        if r.returncode != 0:
+            raise RemoveRefused("failed", "could not check which containers use it: "
+                                          f"{(r.stderr or r.stdout).strip()[-200:]}")
+        return [x.strip() for x in (r.stdout or "").splitlines() if x.strip()]
+
+    def remove_image(self, image_id: str, users: Callable[[dict], list[str]] = lambda entry: []) -> dict:
+        """Remove one of the engine's images by its id (one from this agent's own listing), as an admin asked:
+        refused for the agent's own image, for one a replica here uses (`users`), and for one any container uses;
+        never forced. Answers {ok, image, freed_bytes (the image's size: at most that much came back, since layers another
+        image shares stay), free_bytes?, total_bytes? (after)}. Raises RemoveRefused."""
+        if not self._info.get("ok"):
+            raise RemoveRefused("failed", f"no container engine: {self._info.get('reason') or 'not available'}")
+        wanted = images.normalize(image_id)
+        try:
+            entry = next((e for e in self.list_images() if e["id"] == wanted), None) if wanted else None
+        except StartError as e:
+            raise RemoveRefused("failed", str(e)[:300]) from None
+        if entry is None:
+            raise RemoveRefused("not_found", "that image is not on this machine (any more)")
+        if wanted == self.agent_image():
+            raise RemoveRefused("agent_image", "this is the image the agent itself runs from")
+        held = users(entry)
+        if held:
+            raise RemoveRefused("in_use", f"in use by {', '.join(held)} on this machine: stop "
+                                          f"{'it' if len(held) == 1 else 'them'} first", held)
+        containers = self.containers_of(wanted)
+        if containers:
+            shown = ", ".join(containers[:5]) + (f" and {len(containers) - 5} more" if len(containers) > 5 else "")
+            raise RemoveRefused("in_use", f"the engine keeps an image a container uses: {shown} "
+                                          f"{'uses' if len(containers) == 1 else 'use'} it", containers)
+        engine = Path(self.engine).name
+        names = entry["tags"] or [wanted]
+        try:
+            r = self._cli("rmi", *names, timeout=300)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise RemoveRefused("failed", f"{engine} rmi did not finish: {e}") from None
+        left = self._image(wanted)
+        if left is not None:
+            said = (r.stderr or r.stdout or "").strip()[-200:] or f"exit code {r.returncode}"
+            kept = listed_image(left)["tags"]
+            gone = [t for t in entry["tags"] if t not in kept]
+            more = f" (it is no longer tagged {', '.join(gone)})" if gone else ""
+            raise RemoveRefused("failed", f"{engine} rmi did not remove it{more}: {said}")
+        log.info("Removed the image %s (%s) as an admin asked.", wanted[:19], ", ".join(entry["tags"]) or "no tag")
+        return {"ok": True, "image": entry, "freed_bytes": entry.get("size") or 0, **self.disk()}
 
     def _pull(self, image: str, progress: Optional[pulling.Report], cancel: Optional[threading.Event]) -> None:
         """Through the engine API when it answers; else (or when the registry wants credentials the

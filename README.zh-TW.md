@@ -18,14 +18,14 @@
 ## ✨ 主要功能
 
 - **一個控制台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本；AMD
-  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和大小，可刪除那台機器上沒有部署在用的模型。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。連不到 Hugging Face、GitHub 或映像檔 registry 的機器會經由伺服器取得檔案和有釘選的引擎映像檔，伺服器只轉送、不存檔，另一台機器的快取裡有模型檔時就從那台取得；管理員也可以把映像檔上傳到機器，或從另一台機器複製映像檔。
+  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和引擎映像檔以及它們的大小，可刪除那台機器上沒有部署在用的項目。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。連不到 Hugging Face、GitHub 或映像檔 registry 的機器會經由伺服器取得檔案和有釘選的引擎映像檔，伺服器只轉送、不存檔，另一台機器的快取裡有模型檔時就從那台取得；管理員也可以把映像檔上傳到機器，或從另一台機器複製映像檔。比伺服器舊的 agent 會被標示出來，機器頁面上會顯示更新它的確切指令。
 - **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。
 - **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
 - **視覺模型（1.4）。** 物件偵測、影像分割與深度估計在 `/v1/vision/…`，像其他模型一樣部署。
-- **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。
+- **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。
 - **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
 ## 1.4 的新功能
@@ -34,7 +34,8 @@
 Catalog、Engines、Sources；用量與費用有折線圖；視覺模型（物件偵測、影像分割、深度估計）像其他模型一樣部署。**Download to…**
 可以在部署前先把模型和引擎下載到機器上；連不上網際網路的機器會經由伺服器取得，管理員也能上傳映像檔給它。應用程式（Apps）離開了主控台，它們的
 API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器的快取取得模型檔，管理員也能把引擎映像檔從一台機器複製到另一台，
-兩者都仍然經由伺服器。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的引擎映像檔並能刪除舊的，
+安排副本時也會計算還有多少空的主機連接埠。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
 
 ## 🚀 安裝
 
@@ -47,7 +48,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.1
+  docker.io/tonyhuang1101/forgeyard:1.4.2
 sudo docker logs forgeyard
 ```
 
@@ -89,7 +90,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

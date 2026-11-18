@@ -152,7 +152,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：**
 
-- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)）。之後副本的進度會顯示 *via the server*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
+- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)；這種機器的完整流程：[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)）。之後副本的進度會顯示 *via the server*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
 - 讓這台機器連得到那個主機（DNS、防火牆規則、proxy 路由）；Forgeyard 會在最後一次失敗一小時後，或伺服器重新啟動後，再把新的副本放到這台機器上試試；
 - 或把檔案帶過去：從已經有這個模型的機器複製模型快取（[搬移模型快取](how-to.md#move-a-model-cache)）、用 `docker load` 載入引擎映像檔（請看[副本失敗：映像檔不在這台機器上](#a-replica-fails-the-image-is-not-on-this-machine)），或把模型從本機目錄以 `local://` 模型的方式加入；
 - 或使用這台機器連得到的鏡像站（`HF_ENDPOINT`，請看 [Hugging Face 下載很慢](#hugging-face-downloads-are-slow)）。
@@ -163,10 +163,11 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 - *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
 - *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
 - *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
-- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。
+- *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)），或從有它的機器複製（[從另一台機器複製引擎映像檔](how-to.md#copy-an-engine-image-from-another-machine)）。
 - *… has no build for amd-01's architecture*：映像檔沒有那台機器平台（例如 arm64）的版本；請選有這個版本的 recipe 或變體。
 - *the image through the server: … SHA-256 mismatch*（某一層）、*the manifest the server sent … is not one of the image's recorded digests*，或 *… does not match the recorded ids: not running it*：收到的不是釘選的映像檔。什麼都沒有載入；伺服器的 log 會寫出是哪個 registry 回應的。
 - 伺服器的 log 每轉送一個檔案就有一行：*Relayed <repo>@<revision>/<file> to amd-01: 812.3 MiB in 41.0 s (19.8 MiB/s), finished.*，或它結束的原因。從另一台機器來的檔案（1.4.1）會寫 *… <file> from gpu-host to …*，送不出來的機器會寫出名稱和原因：*gpu-host could not send <file> for … (not_found: …); trying the next machine*。
+- *Relay of <repo>@<revision>/<file> to amd-01 cut short: the source broke off (…); 104857600 of 2147483648 bytes sent from huggingface.co in 12.3 s.*（伺服器的 log，1.4.2）：來源（網際網路上的主機、registry，或 `machine gpu-host`）在檔案傳到一半時中斷。伺服器沒有出錯：agent 會再要求剩下的部分，下載會從磁碟上已有的部分繼續。同一個來源一再發生時，請檢查那段網路，或那台機器的 agent log。
 - *gpu-host's copy of <file> does not match its checksum*（伺服器的 log，稽核紀錄裡的 `node.relay_copy_refused`；送出檔案的機器自己的 log 會寫 *A cached file failed its checksum*）：那台機器上的副本壞了。檔案已改從別處取得；請從那台機器的快取（它的頁面）移除這個模型再重新下載。一小時內不會再要求它送這個檔案。
 
 ## vLLM 在共用的卡上無法啟動
@@ -205,6 +206,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | 這是 CPU 模型，而可用的 RAM 不夠 |
 | `no container runtime (…)` | recipe 需要 Docker 或 Podman，但這台機器沒有 |
 | `its agent does not serve models` | 這個 agent 沒有設定模型快取（設定裡的 `[models] cache`） |
+| `no free port: 3 of 3 in use (host ports 33000-33002)` | 這台機器的[連接埠範圍](#a-replica-waits-no-free-host-port)都被它的副本佔用了 |
 | `offline` | 這台機器的 agent 沒有連線 |
 
 **做法：** 釋出卡上的記憶體（停掉某些東西）、允許更多卡（[GPU 存取權](how-to.md#restrict-gpus-on-a-shared-machine)）、降低上下文長度或並行數、選擇量化過或較小的模型，或者先部署，讓它等到有空間為止（API 的 `"wait": true`）。
@@ -218,6 +220,20 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 缺少副本需要的功能而把它丟掉的 agent，或卡住的 agent，也會這樣。
 
 **怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。agent 已經是伺服器的版本時，訊息會請你重新啟動它並查看它的紀錄（`journalctl -u forgeyard-agent`，或 `docker logs forgeyard-agent`）。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
+
+## 副本在等待：沒有空的主機連接埠
+
+**你會看到：** 副本沒有被放到任何機器上，部署或應用程式頁面顯示 *Cannot be placed: gpu-02: no free port: 3 of 3 in use (host ports 33000-33002)*，或 *not enough free ports: 2 of 3 in use, it needs 2*。部署預覽中那台機器也會顯示同樣的一行。
+
+**原因：** agent 用它連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠公開服務和模型副本。模型副本佔用兩個（agent 的金鑰守衛聽一個，引擎聽另一個），應用程式每公開一個連接埠佔用一個（公開在 `/x/` 時是兩個）。伺服器會計算機器上副本已佔用的連接埠，並略過沒有足夠空連接埠的機器，就像略過記憶體不夠的機器一樣，而不是把副本送到只能在那裡等待的地方。透過 SSH tunnel 連線的機器常有很小的範圍，因為範圍內的每個連接埠都要轉送。1.4.2 之前的 agent 不會回報它的範圍，它們的連接埠不會被計算。
+
+agent 給不出連接埠的副本（在伺服器開始計算連接埠之前就被放上去的）會回報 *no free host port left in 33000-33002*。如果伺服器的計算也這麼認為，就把它從那台機器拿下來：它會被放到有空間的機器，或帶著上面的原因等待。如果計算結果還有空間，代表 Forgeyard 以外的程式佔用了範圍內的連接埠：agent 會跳過它們，並在 backoff 後再試一次。
+
+**做法：** 停掉那台機器上的某些東西、部署到別台機器，或給 agent 更大的範圍（並轉送或開放那些連接埠，讓伺服器連得到），然後重新啟動 agent：
+
+```bash
+sudo forgeyard agent runtimes   # the last line shows the range the agent uses
+```
 
 ## 來自 /v1 的錯誤：401、403、429、503
 

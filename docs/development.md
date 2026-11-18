@@ -48,6 +48,19 @@ image to a machine without registry access. `scripts/pin_images.py` checks both 
   (FY-VIS-001 and FY-VIS-019 name the pinned references). A release that did not change it keeps the pin:
   a server upgrade alone never changes the image a vision model runs.
 
+## Before a release
+
+The release steps are in [CONTRIBUTING.md](../CONTRIBUTING.md#releasing). One of them guards the image
+publish: `.github/workflows/dockerhub-login.yml` (*Docker Hub login*) runs on every push to `dev` and `main`,
+logs in to Docker Hub with the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, checks with
+`scripts/dockerhub_check.py` that the token may push to `forgeyard`, `forgeyard-agent` and `forgeyard-vision`
+(Docker Hub's token service answers with the actions it grants; nothing is pushed), and logs out. Without
+the secrets it warns and stays green. **Before tagging, its latest run on `main` must be green without a
+warning** (`gh run list --workflow dockerhub-login.yml --branch main --limit 1`); otherwise re-enter both
+secrets (the username is the Docker Hub account name, the token a *Read & Write* access token) and run it
+again by hand (*Actions → Docker Hub login → Run workflow*). It is not a required check and does not run on
+pull requests.
+
 ## Writing tests that do not flake
 
 CI runs on small machines (two cores, often busy; the PostgreSQL job the slowest), so a test that
@@ -112,16 +125,17 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/models/` | model sources, the SSRF-guarded fetcher, inspection (safetensors, GGUF, what a model takes besides text, licence), estimates, recipes, the scheduler, routes, the recommended list, the server's Hugging Face token, downloads ahead of a deployment (`prefetch.py`, with `api/downloads.py`) |
 | `forgeyard/recipes/` | the built-in engine recipes (YAML), images pinned by digest |
 | `forgeyard/security/` | passwords, sessions, rate limits, host/CSRF middleware, HTTPS and the CA, secrets at rest, `secrets reset` |
-| `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`) |
+| `forgeyard/agent/` | the agent: inventory collectors (NVML, AMD SMI, CPU), connection, state, trust (`agent trust`), how it runs (`how_it_runs.py`, for its update command) |
 | `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
 | `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks, downloads ahead of a deployment (`prefetch.py`) |
-| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, the published images' names (`images.py`), the server image's health check |
+| `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, an agent's update command and whether it is behind (`update.py`), the published images' names (`images.py`), the server image's health check |
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |
 | `Dockerfile.agent`, `scripts/agent_image_smoke.sh` | the agent's container image and its CI smoke test |
 | `Dockerfile.server`, `scripts/server_image_smoke.sh` | the server's container image and its CI smoke test |
 | `.github/workflows/publish-images.yml`, `scripts/publish_plan.py` | a release tag publishes both images on Docker Hub |
+| `.github/workflows/dockerhub-login.yml`, `scripts/dockerhub_check.py` | every push to `dev` and `main` checks that the Docker Hub secrets log in and may push ([before a release](#before-a-release)) |
 | `scripts/accept_all.py` | the full regression run: every shipped feature checked on your own server and machines ([how](guide/how-to.md#check-a-server-end-to-end)) |
 | `scripts/accept_m3.py`, `accept_m4.py`, `accept_mm.py` | acceptance runs on real machines, through the API and the official OpenAI SDK |
 | `scripts/gpu_probe.py` | checks which NVIDIA GPU an app sees, through the CUDA driver only |

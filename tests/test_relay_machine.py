@@ -393,6 +393,8 @@ def test_fy_rfm_004_a_copy_that_does_not_match_is_never_sent_whole_and_its_sourc
         rows = audit_rows("node.relay_copy_refused")
         assert len(rows) == 1 and rows[0].target == "src" and rows[0].detail["to"] == "tgt"
         assert any("src's copy of acme/shared@dddddddddddd/m.gguf does not match" in m for m in caplog.messages)
+        assert any(m.startswith("Relay of acme/shared@dddddddddddd/m.gguf to tgt cut short: the source's bytes hash to ")
+                   and f"of {len(DATA)} bytes sent from machine src" in m for m in caplog.messages), caplog.messages
         status, headers, body = get(w, url, w.tgt["credential"], rng=f"bytes={len(body)}-")
         assert status == 200 and body == DATA and "content-range" not in headers
         assert cdn(w) == [None]
@@ -926,3 +928,56 @@ def test_fy_rfm_014_a_bad_copy_is_refused_and_the_target_starts_the_file_over_fr
     assert blob(tcache, DATA).read_bytes() == DATA
     assert cdn(w) == [None]  # the whole file, once, from the internet
     assert [r.target for r in audit_rows("node.relay_copy_refused")] == ["src"]
+
+
+def test_fy_rfm_016_a_machine_that_breaks_off_mid_file_reads_as_such_in_the_log(world, monkeypatch, caplog):
+    """FY-RFM-016 (issue #130): the source machine's POST ends after part of the file. The target sees a short body;
+    the server logs one line naming the file, the target, the source machine and the bytes sent, and uvicorn
+    nothing about the cut answer."""
+    from tests.test_relay import Records
+
+    w = world
+    _, uid = download_row(w.model_id, w.tgt["node_id"])
+    asked, release = [], threading.Event()
+
+    def held(self, message, cancel=None):
+        asked.append(message)
+        release.wait(20)
+        return {"ok": False, "code": "failed", "reason": "the test sent it"}
+
+    monkeypatch.setattr(share.Sender, "send", held)
+    caplog.set_level(logging.INFO, logger="forgeyard.relay")
+    uvicorn_log = logging.getLogger("uvicorn.error")
+    seen = Records()
+    uvicorn_log.addHandler(seen)
+    out = {}
+    try:
+        with source(w):
+            connected_source(w, w.src["node_id"])
+            t = threading.Thread(target=lambda: out.update(r=get(w, f"/agent/v1/relay/download/{uid}/model/m.gguf",
+                                                                   w.tgt["credential"])))
+            t.start()
+            wait_until(lambda: asked, "the source asked")
+            path = asked[0]["path"]
+            cut = http.client.HTTPConnection("127.0.0.1", w.port, timeout=20)
+            cut.putrequest("POST", path)
+            cut.putheader("Authorization", f"Bearer {w.src['credential']}")
+            cut.putheader("Content-Length", str(len(DATA)))
+            cut.endheaders()
+            cut.send(DATA[:200_000])
+            wait_until(lambda: peers._pipes[path.rsplit("/", 1)[1]].received == 200_000, "the first part received")
+            cut.close()  # the source machine goes away mid-file
+            t.join(20)
+            status, headers, body = out["r"]
+            assert status == 200 and {k.lower(): v for k, v in headers.items()}["content-length"] == str(len(DATA))
+            assert body == DATA[:len(body)] and len(body) <= 200_000  # short: never a whole file
+            wait_until(lambda: any("cut short" in m for m in caplog.messages), "the log line")
+            lines = [m for m in caplog.messages if "m.gguf" in m and "to tgt" in m and not m.startswith("Relaying")]
+            assert len(lines) == 1, lines
+            assert lines[0].startswith("Relay of acme/shared@dddddddddddd/m.gguf to tgt cut short: the source broke off (")
+            assert f"; {len(body)} of {len(DATA)} bytes sent from machine src in " in lines[0]
+            wait_until(lambda: peers._pipes == {}, "the pipe closed")
+            assert not any("ASGI" in t or "Content-Length" in t or "EndedEarly" in t for t in seen.texts()), seen.texts()
+            release.set()
+    finally:
+        uvicorn_log.removeHandler(seen)

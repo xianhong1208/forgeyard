@@ -1078,6 +1078,13 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .trust-platforms .steps { margin-top: 2px; }
 .trust-platforms p { margin: 8px 0; color: var(--ink-2); }
 .trust-admin-lead { margin: 14px 0 10px; color: var(--ink-2); max-width: 75ch; }
+/* 1.4.2 (#127): the secret-key backup dialog. */
+.trust-admin-actions { margin: 0 0 14px; }
+.keybak form, .keybak-done { display: grid; gap: 12px; }
+.keybak .field { margin: 0; }
+.keybak-facts { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 13px; }
+.keybak-done p { margin: 0; }
+@media (max-width: 760px) { .keybak-facts { grid-template-columns: 1fr; gap: 2px 0; } .keybak-facts dd { margin-bottom: 6px; } }
 .trust-hint { margin: 10px 0 0; }
 .trust-upgrade { margin: 4px 0 12px; }
 .trust-upgrade summary { cursor: pointer; width: max-content; max-width: 100%; color: var(--info); }
@@ -1418,6 +1425,18 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .tile-mem { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .tile-mem strong { color: var(--ink); }
 .tile-foot { display: flex; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+/* 1.4.2 (#121, #122): an agent behind the server, and its update command. */
+.chip-update { gap: 4px; background: var(--heat-soft); border-color: #f3d39b; color: var(--heat-ink); font-family: inherit; font-weight: 600; text-decoration: none; white-space: normal; height: auto; min-height: 21px; overflow-wrap: anywhere; }
+a.chip-update:hover { border-color: var(--heat-ink); }
+.tile-foot:has(.chip-update) { flex-wrap: wrap; align-items: center; }
+.tile-foot .chip-update { position: relative; z-index: 1; font-size: 12px; white-space: nowrap; } /* above the tile's stretched link */
+.agent-update .update-why { margin: 0 0 10px; }
+.update-steps { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 12px; min-width: 0; }
+.update-steps > li { min-width: 0; }
+.update-step-title { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.update-alt { margin-top: 12px; font-size: 13px; }
+.update-alt summary { cursor: pointer; color: var(--ink-2); }
+.update-notes { margin: 12px 0 10px; padding-left: 18px; font-size: 13px; color: var(--muted); display: grid; gap: 4px; }
 .tiles-legend { margin-top: 14px; }
 
 /* A machine's page. */
@@ -1582,6 +1601,14 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 .upl-progress small { font-size: 12px; color: var(--muted); }
 .img-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .cpy-images { max-height: 320px; overflow-y: auto; }
+/* 1.4.2 (#124): the rest of the other machine's images, on request. */
+.cpy-all { align-items: flex-start; font-size: 13px; }
+.cpy-all input { margin-top: 2px; flex: none; }
+.cpy-all small { display: inline; }
+/* 1.4.2 (#123): removing an engine image asks in its row first. */
+.cacherow-confirm { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bad-soft); }
+.cacherow-confirm p { margin: 0; min-width: 0; flex: 1 1 260px; overflow-wrap: anywhere; color: var(--ink); }
+.cacherow-confirm-act { display: flex; flex-wrap: wrap; gap: 8px; }
 /* 1.4.1: a copy whose size is not known ahead: a bar that moves without a value. */
 .bar-busy > span { width: 30%; animation: bar-busy 1.4s ease-in-out infinite; }
 @keyframes bar-busy { 0% { margin-left: 0; } 50% { margin-left: 70%; } 100% { margin-left: 0; } }

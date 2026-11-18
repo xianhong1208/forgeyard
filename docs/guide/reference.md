@@ -1165,6 +1165,41 @@ image}`. The answer is `{ok, bytes, images, source: {id, name}, saved}`, each im
 Audited as `node.image_copied` (the target; `from_machine`, the image asked for, its size, `ok`, the images
 loaded with their content ids, or why not). Refusals before a byte moved are not audited.
 
+### A machine's engine images through the API
+
+`GET /api/machines/{id}/engine-images` (everyone signed in, 1.4.2) asks that machine's agent for the images in
+its engine (`image_list`, as above) and answers `{machine_id, listed, note, images, others, free_bytes,
+total_bytes, can_remove, remove_note}`. `images` holds only the images a recipe names, largest first, each as
+listed plus `matches`, `used_by` (the deployments on that machine whose replica runs it: `[{name, kind, id}]`),
+`agent` (the agent runs from it) and `remove_note` (why it cannot be removed now, or null). `others` counts the
+engine's other images. `free_bytes` / `total_bytes`: where the engine keeps its images, when the agent can see
+that directory, else null. `listed` false with a `note` when the agent is offline, cannot list (no container
+engine, older than 1.4.1) or failed.
+
+`POST /api/machines/{id}/engine-images/remove` with `{"image": "sha256:…"}` (admins) removes one. The server lists
+the machine's images again and refuses before asking the agent; then it sends `image_remove {request_id, image}`
+(protocol feature `image_remove`, agents from 1.4.2). The agent removes only an image of its own listing, never
+the image it runs from, one its replicas use or one any container of the engine uses; it runs `docker rmi` /
+`podman rmi` without `-f` (by the image's tags when it has several) and answers `image_removed {request_id, ok,
+code, reason, in_use, image, freed_bytes, free_bytes, total_bytes}`. A 1.4.2 agent's `image_listed`
+also carries `agent_image` (the id of the image it runs from) and `free_bytes` / `total_bytes`. The answer is
+`{ok, image, freed_bytes, free_bytes, total_bytes}`: `freed_bytes` is the image's size (at most that came back:
+layers another image shares stay); `free_bytes` / `total_bytes` are the space after, when the agent can see it.
+
+| Status | `code` | When |
+|---|---|---|
+| 422 | `bad_image` | The image is not named by its id |
+| 409 | `machine_offline`, `agent_too_old` | The agent is not connected, or older than 1.4.2 |
+| 404 | `image_not_found` | The machine does not list that id (any more) |
+| 409 | `not_an_engine_image` | No recipe names the image: it is not Forgeyard's to remove |
+| 409 | `agent_image` | The agent runs from that image |
+| 409 | `image_in_use` | A deployment on that machine uses it (`in_use` names them), or a container of the engine does (the agent's words) |
+| 409 | `image_remove_failed` | The engine did not remove it (its words) |
+| 504 | `agent_no_answer` | The agent did not answer within 5 minutes |
+
+Audited as `node.image_removed` (the image, its tags, the recipes that name it, `ok`, the bytes freed, or the
+agent's `code` and reason) for every removal the agent was asked for; refusals before that are not audited.
+
 ## Setup health checks
 
 Admins see these under **Get started → Setup health**, as a count in the top bar (errors and
@@ -1184,7 +1219,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `cookie-not-secure` | warning | `COOKIE_SECURE=false` while the server speaks HTTPS |
 | `admin-password-left` | warning | `ADMIN_PASSWORD` is still set after the owner exists |
 | `env-seed-ignored` | note | A first-value setting (`MODEL_URL_HOSTS`, `MODEL_LOCAL_DIRS`, `GATEWAY_DEFAULT_*`, `GATEWAY_MAX_*`, `GATEWAY_CLOUD_*`) differs from what an admin saved, which wins |
-| `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **I have a backup of key id …** ticks it off; it comes back when the key changes |
+| `secret-key-backup` | warning | No admin has confirmed a backup of the current secret key. **Download a backup…** (a passphrase-encrypted file, see [The key backup file](#the-key-backup-file)) or **I have a backup of key id …** ticks it off; it comes back when the key changes |
 | `host-loopback` | error | `HOST` is a loopback address, but a machine joined from another address (and no proxy is in front) |
 | `public-url-unset` | note | `PUBLIC_URL` is empty on a server other machines can reach. A warning when you opened the page as `127.0.0.1` or `localhost` |
 | `certificate-name-missing` | error | Your own certificate does not name `PUBLIC_URL`'s host |
@@ -1227,7 +1262,33 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 |---|---|
 | `uv run python main.py` | Start the server (same as `python -m forgeyard serve`, or `python -m forgeyard` alone). Database changes run on start |
 | `python -m forgeyard secrets reset --yes` | The secret key is lost: make a new one and drop what it encrypted (stop the server first). Without `--yes` it only says what it would drop |
+| `python -m forgeyard secrets restore FILE` | Put back the secret key and the CA from a key backup downloaded from the console (stop the server first). Asks for the passphrase. `--data-dir DIR`: another data folder; `--force`: replace a different key or CA already there (the old files are kept as `<name>.replaced-<time>`); `--passphrase-file PATH`: the passphrase from a file's first line. Exit 2, nothing written, on a wrong passphrase, a damaged file or a different key already there |
 | `python -m forgeyard --version` | The version |
+
+### The key backup file
+
+**Download a backup…** (admins, 1.4.2) answers `POST /api/secret-key/backup` (JSON `password`,
+`passphrase`, `passphrase_confirm`) with `forgeyard-key-backup-<key id>-<YYYYMMDD>.fykey`,
+`Content-Disposition: attachment` and `Cache-Control: no-store`. The password is checked like a
+sign-in (the same back-off; a wrong one answers 401 `wrong_password` and is audited as
+`secret_key.backup_failed`); the passphrase needs 12 to 1024 characters, more than two different
+ones, and must not be the password (422). `GET /api/secret-key` says what a backup holds. The file:
+
+| Bytes | What |
+|---|---|
+| 0–7 | `FYKEYBK` and a zero byte |
+| 8–9 | N, the header's length (big-endian) |
+| 10 … 10+N | The header, UTF-8 JSON: `format` `forgeyard-key-backup`, `version` 1, `kdf` (`name` `argon2id`, `memory_kib` 65536, `iterations` 3, `lanes` 4, `salt`: 16 random bytes, base64), `cipher` (`name` `aes-256-gcm`, `nonce`: 12 random bytes, base64), `kid`, `created_at` |
+| the rest | AES-256-GCM ciphertext, then its 16-byte tag |
+
+The 32-byte encryption key is Argon2id (RFC 9106) of the passphrase, normalised to Unicode NFC and
+encoded as UTF-8, with the header's salt and parameters. The associated data is every byte before
+the ciphertext, so a changed header fails like a changed ciphertext. The plain text is JSON:
+`kid`, `secret_key` (base64url, as in `secret.key`), `tls` (`{"ca.key": PEM, "ca.crt": PEM}`, or
+`null` without Forgeyard's own CA), `created_at` and `server_version`. `secrets restore` reads
+version 1 only, refuses KDF parameters below these or above 1 GiB of memory, 16 passes or 16 lanes,
+and checks that the key matches its id and the CA's key matches its certificate before it writes
+anything.
 
 ### The agent
 
@@ -1361,7 +1422,7 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.4.1` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
+- **Tags**: `1.4.2` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

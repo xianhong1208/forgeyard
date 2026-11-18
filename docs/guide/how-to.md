@@ -133,7 +133,11 @@ the next machine:
   `TLS_EXTRA_NAMES` and restart the server, or use a name the certificate has.
 - **Advanced → Port range** (`FORGEYARD_PORT_RANGE`, default `30000-32767`): the host ports for
   services and model replicas. Set it when only some ports reach the machine, for example
-  `40000-40099` opened in a firewall. The server must be able to reach these ports.
+  `40000-40099` opened in a firewall. The server must be able to reach these ports. Each port an app
+  publishes takes one port of the range, and a model replica (or an app exposed at `/x/`) takes two: one
+  for the agent's key guard and one for the engine behind it. Forgeyard counts them, so a range of 3
+  ports holds one model: a machine whose range is full is skipped, and a replica with nowhere else to go
+  waits ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
 
 A field the agent would reject shows its error instead of a command. The image's tag is the
 server's own version, so agent and server always match. An admin can point the command at a mirror,
@@ -158,7 +162,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
 ```
 
 Then:
@@ -190,7 +194,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -205,7 +209,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2 inventory
 ```
 
 ### CPU only
@@ -219,7 +223,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.2
 ```
 
 ### Why these options
@@ -252,8 +256,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.1 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.1 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.2 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -272,18 +276,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.1 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.2 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.4.1`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.4.2`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.1` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -296,7 +300,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.1
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -306,7 +310,152 @@ A machine that already joined keeps its identity if the container gets its state
 Processes the old agent started outside the container are not taken over: stop them from
 the UI first.
 
+## Run a machine without internet access
+
+A machine with no internet access of its own (behind a firewall, on a DNS filter, or reached only through
+an SSH tunnel) runs models like any other machine: it needs to reach only the server. Models, engine
+archives and engine images come through the server, or from another machine that already has them, and
+the agent checks every file as it checks a direct download. This section goes through it in order, from
+joining to a deployed model, and links to the sections with the details. In the examples, `amd-01` has no
+internet access and `gpu-01` has.
+
+Give it an agent of the server's version. Downloads through the server need 1.4; sending files to other
+machines, 1.4.1; the update command, counting free ports and removing engine images, 1.4.2. The machine's
+page says when its agent is too old for something.
+
+### Join it
+
+1. **The agent reaches the server, and nothing else.** It connects out, over HTTPS, to the server's
+   address (port 7860 unless you changed it), and everything it downloads later comes over that
+   connection. Add the machine as usual: **Machines** → **Add a machine**. On a machine that cannot reach
+   Docker Hub, bring the agent image as a file
+   ([Offline machines, or build it yourself](#offline-machines-or-build-it-yourself)).
+2. **The server reaches the machine's port range.** Model replicas listen on host ports of the agent's
+   port range (`FORGEYARD_PORT_RANGE`, default `30000-32767`), and the gateway connects to them. Open the
+   range in the firewall, or choose a small range and forward it.
+3. **Through an SSH tunnel**, one connection carries both. From the server's host, `-R` brings the
+   server's port to the machine and each `-L` brings one port of the range back. With the range
+   `33000-33002`:
+
+   ```bash
+   ssh -N -R 7860:127.0.0.1:7860 \
+     -L 33000:127.0.0.1:33000 -L 33001:127.0.0.1:33001 -L 33002:127.0.0.1:33002 \
+     USER@amd-01
+   ```
+
+   Then add the machine with **Server address, as that machine reaches it** set to
+   `https://127.0.0.1:7860` and **Advanced → Port range** set to `33000-33002`
+   ([the form](#run-the-agent-in-docker)).
+
+Placement counts the free ports of the range. A model replica takes two (the agent's key guard and the
+engine behind it), so three ports hold one model; a machine whose range is full is skipped, and a replica
+with nowhere else to go waits ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
+
+### Choose its internet access
+
+On the machine's page (admins), under **Models in cache**, set **Internet access for downloads**
+([details](#give-an-offline-machine-models-through-the-server)):
+
+- **Always through the server**: for a machine with no internet access at all, like `amd-01`. Every
+  model file, engine archive and pinned engine image comes through the server. The agent never tries the
+  source first, so nothing waits for a failure, and the machine is never sent a Hugging Face token.
+- **Auto** (the default): for a machine that usually reaches the internet. It downloads directly. Once a
+  source cannot be reached from the machine (the name does not resolve, the connection is refused, reset
+  or times out, the network is unreachable), the rest of that download, and the next ones from that host
+  or registry for an hour, come through the server. An HTTP error (a missing file, a refused token) or a
+  checksum mismatch never switches: the server would get the same answer.
+- **Direct only**: never through the server. Such a machine that cannot reach a source is placed last for
+  an hour ([A machine cannot reach Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)).
+
+Every byte that comes through the server crosses its network twice, so keep the machines that reach the
+internet on **Auto** or **Direct only**.
+
+### Get models onto it
+
+Deploy as usual, or fill the machine's model cache ahead with **Download to…**, which fetches the engine
+too ([Download a model before deploying it](#download-a-model-before-deploying-it)). Either way each file
+comes through the server, from one of two places:
+
+- **another machine's cache**: when a machine whose agent is 1.4.1 or later (`gpu-01`) has the model, it
+  sends the file to the server, which passes it on. That machine also connects out only; it opens no port.
+  The internet is used only when no machine can send the file
+  ([From another machine](#give-an-offline-machine-models-through-the-server));
+- **the internet**: the server downloads the file from Hugging Face or the model's URL and passes it on. A
+  gated model needs the server's Hugging Face token (**Models → Sources**) or the deployment's own.
+
+Which one it was shows in several places:
+
+- the progress, on the deployment's page, under the model in the catalog and on the machine's page:
+  *Downloading the model via the server: … of …* from the internet, *Downloading the model via the
+  server, from gpu-01: … of …* from that machine's cache, then *Downloaded … via the server* or
+  *Downloaded … via the server, from gpu-01* when it is done;
+- **Download to…**, before you start: *via the server*, or *via the server, from gpu-01*, on the
+  machine's line;
+- the downloads API: `via` is `direct`, `server` or `machine`, with the sending machine in `source`
+  ([the reference](reference.md#download-a-model-ahead-through-the-api));
+- the server's log, one line per file: *Relayed … to amd-01: …*, or *… from gpu-01 to amd-01: …*.
+
+Engine archives (llama.cpp's process variant on a CPU machine, for example) always come from the internet
+through the server: agents delete an archive once it is unpacked, so no machine has one to send.
+
+### Get engine images onto it
+
+- **Pinned images come through the server by themselves.** Every built-in recipe pins its images by
+  digest, Forgeyard's own vision image too (since 1.4.1). The server reads the image for the machine's
+  platform from its registry and passes its layers on; the agent checks each one, loads the image and runs
+  it only when it matches the recorded ids. The progress says *Pulling the image via the server: … of …,
+  … of … layers* ([details](#give-an-offline-machine-models-through-the-server)). So a vision model
+  ([Deploy an object-detection model](#deploy-an-object-detection-model)) deploys on such a machine as it
+  does anywhere.
+- **An image named by a tag only** (a custom recipe's, or one you built) has no recorded digest to check
+  it against, so it cannot come through the server. Put it there from the machine's page →
+  **Engine images**:
+  - **Upload an image**: a `docker save` file from your computer
+    ([Upload an engine image to a machine](#upload-an-engine-image-to-a-machine));
+  - **Copy from another machine**: an image that `gpu-01`'s container engine already has, with no file
+    ([Copy an engine image from another machine](#copy-an-engine-image-from-another-machine)).
+- **Remove old images** on the same page when recipes move to newer ones: **Remove** works on an image
+  no deployment there uses ([Engine images](#engine-images)).
+- An agent older than 1.4 gets none of this: carry the image over as a file and `docker load` it
+  ([Offline machines](#offline-machines)).
+
+### Update its agent
+
+After a server upgrade, the machine's page shows **Update the agent** with the complete command
+([Update an agent](#update-an-agent)). For a machine set to **Always through the server**, the command
+carries the agent image instead of pulling it. Run its first step on a machine that can reach Docker Hub
+(replace `USER`, and the host name if you reach the machine by another):
+
+```bash
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.2 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+```
+
+Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
+No `ssh` route to the machine? Save the image to a file and carry it
+([Offline machines, or build it yourself](#offline-machines-or-build-it-yourself)). An agent before 1.4.2
+does not report how it runs: update it that way by hand once, and its page shows the command from then on.
+
+### When something goes wrong
+
+- A download or an image *via the server* fails: each message, and what to do, is under *Through the
+  server, it still fails* in
+  [A machine cannot reach Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face).
+- *Cannot be placed: amd-01: no free port: 3 of 3 in use (host ports 33000-33002)*: the port range is full
+  ([No free host port](troubleshooting.md#a-replica-waits-no-free-host-port)).
+- *Relay of … to amd-01 cut short: the source broke off (…)* in the server's log: the source (a host on the
+  internet, a registry, or `machine gpu-01`) stopped in the middle of a file. The agent asks for the rest
+  again by itself and the download goes on from what is on disk; look further only when it keeps
+  happening with the same source (that network, or that machine's agent log).
+- A replica says its image is not on the machine:
+  [A replica fails: the image is not on this machine](troubleshooting.md#a-replica-fails-the-image-is-not-on-this-machine).
+- The machine shows offline: the tunnel or the firewall between it and the server
+  ([An agent shows offline](troubleshooting.md#an-agent-shows-offline)).
+
 ## Offline machines
+
+For the whole path, from joining such a machine to a deployed model, see
+[Run a machine without internet access](#run-a-machine-without-internet-access).
 
 A machine that cannot reach the registry (no internet access, or a DNS filter that blocks `ghcr.io`
 or Docker Hub) runs the built-in recipes from engine images you carry over as files. The recipe and
@@ -358,7 +507,7 @@ are, with no custom recipe that names an image by tag only.
 
 Ids are recorded for every image of the built-in recipes, and for a custom recipe that names one of
 them exactly. Another image pinned by digest cannot be checked: on an offline machine, name it by its
-tag only in your custom recipe. The check needs an agent from this release or later; an older one
+tag only in your custom recipe. The check needs an agent of 1.3 or later; an older one
 tries to pull.
 
 ## Deploy an object-detection model
@@ -577,9 +726,11 @@ machines or large sizes.
 engine arguments for stable-diffusion.cpp (`--cfg-scale 1 --steps 8`); the recommended entries carry
 them. vLLM-Omni reads them from the model itself.
 
-**On an offline AMD machine:** load the `sd-cpp` recipe's Vulkan image with `docker load` (see
-[Offline machines](#offline-machines)). For the model, deploy it once on a machine that can reach
-Hugging Face, then copy its directory from that machine's model cache
+**On an offline AMD machine:** with a 1.4 agent, the `sd-cpp` recipe's Vulkan image (pinned) and the
+model come through the server, the model from another machine's cache when one has it
+([Run a machine without internet access](#run-a-machine-without-internet-access)). With an older agent,
+load the image with `docker load` ([Offline machines](#offline-machines)); for the model, deploy it once on
+a machine that can reach Hugging Face, then copy its directory from that machine's model cache
 (`hub/models--<org>--<name>`, with `tar` or `rsync -a`: it uses relative links) into the same place in
 the offline machine's cache. The deployment there finds it cached and downloads nothing.
 
@@ -880,7 +1031,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.1
+  docker.io/tonyhuang1101/forgeyard:1.4.2
 sudo docker logs forgeyard
 ```
 
@@ -914,7 +1065,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.2 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -923,7 +1074,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.2 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -932,23 +1083,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.2
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.3
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.2
+  docker.io/tonyhuang1101/forgeyard:1.4.3
 ```
 
-`1.4.2` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
+`1.4.3` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.1
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.2
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -956,7 +1107,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.1 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.2 .`
 
 ## Run the server as a service
 
@@ -1022,11 +1173,63 @@ the journal: `journalctl -u forgeyard -f`.
 
    - **Docker**: `docker pull` the image of the server's new version (the **Machines** page names
      it), then `docker rm -f forgeyard-agent` and the same `docker run` with the new tag. The
-     volume keeps the machine.
+     volume keeps the machine. Each machine's page shows that command, complete
+     ([how](#update-an-agent)).
    - **Manual**: `git pull`, `uv sync`, restart the agent.
 
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
+
+## Update an agent
+
+Every machine's page has an **Update the agent** section. For admins it shows the complete command that brings
+that machine's agent to the server's version, made from what the agent reported about how it runs (agents from
+1.4.2 on report it each time they connect):
+
+- **In Docker**: the agent reads its own container through the engine it already uses: its name, image,
+  network, restart policy, GPUs (`--gpus`), devices and group ids (AMD's `/dev/kfd`, `/dev/dri` and the
+  numeric `--group-add`), mounts and the variables it was given with `-e`. The command pulls the agent image
+  of the server's version, removes the old container and starts the same one on the new image:
+
+   ```bash
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.2 && \
+   sudo docker rm -f forgeyard-agent && \
+   sudo docker run -d \
+     --name forgeyard-agent \
+     --restart always \
+     --network host \
+     --gpus all \
+     -v /var/run/docker.sock:/var/run/docker.sock \
+     -v forgeyard-agent:/var/lib/forgeyard-agent \
+     -v /srv/forgeyard-models:/srv/forgeyard-models \
+     -e FORGEYARD_SERVER=https://192.168.1.20:7860 \
+     -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
+     -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
+     -e HF_TOKEN="$HF_TOKEN" \
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.2
+   ```
+
+   A machine that gets its files through the server (**Always through the server**) gets the image carried
+   instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there
+   (replace `USER`), then the same `docker rm -f` and `docker run`. The other machines show that way too, under
+   *cannot reach the registry?*.
+- **Installed with install.sh**: the one-line install again, without `--join` ([why](#upgrade-the-server-and-the-agents)).
+- **From a checkout**: `git checkout` of the server's version and `uv sync`; then restart the agent the way you
+  started it.
+
+Copy the command and run it on that machine. Its models and apps keep running while the agent is replaced, and
+the volume (or install.sh's state directory) keeps the machine: it comes back online as itself within seconds.
+
+The agent never reports a secret: not the join token (a joined machine does not need it again), not its
+credential, and not a variable whose name or value looks like one (`…TOKEN`, `…KEY`, `…PASSWORD`, a Hugging
+Face or GitHub token, a URL with a password). Such a variable appears as `-e NAME="$NAME"`: set it in your shell
+first (`export HF_TOKEN=…`), and the page says so. Values that cannot be repeated safely are left out and named.
+
+**An agent older than the server** says so on its tile on **Machines** and on its page: *agent 1.4.0, server
+1.4.2: update*; the hint opens the command. So does an agent of the server's version that lacks a feature such
+an agent offers (built from older code), and **Setup health** lists both. An agent before 1.4.2 does not report
+how it runs: update it by hand once ([how](#upgrade-the-server-and-the-agents)); from then on its page shows the
+command.
 
 ## Check the setup health
 
@@ -1082,6 +1285,10 @@ saying so. The groups, in the order they run:
 | `gateway` | `/v1`: chat, streaming, embeddings, rerank, transcription; key allowlists, limits and revoking; the key guard on every replica port; balancing between the two CPU machines; the Playground; usage |
 | `cloud` | with `--cloud-provider`: spilling, keys set to **Never**, local only, the cloud maximum, cost, and budgets with their alerts |
 | `passthrough` | a small HTTP app exposed at `/x/`: as a process on the CPU machine, in a container on the GPU machine. Keys (none, listed), the path as sent, refused paths, credentials and forwarded headers replaced, the forced sandbox, redirects, streaming, the body limit, rpm, concurrency, the read timeout, the replica's port behind the key guard, usage |
+| `tts`, `img`, `video` | speech, image and video generation on the GPU machine (and the CPU machine where a CPU engine exists): the SDK's calls, formats, caps, the queue, usage and the key guard |
+| `vision` | detection, segmentation and depth models with the vision recipe: the results, refusals, keys and usage |
+| `relay` | models through the server: with the CPU machine's **Internet access for downloads** set to **Always through the server**, **Download to…** of a small GGUF (26 MB) arrives through the server; then a second machine (`--relay-second-machine`, default the second CPU machine, else the GPU machine) gets it from the first machine's cache. Both machines' setting goes back, and the model leaves their caches |
+| `images` | on a machine with Docker or Podman (`--engine-machine`, default the GPU machine): its engine images; an image file of a few KB that the script builds is uploaded, copied to a second machine that takes images (`--second-engine-machine`), and removed with **Remove engine image** (a recipe names it for a few seconds, since only images a recipe names may be removed) |
 | `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
 
 `--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
@@ -1092,7 +1299,10 @@ What to know before you run it:
 
 - **It cleans up after itself.** Everything it creates is named `accept-<run>-…`: deployments,
   apps, routes, API keys, a throwaway user, and catalog entries it had to add. It removes them
-  at the end, also after a failure or **Ctrl-C**. Usage rows and audit events of the run stay.
+  at the end, also after a failure or **Ctrl-C**, with the relay group's model in the machines'
+  caches, their fetch setting, and the images group's image and recipe. Usage rows and audit events
+  of the run stay. Only on an agent older than 1.4.2, which cannot remove images, the tiny image
+  `accept-<run>-image:1` stays, and the report says so.
 - **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
   cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
   checks use the run's own keys and user.
@@ -1129,15 +1339,50 @@ PostgreSQL: `pg_dump` as usual.
 
 Once `secret.key` is backed up, tick **I have a backup of key id …** under **Get started → Setup
 health**. Until an admin does, Setup health reminds every admin, and it reminds them again when
-the key changes. The key itself never leaves the server: the page shows only its id.
+the key changes.
+
+**Or download the key from the console** (1.4.2). An admin can download the secret key and the
+server's CA (`ca.key` and `ca.crt`) as one file, encrypted with a passphrase they choose:
+
+1. Click **Download a backup…** on the reminder under **Get started → Setup health**, or **Download a
+   key backup…** under **For admins** on **Trust this server**.
+2. Type your password again (wrong passwords count like failed sign-ins: after a few, you wait), and
+   a backup passphrase twice: at least 12 characters, not your password. Write the passphrase down:
+   nothing can open the file without it.
+3. Click **Download the backup**. The browser saves `forgeyard-key-backup-<key id>-<date>.fykey`.
+
+The download ticks off the reminder for that key id and is recorded in the audit log
+(`secret_key.backup_downloaded`). The server keeps neither the file nor the passphrase. Keep the
+file apart from the database backup and the passphrase apart from the file: together they read
+every stored secret and sign certificates your devices trust. The server certificate is not in it:
+the server makes a new one from the CA when it starts. A server with your own certificate
+(`TLS_CERT_FILE`) or `TLS=off` has no CA of Forgeyard's, so the file holds only the key; back up
+your certificate yourself. The file's format is in
+[Reference](reference.md#the-key-backup-file).
 
 **On each machine** (optional): `/var/lib/forgeyard-agent` (the credential; without it the machine
 joins again with a new token) and `/etc/forgeyard/agent.toml`. The model cache can always be
 downloaded again.
 
 **Restore**: stop the server, put the files back in `data/` (and `.env`), start it. With a wrong or
-missing `secret.key` the server refuses to start and says so, instead of losing the secrets. If the
-key is really lost, stop the server and start over with:
+missing `secret.key` the server refuses to start and says so, instead of losing the secrets.
+
+From a key backup downloaded from the console, put the database back first, then, with the server
+stopped:
+
+```bash
+uv run --no-sync python -m forgeyard secrets restore forgeyard-key-backup-ab12cd34-20261117.fykey
+```
+
+It asks for the passphrase and writes `data/secret.key` (mode 600) and `data/tls/ca.key` (600) and
+`ca.crt` (folders 700); `--data-dir DIR` writes into another data folder. A wrong passphrase, a
+changed or cut-off file writes nothing. It never replaces a different key or CA that is already
+there: it stops and says so, and `--force` replaces them, keeping the old files as
+`<name>.replaced-<time>`. The same key already there is fine. `--passphrase-file PATH` reads the
+passphrase from a file's first line, for scripts. When the server starts it checks that the key
+belongs to the database, as always.
+
+If the key is really lost, stop the server and start over with:
 
 ```bash
 uv run --no-sync python -m forgeyard secrets reset --yes
@@ -1179,7 +1424,7 @@ recorded after its first complete download, and every later download must match 
 (`model.checksum_recorded`). The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
 
 A machine that cannot reach Hugging Face or GitHub itself gets the files through the server: see the
-next section.
+next section, and [Run a machine without internet access](#run-a-machine-without-internet-access).
 
 ## Give an offline machine models through the server
 
@@ -1189,7 +1434,8 @@ server fetches them and
 passes the bytes on**, storing nothing. The agent asks the server the way it already talks to it,
 outbound, over HTTPS with the CA it pins and its machine credential, so it works through whatever
 already carries the agent's connection (for example an `ssh -R 7860:…` tunnel). Nothing on the
-machine or in the tunnel changes.
+machine or in the tunnel changes. For the whole path, from joining such a machine to a deployed model,
+see [Run a machine without internet access](#run-a-machine-without-internet-access).
 
 1. Open the machine's page (admins). Under **Models in cache**, set **Internet access for downloads**:
    - **Auto** (the default): downloads directly; once the source cannot be reached from that machine
@@ -1276,9 +1522,9 @@ digest, as every built-in recipe does:
   it deletes the pieces.
 - The progress says *Pulling the image via the server: 120 MiB of 300 MiB, 3 of 7 layers*, then *loading
   it*. Every layer crosses the server's network twice, like a model file.
-- An image named by a tag only (a custom recipe's, Forgeyard's own vision image of this release)
-  cannot come through the server: there is no recorded digest to check it against. Upload it instead
-  (next section).
+- An image named by a tag only (a custom recipe's, or one you built) cannot come through the server:
+  there is no recorded digest to check it against. Upload it, or copy it from another machine (next
+  sections). Forgeyard's own vision image is pinned since 1.4.1 and comes through the server.
 
 The machine's agent must be 1.4 or later; an older one downloads directly whatever the setting says,
 and the setting tells you to update it (also when it relays models but not yet images). To send files to
@@ -1322,7 +1568,8 @@ machine without registry access needs. Nothing is copied automatically.
 
 1. Open the target machine's page → **Engine images** → **Copy from another machine**.
 2. Choose the machine to copy **From**. Its agent lists the images in its engine: each with its tags, id,
-   size and platform, and which recipe's image it is.
+   size and platform, and which recipe's image it is. The dialog shows the images a recipe names (1.4.2);
+   tick **Show all images** for the others, such as other people's images on a shared machine.
 3. Pick one and **Copy**. The other machine runs `docker save` (or `podman save`) on it, under its own
    tags, and sends it to the server, which passes it straight into the target's `docker load`, keeping
    only a small buffer. When it is loaded, the dialog lists what was loaded, which recipe's image it is,
@@ -1359,6 +1606,33 @@ how much the cache takes on that disk and how much of the disk is free.
 
 Each removal is in the audit log as `model.cache_removed`, with what was removed and how much was
 freed. The API is in [the reference](reference.md#a-machines-model-cache-through-the-api).
+
+### Engine images
+
+Engine images take disk space too, and old ones pile up when recipes move to newer images. The machine's
+page lists them under **Engine images** (1.4.2): each image a recipe names, as its agent lists it now (a
+pinned image recognised by its recorded ids, an image a recipe names by a tag only by that tag), with its
+size, the recipes that name it, and the deployments on that machine that use it. Above the list is the free
+space where the engine keeps its images, when the agent can see that directory (an agent in a container
+usually cannot). The engine's other images are only counted: no recipe names them, so they are not
+Forgeyard's.
+
+- **Remove** (admins) deletes one image from that machine. The row asks first, then the agent runs
+  `docker rmi` (or `podman rmi`) on it, never with `-f`. When it is done, the console says how much was
+  freed: up to the image's size, since layers another image shares stay, and the free space after when the
+  agent can see the engine's disk. A deployment that needs the image again pulls it (or gets it through
+  the server, or you load it again).
+- It is refused, and the row says why, while a deployment on that machine uses the image (stop it first),
+  for the image the agent itself runs from, and while any container of the engine uses it, even one
+  Forgeyard did not start (the engine keeps such an image; the message names the container).
+- It is never offered for an image no recipe names.
+- The agent removes only an image of its own listing, by its id: the server never names an image for it to
+  delete. An image with several tags is removed by those tags.
+- An agent older than 1.4.2 lists the images but cannot remove them. Update the agent.
+
+Each removal the agent was asked for is in the audit log as `node.image_removed`, with the image, its
+tags, the recipes that name it, and how much was freed or why it was not removed. The API is in
+[the reference](reference.md#a-machines-engine-images-through-the-api).
 
 ## Move a model cache
 
