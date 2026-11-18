@@ -338,8 +338,9 @@ def test_fy_adv_008_people_waiting_for_approval(owner, monkeypatch):
 
 
 # ------------------------------------------------------------------ machines
-FULL_FEATURES = ("workloads", "replica_keys", "replica_guard", "image_ids", "engine_zip", "workload_guard", "models",
-                 "cache_admin", "prefetch", "relay", "relay_source", "relay_images", "image_load", "image_save")
+# Every feature a fully equipped agent of this version declares: one list, kept in step with the agent by
+# FY-UPD-017.
+from tests.test_agent_update import FULL as FULL_FEATURES  # noqa: E402
 
 
 def test_fy_adv_009_agents_older_than_the_server(owner):
