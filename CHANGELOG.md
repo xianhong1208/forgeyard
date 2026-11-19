@@ -8,6 +8,7 @@ version until 1.0.
 
 ### Added
 
+- **Contributions are signed off under the Developer Certificate of Origin** (DCO 1.1): every non-merge commit of a pull request needs a `Signed-off-by:` line with its author email (`git commit -s`); a new `DCO` workflow checks it, bots excepted ([CONTRIBUTING](CONTRIBUTING.md#licence)).
 - **Text classification** (#144, vLLM part): a model kind of its own, *Text classification* (task `classify`). A
   sequence classifier with two labels or more (sentiment, language, toxicity…) is added to the catalog with its
   labels, deployed on `vllm-pooling` (vLLM's pooling runner, which picks the classify task by itself), listed under
