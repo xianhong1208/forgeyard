@@ -9,7 +9,10 @@ cpu, default: gpu when the machine has an allowed GPU):
      `accept-vis-<model>` and waits until it is ready; on a GPU the card's memory is read before and once
      ready, against the estimate;
   2. with a new API key: detection on the COCO validation photo 000000039769 (two cats on a sofa: both cats
-     found above 0.8; --image to use another), as multipart and as JSON; segmentation with a box around the
+     found above 0.8; --image to use another), as multipart and as JSON; a zero-shot detector (1.4.4, #142) on the
+     same photo told to find a cat, a remote control and a giraffe (both cats above 0.5, a remote, no giraffe),
+     as multipart (a comma-separated field) and as JSON, and without labels (400 labels_required), while a
+     detector with fixed classes given labels is 400 labels_not_supported; segmentation with a box around the
      red square of a generated image (the mask covers the square); depth on the photo (a 16-bit PNG of the
      photo's size, far and near differ). Each call is timed;
   3. the refusals: no key (401), the wrong task's endpoint (400 wrong_endpoint), no image (400), a key whose
@@ -22,8 +25,10 @@ leftovers of an earlier run are removed first, so it can be run again.
     FORGEYARD_PASSWORD=… python3 scripts/accept_vision.py --server https://<server>:7860 --cacert forgeyard-ca.pem \\
         --user <admin> --machine <machine> [--device gpu|cpu] [--only rtdetr-v2-r18,sam2.1-hiera-tiny,…] --out r.json
 
-Models it knows (--only; the first three are the recommended ones):
-  rtdetr-v2-r18, sam2.1-hiera-tiny, depth-anything-v2-small, rtdetr-v2-r50 (a larger detector, Apache-2.0)
+Models it knows (--only; the first three are the default, every one is recommended but rtdetr-v2-r50):
+  rtdetr-v2-r18, sam2.1-hiera-tiny, depth-anything-v2-small, rtdetr-v2-r50 (a larger detector, Apache-2.0),
+  and the zero-shot detectors (1.4.4, they need a vision image from 1.4.4 on): grounding-dino-tiny,
+  mm-grounding-dino-tiny, owlv2-base
 
 The vision image is the one the `vision` recipe pins by digest (1.4.1: docker.io/tonyhuang1101/forgeyard-vision,
 X.Y.Z or X.Y.Z-cuda, recorded in images.lock.json): the machine pulls it, or gets it through the server. To try
@@ -64,7 +69,15 @@ MODELS = {
                                 "revision": "5426e4f0f36572d16453bbda7a8389317b1bef99", "task": "depth"},
     "rtdetr-v2-r50": {"source": "hf://PekingU/rtdetr_v2_r50vd", "revision": "282494075698cab9faa1096ae26856890030c817",
                       "task": "detect"},
+    # 1.4.4 (#142): zero-shot detectors, told what to find
+    "grounding-dino-tiny": {"source": "hf://IDEA-Research/grounding-dino-tiny",
+                            "revision": "a2bb814dd30d776dcf7e30523b00659f4f141c71", "task": "detect", "zero_shot": True},
+    "mm-grounding-dino-tiny": {"source": "hf://openmmlab-community/mm_grounding_dino_tiny_o365v1_goldg_v3det",
+                               "revision": "ef2053aa1e0cc9d9cee1df31ca919ee9aae4fc8e", "task": "detect", "zero_shot": True},
+    "owlv2-base": {"source": "hf://google/owlv2-base-patch16-ensemble",
+                   "revision": "cfd3195ba4ea9592eec887ded089f4c08eff231d", "task": "detect", "zero_shot": True},
 }
+FIND = ["cat", "remote control", "giraffe"]     # what a zero-shot detector is told to find on the cats photo
 OTHER = {"detect": "depth", "segment": "detect", "depth": "segment"}
 
 
@@ -179,7 +192,25 @@ def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narro
     base = server.rstrip("/") + "/v1/vision/"
     task = spec["task"]
     info = report.setdefault(name, {})
-    if task == "detect":
+    if task == "detect" and spec.get("zero_shot"):
+        body, ctype = multipart({"model": name, "labels": ", ".join(FIND)}, image, filename)
+        s, data, t = post(base + "detect", body, ctype, key)
+        found = data.get("detections", [])
+        cats = [o for o in found if o.get("label") == "cat" and o.get("score", 0) > 0.5]
+        remotes = [o for o in found if o.get("label") == "remote control"]
+        check(f"{name}: find {', '.join(FIND)} ({filename}): two cats, a remote, no giraffe",
+              s == 200 and len(cats) == 2 and remotes and not any(o.get("label") == "giraffe" for o in found)
+              and data.get("model") == name,
+              f"{s} in {t:.2f} s: {[(o.get('label'), o.get('score')) for o in found][:8] or data}")
+        info["detect_s"] = round(t, 3)
+        jb = json.dumps({"model": name, "image": base64.b64encode(image).decode(), "labels": FIND}).encode()
+        s, data2, t = post(base + "detect", jb, "application/json", key)
+        check(f"{name}: the same as JSON with a list of labels (the same boxes)",
+              s == 200 and data2.get("detections") == data.get("detections"), f"{s} in {t:.2f} s")
+        jb = json.dumps({"model": name, "image": base64.b64encode(image).decode()}).encode()
+        s, data, _ = post(base + "detect", jb, "application/json", key)
+        check(f"{name}: no labels: 400 labels_required", s == 400 and code(data) == "labels_required", f"{s} {code(data)}")
+    elif task == "detect":
         body, ctype = multipart({"model": name, "threshold": "0.5"}, image, filename)
         s, data, t = post(base + "detect", body, ctype, key)
         cats = [o for o in data.get("detections", []) if o.get("label") == "cat" and o.get("score", 0) > 0.8]
@@ -190,6 +221,12 @@ def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narro
         s, data2, t = post(base + "detect", jb, "application/json", key)
         check(f"{name}: detect, JSON with base64 (the same boxes)", s == 200 and data2.get("detections") == data.get("detections"),
               f"{s} in {t:.2f} s")
+        jb = json.dumps({"model": name, "image": base64.b64encode(image).decode(), "labels": ["cat"]}).encode()
+        s, data, _ = post(base + "detect", jb, "application/json", key)
+        # A vision image from before 1.4.4 does not know labels and answers as if none were sent.
+        check(f"{name}: labels for a detector with fixed classes: 400 labels_not_supported",
+              s == 400 and code(data) == "labels_not_supported", f"{s} {code(data)}"
+              + (" (a vision image from before 1.4.4 ignores labels)" if s == 200 else ""), info=s == 200)
     elif task == "segment":
         sq = square_png()
         jb = json.dumps({"model": name, "image": base64.b64encode(sq).decode(), "box": [40, 40, 120, 120]}).encode()
@@ -237,7 +274,7 @@ def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narro
         url = f"http://{port['address']}:{port['host_port']}/v1/vision/{task}"
         s, data, _ = post(url, tiny, "application/json", None, timeout=15)
         check(f"{name}: the replica's own port without its key: refused", s in (0, 401), f"{s} {code(data)}")
-    return 1 if task == "depth" else 2
+    return 1 if task == "depth" else 2   # a refused request (400) is not counted
 
 
 def usage_of(c: Client, key_name: str) -> dict:

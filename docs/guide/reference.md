@@ -282,7 +282,7 @@ page cannot use a signed-in browser against it.
 | `GET /v1/videos/{id}/content` | The finished video, `video/mp4`, streamed from the replica that made it. `variant=video` only; `Range` requests answer 206 | — |
 | `DELETE /v1/videos/{id}` | Cancels a job at work, or deletes a finished video, on its replica | — |
 | `POST /v1/videos/sync`, `POST /v1/videos/{id}/remix` | Not offered: always 404 `endpoint_not_supported` | — |
-| `POST /v1/vision/detect` | Object detection (1.4): one image, boxes, labels and scores back. See [Vision](#vision) | no |
+| `POST /v1/vision/detect` | Object detection (1.4): one image, boxes, labels and scores back; a zero-shot detector (1.4.4) is told what to find with `labels`. See [Vision](#vision) | no |
 | `POST /v1/vision/segment` | Segmentation with SAM 2 (1.4): one image and a point or a box, masks as PNGs back | no |
 | `POST /v1/vision/depth` | Depth estimation (1.4): one image, a 16-bit depth map back | no |
 | `POST /v1/classify` | Text classification (1.4.4): texts, each one's label and probabilities back. See [Text classification](#text-classification) | no |
@@ -548,13 +548,25 @@ at most 20 MiB and 40 megapixels. The gateway checks that there is a model and a
 
 | Endpoint | Options | Answer |
 |---|---|---|
-| `detect` | `threshold` (0 to 1, 0.5), `max_detections` (1 to 1,000, 100) | `detections`: `[{"label", "score", "box": [x0, y0, x1, y1]}]`, best first, in the image's pixels |
+| `detect` | `threshold` (0 to 1; 0.5, for a zero-shot detector 0.3, OWL 0.1), `max_detections` (1 to 1,000, 100); `labels` (1.4.4): what a zero-shot detector is to find, a list of names or a comma-separated string, at most 32 of at most 64 characters | `detections`: `[{"label", "score", "box": [x0, y0, x1, y1]}]`, best first, in the image's pixels; a zero-shot detector's `label` is one of the names sent, as sent |
 | `segment` | `points` (`[[x, y], …]`, at most 16) with `labels` (1 inside, 0 outside; all 1 when left out), or `box` (`[x0, y0, x1, y1]`); `multimask` (`true`: three candidate masks) | `masks`: `[{"score", "area", "box", "png"}]`, best first; each mask a 1-bit PNG of the image's size, base64 |
 | `depth` | none | `depth_png` (a 16-bit grey PNG of the image's size, base64, nearer is brighter), `min`, `max`, `unit` (relative depth, not metres) |
 
 Every answer also has `model`, `width`, `height` (the image's) and `ms` (the model's time). The vision
 server's errors (`{"error": {"message", "code"}}`) come back with their status: 400 `invalid_image`,
-`invalid_option`, `missing_prompt` (segment without a point or a box), 413 `image_too_large`.
+`invalid_option`, `missing_prompt` (segment without a point or a box), `labels_required` (a zero-shot
+detector without `labels`), `labels_not_supported` (`labels` for a detector with fixed classes), 413
+`image_too_large`.
+
+**Zero-shot detectors (1.4.4, #142)** (Grounding DINO, MM-Grounding-DINO and LLMDet, OWL-ViT, OWLv2) find
+what each request names instead of a fixed list of classes: the catalog marks them
+*Finds what you name* (`vision.zero_shot`). Send plain names, `labels: ["cat", "remote control"]` (or a form
+field `labels=cat, remote control`); repeats and empty names are dropped. The vision server asks each family
+its own way (Grounding DINO one lower-case prompt, "cat. remote control.", and each box takes the name whose
+words score it highest; OWL one query per name), so a name comes back as it was sent. Their scores run lower
+than a fixed detector's: start at 0.3 (Grounding DINO) or 0.1 to 0.2 (OWLv2). They need a vision image from
+1.4.4 on: until the built-in recipe's pin moves to it, deploying one answers 422 `vision_image_too_old` (a
+custom recipe that names a newer image, or a local build, runs them).
 
 What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
 
@@ -641,6 +653,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
 | 400 | `streaming_not_supported` | Images and vision: `stream: true` | Leave it out |
 | 400 | `missing_image` | Vision: no file field `image`, or JSON without `image` | Send the image |
+| 400 | `labels_required` | Vision (1.4.4): a zero-shot detector was not told what to find | Send `labels` |
+| 400 | `labels_not_supported` | Vision (1.4.4): `labels` for a detector with fixed classes | Leave `labels` out, or use a zero-shot detector |
 | 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
 | 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
 | 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
@@ -1454,11 +1468,18 @@ server's own version, tag only, with `forgeyard_image: vision` (or `vision-cuda`
 backbone…), SAM 2 or 2.1 (segment) or an `…ForDepthEstimation` one (depth: Depth Anything, DPT…). A
 Hugging Face vision model is only added with a permissive licence (Apache-2.0, MIT, BSD): another
 licence, or none, answers 422 `not_a_vision_model` (Depth Anything V2 Base and Large are CC-BY-NC-4.0,
-Ultralytics' YOLO checkpoints AGPL-3.0). So does a zero-shot (open-vocabulary) detector, one of
-transformers' zero-shot detection models known by its `model_type` or architecture (Grounding DINO,
-MM-Grounding-DINO and LLMDet, OmDet-Turbo, OWL-ViT, OWLv2; support comes with #142), when it is added or
-re-tasked, and, for one added before 1.4.3, when it is deployed. Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
-1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU).
+Ultralytics' YOLO checkpoints AGPL-3.0). A zero-shot (open-vocabulary) detector, one of transformers'
+zero-shot detection models known by its `model_type` or architecture (Grounding DINO, MM-Grounding-DINO and
+LLMDet, OmDet-Turbo, OWL-ViT, OWLv2), is a detect model marked `zero_shot` (1.4.4, #142; 1.4.3 refused them,
+and one added before 1.4.3 is known by the config the catalog kept, with no migration). OmDet-Turbo is refused
+like DETR with a timm backbone: its transformers port loads its backbone through timm (422 `not_a_vision_model`
+when added, or when one kept from before 1.4.3 is deployed). It runs on a vision
+image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older, deploying or estimating it answers
+422 `vision_image_too_old`, naming both versions; an image of another name (a local build) is taken as it is.
+Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
+1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU);
+Grounding DINO and MM-Grounding-DINO add 512 MiB (their text encoder and 800-pixel features: peak 2.24 GiB on a
+CPU with 0.64 GiB of files, 1.4.4).
 
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as

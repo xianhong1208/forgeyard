@@ -9,6 +9,7 @@ export type VisionTask = "detect" | "segment" | "depth";
 export type VisionModel = {
   name: string; task: VisionTask; title: string; endpoint: string; deployment_id: number | null; model: string | null;
   licence: string | null; ready: number; running: boolean; reason: string | null;
+  zero_shot?: boolean;     // 1.4.4 (#142): a detector told what to find (labels)
 };
 
 export type VisionOptions = {
@@ -30,6 +31,31 @@ export const VISION_MAX_MB = 20;
 export const VISION_TYPES = ["image/png", "image/jpeg", "image/webp"];
 // Detection asks for everything above this score once; the slider then filters in the browser.
 export const DETECT_FLOOR = 0.1;
+// Where the slider starts: a detector with fixed classes is sure of what it finds; a zero-shot one scores lower
+// (OWLv2's matches are often 0.2 to 0.5).
+export const START_THRESHOLD = 0.5;
+export const START_THRESHOLD_ZERO_SHOT = 0.3;
+// What a zero-shot detector may be told to find (the vision server's limits).
+export const MAX_LABELS = 32;
+export const MAX_LABEL_CHARS = 64;
+
+// The names typed into "Find these" (comma-separated), trimmed, without repeats; null with why when they cannot be
+// sent (none, too many, one too long).
+export function parseLabels(text: string): { labels: string[]; error: string | null } {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const raw of text.split(",")) {
+    const x = raw.split(/\s+/).filter(Boolean).join(" ");
+    if (!x || seen.has(x.toLowerCase())) continue;
+    seen.add(x.toLowerCase());
+    labels.push(x);
+  }
+  if (!labels.length) return { labels, error: "Name at least one thing to find, e.g. cat, remote control." };
+  if (labels.length > MAX_LABELS) return { labels, error: `At most ${MAX_LABELS} things at once.` };
+  const long = labels.find((x) => x.length > MAX_LABEL_CHARS);
+  if (long) return { labels, error: `"${long.slice(0, 20)}…" is longer than ${MAX_LABEL_CHARS} characters.` };
+  return { labels, error: null };
+}
 
 export function imageLimitMb(w: { max_body_mb?: number } | undefined): number {
   return Math.min(VISION_MAX_MB, w?.max_body_mb ?? VISION_MAX_MB);
@@ -38,7 +64,7 @@ export function imageLimitMb(w: { max_body_mb?: number } | undefined): number {
 // What the panel sends an image to: a vision model.
 export type VisionTarget = {
   kind: "model"; id: string; name: string; task: VisionTask; title: string; model: string; licence: string | null;
-  ready: number; reason: string | null; max_body_mb?: number;
+  ready: number; reason: string | null; max_body_mb?: number; zero_shot: boolean;
   url: string;            // where the console posts the image
   call: string;           // what a program calls, with an API key
   link: { to: string; label: string } | null;
@@ -47,7 +73,8 @@ export type VisionTarget = {
 export function targets(o: VisionOptions | null | undefined): VisionTarget[] {
   const models: VisionTarget[] = (o?.models ?? []).map((m) => ({
     kind: "model", id: `model:${m.name}`, name: m.name, task: m.task, title: m.title, model: m.model ?? m.name,
-    licence: m.licence, ready: m.ready, reason: m.reason, url: `/api/playground/vision/${m.task}`,
+    licence: m.licence, ready: m.ready, reason: m.reason, zero_shot: Boolean(m.zero_shot && m.task === "detect"),
+    url: `/api/playground/vision/${m.task}`,
     call: `POST /v1/vision/${m.task} with model=${m.name}`,
     link: m.deployment_id ? { to: `/serving/${m.deployment_id}`, label: "Deployment" } : null,
   }));
@@ -122,6 +149,7 @@ export function pngUri(b64: string): string {
   return `data:image/png;base64,${b64}`;
 }
 
+export const ZERO_SHOT_HELP = "Finds what you name and draws a box, label and score for each.";
 export const TASK_HELP: Record<VisionTask, string> = {
   detect: "Finds objects and draws a box, label and score for each.",
   segment: "Click a point on the image, or drag a box around something: the model outlines it.",

@@ -322,11 +322,11 @@ API key.
 - **Which models:** the catalog reads the model's `config.json`. An `…ForObjectDetection` architecture
   is detection, SAM 2 segmentation, an `…ForDepthEstimation` one depth; anything else is not a vision
   model. **Permissive licences only** (Apache-2.0, MIT, BSD): Depth Anything V2 Base and Large
-  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added. Nor can zero-shot
-  (open-vocabulary) detectors, which find what a text prompt names (Grounding DINO, MM-Grounding-DINO,
-  OWL-ViT, OWLv2, OmDet-Turbo): their architectures end in `ForObjectDetection` too, but the vision server
-  cannot load them yet (support comes with #142). One added before 1.4.3 stays in the catalog and cannot be
-  deployed.
+  (CC-BY-NC-4.0) and Ultralytics' YOLO checkpoints (AGPL-3.0) cannot be added.
+- **Detectors that find what you name (1.4.4):** zero-shot (open-vocabulary) detectors (Grounding DINO,
+  MM-Grounding-DINO, OWL-ViT, OWLv2) know no fixed list of classes: each request names what to
+  find (`labels: ["cat", "remote control"]`), and the same `/v1/vision/detect` answers with boxes for those
+  names. The catalog marks them *Finds what you name*; they need the vision image of 1.4.4 or later.
 - **Their own API:** `/v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth`, one image per
   request (multipart, or base64 in JSON) and a JSON answer; masks and depth maps are PNGs in base64.
   The OpenAI SDK has no such API: any HTTP client calls it.

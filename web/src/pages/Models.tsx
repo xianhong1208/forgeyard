@@ -193,7 +193,8 @@ function ModelRow({ m, canManage, canDeploy, reload, downloads, onDownload, onCh
       <td data-label="Size" className="small">{bytes(m.size_bytes)}</td>
       <td data-label="Architecture" className="small">
         {m.summary.architecture ?? "—"}{m.summary.params ? ` · ${params(m.summary.params)} params` : ""}
-        {m.vision?.labels ? <div className="muted" title={m.vision.label_examples?.join(", ")}>{m.vision.labels} classes</div> : null}
+        {m.vision?.zero_shot ? <div className="muted" title="A zero-shot detector: each request names what to find">Finds what you name</div>
+          : m.vision?.labels ? <div className="muted" title={m.vision.label_examples?.join(", ")}>{m.vision.labels} classes</div> : null}
         {m.summary.layers ? <div className="muted">{m.summary.layers} layers{m.summary.kv_heads ? `, ${m.summary.kv_heads} KV heads` : ""}{m.summary.max_context ? `, ${m.summary.max_context} ctx` : ""}</div> : null}
       </td>
       <td data-label="Licence" className="small">

@@ -61,7 +61,7 @@ groups:
     description: Models for /v1/videos, made as jobs on NVIDIA GPUs with vLLM-Omni. Wan2.1 1.3B makes 480p clips on one shared card; Wan2.2 5B makes 720p and needs more memory. Apache-2.0.
   - id: detection
     title: Object detection, segmentation and depth
-    description: Vision models for /v1/vision/detect, /segment and /depth on Forgeyard's own vision server. Small and quick on a CPU, faster on an NVIDIA GPU. Apache-2.0 only.
+    description: Vision models for /v1/vision/detect, /segment and /depth on Forgeyard's own vision server, including detectors that find what you name. Small and quick on a CPU, faster on an NVIDIA GPU. Apache-2.0 only.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -730,3 +730,43 @@ models:
     download_gib: 0.09
     memory_gib: 1.34
     note: Relative depth for every pixel of an image, as a 16-bit PNG. Only Small is Apache-2.0 (Base and Large are not).
+  # Zero-shot (open-vocabulary) detectors (1.4.4, #142): each request names what to find (`labels`).
+  - name: grounding-dino-tiny
+    title: Grounding DINO tiny (finds what you name)
+    source: hf://IDEA-Research/grounding-dino-tiny
+    revision: a2bb814dd30d776dcf7e30523b00659f4f141c71
+    license: apache-2.0
+    group: detection
+    task: detect
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.64
+    memory_gib: 2.39
+    note: Boxes for whatever you name in the request ("cat, remote control"), not a fixed list of classes. The best-known zero-shot detector.
+  - name: mm-grounding-dino-tiny
+    title: MM-Grounding-DINO tiny (finds what you name)
+    source: hf://openmmlab-community/mm_grounding_dino_tiny_o365v1_goldg_v3det
+    revision: ef2053aa1e0cc9d9cee1df31ca919ee9aae4fc8e
+    license: apache-2.0
+    group: detection
+    task: detect
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.64
+    memory_gib: 2.39
+    note: Grounding DINO re-trained by OpenMMLab; finds what you name, usually more of it than the original tiny.
+  - name: owlv2-base
+    title: OWLv2 base (finds what you name)
+    source: hf://google/owlv2-base-patch16-ensemble
+    revision: cfd3195ba4ea9592eec887ded089f4c08eff231d
+    license: apache-2.0
+    group: detection
+    task: detect
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.58
+    memory_gib: 1.83
+    note: Google's open-vocabulary detector; one query per name you send, good at small objects, quicker than Grounding DINO on a CPU.

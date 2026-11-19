@@ -69,6 +69,7 @@ class FakeVision:
         self.seen: list[dict] = []
         self.status: Optional[int] = None
         self.answer: Optional[bytes] = None
+        self.refuse: Optional[tuple] = None    # (status, body): an error the vision server itself gives
         engine = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -90,6 +91,8 @@ class FakeVision:
                     return self._send(401, b'{"error": {"message": "A valid API key is needed.", "code": "invalid_api_key"}}')
                 if self.path != f"/v1/vision/{engine.task}":
                     return self._send(404, b'{"detail": "Not Found"}')
+                if engine.refuse:
+                    return self._send(*engine.refuse)
                 if engine.status:
                     return self._send(engine.status, b'{"error": {"message": "The image could not be read.", '
                                                      b'"code": "invalid_image"}}')
@@ -511,8 +514,8 @@ def test_fy_vis_011_the_playground(vis, client):
     assert set(models) == {"det", "seg", "depth"} and "workloads" not in o  # 1.4 (#88): no apps
     assert models["det"] | {"deployment_id": None} == {
         "name": "det", "task": "detect", "title": "Object detection", "endpoint": "/v1/vision/detect",
-        "deployment_id": None, "model": "PekingU/rtdetr_v2_r18vd", "licence": "apache-2.0", "ready": 1,
-        "running": True, "reason": None}
+        "deployment_id": None, "model": "PekingU/rtdetr_v2_r18vd", "licence": "apache-2.0", "zero_shot": False,
+        "ready": 1, "running": True, "reason": None}
     files = {"image": ("cats.jpg", b"\xff\xd8 jpeg", "image/jpeg")}
     r = vis.owner.post("/api/playground/vision/detect", data={"model": "det"}, files=files)
     assert r.status_code == 200 and r.json()["detections"][0]["label"] == "cat"
@@ -535,14 +538,22 @@ def test_fy_vis_011_the_playground(vis, client):
 # ------------------------------------------------------------------ the recommended list, the search
 def test_fy_vis_012_the_recommended_vision_models():
     """FY-VIS-012: the three models of the 1.3 templates are recommended, at the same pinned revisions as the
-    vision image's models.json, with the vision recipe on the CPU and Apache-2.0; a vision entry with a
+    vision image's models.json, with the vision recipe on the CPU and Apache-2.0; so are three zero-shot detectors
+    (1.4.4, #142: Grounding DINO tiny, MM-Grounding-DINO tiny, OWLv2 base), pinned to a commit; a vision entry with a
     licence that is not permissive (even one the list allows for others) or without a pinned commit is refused."""
-    entries = {e.task: e for e in rec.recommended().models if e.task in vision.TASKS}
-    assert set(entries) == {"detect", "segment", "depth"}
+    entries = [e for e in rec.recommended().models if e.task in vision.TASKS]
     baked = templates.models_file()
-    for task, e in entries.items():
+    fixed = {e.task: e for e in entries if e.source == f"hf://{baked[e.task]['repo']}"}
+    assert set(fixed) == {"detect", "segment", "depth"}
+    for task, e in fixed.items():
         assert (e.source, e.revision) == (f"hf://{baked[task]['repo']}", baked[task]["revision"])
         assert e.recipe == "vision" and e.device == "cpu" and e.license == "apache-2.0" and e.group == "detection"
+    zero = {e.source: e for e in entries if e not in fixed.values()}
+    assert set(zero) == {"hf://IDEA-Research/grounding-dino-tiny", "hf://google/owlv2-base-patch16-ensemble",
+                         "hf://openmmlab-community/mm_grounding_dino_tiny_o365v1_goldg_v3det"}
+    for e in zero.values():
+        assert e.task == "detect" and e.recipe == "vision" and e.license == "apache-2.0" and e.group == "detection"
+        assert len(e.revision) == 40 and "name" in e.note.lower(), e.source
     data = rec.load().model_dump(exclude_defaults=False)
     i = next(n for n, m in enumerate(data["models"]) if m["task"] == "detect")
     for change, why in [({"license": "creativeml-openrail-m"}, "permissive"), ({"revision": "main"}, "pinned")]:
@@ -553,10 +564,16 @@ def test_fy_vis_012_the_recommended_vision_models():
 
 
 def test_fy_vis_013_searching_hugging_face_for_vision_models():
-    """FY-VIS-013: the search's detect, segment and depth ask Hugging Face for object-detection,
-    mask-generation and depth-estimation; a result says its task and the licence its tags state."""
+    """FY-VIS-013: the search's detect, segment and depth ask Hugging Face for object-detection (and, 1.4.4,
+    zero-shot-object-detection), mask-generation and depth-estimation; a result says its task and the licence its
+    tags state."""
     q = hub.make_query("", "detect", None, 10)
     assert any("pipeline_tag=object-detection" in u for u in hub.search_urls("https://hf.example", q))
+    # 1.4.4 (#142): zero-shot detectors are detection models too
+    assert any("pipeline_tag=zero-shot-object-detection" in u for u in hub.search_urls("https://hf.example", q))
+    zs = hub.summarise({"id": "IDEA-Research/grounding-dino-tiny", "pipeline_tag": "zero-shot-object-detection",
+                        "library_name": "transformers", "tags": ["safetensors", "license:apache-2.0"]})
+    assert zs["task"] == "detect" and zs["license"] == "apache-2.0"
     assert hub.TASK_TAGS["segment"] == ("mask-generation",) and hub.TASK_TAGS["depth"] == ("depth-estimation",)
     s = hub.summarise({"id": "PekingU/rtdetr_v2_r50vd", "pipeline_tag": "object-detection", "library_name": "transformers",
                        "tags": ["transformers", "safetensors", "license:apache-2.0"], "downloads": 10})
@@ -591,3 +608,109 @@ def test_fy_vis_015_the_server_and_the_catalog_agree_on_what_a_vision_model_is()
                {"architectures": ["Qwen3ForCausalLM"]}, {}, {"architectures": [None, "YolosForObjectDetection"]}]
     assert [ns["task_of"](c) for c in configs] == [vision.task_of(c) for c in configs]
     assert [vision.task_of(c) for c in configs] == ["detect", "segment", "segment", "depth", None, None, None, "detect"]
+
+
+# ------------------------------------------------------------------ zero-shot detectors (1.4.4, #142)
+def test_fy_vis_021_the_server_and_the_catalog_agree_on_zero_shot_detectors():
+    """FY-VIS-021: the vision server's own list of zero-shot detectors and its zero_shot rule (images/vision/app.py,
+    read from the file) are the catalog's, and its label limits are those Try it keeps to."""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "images" / "vision" / "app.py").read_text()
+    tree = ast.parse(src)
+    names = {"ZERO_SHOT_DETECT", "MAX_LABELS", "MAX_LABEL_CHARS"}
+    keep = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "zero_shot"
+            or isinstance(n, ast.Assign) and any(getattr(t, "id", None) in names for t in n.targets)]
+    assert len(keep) == 4
+    ns: dict = {}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), "app.py", "exec"), ns)
+    assert ns["ZERO_SHOT_DETECT"] == vision.ZERO_SHOT_DETECT
+    assert (ns["MAX_LABELS"], ns["MAX_LABEL_CHARS"]) == (vision.MAX_LABELS, vision.MAX_LABEL_CHARS)
+    configs = [{"model_type": "grounding-dino"}, {"model_type": "mm_grounding_dino"}, {"architectures": ["Owlv2ForObjectDetection"]},
+               {"architectures": ["owlvitforobjectdetection"]}, {"model_type": "x", "architectures": ["OmDetTurboForObjectDetection"]},
+               {"architectures": ["RtDetrV2ForObjectDetection"]}, {}, {"model_type": None, "architectures": [None]}]
+    assert [ns["zero_shot"](c) for c in configs] == [vision.zero_shot(c) for c in configs] == [True] * 5 + [False] * 3
+    assert vision.try_labels(None) == vision.TEST_LABELS and vision.try_labels(" , ") == vision.TEST_LABELS
+    assert vision.try_labels("cat, remote control ,") == ["cat", "remote control"]
+    assert len(vision.try_labels(",".join(f"l{i}" for i in range(40)))) == vision.MAX_LABELS
+    assert vision.try_labels("x" * 100) == ["x" * vision.MAX_LABEL_CHARS]
+
+
+NEW_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4@sha256:" + "4" * 64
+NEW_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4-cuda@sha256:" + "5" * 64
+
+
+@pytest.fixture()
+def zsd(vis):
+    """A zero-shot detector (Grounding DINO tiny) deployed as `gd` with a copy of the vision recipe on a 1.4.4 image,
+    on a fake vision server."""
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: vision-144\n", 1)
+    text = text.replace(f"image: {VISION_CUDA}", f"image: {NEW_CUDA}").replace(f"image: {VISION_CPU}", f"image: {NEW_CPU}")
+    assert vis.owner.post("/api/recipes", json={"yaml": text}).status_code == 201
+    meta = vision_meta("detect", "IDEA-Research/grounding-dino-tiny", "a" * 40, "GroundingDinoForObjectDetection",
+                       660 * MIB, pipeline_tag="zero-shot-object-detection",
+                       config={"architectures": ["GroundingDinoForObjectDetection"], "model_type": "grounding-dino"})
+    meta["vision"]["zero_shot"] = True
+    add_catalog("gdino", meta, task="detect", fmt="safetensors", source="hf://IDEA-Research/grounding-dino-tiny")
+    engine = FakeVision("detect", "s-gd")
+    deploy(vis.owner, "gd", "gdino", "vision-144", params={"gpus": 0}, machine_id=vis.cpu, wait=True)
+    make_ready("gd", [(vis.cpu, engine.port, engine.secret)])
+    yield SimpleNamespace(vis=vis, engine=engine)
+    engine.close()
+
+
+def test_fy_vis_022_labels_reach_a_zero_shot_detector(zsd):
+    """FY-VIS-022: `labels` reach the zero-shot detector's replica as the client sent them (a multipart field, or a
+    JSON list), with only `model` changed; the vision server's refusal (400 labels_required) comes back unchanged and
+    is counted as no image; the Playground lists it as zero_shot (the others not); Try it sends it the test image
+    with the names of its two shapes, or the words typed (comma-separated), and a detector with fixed classes gets
+    no labels."""
+    vis, engine = zsd.vis, zsd.engine
+    r = detect(vis.api, "gd", labels='["cat", "remote control"]')
+    assert r.status_code == 200, r.text
+    assert b'name="labels"\r\n\r\n["cat", "remote control"]' in engine.seen[-1]["body"]
+    image = base64.b64encode(b"\x89PNG fake").decode()
+    r = vis.api.post("/v1/vision/detect", json={"model": "gd", "image": image, "labels": ["cat", "dog"], "threshold": 0.3})
+    assert r.status_code == 200
+    assert json.loads(engine.seen[-1]["body"]) == {"model": "gd", "image": image, "labels": ["cat", "dog"], "threshold": 0.3}
+    before = sum(row.get("images") or 0 for row in usage_rows(vis.owner) if row.get("name") == "gd")
+    engine.refuse = (400, b'{"error": {"message": "This model finds what you name: send labels.", "code": "labels_required"}}')
+    r = vis.api.post("/v1/vision/detect", json={"model": "gd", "image": image})
+    engine.refuse = None
+    assert r.status_code == 400 and err(r)["code"] == "labels_required"
+    after = sum(row.get("images") or 0 for row in usage_rows(vis.owner) if row.get("name") == "gd")
+    assert before == 2 and after == 2
+    models = {m["name"]: m for m in vis.owner.get("/api/playground/vision/options").json()["models"]}
+    assert models["gd"]["zero_shot"] is True and models["det"]["zero_shot"] is False and models["seg"]["zero_shot"] is False
+    deps = {d["name"]: d["id"] for d in vis.owner.get("/api/deployments").json()["deployments"]}
+    out = vis.owner.post(f"/api/deployments/{deps['gd']}/try", json={}).json()
+    assert out["ok"] and out["request"]["labels"] == ["red square", "blue rectangle"]
+    assert json.loads(engine.seen[-1]["body"])["labels"] == vision.TEST_LABELS
+    vis.owner.post(f"/api/deployments/{deps['gd']}/try", json={"input": "square, circle"})
+    assert json.loads(engine.seen[-1]["body"])["labels"] == ["square", "circle"]
+    vis.owner.post(f"/api/deployments/{deps['det']}/try", json={"input": "square"})
+    assert "labels" not in json.loads(vis.engines["det"].seen[-1]["body"])
+
+
+def test_fy_vis_028_grounding_dino_is_estimated_with_its_text_encoder():
+    """FY-VIS-028: Grounding DINO and MM-Grounding-DINO (measured 2.24 GiB peak on a CPU with 0.64 GiB of files) get
+    512 MiB beyond the files and the vision recipe's overhead, on a CPU and on a GPU, known by model_type or (a row
+    from before 1.4.3) the architecture alone; OWLv2 and a detector with fixed classes get nothing more."""
+    r = recipes.builtin_recipes()["vision"][0]
+    gd = vision_meta("detect", "IDEA-Research/grounding-dino-tiny", "a" * 40, "GroundingDinoForObjectDetection", 660 * MIB,
+                     config={"architectures": ["GroundingDinoForObjectDetection"], "model_type": "grounding-dino"})
+    gd["vision"]["zero_shot"] = True
+    cpu = estimate(gd, r, {"gpus": 0}, device="cpu", gpu_context=500 * MIB)
+    assert cpu.ram == 660 * MIB + 2000 + 1280 * MIB + 512 * MIB
+    assert cpu.parts[-1].label == "Zero-shot detector" and cpu.parts[-1].bytes == 512 * MIB
+    gpu = estimate(gd, r, {"gpus": 1}, device="gpu", gpu_context=500 * MIB)
+    assert gpu.per_gpu == 660 * MIB + 2000 + GIB + 500 * MIB + 512 * MIB
+    old = vision_meta("detect", "acme/mm", "a" * 40, "MMGroundingDinoForObjectDetection", 660 * MIB)
+    assert vision.estimate_extra(old) == 512 * MIB
+    owl = vision_meta("detect", "google/owlv2-base-patch16-ensemble", "a" * 40, "Owlv2ForObjectDetection", 590 * MIB,
+                      config={"architectures": ["Owlv2ForObjectDetection"], "model_type": "owlv2"})
+    assert vision.estimate_extra(owl) == 0
+    assert estimate(owl, r, {"gpus": 0}, device="cpu", gpu_context=0).ram == 590 * MIB + 2000 + 1280 * MIB
+    rt = vision_meta("detect", "PekingU/rtdetr_v2_r18vd", RTDETR_REV, "RtDetrV2ForObjectDetection", 80 * MIB)
+    assert vision.estimate_extra(rt) == 0

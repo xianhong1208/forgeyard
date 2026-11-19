@@ -523,15 +523,26 @@ and an offline machine works once its cache has it.
    (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
    or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
    backbone…), SAM 2 or 2.1, or depth model (Depth Anything, DPT…) with a permissive licence (Apache-2.0,
-   MIT, BSD). Another licence, or none, cannot be added, nor can a zero-shot detector (Grounding DINO,
-   OWL-ViT, OWLv2…: support comes with #142).
+   MIT, BSD). Another licence, or none, cannot be added. Since 1.4.4 the list also has three detectors
+   that **find what you name** (Grounding DINO tiny, MM-Grounding-DINO tiny, OWLv2 base): no fixed classes,
+   each request says what to look for (see below). They need the vision image of 1.4.4 or later.
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
 3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
    sends a test image; the **Playground** (the model under *Vision* in its picker) takes your own pictures.
 
 Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
-and the picture as a file field `image`:
+and the picture as a file field `image`. A detector that finds what you name also takes `labels`, the
+names to look for (a comma-separated field, or a JSON list), and refuses a request without them (400
+`labels_required`):
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=grounding-dino-tiny -F image=@cats.jpg -F 'labels=cat, remote control' -F threshold=0.3
+```
+
+The other kinds:
 
 ```bash
 curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
@@ -593,7 +604,9 @@ templates are not offered here (apps left the console in 1.4 and are
 2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
-     model found; **Score at least** hides the weaker ones without asking again.
+     model found; **Score at least** hides the weaker ones without asking again. A detector that finds
+     what you name (1.4.4) first asks **Find these**: type the names, separated by commas (*cat, remote
+     control*), then **Find**; the slider starts at 0.3, as these models score lower.
    - **Segmentation:** click a point on something, or drag a box around it. The best mask is laid over
      the picture; the buttons above it switch between the masks the model offers. Click or drag again
      for another.

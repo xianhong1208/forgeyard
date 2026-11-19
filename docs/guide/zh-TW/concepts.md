@@ -150,7 +150,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 視覺模型（1.4）看一張圖片：**物件偵測**（方框、標籤和分數：RT-DETR、D-FINE、DETR…）、**影像分割**（一個點或一個方框所指東西的遮罩：SAM 2 和 2.1）和**深度估計**（每個像素有多近：Depth Anything、DPT…）。它們和其他模型一樣是模型種類：從 Hugging Face 加入目錄（推薦了三個）、部署後列在 **Serving → Vision**、在 **Playground** 試用（模型選單的 *Vision* 底下）、用 API 金鑰呼叫。
 
 - **只有一種引擎，Forgeyard 自己的。** `vision` 配方在 `forgeyard-vision` 映像檔（和每個引擎一樣以 digest 固定）裡執行 Forgeyard 的視覺伺服器（PyTorch 上的 transformers）：NVIDIA GPU 上用 CUDA 版，以記憶體共用一張卡；任何機器都能用 CPU 版（AMD 機器用它的 CPU 執行：還沒有 ROCm 版）。模型和其他模型一樣來自機器的模型快取。
-- **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。零樣本（開放詞彙）偵測模型也不能加入：它們找的是文字提示說的東西（Grounding DINO、MM-Grounding-DINO、OWL-ViT、OWLv2、OmDet-Turbo），架構名稱也以 `ForObjectDetection` 結尾，但視覺伺服器還不能載入（#142 會支援）。1.4.3 之前加入的會留在目錄裡，但不能部署。
+- **哪些模型：**目錄讀模型的 `config.json`。`…ForObjectDetection` 架構是偵測，SAM 2 是分割，`…ForDepthEstimation` 是深度；其他都不是視覺模型。**只接受寬鬆授權**（Apache-2.0、MIT、BSD）：Depth Anything V2 Base 和 Large（CC-BY-NC-4.0）以及 Ultralytics 的 YOLO 權重（AGPL-3.0）不能加入。
+- **找你說的東西的偵測模型（1.4.4）：** 零樣本（開放詞彙）偵測模型（Grounding DINO、MM-Grounding-DINO、OWL-ViT、OWLv2）沒有固定的類別清單：每個請求說要找什麼（`labels: ["cat", "remote control"]`），同一個 `/v1/vision/detect` 就傳回這些名稱的方框。目錄標示 *Finds what you name*；它們需要 1.4.4 起的視覺映像檔。
 - **自己的 API：**`/v1/vision/detect`、`/v1/vision/segment` 和 `/v1/vision/depth`，每個請求一張圖片（multipart，或 JSON 裡的 base64），回應是 JSON；遮罩和深度圖是 base64 的 PNG。OpenAI SDK 沒有這個 API：任何 HTTP 用戶端都能呼叫。
 - 每個副本**一次處理一張圖片**；其餘排隊等候。要更高吞吐量就多開副本。
 - 用量計**每個請求一張圖片**、它的千像素數和忙碌時間。圖片只留在你自己的部署上：絕不送往雲端供應商，也不會被保存。

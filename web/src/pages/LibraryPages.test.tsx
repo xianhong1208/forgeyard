@@ -361,4 +361,22 @@ describe("model and engine pages (1.4.3, #140)", () => {
     const card = await screen.findByRole("article", { name: "Engine llama-cpp" });
     expect(within(card).getByRole("link", { name: "llama-cpp" }).getAttribute("href")).toBe("/models/engines/llama-cpp");
   });
+
+  it("FY-WEB-503 a zero-shot detector's page and catalog row say it finds what you name instead of its classes (1.4.4, #142)", async () => {
+    const zs = { ...MODEL, name: "gdino", task: "detect", task_label: "Object detection", format: "safetensors", file: null, recipes: ["vision"],
+      summary: { architecture: "GroundingDinoForObjectDetection" }, vision: { task: "detect", architecture: "GroundingDinoForObjectDetection", zero_shot: true } } as CatalogModel;
+    const rt = { ...zs, id: 8, name: "rtdetr", summary: { architecture: "RtDetrV2ForObjectDetection" },
+      vision: { task: "detect", architecture: "RtDetrV2ForObjectDetection", labels: 80, label_examples: ["person", "bicycle"] } } as CatalogModel;
+    server((url) => url === "/api/models/gdino" ? { status: 200, body: modelPage({ model: zs, fits: {} }) }
+      : url === "/api/models" ? { status: 200, body: { can_manage: true, can_deploy: true, models: [zs, rt], recipes: [],
+        sources: { url_hosts: [], local_dirs: [], hf_endpoint: "https://huggingface.co", allow_private_hosts: false } } as CatalogResponse } : undefined);
+    mount("/models/gdino");
+    expect(await screen.findByText("Finds what you name")).toBeTruthy();
+    expect(screen.getByText(/each request lists what to find/)).toBeTruthy();
+    cleanup();
+    mount("/models");
+    expect(await screen.findByText("Finds what you name")).toBeTruthy();
+    expect(screen.getByText("80 classes")).toBeTruthy();
+  });
 });
+

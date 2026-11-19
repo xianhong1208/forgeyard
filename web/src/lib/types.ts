@@ -341,7 +341,9 @@ export type CatalogModel = {
   // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
   image?: ImageModel | null;
   // 1.4, vision models: the task, architecture and (detection) the classes it knows.
-  vision?: { task: "detect" | "segment" | "depth"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string } | null;
+  vision?: { task: "detect" | "segment" | "depth"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string;
+    // 1.4.4 (#142): a zero-shot detector, which finds what each request names (no classes of its own)
+    zero_shot?: boolean } | null;
   // 1.4.4, text classifiers: the architecture, how many labels, their names in index order, the problem type
   // (multi_label_classification: each label's probability on its own).
   classify?: TextClassifier | null;

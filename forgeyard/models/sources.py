@@ -423,6 +423,7 @@ TASK_FROM_PIPELINE = {
     "text-to-video": "video",
     # 1.4, vision models (forgeyard/models/vision.py)
     "object-detection": "detect", "mask-generation": "segment", "depth-estimation": "depth",
+    "zero-shot-object-detection": "detect",   # 1.4.4 (#142): Grounding DINO, OWLv2, …: they find what a request names
 }
 
 
