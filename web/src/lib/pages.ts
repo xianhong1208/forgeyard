@@ -2,6 +2,7 @@
 // console uses beside them under /models (deploy, deployments, routes, engines…) are refused as model names by the
 // API, so a model's page never hides another page.
 import type { ModelKind } from "./fleet";
+import { isVisionTask } from "./models";
 import type { CatalogModel, DeviceFit, EnginePage, EngineOn, MachineVerdict, ModelFile, ModelPage, RecipeVariant } from "./types";
 
 export const modelHref = (name: string) => `/models/${encodeURIComponent(name)}`;
@@ -9,7 +10,7 @@ export const engineHref = (name: string) => `/models/engines/${encodeURIComponen
 
 export function catalogKind(m: Pick<CatalogModel, "task" | "modalities">): ModelKind {
   if (m.task === "chat") return (m.modalities ?? []).length > 0 ? "multimodal" : "chat";
-  if (m.task === "detect" || m.task === "segment" || m.task === "depth") return "vision";
+  if (isVisionTask(m.task)) return "vision";
   return m.task;
 }
 

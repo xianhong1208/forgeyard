@@ -51,13 +51,14 @@ cloud provider.
 13. Videos (1.3, forgeyard/gateway/videogen.py and videojobs.py): /v1/videos is asynchronous: a job is
    checked against each deployment's caps, sent to one replica, which holds it, and its status and
    MP4 are relayed from that replica; it does not go through forward(). Local only.
-14. Vision (1.4, forgeyard/models/vision.py): /v1/vision/detect, /segment and /depth take one image
+14. Vision (1.4, forgeyard/models/vision.py): /v1/vision/detect, /segment, /depth and (1.4.4) /classify take one image
    (multipart with `model` and an `image` file, or JSON with `model` and `image` in base64) for a model
    of that task, passed to the vision server as it came (only `model` changed); its JSON answer is passed
    back unchanged and counted as one image, its kilopixels and the replica's busy milliseconds. Local
    only (no provider serves them). A zero-shot detector (1.4.4, #142) is told what to find with `labels` (a
    list of names, or a comma-separated string in a form); the vision server checks them (400 labels_required
-   without them, labels_not_supported for a detector with fixed classes).
+   without them, labels_not_supported for a detector with fixed classes). So is a zero-shot image classifier (1.4.4,
+   #141: CLIP, SigLIP) at /v1/vision/classify, which answers the labels it was given, scored.
 15. Text classification (1.4.4, forgeyard/gateway/classify.py): /v1/classify takes `input` (a text or a list
    of texts) for a text classification model; the body is checked and rebuilt with the fields Forgeyard knows,
    sent to the engine's /classify (vLLM serves it without /v1), and the answer passed back, counted in prompt
@@ -114,6 +115,7 @@ ENDPOINTS: dict[str, tuple[str, str]] = {
     "vision/detect": ("vision-detect", "vision"),
     "vision/segment": ("vision-segment", "vision"),
     "vision/depth": ("vision-depth", "vision"),
+    "vision/classify": ("vision-classify", "vision"),   # 1.4.4: image classification (#141)
     # 1.4.4: text classification (forgeyard/gateway/classify.py)
     "classify": ("classify", "json"),
 }
@@ -333,7 +335,8 @@ def endpoint_for(api: str) -> str:
             "openai-audio": "/v1/audio/transcriptions", "openai-speech": "/v1/audio/speech",
             "openai-images": "/v1/images/generations", "openai-videos": "/v1/videos",
             "vision-detect": "/v1/vision/detect", "vision-segment": "/v1/vision/segment",
-            "vision-depth": "/v1/vision/depth", "classify": "/v1/classify"}.get(api, "/v1")
+            "vision-depth": "/v1/vision/depth", "vision-classify": "/v1/vision/classify",
+            "classify": "/v1/classify"}.get(api, "/v1")
 
 
 def visible(cloud: str, has_local: bool) -> bool:

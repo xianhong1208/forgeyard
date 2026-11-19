@@ -4,8 +4,9 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     name: vllm                       a-z, 0-9, '-'; unique
     engine, version, title, description
     tasks: [chat]                    model tasks it serves: chat, embed, rerank, asr, tts, image, video,
-                                     detect, segment, depth (1.4, vision: forgeyard/models/vision.py),
-                                     classify (1.4.4, text classification: forgeyard/models/textcls.py)
+                                     detect, segment, depth (1.4), image-classify (1.4.4) (vision:
+                                     forgeyard/models/vision.py), classify (1.4.4, text classification:
+                                     forgeyard/models/textcls.py)
     formats: [safetensors]           model formats it reads: safetensors, gguf, ctranslate2, onnx,
                                      diffusers (a repository with model_index.json)
     api: {chat: openai-chat}         per task, the protocol the gateway (M4) speaks to it
@@ -100,10 +101,13 @@ from forgeyard.workloads.spec import ENV_KEY_RE, IMAGE_RE, RESERVED_ENV, RESERVE
 BUILTIN_DIR = Path(__file__).resolve().parent.parent / "recipes"
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$")
 PLACEHOLDER_RE = re.compile(r"\{([a-z][a-z0-9_]{0,31})\}")
-VISION_TASKS = ("detect", "segment", "depth")
+VISION_TASKS = ("detect", "segment", "depth", "image-classify")
+# Each vision task is served as this protocol (image classification at /v1/vision/classify, 1.4.4).
+VISION_API = {"detect": "vision-detect", "segment": "vision-segment", "depth": "vision-depth",
+              "image-classify": "vision-classify"}
 TASKS = ("chat", "embed", "rerank", "asr", "tts", "image", "video") + VISION_TASKS + ("classify",)
 FORMATS = ("safetensors", "gguf", "ctranslate2", "onnx", "diffusers")
-VISION_APIS = ("vision-detect", "vision-segment", "vision-depth")
+VISION_APIS = tuple(VISION_API[t] for t in VISION_TASKS)
 APIS = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images",
         "openai-videos") + VISION_APIS + ("classify",)
 # Forgeyard's own images (1.4), named by the server's version: forgeyard/install/images.py. Only custom recipes
@@ -534,8 +538,8 @@ class Recipe(_M):
         if "video" in self.tasks and self.estimate.method not in ("diffusers", "fixed"):
             raise ValueError("estimate: a video recipe uses the diffusers (or fixed) method")
         for task in VISION_TASKS:
-            if task in self.tasks and self.api.get(task) != f"vision-{task}":
-                raise ValueError(f"api: {task} is served as vision-{task}")
+            if task in self.tasks and self.api.get(task) != VISION_API[task]:
+                raise ValueError(f"api: {task} is served as {VISION_API[task]}")
         if "classify" in self.tasks and self.api.get("classify") != "classify":
             raise ValueError("api: classify is served as classify")
         if "video" in self.tasks and len(self.tasks) > 1:

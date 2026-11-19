@@ -589,6 +589,38 @@ A machine that cannot reach Docker Hub gets the vision image through the server,
 image ([Offline machines](#offline-machines)); or load it there (Models → Engines → `vision` → *Machine
 without registry access* gives the commands).
 
+## Classify images
+
+Image classification (1.4.4) is a model kind of its own, *Image classification* (task `image-classify`),
+answered at `/v1/vision/classify` by the same vision server; it is not text classification (`/v1/classify`).
+Two sorts of model:
+
+- **Fixed classes:** ViT, ConvNeXt V2, DINOv2 classifiers… (an `…ForImageClassification` model) know their
+  own list, often the 1,000 ImageNet classes, and answer the best of them.
+- **Zero-shot:** CLIP and SigLIP 2 sort a picture into the labels you send with each request (`labels`),
+  each read as "This is a photo of …" (`template` changes that). SigLIP scores each label on its own
+  (`multi_label: true`: several can fit, or none); CLIP shares 1 between them.
+
+1. **Models → Add a model → Recommended → Image classification** lists SigLIP 2 base and LAION's CLIP
+   ViT-B/32 (zero-shot), ViT base, ConvNeXt V2 tiny and DINOv2 small (ImageNet classes), Apache-2.0 or MIT.
+   Or search Hugging Face with the task **Image classification**.
+2. **Deploy** it like the other vision models: a CPU is enough (0.1 to 0.4 s per picture on four threads).
+   It needs the vision image of 1.4.4 or later.
+3. Call it:
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=vit-base-patch16-224 -F image=@cats.jpg -F top_k=3
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=siglip2-base -F image=@cats.jpg -F 'labels=cats on a sofa, a dog, an invoice'
+```
+
+The answer: `labels`, best first, each `{"label", "score"}`, and `multi_label`. A zero-shot classifier
+without `labels` answers 400 `labels_required`; a classifier with fixed classes given `labels` answers 400
+`labels_not_supported`.
+
 ## Try vision in the Playground
 
 The Playground's vision panel sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
@@ -612,6 +644,8 @@ templates are not offered here (apps left the console in 1.4 and are
      for another.
    - **Depth estimation:** **Estimate depth** shows the depth map beside the photo, brighter or warmer
      where it is nearer, in **Colour** or **Grey**. The depth is relative, not metres.
+   - **Image classification (1.4.4):** **Classify** lists the best classes with a bar for each score. A
+     zero-shot classifier first asks for **Labels**, separated by commas (*a cat, a dog, a screenshot*).
 
 Under the result: which replica answered, the picture's size and the time the model and the whole request
 took. A stopped model, or a picture it cannot read, is said in plain words. The console sends it to

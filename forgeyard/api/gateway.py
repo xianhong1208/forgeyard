@@ -7,7 +7,7 @@ does not apply (clients are not browsers). The host check (421) does. No CORS he
 The console's playground (`/api/playground/…`) goes through the same code with the signed-in
 user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Classify view
 (1.4.4) posts to `/api/playground/classify`. Its Vision tab
-reaches vision models (1.4) at `/api/playground/vision/detect|segment|depth` like any /v1 request, and
+reaches vision models (1.4) at `/api/playground/vision/detect|segment|depth|classify` like any /v1 request, and
 exposed vision workloads (1.3, `/api/playground/vision/<workload>/<task>`) the way /x/ does
 (forgeyard/gateway/vision.py).
 
@@ -84,7 +84,7 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         body = await proxy.read_body(request, await run_in_threadpool(proxy.body_ceiling))
         parsed = proxy.parse_body(body, request.headers.get("content-type", ""), kind)
         if kind == "vision":
-            parsed.vision = endpoint.split("/", 1)[1]   # 1.4: detect, segment or depth
+            parsed.vision = endpoint.split("/", 1)[1]   # 1.4: detect, segment or depth; 1.4.4: classify
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
         if endpoint == speech.ENDPOINT:
@@ -182,6 +182,11 @@ async def vision_depth(request: Request):
     return await _api(request, "vision/depth")
 
 
+@router.post("/vision/classify")
+async def vision_classify(request: Request):
+    """Image classification (1.4.4, #141): an image to a classifier (fixed classes, or CLIP-like and told the labels);
+    the best labels and their scores back."""
+    return await _api(request, "vision/classify")
 @router.post("/classify")
 async def classify_text(request: Request):
     """Text classification (1.4.4): texts to a text classification model; each one's label and probabilities back."""
@@ -364,7 +369,7 @@ async def unknown(rest: str):
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
                                                  "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
                                                  "/v1/audio/voices, /v1/images/generations, /v1/videos and "
-                                                 "/v1/vision/detect, /segment and /depth, and "
+                                                 "/v1/vision/detect, /segment, /depth and /classify, and "
                                                  "/v1/classify.").response()
 
 

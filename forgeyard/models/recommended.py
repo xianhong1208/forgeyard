@@ -46,7 +46,8 @@ class Entry(BaseModel):
     file: Optional[str] = None
     mmproj: Optional[str] = None          # GGUF vision models: the projector file
     group: str
-    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video", "detect", "segment", "depth", "classify"]
+    task: Literal["chat", "embed", "rerank", "asr", "tts", "image", "video", "detect", "segment", "depth", "classify",
+                  "image-classify"]
     format: Literal["safetensors", "gguf", "ctranslate2", "onnx", "diffusers"]
     recipe: str
     device: Literal["gpu", "cpu"] = "gpu"

@@ -285,6 +285,7 @@ page cannot use a signed-in browser against it.
 | `POST /v1/vision/detect` | Object detection (1.4): one image, boxes, labels and scores back; a zero-shot detector (1.4.4) is told what to find with `labels`. See [Vision](#vision) | no |
 | `POST /v1/vision/segment` | Segmentation with SAM 2 (1.4): one image and a point or a box, masks as PNGs back | no |
 | `POST /v1/vision/depth` | Depth estimation (1.4): one image, a 16-bit depth map back | no |
+| `POST /v1/vision/classify` | Image classification (1.4.4): one image, the best classes and their scores back; a zero-shot classifier (CLIP, SigLIP) is given the `labels` to choose from | no |
 | `POST /v1/classify` | Text classification (1.4.4): texts, each one's label and probabilities back. See [Text classification](#text-classification) | no |
 
 Any other path under `/v1` answers 404 `unknown_endpoint`.
@@ -534,7 +535,8 @@ in the server's database (table `video_jobs`, migration `0014`).
 
 ### Vision
 
-`POST /v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth` (1.4) take one image for a
+`POST /v1/vision/detect`, `/v1/vision/segment`, `/v1/vision/depth` (1.4) and `/v1/vision/classify` (1.4.4,
+image classification, task `image-classify`) take one image for a
 vision model and answer JSON. They are Forgeyard's own API (the OpenAI SDK has none): any HTTP client
 works. One engine serves them, Forgeyard's own vision server (recipe `vision`, the image
 `forgeyard-vision` pinned by digest: the CUDA build on NVIDIA, the CPU build elsewhere), with the
@@ -551,11 +553,12 @@ at most 20 MiB and 40 megapixels. The gateway checks that there is a model and a
 | `detect` | `threshold` (0 to 1; 0.5, for a zero-shot detector 0.3, OWL 0.1), `max_detections` (1 to 1,000, 100); `labels` (1.4.4): what a zero-shot detector is to find, a list of names or a comma-separated string, at most 32 of at most 64 characters | `detections`: `[{"label", "score", "box": [x0, y0, x1, y1]}]`, best first, in the image's pixels; a zero-shot detector's `label` is one of the names sent, as sent |
 | `segment` | `points` (`[[x, y], …]`, at most 16) with `labels` (1 inside, 0 outside; all 1 when left out), or `box` (`[x0, y0, x1, y1]`); `multimask` (`true`: three candidate masks) | `masks`: `[{"score", "area", "box", "png"}]`, best first; each mask a 1-bit PNG of the image's size, base64 |
 | `depth` | none | `depth_png` (a 16-bit grey PNG of the image's size, base64, nearer is brighter), `min`, `max`, `unit` (relative depth, not metres) |
+| `classify` | `top_k` (1 to 1,000; 5, a zero-shot classifier all its labels); `labels` (zero-shot classifiers only, and required there: the labels to choose from, as for `detect`); `template` (zero-shot: `This is a photo of {}.`, one `{}` where the label goes, at most 200 characters) | `labels`: `[{"label", "score"}]`, best first; `multi_label` (`true`: each score stands alone, a sigmoid, as SigLIP's and multi-label classifiers'; `false`: the scores share 1) |
 
 Every answer also has `model`, `width`, `height` (the image's) and `ms` (the model's time). The vision
 server's errors (`{"error": {"message", "code"}}`) come back with their status: 400 `invalid_image`,
 `invalid_option`, `missing_prompt` (segment without a point or a box), `labels_required` (a zero-shot
-detector without `labels`), `labels_not_supported` (`labels` for a detector with fixed classes), 413
+detector without `labels`), `labels_not_supported` (`labels` for a detector or classifier with fixed classes; 1.4.4 for both), 413
 `image_too_large`.
 
 **Zero-shot detectors (1.4.4, #142)** (Grounding DINO, MM-Grounding-DINO and LLMDet, OWL-ViT, OWLv2) find
@@ -653,8 +656,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `response_format_not_supported` | Images: `response_format: url`. Images come back as base64 only | Leave it out, or ask for `b64_json` |
 | 400 | `streaming_not_supported` | Images and vision: `stream: true` | Leave it out |
 | 400 | `missing_image` | Vision: no file field `image`, or JSON without `image` | Send the image |
-| 400 | `labels_required` | Vision (1.4.4): a zero-shot detector was not told what to find | Send `labels` |
-| 400 | `labels_not_supported` | Vision (1.4.4): `labels` for a detector with fixed classes | Leave `labels` out, or use a zero-shot detector |
+| 400 | `labels_required` | Vision (1.4.4): a zero-shot detector was not told what to find, or a zero-shot classifier not given its labels | Send `labels` |
+| 400 | `labels_not_supported` | Vision (1.4.4): `labels` for a detector or classifier with fixed classes | Leave `labels` out, or use a zero-shot model |
 | 400 | `too_many_images` | Images: `n` over the deployment's *Images per request* | Ask for fewer, or raise `max_images` |
 | 400 | `image_too_large` | Images: a side over the deployment's *Largest side* | Ask for a smaller size, or raise `max_side` |
 | 400 | `invalid_size` | Images: `size` is not `WIDTHxHEIGHT` (each side 64 to 8,192), or a side is not a multiple of what the model takes (16 or 64; the message says). Videos: the same, each side 64 to 2,048, multiples of 16 or 32 | Use a size like the one the message suggests |
@@ -1473,9 +1476,14 @@ zero-shot detection models known by its `model_type` or architecture (Grounding 
 LLMDet, OmDet-Turbo, OWL-ViT, OWLv2), is a detect model marked `zero_shot` (1.4.4, #142; 1.4.3 refused them,
 and one added before 1.4.3 is known by the config the catalog kept, with no migration). OmDet-Turbo is refused
 like DETR with a timm backbone: its transformers port loads its backbone through timm (422 `not_a_vision_model`
-when added, or when one kept from before 1.4.3 is deployed). It runs on a vision
-image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older, deploying or estimating it answers
-422 `vision_image_too_old`, naming both versions; an image of another name (a local build) is taken as it is.
+when added, or when one kept from before 1.4.3 is deployed). An image classifier (1.4.4, #141, task
+`image-classify`) is a model whose `config.json` names an `…ForImageClassification` architecture (fixed classes:
+ViT, ConvNeXt V2, DINOv2…; a timm checkpoint, `timm_wrapper`, is refused) or a CLIP-like one (marked `zero_shot`:
+CLIP, SigLIP, SigLIP 2, ALIGN, AltCLIP, Chinese-CLIP, MetaCLIP 2), served as `vision-classify`. Zero-shot
+detectors and image classifiers run on a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision`
+image is older, deploying or estimating one answers 422 `vision_image_too_old`, naming both versions; an
+image of another name (a local build) is taken as it is. OpenCLIP's own weights beside a CLIP repository's
+transformers ones (`open_clip_*`) are neither read nor downloaded.
 Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
 1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU);
 Grounding DINO and MM-Grounding-DINO add 512 MiB (their text encoder and 800-pixel features: peak 2.24 GiB on a

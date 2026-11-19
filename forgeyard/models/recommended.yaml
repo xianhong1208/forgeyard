@@ -10,11 +10,12 @@
 #   title         what people see
 #   source        hf://<org>/<name>
 #   revision      optional: a branch, tag or ref to resolve instead of main; text-to-speech, image,
-#                 video, vision (detect, segment, depth) and text classification entries are pinned to a commit
-#                 (their voices, files, labels and measured memory belong to it)
+#                 video, vision (detect, segment, depth, image-classify) and text classification entries are pinned
+#                 to a commit (their voices, files, labels and measured memory belong to it)
 #   file          GGUF (and image models' safetensors files) only: which file of the repository
 #   group         one of the groups below
-#   task          chat | embed | rerank | asr | tts | image | video | detect | segment | depth | classify
+#   task          chat | embed | rerank | asr | tts | image | video | detect | segment | depth | classify |
+#                 image-classify
 #   format        safetensors | gguf | ctranslate2 | onnx | diffusers (what the repository holds)
 #   recipe        the recipe suggested for it (it must serve that task and format)
 #   device        optional: cpu to suggest running it on the CPU (the recipe must have a CPU variant)
@@ -62,6 +63,9 @@ groups:
   - id: detection
     title: Object detection, segmentation and depth
     description: Vision models for /v1/vision/detect, /segment and /depth on Forgeyard's own vision server, including detectors that find what you name. Small and quick on a CPU, faster on an NVIDIA GPU. Apache-2.0 only.
+  - id: image-classification
+    title: Image classification
+    description: Models for /v1/vision/classify on Forgeyard's own vision server. CLIP and SigLIP 2 sort a picture into the labels you send; ViT, ConvNeXt V2 and DINOv2 know the 1,000 ImageNet classes. Quick on a CPU. Apache-2.0 and MIT only.
   - id: retrieval
     title: Embeddings and rerank
     description: General-purpose models for search and retrieval (RAG), in over 100 languages.
@@ -770,3 +774,69 @@ models:
     download_gib: 0.58
     memory_gib: 1.83
     note: Google's open-vocabulary detector; one query per name you send, good at small objects, quicker than Grounding DINO on a CPU.
+  # ---------------------------------------------------------------- image classification (1.4.4, #141)
+  - name: siglip2-base
+    title: SigLIP 2 base (classifies into the labels you send)
+    source: hf://google/siglip2-base-patch16-224
+    revision: 75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2
+    license: apache-2.0
+    group: image-classification
+    task: image-classify
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 1.43
+    memory_gib: 2.68
+    note: Zero-shot classification in many languages; each label is scored on its own, so several can fit one picture.
+  - name: clip-vit-b-32-laion
+    title: CLIP ViT-B/32 LAION-2B (classifies into the labels you send)
+    source: hf://laion/CLIP-ViT-B-32-laion2B-s34B-b79K
+    revision: 1a25a446712ba5ee05982a381eed697ef9b435cf
+    license: mit
+    group: image-classification
+    task: image-classify
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.57
+    memory_gib: 1.82
+    note: The classic CLIP, trained openly by LAION; small and quick; picks the one label that fits best.
+  - name: vit-base-patch16-224
+    title: ViT base (ImageNet classes)
+    source: hf://google/vit-base-patch16-224
+    revision: 3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3
+    license: apache-2.0
+    group: image-classification
+    task: image-classify
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.32
+    memory_gib: 1.57
+    note: The reference image classifier, the 1,000 ImageNet classes.
+  - name: convnextv2-tiny-22k-224
+    title: ConvNeXt V2 tiny (ImageNet classes)
+    source: hf://facebook/convnextv2-tiny-22k-224
+    revision: 9cba4896e97bb86b1eb609e482a2149d84f345bc
+    license: apache-2.0
+    group: image-classification
+    task: image-classify
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.11
+    memory_gib: 1.36
+    note: Small and accurate, pre-trained on ImageNet-22k; the 1,000 ImageNet classes.
+  - name: dinov2-small-imagenet1k
+    title: DINOv2 small, ImageNet head (ImageNet classes)
+    source: hf://facebook/dinov2-small-imagenet1k-1-layer
+    revision: 03e870f2220b7147526b10290eadbf2341c6c30b
+    license: apache-2.0
+    group: image-classification
+    task: image-classify
+    format: safetensors
+    recipe: vision
+    device: cpu
+    download_gib: 0.09
+    memory_gib: 1.34
+    note: Meta's DINOv2 features with a linear ImageNet head; the 1,000 ImageNet classes.

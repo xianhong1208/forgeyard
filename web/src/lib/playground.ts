@@ -10,7 +10,7 @@ import type { Deployment, RouteInfo } from "./types";
 // multimodal chat, as on Serving; a cloud-only model has no deployment, so it is plain chat.
 const API_MODEL_KIND: Record<string, ModelKind> = {
   "openai-chat": "chat", "openai-embeddings": "embed", rerank: "rerank", "openai-audio": "asr", "openai-speech": "tts",
-  "openai-images": "image", "openai-videos": "video", "vision-detect": "vision", "vision-segment": "vision", "vision-depth": "vision",
+  "openai-images": "image", "openai-videos": "video", "vision-detect": "vision", "vision-segment": "vision", "vision-depth": "vision", "vision-classify": "vision",
   classify: "classify",
 };
 

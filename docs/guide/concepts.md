@@ -327,6 +327,10 @@ API key.
   MM-Grounding-DINO, OWL-ViT, OWLv2) know no fixed list of classes: each request names what to
   find (`labels: ["cat", "remote control"]`), and the same `/v1/vision/detect` answers with boxes for those
   names. The catalog marks them *Finds what you name*; they need the vision image of 1.4.4 or later.
+- **Image classification (1.4.4):** its own kind (task `image-classify`, at `/v1/vision/classify`; text
+  classification is another): classifiers with fixed classes (ViT, ConvNeXt V2, DINOv2: the ImageNet classes)
+  answer the best of their own classes, and zero-shot ones (CLIP, SigLIP 2) choose among the `labels` each
+  request sends. They need the vision image of 1.4.4 or later.
 - **Their own API:** `/v1/vision/detect`, `/v1/vision/segment` and `/v1/vision/depth`, one image per
   request (multipart, or base64 in JSON) and a JSON answer; masks and depth maps are PNGs in base64.
   The OpenAI SDK has no such API: any HTTP client calls it.

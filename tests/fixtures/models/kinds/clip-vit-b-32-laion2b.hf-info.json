@@ -1,0 +1,18 @@
+{
+  "id": "laion/CLIP-ViT-B-32-laion2B-s34B-b79K",
+  "pipeline_tag": "zero-shot-image-classification",
+  "library_name": "open_clip",
+  "tags": [
+    "open_clip",
+    "pytorch",
+    "safetensors",
+    "clip",
+    "zero-shot-image-classification",
+    "arxiv:1910.04867",
+    "license:mit",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "mit"
+  }
+}

@@ -295,8 +295,9 @@ export type LogsResponse = { source: "live" | "stored"; text: string; truncated:
 
 // ---------------------------------------------------------------- models (M3)
 // 1.4 (#86): detect, segment and depth are vision models (Forgeyard's vision server, /v1/vision/<task>).
-// 1.4.4 (#144): classify is text classification (vLLM's pooling runner, /v1/classify).
-export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "detect" | "segment" | "depth" | "classify";
+// 1.4.4 (#144): classify is text classification (vLLM's pooling runner, /v1/classify); image-classify (#141) is
+// image classification on the vision server (/v1/vision/classify).
+export type Task = "chat" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "detect" | "segment" | "depth" | "classify" | "image-classify";
 
 export type RecipeParam = {
   type: "int" | "choice" | "size" | "float"; default: number | string; min?: number; max?: number; choices?: string[]; label?: string; help?: string;
@@ -341,8 +342,9 @@ export type CatalogModel = {
   // 1.3, image models: the native size, and the pipeline's components or the files beside the model file.
   image?: ImageModel | null;
   // 1.4, vision models: the task, architecture and (detection) the classes it knows.
-  vision?: { task: "detect" | "segment" | "depth"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string;
-    // 1.4.4 (#142): a zero-shot detector, which finds what each request names (no classes of its own)
+  vision?: { task: "detect" | "segment" | "depth" | "image-classify"; architecture?: string; labels?: number; label_examples?: string[]; problem?: string;
+    // 1.4.4: a zero-shot detector (#142), which finds what each request names, or a zero-shot image classifier (#141),
+    // which chooses among the labels each request sends (no classes of their own)
     zero_shot?: boolean } | null;
   // 1.4.4, text classifiers: the architecture, how many labels, their names in index order, the problem type
   // (multi_label_classification: each label's probability on its own).

@@ -759,6 +759,13 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .vis-name { overflow-wrap: anywhere; }
 .vis-actions { align-items: center; }
 .vis-find { max-width: 560px; }
+.vis-classes { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.vis-class-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.vis-class-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; }
+.vis-class-list li.best .vis-class-name { font-weight: 700; }
+.vis-class-name { overflow-wrap: anywhere; min-width: 0; }
+.vis-class-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.vis-class-bar > span { display: block; height: 100%; background: var(--steel); }
 .vis-find input { width: 100%; }
 .vis-threshold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; color: var(--ink-2); }
 .vis-threshold label { font-weight: 600; }

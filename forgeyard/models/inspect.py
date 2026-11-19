@@ -338,9 +338,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
                 out["voices"] = voices_of(config)
             if modalities.vision_tile_px(config):
                 out["vision_tile_px"] = modalities.vision_tile_px(config)
-            shards = [p for p in paths if p.endswith(".safetensors") and "/" not in p]
-            if not shards:
-                shards = [p for p in paths if p.endswith(".safetensors")]
+            weights = [p for p in paths if p.endswith(".safetensors") and not sources.other_weights(p)]
+            shards = [p for p in weights if "/" not in p] or weights
             if len(shards) > MAX_SHARDS:
                 raise InspectError(f"more than {MAX_SHARDS} safetensors files")
             out["weights"] = safetensors.merge([safetensors.read_remote(ranged(p)) for p in shards])
