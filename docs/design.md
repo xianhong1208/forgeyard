@@ -66,7 +66,7 @@ agent dials out to the server, so the server never needs to reach the machine.
 A **workload** is something to run on your machines: a **service** (runs until stopped, is
 health-checked and restarted) or a **task** (runs to the end, with retries and a time limit).
 Each one has 1 to 16 **replicas**; each replica runs on one machine. Model deployments run as
-workloads (runtime `model`); fine-tuning (1.9) will too.
+workloads (runtime `model`); fine-tuning (1.8) will too.
 
 **Apps leave Forgeyard** (#88, #89). A workload people run themselves, not a model's, was an *app*:
 in the console under **Apps** (1.4, #81), made with `POST /api/workloads`, optionally exposed at
