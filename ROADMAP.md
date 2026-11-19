@@ -2,7 +2,7 @@
 
 [繁體中文](ROADMAP.zh-TW.md)
 
-Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10; each line names what
+Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10 and revised on 2026-11-19 after an outside review; each line names what
 users get, not how it is built. Versions are minor releases unless a change breaks something.
 
 ## Shipped
@@ -304,16 +304,16 @@ Also in 1.4.2: a relay whose source breaks off mid-file reads as one clear line 
 | Version | What you get |
 |---|---|
 | **1.4.4: more kinds of models, part 1** | **Zero-shot object detection** (#142): `/v1/vision/detect` takes an optional `labels` list and finds the objects named in it, with the same answer, on Forgeyard's vision image (Grounding DINO, OWLv2, MM-Grounding-DINO). **Text classification** (#144): small classifier models on vLLM's pooling engine at `/v1/classify`, on a GPU. **Image classification** (#141): image classification and zero-shot image classification (CLIP and SigLIP 2) at `/v1/vision/classify` on the vision image. Permissive licences only. |
+| **1.4.5: fixes from an outside review** | **Structured output is never silently lost:** a request with a JSON schema, grammar or guided-decoding parameter is not spilled to a cloud tier that would drop it, and any parameter dropped on the way to a cloud provider is named in an `X-Forgeyard-Dropped-Params` header. **Encrypted traffic to the machines:** the gateway talks to each replica over TLS, with a certificate the agent gets from Forgeyard's own CA, so prompts and answers no longer cross the network in plain HTTP. **Replicas move off a machine that stays offline:** after a grace period they are placed on another machine that fits. **Prometheus metrics** at `/metrics`. Smaller fixes: an agent that reports a vendor the server does not know is still accepted; `local_busy` answers carry `Retry-After`; cloud spend from answers without token counts survives a restart; the installer pins the uv it downloads by hash. **Behind the scenes:** the two largest files are split before more is built on them: the gateway's `proxy.py` (about 1,700 lines) into routing, spill, cloud and streaming parts, and the agent's `supervisor.py` (about 1,150 lines) into smaller pieces, with an explicit interface for container and process runtimes. Behaviour does not change; the existing tests and the full regression run must pass unchanged. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. **More kinds of models, part 2:** image embeddings (#141), image-to-image and image-to-video (#143), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
-| **1.6: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
-| **1.7: teams** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. |
-| **1.8: running it for real** | Prometheus metrics and dashboards; alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
-| **1.9: fine-tuning** | A first-class **single-machine LoRA / QLoRA fine-tune**: pick a base model, upload a dataset, train with sensible defaults and a loss curve, then **deploy the adapter in one click** on vLLM (details below). |
+| **1.6: teams and operations** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log can be sent out (syslog, OpenTelemetry). Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
+| **1.7: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
+| **1.8: fine-tuning** | A first-class **single-machine LoRA / QLoRA fine-tune**: pick a base model, upload a dataset, train with sensible defaults and a loss curve, then **deploy the adapter in one click** on vLLM (details below). |
 
 Reinforcement learning, robotics and graph learning are not planned as model types: they are
 training and research workloads, and run as plain tasks.
 
-### 1.9: training
+### 1.8: training
 
 Fine-tuning already runs today as a one-off task in your own trainer container (Unsloth,
 LLaMA-Factory, axolotl), with only the GPUs it was given. The direction under discussion is a
@@ -329,22 +329,8 @@ first-class **single-machine LoRA / QLoRA fine-tune** flow:
 
 Training holds whole GPUs for hours, so on shared machines it needs priorities against serving
 (preemptible jobs, quiet-hours windows). That is why it comes after 1.5 (deployments that free
-their GPUs) and 1.8 (alerts). The details are designed then; multi-machine distributed training is
+their GPUs) and 1.6 (alerts). The details are designed then; multi-machine distributed training is
 much later.
-
-### Larger platforms: Kubernetes and others (to be designed, after 1.9)
-
-Forgeyard runs today on its own server with an agent per machine. For bigger installations:
-
-- **The server on Kubernetes:** a Helm chart for the published server image, with PostgreSQL and
-  the data volume, behind the cluster's ingress.
-- **A cluster as a pool of machines:** instead of an agent on each machine, Forgeyard places replicas
-  as pods on an existing Kubernetes cluster (GPUs through the NVIDIA or AMD device plugins), so a
-  cluster that is already managed joins as it is, next to plain machines with agents.
-- Other schedulers (Slurm, Nomad) are looked at in the same design.
-
-How established projects do this (KServe, GPUStack, others) is researched before the design. The
-version is not decided yet.
 
 ## Later, when there is a need
 
@@ -358,6 +344,20 @@ version is not decided yet.
 - **Prefix-aware routing.** Requests that share a long prompt go to the replica that already has
   it cached.
 - **Several servers.** For availability, with limits and counters shared between them.
+
+### Larger platforms: Kubernetes and others (when there is a need)
+
+Forgeyard runs today on its own server with an agent per machine. For bigger installations:
+
+- **The server on Kubernetes:** a Helm chart for the published server image, with PostgreSQL and
+  the data volume, behind the cluster's ingress.
+- **A cluster as a pool of machines:** instead of an agent on each machine, Forgeyard places replicas
+  as pods on an existing Kubernetes cluster (GPUs through the NVIDIA or AMD device plugins), so a
+  cluster that is already managed joins as it is, next to plain machines with agents.
+- Other schedulers (Slurm, Nomad) are looked at in the same design.
+
+How established projects do this (KServe, GPUStack, others) is researched before the design. The
+version is not decided yet.
 
 ## Small improvements, picked up along the way
 

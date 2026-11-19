@@ -49,7 +49,7 @@ server 不需要能連到機器。
 
 **workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
 可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。模型部署以
-workload（runtime 為 `model`）執行；微調（1.9）也會。
+workload（runtime 為 `model`）執行；微調（1.8）也會。
 
 **應用程式離開 Forgeyard**（#88、#89）。使用者自己執行、不是模型的 workload 叫 *app*：1.4（#81）在 console 的 **Apps**，
 用 `POST /api/workloads` 建立，可以公開在 `/x/`。Forgeyard 的重點是執行和管理模型，所以 1.4 把應用程式從 console 拿掉（頁面、範本、
