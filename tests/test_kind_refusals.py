@@ -169,6 +169,9 @@ def _old_row(name: str, source: str, arch: str, model_type: str, archs: list | N
 
 NEW_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4@sha256:" + "4" * 64
 NEW_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4-cuda@sha256:" + "5" * 64
+# The image the built-in recipe pinned before 1.4.4rc1.
+OLD_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6"
+OLD_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3"
 
 
 def _vision_copy(name: str, cpu: str, cuda: str) -> str:
@@ -183,7 +186,7 @@ def _vision_copy(name: str, cpu: str, cuda: str) -> str:
 def test_fy_kind_004_a_zero_shot_detector_runs_on_a_vision_image_from_1_4_4_on(owner):
     """FY-KIND-004 (1.4.4): a zero-shot detector added before 1.4.3 (no flag) is known from the model_type or the
     architecture the catalog kept, and listed as zero_shot without the classes it was given then (no migration).
-    On a recipe whose Forgeyard vision image is older than 1.4.4 (the built-in one until its pin moves), deploying
+    On a recipe whose Forgeyard vision image is older than 1.4.4 (the built-in one until 1.4.4rc1), deploying
     or estimating it answers 422 vision_image_too_old naming both versions; on an image from 1.4.4 on, or another
     image (a local build), it deploys. A detector that is not zero-shot deploys on the old image too; OmDet-Turbo,
     which needs timm, is refused on any image (422 not_a_vision_model)."""
@@ -206,22 +209,24 @@ def test_fy_kind_004_a_zero_shot_detector_runs_on_a_vision_image_from_1_4_4_on(o
         assert listed[model]["vision"]["zero_shot"] is True and "labels" not in listed[model]["vision"], model
     assert listed["rtdetr"]["vision"]["labels"] == 2 and "zero_shot" not in listed["rtdetr"]["vision"]
     assert owner.post("/api/recipes", json={"yaml": _vision_copy("vision-new", NEW_CPU, NEW_CUDA)}).status_code == 201
+    assert owner.post("/api/recipes", json={"yaml": _vision_copy("vision-old", OLD_CPU, OLD_CUDA)}).status_code == 201
     assert owner.post("/api/recipes", json={"yaml": _vision_copy(
         "vision-local", "forgeyard-local/forgeyard-vision:zs-test", "forgeyard-local/forgeyard-vision:zs-test-cuda")
     }).status_code == 201
     cpu = make_node("cpu-a", features=("workloads", "models"))
     for model in ("gdino", "owl", "owl2", "mm"):
-        body = {"name": f"{model}-dep", "model": model, "recipe": "vision", "params": {"gpus": 0}, "machine_id": cpu,
+        body = {"name": f"{model}-dep", "model": model, "recipe": "vision-old", "params": {"gpus": 0}, "machine_id": cpu,
                 "wait": True}
         for path in ("/api/deployments", "/api/deployments/estimate"):
             r = owner.post(path, json=body)
             assert r.status_code == 422, (model, path, r.text)
             d = r.json()["detail"]
             assert d["code"] == "vision_image_too_old", (model, d)
-            assert "needs Forgeyard's vision image 1.4.4 or newer; the vision recipe runs 1.4.0" in d["message"]
+            assert "needs Forgeyard's vision image 1.4.4 or newer; the vision-old recipe runs 1.4.0" in d["message"]
     assert owner.get("/api/models").status_code == 200
-    deploy(owner, "rtdetr-dep", "rtdetr", "vision", params={"gpus": 0}, machine_id=cpu, wait=True)
+    deploy(owner, "rtdetr-dep", "rtdetr", "vision-old", params={"gpus": 0}, machine_id=cpu, wait=True)
     deploy(owner, "gdino-new", "gdino", "vision-new", params={"gpus": 0}, machine_id=cpu, wait=True)
+    deploy(owner, "gdino-builtin", "gdino", "vision", params={"gpus": 0}, machine_id=cpu, wait=True)
     deploy(owner, "owl-local", "owl", "vision-local", params={"gpus": 0}, machine_id=cpu, wait=True)
     # OmDet-Turbo (kept from before 1.4.3) needs timm, whatever the image.
     for recipe in ("vision", "vision-new"):

@@ -40,10 +40,15 @@ DEPTH_REV = "5426e4f0f36572d16453bbda7a8389317b1bef99"
 A100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
 # The vision recipe's pinned images (1.4.1, #113): moved by scripts/pin_images.py --write after a release that
 # changed images/vision.
-VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0"
-              "@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6")
-VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda"
-               "@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3")
+VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1"
+              "@sha256:f4e5940bdbfe1c88a6712aaf708432149651e25a9a6d7318e9f382ab697c579b")
+VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda"
+               "@sha256:9e4ef32b302cf3d82a07d69a1a55e42b28c17e9e34f8e3399bfe8918d1362376")
+# The image the built-in recipe pinned before 1.4.4: kept for the refusals of models it cannot run.
+OLD_VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0"
+                  "@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6")
+OLD_VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda"
+                   "@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3")
 
 
 def vision_meta(task: str, repo: str, rev: str, arch: str, size: int, **over) -> dict:
@@ -214,8 +219,8 @@ def test_fy_vis_019_the_vision_image_is_pinned_recorded_and_relayable(monkeypatc
     from forgeyard.workloads import images as image_ids
 
     lock = image_ids.load_lock()
-    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:")
-    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:")
+    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1@sha256:")
+    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda@sha256:")
     for image, platforms in [(VISION_CPU, {"linux/amd64", "linux/arm64"}), (VISION_CUDA, {"linux/amd64"})]:
         entry = lock[image]
         assert entry["index"] == image.partition("@")[2] and set(entry["platforms"]) == platforms
@@ -894,17 +899,22 @@ def test_fy_vis_031_classify_through_the_gateway(cls):
 
 
 def test_fy_vis_032_image_classifiers_need_the_1_4_4_vision_image(vis):
-    """FY-VIS-032: on the built-in recipe while it pins a vision image older than 1.4.4, deploying or estimating an image
-    classifier answers 422 vision_image_too_old (the old server has no image-classify task); its estimate on a newer
-    image is its files plus the recipe's overhead."""
+    """FY-VIS-032: on a recipe that pins a vision image older than 1.4.4 (the built-in one did until 1.4.4rc1),
+    deploying or estimating an image classifier answers 422 vision_image_too_old (the old server has no
+    image-classify task); on the built-in recipe it deploys; its estimate is its files plus the recipe's overhead."""
     vit = vision_meta("detect", "google/vit-base-patch16-224", "b" * 40, "ViTForImageClassification", 330 * MIB)
     vit["vision"] = {"task": "image-classify", "architecture": "ViTForImageClassification", "labels": 1000}
     add_catalog("vit-old", vit, task="image-classify", fmt="safetensors", source="hf://google/vit-base-patch16-224")
-    body = {"name": "vit-old", "model": "vit-old", "recipe": "vision", "params": {"gpus": 0}, "machine_id": vis.cpu}
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: vision-old\n", 1)
+    text = text.replace(f"image: {VISION_CUDA}", f"image: {OLD_VISION_CUDA}").replace(f"image: {VISION_CPU}", f"image: {OLD_VISION_CPU}")
+    assert vis.owner.post("/api/recipes", json={"yaml": text}).status_code == 201
+    body = {"name": "vit-old", "model": "vit-old", "recipe": "vision-old", "params": {"gpus": 0}, "machine_id": vis.cpu}
     for path in ("/api/deployments", "/api/deployments/estimate"):
         r = vis.owner.post(path, json=body)
         assert r.status_code == 422 and r.json()["detail"]["code"] == "vision_image_too_old", (path, r.text)
         assert r.json()["detail"]["message"].startswith("Image classification needs Forgeyard's vision image 1.4.4")
+    r = vis.owner.post("/api/deployments", json={**body, "recipe": "vision"})
+    assert r.status_code == 201, r.text
     est = estimate(vit, recipes.builtin_recipes()["vision"][0], {"gpus": 0}, device="cpu", gpu_context=0)
     assert est.ram == 330 * MIB + 2000 + 1280 * MIB
     q = hub.make_query("", "image-classify", None, 10)
