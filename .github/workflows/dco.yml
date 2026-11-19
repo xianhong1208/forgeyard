@@ -1,0 +1,28 @@
+name: DCO
+
+# Every non-merge commit of a pull request must carry a "Signed-off-by:" line whose email is
+# the commit's author email (Developer Certificate of Origin, see CONTRIBUTING.md#licence).
+# Commits by bots (author name ending in "[bot]") are not checked.
+on:
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: shellcheck the check
+        run: shellcheck scripts/check_dco.sh
+      - name: Check sign-off on every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/check_dco.sh "$BASE" "$HEAD"
