@@ -899,6 +899,8 @@ sudo systemctl enable --now forgeyard
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
 
+1.4.5 起，升級期間版本不同的伺服器和 agent 仍能一起運作，先升級哪一邊都可以：任一邊收到不認得的訊息都會略過（並在自己的日誌留下警告）；伺服器遇到還不認得的卡片種類時，會略過那張卡，而不是拒絕這個 agent。機器頁面的 **Detection notes** 會把它列為 *unknown vendor*；升級伺服器後才能使用那張卡。
+
 ## 更新 agent
 
 每台機器的頁面都有**Update the agent** 區塊。管理員會在這裡看到把這台機器的 agent 更新到伺服器版本的完整指令，它是根據 agent 回報的執行方式產生的（1.4.2 起的 agent 每次連線都會回報）：

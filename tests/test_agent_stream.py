@@ -171,7 +171,7 @@ def test_fy_ags_012_bad_message_after_hello_closes_with_4003(owner):
     j = joined(owner)
     with connect(owner, j["credential"]) as ws:
         _online(ws)
-        ws.send_json({"v": 1, "type": "launch_missiles"})
+        ws.send_json({"v": 1, "type": "inventory", "inventory": "launch_missiles"})  # (#170: unknown types are ignored)
         assert ws.receive_json()["code"] == "bad_message"
         assert expect_close(ws) == 4003
 

@@ -4,13 +4,16 @@ model name must never keep a machine from connecting."""
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from forgeyard.machines.protocol import DOWNLOAD_STATES, MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
 from forgeyard.models.cache_keys import parse
+
+log = logging.getLogger("forgeyard.machines")
 
 
 def _short(limit: int):
@@ -210,9 +213,43 @@ class CollectorStatus(_Msg):
     reason: Annotated[Optional[str], _short(400)] = None
 
 
+# 1.4.5 (#170): the note a machine page shows (under "Detection notes") for cards of a vendor this server does not
+# know, which a newer agent may report. The cards are left out; the rest of the hello is kept.
+UNKNOWN_VENDOR = "unknown vendor"
+
+
 class InventoryIn(_Msg):
     accelerators: list[AcceleratorIn] = Field(default_factory=list, max_length=256)
     collectors: dict[Annotated[str, _short(32)], CollectorStatus] = Field(default_factory=dict, max_length=16)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _leave_out_unknown_vendors(cls, value: Any) -> Any:
+        """A newer agent may report a kind of card this server does not know (a `vendor` outside VENDORS). That
+        card is left out with a warning and a detection note, instead of refusing the whole hello: refused, the
+        agent would reconnect and be refused again forever (#170)."""
+        if not isinstance(value, dict) or not isinstance(value.get("accelerators"), list):
+            return value
+        kept, unknown = [], []
+        for card in value["accelerators"]:
+            vendor = card.get("vendor") if isinstance(card, dict) else None
+            if isinstance(vendor, str) and vendor not in VENDORS:
+                unknown.append(vendor.strip()[:32])
+            else:
+                kept.append(card)
+        if not unknown:
+            return value
+        names = ", ".join(sorted(set(unknown)))
+        log.warning("An agent reported %d card(s) of a vendor this server does not know (%s); left out. "
+                    "A newer agent? Update the server to use them.", len(unknown), names)
+        collectors = value.get("collectors") if isinstance(value.get("collectors"), dict) else {}
+        if len(collectors) < 16:
+            n = len(unknown)
+            collectors = {**collectors, UNKNOWN_VENDOR: {
+                "ok": False, "count": n, "source": "server",
+                "reason": f"{n} {'card' if n == 1 else 'cards'} of a vendor this server does not know ({names}) "
+                          f"left out; update the server to use {'it' if n == 1 else 'them'}"}}
+        return {**value, "accelerators": kept, "collectors": collectors}
 
 
 def _port_range(value: Any) -> Optional[dict]:
