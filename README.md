@@ -195,10 +195,12 @@ Also:
   stored secrets, and
   [upgrading agents that joined 1.0 over plain HTTP](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http).
 - [Development](docs/development.md): build, test, and find your way around the code.
+- [Verified hardware](docs/verified-hardware.md): the machines each release is accepted on, and the results.
 
 ## Tested on
 
-Every release is checked on real machines, not only in CI. So far:
+Every release is checked on real machines, not only in CI; [Verified hardware](docs/verified-hardware.md)
+lists each release's acceptance runs and pass counts. So far:
 
 | Hardware | Software | What ran |
 |---|---|---|
