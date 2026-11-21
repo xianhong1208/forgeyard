@@ -162,7 +162,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 Then:
@@ -194,7 +194,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -209,7 +209,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4 inventory
 ```
 
 ### CPU only
@@ -223,7 +223,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 ### Why these options
@@ -256,8 +256,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.3 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.4 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -276,18 +276,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.3 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.4 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.4.3`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.4.4`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -300,7 +300,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.4
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -427,8 +427,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.4 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -1148,7 +1148,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.3
+  docker.io/tonyhuang1101/forgeyard:1.4.4
 sudo docker logs forgeyard
 ```
 
@@ -1182,7 +1182,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.4 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1191,7 +1191,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.4 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1200,23 +1200,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.4
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 ```
 
-`1.4.4` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
+`1.4.5` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.3
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.4
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1224,7 +1224,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.3 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.4 .`
 
 ## Run the server as a service
 
@@ -1314,7 +1314,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1328,7 +1328,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.4
    ```
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried
