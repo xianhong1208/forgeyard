@@ -86,7 +86,9 @@ ZERO_SHOT_SINCE = (1, 4, 4)
 # does not include: such a model is refused, like DETR with a timm backbone (a row added before 1.4.3 when deployed).
 NEEDS_TIMM = ("omdet-turbo",)
 TIMM_PROBLEM = "it uses a timm backbone (use_timm_backbone), which Forgeyard's vision server does not include"
-VISION_IMAGE_RE = re.compile(r"/forgeyard-vision:(\d+)\.(\d+)\.(\d+)(?:-[a-z0-9]+)?(?:@|$)")
+# A Forgeyard vision image's tag: X.Y.Z, an optional PEP 440 pre-release (aN, bN or rcN: a pre-release tag such as
+# 1.4.4rc1 publishes the image as `1.4.4rc1` and `1.4.4rc1-cuda`), an optional -variant, then the digest or the end.
+VISION_IMAGE_RE = re.compile(r"/forgeyard-vision:(\d+)\.(\d+)\.(\d+)(?:(?:a|b|rc)\d+)?(?:-[a-z0-9]+)?(?:@|$)")
 
 
 def task_of(config: dict) -> Optional[str]:
@@ -219,7 +221,10 @@ def estimate_extra(meta: dict) -> int:
 
 def image_version(image: Optional[str]) -> Optional[tuple[int, int, int]]:
     """X.Y.Z of a Forgeyard vision image reference (docker.io/<ns>/forgeyard-vision:1.4.0[-cuda][@sha256:…]), or
-    None: another image (a custom recipe's local build), or no version in its tag."""
+    None: another image (a custom recipe's local build), or no version in its tag. A pre-release counts as the
+    release it leads to (1.4.4rc1 -> 1.4.4): it is built from that release's images/vision, so it carries that
+    release's features (1.4.4rc1 runs zero-shot detection and image classification), while 1.4.3rc1 stays older
+    than 1.4.4."""
     m = VISION_IMAGE_RE.search(image or "")
     return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
 
