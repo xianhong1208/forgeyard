@@ -240,6 +240,6 @@ describe("changing a deployment (1.3.1)", () => {
     mount("/serving/3/edit");
     const input = await screen.findByLabelText("Wait for the first answer (seconds)") as HTMLInputElement;
     expect(input.placeholder).toBe("120");
-    expect(screen.getByText(/Changing it restarts nothing/)).toBeTruthy();
+    expect(screen.getByText(/Changing it restarts nothing/).textContent).toMatch(/^Streamed answers only\./);
   });
 });

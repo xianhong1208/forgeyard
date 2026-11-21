@@ -41,6 +41,7 @@ class FakeEngine:
         self.retry_after: Optional[str] = None  # sent with `status`
         self.cut_after: Optional[int] = None  # a stream breaks off after this many chunks (1.2)
         self.first_delay = 0.0      # a stream's headers go out at once, its first chunk after this (1.4.5)
+        self.gate_streams = False   # `gate` holds streams too, before their headers (1.4.5)
         self.seen: list[dict] = []
         self.refused = 0
         self.disconnects = 0
@@ -84,6 +85,8 @@ class FakeEngine:
                                       {"Retry-After": engine.retry_after} if engine.retry_after else None)
                 body = entry["body"] or {}
                 if self.path == "/v1/chat/completions" and body.get("stream"):
+                    if engine.gate is not None and engine.gate_streams:
+                        engine.gate.wait(30)   # not even the headers until the test opens it (1.4.5)
                     return self._stream(body)
                 if engine.gate is not None:
                     engine.gate.wait(30)

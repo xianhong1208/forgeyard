@@ -1,8 +1,8 @@
 """No request runs twice, and a shorter wait for the first answer (1.4.5, #168): a request moves to
 another replica only when it provably never reached the first one; a replica that took it and then
-broke off or went silent is given up (502 / 504) without trying it elsewhere; the deployment's
-`first_answer_timeout` (120 s by default) bounds the wait for the status line, and for a stream for
-its first bytes too (FY-FA-*)."""
+broke off or went silent is given up (502 / 504) without trying it elsewhere; for a streamed answer the
+deployment's `first_answer_timeout` (120 s by default) bounds the wait for the status line and the first
+bytes, while a non-streamed answer keeps GATEWAY_READ_TIMEOUT (Tony, #168) (FY-FA-*)."""
 
 import socket
 import threading
@@ -103,15 +103,15 @@ def test_fy_fa_003_a_replica_that_cannot_be_reached_still_fails_over(gw):  # noq
 
 
 def test_fy_fa_004_a_silent_replica_gets_504_after_the_first_answer_wait(gw, monkeypatch):  # noqa: F811
-    """FY-FA-004: a replica that takes the request and says nothing: 504 first_answer_timeout after the
-    wait (not GATEWAY_READ_TIMEOUT's 600 s), never sent to the other replica; the engine's connection is
-    closed."""
+    """FY-FA-004: a replica that takes a streamed request and says nothing, not even its headers: 504
+    first_answer_timeout after the wait (not GATEWAY_READ_TIMEOUT's 600 s), never sent to the other
+    replica; the engine's connection is closed."""
     monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 0.5)
-    gw.e1.gate = threading.Event()
-    gw.e2.gate = threading.Event()
+    gw.e1.gate, gw.e1.gate_streams = threading.Event(), True
+    gw.e2.gate, gw.e2.gate_streams = threading.Event(), True
     try:
         started = time.monotonic()
-        r = chat(gw.api)
+        r = chat(gw.api, stream=True)
         took = time.monotonic() - started
     finally:
         gw.e1.gate.set()
@@ -164,8 +164,8 @@ def test_fy_fa_006_streams_wait_for_their_first_bytes(gw, monkeypatch):  # noqa:
 
 
 def test_fy_fa_007_a_long_wait_also_lifts_the_read_timeout(gw, monkeypatch):  # noqa: F811
-    """FY-FA-007: a first-answer wait above GATEWAY_READ_TIMEOUT is honoured: the answer that comes after
-    the read timeout but within the wait is passed on."""
+    """FY-FA-007: a first-answer wait above GATEWAY_READ_TIMEOUT is honoured for a stream: its first chunk,
+    which comes after the read timeout but within the wait, and the rest are passed on."""
     from forgeyard.config import get_settings
 
     monkeypatch.setenv("GATEWAY_READ_TIMEOUT", "0.3")
@@ -173,10 +173,47 @@ def test_fy_fa_007_a_long_wait_also_lifts_the_read_timeout(gw, monkeypatch):  # 
     proxy._clients.clear()
     monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 3.0)
     for e in (gw.e1, gw.e2):
+        e.first_delay = 1.0
+    r = chat(gw.api, stream=True)
+    assert r.status_code == 200, r.text
+    assert events(r.text)[-1] == "[DONE]"
+    proxy._clients.clear()
+
+
+def test_fy_fa_010_a_non_streamed_answer_keeps_the_read_timeout(gw, monkeypatch):  # noqa: F811
+    """FY-FA-010: a non-streamed answer is the whole answer: one slower than the first-answer wait still
+    comes back (200); only GATEWAY_READ_TIMEOUT bounds it, as before (504 upstream_timeout), and it is
+    not sent to the other replica either."""
+    from forgeyard.config import get_settings
+
+    monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 0.3)
+    for e in (gw.e1, gw.e2):
         e.hold = 1.0
     r = chat(gw.api)
-    assert r.status_code == 200, r.text
+    assert r.status_code == 200 and r.json()["choices"][0]["message"]["content"].startswith("hello from"), r.text
+    monkeypatch.setenv("GATEWAY_READ_TIMEOUT", "0.5")
+    get_settings.cache_clear()
     proxy._clients.clear()
+    sent = len(gw.e1.posts()) + len(gw.e2.posts())
+    r = chat(gw.api)
+    assert r.status_code == 504 and r.json()["error"]["code"] == "upstream_timeout", r.text
+    assert len(gw.e1.posts()) + len(gw.e2.posts()) == sent + 1
+    proxy._clients.clear()
+
+
+def test_fy_fa_011_which_requests_are_streams():
+    """FY-FA-011: the first-answer wait is for streams only: `stream: true`, or speech with a stream_format
+    (audio or sse); a speech request without one is a whole file."""
+    from forgeyard.gateway import speech
+
+    def ask(sf):
+        return speech.Ask(characters=3, format=None, stream_format=sf, voice=None, language_given=False,
+                          frames_given=False)
+    assert proxy.streams(proxy.Parsed(model="m", stream=True)) is True
+    assert proxy.streams(proxy.Parsed(model="m")) is False
+    assert proxy.streams(proxy.Parsed(model="m", tts=ask("audio"))) is True
+    assert proxy.streams(proxy.Parsed(model="m", tts=ask("sse"))) is True
+    assert proxy.streams(proxy.Parsed(model="m", stream=True, tts=ask(None))) is False
 
 
 def test_fy_fa_008_deploy_checks_the_parameter(gw):  # noqa: F811

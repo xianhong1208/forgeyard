@@ -22,13 +22,15 @@ version until 1.0.
   the request) when its engine is not running, instead of closing without an answer, so failover to the next
   replica keeps working; behind an agent older than 1.4.5 that case is now a 502 until the agent reports the dead
   engine (seconds): update the agents.
-- **A shorter, settable wait for the first answer** (#168). Once a request is written to a replica, the replica has
-  the deployment's *Wait for the first answer* (`first_answer_timeout`, 120 s by default, 5 to 3,600, under
-  **Advanced** in the deploy and change forms) to answer: the status line, and for a stream its first bytes too.
-  Then the request is closed (the engine stops) with 504 `first_answer_timeout`, never sent elsewhere; it used to
-  wait `GATEWAY_READ_TIMEOUT` (600 s), and a stream that never started came back as a 200 that broke off.
-  `GATEWAY_READ_TIMEOUT` now applies to each later piece. Image deployments keep their own *Timeout*, video jobs
-  theirs. Changing only this parameter restarts nothing. No migration: it lives in the deployment's parameters.
+- **A shorter, settable wait for a stream to start** (#168). Once a streamed request (`stream: true`, or speech with
+  a `stream_format`) is written to a replica, the replica has the deployment's *Wait for the first answer*
+  (`first_answer_timeout`, 120 s by default, 5 to 3,600, under **Advanced** in the deploy and change forms) for the
+  status line and the stream's first bytes. Then the request is closed (the engine stops) with 504
+  `first_answer_timeout`, never sent elsewhere; it used to wait `GATEWAY_READ_TIMEOUT` (600 s), and a stream that
+  never started came back as a 200 that broke off. A non-streamed answer is the whole answer, so it keeps
+  `GATEWAY_READ_TIMEOUT` as before: long non-streamed generations and transcriptions are not cut short. Image
+  deployments keep their own *Timeout*, video jobs theirs. Changing only this parameter restarts nothing. No
+  migration: it lives in the deployment's parameters.
 - **Structured output is never lost silently on a cloud spill** (#162). A request with a JSON `response_format`,
   vLLM's `structured_outputs` or `guided_*`, llama.cpp's `grammar` or `json_schema`, or a tool with `strict: true`
   skips every provider target that would drop or ignore it (every cloud kind drops the engine-only ones; Anthropic

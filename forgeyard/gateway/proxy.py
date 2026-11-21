@@ -22,11 +22,12 @@ cloud provider.
    provably never reached the first one (the connection could not be made, or no connection was free
    in the pool: RETRYABLE). A connection that breaks once the request was being sent (SENT_BROKE) may
    have left the engine working on it, so that answers 502 and is not tried again anywhere.
-   **The first answer** (1.4.5): once a request is sent to a replica, the replica has the deployment's
-   `first_answer_timeout` (120 s by default) to answer: the status line and headers, and for a stream
-   (SSE or streamed audio) its first bytes too. After that it is closed (the engine stops) and the
-   client gets 504 `first_answer_timeout`; it is never sent elsewhere. Later pieces of an answer may
-   take up to GATEWAY_READ_TIMEOUT each. Image requests keep their deployment's own `timeout`.
+   **The first answer of a stream** (1.4.5): once a streamed request (`stream: true`, or speech with a
+   `stream_format`) is sent to a replica, the replica has the deployment's `first_answer_timeout`
+   (120 s by default) for the status line and the stream's first bytes. After that it is closed (the
+   engine stops) and the client gets 504 `first_answer_timeout`; it is never sent elsewhere. Later
+   pieces may take up to GATEWAY_READ_TIMEOUT each. A non-streamed answer is the whole answer, so it
+   keeps GATEWAY_READ_TIMEOUT (600 s) as before; image requests their deployment's own `timeout`.
 4. Which tiers a request may use: a route marked local only, a request with
    `X-Forgeyard-Local-Only: 1`, and a key whose `cloud` setting is off never reach a provider outside
    your network; with `fallback` only as a spill target (after a local tier); with `on` also cloud-only
@@ -165,6 +166,13 @@ NOT_TAKEN_HEADER = "x-forgeyard-not-taken"
 
 class EngineUnreachable(Exception):
     """What a replica's guard said: its engine is not running (named in upstream_unreachable)."""
+
+
+def streams(parsed: "Parsed") -> bool:
+    """Does the client ask for its answer as a stream (the first-answer wait applies only then)?"""
+    if parsed.tts is not None:
+        return parsed.tts.stream_format is not None
+    return parsed.stream
 
 
 def not_taken(response: httpx.Response) -> bool:
@@ -1389,9 +1397,10 @@ class Job:
             if image and g.draws is not None:   # images take long: the deployment's own read timeout
                 timeout = httpx.Timeout(connect=self.settings.gateway_connect_timeout, read=g.draws.timeout,
                                         write=60.0, pool=30.0)
-            # Images keep their own timeout; everything else has the deployment's wait for a first answer,
-            # counted from the moment the request was written to the replica.
-            first = None if image else g.first_answer
+            # A stream has the deployment's wait for a first answer, counted from the moment the request was
+            # written to the replica. A non-streamed answer is the whole answer: GATEWAY_READ_TIMEOUT, as
+            # before (Tony, #168); images keep their own timeout.
+            first = g.first_answer if not image and streams(parsed) else None
             self.first_answer = first
             self.answer_by = None
             if first is not None and first > self.settings.gateway_read_timeout:
