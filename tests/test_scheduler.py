@@ -368,9 +368,10 @@ def test_fy_sch_013_llama_cpp_on_amd_apu_takes_vulkan_and_discrete_takes_rocm(ow
     assert plan["placed"][0]["variant"] == "vulkan" and plan["placed"][0]["gpus"] == [0]
     big = owner.post("/api/deployments/estimate", json={"name": "t", "model": "qwen3-1.7b-gguf", "recipe": "llama-cpp",
                                                         "params": {"vram": "200Gi"}}).json()["placement"]
-    # The pool is what the inventory reports for the card: here its GTT (104 GiB free of 110, less
-    # the headroom), not the 512 MiB carve-out.
-    assert big["fits"] is False and "available: #0 103.50 GiB" in big["machines"][0]["reason"], big
+    # The pool is what the inventory reports for the card: here its GTT, not the 512 MiB carve-out. GTT is the
+    # machine's RAM (1.4.5, #166), so it offers no more than the RAM has free: 100 GiB (not the GTT's 104), less the
+    # headroom.
+    assert big["fits"] is False and "available: #0 99.50 GiB" in big["machines"][0]["reason"], big
     deploy(owner, "apu", "qwen3-1.7b-gguf", "llama-cpp")
     row = replica_row("apu")
     vulkan = recipes.builtin_recipes()["llama-cpp"][0].variant("vulkan")
