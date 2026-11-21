@@ -1707,7 +1707,8 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
         if job.dropped and job.sent_to is not None and DROPPED_HEADER not in e.headers:
             e.headers[DROPPED_HEADER] = ",".join(job.dropped)
         if job.kept_from and e.code != "structured_output_not_supported" and e.status >= 500:
-            e.message += job.not_spilled()
+            text = e.message.rstrip()
+            e.message = text + ("" if text.endswith(".") else ".") + job.not_spilled()
         if e.status == 402 and job.budget_target is not None and job.sent_to is None:
             job.target, _ = job.budget_target  # counted under the provider, at no cost
             job.deployment_id = None

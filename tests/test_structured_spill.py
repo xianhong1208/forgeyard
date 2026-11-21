@@ -102,6 +102,7 @@ def test_fy_so_005_unavailable_local_answers_why_it_did_not_spill(mixed):  # noq
     assert r.status_code == 503 and r.json()["error"]["code"] == "no_ready_replica"
     msg = r.json()["error"]["message"]
     assert "Not sent to the cloud: cloudy would drop grammar" in msg and "structured output" in msg
+    assert ". Not sent to the cloud" in msg and ".. Not" not in msg
     assert mixed.cloud.posts() == []
     r = chat(mixed.api)
     assert r.status_code == 200 and r.headers["x-forgeyard-spilled"] == "unavailable"
