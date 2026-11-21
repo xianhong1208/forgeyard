@@ -299,11 +299,30 @@ Also in 1.4.2: a relay whose source breaks off mid-file reads as one clear line 
    detectors are no longer taken as detection models, and sequence classifiers with more than one label are
    no longer filed as rerankers. Both come with 1.4.4.
 
+## Shipped: 1.4.4 (2026-11-21), more kinds of models, part 1
+
+1. ✅ **Zero-shot object detection** (#156, for #142): `/v1/vision/detect` takes a `labels` list and finds the
+   objects named in it, with the same answer, on Forgeyard's vision image. Grounding DINO, MM-Grounding-DINO
+   (and LLMDet), OWL-ViT and OWLv2 are detection models marked *Finds what you name*; three are recommended
+   (Apache-2.0, pinned). The Playground has a **Find these** box for them.
+2. ✅ **Text classification** (#157, for #144): sequence classifiers with two labels or more are a kind of their
+   own, run on vLLM's pooling engine on a GPU and answered at `/v1/classify` in vLLM's shape, with three recommended
+   models (sentiment, language, toxic comments; MIT or Apache-2.0). One output is still a reranker. NLI zero-shot
+   classification and the transformers engine come with 1.5.
+3. ✅ **Image classification** (#158, for #141): classifiers with fixed classes (ViT, ConvNeXt V2, DINOv2) and
+   zero-shot ones (CLIP, SigLIP 2 and other CLIP-like models, scoring the `labels` each request sends) at
+   `/v1/vision/classify` on the vision image, with five recommended models.
+4. ✅ **The vision image that runs them** (#174, #175): the `v1.4.4rc1` pre-release published `forgeyard-vision`
+   1.4.4rc1, and the built-in `vision` recipe pins it by digest. On a recipe with an older vision image, these
+   models are refused with `vision_image_too_old` instead of failing to load.
+
+Also in 1.4.4: contributions are signed off under the Developer Certificate of Origin, checked on every pull
+request (#160).
+
 ## Next
 
 | Version | What you get |
 |---|---|
-| **1.4.4: more kinds of models, part 1** | **Zero-shot object detection** (#142): `/v1/vision/detect` takes an optional `labels` list and finds the objects named in it, with the same answer, on Forgeyard's vision image (Grounding DINO, OWLv2, MM-Grounding-DINO). **Text classification** (#144): small classifier models on vLLM's pooling engine at `/v1/classify`, on a GPU. **Image classification** (#141): image classification and zero-shot image classification (CLIP and SigLIP 2) at `/v1/vision/classify` on the vision image. Permissive licences only. |
 | **1.4.5: fixes from an outside review** | **Structured output is never silently lost:** a request with a JSON schema, grammar or guided-decoding parameter is not spilled to a cloud tier that would drop it, and any parameter dropped on the way to a cloud provider is named in an `X-Forgeyard-Dropped-Params` header. **Encrypted traffic to the machines:** the gateway talks to each replica over TLS, with a certificate the agent gets from Forgeyard's own CA, so prompts and answers no longer cross the network in plain HTTP. **Replicas move off a machine that stays offline:** after a grace period they are placed on another machine that fits. **Prometheus metrics** at `/metrics`. **Memory is never promised twice:** layers of a GGUF model left on the CPU count against the machine's RAM, an APU's shared memory is not counted both as GPU memory and as RAM, and a recipe's changed overhead updates the reservations of existing deployments. **Better estimates:** sliding-window attention (Gemma, Mistral), MLA (DeepSeek) and hybrid models are estimated from what they really keep, so models that fit are no longer refused. **No request runs twice:** a request is retried on another replica only when it never reached the first; a replica that accepts a request and then goes silent is given up after a shorter, settable wait instead of 600 s. **Fair waiting:** text requests waiting for a busy deployment are served first come, first served. **Mixed versions keep working:** a server ignores a message type or a vendor it does not know instead of dropping the agent. **A warning when a machine reports a loopback address** (an agent reached through an SSH tunnel), since the gateway would then dial its own host. Smaller fixes: `local_busy` answers carry `Retry-After`; cloud spend from answers without token counts survives a restart; the installer pins the uv it downloads by hash. **Behind the scenes:** the two largest files are split before more is built on them: the gateway's `proxy.py` (about 1,700 lines) into routing, spill, cloud and streaming parts, and the agent's `supervisor.py` (about 1,150 lines) into smaller pieces, with an explicit interface for container and process runtimes. Behaviour does not change; the existing tests and the full regression run must pass unchanged. |
 | **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. **More kinds of models, part 2:** image embeddings (#141), image-to-image and image-to-video (#143), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
 | **1.6: teams and operations** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log can be sent out (syslog, OpenTelemetry). Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |

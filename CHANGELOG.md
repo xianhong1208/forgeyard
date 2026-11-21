@@ -6,6 +6,18 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.4] — 2026-11-21
+
+More kinds of models, part 1. Zero-shot object detectors find the objects a request names: `/v1/vision/detect`
+takes `labels` (Grounding DINO, MM-Grounding-DINO, OWLv2; #142). Text classifiers run on vLLM's pooling engine at
+`/v1/classify` (sentiment, language, toxicity; #144), and image classifiers, with fixed classes or zero-shot
+(CLIP, SigLIP 2), at `/v1/vision/classify` (#141). Each has its own kind, recommended models with permissive
+licences, a Playground view and **Try it**. The built-in `vision` recipe now pins `forgeyard-vision` 1.4.4rc1,
+the image published by the `v1.4.4rc1` pre-release, which runs both new vision tasks (#175). No setting and no
+migration (the labels live in the catalog entry's details), and the agents need no update: the agent did not
+change since 1.4.3, and a machine gets the new vision image like any other pinned engine image. Contributions
+are now signed off under the DCO.
+
 ### Added
 
 - **Contributions are signed off under the Developer Certificate of Origin** (DCO 1.1): every non-merge commit of a pull request needs a `Signed-off-by:` line with its author email (`git commit -s`); a new `DCO` workflow checks it, bots excepted ([CONTRIBUTING](CONTRIBUTING.md#licence)).
