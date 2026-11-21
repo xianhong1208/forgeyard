@@ -14,6 +14,11 @@ version until 1.0.
 
 ### Fixed
 
+- **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
+  local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of
+  polling every 25 ms, where whoever looked first after a release took the slot (a newcomer could starve those
+  already waiting). At most 256 wait per route tier; one more does not wait and moves on at once (it spills, as
+  when the wait is over). A client that goes away leaves the line. `local_busy` answers carry `Retry-After: 1`.
 - **No request runs twice** (#168). A request moves to another replica (or provider) only when it provably never
   reached the first one: a connection that could not be made, no free connection, or a replica's key guard saying
   its engine is not running. A connection that breaks once the request was sent (`ReadError`,

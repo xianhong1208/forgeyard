@@ -645,7 +645,7 @@ The label names are on the catalog entry (`GET /api/models/<name>`, `classify.la
 | `X-Forgeyard-Voice` | answer | Text to speech: the voice the gateway chose because the request named none, or an OpenAI voice the model does not have; `default` when the model has only its own voice |
 | `X-Forgeyard-Dropped-Params` | answer | The request parameters Forgeyard left out on the way to the provider that answered (engine-only ones such as `top_k`, `chat_template_kwargs`; a model's own drop list), comma-separated. Also on that provider's error. Missing when nothing was left out ([structured output](cloud-providers.md#when-a-request-spills) is never left out: such a request skips that provider) |
 | `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
-| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
+| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, on 503 `local_busy` (1), and on a replica's or provider's own 429 or 503 passed on as it was |
 
 ### Errors
 
@@ -728,7 +728,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 502 | `provider_unreachable` | The provider could not be reached | Retry later |
 | 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
 | 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
-| 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it | Retry |
+| 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it. Carries `Retry-After: 1` | Retry after `Retry-After` seconds |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
 | 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |

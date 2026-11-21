@@ -46,6 +46,7 @@ class Balancer:
         self._turn: dict[str, int] = {}
         self._failed: dict[str, tuple[float, float]] = {}   # uid -> (penalty until, wall time of the failure)
         self._cool: dict[str, float] = {}                    # provider target -> cooled down until
+        self._listeners: list[Callable[[str], None]] = []    # told when a slot is released (1.4.5)
 
     def reset(self) -> None:
         with self._lock:
@@ -89,6 +90,12 @@ class Balancer:
             self.served[uid] = self.served.get(uid, 0) + 1
             return True
 
+    def listen(self, fn: Callable[[str], None]) -> None:
+        """Call fn(uid) whenever a slot is released (the gateway's waiting line, forgeyard/gateway/waiting.py)."""
+        with self._lock:
+            if fn not in self._listeners:
+                self._listeners.append(fn)
+
     def release(self, uid: str) -> None:
         with self._lock:
             left = self.inflight.get(uid, 0) - 1
@@ -96,6 +103,9 @@ class Balancer:
                 self.inflight[uid] = left
             else:
                 self.inflight.pop(uid, None)
+            listeners = list(self._listeners)
+        for fn in listeners:
+            fn(uid)
 
     def failed(self, uid: str, reached: bool = False) -> None:
         """Try the replica last for a while. `reached`: it got the request (and then broke off or went
