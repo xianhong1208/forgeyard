@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
-from forgeyard.models import modalities, vision
+from forgeyard.models import kvlayout, modalities, vision
 from forgeyard.models.recipes import Recipe
 
 GIB = 1024**3
@@ -47,6 +47,7 @@ GGUF_KV_BYTES = {"f32": (4, 1), "f16": (2, 1), "bf16": (2, 1), "f8_e4m3": (1, 1)
 
 
 CODEC_LABEL = "Audio decoder"
+STATE_LABEL = "Recurrent state"
 
 
 class EstimateError(ValueError):
@@ -97,6 +98,111 @@ def _dtype_bytes(name: str) -> float:
     return _DTYPE_BYTES.get(str(name).lower().replace("torch.", ""), 2)
 
 
+# ------------------------------------------------------------------ KV by layer kind (1.4.5, #167)
+# vLLM 0.32 keeps, per sequence, the last `window - 1` tokens of a sliding-window layer plus the tokens it has in
+# flight: two batches (async scheduling) of up to max_num_batched_tokens, which Forgeyard does not set, so vLLM picks
+# it by card: 2,048 on an A100, 8,192 on other cards of 70 GB or more (H100, H200), 16,384 from 160 GB (B200)
+# (engine/arg_utils.py: get_batch_defaults). The estimate takes 2 x 8,192: right or high below 160 GB. Plus one
+# 16-token block, as the window may not start at a block's start. Never more than the context.
+VLLM_IN_FLIGHT = 2 * 8192
+VLLM_BLOCK = 16
+# vLLM keeps two states per sequence of a recurrent layer with prefix caching on (mamba_cache_mode "align":
+# MambaSpec.max_memory_usage_bytes); llama.cpp one, in 32-bit floats (llama_memory_recurrent, GGML_TYPE_F32).
+VLLM_STATE_COPIES = 2
+LLAMA_STATE_BYTES = 4
+LLAMA_SWA_PAD = 256
+
+_KIND_TEXT = {kvlayout.FULL: "full-attention", kvlayout.SLIDING: "sliding-window", kvlayout.BOTH: "full-attention"}
+
+
+def _n(x: int) -> str:
+    return f"{x:,}"
+
+
+def vllm_kv(layout: dict, context: int, seqs: int, kv_bytes: int, gpus: int) -> tuple[int, int, str, str]:
+    """(KV bytes per GPU, recurrent-state bytes per GPU, their details) of one vLLM replica, from a model's
+    layout: full-attention layers hold the context, sliding-window ones at most their window plus the tokens in
+    flight, recurrent ones a fixed state; for `seqs` sequences. Tensor parallel splits the KV heads (a head is
+    replicated when there are fewer heads than GPUs, so an MLA latent, one "head", always is) and the recurrent
+    state."""
+    kinds = layout.get("kinds") or ""
+    kv, texts = 0, []
+    for kind, spec_key in ((kvlayout.FULL, "full"), (kvlayout.SLIDING, "sliding")):
+        layers = kinds.count(kind) + (kinds.count(kvlayout.BOTH) if kind == kvlayout.FULL else 0)
+        spec = layout.get(spec_key) or {}
+        if not layers or not spec:
+            continue
+        heads, values = int(spec.get("heads") or 0), int(spec.get("values") or 0)
+        per_gpu_heads = max(1, heads // gpus)
+        if kind == kvlayout.SLIDING:
+            window = int(spec.get("window") or 0)
+            tokens = min(window - 1 + VLLM_IN_FLIGHT + VLLM_BLOCK, context)
+            held = f"{_n(tokens)} tokens (window {_n(window)} + in flight, at most the context)"
+        else:
+            tokens = context
+            held = f"{_n(tokens)} tokens"
+        kv += layers * per_gpu_heads * values * tokens * seqs * kv_bytes
+        what = "latent" if layout.get("mla") else f"KV head{'s' if heads > 1 else ''}"
+        texts.append(f"{layers} {_KIND_TEXT[kind]} layers x {heads} {what} x {values} values x {held}")
+    detail = "; ".join(texts) + f"; x {seqs} sequence{'s' if seqs > 1 else ''} x {kv_bytes} B"
+    if gpus > 1:
+        detail += ", per GPU"
+    state, state_text = 0, ""
+    st = layout.get("state")
+    recurrent = kinds.count(kvlayout.STATE) + kinds.count(kvlayout.BOTH)
+    if st and recurrent:
+        per_seq = int(st.get("conv") or 0) * kv_bytes + int(st.get("ssm") or 0) * int(st.get("ssm_bytes") or kv_bytes)
+        state = recurrent * per_seq * VLLM_STATE_COPIES * seqs // gpus
+        state_text = (f"{recurrent} recurrent layers x {gib(per_seq)} per sequence x {VLLM_STATE_COPIES} copies "
+                      f"(prefix caching) x {seqs} sequence{'s' if seqs > 1 else ''}, the same for any context")
+    return kv, state, detail, state_text
+
+
+def gguf_kv(layout: dict, kinds: str, tokens: int, seqs: int, kv_num: int, kv_den: int) -> tuple[int, int]:
+    """(KV bytes, recurrent-state bytes) of these llama.cpp layers (`kinds`, a slice of the layout's: the ones
+    on one device) for `tokens` cells in all (context x sequences, one unified cache): a sliding-window layer
+    keeps window x sequences + 512 of them, padded to 256 (llama_kv_cache_iswa), a recurrent one a 32-bit
+    state per sequence."""
+    kv = 0
+    for kind, spec_key in ((kvlayout.FULL, "full"), (kvlayout.SLIDING, "sliding")):
+        layers = kinds.count(kind) + (kinds.count(kvlayout.BOTH) if kind == kvlayout.FULL else 0)
+        spec = layout.get(spec_key) or {}
+        if not layers or not spec:
+            continue
+        cells = tokens
+        if kind == kvlayout.SLIDING:
+            cells = gguf_swa_cells(int(spec.get("window") or 0), tokens, seqs)
+        kv += layers * int(spec.get("heads") or 0) * int(spec.get("values") or 0) * cells * kv_num // kv_den
+    st = layout.get("state")
+    recurrent = kinds.count(kvlayout.STATE) + kinds.count(kvlayout.BOTH)
+    state = recurrent * (int(st.get("conv") or 0) + int(st.get("ssm") or 0)) * LLAMA_STATE_BYTES * max(1, seqs) \
+        if st else 0
+    return kv, state
+
+
+def gguf_swa_cells(window: int, tokens: int, seqs: int) -> int:
+    cells = min(tokens, window * max(1, seqs) + LLAMA_UBATCH)
+    return (cells + LLAMA_SWA_PAD - 1) // LLAMA_SWA_PAD * LLAMA_SWA_PAD
+
+
+def gguf_kv_detail(layout: dict, kinds: str, tokens: int, seqs: int, kv_label: str) -> str:
+    texts = []
+    for kind, spec_key in ((kvlayout.FULL, "full"), (kvlayout.SLIDING, "sliding")):
+        layers = kinds.count(kind) + (kinds.count(kvlayout.BOTH) if kind == kvlayout.FULL else 0)
+        spec = layout.get(spec_key) or {}
+        if not layers or not spec:
+            continue
+        if kind == kvlayout.SLIDING:
+            cells = gguf_swa_cells(int(spec.get("window") or 0), tokens, seqs)
+            held = f"{_n(cells)} cells (window {_n(int(spec.get('window') or 0))} x {seqs} + 512, at most {_n(tokens)})"
+        else:
+            held = f"{_n(tokens)} cells"
+        what = "x K only (MLA)" if layout.get("mla") else "KV heads x (K + V)"
+        texts.append(f"{layers} {_KIND_TEXT[kind]} layers x {spec.get('heads')} {what} {spec.get('values')} values x "
+                     f"{held}")
+    return "; ".join(texts) + f" x {kv_label}"
+
+
 def _safetensors(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int) -> Estimate:
     cfg = meta.get("config") or {}
     weights = meta.get("weights") or {}
@@ -121,14 +227,28 @@ def _safetensors(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int) 
         raise EstimateError(f"context: this model supports at most {max_ctx} tokens")
     kv_dtype = 2 if cfg.get("dtype") in (None, "float32") or dtype == "auto" else int(_dtype_bytes(dtype))
     tokens = kv_tokens(recipe, params)
-    per_token = 2 * cfg["layers"] * cfg["kv_heads"] * cfg["head_dim"] * kv_dtype
-    kv = per_token * tokens
-    seqs = "1 sequence" if recipe.estimate.kv_sequences == "one" else f"{params.get('concurrency')} sequences"
+    layout = cfg.get("kv_layout") if isinstance(cfg.get("kv_layout"), dict) else None
+    state, state_text = 0, ""
+    if layout is not None:
+        # 1.4.5 (#167): sliding-window, MLA, hybrid and KV-shared layers, as vLLM keeps them.
+        n_seqs = 1 if recipe.estimate.kv_sequences == "one" else max(1, int(params.get("concurrency") or 1))
+        kv_gpu, state, kv_text, state_text = vllm_kv(layout, int(params.get("context") or 0), n_seqs, kv_dtype, gpus)
+    else:
+        per_token = 2 * cfg["layers"] * cfg["kv_heads"] * cfg["head_dim"] * kv_dtype
+        seqs = "1 sequence" if recipe.estimate.kv_sequences == "one" else f"{params.get('concurrency')} sequences"
+        kv = per_token * tokens
+        # A KV head is never split: with fewer KV heads than GPUs, each GPU holds one (vLLM replicates it).
+        kv_gpu = kv // gpus if cfg["kv_heads"] >= gpus else kv // cfg["kv_heads"]
+        kv_text = (f"2 x {cfg['layers']} layers x {cfg['kv_heads']} KV heads x {cfg['head_dim']} x "
+                   f"{tokens} tokens ({params.get('context')} x {seqs}) x {kv_dtype} B")
     est = Estimate("safetensors-kv", "gpu", gpus, kv_tokens=tokens)
     est.parts = [
         Part("Weights", w // gpus, wdetail + (f", split over {gpus} GPUs" if gpus > 1 else "")),
-        Part("KV cache", kv // gpus, f"2 x {cfg['layers']} layers x {cfg['kv_heads']} KV heads x {cfg['head_dim']} x "
-                                     f"{tokens} tokens ({params.get('context')} x {seqs}) x {kv_dtype} B"),
+        Part("KV cache", kv_gpu, kv_text),
+    ]
+    if state:
+        est.parts.append(Part(STATE_LABEL, state, state_text))
+    est.parts += [
         Part("Engine overhead", recipe.estimate.overhead, "activations, CUDA graphs, workspaces (recipe)"),
         Part("CUDA context", ctx, "per process (measured on an A100)"),
     ]
@@ -199,14 +319,37 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
     per_layer_token = int(g.get("kv_heads") or 0) * (int(g.get("key_length") or 0) + int(g.get("value_length") or 0))
     logits = int(g.get("vocab") or 0) * LLAMA_UBATCH * 4
     est = Estimate("gguf", device, gpus if device == "gpu" else 0, kv_tokens=tokens)
+    kv_label = (f"{kv_num} B" if kv_den == 1 else f"{kv_num}/{kv_den} B") + f" ({kv_type})"
     kv_detail = (f"{layers} layers x {g.get('kv_heads')} KV heads x ({g.get('key_length')} + {g.get('value_length')}) x "
-                 f"{tokens} tokens ({params.get('context')} x {params.get('concurrency')}) x "
-                 + (f"{kv_num} B" if kv_den == 1 else f"{kv_num}/{kv_den} B") + f" ({kv_type})")
+                 f"{tokens} tokens ({params.get('context')} x {params.get('concurrency')}) x " + kv_label)
+    layout = g.get("kv_layout") if isinstance(g.get("kv_layout"), dict) else None
+    if layout is not None and len(layout.get("kinds") or "") != layers:
+        layout = None
+    seqs = max(1, int(params.get("concurrency") or 1))
+
+    def kv_of(n_layers: int) -> tuple[int, int, str]:
+        """KV and recurrent-state bytes of the last `n_layers` layers (llama.cpp offloads from the end)."""
+        if layout is None:
+            return per_layer_token * n_layers * tokens * kv_num // kv_den, 0, kv_detail
+        kinds = layout["kinds"][layers - n_layers:] if n_layers else ""
+        kv, state = gguf_kv(layout, kinds, tokens, seqs, kv_num, kv_den)
+        return kv, state, gguf_kv_detail(layout, kinds, tokens, seqs, kv_label)
+
+    def state_part(state: int, n_layers: int) -> list[Part]:
+        if not state:
+            return []
+        kinds = layout["kinds"][layers - n_layers:] if layout and n_layers else ""
+        n = kinds.count(kvlayout.STATE) + kinds.count(kvlayout.BOTH)
+        return [Part(STATE_LABEL, state, f"{n} recurrent layers x {seqs} sequence{'s' if seqs > 1 else ''}, 32-bit, "
+                                         "the same for any context")]
+
     if device == "cpu":
+        kv, state, detail = kv_of(layers)
         est.parts = [
             Part("Weights", int(g["tensor_bytes"]), f"{len(g.get('layer_bytes') or [])} blocks + embeddings, "
                                                      "memory-mapped from the cache"),
-            Part("KV cache", per_layer_token * layers * tokens * kv_num // kv_den, kv_detail),
+            Part("KV cache", kv, detail),
+            *state_part(state, layers),
             Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
             Part("Engine overhead", recipe.estimate.cpu_overhead, "compute buffers (recipe)"),
         ]
@@ -219,10 +362,12 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
     on_gpu = sum(layer_bytes[layers - offload:]) if offload else 0
     if int(params.get("gpu_layers", 999)) > layers:
         on_gpu += int(g.get("output_bytes") or 0)
+    kv, state, detail = kv_of(offload)
     est.parts = [
         Part("Weights", on_gpu // gpus, f"{offload} of {layers} layers on the GPU"
                                         + (" and the output layer" if int(params.get('gpu_layers', 999)) > layers else "")),
-        Part("KV cache", per_layer_token * offload * tokens * kv_num // kv_den // gpus, kv_detail),
+        Part("KV cache", kv // gpus, detail),
+        *[Part(p.label, p.bytes // gpus, p.detail) for p in state_part(state, offload)],
         Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
         Part("Engine overhead", recipe.estimate.overhead, "compute buffers (recipe)"),
         Part("CUDA context", ctx, "per process"),
