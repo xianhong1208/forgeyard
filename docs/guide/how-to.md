@@ -40,7 +40,10 @@ What it shows for each card:
 - **ROCm version** (`rocm=` here, "ROCm" on the Machines page) where NVIDIA cards show their
   driver. The kernel driver's version is kept in the card's details.
 - **Memory:** for an APU, the larger of the VRAM carve-out (set in the BIOS) and GTT, which is
-  what `amd-smi monitor` shows too.
+  what `amd-smi monitor` shows too. GTT is the machine's own RAM, so when the card reports GTT,
+  Forgeyard counts the card and the RAM as one pool (1.4.5): what a model on the GPU reserves is
+  not promised again to a CPU model, and the card never offers more than the RAM has free. A
+  carve-out is memory Linux does not see, so with it the two are counted apart.
 - **Key:** the card's UUID when it has a serial number, else its PCI address (APUs have no
   serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
   1.1.0 or older keeps its GPU allowlist when the key changes.

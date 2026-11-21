@@ -10,6 +10,9 @@
   headroom. Cards are exclusive unless the deployment shares VRAM (`share: vram`), and a shared
   card is only ever shared with other sharing replicas;
 - CPU replicas: the free RAM, the same way;
+- (1.4.5, #166) a GPU replica that keeps layers on the CPU (llama.cpp's partial offload) needs that much free RAM
+  too; on an APU whose card is the machine's RAM (forgeyard.workloads.placement.shares_ram) the card and the RAM
+  are one pool: neither is promised what the other already promised;
 - (1.4.2) a free host port in the machine's range for the replica (two behind the agent's key guard), when its
   agent reports the range (forgeyard.workloads.placement.port_problem).
 
@@ -238,6 +241,23 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
     ram_holds = list(used.ram) + list((extra or {}).get("__ram__", []))
     need = ctx.amount
     want_gpu = ctx.device == "gpu"
+    # 1.4.5 (#166): RAM a GPU replica keeps too (layers left on the CPU), and cards whose memory is the RAM.
+    host = int(ctx.estimate.ram or 0) if want_gpu else 0
+    cpu_row = next((a for a in node.accelerators if a.vendor == "cpu"), None)
+    shared = {a.key for a in node.accelerators if placement.shares_ram(a)} if cpu_row is not None else set()
+
+    def pool(a: Accelerator) -> tuple[int, Optional[int]]:
+        """(also, cap) for placement.available: on a card that is the RAM, what is pending on the RAM and on the
+        other such cards counts against it, and it never offers more than the RAM has free."""
+        if a.key not in shared:
+            return 0, None
+        also = placement.pending_bytes(ram_holds) + sum(placement.pending_bytes(cards.get(k, [])) for k in shared
+                                                        if k != a.key)
+        return also, int(cpu_row.vram_free or 0) + back.get(cpu_row.key, 0)
+
+    def ram_free() -> int:
+        also = sum(placement.pending_bytes(cards.get(k, [])) for k in shared)
+        return placement.available(cpu_row, ram_holds, back.get(cpu_row.key, 0), also=also)
     problems: list[str] = []
     shortfalls: list[tuple[int, str]] = []
     matched_hw = False
@@ -267,15 +287,27 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
             fitting, avail = [], []
             for a in compatible:
                 holds = cards.get(a.key, [])
-                free = placement.available(a, holds, back.get(a.key, 0))
+                also, cap = pool(a)
+                free = placement.available(a, holds, back.get(a.key, 0), also=also, cap=cap)
                 avail.append((free, a))
-                if placement.card_problem(a, holds, ctx.share, need, back.get(a.key, 0)) is None:
+                if placement.card_problem(a, holds, ctx.share, need, back.get(a.key, 0), also=also, cap=cap) is None:
                     fitting.append((free, a))
             v.cards = [{"index": a.index, "available": max(0, free), "total": a.vram_total,
                         "shared_with": [h.workload for h in cards.get(a.key, [])]} for free, a in avail]
             if len(fitting) >= ctx.gpus:
                 fitting.sort(key=lambda t: (t[0], t[1].index))  # binpack: the fullest that fits
                 chosen = [a for _, a in fitting[:ctx.gpus]]
+                if host and cpu_row is not None:
+                    # The layers left on the CPU need the RAM too (on an APU's card, as well as the card's own share).
+                    on_ram = sum(1 for a in chosen if a.key in shared)
+                    ram_need, rfree = host + need * on_ram, ram_free()
+                    if rfree < ram_need:
+                        what = (f"{gib(ram_need)} of the machine's RAM ({gib(need)} on the GPU, which is the RAM on an "
+                                f"APU, and {gib(host)} for the layers left on the CPU)" if on_ram else
+                                f"{gib(host)} of RAM for the layers left on the CPU")
+                        shortfalls.append((ram_need - rfree, f"needs {what}, {gib(max(0, rfree))} available "
+                                                             f"({gib(ram_need - rfree)} short)"))
+                        continue
                 left = min(free for free, a in fitting[:ctx.gpus]) - need
                 opt = _option(node, ctx, variant, chosen, left)
                 if opt.blocked is None:
@@ -319,7 +351,7 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
                 problems.append(f"{variant.name}: needs {cores:g} CPU threads, {max(0.0, threads - used.cpu):g} free "
                                 f"of {threads:g}")
                 continue
-            free = placement.available(cpu, ram_holds, back.get(cpu.key, 0))
+            free = ram_free()
             v.cards = [{"index": None, "available": max(0, free), "total": cpu.vram_total, "shared_with":
                         [h.workload for h in ram_holds]}]
             if free >= need:
@@ -458,6 +490,8 @@ def preview(db: DbSession, ctx: Context, *, release: Collection[int] = (),
             holds.setdefault(a.key, []).append(hold)
         if not opt.cards:
             holds.setdefault("__ram__", []).append(hold)
+        elif ctx.device == "gpu" and ctx.estimate.ram:
+            holds.setdefault("__ram__", []).append(Hold(f"replica {i}", "vram", ctx.estimate.ram, True))
         ports[opt.node.id] = ports.get(opt.node.id, 0) + placement.ports_for(MODEL_PORTS, guarded(opt.node, ctx))
         entry = {"replica": i, "machine": opt.node.name, "machine_id": opt.node.id, "variant": opt.variant.name,
                  "runtime": opt.variant.runtime, "image": opt.variant.image, "gpus": [a.index for a in opt.cards],
