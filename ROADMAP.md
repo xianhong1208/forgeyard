@@ -330,7 +330,8 @@ Prometheus metrics, and TLS between the gateway and the machines.
 Some features for larger organisations are planned for a separate **enterprise edition**: single
 sign-on with MFA and SCIM, organisations and teams with quotas and cost reports, the per-request audit
 log and its export, PII masking, tunnels for machines at other sites, more than one server for high
-availability, and long-term support. They are marked *(enterprise edition)* in the table below.
+availability, and extended support (longer support periods, with fixes back-ported to older releases). They
+are marked *(enterprise edition)* in the table below.
 Nothing that is in the community edition today moves to the enterprise edition.
 
 ## Next
@@ -350,7 +351,7 @@ the rest one release at a time.
 | **1.6.0: single sign-on** *(enterprise edition)* | Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication (#39). |
 | **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
 | **1.6.2: request log and audit export** *(enterprise edition)* | **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log and the request log can be sent out (syslog, OpenTelemetry), with tamper evidence (#40). |
-| **1.6.3: notifications and alerts** | Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**. The community edition sends the basic alerts; the enterprise edition adds several destinations per event and schedules (#191). |
+| **1.6.3: notifications and alerts** | Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**. Each kind of event goes to the channels chosen for it (#191). |
 | **1.6.4: Batch API** | An **OpenAI-compatible Batch API:** large jobs run at quiet times (#192). |
 | **1.7.0: PII masking** *(enterprise edition)* | Personal data is masked in requests that go to a cloud tier, by a built-in filter or your own DLP hook. An optional, encrypted audit of request content (#193). |
 | **1.7.1: machines behind NAT** *(enterprise edition)* | A machine with no inbound ports serves through a **reverse tunnel**: requests travel over the agent's own outbound connection, so machines at other sites can join. Machines on the server's network keep being reached directly, as today, in the community edition (#194). |
