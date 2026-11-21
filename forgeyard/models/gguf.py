@@ -13,6 +13,8 @@ import struct
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from forgeyard.models import kvlayout
+
 MAGIC = b"GGUF"
 DEFAULT_ALIGNMENT = 32
 MAX_HEADER = 128 * 1024**2  # a header larger than this is refused (real ones are a few MB)
@@ -109,7 +111,7 @@ class GGUFHeader:
             else:
                 other += t.nbytes
         vocab = self.array_lengths.get("tokenizer.ggml.tokens") or int(self.arch_value("vocab_size") or 0)
-        return {
+        out = {
             "architecture": self.architecture,
             "name": self.metadata.get("general.name"),
             "file_type": self.metadata.get("general.file_type"),
@@ -130,6 +132,11 @@ class GGUFHeader:
             "data_offset": self.data_offset,
             "elements": sum(t.elements for t in self.tensors),
         }
+        # 1.4.5 (#167): sliding-window, MLA, recurrent and KV-shared layers, for files that have them.
+        layout = kvlayout.from_gguf(self.metadata, self.architecture, layers, self.array_lengths)
+        if layout is not None:
+            out["kv_layout"] = layout
+        return out
 
 
 class _Reader:

@@ -12,7 +12,7 @@ import pytest
 from alembic import command
 from sqlalchemy import select, text
 
-from forgeyard.db import ApiKey, AuditEvent, BudgetAlert, Provider, User, get_engine, new_session
+from forgeyard.db import ApiKey, AuditEvent, BudgetAlert, Provider, ServerSetting, User, get_engine, new_session
 from forgeyard.gateway import budgets, pricing, proxy
 from forgeyard.gateway.budgets import Blocked, Hold, Ledger, Limit, ledger
 from forgeyard.gateway.pricing import Prices
@@ -407,6 +407,94 @@ def test_fy_bdg_013_an_unknown_cost_counts_at_its_reservation(priced):
     m.cloud.usage = {"note": "no tokens"}
     assert send(m).status_code == 200
     assert ledger.snapshot().spent[("key", 1)] == pricing.micros_of(need())
+
+
+def test_fy_bdg_040_an_unknown_cost_outlives_a_restart(priced):
+    """FY-BDG-040 (1.4.5, #172): what an answer without usage counted at its reservation is written to the
+    server_settings row and read back by the next server start (a new ledger) with the month, once, next to a
+    priced answer read from the usage rows; a ledger of another month does not take it."""
+    m = priced
+    m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": 1_000_000})
+    set_state("chat", 0, "starting", "loading")
+    m.cloud.usage = {"note": "no tokens"}
+    assert send(m).status_code == 200
+    m.cloud.usage = None
+    assert send(m).status_code == 200            # priced: in the usage rows, not in the row below
+    total = need() + ANSWER_PICOS
+    assert ledger._spent[("key", 1)] == total
+    assert sorted(s for s, _ in ledger._estimated) == ["key", "person", "provider"]
+    assert set(ledger._estimated.values()) == {need()}        # only the answer without usage
+    recorder.flush()
+    assert ledger.write_estimated() is True and ledger.write_estimated() is False   # written once, when changed
+    db = new_session()
+    try:
+        row = db.get(ServerSetting, budgets.ESTIMATED_SETTING)
+        assert row.value["month"] == budgets.month_of(time.time()) and row.value["picos"]["key:1"] == need()
+    finally:
+        db.close()
+    fresh = Ledger()                              # the server started again
+    assert fresh.snapshot().spent[("key", 1)] == pricing.micros_of(total)
+    assert fresh._estimated[("key", 1)] == need()
+    later = Ledger(clock=lambda: DEC + 40 * 86400)  # another month: starts from nothing
+    assert later.snapshot().spent.get(("key", 1)) is None
+    # A third answer without usage after the restart adds to what was read, and is written as the new total.
+    h = fresh.reserve([], 0)
+    fresh.settle(h, key_id=1, user_id=1, provider_id=None, picos=5 * P, estimated=True)
+    assert fresh.write_estimated() and Ledger()._read_estimated(new_session(), budgets.month_of(time.time()))[
+        ("key", 1)] == need() + 5 * P
+
+
+def test_fy_bdg_041_the_estimated_row_is_checked_and_written_again_after_a_failure(owner, monkeypatch):
+    """FY-BDG-041: a settle that is not estimated never reaches the row; one before the month was read reads it
+    first (so the reading cannot overwrite it); odd entries in the row are skipped; a failed write is tried
+    again on the next call."""
+    month = budgets.month_of(time.time())
+    fresh = Ledger()
+    fresh.settle(None, key_id=3, user_id=4, provider_id=5, picos=7 * P)                  # priced: nothing kept
+    assert fresh._estimated == {} and fresh.write_estimated() is False
+    fresh.settle(None, key_id=3, user_id=4, provider_id=5, picos=7 * P, estimated=True)  # read first, then kept
+    assert fresh._month == month and fresh._estimated == {("key", 3): 7 * P, ("person", 4): 7 * P,
+                                                            ("provider", 5): 7 * P}
+    calls = []
+
+    def broken(*a, **kw):
+        calls.append(1)
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(budgets, "utcnow", broken)
+    with pytest.raises(RuntimeError):
+        fresh.write_estimated()
+    monkeypatch.undo()
+    assert fresh.write_estimated() is True and calls == [1]
+    fresh.settle(None, key_id=3, user_id=4, provider_id=5, picos=P, estimated=True)
+    fresh.reset()                                    # (tests, and nothing else, start the ledger over)
+    assert fresh._estimated == {} and fresh.write_estimated() is False
+    db = new_session()
+    try:
+        row = db.get(ServerSetting, budgets.ESTIMATED_SETTING)
+        row.value = {"month": month, "picos": {"key:3": 7 * P, "nonsense": 5, "person:x": 1, "provider:5": -4,
+                                               "key:8": "9", "bucket:1": 3}}
+        db.commit()
+        assert Ledger._read_estimated(db, month) == {("key", 3): 7 * P}
+        row.value = ["not", "a", "dict"]
+        db.commit()
+        assert Ledger._read_estimated(db, month) == {}
+    finally:
+        db.close()
+
+
+def test_fy_bdg_042_the_server_writes_it_when_it_stops():
+    """FY-BDG-042: what was counted at a reservation since the last periodic write is written when the server
+    shuts down (the app's lifespan), like the usage counts."""
+    from tests.conftest import make_client
+
+    with make_client():
+        ledger.settle(None, key_id=6, user_id=7, provider_id=8, picos=11 * P, estimated=True)
+    db = new_session()
+    try:
+        assert db.get(ServerSetting, budgets.ESTIMATED_SETTING).value["picos"]["key:6"] == 11 * P
+    finally:
+        db.close()
 
 
 def test_fy_bdg_014_who_may_set_budgets(priced):

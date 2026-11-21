@@ -29,7 +29,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 - **名稱：**卡的市售名稱。APU 的名稱常常只是「AMD Radeon Graphics」，這時改用 CPU 型號裡寫的 GPU（「… w/ Radeon 8060S」）。
 - **ROCm 版本**（這裡是 `rocm=`，Machines 頁面上寫「ROCm」），放在 NVIDIA 卡顯示驅動程式版本的位置。核心驅動程式的版本保留在卡的詳細資料裡。
-- **記憶體：**APU 取 VRAM 切割區（在 BIOS 設定）和 GTT 兩者中較大的那個，和 `amd-smi monitor` 顯示的一樣。
+- **記憶體：**APU 取 VRAM 切割區（在 BIOS 設定）和 GTT 兩者中較大的那個，和 `amd-smi monitor` 顯示的一樣。GTT 就是這台機器本身的 RAM，所以卡回報的是 GTT 時，Forgeyard 把卡和 RAM 當成同一個記憶體池計算（1.4.5）：GPU 上的模型預留的記憶體不會再承諾給 CPU 上的模型，卡能提供的也不會超過 RAM 剩下的。切割區是 Linux 看不到的記憶體，所以用切割區時兩者分開計算。
 - **識別鍵（key）：**卡有序號時用它的 UUID，否則用 PCI 位址（APU 沒有序號，所以每台機器上的 UUID 都一樣）。用 Forgeyard 1.1.0 或更舊版本加入的機器，識別鍵改變後 GPU 允許清單仍會保留。
 
 在 AMD 上，模型可以用 `vllm` recipe 的 ROCm 映像檔執行，也可以用 `llama-cpp`。行程只會在 `ROCR_VISIBLE_DEVICES` 裡拿到自己的卡，而且只有在分配到 GPU 時，才會加入擁有 `/dev/kfd` 和對應 `/dev/dri/renderD*` 的群組。
@@ -898,6 +898,8 @@ sudo systemctl enable --now forgeyard
    - **手動安裝**：`git pull`、`uv sync`，然後重新啟動 agent。
 
 **Machines** 頁面會顯示每個 agent 的版本。伺服器升級後，請盡快升級 agent：太舊的 agent 可能缺少新版伺服器需要的功能。
+
+1.4.5 起，升級期間版本不同的伺服器和 agent 仍能一起運作，先升級哪一邊都可以：任一邊收到不認得的訊息都會略過（並在自己的日誌留下警告）；伺服器遇到還不認得的卡片種類時，會略過那張卡，而不是拒絕這個 agent。機器頁面的 **Detection notes** 會把它列為 *unknown vendor*；升級伺服器後才能使用那張卡。
 
 ## 更新 agent
 

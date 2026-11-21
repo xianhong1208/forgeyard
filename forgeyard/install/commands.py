@@ -18,7 +18,7 @@ from typing import Optional
 from forgeyard import __version__
 from forgeyard.agent import config as agent_config
 from forgeyard.config import get_settings
-from forgeyard.install import images, wheel
+from forgeyard.install import images, requirements, wheel
 
 TEMPLATE = Path(__file__).with_name("install.sh")
 MODEL_CACHE = "/srv/forgeyard-models"
@@ -31,12 +31,16 @@ def safe_server(url: str) -> bool:
 
 
 def install_script(server: str) -> str:
-    """install.sh for this server: its address, version and the wheel's checksum filled in."""
+    """install.sh for this server: its address, version and the checksums of the wheel and of the lists of its
+    dependencies filled in."""
     if not safe_server(server):
         raise ValueError(f"not a plain https:// address: {server!r}")
     name, _, sha = wheel.cached()
     out = TEMPLATE.read_text()
-    for key, value in (("SERVER", server), ("VERSION", __version__), ("WHEEL", name), ("WHEEL_SHA256", sha)):
+    reqs = requirements.served("agent-requirements.txt")[1]
+    nvidia = requirements.served("agent-requirements-nvidia.txt")[1]
+    for key, value in (("SERVER", server), ("VERSION", __version__), ("WHEEL", name), ("WHEEL_SHA256", sha),
+                       ("REQS_SHA256", reqs), ("REQS_NVIDIA_SHA256", nvidia)):
         out = out.replace(f"@@{key}@@", value)
     return out
 

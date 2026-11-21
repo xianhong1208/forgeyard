@@ -40,7 +40,10 @@ What it shows for each card:
 - **ROCm version** (`rocm=` here, "ROCm" on the Machines page) where NVIDIA cards show their
   driver. The kernel driver's version is kept in the card's details.
 - **Memory:** for an APU, the larger of the VRAM carve-out (set in the BIOS) and GTT, which is
-  what `amd-smi monitor` shows too.
+  what `amd-smi monitor` shows too. GTT is the machine's own RAM, so when the card reports GTT,
+  Forgeyard counts the card and the RAM as one pool (1.4.5): what a model on the GPU reserves is
+  not promised again to a CPU model, and the card never offers more than the RAM has free. A
+  carve-out is memory Linux does not see, so with it the two are counted apart.
 - **Key:** the card's UUID when it has a serial number, else its PCI address (APUs have no
   serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
   1.1.0 or older keeps its GPU allowlist when the key changes.
@@ -1296,6 +1299,11 @@ the journal: `journalctl -u forgeyard -f`.
 
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
+
+From 1.4.5 on, a server and an agent of different versions keep working together while you upgrade, in either
+order: each side ignores a message it does not know (with a warning in its log), and a server leaves out a card
+of a kind it does not know yet instead of refusing the agent. The machine's page then lists it under
+**Detection notes** as *unknown vendor*; update the server to use that card.
 
 ## Update an agent
 

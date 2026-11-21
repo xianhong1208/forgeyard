@@ -964,6 +964,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `model-cache-full` | 警告 | 某台機器的模型快取磁碟剩餘空間不到 10% |
 | `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
+| `machine-loopback-address` | 警告 | 不是伺服器主機的機器把副本公開在 loopback 位址上（透過 tunnel 或 proxy），而且它的連接埠範圍沒有轉送到伺服器的主機（[做法](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)） |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
@@ -1043,6 +1044,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `-h`、`--help` | 列出選項 |
 
 再執行一次時，它會把 agent 升級到伺服器的版本，並保留設定和憑據。它需要 x86_64 或 aarch64 的 Linux、root 權限、`curl`，以及能連上 PyPI 以下載 agent 的少數幾個相依套件。它會優先使用已安裝的 `uv`，否則使用系統上已有的 Python 3.13 或更新版本，再不然就把 `uv` 安裝到 `/opt/forgeyard/bin`，它會自備 Python。沒有 systemd 的話，它會安裝好所有東西，並印出啟動 agent 的方法。
+
+它下載的東西都會經過檢查（1.4.5）：agent 和它的相依套件清單來自伺服器，各自對照腳本裡寫明的 SHA-256；相依套件從 PyPI 下載，版本固定為這個伺服器版本測試過的版本，每個檔案都要符合它公開的雜湊值（`--require-hashes`，不會連帶安裝其他套件）；它安裝的 `uv` 是固定的版本（0.9.24），從 GitHub 下載並對照 SHA-256，而不是執行安裝腳本。透過鏡像站連到 PyPI 的機器（`UV_INDEX_URL`、`PIP_INDEX_URL`）拿到的仍是同樣的檔案，否則就不安裝。
 
 ## 內建配方
 

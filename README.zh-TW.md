@@ -164,10 +164,11 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 - [HTTPS 與信任](docs/https-and-trust.md)（英文）：憑證授權單位、agent 的指紋、加密儲存的機密，以及
   [從 1.0 升級：用一般 HTTP 加入的 agent](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。
 - [開發](docs/development.zh-TW.md)：建置、測試，以及程式碼結構。
+- [驗證過的硬體](docs/verified-hardware.zh-TW.md)：每個版本在哪些機器上驗收，以及結果。
 
 ## 已驗證的硬體
 
-每個版本都在真實的機器上檢查過，不只是跑 CI。目前為止：
+每個版本都在真實的機器上檢查過，不只是跑 CI；[驗證過的硬體](docs/verified-hardware.zh-TW.md)列出每個版本的驗收執行與通過的項目數。目前為止：
 
 | 硬體 | 軟體 | 測過的內容 |
 |---|---|---|

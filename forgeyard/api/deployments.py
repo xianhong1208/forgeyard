@@ -551,7 +551,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     if not changes:
         return {**out, "deployment": deployment_out(db, d, caller)}
     nodes: set[int] = set()
-    if params_changed:
+    if params_changed or ctx.estimate.as_dict() != d.estimate:
+        # 1.4.5 (#166): the estimate from the recipe as it is now, even when no parameter changed (no restart for it).
         d.params = ctx.params
         d.estimate = ctx.estimate.as_dict()
     spec["replicas"], spec["machine_id"] = replicas, machine_id

@@ -31,6 +31,11 @@ Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrad
 test fails when the models and migrations drift apart. Test IDs (`FY-…`) are unique across the
 project.
 
+After `uv lock` (or a Dependabot update of `uv.lock`), run `uv run --no-sync python -m
+forgeyard.install.requirements`: it rewrites the lists of the agent's dependencies, with their hashes, that
+install.sh installs from (`forgeyard/install/agent-requirements*.txt`), and FY-INST-020 fails while they
+differ from the lock.
+
 ## Pinned engine images
 
 Every container variant of a built-in recipe names its image as `repo:tag@sha256:<index digest>`, and

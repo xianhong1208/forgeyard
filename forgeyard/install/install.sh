@@ -8,9 +8,11 @@
 # fingerprint. This script then:
 #   1. checks the system (Linux, x86_64 or aarch64, root);
 #   2. downloads the agent from the same server (its exact version) over HTTPS, verified against
-#      the pinned CA, and checks the file's SHA-256;
+#      the pinned CA, and checks the file's SHA-256; the same for the list of its dependencies;
 #   3. installs it in its own Python environment (/opt/forgeyard/venv), with uv when it is there,
-#      else with a Python 3.13+ already on the machine, else it installs uv first;
+#      else with a Python 3.13+ already on the machine, else it installs uv first (a pinned release
+#      from GitHub, its SHA-256 checked); the dependencies come from PyPI at pinned versions, each
+#      file checked against its hash (--require-hashes);
 #   4. creates the account process workloads run as (forgeyard-run);
 #   5. writes /etc/forgeyard/agent.toml with `forgeyard agent init` (kept when it exists);
 #   6. joins the server with the one-time token (skipped when this machine already joined);
@@ -26,6 +28,15 @@ SERVER="@@SERVER@@"
 VERSION="@@VERSION@@"
 WHEEL="@@WHEEL@@"
 WHEEL_SHA256="@@WHEEL_SHA256@@"
+# The agent's dependencies, pinned with their hashes (forgeyard/install/requirements.py), and the extra NVIDIA ones.
+REQS_SHA256="@@REQS_SHA256@@"
+REQS_NVIDIA_SHA256="@@REQS_NVIDIA_SHA256@@"
+# The uv this script installs when the machine has neither uv nor Python 3.13: this release's static build, checked
+# against the SHA-256 its release publishes (also the CI's and the server image's uv).
+UV_VERSION="0.9.24"
+UV_SHA256_X86_64="cf307aa4271038daa334ca64e75aa40c0c085ce6fa0c0e6f21e41a2b62c7904d"
+UV_SHA256_AARCH64="b16359904ede857b90b68168f10b0f6bf500858df9bed4e7156dbc59fd3f0747"
+UV_RELEASES="${FORGEYARD_UV_RELEASES:-https://github.com/astral-sh/uv/releases/download}"
 
 # Where things go. The environment can move them (the tests do; most people never need to).
 HOME_DIR="${FORGEYARD_HOME:-/opt/forgeyard}"
@@ -192,9 +203,16 @@ got="$(sha256sum "$WORK/$WHEEL" | cut -c1-64)"
 [ "$got" = "$WHEEL_SHA256" ] || die "$WHEEL is damaged: SHA-256 $got, expected $WHEEL_SHA256"
 say "$WHEEL ($(wc -c < "$WORK/$WHEEL" | tr -d ' ') bytes, SHA-256 checked)."
 
-EXTRA=""
+checked() {  # checked NAME SHA256: fetch $SERVER/install/NAME into $WORK and check its SHA-256
+    fetch "$SERVER/install/$1" "$WORK/$1" || die "cannot download $SERVER/install/$1"
+    got="$(sha256sum "$WORK/$1" | cut -c1-64)"
+    [ "$got" = "$2" ] || die "$1 is damaged: SHA-256 $got, expected $2"
+}
+checked agent-requirements.txt "$REQS_SHA256"
+REQS="-r $WORK/agent-requirements.txt"
 if [ -e /dev/nvidiactl ] || [ -e /proc/driver/nvidia/version ] || have nvidia-smi; then
-    EXTRA="[nvidia]"
+    checked agent-requirements-nvidia.txt "$REQS_NVIDIA_SHA256"
+    REQS="$REQS -r $WORK/agent-requirements-nvidia.txt"
     say "NVIDIA driver found: installing NVML support too."
 fi
 
@@ -207,8 +225,8 @@ mkdir -p "$HOME_DIR"
 UV=""
 if have uv; then
     UV="$(command -v uv)"
-elif [ -x "$HOME_DIR/bin/uv" ]; then
-    UV="$HOME_DIR/bin/uv"
+elif [ -x "$HOME_DIR/bin/uv" ] && [ "$("$HOME_DIR/bin/uv" --version 2>/dev/null | cut -d' ' -f2)" = "$UV_VERSION" ]; then
+    UV="$HOME_DIR/bin/uv"   # the one this script installed before
 fi
 PY=""
 if [ -z "$UV" ]; then
@@ -220,30 +238,47 @@ if [ -z "$UV" ]; then
     done
 fi
 if [ -z "$UV" ] && [ -z "$PY" ]; then
-    say "No uv and no Python 3.13 here: installing uv into $HOME_DIR/bin (it brings its own Python)."
-    curl -LsSf https://astral.sh/uv/install.sh -o "$WORK/uv-install.sh" || die "cannot download uv from astral.sh"
-    env UV_INSTALL_DIR="$HOME_DIR/bin" UV_NO_MODIFY_PATH=1 sh "$WORK/uv-install.sh" >/dev/null || die "installing uv failed"
+    case "$(uname -m)" in
+        x86_64|amd64) uv_arch=x86_64; uv_sha="$UV_SHA256_X86_64" ;;
+        *) uv_arch=aarch64; uv_sha="$UV_SHA256_AARCH64" ;;
+    esac
+    uv_tar="uv-$uv_arch-unknown-linux-musl.tar.gz"
+    say "No uv and no Python 3.13 here: installing uv $UV_VERSION into $HOME_DIR/bin (it brings its own Python)."
+    curl -fsSL "$UV_RELEASES/$UV_VERSION/$uv_tar" -o "$WORK/$uv_tar" || die "cannot download $UV_RELEASES/$UV_VERSION/$uv_tar"
+    got="$(sha256sum "$WORK/$uv_tar" | cut -c1-64)"
+    [ "$got" = "$uv_sha" ] || die "$uv_tar is damaged: SHA-256 $got, expected $uv_sha"
+    mkdir -p "$WORK/uv" "$HOME_DIR/bin"
+    tar -xzf "$WORK/$uv_tar" -C "$WORK/uv" || die "cannot unpack $uv_tar"
+    if ! { cp "$WORK/uv/uv-$uv_arch-unknown-linux-musl/uv" "$HOME_DIR/bin/uv.new" && chmod 755 "$HOME_DIR/bin/uv.new" \
+            && mv -f "$HOME_DIR/bin/uv.new" "$HOME_DIR/bin/uv"; }; then
+        die "cannot install uv into $HOME_DIR/bin"
+    fi
     UV="$HOME_DIR/bin/uv"
 fi
 
 cp "$WORK/$WHEEL" "$HOME_DIR/$WHEEL"
-REQ="forgeyard$EXTRA @ file://$HOME_DIR/$WHEEL"
+# The dependencies at their pinned versions, each file checked against its hash; then the agent itself, whose
+# SHA-256 was checked above, without dependencies (so nothing unpinned comes with it).
 if [ -n "$UV" ]; then
     export UV_PYTHON_INSTALL_DIR="$HOME_DIR/python"
     if ! [ -x "$VENV/bin/python" ] || ! python_ok "$VENV/bin/python"; then
         "$UV" venv --quiet --python 3.13 "$VENV" || die "uv could not make a Python 3.13 environment"
     fi
-    "$UV" pip install --quiet --python "$VENV/bin/python" --reinstall-package forgeyard "$REQ" \
-        || die "installing the agent failed (it needs PyPI for its few dependencies)"
+    # shellcheck disable=SC2086 # REQS is one or two "-r FILE"
+    "$UV" pip install --quiet --python "$VENV/bin/python" --require-hashes $REQS \
+        || die "installing the agent's dependencies failed (it needs PyPI, and each file must match its hash)"
+    "$UV" pip install --quiet --python "$VENV/bin/python" --no-deps --reinstall-package forgeyard "$HOME_DIR/$WHEEL" \
+        || die "installing the agent failed"
     say "Installed with uv ($("$UV" --version))."
 else
     if ! [ -x "$VENV/bin/python" ] || ! python_ok "$VENV/bin/python"; then
         "$PY" -m venv "$VENV" || die "$PY could not make a virtual environment"
     fi
+    # shellcheck disable=SC2086 # REQS is one or two "-r FILE"
+    "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check --require-hashes $REQS \
+        || die "installing the agent's dependencies failed (it needs PyPI, and each file must match its hash)"
     "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check --force-reinstall --no-deps \
         "$HOME_DIR/$WHEEL" || die "installing the agent failed"
-    "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check "$REQ" \
-        || die "installing the agent's dependencies failed (it needs PyPI)"
     say "Installed with $("$PY" --version 2>&1)."
 fi
 for old in "$HOME_DIR"/forgeyard-*.whl; do
