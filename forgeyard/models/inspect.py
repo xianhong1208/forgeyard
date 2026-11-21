@@ -10,7 +10,7 @@ import json
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import fetch, gguf, modalities, safetensors, sources, textcls, vision
+from forgeyard.models import fetch, gguf, kvlayout, modalities, safetensors, sources, textcls, vision
 from forgeyard.models.sources import Source, SourceError
 
 MAX_SHARDS = 256
@@ -56,7 +56,7 @@ def config_summary(config: dict) -> dict:
         # 1.4.4: RoBERTa's positions start after the padding index (vLLM's roberta.py adds padding_idx + 1), so
         # 514 position embeddings hold 512 tokens (BGE-M3: 8194, 8192); a longer --max-model-len overflows them.
         max_context -= pad + 1
-    return {
+    out = {
         "architectures": config.get("architectures") or [],
         "model_type": config.get("model_type"),
         "layers": int(text.get("num_hidden_layers") or text.get("n_layer") or 0),
@@ -69,6 +69,12 @@ def config_summary(config: dict) -> dict:
         "dtype": str(config.get("torch_dtype") or config.get("dtype") or text.get("torch_dtype") or "bfloat16"),
         "quantization": (config.get("quantization_config") or {}).get("quant_method"),
     }
+    # 1.4.5 (#167): sliding-window, MLA, hybrid and KV-shared layers, for models that have them (a plain model
+    # keeps the fields above only, and the estimate's plain formula).
+    layout = kvlayout.from_config(text)
+    if layout is not None:
+        out["kv_layout"] = layout
+    return out
 
 
 MAX_VOICES = 200
