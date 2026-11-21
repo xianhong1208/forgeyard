@@ -43,6 +43,16 @@ version until 1.0.
   hash; the agent's wheel follows with `--no-deps`. `python -m forgeyard.install.requirements` writes the lists
   from uv.lock; a test fails while they are out of date.
 
+- **Structured output is never lost silently on a cloud spill** (#162). A request with a JSON `response_format`,
+  vLLM's `structured_outputs` or `guided_*`, llama.cpp's `grammar` or `json_schema`, or a tool with `strict: true`
+  skips every provider target that would drop or ignore it (every cloud kind drops the engine-only ones; Anthropic
+  also ignores `json_object`, a schema without `strict` and strict tools; a model's `drop_params` counts too), where
+  it used to get 200 with an unconstrained answer. With nothing else to serve it, a busy local tier takes it anyway
+  and an unavailable one answers 503 naming the providers skipped; a cloud model only such providers serve answers
+  400 `structured_output_not_supported`. Parameters left out on the way to a provider are named in the new
+  `X-Forgeyard-Dropped-Params` header (also a `max_tokens` sent beside `max_completion_tokens`, which was dropped
+  without a word).
+
 
 ## [1.4.4] — 2026-11-21
 

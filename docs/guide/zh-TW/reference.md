@@ -482,6 +482,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `X-Forgeyard-Replica` | 回應 | 本機回答時：`<model>#<replica>` |
 | `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
 | `X-Forgeyard-Voice` | 回應 | 文字轉語音：請求沒指定聲音、或指定了模型沒有的 OpenAI 聲音時，閘道所選的聲音；模型只有自己的一種聲音時為 `default` |
+| `X-Forgeyard-Dropped-Params` | 回應 | Forgeyard 在送往回答的供應商途中拿掉的請求參數（只有引擎才有的，例如 `top_k`、`chat_template_kwargs`；模型自己的拿掉清單），以逗號分隔。該供應商回錯誤時也會帶上。沒有拿掉任何參數時沒有這個標頭（[結構化輸出](cloud-providers.md#when-a-request-spills)永遠不會被拿掉：這種請求會略過那個供應商） |
 | `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
 | `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`，以及原樣轉回的副本或供應商自己的 429 或 503 |
 
@@ -530,6 +531,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 400 | `input_reference_not_supported` | 影片：帶了 `input_reference`（或 `image_reference`、`video_reference`、`audio_reference`）：1.3 只支援文字轉影片 | 改在提示裡描述 |
 | 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；引擎只做影片 | 改用 `variant=video` |
 | 4xx/5xx | `engine_error` | 圖片與影片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
+| 400 | `structured_output_not_supported` | 請求要求結構化輸出（JSON 的 `response_format`、`structured_outputs`、`guided_*`、`grammar`、`json_schema`、strict 工具），但提供這個模型的每個供應商都會拿掉或忽略它。訊息會列出它們和參數 | 拿掉這個參數，或改用接受它的目標（OpenAI 相容伺服器、本機部署） |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |

@@ -29,7 +29,13 @@ cloud provider.
    tokens, and removes it again if the client did not ask for it.
 7. If the client goes away, the upstream request is closed at once, so the engine stops generating.
 8. The answer names who served it: `X-Forgeyard-Target: local:<deployment>#<replica>` or
-   `provider:<provider>/<model>`, never a key; `X-Forgeyard-Spilled` says why it left tier 0.
+   `provider:<provider>/<model>`, never a key; `X-Forgeyard-Spilled` says why it left tier 0, and
+   `X-Forgeyard-Dropped-Params` (1.4.5) names the request parameters left out on the way to a provider.
+   **Structured output is never lost silently** (1.4.5): a request with a JSON schema, a grammar or
+   another guided-decoding parameter (quirks.STRUCTURED) skips every provider target that would drop or
+   ignore it; with nothing else to serve it, it gets the local answer it would have had without the
+   cloud (busy: sent to a replica anyway; unavailable: 503 saying why it was not spilled), and a route
+   that only such providers serve answers 400 `structured_output_not_supported`.
 9. Budgets (forgeyard/gateway/budgets.py): before a request goes to a provider outside your network,
    its estimated cost is reserved against the key's, the person's and the provider's monthly budget.
    A budget that cannot cover it skips that provider (the next target or tier, or waiting for a busy
@@ -126,6 +132,7 @@ CLOUD_APIS = ("openai-chat", "openai-embeddings")      # what provider targets s
 CLOUD_ENDPOINTS = ("chat/completions", "completions", "embeddings")
 CLIENT_CLOSED = 499  # nginx's code for "the client went away": counted, but not as an error
 LOCAL_ONLY_HEADER = "x-forgeyard-local-only"
+DROPPED_HEADER = "X-Forgeyard-Dropped-Params"   # 1.4.5: what a provider was sent without
 MAX_WAIT_MS = 10_000
 RETRY_AFTER_CAP = 2.0   # with no other target left, a provider's Retry-After up to this is waited for once
 BYTES_PER_TOKEN = 3     # a prompt's size in tokens, estimated on the high side (CJK is ~3 bytes a token)
@@ -949,6 +956,8 @@ class Job:
         self.queue_key = ""
         self.sent_at = 0.0
         self._ticket: Optional[int] = None
+        self.dropped: list[str] = []                # parameters left out for the provider it was sent to (1.4.5)
+        self.kept_from: list[str] = []              # providers skipped: they would lose the structured output
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -1039,7 +1048,41 @@ class Job:
             out["X-Forgeyard-Spilled"] = self.spilled
         if self.budget_blocked:
             out[budgets.HEADER] = ",".join(self.budget_blocked)
+        if self.dropped:
+            out[DROPPED_HEADER] = ",".join(self.dropped)
         return out
+
+    def keep_structure(self, tiers: list[Tier]) -> list[Tier]:
+        """The tiers without the provider targets that would drop or ignore the request's structured
+        output (1.4.5). Raises 400 when no target is left at all."""
+        obj = self.parsed.obj
+        if not quirks.structured(obj) or not any(t.clouds for t in tiers):
+            return tiers
+        out: list[Tier] = []
+        for tier in tiers:
+            clouds = []
+            for c in tier.clouds:
+                lost = quirks.structure_lost(c.kind, obj, self.endpoint, c.drop_params)
+                if lost:
+                    self.kept_from.append(f"{c.provider} would drop {', '.join(lost)}")
+                    log.info("A request with structured output was not sent to %s (%s): it would drop %s.",
+                             c.provider, c.upstream_model, ", ".join(lost))
+                else:
+                    clouds.append(c)
+            if tier.locals or clouds:
+                out.append(Tier(tier.index, list(tier.locals), clouds))
+        if not out:
+            raise GatewayError(400, "structured_output_not_supported",
+                               f"{self.route.served_name!r} is served here only by providers that would not keep this "
+                               f"request's structured output: {'; '.join(dict.fromkeys(self.kept_from))}. Leave the "
+                               "parameter out, or ask an admin for a target that takes it.")
+        return out
+
+    def not_spilled(self) -> str:
+        """What a local error adds when providers were skipped for the structured output."""
+        if not self.kept_from:
+            return ""
+        return f" Not sent to the cloud: {'; '.join(dict.fromkeys(self.kept_from))} (structured output)."
 
     def gone(self) -> Response:
         self.finish(CLIENT_CLOSED, None)
@@ -1186,6 +1229,7 @@ class Job:
             remaining.remove(pick)
             g = group_of[pick.uid]
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None
+            self.dropped = []
             if parsed.image is not None:
                 # Each image deployment gets its own body: its default size and steps, its request style.
                 if g.deployment_id not in body_for:
@@ -1334,7 +1378,9 @@ class Job:
                 options["include_usage"] = True
                 obj["stream_options"] = options
                 strip = True
-        obj, _dropped = quirks.outgoing(c.kind, obj, endpoint, c.drop_params)
+        obj, self.dropped = quirks.outgoing(c.kind, obj, endpoint, c.drop_params)
+        if self.dropped:
+            log.info("Left out for %s (%s): %s.", c.provider, c.upstream_model, ", ".join(self.dropped))
         body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         cooldown = PROVIDER_COOLDOWN
         try:
@@ -1654,10 +1700,16 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
                 await run_in_threadpool(budgets.ledger.ensure)  # this month's spend, off the event loop
             except Exception:
                 log.exception("Reading this month's spend for budgets failed")
+        tiers = job.keep_structure(tiers)
         return await job.run(tiers)
     except GatewayError as e:
         if job.budget_blocked and budgets.HEADER not in e.headers:
             e.headers[budgets.HEADER] = ",".join(job.budget_blocked)
+        if job.dropped and job.sent_to is not None and DROPPED_HEADER not in e.headers:
+            e.headers[DROPPED_HEADER] = ",".join(job.dropped)
+        if job.kept_from and e.code != "structured_output_not_supported" and e.status >= 500:
+            text = e.message.rstrip()
+            e.message = text + ("" if text.endswith(".") else ".") + job.not_spilled()
         if e.status == 402 and job.budget_target is not None and job.sent_to is None:
             job.target, _ = job.budget_target  # counted under the provider, at no cost
             job.deployment_id = None
