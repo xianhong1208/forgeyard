@@ -6,6 +6,46 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **No request runs twice** (#168). A request moves to another replica (or provider) only when it provably never
+  reached the first one: a connection that could not be made, no free connection, or a replica's key guard saying
+  its engine is not running. A connection that breaks once the request was sent (`ReadError`,
+  `RemoteProtocolError`, `WriteError`: the engine may be generating) is 502 and is not tried elsewhere; before, it
+  was retried on the next replica, or the next cloud target, and could run twice. The same holds for video jobs
+  and `/x/`. The agent's key guard now answers 503 with `X-Forgeyard-Not-Taken: engine-unreachable` (after reading
+  the request) when its engine is not running, instead of closing without an answer, so failover to the next
+  replica keeps working; behind an agent older than 1.4.5 that case is now a 502 until the agent reports the dead
+  engine (seconds): update the agents.
+- **A shorter, settable wait for the first answer** (#168). Once a request is written to a replica, the replica has
+  the deployment's *Wait for the first answer* (`first_answer_timeout`, 120 s by default, 5 to 3,600, under
+  **Advanced** in the deploy and change forms) to answer: the status line, and for a stream its first bytes too.
+  Then the request is closed (the engine stops) with 504 `first_answer_timeout`, never sent elsewhere; it used to
+  wait `GATEWAY_READ_TIMEOUT` (600 s), and a stream that never started came back as a 200 that broke off.
+  `GATEWAY_READ_TIMEOUT` now applies to each later piece. Image deployments keep their own *Timeout*, video jobs
+  theirs. Changing only this parameter restarts nothing. No migration: it lives in the deployment's parameters.
+- **Structured output is never lost silently on a cloud spill** (#162). A request with a JSON `response_format`,
+  vLLM's `structured_outputs` or `guided_*`, llama.cpp's `grammar` or `json_schema`, or a tool with `strict: true`
+  skips every provider target that would drop or ignore it (every cloud kind drops the engine-only ones; Anthropic
+  also ignores `json_object`, a schema without `strict` and strict tools; a model's `drop_params` counts too), where
+  it used to get 200 with an unconstrained answer. With nothing else to serve it, a busy local tier takes it anyway
+  and an unavailable one answers 503 naming the providers skipped; a cloud model only such providers serve answers
+  400 `structured_output_not_supported`. Parameters left out on the way to a provider are named in the new
+  `X-Forgeyard-Dropped-Params` header (also a `max_tokens` sent beside `max_completion_tokens`, which was dropped
+  without a word).
+
+## [1.4.4] — 2026-11-21
+
+More kinds of models, part 1. Zero-shot object detectors find the objects a request names: `/v1/vision/detect`
+takes `labels` (Grounding DINO, MM-Grounding-DINO, OWLv2; #142). Text classifiers run on vLLM's pooling engine at
+`/v1/classify` (sentiment, language, toxicity; #144), and image classifiers, with fixed classes or zero-shot
+(CLIP, SigLIP 2), at `/v1/vision/classify` (#141). Each has its own kind, recommended models with permissive
+licences, a Playground view and **Try it**. The built-in `vision` recipe now pins `forgeyard-vision` 1.4.4rc1,
+the image published by the `v1.4.4rc1` pre-release, which runs both new vision tasks (#175). No setting and no
+migration (the labels live in the catalog entry's details), and the agents need no update: the agent did not
+change since 1.4.3, and a machine gets the new vision image like any other pinned engine image. Contributions
+are now signed off under the DCO.
+
 ### Added
 
 - **Contributions are signed off under the Developer Certificate of Origin** (DCO 1.1): every non-merge commit of a pull request needs a `Signed-off-by:` line with its author email (`git commit -s`); a new `DCO` workflow checks it, bots excepted ([CONTRIBUTING](CONTRIBUTING.md#licence)).
@@ -59,7 +99,8 @@ version until 1.0.
   - Playground: a **Find these** box for them (comma-separated names, then **Find**; the score slider starts at
     0.3). **Try it** asks them for the test image's two shapes (or for the words sent as `input`).
   - They need a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older, deploying one
-    answers 422 `vision_image_too_old`. The built-in recipe runs one (below).
+    answers 422 `vision_image_too_old` (a pre-release tag such as `1.4.4rc1` counts as the release it leads to,
+    1.4.4). The built-in recipe runs one (below).
   - `scripts/accept_vision.py` knows `grounding-dino-tiny`, `mm-grounding-dino-tiny` and `owlv2-base`: two cats,
     a remote and no giraffe on the COCO photo, `labels_required`, and `labels_not_supported` for RT-DETR.
 
@@ -79,31 +120,6 @@ version until 1.0.
 
 ### Fixed
 
-- **No request runs twice** (#168). A request moves to another replica (or provider) only when it provably never
-  reached the first one: a connection that could not be made, no free connection, or a replica's key guard saying
-  its engine is not running. A connection that breaks once the request was sent (`ReadError`,
-  `RemoteProtocolError`, `WriteError`: the engine may be generating) is 502 and is not tried elsewhere; before, it
-  was retried on the next replica, or the next cloud target, and could run twice. The same holds for video jobs
-  and `/x/`. The agent's key guard now answers 503 with `X-Forgeyard-Not-Taken: engine-unreachable` (after reading
-  the request) when its engine is not running, instead of closing without an answer, so failover to the next
-  replica keeps working; behind an agent older than 1.4.5 that case is now a 502 until the agent reports the dead
-  engine (seconds): update the agents.
-- **A shorter, settable wait for the first answer** (#168). Once a request is written to a replica, the replica has
-  the deployment's *Wait for the first answer* (`first_answer_timeout`, 120 s by default, 5 to 3,600, under
-  **Advanced** in the deploy and change forms) to answer: the status line, and for a stream its first bytes too.
-  Then the request is closed (the engine stops) with 504 `first_answer_timeout`, never sent elsewhere; it used to
-  wait `GATEWAY_READ_TIMEOUT` (600 s), and a stream that never started came back as a 200 that broke off.
-  `GATEWAY_READ_TIMEOUT` now applies to each later piece. Image deployments keep their own *Timeout*, video jobs
-  theirs. Changing only this parameter restarts nothing. No migration: it lives in the deployment's parameters.
-- **Structured output is never lost silently on a cloud spill** (#162). A request with a JSON `response_format`,
-  vLLM's `structured_outputs` or `guided_*`, llama.cpp's `grammar` or `json_schema`, or a tool with `strict: true`
-  skips every provider target that would drop or ignore it (every cloud kind drops the engine-only ones; Anthropic
-  also ignores `json_object`, a schema without `strict` and strict tools; a model's `drop_params` counts too), where
-  it used to get 200 with an unconstrained answer. With nothing else to serve it, a busy local tier takes it anyway
-  and an unavailable one answers 503 naming the providers skipped; a cloud model only such providers serve answers
-  400 `structured_output_not_supported`. Parameters left out on the way to a provider are named in the new
-  `X-Forgeyard-Dropped-Params` header (also a `max_tokens` sent beside `max_completion_tokens`, which was dropped
-  without a word).
 - RoBERTa and XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold
   512 tokens: the catalog now says 512 (BGE-M3 and its reranker: 8192, not 8194). Choosing the old maximum as the
   context would have overflowed the position table in vLLM. Models already in the catalog keep the number they were
