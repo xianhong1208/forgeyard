@@ -266,6 +266,46 @@ def test_fy_kind_007_which_vision_images_run_zero_shot_detectors():
     assert vision.deploy_refusal("detect", {**zs, "kind": "local"}, old) is None
 
 
+def test_fy_kind_008_a_pre_release_vision_image_counts_as_its_release():
+    """FY-KIND-008 (1.4.4): a pre-release tag of the vision image (PEP 440 aN, bN or rcN, CPU or -cuda, pinned or
+    not) is read as the release it leads to, so 1.4.4rc1 runs zero-shot detectors and image classifiers and
+    1.4.3rc1 is refused as older than 1.4.4; the built-in recipe's own images (1.4.4rc1) are read as 1.4.4, not
+    passed as images of another name. A tag that is no PEP 440 pre-release stays unread."""
+    from types import SimpleNamespace as NS
+
+    from forgeyard.models import recipes
+
+    digest = "@sha256:" + "b" * 64
+    for tag, want in (("1.4.4rc1", (1, 4, 4)), ("1.4.4rc1-cuda", (1, 4, 4)), ("1.4.4a2", (1, 4, 4)),
+                      ("1.4.4b10-cuda", (1, 4, 4)), ("1.4.3rc1", (1, 4, 3)), ("1.4.3rc1-cuda", (1, 4, 3)),
+                      ("1.10.0rc12", (1, 10, 0))):
+        for suffix in ("", digest):
+            assert vision.image_version(f"docker.io/x/forgeyard-vision:{tag}{suffix}") == want, (tag, suffix)
+    for other in ("docker.io/x/forgeyard-vision:1.4.4rc", "docker.io/x/forgeyard-vision:1.4.4c1",
+                  "docker.io/x/forgeyard-vision:1.4.4-rc1x!", "docker.io/x/forgeyard-vision:1.4.4.rc1",
+                  "docker.io/x/forgeyard-vision:1.4.4rc1rc2"):
+        assert vision.image_version(other) is None, other
+
+    recipe, _ = recipes.builtin_recipes()["vision"]
+    images = [v.image for v in recipe.variants if v.image]
+    assert images and all("/forgeyard-vision:1.4.4rc1" in i for i in images), images
+    assert {vision.image_version(i) for i in images} == {(1, 4, 4)}
+
+    zs = {"kind": "hf", "vision": {"task": "detect", "architecture": "Owlv2ForObjectDetection", "zero_shot": True}}
+    assert vision.deploy_refusal("detect", zs, recipe) is None
+    assert vision.deploy_refusal("image-classify", {"kind": "hf"}, recipe) is None
+
+    def r(*tags):
+        return NS(name="r", variants=[NS(image=f"docker.io/x/forgeyard-vision:{t}{digest}") for t in tags])
+
+    assert vision.deploy_refusal("detect", zs, r("1.4.4rc1", "1.4.4rc1-cuda")) is None
+    for what, task, meta in (("This zero-shot detector", "detect", zs), ("Image classification", "image-classify",
+                                                                         {"kind": "hf"})):
+        code, why = vision.deploy_refusal(task, meta, r("1.4.4rc1", "1.4.3rc1-cuda"))
+        assert code == "vision_image_too_old"
+        assert why.startswith(f"{what} needs Forgeyard's vision image 1.4.4 or newer; the r recipe runs 1.4.3."), why
+
+
 # ------------------------------------------------------------------ text classifiers and rerankers
 def test_fy_kind_005_one_label_is_a_reranker_more_is_a_classifier():
     """FY-KIND-005: vLLM's rule on the real configs: bge-reranker-v2-m3 and ms-marco-MiniLM (one label) are
