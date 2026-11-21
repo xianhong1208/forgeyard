@@ -60,7 +60,8 @@ until 1.5. 1.4.1 lets such a machine get a model file from another machine's cac
 engine image from one machine to another, both still through the server. 1.4.2 shows on a machine's page
 the exact command that updates its agent, lists its engine images and removes old ones, and counts free host
 ports when placing replicas. 1.4.3 gives every catalog model and every engine its own page: where it is,
-whether it fits each machine and what uses it. Every change is in the [CHANGELOG](CHANGELOG.md).
+whether it fits each machine and what uses it. 1.4.4 adds zero-shot object detection (find the objects you
+name), text classification and image classification. Every change is in the [CHANGELOG](CHANGELOG.md).
 
 ## 🚀 Installation
 
@@ -73,7 +74,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.3
+  docker.io/tonyhuang1101/forgeyard:1.4.4
 sudo docker logs forgeyard
 ```
 
@@ -118,7 +119,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
