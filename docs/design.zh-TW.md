@@ -194,7 +194,10 @@ Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 
 
   `llama-cpp` 在每個 variant 上也提供 `tts`（附 projector 的 TTS GGUF）。
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
-  （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
+  （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes；1.4.5、#167 起依層的種類計算，見 `forgeyard/models/kvlayout.py`：
+  滑動視窗層每個序列最多存 window − 1 + 2 × 8,192 個進行中的 token，MLA 存一個 `kv_lora_rank + qk_rope_head_dim` 的 latent、沒有 V、每張 GPU 都有一份，
+  遞迴層每個序列一份固定大小的狀態（prefix caching 時兩份），共用 KV 的層不存；llama.cpp 的滑動層是 `window × 序列數 + 512` 格、補到 256 的倍數，
+  MLA 只存 K，遞迴狀態用 32-bit float）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
   GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
   能讀圖片的模型（1.3）會加上配方的**視覺項**：vLLM 加 `vision_overhead`（1.5 GiB：vLLM 啟動時會用最大的圖片跑一次視覺編碼器並保留 encoder cache，之後才決定 KV cache 大小；視覺權重已含在模型權重裡），開啟影片時再加 `video_overhead`（1 GiB）；llama.cpp 加 projector 檔本身（整個載入，預設放到 GPU）與它的 buffer 用的 `vision_overhead`（在 CPU 上量測）。開啟圖片時，估算會註明圖片也會占用上下文 token。

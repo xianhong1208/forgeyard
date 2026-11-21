@@ -135,6 +135,22 @@ are now signed off under the DCO.
   context would have overflowed the position table in vLLM. Models already in the catalog keep the number they were
   added with.
 - The get-started page told vision examples to `pip install openai`; they use httpx, as rerank does.
+- **The KV cache is estimated from what each kind of layer keeps** (#167), so models that fit are no longer
+  refused. Sliding-window layers (Gemma 2, 3 and 4, gpt-oss, Mistral 7B v0.1) keep at most their window: on vLLM
+  the window plus the tokens in flight (two batches of up to 8,192), on llama.cpp `window x sequences + 512` cells
+  for all sequences, padded to 256. MLA models (DeepSeek V2 and V3, Kimi K2) keep one latent of
+  `kv_lora_rank + qk_rope_head_dim` values per token and layer, with no separate V, on every GPU of a replica (a
+  llama.cpp file needs `attention.key_length_mla`, which conversions since 2025 have). Hybrid and linear-attention
+  models (Qwen3-Next, Granite 4 hybrids, Falcon-H1, Jamba, Nemotron-H) grow with the context on their attention
+  layers only, plus a fixed *Recurrent state* per sequence (two on vLLM, for prefix caching), now its own line.
+  Gemma 4's KV-shared layers keep nothing of their own, and its full-attention layers are counted with their own
+  head size and KV heads. With fewer KV heads than GPUs, each GPU holds a whole head. Examples: Gemma 3 27B at a
+  context of 131,072 on vLLM, 62 to 16.9 GiB of KV cache; DeepSeek-V3 at 8,192 x 4, 53.4 to 2.1 GiB; Gemma 4 12B
+  at the defaults, 12.0 to 10.5 GiB (the recommended list's memory figures for Gemma 4 move with it). At vLLM's
+  default context Gemma 3 and gpt-oss do not change: the window plus what is in flight covers it. Falcon-H1 goes up
+  a little: its recurrent state was not counted. Plain models (Qwen3, Llama and the like) are estimated as before.
+  No migration: the layout is read when a model is added, so a model added before this keeps its old estimate
+  until it is added again.
 
 ## [1.4.3] — 2026-11-18
 
