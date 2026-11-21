@@ -91,6 +91,12 @@ agent in hello, the server in welcome), and `desired` / `status` / `logs` flow o
 "workloads". An M1 agent (no features) keeps working with this server and is never sent work; an
 M2 agent talking to an M1 server never sends status, which that server would refuse.
 
+Mixed versions (1.4.5, #170): each side ignores a message type it does not know (AGENT_MESSAGES on the server,
+SERVER_MESSAGES on the agent), with one warning per type and connection, and the server leaves out an accelerator
+whose `vendor` it does not know (warning, and an "unknown vendor" detection note on the machine) instead of refusing
+the hello. A known message that does not validate, or one sent without the feature it needs, is still refused
+(4003).
+
 Close codes the agent acts on (4000-4999 are application codes):
   4001 revoked or removed: the credential is dead, stop
   4002 protocol version not supported: upgrade the agent, stop
@@ -113,6 +119,14 @@ CLOSE_BAD_MESSAGE = 4003
 CLOSE_TIMEOUT = 4008
 CLOSE_REPLACED = 4009
 CLOSE_RESTART = 1012
+
+# 1.4.5 (#170): the message types each side knows. A side ignores a type it does not know, with a warning, so an
+# agent newer than its server (or older) keeps working: what it adds is gated by `features` anyway. The same holds
+# for a card of a `vendor` outside VENDORS: the server leaves that card out and keeps the rest of the hello.
+AGENT_MESSAGES = ("hello", "heartbeat", "inventory", "status", "logs", "cache_removed", "image_loaded", "relay_sent",
+                  "image_listed", "image_saved", "image_removed")
+SERVER_MESSAGES = ("welcome", "error", "desired", "logs_request", "cache_remove", "cache_prune", "image_load",
+                   "relay_send", "image_list", "image_save", "image_remove")
 
 # The agent stops on these instead of reconnecting.
 FATAL_CLOSE_CODES = {CLOSE_REVOKED, CLOSE_PROTOCOL, CLOSE_REPLACED}

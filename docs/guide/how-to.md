@@ -1297,6 +1297,11 @@ the journal: `journalctl -u forgeyard -f`.
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
 
+From 1.4.5 on, a server and an agent of different versions keep working together while you upgrade, in either
+order: each side ignores a message it does not know (with a warning in its log), and a server leaves out a card
+of a kind it does not know yet instead of refusing the agent. The machine's page then lists it under
+**Detection notes** as *unknown vendor*; update the server to use that card.
+
 ## Update an agent
 
 Every machine's page has an **Update the agent** section. For admins it shows the complete command that brings

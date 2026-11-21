@@ -31,6 +31,7 @@ from forgeyard.machines.hub import Connection, hub
 from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn, ImageRemovedIn,
                                          ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn)
 from forgeyard.machines.protocol import (
+    AGENT_MESSAGES,
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
@@ -309,6 +310,7 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
     # agents up to 1.2.0 keep the highest revision they saw across connections and drop any lower
     # list without a word, so they took no new work until the count caught up.
     revision = time.time_ns() // 1_000_000
+    ignored: set[str] = set()  # message types this server does not know, already warned about
     try:
         while True:
             if recv is None:
@@ -384,8 +386,16 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     if kind != "image_saved" and said.ok:  # 1.4.3 (#140): the listing the server keeps
                         await run_in_threadpool(_db_call, _images_kept, node_id, said)
                     conn.answer(said.request_id, said.model_dump())
+                elif isinstance(kind, str) and kind not in AGENT_MESSAGES:
+                    # 1.4.5 (#170): a newer agent's message this server does not know. Ignored, with one warning
+                    # per kind and connection; refused, the agent would reconnect and send it again forever.
+                    if kind not in ignored and len(ignored) < 16:
+                        ignored.add(kind)
+                        log.warning("Machine %s sent a message this server does not know (%r); ignored. "
+                                    "A newer agent? Update the server.", node_id, kind[:40])
+                    ok = True
                 else:
-                    raise ValueError(f"unknown message type {kind!r}")
+                    raise ValueError(f"message type {kind!r} not expected here")
             except _ProtocolMismatch:
                 await _error_close(ws, CLOSE_PROTOCOL, "protocol_unsupported", "Protocol version changed mid-connection.")
                 return

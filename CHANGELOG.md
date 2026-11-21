@@ -12,6 +12,16 @@ version until 1.0.
   back-merge): every commit reached `dev` through its own checked pull request, and checking them again
   failed on commits merged before the DCO was adopted (#160).
 
+### Fixed
+
+- **Mixed server and agent versions keep working** (#170). A card of a vendor the server does not know (from a
+  newer agent) is left out of the machine, with a warning in the server's log and an *unknown vendor* line under
+  the machine page's **Detection notes**, instead of refusing the agent's hello. A message type either side does
+  not know is ignored, with one warning per connection, instead of closing the socket. Before, both closed the
+  connection with 4003, which an agent retries, so a newer agent reconnected forever. A known message that does
+  not validate is still refused.
+
+
 ## [1.4.4] — 2026-11-21
 
 More kinds of models, part 1. Zero-shot object detectors find the objects a request names: `/v1/vision/detect`
