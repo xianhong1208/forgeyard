@@ -105,6 +105,10 @@ async def lifespan(_app: FastAPI):
         except Exception:
             log.exception("Writing gateway usage on shutdown failed")
         try:
+            await asyncio.to_thread(gateway_budgets.ledger.write_estimated)  # spend counted at reservations (#172)
+        except Exception:
+            log.exception("Writing the spend counted at reservations on shutdown failed")
+        try:
             await asyncio.to_thread(gateway_budgets.ledger.write_alerts)
         except Exception:
             log.exception("Writing budget alerts on shutdown failed")

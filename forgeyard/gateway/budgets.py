@@ -11,7 +11,10 @@ provider, in micro-USD.
   local tier, may still serve it. When nothing else can, it gets 402 `budget_exhausted`.
 - **Settled at the end** with the request's real cost (forgeyard/gateway/pricing.py); a request that
   failed or was refused releases its reservation. A request whose real cost is unknown (it was
-  answered but reported no tokens) counts at its reservation, in memory, until the server restarts.
+  answered but reported no tokens) counts at its reservation. That amount is in no usage row, so the
+  ledger keeps this month's total of it in one `server_settings` row (ESTIMATED_SETTING), written with
+  the alerts every few seconds and on shutdown, and read back with the month (1.4.5, #172; before, it
+  was lost when the server restarted).
 - **A model without a price** cannot be reserved: under any budget it is blocked (402
   `budget_unpriced`) until an admin sets its prices. Without a budget it is used as before.
 - **Alerts** at 80% and 100% of a budget's spend: one audit event per scope, month and threshold
@@ -41,7 +44,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard import audit
-from forgeyard.db import ApiKey, BudgetAlert, ProviderModel, UsageDaily, new_session
+from forgeyard.db import ApiKey, BudgetAlert, ProviderModel, ServerSetting, UsageDaily, new_session, utcnow
 from forgeyard.gateway import pricing
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.quirks import Usage
@@ -54,6 +57,9 @@ PICOS = pricing.PICOS_PER_MICRO           # pico-USD per micro-USD
 BYTES_PER_TOKEN = 3
 HEADER = "X-Forgeyard-Budget-Exhausted"
 STATUS = 402                              # Payment Required: not retried by OpenAI's SDKs, unlike 429
+# server_settings row: {"month": "YYYY-MM", "picos": {"key:12": n, "person:3": n, "provider:2": n}}, the spend
+# this month counted at a reservation because the provider reported no tokens (1.4.5, #172).
+ESTIMATED_SETTING = "budget_estimated_spend"
 
 
 # ------------------------------------------------------------------ months
@@ -205,12 +211,20 @@ class Ledger:
         self._held: dict[tuple[str, int], int] = {}      # pico-USD reserved by requests in flight
         self._alerted: set[tuple[str, int, str, int]] = set()
         self._pending: list[_Alert] = []
+        # Of _spent, what was counted at a reservation (no usage row has it), and whether that changed since it
+        # was last written to ESTIMATED_SETTING.
+        self._estimated: dict[tuple[str, int], int] = {}
+        self._estimated_month: Optional[str] = None
+        self._estimated_dirty = False
 
     def reset(self) -> None:
         with self._lock:
             self._month = None
             self._spent.clear()
             self._held.clear()
+            self._estimated.clear()
+            self._estimated_month = None
+            self._estimated_dirty = False
             self._alerted.clear()
             self._pending.clear()
 
@@ -230,13 +244,31 @@ class Ledger:
         db = new_session()
         try:
             spent = self._read(db, month)
+            estimated = self._read_estimated(db, month)
             alerted = {(a.scope, a.scope_id, a.month, a.threshold) for a in
                        db.scalars(select(BudgetAlert).where(BudgetAlert.month == month)).all()}
         finally:
             db.close()
+        for slot, picos in estimated.items():
+            spent[slot] = spent.get(slot, 0) + picos
         self._spent = spent
+        self._estimated = estimated
+        self._estimated_month = month
         self._alerted = alerted
         self._month = month
+
+    @staticmethod
+    def _read_estimated(db: DbSession, month: str) -> dict[tuple[str, int], int]:
+        row = db.get(ServerSetting, ESTIMATED_SETTING)
+        value = row.value if row is not None and isinstance(row.value, dict) else {}
+        if value.get("month") != month or not isinstance(value.get("picos"), dict):
+            return {}
+        out = {}
+        for name, picos in value["picos"].items():
+            scope, _, ident = str(name).partition(":")
+            if scope in SCOPES and ident.isdigit() and type(picos) is int and picos > 0:
+                out[(scope, int(ident))] = picos
+        return out
 
     @staticmethod
     def _read(db: DbSession, month: str) -> dict[tuple[str, int], int]:
@@ -298,17 +330,23 @@ class Ledger:
             self._free(hold)
 
     def settle(self, hold: Optional[Hold], *, key_id: int, user_id: int, provider_id: Optional[int],
-               picos: int, then: Optional[Callable[[], None]] = None) -> None:
+               picos: int, then: Optional[Callable[[], None]] = None, estimated: bool = False) -> None:
         """A finished cloud request: free its reservation, add what it cost, and (under the same lock)
-        count its usage with `then`, so seeding sees it exactly once."""
+        count its usage with `then`, so seeding sees it exactly once. `estimated`: its cost is unknown and
+        `picos` is its reservation, which no usage row holds; it is kept for ESTIMATED_SETTING."""
         with self._lock:
             self._free(hold)
+            if picos > 0 and estimated and self._month is None:
+                self._ensure()    # no usage row will have it: the reading cannot be left to find it
             # Not read yet: the reading will find this request in the usage counted below. (After the
             # turn of a month, the next reading starts the new month from the usage rows.)
             if picos > 0 and self._month is not None:
                 for slot in (("key", key_id), ("person", user_id), ("provider", provider_id)):
                     if slot[1]:
                         self._spent[slot] = self._spent.get(slot, 0) + picos
+                        if estimated:
+                            self._estimated[slot] = self._estimated.get(slot, 0) + picos
+                            self._estimated_dirty = True
                 for lim in hold.limits if hold else []:
                     self._check(lim)
             if then is not None:
@@ -332,6 +370,35 @@ class Ledger:
             self._ensure()
             return Spend(self._month or "", {k: pricing.micros_of(v) for k, v in self._spent.items()},
                          {k: pricing.micros_of(v) for k, v in self._held.items()})
+
+    # -------------------------------------------------------------- spend counted at a reservation
+    def write_estimated(self, db: Optional[DbSession] = None) -> bool:
+        """Write this month's spend counted at a reservation to ESTIMATED_SETTING, when it changed. Returns
+        whether it wrote."""
+        with self._lock:
+            if not self._estimated_dirty or self._estimated_month is None:
+                return False
+            month, picos = self._estimated_month, dict(self._estimated)
+            self._estimated_dirty = False
+        own = db is None
+        db = db or new_session()
+        try:
+            value = {"month": month, "picos": {f"{scope}:{ident}": n for (scope, ident), n in sorted(picos.items())}}
+            row = db.get(ServerSetting, ESTIMATED_SETTING)
+            if row is None:
+                db.add(ServerSetting(key=ESTIMATED_SETTING, value=value, updated_by="forgeyard", updated_at=utcnow()))
+            else:
+                row.value, row.updated_by, row.updated_at = value, "forgeyard", utcnow()
+            db.commit()
+        except Exception:
+            db.rollback()
+            with self._lock:
+                self._estimated_dirty = True     # try again next time
+            raise
+        finally:
+            if own:
+                db.close()
+        return True
 
     # -------------------------------------------------------------- alerts
     def write_alerts(self, db: Optional[DbSession] = None) -> int:
@@ -377,6 +444,10 @@ class Ledger:
 
         while True:
             await asyncio.sleep(interval)
+            try:
+                await asyncio.to_thread(self.write_estimated)
+            except Exception:
+                log.exception("Writing the spend counted at reservations failed; trying again")
             try:
                 await asyncio.to_thread(self.write_alerts)
             except Exception:
