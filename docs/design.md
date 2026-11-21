@@ -36,7 +36,9 @@ agent dials out to the server, so the server never needs to reach the machine.
   (`8.0`), memory, driver. AMD through the `amdsmi` library that ships with ROCm, else the
   `amd-smi` CLI, else `rocm-smi`: `arch` is the gfx target (`gfx1100`, `gfx1151`). APUs such as
   Strix Halo are flagged **unified memory**, and their size is the larger of the VRAM carve-out
-  and GTT. The CPU and system RAM always appear as one row. A collector that finds nothing
+  and GTT (`detail.pool`). GTT is system RAM, so the scheduler counts such a card and the RAM
+  row as one pool (1.4.5, #166: `placement.shares_ram`); a carve-out is outside MemTotal and
+  stays apart. The CPU and system RAM always appear as one row. A collector that finds nothing
   reports why and never stops the agent. All of these are read-only: no GPU memory is
   allocated, and running processes are not touched.
 - **`python -m forgeyard agent inventory [--json] [--raw]`** prints what the agent detects,
@@ -322,7 +324,9 @@ page shows that name, its usage, each replica and a small **Try it** that checks
   two with prefix caching, and KV-shared layers nothing; llama.cpp: sliding layers `window ×
   sequences + 512` cells padded to 256, MLA K only, recurrent state in 32-bit floats) +
   the recipe's engine overhead + the CUDA context (0.4 GiB, measured on an A100); GGUF = the exact
-  tensor sizes of the offloaded layers + their KV cache + the logits buffer + overhead; whisper =
+  tensor sizes of the offloaded layers + their KV cache + the logits buffer + overhead (the layers
+  left on the CPU, the output layer unless all are offloaded, and their KV cache are the estimate's
+  `ram`, reserved on the machine's RAM row: 1.4.5, #166); whisper =
   the model files + overhead. A declared `vram` replaces it (required for `local://` models).
   A model that takes images (1.3) adds the recipe's **vision term**: on vLLM `vision_overhead`
   (1.5 GiB: vLLM runs the vision encoder on the largest image at startup and keeps an encoder cache

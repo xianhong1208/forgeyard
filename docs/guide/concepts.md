@@ -148,6 +148,8 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   really keeps (1.4.5): a sliding-window layer (Gemma, gpt-oss, Mistral 7B) at most its window, an MLA
   model (DeepSeek, Kimi) one compressed latent per token, and a hybrid model (Qwen3-Next, Granite 4,
   Falcon-H1) the context on its attention layers only, plus a fixed *Recurrent state* per request.
+  A GGUF model with layers left on the CPU also reserves the machine's RAM for them, and a
+  deployment's estimate is made again from its engine as it is now each time a replica is placed.
 - The **model cache** on each machine (`/srv/forgeyard-models` by default, for an agent run as root)
   keeps the downloaded files, checked against their checksums, shared by every replica there.
   Containers get their model mounted read-only. The machine's page lists what is in it, with sizes,

@@ -71,10 +71,13 @@ class Estimate:
     device: str                    # gpu | cpu
     gpus: int
     per_gpu: int = 0               # bytes reserved on each GPU
-    ram: int = 0                   # bytes of host memory (CPU replicas)
+    ram: int = 0                   # bytes of host memory (CPU replicas; a GPU replica's host_parts)
     parts: list[Part] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     kv_tokens: int = 0
+    # 1.4.5 (#166): what a GPU replica also keeps in the machine's RAM (llama.cpp's layers left on the CPU), which
+    # `ram` then adds up and placement reserves on the machine as well.
+    host_parts: list[Part] = field(default_factory=list)
 
     @property
     def amount(self) -> int:
@@ -327,29 +330,30 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
         layout = None
     seqs = max(1, int(params.get("concurrency") or 1))
 
-    def kv_of(n_layers: int) -> tuple[int, int, str]:
-        """KV and recurrent-state bytes of the last `n_layers` layers (llama.cpp offloads from the end)."""
+    def kv_of(start: int, end: int) -> tuple[int, int, str]:
+        """KV and recurrent-state bytes of layers start..end-1 (llama.cpp offloads the last ones: their KV cache is
+        on the GPU, the others' in host memory)."""
         if layout is None:
-            return per_layer_token * n_layers * tokens * kv_num // kv_den, 0, kv_detail
-        kinds = layout["kinds"][layers - n_layers:] if n_layers else ""
+            return per_layer_token * (end - start) * tokens * kv_num // kv_den, 0, kv_detail
+        kinds = layout["kinds"][start:end]
         kv, state = gguf_kv(layout, kinds, tokens, seqs, kv_num, kv_den)
         return kv, state, gguf_kv_detail(layout, kinds, tokens, seqs, kv_label)
 
-    def state_part(state: int, n_layers: int) -> list[Part]:
+    def state_part(state: int, start: int, end: int) -> list[Part]:
         if not state:
             return []
-        kinds = layout["kinds"][layers - n_layers:] if layout and n_layers else ""
+        kinds = layout["kinds"][start:end] if layout else ""
         n = kinds.count(kvlayout.STATE) + kinds.count(kvlayout.BOTH)
         return [Part(STATE_LABEL, state, f"{n} recurrent layers x {seqs} sequence{'s' if seqs > 1 else ''}, 32-bit, "
                                          "the same for any context")]
 
     if device == "cpu":
-        kv, state, detail = kv_of(layers)
+        kv, state, detail = kv_of(0, layers)
         est.parts = [
             Part("Weights", int(g["tensor_bytes"]), f"{len(g.get('layer_bytes') or [])} blocks + embeddings, "
                                                      "memory-mapped from the cache"),
             Part("KV cache", kv, detail),
-            *state_part(state, layers),
+            *state_part(state, 0, layers),
             Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
             Part("Engine overhead", recipe.estimate.cpu_overhead, "compute buffers (recipe)"),
         ]
@@ -358,16 +362,17 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
         _media_note(est, meta, "gguf", params)
         return est
     offload = min(int(params.get("gpu_layers", 999)), layers)
+    output_on_gpu = int(params.get("gpu_layers", 999)) > layers
     layer_bytes = list(g.get("layer_bytes") or [])
     on_gpu = sum(layer_bytes[layers - offload:]) if offload else 0
-    if int(params.get("gpu_layers", 999)) > layers:
+    if output_on_gpu:
         on_gpu += int(g.get("output_bytes") or 0)
-    kv, state, detail = kv_of(offload)
+    kv, state, detail = kv_of(layers - offload, layers)
     est.parts = [
         Part("Weights", on_gpu // gpus, f"{offload} of {layers} layers on the GPU"
-                                        + (" and the output layer" if int(params.get('gpu_layers', 999)) > layers else "")),
+                                        + (" and the output layer" if output_on_gpu else "")),
         Part("KV cache", kv // gpus, detail),
-        *[Part(p.label, p.bytes // gpus, p.detail) for p in state_part(state, offload)],
+        *[Part(p.label, p.bytes // gpus, p.detail) for p in state_part(state, layers - offload, layers)],
         Part("Logits buffer", logits, f"{g.get('vocab')} tokens x {LLAMA_UBATCH} x 4 B"),
         Part("Engine overhead", recipe.estimate.overhead, "compute buffers (recipe)"),
         Part("CUDA context", ctx, "per process"),
@@ -375,8 +380,23 @@ def _gguf(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int, device:
     est.parts += _projector(meta, recipe, params) + _speech(recipe, params, task)
     est.per_gpu = sum(p.bytes for p in est.parts)
     _media_note(est, meta, "gguf", params)
-    if offload < layers:
-        est.notes.append(f"{layers - offload} layers stay on the CPU (host memory).")
+    # 1.4.5 (#166): what stays on the CPU is in the machine's RAM, and is reserved there too: the layers llama.cpp
+    # does not offload (and the output layer, unless every layer is offloaded), with their KV cache. The token
+    # embeddings stay memory-mapped from the cache, as on a GPU that holds every layer.
+    on_cpu = layers - offload
+    if on_cpu or not output_on_gpu:
+        cpu_kv, cpu_state, cpu_detail = kv_of(0, on_cpu)
+        weights_cpu = sum(layer_bytes[:on_cpu]) + (0 if output_on_gpu else int(g.get("output_bytes") or 0))
+        what = (f"{on_cpu} of {layers} layers" if on_cpu else "") + \
+            (" and " if on_cpu and not output_on_gpu else "") + ("the output layer" if not output_on_gpu else "")
+        est.host_parts = [Part("Weights on the CPU", weights_cpu, what)]
+        if on_cpu:
+            est.host_parts.append(Part("KV cache on the CPU", cpu_kv, cpu_detail))
+            est.host_parts += state_part(cpu_state, 0, on_cpu)
+        est.ram = sum(p.bytes for p in est.host_parts)
+        est.notes.append((f"{on_cpu} layers stay" if on_cpu else "The output layer stays") +
+                         f" on the CPU: {gib(est.ram)} of the machine's RAM is reserved for "
+                         f"{'them' if on_cpu else 'it'} as well.")
     return est
 
 

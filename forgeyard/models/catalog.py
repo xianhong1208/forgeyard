@@ -114,14 +114,46 @@ def estimate_from_dict(d: dict) -> Estimate:
     est = Estimate(d["method"], d["device"], int(d.get("gpus") or 0), per_gpu=int(d.get("per_gpu") or 0),
                    ram=int(d.get("ram") or 0), notes=list(d.get("notes") or []), kv_tokens=int(d.get("kv_tokens") or 0))
     est.parts = [Part(p["label"], int(p["bytes"]), p.get("detail", "")) for p in d.get("parts") or []]
+    est.host_parts = [Part(p["label"], int(p["bytes"]), p.get("detail", "")) for p in d.get("host_parts") or []]
     return est
+
+
+def current_estimate(db: DbSession, dep: Deployment, recipe: Recipe) -> Estimate:
+    """The deployment's estimate from its recipe as it is now (1.4.5, #166). The stored one was made when the
+    deployment was created or last edited; a recipe whose overhead changed since (a custom recipe edited, a built-in
+    one in a new Forgeyard), a changed CUDA-context setting or a better estimator give another number, and new
+    placements must reserve that. When it differs, it is stored and the deployment's events say so; replicas that
+    run keep what they reserved (the agent's numbers show what they really use), and none is restarted for it.
+    The stored estimate stays when the new one cannot be made (the model or the recipe no longer allow it)."""
+    from forgeyard.models import scheduler
+    from forgeyard.models.estimate import EstimateError, estimate, gib
+    from forgeyard.workloads.state import event
+
+    stored = estimate_from_dict(dep.estimate)
+    # A parameter the recipe gained since takes its default, as the next edit would give it.
+    params = {k: p.default for k, p in recipe.params.items() if k not in (dep.params or {})} | dict(dep.params or {})
+    try:
+        fresh = estimate(dep.model.meta or {}, recipe, params, device=stored.device,
+                         gpu_context=scheduler.gpu_context(), task=dep.model.task)
+    except (EstimateError, KeyError, TypeError, ValueError):  # (EstimateError is a ValueError)
+        return stored
+    if fresh.as_dict() == dep.estimate:
+        return stored
+    if (fresh.amount, fresh.ram) != (stored.amount, stored.ram):
+        per = " per GPU" if fresh.device == "gpu" else " of RAM"
+        ram = f" (and {gib(fresh.ram)} of the machine's RAM)" if fresh.device == "gpu" and fresh.ram else ""
+        event(db, dep.workload, "estimate", f"The estimate changed from {gib(stored.amount)} to {gib(fresh.amount)}{per}"
+                                            f"{ram}: the engine's recipe or Forgeyard's estimate changed. Replicas that run "
+                                            "keep what they reserved; replicas placed from now on reserve the new amount.")
+    dep.estimate = fresh.as_dict()
+    return fresh
 
 
 def context_for(db: DbSession, dep: Deployment) -> Optional[Context]:
     recipe = get_recipe(db, dep.recipe)
     if recipe is None:
         return None
-    est = estimate_from_dict(dep.estimate)
+    est = current_estimate(db, dep, recipe)
     params = dict(dep.params or {})
     spec = dep.workload.spec or {}
     return Context(dep, dep.model, recipe, params, est, est.device, params.get("share") or recipe.share,

@@ -100,6 +100,21 @@ version until 1.0.
   a little: its recurrent state was not counted. Plain models (Qwen3, Llama and the like) are estimated as before.
   No migration: the layout is read when a model is added, so a model added before this keeps its old estimate
   until it is added again.
+- **Memory is never promised twice** (#166):
+  - A GGUF model with some layers left on the CPU (*Layers on the GPU* below the model's) reserves the machine's RAM
+    for them as well: those layers, the output layer and their KV cache (and recurrent state), listed in the
+    estimate as `host_parts` and added up in its `ram`. A machine without that much RAM free is skipped with the
+    reason ("needs 1.30 GiB of RAM for the layers left on the CPU, …"), and until the replica is in the agent's
+    numbers that RAM is not promised to anything else. The token embeddings stay memory-mapped, as before.
+  - On an APU whose GPU memory is the machine's RAM (a unified-memory card that reports its GTT pool; the agent
+    picks GTT when it is larger than the BIOS carve-out), a reservation on the card counts against the RAM and one
+    on the RAM against the card, and the card never offers more than the RAM has free. A card that reports its
+    carve-out (`pool: vram`, as a Strix Halo with 96 GiB set aside) keeps memory Linux does not count as RAM, so the
+    two stay apart. An agent that does not say which pool it reports is taken to share the RAM.
+  - A deployment's estimate is made again from its recipe as it is now whenever a replica is placed (and when the
+    deployment is edited, even if no parameter changed): a custom recipe whose overhead was edited, a built-in one
+    changed by an upgrade, or a changed `GPU_CONTEXT_MIB` reach new placements. The deployment's events say when the
+    amount changed; replicas that run keep what they reserved and are not restarted for it.
 
 ## [1.4.3] — 2026-11-18
 
