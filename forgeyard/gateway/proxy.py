@@ -977,7 +977,8 @@ class Job:
         # A cost that is unknown although the provider answered counts at its reservation.
         picos = self.cost.picos if self.cost.picos is not None else (hold.picos if hold and served else 0)
         budgets.ledger.settle(hold, key_id=self.caller.key_id if self.caller.source == "api" else 0,
-                              user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count)
+                              user_id=self.caller.user_id, provider_id=c.provider_id, picos=max(0, picos), then=count,
+                              estimated=self.cost.picos is None)
 
     def units(self, served: bool = True) -> Optional[dict]:
         """The request's 1.3 usage units: the media items it carried; for speech that was answered, the

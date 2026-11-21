@@ -514,3 +514,131 @@ def test_fy_img_002_the_image_has_what_the_hosts_libamd_smi_loads():
     assert 'ln -s libdrm_amdgpu.so.1 "$(dirname "$amdgpu")/libdrm_amdgpu.so"' in text and "ldconfig" in text
     smoke = (ROOT / "scripts" / "agent_image_smoke.sh").read_text()
     assert 'ctypes.CDLL("libdrm.so.2"); ctypes.CDLL("libdrm_amdgpu.so")' in smoke
+
+
+# ------------------------------------------------------------------ 1.4.5 (#172): pinned dependencies and uv
+def _version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in re.findall(r"\d+", v)[:3])
+
+
+def test_fy_inst_020_the_dependency_lists_are_uv_locks_with_hashes():
+    """FY-INST-020: the two files install.sh installs the agent's dependencies from are what uv.lock gives
+    (regenerate them with `python -m forgeyard.install.requirements` after `uv lock`): every package the wheel
+    requires, and what they require, at one version with at least one SHA-256 each; the NVIDIA file holds only
+    what the extra adds. Each pinned version satisfies the wheel's own lower bound."""
+    from forgeyard.install import requirements
+
+    lock = (ROOT / "uv.lock").read_text()
+    for name, extra in requirements.FILES.items():
+        assert (ROOT / "forgeyard" / "install" / name).read_text() == requirements.generate(lock, extra), \
+            f"{name} is out of date: run python -m forgeyard.install.requirements"
+    base = (ROOT / "forgeyard" / "install" / "agent-requirements.txt").read_text()
+    pins = dict(re.findall(r"^([a-z0-9-]+)==(\S+)", base, re.M))
+    assert {"websockets", "h11", "pydantic", "pydantic-core", "typing-extensions"} <= set(pins)
+    for req in wheel.REQUIRES:
+        name, low = re.match(r"([a-z0-9-]+)>=(\S+)", req).groups()
+        assert _version_tuple(pins[name]) >= _version_tuple(low), req
+    blocks = [b for b in re.split(r"\n(?=[a-z])", base.split("\n", 2)[2]) if b.strip()]
+    assert len(blocks) == len(pins) and all(re.search(r"--hash=sha256:[0-9a-f]{64}", b) for b in blocks)
+    nvidia = (ROOT / "forgeyard" / "install" / "agent-requirements-nvidia.txt").read_text()
+    assert re.findall(r"^([a-z0-9-]+)==", nvidia, re.M) == ["nvidia-ml-py"] and "--hash=sha256:" in nvidia
+    # A lock that names a package twice, or one without hashes, is refused rather than written half-pinned.
+    with pytest.raises(ValueError, match="more than once"):
+        requirements.generate(lock + '\n[[package]]\nname = "h11"\nversion = "0.1"\n', "")
+    def pkg(name, hashed=True):
+        files = f'sdist = {{ url = "https://x/{name}.tar.gz", hash = "sha256:{"ab" * 32}" }}\n' if hashed else ""
+        return f'[[package]]\nname = "{name}"\nversion = "1.0"\nsource = {{ registry = "https://pypi.org/simple" }}\n{files}'
+    small = "version = 1\n" + "".join(pkg(n) for n in ("websockets", "pydantic"))
+    assert "h11==1.0" in requirements.generate(small + pkg("h11"), "")
+    with pytest.raises(ValueError, match="no SHA-256 for h11"):
+        requirements.generate(small + pkg("h11", hashed=False), "")
+    with pytest.raises(ValueError, match="h11 is not in uv.lock"):
+        requirements.generate(small, "")
+    # The extra's file lists only what the agent's own file does not: here nvidia-ml-py, not h11 it depends on.
+    extra = small + pkg("h11") + pkg("nvidia-ml-py") + 'dependencies = [{ name = "h11" }]\n'
+    assert re.findall(r"^([a-z0-9-]+)==", requirements.generate(extra, "nvidia"), re.M) == ["nvidia-ml-py"]
+
+
+def test_fy_inst_021_install_sh_pins_uv_and_installs_only_by_hash():
+    """FY-INST-021: install.sh names the checksums of both dependency lists, which the server serves at
+    /install/<name> (HTTPS only); it installs the dependencies with --require-hashes and the agent without
+    dependencies, with uv or with pip; it never runs astral.sh's install script and pins uv's version with the
+    SHA-256 of each archive it may download."""
+    from forgeyard.install import requirements
+
+    with _client("https://localhost") as c:
+        script = c.get("/install.sh").text
+        for name in requirements.FILES:
+            data, sha = requirements.served(name)
+            r = c.get(f"/install/{name}")
+            assert r.status_code == 200 and r.content == data and r.headers["x-checksum-sha256"] == sha
+            assert hashlib.sha256(r.content).hexdigest() == sha
+        assert f'REQS_SHA256="{requirements.served("agent-requirements.txt")[1]}"' in script
+        assert f'REQS_NVIDIA_SHA256="{requirements.served("agent-requirements-nvidia.txt")[1]}"' in script
+        assert "@@" not in script
+    with _client("http://localhost") as c:
+        assert c.get("/install/agent-requirements.txt").status_code == 403
+    text = SCRIPT.read_text()
+    assert "astral.sh" not in text and "install.sh -o" not in text
+    assert re.search(r'^UV_VERSION="\d+\.\d+\.\d+"$', text, re.M)
+    assert re.search(r'^UV_SHA256_X86_64="[0-9a-f]{64}"$', text, re.M)
+    assert re.search(r'^UV_SHA256_AARCH64="[0-9a-f]{64}"$', text, re.M)
+    installs = [line for line in text.splitlines() if re.search(r"pip install", line) and not line.lstrip().startswith("#")]
+    assert len(installs) == 4, installs
+    assert sum("--require-hashes $REQS" in line for line in installs) == 2
+    assert sum("--no-deps" in line for line in installs) == 2
+    assert all(("--require-hashes" in line) != ("--no-deps" in line) for line in installs)
+
+
+@pytest.mark.skipif(not shutil.which("curl") or not _python_313(), reason="needs curl and Python 3.13")
+def test_fy_inst_022_a_damaged_download_is_refused_and_uv_comes_pinned(live, tmp_path):
+    """FY-INST-022: a dependency list that is not the one the script names is refused before anything is
+    installed. On a machine with neither uv nor Python 3.13 the script downloads uv's release archive (from a
+    stand-in for GitHub here) and refuses one whose SHA-256 is not the pinned one; one that matches is unpacked
+    into <home>/bin and used (this stand-in uv then fails to make the environment, which the script reports)."""
+    import http.server
+    import tarfile
+    import threading
+
+    box = Box(tmp_path / "box", with_uv=False)
+    for name in ("python3", "python3.13", "python3.14"):   # no usable Python here
+        (box.fake / name).unlink(missing_ok=True)
+        (box.fake / name).write_text("#!/bin/sh\nexit 1\n")
+        (box.fake / name).chmod(0o755)
+    tok = _token(live)
+    script = _get_text(live, "/install.sh")
+    args = ("--join", tok["token"], "--ca-fingerprint", tok["ca_fingerprint"], "--workload-user", ABSENT_USER)
+    tampered = re.sub(r'REQS_SHA256="[0-9a-f]{64}"', 'REQS_SHA256="' + "0" * 64 + '"', script)
+    r = box.run(tampered, *args)
+    assert r.returncode == 1 and "agent-requirements.txt is damaged" in r.stderr
+    assert not (box.root / "opt" / "venv").exists() and not (box.root / "opt" / "bin").exists()
+
+    arch = "x86_64" if os.uname().machine in ("x86_64", "amd64") else "aarch64"
+    releases = tmp_path / "releases"
+    folder = releases / re.search(r'^UV_VERSION="(.+)"$', script, re.M).group(1)
+    folder.mkdir(parents=True)
+    fake_uv = b"#!/bin/sh\necho 'uv 0.0.0-fake'; [ \"$1\" = --version ] && exit 0; exit 1\n"
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo(f"uv-{arch}-unknown-linux-musl/uv")
+        info.size, info.mode = len(fake_uv), 0o755
+        tar.addfile(info, io.BytesIO(fake_uv))
+    archive = buf.getvalue()
+    (folder / f"uv-{arch}-unknown-linux-musl.tar.gz").write_bytes(archive)
+
+    handler = lambda *a, **kw: http.server.SimpleHTTPRequestHandler(*a, directory=str(releases), **kw)  # noqa: E731
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        env = {"FORGEYARD_UV_RELEASES": f"http://127.0.0.1:{httpd.server_address[1]}"}
+        r = box.run(script, *args, env=env)            # the pinned SHA-256 is the real release's: refused
+        assert r.returncode == 1 and f"uv-{arch}-unknown-linux-musl.tar.gz is damaged" in r.stderr
+        assert not (box.root / "opt" / "bin" / "uv").exists()
+        key = "UV_SHA256_X86_64" if arch == "x86_64" else "UV_SHA256_AARCH64"
+        ours = re.sub(rf'^{key}="[0-9a-f]{{64}}"$', f'{key}="{hashlib.sha256(archive).hexdigest()}"', script, flags=re.M)
+        r = box.run(ours, *args, env=env)
+        assert r.returncode == 1 and "uv could not make a Python 3.13 environment" in r.stderr
+        assert (box.root / "opt" / "bin" / "uv").read_bytes() == fake_uv
+        assert oct((box.root / "opt" / "bin" / "uv").stat().st_mode & 0o777) == "0o755"
+    finally:
+        httpd.shutdown()

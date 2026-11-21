@@ -31,6 +31,18 @@ version until 1.0.
   Older agents report neither and are not checked. No migration: both values live in the machine's runtime
   details.
 
+- **Cloud spend of answers without token counts survives a restart** (#172). Such an answer counts against the
+  budgets at its reservation; that amount is in no usage row, so it lived only in memory and a restart forgot it.
+  The ledger now keeps this month's total of it in one `server_settings` row (`budget_estimated_spend`), written
+  every few seconds and on shutdown, and reads it back with the month. No migration.
+
+- **install.sh checks everything it installs** (#172). It no longer pipes astral.sh's uv installer: it downloads
+  uv 0.9.24's static release archive from GitHub and checks its SHA-256. The agent's dependencies are installed
+  from two lists the server serves (`/install/agent-requirements.txt`, and `-nvidia` for NVML), checked against
+  the SHA-256 the script names, with `--require-hashes`: the versions uv.lock pins, each file matching its PyPI
+  hash; the agent's wheel follows with `--no-deps`. `python -m forgeyard.install.requirements` writes the lists
+  from uv.lock; a test fails while they are out of date.
+
 
 ## [1.4.4] — 2026-11-21
 
