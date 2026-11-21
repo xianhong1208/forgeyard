@@ -27,7 +27,8 @@ server 不需要能連到機器。
 
 - **Inventory：** NVIDIA 用 NVML（`nvidia-ml-py`）：型號、UUID、compute capability 當作 `arch`（`8.0`）、記憶體、
   driver。AMD 用 ROCm 附的 `amdsmi` 函式庫，沒有時退回 `amd-smi` CLI，再退回 `rocm-smi`；`arch` 是 gfx target
-  （`gfx1100`、`gfx1151`）。Strix Halo 這類 APU 會標示 **unified memory**，大小取 VRAM carve-out 與 GTT 中較大者。
+  （`gfx1100`、`gfx1151`）。Strix Halo 這類 APU 會標示 **unified memory**，大小取 VRAM carve-out 與 GTT 中較大者（`detail.pool`）。
+  GTT 是系統記憶體，所以排程器把這種卡和 RAM 那一筆當成同一個記憶體池（1.4.5、#166：`placement.shares_ram`）；carve-out 不在 MemTotal 裡，分開計算。
   CPU 與系統記憶體一定會列成一筆。某個 collector 找不到東西時會說明原因，不會讓 agent 停掉。這些都是唯讀查詢：
   不配置 GPU 記憶體，也不碰執行中的行程。
 - **`python -m forgeyard agent inventory [--json] [--raw]`** 不加入 server，只印出 agent 偵測到的硬體。
@@ -198,7 +199,8 @@ Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 
   滑動視窗層每個序列最多存 window − 1 + 2 × 8,192 個進行中的 token，MLA 存一個 `kv_lora_rank + qk_rope_head_dim` 的 latent、沒有 V、每張 GPU 都有一份，
   遞迴層每個序列一份固定大小的狀態（prefix caching 時兩份），共用 KV 的層不存；llama.cpp 的滑動層是 `window × 序列數 + 512` 格、補到 256 的倍數，
   MLA 只存 K，遞迴狀態用 32-bit float）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
-  GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead；whisper = 模型檔 + overhead。
+  GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead（留在 CPU 的層、沒有全部卸載時的 output 層與它們的 KV cache
+  是估算的 `ram`，預留在機器的 RAM 那一筆：1.4.5、#166）；whisper = 模型檔 + overhead。
   宣告 `vram` 就以它為準（`local://` 模型必須宣告）。
   能讀圖片的模型（1.3）會加上配方的**視覺項**：vLLM 加 `vision_overhead`（1.5 GiB：vLLM 啟動時會用最大的圖片跑一次視覺編碼器並保留 encoder cache，之後才決定 KV cache 大小；視覺權重已含在模型權重裡），開啟影片時再加 `video_overhead`（1 GiB）；llama.cpp 加 projector 檔本身（整個載入，預設放到 GPU）與它的 buffer 用的 `vision_overhead`（在 CPU 上量測）。開啟圖片時，估算會註明圖片也會占用上下文 token。
   **兩階段語音引擎（1.3）：** vLLM-Omni 把 Qwen3-TTS 跑成 talker（語言模型，依它的 `talker_config` 像一般 safetensors 模型估算）與音訊解碼器（code2wav）兩段，放在同一張卡上，兩段各是一個 vLLM 引擎，各自檢查自己那份卡總量的 `gpu_memory_utilization`。估算加上配方的 `codec_overhead`（4.5 GiB：解碼器那段，vLLM-Omni 在 A100 40GB 上量到 3.8 GiB，再含它的 CUDA context），產生參數時再把保留量拆開：解碼器拿自己那份當它的比例，其餘給 talker（`--stage-overrides`）。speaches 的 TTS 模型和 Whisper 一樣是模型檔加 overhead。
