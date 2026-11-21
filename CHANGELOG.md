@@ -21,6 +21,16 @@ version until 1.0.
   connection with 4003, which an agent retries, so a newer agent reconnected forever. A known message that does
   not validate is still refused.
 
+- **A machine that publishes its replicas on a loopback address is pointed out** (#171). An agent reached through
+  an SSH tunnel or a proxy on its own host connects to `127.0.0.1`, publishes its replicas there, and the gateway
+  then dials `127.0.0.1` on the server's host. A 1.4.5 agent reports that address and its own end of the
+  connection; when that end is the peer the server sees, nothing sits between them and the agent runs on the
+  server's own host. For any other machine on loopback the setup advisor warns (`machine-loopback-address`, a
+  snoozable warning, also on the machine's page), unless every port of a range of up to 64 ports is forwarded to
+  the server's host, as in the guide's tunnel. The machine page lists the address under **Agent → Replicas at**.
+  Older agents report neither and are not checked. No migration: both values live in the machine's runtime
+  details.
+
 
 ## [1.4.4] — 2026-11-21
 

@@ -176,8 +176,9 @@ def addresses(host: str) -> list[str]:
 
 
 def reset() -> None:
-    global resolver
+    global resolver, listening
     resolver = _system_resolve
+    listening = _listening
     with _resolve_lock:
         _resolved.clear()
 
@@ -511,6 +512,58 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
                           "/guide/en/how-to#free-disk-space-on-a-machine", "How to free disk space",
                           scope=f"machine:{n.id}",
                           pages=("machines",))
+
+
+# 1.4.5 (#171): a loopback replica address works for a machine elsewhere only when its port range is forwarded to
+# the server's host (the SSH tunnel of the guide); the advisor looks for that on ranges up to this size.
+FORWARD_PROBE_MAX = 64
+
+
+def _listening(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+listening: Callable[[str, int], bool] = _listening   # tests replace it
+
+
+@check
+def machine_loopback_address(ctx: Context) -> Iterator[Finding]:
+    """1.4.5 (#171): a machine publishes its replicas on a loopback address (its connection to the server came
+    through an SSH tunnel or a proxy on its own host), but it is not this server's host: the gateway would dial
+    that address here, on the server's host. Which agent runs on the server's host is told by the connection itself
+    (messages.same_end: its own end is the peer the server sees, so nothing sits between them); agents before 1.4.5
+    do not report it and are not checked. Not raised when every port of a small range is forwarded here (something
+    listens on each on the server's loopback), as the guide's tunnel does."""
+    for n in ctx.nodes:
+        info = n.runtime_info or {}
+        address = info.get("address")
+        if not isinstance(address, str) or not is_loopback_host(address) or info.get("same_host") is not False:
+            continue
+        ports = info.get("ports") or {}
+        low, high = ports.get("low"), ports.get("high")
+        if not (isinstance(low, int) and isinstance(high, int) and low <= high):
+            low, high = 30000, 32767  # the agent's default range
+        if high - low < FORWARD_PROBE_MAX:
+            missing = [p for p in range(low, high + 1) if not listening(address, p)]
+            if not missing:
+                continue
+            shown = ", ".join(str(p) for p in missing[:4]) + (" …" if len(missing) > 4 else "")
+            forwarded = (f" Nothing listens on {_plural(len(missing), 'port')} of its range here ({shown}): forward "
+                         "every port of the range back through the tunnel.")
+        else:
+            forwarded = (f" Its port range ({low}-{high}) is too large to forward: choose a small one "
+                         "(FORGEYARD_PORT_RANGE) and forward each port back through the tunnel.")
+        yield Finding("machine-loopback-address", "warning", f"{n.name} publishes its replicas on {address}",
+                      f"{n.name}'s agent reached the server through a tunnel or a proxy, so it publishes its replicas "
+                      f"on {address}, and the gateway dials that address on the server's own host, not on "
+                      f"{n.name}." + forwarded + " Or give the agent an address the server can reach "
+                      "(FORGEYARD_BIND_ADDRESS, --bind-address). If the server does reach it, snooze this.",
+                      "/guide/en/troubleshooting#a-machine-publishes-its-replicas-on-a-loopback-address",
+                      "What to do", scope=f"machine:{n.id}", pages=("machines",))
 
 
 @check

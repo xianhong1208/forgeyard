@@ -9,7 +9,11 @@ agent -> server
              inventory is simulated, and the full inventory. (1.4.2) `runtime_info.ports` ({low, high}):
              the host port range replicas are published on, which placement counts; older servers drop it.
              (1.4.2) `install`: how the agent runs (agent/how_it_runs.py: its container's `docker run`
-             options, install.sh, or a checkout), for its update command; no secrets. Older servers ignore it
+             options, install.sh, or a checkout), for its update command; no secrets. Older servers ignore it.
+             (1.4.5) `runtime_info.address`: the address replicas are published on (what the gateway dials), and
+             `runtime_info.connection` ({address, port}): the agent's own end of this connection, which the
+             server compares with the peer it sees (same: the agent runs on the server's host) and does not
+             keep. Older servers drop both
   heartbeat  every 10 s: only the values that change (free/used memory, utilisation, temperature)
   inventory  the full inventory again, sent when the hardware changed
 

@@ -29,7 +29,7 @@ from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
 from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn, ImageRemovedIn,
-                                         ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn)
+                                         ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn, same_end)
 from forgeyard.machines.protocol import (
     AGENT_MESSAGES,
     CLOSE_BAD_MESSAGE,
@@ -270,6 +270,11 @@ async def stream(ws: WebSocket):
     except WebSocketDisconnect:
         return
 
+    connection = hello.runtime_info.pop("connection", None)
+    if "address" in hello.runtime_info:
+        # 1.4.5 (#171): whether the agent runs on this server's own host (see messages.same_end); kept with the
+        # address its replicas are published on, for the setup advisor's loopback check.
+        hello.runtime_info["same_host"] = same_end(connection, (ws.client.host, ws.client.port) if ws.client else None)
     features = set(hello.features) & set(SERVER_FEATURES)
     conn = Connection(node_id, features=features)
     replaced = hub.attach(conn)
