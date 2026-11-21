@@ -113,7 +113,9 @@ export type Machine = {
   fetch_via?: FetchVia;
   // 1.4: the largest image file an admin may upload to it (IMAGE_UPLOAD_MAX_GB).
   image_upload_max_bytes?: number;
-  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
+  // 1.4.5 (#171): `address`, where its replicas are published (what the gateway dials); `same_host`, whether its
+  // agent runs on the server's own host (agents before 1.4.5 report neither).
+  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>> & { address?: string; same_host?: boolean };
   // 1.4.2 (#122): why its agent should be updated (null: it need not be), and the server's version.
   agent_behind?: AgentBehind | null;
   server_version?: string;

@@ -235,6 +235,19 @@ agent 給不出連接埠的副本（在伺服器開始計算連接埠之前就�
 sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 ```
 
+## 機器把副本公開在 loopback 位址上
+
+**你會看到：** **Get started → Setup health** 和機器的頁面出現 *gpu-02 publishes its replicas on 127.0.0.1*，部署在那台機器上的模型可能回應 502 或意料之外的內容。
+
+**原因：** agent 把副本公開在它朝向伺服器的位址上：也就是它連線的本機端，除非 `FORGEYARD_BIND_ADDRESS` 指定了別的位址。透過 SSH tunnel 或自己主機上的 proxy 連到伺服器的 agent，連的是 `127.0.0.1`，所以它回報的就是這個位址，閘道就會在**伺服器**的主機上連 `127.0.0.1`：連到的是伺服器自己的連接埠，而不是那台機器的。1.4.5 起 agent 也會告訴伺服器它那一端的連線；如果那一端就是伺服器看到的對方，代表中間沒有任何東西，agent 在伺服器自己的主機上，loopback 就是對的。只有其他機器會被檢查，而且只檢查 1.4.5 的 agent。如果範圍最多 64 個連接埠、而且每個連接埠都已轉送到伺服器的主機（伺服器的 loopback 上每個連接埠都有東西在聽），就像指南中的 [SSH tunnel](how-to.md#run-a-machine-without-internet-access)，就不會出現這個警告。
+
+**做法：** 以下擇一。
+
+- 也把機器的連接埠範圍透過 tunnel 轉送回來：選一個小範圍（`FORGEYARD_PORT_RANGE=33000-33002`），並在承載 agent 連線的 `ssh` 指令中，每個連接埠加一個 `-L`（[做法](how-to.md#run-a-machine-without-internet-access)）。
+- 或用 `FORGEYARD_BIND_ADDRESS`（`--bind-address`）給 agent 一個伺服器連得到的位址（它的 LAN 或 VPN 位址），並在那裡開放連接埠範圍。
+
+然後重新啟動 agent。如果伺服器其實能以 Forgeyard 看不到的方式連到那個位址（例如伺服器主機上的 proxy），就對這個警告按 **Snooze 30 days**。
+
 ## 來自 /v1 的錯誤：401、403、429、503
 
 閘道以 OpenAI 的格式回應錯誤：`{"error": {"message", "type", "param", "code"}}`。`code` 會說明發生了什麼事。

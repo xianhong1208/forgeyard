@@ -1277,6 +1277,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
 | `machine-simulated` | warning | A machine reports simulated hardware |
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
+| `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |

@@ -3,6 +3,7 @@ model name must never keep a machine from connecting."""
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from typing import Annotated, Any, Literal, Optional
@@ -225,9 +226,33 @@ def _port_range(value: Any) -> Optional[dict]:
     return {"low": low, "high": high}
 
 
+def _ip(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        ip = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return str(ip)
+
+
+def _connection(value: Any) -> Optional[dict]:
+    """(1.4.5, #171) {"address", "port"}: the agent's own end of this connection."""
+    if not isinstance(value, dict):
+        return None
+    address, port = _ip(value.get("address")), value.get("port")
+    if address is None or type(port) is not int or not 1 <= port <= 65535:
+        return None
+    return {"address": address, "port": port}
+
+
 def _runtime_info(value: Any) -> dict:
     """{"process": {...}, "container": {...}}: small dicts of what each runtime can do; (1.4.2) "ports": the
-    agent's host port range (servers before 1.4.2 drop it, so it never reaches them)."""
+    agent's host port range (servers before 1.4.2 drop it, so it never reaches them); (1.4.5, #171) "address":
+    the address replicas are published on, which the gateway dials, and "connection": the agent's own end of the
+    connection, which the server compares with the peer it sees and does not keep."""
     if not isinstance(value, dict):
         return {}
     out = {}
@@ -238,7 +263,22 @@ def _runtime_info(value: Any) -> dict:
     ports = _port_range(value.get("ports"))
     if ports is not None:
         out["ports"] = ports
+    address = value.get("address")
+    if isinstance(address, str) and address.strip():
+        out["address"] = address.strip()[:64]
+    connection = _connection(value.get("connection"))
+    if connection is not None:
+        out["connection"] = connection
     return out
+
+
+def same_end(connection: Optional[dict], peer: Optional[tuple]) -> bool:
+    """(1.4.5, #171) Whether the agent's own end of the connection is the peer the server sees: then nothing sits
+    between them (no tunnel, no proxy), so the agent runs on the server's own host and network, and a loopback
+    address it publishes replicas on is the server's loopback too."""
+    if not connection or not peer or len(peer) < 2:
+        return False
+    return connection.get("address") == _ip(peer[0]) and connection.get("port") == peer[1]
 
 
 # 1.4.2 (#121): how the agent runs (agent/how_it_runs.py). Kept as the agent sent it, within a size limit; the
