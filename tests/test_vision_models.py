@@ -40,10 +40,15 @@ DEPTH_REV = "5426e4f0f36572d16453bbda7a8389317b1bef99"
 A100 = {"vendor": "nvidia", "arch": "8.0", "driver": "580.178.04"}
 # The vision recipe's pinned images (1.4.1, #113): moved by scripts/pin_images.py --write after a release that
 # changed images/vision.
-VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0"
-              "@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6")
-VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda"
-               "@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3")
+VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1"
+              "@sha256:f4e5940bdbfe1c88a6712aaf708432149651e25a9a6d7318e9f382ab697c579b")
+VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda"
+               "@sha256:9e4ef32b302cf3d82a07d69a1a55e42b28c17e9e34f8e3399bfe8918d1362376")
+# The image the built-in recipe pinned before 1.4.4: kept for the refusals of models it cannot run.
+OLD_VISION_CPU = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0"
+                  "@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6")
+OLD_VISION_CUDA = ("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda"
+                   "@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3")
 
 
 def vision_meta(task: str, repo: str, rev: str, arch: str, size: int, **over) -> dict:
@@ -69,6 +74,7 @@ class FakeVision:
         self.seen: list[dict] = []
         self.status: Optional[int] = None
         self.answer: Optional[bytes] = None
+        self.refuse: Optional[tuple] = None    # (status, body): an error the vision server itself gives
         engine = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -90,6 +96,8 @@ class FakeVision:
                     return self._send(401, b'{"error": {"message": "A valid API key is needed.", "code": "invalid_api_key"}}')
                 if self.path != f"/v1/vision/{engine.task}":
                     return self._send(404, b'{"detail": "Not Found"}')
+                if engine.refuse:
+                    return self._send(*engine.refuse)
                 if engine.status:
                     return self._send(engine.status, b'{"error": {"message": "The image could not be read.", '
                                                      b'"code": "invalid_image"}}')
@@ -101,6 +109,9 @@ class FakeVision:
                     out["detections"] = [{"label": "cat", "score": 0.97, "box": [341.1, 25.1, 640.0, 372.9]}]
                 elif engine.task == "segment":
                     out["masks"] = [{"score": 0.98, "area": 6400, "box": [40, 40, 120, 120], "png": "iVBORw0KGgo="}]
+                elif engine.task == "classify":
+                    out.update(labels=[{"label": "tabby, tabby cat", "score": 0.86}, {"label": "Egyptian cat", "score": 0.07}],
+                               multi_label=False)
                 else:
                     out.update(depth_png="iVBORw0KGgo=", min=0.8, max=5.2, unit="relative (larger is nearer)")
                 self._send(200, json.dumps(out).encode())
@@ -164,14 +175,16 @@ def spec_of(_owner, name: str) -> dict:
 
 # ------------------------------------------------------------------ the recipe
 def test_fy_vis_001_the_vision_recipe():
-    """FY-VIS-001: the built-in `vision` recipe serves detect, segment and depth as vision-<task> with Forgeyard's
+    """FY-VIS-001: the built-in `vision` recipe serves detect, segment, depth and (1.4.4) image-classify as
+    vision-detect, -segment, -depth and -classify with Forgeyard's
     own vision image, pinned by digest (1.4.1: the CUDA build on NVIDIA 7.5+ with driver 580, the CPU build for
     x86_64 and aarch64), the model from the cache (--model {model_path}) and the replica's key in
     VISION_API_KEY; a vision task served under another protocol, forgeyard_image beside image, an unknown
     forgeyard_image, or forgeyard_image on a process variant are refused."""
     r = recipes.builtin_recipes()["vision"][0]
-    assert r.tasks == ["detect", "segment", "depth"] and r.formats == ["safetensors"]
-    assert r.api == {"detect": "vision-detect", "segment": "vision-segment", "depth": "vision-depth"}
+    assert r.tasks == ["detect", "segment", "depth", "image-classify"] and r.formats == ["safetensors"]
+    assert r.api == {"detect": "vision-detect", "segment": "vision-segment", "depth": "vision-depth",
+                     "image-classify": "vision-classify"}
     assert r.api_key_env == "VISION_API_KEY" and r.share == "vram" and r.estimate.method == "files"
     assert r.args[:4] == ["--task", "{task}", "--model", "{model_path}"] and "{served_name}" in r.args
     assert [(v.name, v.image) for v in r.variants] == [("cuda", VISION_CUDA), ("cpu", VISION_CPU)]
@@ -185,6 +198,8 @@ def test_fy_vis_001_the_vision_recipe():
     cuda_line, cpu_line = f"    image: {VISION_CUDA}\n", f"    image: {VISION_CPU}\n"
     assert cuda_line in text and cpu_line in text
     for bad, why in [(text.replace("detect: vision-detect", "detect: openai-chat"), "vision-detect"),
+                     (text.replace("image-classify: vision-classify", "image-classify: vision-detect"),
+                      "served as vision-classify"),
                      (text.replace(cuda_line, cuda_line + "    forgeyard_image: vision-cuda\n"), "instead of image"),
                      (text.replace(cpu_line, "    forgeyard_image: rocm\n"), "forgeyard_image"),
                      (text.replace("    runtime: container\n" + cpu_line,
@@ -204,8 +219,8 @@ def test_fy_vis_019_the_vision_image_is_pinned_recorded_and_relayable(monkeypatc
     from forgeyard.workloads import images as image_ids
 
     lock = image_ids.load_lock()
-    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:")
-    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:")
+    assert VISION_CPU.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1@sha256:")
+    assert VISION_CUDA.startswith("docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda@sha256:")
     for image, platforms in [(VISION_CPU, {"linux/amd64", "linux/arm64"}), (VISION_CUDA, {"linux/amd64"})]:
         entry = lock[image]
         assert entry["index"] == image.partition("@")[2] and set(entry["platforms"]) == platforms
@@ -511,8 +526,8 @@ def test_fy_vis_011_the_playground(vis, client):
     assert set(models) == {"det", "seg", "depth"} and "workloads" not in o  # 1.4 (#88): no apps
     assert models["det"] | {"deployment_id": None} == {
         "name": "det", "task": "detect", "title": "Object detection", "endpoint": "/v1/vision/detect",
-        "deployment_id": None, "model": "PekingU/rtdetr_v2_r18vd", "licence": "apache-2.0", "ready": 1,
-        "running": True, "reason": None}
+        "deployment_id": None, "model": "PekingU/rtdetr_v2_r18vd", "licence": "apache-2.0", "zero_shot": False,
+        "ready": 1, "running": True, "reason": None}
     files = {"image": ("cats.jpg", b"\xff\xd8 jpeg", "image/jpeg")}
     r = vis.owner.post("/api/playground/vision/detect", data={"model": "det"}, files=files)
     assert r.status_code == 200 and r.json()["detections"][0]["label"] == "cat"
@@ -535,14 +550,30 @@ def test_fy_vis_011_the_playground(vis, client):
 # ------------------------------------------------------------------ the recommended list, the search
 def test_fy_vis_012_the_recommended_vision_models():
     """FY-VIS-012: the three models of the 1.3 templates are recommended, at the same pinned revisions as the
-    vision image's models.json, with the vision recipe on the CPU and Apache-2.0; a vision entry with a
-    licence that is not permissive (even one the list allows for others) or without a pinned commit is refused."""
-    entries = {e.task: e for e in rec.recommended().models if e.task in vision.TASKS}
-    assert set(entries) == {"detect", "segment", "depth"}
+    vision image's models.json, with the vision recipe on the CPU and Apache-2.0; so are three zero-shot detectors
+    (1.4.4, #142: Grounding DINO tiny, MM-Grounding-DINO tiny, OWLv2 base), pinned to a commit; a vision entry with a
+    licence that is not permissive (even one the list allows for others) or without a pinned commit is refused.
+    1.4.4 (#141): five image classifiers in a group of their own (SigLIP 2 and LAION's CLIP zero-shot, MIT for
+    CLIP; ViT, ConvNeXt V2, DINOv2 with ImageNet classes)."""
+    classify = {e.name: e for e in rec.recommended().models if e.task == "image-classify"}
+    assert set(classify) == {"siglip2-base", "clip-vit-b-32-laion", "vit-base-patch16-224", "convnextv2-tiny-22k-224",
+                             "dinov2-small-imagenet1k"}
+    for e in classify.values():
+        assert e.recipe == "vision" and e.device == "cpu" and e.group == "image-classification" and len(e.revision) == 40
+        assert e.license == ("mit" if e.name == "clip-vit-b-32-laion" else "apache-2.0"), e.name
+    entries = [e for e in rec.recommended().models if e.task in ("detect", "segment", "depth")]
     baked = templates.models_file()
-    for task, e in entries.items():
+    fixed = {e.task: e for e in entries if e.source == f"hf://{baked[e.task]['repo']}"}
+    assert set(fixed) == {"detect", "segment", "depth"}
+    for task, e in fixed.items():
         assert (e.source, e.revision) == (f"hf://{baked[task]['repo']}", baked[task]["revision"])
         assert e.recipe == "vision" and e.device == "cpu" and e.license == "apache-2.0" and e.group == "detection"
+    zero = {e.source: e for e in entries if e not in fixed.values()}
+    assert set(zero) == {"hf://IDEA-Research/grounding-dino-tiny", "hf://google/owlv2-base-patch16-ensemble",
+                         "hf://openmmlab-community/mm_grounding_dino_tiny_o365v1_goldg_v3det"}
+    for e in zero.values():
+        assert e.task == "detect" and e.recipe == "vision" and e.license == "apache-2.0" and e.group == "detection"
+        assert len(e.revision) == 40 and "name" in e.note.lower(), e.source
     data = rec.load().model_dump(exclude_defaults=False)
     i = next(n for n, m in enumerate(data["models"]) if m["task"] == "detect")
     for change, why in [({"license": "creativeml-openrail-m"}, "permissive"), ({"revision": "main"}, "pinned")]:
@@ -553,10 +584,16 @@ def test_fy_vis_012_the_recommended_vision_models():
 
 
 def test_fy_vis_013_searching_hugging_face_for_vision_models():
-    """FY-VIS-013: the search's detect, segment and depth ask Hugging Face for object-detection,
-    mask-generation and depth-estimation; a result says its task and the licence its tags state."""
+    """FY-VIS-013: the search's detect, segment and depth ask Hugging Face for object-detection (and, 1.4.4,
+    zero-shot-object-detection), mask-generation and depth-estimation; a result says its task and the licence its
+    tags state."""
     q = hub.make_query("", "detect", None, 10)
     assert any("pipeline_tag=object-detection" in u for u in hub.search_urls("https://hf.example", q))
+    # 1.4.4 (#142): zero-shot detectors are detection models too
+    assert any("pipeline_tag=zero-shot-object-detection" in u for u in hub.search_urls("https://hf.example", q))
+    zs = hub.summarise({"id": "IDEA-Research/grounding-dino-tiny", "pipeline_tag": "zero-shot-object-detection",
+                        "library_name": "transformers", "tags": ["safetensors", "license:apache-2.0"]})
+    assert zs["task"] == "detect" and zs["license"] == "apache-2.0"
     assert hub.TASK_TAGS["segment"] == ("mask-generation",) and hub.TASK_TAGS["depth"] == ("depth-estimation",)
     s = hub.summarise({"id": "PekingU/rtdetr_v2_r50vd", "pipeline_tag": "object-detection", "library_name": "transformers",
                        "tags": ["transformers", "safetensors", "license:apache-2.0"], "downloads": 10})
@@ -581,13 +618,306 @@ def test_fy_vis_015_the_server_and_the_catalog_agree_on_what_a_vision_model_is()
 
     src = (Path(__file__).resolve().parent.parent / "images" / "vision" / "app.py").read_text()
     tree = ast.parse(src)
-    keep = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "task_of"
-            or isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "SEGMENT_TYPES" for t in n.targets)]
-    assert len(keep) == 2
+    funcs, names = {"task_of", "zero_shot_classifier", "classifier_type"}, {"SEGMENT_TYPES", "ZERO_SHOT_CLASSIFY"}
+    keep = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in funcs
+            or isinstance(n, ast.Assign) and any(getattr(t, "id", None) in names for t in n.targets)]
+    assert len(keep) == 5
     ns: dict = {}
     exec(compile(ast.Module(body=keep, type_ignores=[]), "app.py", "exec"), ns)
     configs = [{"architectures": ["RtDetrV2ForObjectDetection"]}, {"architectures": ["Sam2VideoModel"], "model_type": "sam2_video"},
                {"model_type": "sam2"}, {"architectures": ["DPTForDepthEstimation"]}, {"architectures": ["SamModel"]},
-               {"architectures": ["Qwen3ForCausalLM"]}, {}, {"architectures": [None, "YolosForObjectDetection"]}]
+               {"architectures": ["Qwen3ForCausalLM"]}, {}, {"architectures": [None, "YolosForObjectDetection"]},
+               # 1.4.4 (#141): classifiers with fixed classes, CLIP-like zero-shot ones (by architecture, or by
+               # model_type alone), a fine-tuned SigLIP head (fixed), BLIP (not taken)
+               {"architectures": ["ViTForImageClassification"]}, {"architectures": ["Siglip2Model"]},
+               {"model_type": "clip"}, {"model_type": "chinese-clip"}, {"architectures": ["SiglipForImageClassification"]},
+               {"architectures": ["BlipModel"], "model_type": "blip"}, {"model_type": "siglip2", "architectures": ["Other"]}]
     assert [ns["task_of"](c) for c in configs] == [vision.task_of(c) for c in configs]
-    assert [vision.task_of(c) for c in configs] == ["detect", "segment", "segment", "depth", None, None, None, "detect"]
+    assert [vision.task_of(c) for c in configs] == ["detect", "segment", "segment", "depth", None, None, None, "detect",
+                                                    "image-classify", "image-classify", "image-classify",
+                                                    "image-classify", "image-classify", None, None]
+
+
+# ------------------------------------------------------------------ zero-shot detectors (1.4.4, #142)
+def test_fy_vis_021_the_server_and_the_catalog_agree_on_zero_shot_detectors():
+    """FY-VIS-021: the vision server's own list of zero-shot detectors and its zero_shot rule (images/vision/app.py,
+    read from the file) are the catalog's, and its label limits are those Try it keeps to."""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "images" / "vision" / "app.py").read_text()
+    tree = ast.parse(src)
+    names = {"ZERO_SHOT_DETECT", "MAX_LABELS", "MAX_LABEL_CHARS"}
+    keep = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "zero_shot"
+            or isinstance(n, ast.Assign) and any(getattr(t, "id", None) in names for t in n.targets)]
+    assert len(keep) == 4
+    ns: dict = {}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), "app.py", "exec"), ns)
+    assert ns["ZERO_SHOT_DETECT"] == vision.ZERO_SHOT_DETECT
+    assert (ns["MAX_LABELS"], ns["MAX_LABEL_CHARS"]) == (vision.MAX_LABELS, vision.MAX_LABEL_CHARS)
+    configs = [{"model_type": "grounding-dino"}, {"model_type": "mm_grounding_dino"}, {"architectures": ["Owlv2ForObjectDetection"]},
+               {"architectures": ["owlvitforobjectdetection"]}, {"model_type": "x", "architectures": ["OmDetTurboForObjectDetection"]},
+               {"architectures": ["RtDetrV2ForObjectDetection"]}, {}, {"model_type": None, "architectures": [None]}]
+    assert [ns["zero_shot"](c) for c in configs] == [vision.zero_shot(c) for c in configs] == [True] * 5 + [False] * 3
+    assert vision.try_labels(None) == vision.TEST_LABELS and vision.try_labels(" , ") == vision.TEST_LABELS
+    assert vision.try_labels("cat, remote control ,") == ["cat", "remote control"]
+    assert len(vision.try_labels(",".join(f"l{i}" for i in range(40)))) == vision.MAX_LABELS
+    assert vision.try_labels("x" * 100) == ["x" * vision.MAX_LABEL_CHARS]
+
+
+NEW_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4@sha256:" + "4" * 64
+NEW_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4-cuda@sha256:" + "5" * 64
+
+
+@pytest.fixture()
+def zsd(vis):
+    """A zero-shot detector (Grounding DINO tiny) deployed as `gd` with a copy of the vision recipe on a 1.4.4 image,
+    on a fake vision server."""
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: vision-144\n", 1)
+    text = text.replace(f"image: {VISION_CUDA}", f"image: {NEW_CUDA}").replace(f"image: {VISION_CPU}", f"image: {NEW_CPU}")
+    assert vis.owner.post("/api/recipes", json={"yaml": text}).status_code == 201
+    meta = vision_meta("detect", "IDEA-Research/grounding-dino-tiny", "a" * 40, "GroundingDinoForObjectDetection",
+                       660 * MIB, pipeline_tag="zero-shot-object-detection",
+                       config={"architectures": ["GroundingDinoForObjectDetection"], "model_type": "grounding-dino"})
+    meta["vision"]["zero_shot"] = True
+    add_catalog("gdino", meta, task="detect", fmt="safetensors", source="hf://IDEA-Research/grounding-dino-tiny")
+    engine = FakeVision("detect", "s-gd")
+    deploy(vis.owner, "gd", "gdino", "vision-144", params={"gpus": 0}, machine_id=vis.cpu, wait=True)
+    make_ready("gd", [(vis.cpu, engine.port, engine.secret)])
+    yield SimpleNamespace(vis=vis, engine=engine)
+    engine.close()
+
+
+def test_fy_vis_022_labels_reach_a_zero_shot_detector(zsd):
+    """FY-VIS-022: `labels` reach the zero-shot detector's replica as the client sent them (a multipart field, or a
+    JSON list), with only `model` changed; the vision server's refusal (400 labels_required) comes back unchanged and
+    is counted as no image; the Playground lists it as zero_shot (the others not); Try it sends it the test image
+    with the names of its two shapes, or the words typed (comma-separated), and a detector with fixed classes gets
+    no labels."""
+    vis, engine = zsd.vis, zsd.engine
+    r = detect(vis.api, "gd", labels='["cat", "remote control"]')
+    assert r.status_code == 200, r.text
+    assert b'name="labels"\r\n\r\n["cat", "remote control"]' in engine.seen[-1]["body"]
+    image = base64.b64encode(b"\x89PNG fake").decode()
+    r = vis.api.post("/v1/vision/detect", json={"model": "gd", "image": image, "labels": ["cat", "dog"], "threshold": 0.3})
+    assert r.status_code == 200
+    assert json.loads(engine.seen[-1]["body"]) == {"model": "gd", "image": image, "labels": ["cat", "dog"], "threshold": 0.3}
+    before = sum(row.get("images") or 0 for row in usage_rows(vis.owner) if row.get("name") == "gd")
+    engine.refuse = (400, b'{"error": {"message": "This model finds what you name: send labels.", "code": "labels_required"}}')
+    r = vis.api.post("/v1/vision/detect", json={"model": "gd", "image": image})
+    engine.refuse = None
+    assert r.status_code == 400 and err(r)["code"] == "labels_required"
+    after = sum(row.get("images") or 0 for row in usage_rows(vis.owner) if row.get("name") == "gd")
+    assert before == 2 and after == 2
+    models = {m["name"]: m for m in vis.owner.get("/api/playground/vision/options").json()["models"]}
+    assert models["gd"]["zero_shot"] is True and models["det"]["zero_shot"] is False and models["seg"]["zero_shot"] is False
+    deps = {d["name"]: d["id"] for d in vis.owner.get("/api/deployments").json()["deployments"]}
+    out = vis.owner.post(f"/api/deployments/{deps['gd']}/try", json={}).json()
+    assert out["ok"] and out["request"]["labels"] == ["red square", "blue rectangle"]
+    assert json.loads(engine.seen[-1]["body"])["labels"] == vision.TEST_LABELS
+    vis.owner.post(f"/api/deployments/{deps['gd']}/try", json={"input": "square, circle"})
+    assert json.loads(engine.seen[-1]["body"])["labels"] == ["square", "circle"]
+    vis.owner.post(f"/api/deployments/{deps['det']}/try", json={"input": "square"})
+    assert "labels" not in json.loads(vis.engines["det"].seen[-1]["body"])
+
+
+def test_fy_vis_028_grounding_dino_is_estimated_with_its_text_encoder():
+    """FY-VIS-028: Grounding DINO and MM-Grounding-DINO (measured 2.24 GiB peak on a CPU with 0.64 GiB of files) get
+    512 MiB beyond the files and the vision recipe's overhead, on a CPU and on a GPU, known by model_type or (a row
+    from before 1.4.3) the architecture alone; OWLv2 and a detector with fixed classes get nothing more."""
+    r = recipes.builtin_recipes()["vision"][0]
+    gd = vision_meta("detect", "IDEA-Research/grounding-dino-tiny", "a" * 40, "GroundingDinoForObjectDetection", 660 * MIB,
+                     config={"architectures": ["GroundingDinoForObjectDetection"], "model_type": "grounding-dino"})
+    gd["vision"]["zero_shot"] = True
+    cpu = estimate(gd, r, {"gpus": 0}, device="cpu", gpu_context=500 * MIB)
+    assert cpu.ram == 660 * MIB + 2000 + 1280 * MIB + 512 * MIB
+    assert cpu.parts[-1].label == "Zero-shot detector" and cpu.parts[-1].bytes == 512 * MIB
+    gpu = estimate(gd, r, {"gpus": 1}, device="gpu", gpu_context=500 * MIB)
+    assert gpu.per_gpu == 660 * MIB + 2000 + GIB + 500 * MIB + 512 * MIB
+    old = vision_meta("detect", "acme/mm", "a" * 40, "MMGroundingDinoForObjectDetection", 660 * MIB)
+    assert vision.estimate_extra(old) == 512 * MIB
+    owl = vision_meta("detect", "google/owlv2-base-patch16-ensemble", "a" * 40, "Owlv2ForObjectDetection", 590 * MIB,
+                      config={"architectures": ["Owlv2ForObjectDetection"], "model_type": "owlv2"})
+    assert vision.estimate_extra(owl) == 0
+    assert estimate(owl, r, {"gpus": 0}, device="cpu", gpu_context=0).ram == 590 * MIB + 2000 + 1280 * MIB
+    rt = vision_meta("detect", "PekingU/rtdetr_v2_r18vd", RTDETR_REV, "RtDetrV2ForObjectDetection", 80 * MIB)
+    assert vision.estimate_extra(rt) == 0
+
+
+# ------------------------------------------------------------------ image classification (1.4.4, #141)
+def test_fy_vis_029_the_server_and_the_catalog_agree_on_image_classifiers():
+    """FY-VIS-029: the vision server's list of zero-shot image classifiers is the catalog's, and both read the same
+    configs the same way (FY-VIS-015 covers task_of); image classification is its own kind, `image-classify`
+    ("Image classification"), served as vision-classify at /v1/vision/classify, apart from text classification."""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "images" / "vision" / "app.py").read_text()
+    tree = ast.parse(src)
+    keep = [n for n in tree.body if isinstance(n, ast.Assign)
+            and any(getattr(t, "id", None) in ("ZERO_SHOT_CLASSIFY", "PATHS") for t in n.targets)]
+    ns: dict = {}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), "app.py", "exec"), ns)
+    assert ns["ZERO_SHOT_CLASSIFY"] == vision.ZERO_SHOT_CLASSIFY
+    assert set(vision.ZERO_SHOT_CLASSIFY) == {"align", "altclip", "chinese_clip", "clip", "metaclip_2", "siglip", "siglip2"}
+    assert ns["PATHS"] == {"image-classify": "classify"} and vision.ENDPOINT["image-classify"] == "vision/classify"
+    assert vision.API["image-classify"] == "vision-classify" and vision.LABEL["image-classify"] == "Image classification"
+    assert proxy.ENDPOINTS["vision/classify"] == ("vision-classify", "vision")
+    assert proxy.endpoint_for("vision-classify") == "/v1/vision/classify"
+    # Text classification (#144, task classify, /v1/classify) is another kind.
+    assert "classify" not in vision.TASKS and {"classify", "image-classify"} <= set(recipes.TASKS)
+    assert proxy.ENDPOINTS["classify"][0] != proxy.ENDPOINTS["vision/classify"][0]
+    for cfg, zs in (({"architectures": ["CLIPModel"]}, True), ({"model_type": "siglip"}, True),
+                    ({"architectures": ["CLIPForImageClassification"], "model_type": "clip"}, False),
+                    ({"architectures": ["ViTForImageClassification"]}, False)):
+        s = vision.summary(cfg)
+        assert s["task"] == "image-classify" and bool(s.get("zero_shot")) is zs, cfg
+    timm = vision.summary({"architectures": ["TimmWrapperForImageClassification"], "model_type": "timm_wrapper"})
+    assert "timm" in timm["problem"]
+
+
+def _repo(name: str, sha: str, extra: dict | None = None):
+    """A real repository's config.json and Hugging Face answer (tests/fixtures/models/kinds), with small weights."""
+    from tests.model_helpers import FIX
+
+    info = json.loads((FIX / "kinds" / f"{name}.hf-info.json").read_text())
+    st = safetensors_bytes({"w": {"dtype": "F32", "shape": [64], "data_offsets": [0, 256]}}, b"\0" * 256)
+    files = {"config.json": (FIX / "kinds" / f"{name}.config.json").read_bytes(), "model.safetensors": st, **(extra or {})}
+    r = Repo(info["id"], sha, files)
+    r.info.update(pipeline_tag=info["pipeline_tag"], library_name=info["library_name"], tags=info["tags"],
+                  cardData=info["cardData"])
+    return r
+
+
+def test_fy_vis_030_image_classifiers_are_added_from_hugging_face(owner, monkeypatch):
+    """FY-VIS-030: SigLIP 2 (its config names no architecture, only model_type siglip) and LAION's CLIP are added as
+    zero-shot image classifiers, ViT with its 1,000 ImageNet classes, all with the task Hugging Face's pipeline tag
+    gives and the vision recipe; OpenCLIP's own copy beside LAION's transformers weights is neither read nor
+    downloaded; another task asked for is refused, as is a licence that is not permissive."""
+    from forgeyard.config import get_settings
+
+    big = safetensors_bytes({"w": {"dtype": "F32", "shape": [4096], "data_offsets": [0, 16384]}}, b"\0" * 16384)
+    server = FakeHF(_repo("siglip2-base-patch16-224", "1" * 40), _repo("vit-base-patch16-224", "2" * 40),
+                    _repo("clip-vit-b-32-laion2b", "3" * 40, {"open_clip_model.safetensors": big,
+                                                              "open_clip_config.json": b"{}"}))
+    monkeypatch.setenv("HF_ENDPOINT", server.url)
+    monkeypatch.setenv("MODEL_ALLOW_PRIVATE_HOSTS", "true")
+    get_settings.cache_clear()
+    try:
+        added = {}
+        for name, source in (("siglip2", "hf://google/siglip2-base-patch16-224"), ("vit", "hf://google/vit-base-patch16-224"),
+                             ("clip", "hf://laion/CLIP-ViT-B-32-laion2B-s34B-b79K")):
+            r = owner.post("/api/models", json={"name": name, "source": source})
+            assert r.status_code == 201, (name, r.text)
+            added[name] = r.json()["model"]
+        for name in added:
+            assert added[name]["task"] == "image-classify" and added[name]["recipes"] == ["vision"], name
+            assert added[name]["task_label"] == "Image classification"
+        assert added["siglip2"]["vision"] == {"task": "image-classify", "architecture": "siglip", "zero_shot": True}
+        assert added["clip"]["vision"]["zero_shot"] is True and added["clip"]["license"] == "mit"
+        assert added["vit"]["vision"]["labels"] == 1000 and "zero_shot" not in added["vit"]["vision"]
+        assert added["vit"]["vision"]["label_examples"][0] == "tench, Tinca tinca"
+        assert added["clip"]["size_bytes"] < 16384                      # the OpenCLIP copy is not counted
+        assert added["clip"]["summary"]["params"] == 64                  # nor read as weights
+        prev = owner.post("/api/models/inspect", json={"source": "hf://laion/CLIP-ViT-B-32-laion2B-s34B-b79K"}).json()
+        assert prev["meta"]["file_count"] == 2                          # config.json and model.safetensors
+        r = owner.post("/api/models", json={"name": "vit-det", "source": "hf://google/vit-base-patch16-224", "task": "detect"})
+        assert r.status_code == 422 and "image classification model" in r.json()["detail"]["message"]
+        meta = {"kind": "hf", "license": "cc-by-nc-4.0", "vision": {"task": "image-classify", "architecture": "CLIPModel"}}
+        assert "permissive licence only" in vision.refusal("image-classify", meta)
+    finally:
+        server.close()
+        get_settings.cache_clear()
+
+
+@pytest.fixture()
+def cls(vis):
+    """Two image classifiers on fake vision servers, on a copy of the vision recipe with a 1.4.4 image: `vit` (fixed
+    ImageNet classes) and `siglip` (zero-shot)."""
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: vision-144\n", 1)
+    text = text.replace(f"image: {VISION_CUDA}", f"image: {NEW_CUDA}").replace(f"image: {VISION_CPU}", f"image: {NEW_CPU}")
+    assert vis.owner.post("/api/recipes", json={"yaml": text}).status_code == 201
+    vit = vision_meta("detect", "google/vit-base-patch16-224", "b" * 40, "ViTForImageClassification", 330 * MIB,
+                      pipeline_tag="image-classification")
+    vit["vision"] = {"task": "image-classify", "architecture": "ViTForImageClassification", "labels": 1000}
+    sig = vision_meta("detect", "google/siglip2-base-patch16-224", "c" * 40, "siglip", 1430 * MIB,
+                      pipeline_tag="zero-shot-image-classification", config={"architectures": [], "model_type": "siglip"})
+    sig["vision"] = {"task": "image-classify", "architecture": "siglip", "zero_shot": True}
+    add_catalog("vit-b", vit, task="image-classify", fmt="safetensors", source="hf://google/vit-base-patch16-224")
+    add_catalog("siglip2", sig, task="image-classify", fmt="safetensors", source="hf://google/siglip2-base-patch16-224")
+    engines = {"vit": FakeVision("classify", "s-vit"), "siglip": FakeVision("classify", "s-sig")}
+    deploy(vis.owner, "vit", "vit-b", "vision-144", params={"gpus": 0}, machine_id=vis.cpu, wait=True)
+    deploy(vis.owner, "siglip", "siglip2", "vision-144", params={"gpus": 0}, machine_id=vis.cpu, wait=True)
+    for name in engines:
+        make_ready(name, [(vis.cpu, engines[name].port, engines[name].secret)])
+    yield SimpleNamespace(vis=vis, engines=engines)
+    for e in engines.values():
+        e.close()
+
+
+def test_fy_vis_031_classify_through_the_gateway(cls):
+    """FY-VIS-031: /v1/vision/classify reaches a classifier's replica at /v1/vision/classify (multipart and JSON, labels
+    and top_k as sent, only `model` changed) and its answer comes back; a classifier at /v1/vision/detect, or a
+    detector at /v1/vision/classify, is 400 wrong_endpoint; each answer counts one image; the Playground lists both
+    (the zero-shot one marked) at /v1/vision/classify; Try it sends the zero-shot one the test image with three
+    classes (or the words typed), the other none, and sums the answer up; /v1/models lists them."""
+    vis, engines = cls.vis, cls.engines
+    files = {"image": ("cats.jpg", b"\xff\xd8\xff fake jpeg", "image/jpeg")}
+    r = vis.api.post("/v1/vision/classify", data={"model": "vit", "top_k": "3"}, files=files)
+    assert r.status_code == 200, r.text
+    assert r.json()["labels"][0]["label"] == "tabby, tabby cat" and r.headers["x-forgeyard-target"] == "local:vit#0"
+    seen = engines["vit"].seen[-1]
+    assert seen["path"] == "/v1/vision/classify" and seen["auth"] == "Bearer s-vit" and b'name="top_k"\r\n\r\n3' in seen["body"]
+    image = base64.b64encode(b"\x89PNG fake").decode()
+    r = vis.api.post("/v1/vision/classify", json={"model": "siglip", "image": image, "labels": ["a cat", "a dog"]})
+    assert r.status_code == 200
+    assert json.loads(engines["siglip"].seen[-1]["body"]) == {"model": "siglip", "image": image, "labels": ["a cat", "a dog"]}
+    r = vis.api.post("/v1/vision/detect", json={"model": "vit", "image": image})
+    assert r.status_code == 400 and err(r)["code"] == "wrong_endpoint" and "/v1/vision/classify" in err(r)["message"]
+    r = vis.api.post("/v1/vision/classify", json={"model": "det", "image": image})
+    assert r.status_code == 400 and err(r)["code"] == "wrong_endpoint"
+    rows = {row["name"]: row for row in usage_rows(vis.owner)}
+    assert rows["vit"]["images"] == 1 and rows["siglip"]["images"] == 1 and rows["vit"]["kilopixels"] == 307
+    models = {m["name"]: m for m in vis.owner.get("/api/playground/vision/options").json()["models"]}
+    assert models["siglip"] | {"deployment_id": None} == {
+        "name": "siglip", "task": "image-classify", "title": "Image classification", "endpoint": "/v1/vision/classify",
+        "deployment_id": None, "model": "google/siglip2-base-patch16-224", "licence": "apache-2.0", "zero_shot": True,
+        "ready": 1, "running": True, "reason": None}
+    assert models["vit"]["zero_shot"] is False
+    r = vis.owner.post("/api/playground/vision/classify", data={"model": "vit"}, files=files)
+    assert r.status_code == 200 and r.json()["labels"][0]["label"] == "tabby, tabby cat"
+    deps = {d["name"]: d["id"] for d in vis.owner.get("/api/deployments").json()["deployments"]}
+    out = vis.owner.post(f"/api/deployments/{deps['siglip']}/try", json={}).json()
+    assert out["ok"] and out["api"] == "vision-classify" and out["endpoint"].endswith("/v1/vision/classify")
+    assert out["request"]["labels"] == vision.TEST_CLASSES and out["summary"] == "Best: tabby, tabby cat 0.86, Egyptian cat 0.07"
+    vis.owner.post(f"/api/deployments/{deps['siglip']}/try", json={"input": "squares, circles"})
+    assert json.loads(engines["siglip"].seen[-1]["body"])["labels"] == ["squares", "circles"]
+    vis.owner.post(f"/api/deployments/{deps['vit']}/try", json={})
+    assert "labels" not in json.loads(engines["vit"].seen[-1]["body"])
+    names = {m["id"] for m in vis.api.get("/v1/models").json()["data"]}
+    assert {"vit", "siglip"} <= names
+
+
+def test_fy_vis_032_image_classifiers_need_the_1_4_4_vision_image(vis):
+    """FY-VIS-032: on a recipe that pins a vision image older than 1.4.4 (the built-in one did until 1.4.4rc1),
+    deploying or estimating an image classifier answers 422 vision_image_too_old (the old server has no
+    image-classify task); on the built-in recipe it deploys; its estimate is its files plus the recipe's overhead."""
+    vit = vision_meta("detect", "google/vit-base-patch16-224", "b" * 40, "ViTForImageClassification", 330 * MIB)
+    vit["vision"] = {"task": "image-classify", "architecture": "ViTForImageClassification", "labels": 1000}
+    add_catalog("vit-old", vit, task="image-classify", fmt="safetensors", source="hf://google/vit-base-patch16-224")
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", "name: vision-old\n", 1)
+    text = text.replace(f"image: {VISION_CUDA}", f"image: {OLD_VISION_CUDA}").replace(f"image: {VISION_CPU}", f"image: {OLD_VISION_CPU}")
+    assert vis.owner.post("/api/recipes", json={"yaml": text}).status_code == 201
+    body = {"name": "vit-old", "model": "vit-old", "recipe": "vision-old", "params": {"gpus": 0}, "machine_id": vis.cpu}
+    for path in ("/api/deployments", "/api/deployments/estimate"):
+        r = vis.owner.post(path, json=body)
+        assert r.status_code == 422 and r.json()["detail"]["code"] == "vision_image_too_old", (path, r.text)
+        assert r.json()["detail"]["message"].startswith("Image classification needs Forgeyard's vision image 1.4.4")
+    r = vis.owner.post("/api/deployments", json={**body, "recipe": "vision"})
+    assert r.status_code == 201, r.text
+    est = estimate(vit, recipes.builtin_recipes()["vision"][0], {"gpus": 0}, device="cpu", gpu_context=0)
+    assert est.ram == 330 * MIB + 2000 + 1280 * MIB
+    q = hub.make_query("", "image-classify", None, 10)
+    urls = hub.search_urls("https://hf.example", q)
+    assert any("pipeline_tag=image-classification" in u for u in urls)
+    assert any("pipeline_tag=zero-shot-image-classification" in u for u in urls)

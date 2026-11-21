@@ -48,7 +48,7 @@ images) and a map of the code are in [docs/development.md](docs/development.md).
    uv run --no-sync python -m pytest -q
    cd web && npm run lint && npm run typecheck && npm test && npm run build
    shellcheck -s sh forgeyard/install/install.sh
-   shellcheck scripts/agent_image_smoke.sh scripts/server_image_smoke.sh
+   shellcheck scripts/agent_image_smoke.sh scripts/server_image_smoke.sh scripts/check_dco.sh
    ```
 
    CI also builds both container images and runs their smoke tests (`agent-image`, `server-image`)
@@ -80,6 +80,8 @@ warning, never silent. Runtime policy (limits, cloud, sources, budgets) lives in
 the web UI, not in the environment.
 
 Commit messages say what changed and why, in plain English. Keep pull requests to one topic.
+Every commit is signed off (`git commit -s`, see [Licence](#licence)); the `DCO` check fails on a pull
+request with a commit that is not.
 
 ## Releasing
 
@@ -130,3 +132,10 @@ pin to the new version with `scripts/pin_images.py --write` ([docs/development.m
 
 Forgeyard is licensed under the [Apache License 2.0](LICENSE). By contributing you agree that your
 contribution is licensed the same way (section 5 of the licence).
+
+Contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/)
+(DCO 1.1): by adding a `Signed-off-by:` line to a commit you certify that you wrote it, or otherwise
+have the right to submit it under this licence. `git commit -s` adds the line with your configured
+name and email; the email must be the commit's author email. Merge commits and commits by bots are
+not checked. To sign off commits already on your branch: `git rebase --signoff dev`, then push with
+`--force-with-lease`.

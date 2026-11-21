@@ -22,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from forgeyard.api.deployments import fit_default_context  # noqa: E402
 from forgeyard.models import fetch, inspect as inspector, recipes  # noqa: E402
 from forgeyard.models.estimate import estimate  # noqa: E402
 from forgeyard.models.recommended import recommended  # noqa: E402
@@ -76,6 +77,8 @@ def main(names: list[str]) -> int:
         recipe = builtin[e.recipe]
         params = {k: p.default for k, p in recipe.params.items()} | {"gpus": 0 if e.device == "cpu" else 1,
                                                                        "share": recipe.share}
+        # 1.4.4: as a deployment that names no context, the model's own maximum when it is shorter.
+        fit_default_context(recipe, {}, params, meta)
         est = estimate(meta, recipe, params, device=e.device, gpu_context=400 * 1024**2, task=e.task)
         size, need = meta["size_bytes"] / GIB, est.amount / GIB
         line = (f"{e.name:30} {meta['revision'][:12]}  download {size:6.2f} GiB (file: {e.download_gib:6.2f})  "

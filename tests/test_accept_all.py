@@ -228,7 +228,8 @@ def test_fy_acc_010_a_group_that_breaks_is_a_failure_not_the_end(acc):
 
 def test_fy_acc_011_the_models_it_deploys(acc):
     """FY-ACC-011: MODELS uses built-in recipes and the catalog names of accept_m3.py for the same
-    sources (so a machine's model cache and catalog entries are reused); one CPU model, the rest GPU."""
+    sources (so a machine's model cache and catalog entries are reused; a kind newer than M3, such as the
+    1.4.4 text classifier, has no M3 entry); one CPU model, the rest GPU."""
     sys.path.insert(0, str(ROOT / "scripts"))
     try:
         import accept_m3
@@ -241,8 +242,9 @@ def test_fy_acc_011_the_models_it_deploys(acc):
     assert len({m["key"] for m in acc.MODELS}) == len(acc.MODELS)
     assert [m["device"] for m in acc.MODELS].count("cpu") == 1 and acc.MODELS[0]["device"] == "cpu"
     for m in acc.MODELS:
-        assert m["recipe"] in builtin and m["model"].startswith("accept-") and m3.get(m["source"]) == m["model"], m
+        assert m["recipe"] in builtin and m["model"].startswith("accept-") and m3.get(m["source"], m["model"]) == m["model"], m
         assert (m["params"].get("gpus") == 0) == (m["device"] == "cpu")
+    assert {m["key"] for m in acc.MODELS if m["source"] not in m3} == {"classify"}
     assert acc.CLOUD_PROMPT and len(acc.CLOUD_PROMPT) < 100
 
 

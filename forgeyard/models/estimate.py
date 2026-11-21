@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 
-from forgeyard.models import modalities
+from forgeyard.models import modalities, vision
 from forgeyard.models.recipes import Recipe
 
 GIB = 1024**3
@@ -474,7 +474,16 @@ def estimate(meta: dict, recipe: Recipe, params: dict, *, device: str, gpu_conte
     if method == "gguf":
         return _gguf(meta, recipe, params, gpus, gpu_context, device, task)
     if method == "files":
-        return _files(meta, recipe, gpus, gpu_context, device)
+        est = _files(meta, recipe, gpus, gpu_context, device)
+        extra = vision.estimate_extra(meta)
+        if extra:
+            # 1.4.4 (#142): Grounding DINO's text encoder and its 800-pixel image features, beyond the recipe's 1 GiB.
+            est.parts.append(Part("Zero-shot detector", extra, "text encoder and image features (measured)"))
+            if device == "gpu":
+                est.per_gpu += extra
+            else:
+                est.ram += extra
+        return est
     if method == "diffusers":
         return _diffusion(meta, recipe, params, gpus, gpu_context, device)
     est = Estimate("fixed", device, gpus)

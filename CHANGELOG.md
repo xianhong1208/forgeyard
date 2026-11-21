@@ -6,6 +6,98 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.4] — 2026-11-21
+
+More kinds of models, part 1. Zero-shot object detectors find the objects a request names: `/v1/vision/detect`
+takes `labels` (Grounding DINO, MM-Grounding-DINO, OWLv2; #142). Text classifiers run on vLLM's pooling engine at
+`/v1/classify` (sentiment, language, toxicity; #144), and image classifiers, with fixed classes or zero-shot
+(CLIP, SigLIP 2), at `/v1/vision/classify` (#141). Each has its own kind, recommended models with permissive
+licences, a Playground view and **Try it**. The built-in `vision` recipe now pins `forgeyard-vision` 1.4.4rc1,
+the image published by the `v1.4.4rc1` pre-release, which runs both new vision tasks (#175). No setting and no
+migration (the labels live in the catalog entry's details), and the agents need no update: the agent did not
+change since 1.4.3, and a machine gets the new vision image like any other pinned engine image. Contributions
+are now signed off under the DCO.
+
+### Added
+
+- **Contributions are signed off under the Developer Certificate of Origin** (DCO 1.1): every non-merge commit of a pull request needs a `Signed-off-by:` line with its author email (`git commit -s`); a new `DCO` workflow checks it, bots excepted ([CONTRIBUTING](CONTRIBUTING.md#licence)).
+- **Text classification** (#144, vLLM part): a model kind of its own, *Text classification* (task `classify`). A
+  sequence classifier with two labels or more (sentiment, language, toxicity…) is added to the catalog with its
+  labels, deployed on `vllm-pooling` (vLLM's pooling runner, which picks the classify task by itself), listed under
+  **Serving → Text classification**, tried in the **Playground** (texts, one per line; every label's probability as
+  a bar, most likely first) and on the deployment's page (**Try it**), and called at **`POST /v1/classify`** in vLLM's
+  shape (`input`: a text or up to 2,048; `data[{index, label, probs, num_classes}]`, `usage`). The gateway checks the
+  body, sends the engine only `model`, `input`, `truncate_prompt_tokens` and `use_activation` at its `/classify`,
+  counts prompt tokens like embeddings, and never sends it to a cloud provider. Three recommended models, MIT or
+  Apache-2.0: multilingual sentiment (1 to 5 stars), language detection (20 languages) and toxic comments (6 labels,
+  scored on their own). Hugging Face search has the task too. The guide says how a chat model classifies into labels
+  you choose with structured outputs (`structured_outputs.choice`, or a JSON schema `enum`). No migration: the
+  labels live in the catalog entry's details, like a vision model's classes.
+- A chat model called at `/v1/classify` answers 400 `wrong_endpoint` with how to classify with structured outputs.
+- **Image classification** (#141), a model kind of its own: *Image classification*, task `image-classify` (text
+  classification, #144, is another kind), answered at `POST /v1/vision/classify` by the vision server.
+  - Classifiers with fixed classes (`…ForImageClassification`: ViT, ConvNeXt V2, DINOv2…) answer their best
+    classes; zero-shot ones (CLIP-like: CLIP, SigLIP, SigLIP 2, ALIGN, AltCLIP, Chinese-CLIP, MetaCLIP 2) score the
+    `labels` each request sends, put in a `template` ("This is a photo of {}."), with a sigmoid each (SigLIP,
+    `multi_label: true`) or a softmax (CLIP). `top_k` (5; zero-shot: all labels). `labels_required` /
+    `labels_not_supported` as for detection; a timm checkpoint (`timm_wrapper`) is refused.
+  - Keys, model lists, rpm and usage (one image, its kilopixels, busy time) as for the other vision routes;
+    Hugging Face search asks for `image-classification` and `zero-shot-image-classification`; OpenCLIP's own
+    copy beside LAION's transformers weights (`open_clip_*`) is neither read nor downloaded.
+  - Recommended group *Image classification*: SigLIP 2 base, LAION CLIP ViT-B/32 (MIT), ViT base, ConvNeXt V2 tiny,
+    DINOv2 small with its ImageNet head.
+  - Playground: a classify view (labels for zero-shot models, scores as bars); Try it asks a zero-shot classifier
+    to choose among three test classes. The vision image of 1.4.4 or later is needed (422 `vision_image_too_old`
+    on an older one, which has no such task).
+  - `scripts/accept_vision.py`: `siglip2-base`, `clip-vit-b-32-laion`, `vit-base-patch16-224`,
+    `convnextv2-tiny-22k-224`.
+- **Detectors that find what you name** (#142). Zero-shot (open-vocabulary) object detectors (Grounding DINO,
+  MM-Grounding-DINO and LLMDet, OWL-ViT, OWLv2), refused by 1.4.3, are detection models now: the
+  same `/v1/vision/detect` takes `labels`, the names to find (a JSON list, or a comma-separated form field;
+  at most 32 of at most 64 characters), and answers boxes for those names in the usual shape. The vision
+  server loads them with `AutoModelForZeroShotObjectDetection` and asks each family its own way (Grounding DINO
+  one lower-case prompt, each box taking the name whose words score it highest; OWL one query per name, OWLv2's
+  boxes scaled to the square it looks at). Without `labels` a zero-shot detector
+  answers 400 `labels_required`; a detector with fixed classes given `labels` answers 400
+  `labels_not_supported`. Default thresholds follow the family (0.3, OWL 0.1). OmDet-Turbo stays refused: its
+  transformers port loads its backbone through timm, which the vision image does not include (the vision server
+  now refuses any `use_timm_backbone` model at start).
+  - The catalog marks them *Finds what you name* (`vision.zero_shot`, no classes); a row added before 1.4.3 is
+    known by the config it kept (no migration). Hugging Face's search for detection also asks for
+    `zero-shot-object-detection`.
+  - Recommended: Grounding DINO tiny, MM-Grounding-DINO tiny and OWLv2 base (Apache-2.0, pinned). Grounding DINO
+    and MM-Grounding-DINO are estimated with 512 MiB more (measured: 2.24 GiB peak on a CPU with 0.64 GiB of
+    files; OWLv2 base 1.13 GiB).
+  - Playground: a **Find these** box for them (comma-separated names, then **Find**; the score slider starts at
+    0.3). **Try it** asks them for the test image's two shapes (or for the words sent as `input`).
+  - They need a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older, deploying one
+    answers 422 `vision_image_too_old` (a pre-release tag such as `1.4.4rc1` counts as the release it leads to,
+    1.4.4). The built-in recipe runs one (below).
+  - `scripts/accept_vision.py` knows `grounding-dino-tiny`, `mm-grounding-dino-tiny` and `owlv2-base`: two cats,
+    a remote and no giraffe on the COCO photo, `labels_required`, and `labels_not_supported` for RT-DETR.
+
+### Changed
+
+- **The built-in `vision` recipe pins `forgeyard-vision` 1.4.4rc1** (CPU `sha256:f4e5940b…`, linux/amd64 and arm64;
+  `-cuda` `sha256:9e4ef32b…`), published by the `v1.4.4rc1` pre-release, so zero-shot detectors and image classifiers
+  deploy on it. It was 1.4.0.
+- A text classifier tagged *text classification* is read as one (1.4.3 refused it as a reranker): one output
+  (`num_labels` 1) is still a reranker and two labels or more a classifier, and neither becomes the other.
+  Refused as text classifiers, with the reason: zero-shot (NLI) models and DeBERTa, DistilBERT or BART classifiers,
+  which vLLM 0.32 does not run (the transformers engine and zero-shot come in 1.5), and regression heads.
+- A deployment that names no context starts at the model's own maximum when that is shorter than the engine's
+  default (a 512-token classifier or cross-encoder on `vllm-pooling`, whose default is 8192), in the console's
+  deploy form, the API and the suggestion shown when a model is added. A context that is named is checked as
+  before.
+
+### Fixed
+
+- RoBERTa and XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold
+  512 tokens: the catalog now says 512 (BGE-M3 and its reranker: 8192, not 8194). Choosing the old maximum as the
+  context would have overflowed the position table in vLLM. Models already in the catalog keep the number they were
+  added with.
+- The get-started page told vision examples to `pip install openai`; they use httpx, as rerank does.
+
 ## [1.4.3] — 2026-11-18
 
 Every catalog model and every engine gets its own page in the console (#140): a model's page says where it

@@ -35,7 +35,7 @@ from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, N
 from forgeyard.gateway import imagegen, proxy
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
-from forgeyard.models import catalog, modalities, routes, scheduler, vision
+from forgeyard.models import catalog, modalities, routes, scheduler, textcls, vision
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -127,10 +127,12 @@ def build_context(db: DbSession, body: DeploymentIn) -> tuple[Context, Recipe, C
         raise fail(422, "incompatible", f"{recipe.name} reads {', '.join(recipe.formats)} models; {m.name} is {m.format}.")
     if m.task not in recipe.tasks:
         raise fail(422, "incompatible", f"{recipe.name} serves {', '.join(recipe.tasks)}; {m.name} is a {m.task} model.")
-    if why := vision.deploy_refusal(m.task, m.meta or {}):
-        # 1.4.3 (#147): a zero-shot detector added before the catalog refused them.
-        raise fail(422, "not_a_vision_model", why)
+    if why := vision.deploy_refusal(m.task, m.meta or {}, recipe):
+        # 1.4.4 (#142): a zero-shot detector the vision server cannot load: one that needs timm (OmDet-Turbo, added
+        # before 1.4.3), or one on a vision image from before 1.4.4; an image classifier (#141) on such an image too.
+        raise fail(422, *why)
     params = normalise_params(recipe, body.params)
+    fit_default_context(recipe, body.params, params, m.meta or {})
     device = "gpu" if params["gpus"] > 0 else "cpu"
     try:
         est = compute_estimate(m.meta or {}, recipe, params, device=device, gpu_context=scheduler.gpu_context(),
@@ -164,14 +166,30 @@ def _previewing(ctx: Context, body: DeploymentIn, m: CatalogModel) -> None:
 CONTEXT_STEP = 1024
 
 
-def model_max_context(m: CatalogModel) -> Optional[int]:
-    """The longest context the model itself supports (config.json or the GGUF metadata), if known."""
-    meta = m.meta or {}
+def max_context_of(meta: dict) -> Optional[int]:
+    """The longest context a model itself supports (config.json or the GGUF metadata), if known."""
     n = (meta.get("config") or {}).get("max_context") or (meta.get("gguf") or {}).get("context_length")
     try:
         return int(n) if n and int(n) > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def model_max_context(m: CatalogModel) -> Optional[int]:
+    """The longest context the model itself supports (config.json or the GGUF metadata), if known."""
+    return max_context_of(m.meta or {})
+
+
+def fit_default_context(recipe: Recipe, raw: Optional[dict], params: dict, meta: dict) -> None:
+    """1.4.4: a context the request does not name is the recipe's default, or the model's own maximum when that is
+    smaller (a 512-token BERT classifier on a recipe whose default is 8192), so the default is one the model takes.
+    A context the request names is checked by the estimate as before (D9)."""
+    p = recipe.params.get("context")
+    if p is None or "context" in (raw or {}) or not isinstance(params.get("context"), int):
+        return
+    top = max_context_of(meta)
+    if top and params["context"] > top:
+        params["context"] = max(int(p.min or 1), top)
 
 
 def context_hint(db: DbSession, body: DeploymentIn, recipe: Recipe, m: CatalogModel) -> Optional[dict]:
@@ -271,7 +289,9 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
                   "format": d.model.format, "revision": d.model.revision, "file": d.model.file,
                   "size_bytes": d.model.size_bytes,
                   # 1.4: what it takes besides text, so the pages list a chat model as multimodal chat.
-                  "modalities": modalities.of_model(d.model.meta or {}, d.model.format)},
+                  "modalities": modalities.of_model(d.model.meta or {}, d.model.format),
+                  # 1.4.4: a text classifier's labels, so the Playground names every probability.
+                  **({"classify": textcls.out(d.model.meta or {})} if d.model.task == textcls.TASK else {})},
         "estimate": d.estimate, "has_token": bool(d.hf_token), "created_by": d.created_by, "created_at": d.created_at,
         "route": {"served_name": route.served_name, "api": route.api,
                   "upstream_model": own.upstream_model if own else d.served_name}
@@ -616,15 +636,21 @@ TRY_IMAGE_SIZE = 256                       # small, so a CPU answers within the 
 
 
 def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[str] = None,
-                draws: Optional[imagegen.Draws] = None) -> tuple[str, bytes, str]:
-    """(path, body, content type) of a small request in the route's protocol."""
+                draws: Optional[imagegen.Draws] = None, zero_shot: bool = False) -> tuple[str, bytes, str]:
+    """(path, body, content type) of a small request in the route's protocol. `zero_shot`: the model is a
+    zero-shot detector, which is told what to find (1.4.4)."""
     if api in VISION_TRY:
-        # 1.4: the test image (two squares); for SAM 2, the box around the red one.
+        # 1.4: the test image (two squares); for SAM 2, the box around the red one; for a zero-shot detector, the
+        # names of the two squares (or the words typed in Try it, comma-separated).
         task = VISION_TRY[api]
         body: dict = {"model": upstream, "image": base64.b64encode(vision.test_png()).decode("ascii")}
         if task == "segment":
             body["box"] = vision.TEST_BOX
-        return f"/v1/vision/{task}", json.dumps(body).encode(), "application/json"
+        if task == "detect" and zero_shot:
+            body["labels"] = vision.try_labels(text)
+        if task == "image-classify" and zero_shot:
+            body["labels"] = vision.try_labels(text, vision.TEST_CLASSES)   # 1.4.4 (#141)
+        return f"/v1/{vision.ENDPOINT[task]}", json.dumps(body).encode(), "application/json"
     if api == "openai-images":
         # One small image, in the request shape this engine takes.
         side = TRY_IMAGE_SIZE if draws is None else max(draws.multiple, TRY_IMAGE_SIZE // draws.multiple * draws.multiple)
@@ -644,6 +670,10 @@ def try_request(api: str, upstream: str, text: Optional[str], voice: Optional[st
                 "documents": ["Paris is the capital and largest city of France.",
                               "The Eiffel Tower was completed in 1889.", "Berlin is the capital of Germany."]}
         return "/v1/rerank", json.dumps(body).encode(), "application/json"
+    if api == "classify":
+        # 1.4.4: vLLM serves /classify without /v1.
+        body = {"model": upstream, "input": [text or "Forgeyard runs models on your own machines, and that is great."]}
+        return "/classify", json.dumps(body).encode(), "application/json"
     if api == "openai-audio":
         boundary = uuid.uuid4().hex
         parts = [f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{upstream}\r\n".encode(),
@@ -705,6 +735,9 @@ def summarise(api: str, answer) -> str:
         if api == "rerank":
             res = sorted(answer.get("results") or [], key=lambda r: -r.get("relevance_score", 0))
             return "; ".join(f"#{r['index']} {r['relevance_score']:.3f}" for r in res)
+        if api == "classify":
+            d = answer["data"][0]
+            return f"{d['label']} {max(d['probs']):.3f} ({d['num_classes']} labels)"
         if api == "openai-audio":
             return str(answer.get("text", "")).strip()[:1000]
         if api == "openai-images":
@@ -742,7 +775,8 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     replica = next((r for r in d.workload.replicas if r.ordinal == target["replica"]), None)
     if route.api == "openai-videos":
         return _try_videos(target, replica)
-    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws)
+    zero_shot = d.model is not None and vision.is_zero_shot(d.model.meta or {})
+    path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws, zero_shot)
     started = time.monotonic()
     status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
     ms = int((time.monotonic() - started) * 1000)

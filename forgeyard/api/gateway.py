@@ -5,8 +5,9 @@ web page cannot use a signed-in browser against it; for the same reason the cons
 does not apply (clients are not browsers). The host check (421) does. No CORS headers are sent.
 
 The console's playground (`/api/playground/…`) goes through the same code with the signed-in
-user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Vision tab
-reaches vision models (1.4) at `/api/playground/vision/detect|segment|depth` like any /v1 request, and
+user, under the console's own rules (cookie + CSRF), counted as "console" in usage. Its Classify view
+(1.4.4) posts to `/api/playground/classify`. Its Vision tab
+reaches vision models (1.4) at `/api/playground/vision/detect|segment|depth|classify` like any /v1 request, and
 exposed vision workloads (1.3, `/api/playground/vision/<workload>/<task>`) the way /x/ does
 (forgeyard/gateway/vision.py).
 
@@ -26,7 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from forgeyard import deprecation
 from forgeyard.db import new_session
-from forgeyard.gateway import imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs, vision
+from forgeyard.gateway import classify, imagegen, keys, media as gmedia, proxy, speech, videogen, videojobs, vision
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -83,13 +84,15 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
         body = await proxy.read_body(request, await run_in_threadpool(proxy.body_ceiling))
         parsed = proxy.parse_body(body, request.headers.get("content-type", ""), kind)
         if kind == "vision":
-            parsed.vision = endpoint.split("/", 1)[1]   # 1.4: detect, segment or depth
+            parsed.vision = endpoint.split("/", 1)[1]   # 1.4: detect, segment or depth; 1.4.4: classify
         route = await run_in_threadpool(_route, parsed.model)
         route = proxy.check_access(caller, route, parsed.model, endpoint)
         if endpoint == speech.ENDPOINT:
             route = proxy.fit_speech(route, parsed)  # 1.3: checked, voice cloning refused, counted
         elif endpoint == imagegen.ENDPOINT:
             route = proxy.fit_images(route, parsed)  # 1.3: checked against each deployment's caps
+        elif endpoint == classify.ENDPOINT:
+            proxy.fit_classify(parsed)               # 1.4.4: checked, only the known fields sent on
         # Images, audio and video (1.3): parts rebuilt, the route narrowed to what can take them,
         # media URLs fetched by the gateway, and the size checked again with them inlined.
         media = proxy.scan_media(parsed, endpoint)
@@ -177,6 +180,17 @@ async def vision_segment(request: Request):
 async def vision_depth(request: Request):
     """Depth estimation (1.4): an image to a depth model; a 16-bit depth PNG back."""
     return await _api(request, "vision/depth")
+
+
+@router.post("/vision/classify")
+async def vision_classify(request: Request):
+    """Image classification (1.4.4, #141): an image to a classifier (fixed classes, or CLIP-like and told the labels);
+    the best labels and their scores back."""
+    return await _api(request, "vision/classify")
+@router.post("/classify")
+async def classify_text(request: Request):
+    """Text classification (1.4.4): texts to a text classification model; each one's label and probabilities back."""
+    return await _api(request, "classify")
 
 
 @router.post("/images/edits")
@@ -355,7 +369,8 @@ async def unknown(rest: str):
                                                  "/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/rerank, "
                                                  "/v1/score, /v1/audio/transcriptions, /v1/audio/speech, "
                                                  "/v1/audio/voices, /v1/images/generations, /v1/videos and "
-                                                 "/v1/vision/detect, /segment and /depth.").response()
+                                                 "/v1/vision/detect, /segment, /depth and /classify, and "
+                                                 "/v1/classify.").response()
 
 
 # ------------------------------------------------------------------ the console's playground

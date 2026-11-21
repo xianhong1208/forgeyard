@@ -10,7 +10,7 @@ import json
 from typing import Optional
 from urllib.parse import quote
 
-from forgeyard.models import fetch, gguf, modalities, safetensors, sources, vision
+from forgeyard.models import fetch, gguf, modalities, safetensors, sources, textcls, vision
 from forgeyard.models.sources import Source, SourceError
 
 MAX_SHARDS = 256
@@ -32,6 +32,10 @@ def _hf_error(e: fetch.FetchError, repo: str) -> InspectError:
     return InspectError(str(e))
 
 
+# Models whose position ids start after the padding index (transformers' and vLLM's RoBERTa embeddings).
+ROBERTA_TYPES = ("roberta", "xlm-roberta")
+
+
 def config_summary(config: dict) -> dict:
     """The fields the KV-cache estimate needs, from a transformers config.json (multimodal
     configs keep them in text_config; a speech-only model such as Qwen3-TTS in talker_config, the
@@ -45,6 +49,13 @@ def config_summary(config: dict) -> dict:
     heads = int(text.get("num_attention_heads") or 0)
     hidden = int(text.get("hidden_size") or text.get("d_model") or 0)
     head_dim = text.get("head_dim") or (hidden // heads if heads else 0)
+    max_context = int(text.get("max_position_embeddings") or 0)
+    pad = text.get("pad_token_id")
+    if text.get("model_type") in ROBERTA_TYPES and isinstance(pad, int) and not isinstance(pad, bool) \
+            and 0 <= pad < max_context:
+        # 1.4.4: RoBERTa's positions start after the padding index (vLLM's roberta.py adds padding_idx + 1), so
+        # 514 position embeddings hold 512 tokens (BGE-M3: 8194, 8192); a longer --max-model-len overflows them.
+        max_context -= pad + 1
     return {
         "architectures": config.get("architectures") or [],
         "model_type": config.get("model_type"),
@@ -54,7 +65,7 @@ def config_summary(config: dict) -> dict:
         "head_dim": int(head_dim or 0),
         "hidden_size": hidden,
         "vocab": int(text.get("vocab_size") or 0),
-        "max_context": int(text.get("max_position_embeddings") or 0),
+        "max_context": max_context,
         "dtype": str(config.get("torch_dtype") or config.get("dtype") or text.get("torch_dtype") or "bfloat16"),
         "quantization": (config.get("quantization_config") or {}).get("quant_method"),
     }
@@ -301,10 +312,21 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
         elif fmt == "safetensors":
             config = json.loads(fetch.get_bytes(url("config.json"), policy, headers=_auth(token), limit=4 * 1024**2))
             out["config"] = config_summary(config)
+            labelled = textcls.summary(config) if isinstance(config, dict) else None
+            if out["task_hint"] in ("rerank", "classify", None) and labelled is not None:
+                # 1.4.4 (#144): vLLM's rule on a sequence classifier, whatever Hugging Face tags it: one output
+                # scores pairs (a reranker), two labels or more are a text classifier's.
+                out["task_hint"] = "rerank" if labelled["labels"] == 1 else "classify"
+            elif out["task_hint"] == "classify":
+                out["task_hint"] = None     # tagged text-classification, but no classification head to read
             if (task or out["task_hint"]) == "rerank" and isinstance(config, dict) and (
                     why := sources.reranker_refusal(config)):
-                # 1.4.3 (#147): a text classifier tagged text-classification, like the rerankers.
+                # 1.4.3 (#147): a text classifier is never served as a reranker.
                 raise InspectError(why)
+            if (task or out["task_hint"]) == "classify":
+                if why := textcls.refusal(labelled):
+                    raise InspectError(why)
+                out["classify"] = labelled
             out["modalities"] = modalities.from_config(config, paths)
             seen = vision.summary(config) if isinstance(config, dict) else None
             if seen is not None:
@@ -316,9 +338,8 @@ def inspect_hf(repo: str, ref: Optional[str], file: Optional[str], *, endpoint: 
                 out["voices"] = voices_of(config)
             if modalities.vision_tile_px(config):
                 out["vision_tile_px"] = modalities.vision_tile_px(config)
-            shards = [p for p in paths if p.endswith(".safetensors") and "/" not in p]
-            if not shards:
-                shards = [p for p in paths if p.endswith(".safetensors")]
+            weights = [p for p in paths if p.endswith(".safetensors") and not sources.other_weights(p)]
+            shards = [p for p in weights if "/" not in p] or weights
             if len(shards) > MAX_SHARDS:
                 raise InspectError(f"more than {MAX_SHARDS} safetensors files")
             out["weights"] = safetensors.merge([safetensors.read_remote(ranged(p)) for p in shards])

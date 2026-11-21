@@ -1,0 +1,22 @@
+{
+  "id": "unitary/toxic-bert",
+  "pipeline_tag": "text-classification",
+  "library_name": "transformers",
+  "tags": [
+    "transformers",
+    "pytorch",
+    "jax",
+    "safetensors",
+    "bert",
+    "text-classification",
+    "arxiv:1703.04009",
+    "arxiv:1905.12516",
+    "license:apache-2.0",
+    "endpoints_compatible",
+    "deploy:azure",
+    "region:us"
+  ],
+  "cardData": {
+    "license": "apache-2.0"
+  }
+}

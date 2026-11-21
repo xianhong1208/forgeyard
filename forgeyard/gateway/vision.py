@@ -1,7 +1,8 @@
 """The Playground's Vision tab: vision models (1.4) and exposed vision workloads (1.3), tried from the console
 as the signed-in user.
 
-**Vision models (1.4)** are deployments of detection, SAM 2 and depth models (forgeyard/models/vision.py).
+**Vision models (1.4)** are deployments of detection, SAM 2 and depth models (forgeyard/models/vision.py); a
+zero-shot detector (1.4.4, #142) is marked `zero_shot`, and the tab asks what to find.
 The tab sends their requests to `/api/playground/vision/detect|segment|depth` with the model's name, which
 is the /v1 gateway path for the signed-in person (forgeyard/api/gateway.py); `options()` lists them with
 how many replicas are ready.
@@ -97,9 +98,13 @@ def model_options(db: DbSession) -> list[dict]:
         m = d.model if d is not None else None
         task = apis[row.api]
         out.append({"name": row.served_name, "task": task, "title": vision_models.LABEL[task],
-                    "endpoint": f"/v1/vision/{task}", "deployment_id": row.deployment_id,
+                    "endpoint": f"/v1/{vision_models.ENDPOINT[task]}", "deployment_id": row.deployment_id,
                     "model": ((m.meta or {}).get("repo") or m.source) if m is not None else None,
                     "licence": (m.meta or {}).get("license") if m is not None else None,
+                    # 1.4.4 (#142): a zero-shot detector finds what the request names (`labels`)
+                    # (1.4.4, #141) and a zero-shot image classifier the labels to choose from
+                    "zero_shot": bool(m is not None and task in ("detect", "image-classify")
+                                      and vision_models.is_zero_shot(m.meta or {})),
                     "ready": ready, "running": running, "reason": None if ready else route.reason})
     return out
 

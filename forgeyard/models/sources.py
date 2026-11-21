@@ -43,7 +43,9 @@ CONTAINER_ROOT = "/models"
 
 # Weight formats a safetensors deployment does not need (they would double the download).
 _OTHER_WEIGHTS = ("*.bin", "*.pt", "*.pth", "*.h5", "*.msgpack", "*.ot", "*.onnx", "*.onnx_data", "*.tflite",
-                  "*.mlmodel", "*.gguf", "*.ckpt", "*.npz", "*.pkl")
+                  "*.mlmodel", "*.gguf", "*.ckpt", "*.npz", "*.pkl",
+                  # OpenCLIP's own copy of a CLIP model beside the transformers one (LAION's CLIP repositories, 1.4.4)
+                  "open_clip_*")
 _OTHER_DIRS = ("onnx/", "openvino/", "coreml/", "original/", "tf_model/", "flax_model/")
 
 
@@ -183,6 +185,11 @@ def container_paths(model: dict) -> dict:
 def _matches(path: str, patterns) -> bool:
     name = posixpath.basename(path)
     return any(fnmatch.fnmatch(name, p) for p in patterns)
+
+
+def other_weights(path: str) -> bool:
+    """A weights file a safetensors model does not load (another framework's copy, OpenCLIP's, …): not downloaded."""
+    return _matches(path, _OTHER_WEIGHTS) or any(path.startswith(d) for d in _OTHER_DIRS)
 
 
 def detect_format(paths: list[str], library: Optional[str] = None) -> str:
@@ -400,7 +407,7 @@ def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmpr
             if path != chosen and not (m and c and m.group(1) == c.group(1) and m.group(3) == c.group(3)):
                 continue
         elif fmt == "safetensors":
-            if _matches(path, _OTHER_WEIGHTS) or any(path.startswith(d) for d in _OTHER_DIRS):
+            if other_weights(path):
                 continue
         out.append(f)
     if fmt == "gguf" and not out:
@@ -413,15 +420,18 @@ def select_files(files: list[dict], fmt: str, chosen: Optional[str] = None, mmpr
 TASK_FROM_PIPELINE = {
     "text-generation": "chat", "text2text-generation": "chat", "image-text-to-text": "chat",
     "feature-extraction": "embed", "sentence-similarity": "embed",
-    # Many cross-encoder rerankers are tagged text-classification (BAAI/bge-reranker-v2-m3); so are text
-    # classifiers, which the inspector tells apart by their number of labels (reranker_refusal).
-    "text-ranking": "rerank", "text-classification": "rerank",
+    # Text classifiers are tagged text-classification (1.4.4, #144); so are many cross-encoder rerankers
+    # (BAAI/bge-reranker-v2-m3). The inspector tells them apart by their number of labels (one: a reranker).
+    # Zero-shot (NLI) models are classifiers too, refused until 1.5 (forgeyard/models/textcls.py).
+    "text-ranking": "rerank", "text-classification": "classify", "zero-shot-classification": "classify",
     "automatic-speech-recognition": "asr",
     "text-to-speech": "tts",
     "text-to-image": "image",
     "text-to-video": "video",
     # 1.4, vision models (forgeyard/models/vision.py)
     "object-detection": "detect", "mask-generation": "segment", "depth-estimation": "depth",
+    "zero-shot-object-detection": "detect",   # 1.4.4 (#142): Grounding DINO, OWLv2, …: they find what a request names
+    "image-classification": "image-classify", "zero-shot-image-classification": "image-classify",   # 1.4.4 (#141)
 }
 
 
@@ -434,7 +444,7 @@ def task_hint(pipeline_tag: Optional[str], tags: list[str]) -> Optional[str]:
     return None
 
 
-# ------------------------------------------------------------------ rerankers and text classifiers (1.4.3)
+# ------------------------------------------------------------------ rerankers and text classifiers (1.4.3, 1.4.4)
 def sequence_labels(config: dict) -> Optional[int]:
     """How many outputs a sequence-classification model's head has, or None when config.json names no
     …ForSequenceClassification architecture (a causal-LM reranker such as Qwen3-Reranker). As transformers
@@ -455,7 +465,7 @@ def sequence_labels(config: dict) -> Optional[int]:
 def reranker_refusal(config: dict) -> Optional[str]:
     """Why a model cannot be served as a reranker (a message), or None. vLLM's rule: a sequence-classification
     model scores pairs (/rerank, /score) only when it has one output (num_labels 1); with more it is a text
-    classifier (sentiment, topic, NLI…), which Forgeyard does not serve yet."""
+    classifier (sentiment, topic, NLI…), added as one (task classify, 1.4.4) and never as a reranker."""
     n = sequence_labels(config)
     if n is None or n == 1:
         return None
@@ -463,4 +473,4 @@ def reranker_refusal(config: dict) -> Optional[str]:
     names = [str(v)[:40] for _, v in sorted(labels.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0)]
     shown = f" ({', '.join(names[:6])}{', …' if len(names) > 6 else ''})" if names else ""
     return (f"This is a text classifier with {n} labels{shown}, not a reranker: a reranker has one output "
-            "(num_labels 1 in its config.json). Text classification comes with #144.")
+            "(num_labels 1 in its config.json). Add it as a text classification model.")

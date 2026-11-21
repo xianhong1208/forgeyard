@@ -162,7 +162,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 Then:
@@ -194,7 +194,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -209,7 +209,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4 inventory
 ```
 
 ### CPU only
@@ -223,7 +223,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
 
 ### Why these options
@@ -256,8 +256,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.3 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.4 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -276,18 +276,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.3 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.4 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.4.3`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.4.4`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -300,7 +300,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.4
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -427,8 +427,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.3 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.4 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -523,15 +523,26 @@ and an offline machine works once its cache has it.
    (depth), all Apache-2.0. Or search Hugging Face with the task **Object detection**, **Segmentation**
    or **Depth estimation**: any transformers detection model (RT-DETR, D-FINE, DETR without a timm
    backbone…), SAM 2 or 2.1, or depth model (Depth Anything, DPT…) with a permissive licence (Apache-2.0,
-   MIT, BSD). Another licence, or none, cannot be added, nor can a zero-shot detector (Grounding DINO,
-   OWL-ViT, OWLv2…: support comes with #142).
+   MIT, BSD). Another licence, or none, cannot be added. Since 1.4.4 the list also has three detectors
+   that **find what you name** (Grounding DINO tiny, MM-Grounding-DINO tiny, OWLv2 base): no fixed classes,
+   each request says what to look for (see below). They need the vision image of 1.4.4 or later.
 2. **Deploy**: the suggestion is the CPU (about 1.3 GiB of RAM, a fraction of a second to a second and a
    half per image on four threads) or an NVIDIA GPU (the files plus about 1.5 GiB on a shared card).
 3. The deployment shows up under **Serving → Vision**, with its path. **Try it** on its page
    sends a test image; the **Playground** (the model under *Vision* in its picker) takes your own pictures.
 
 Call it with an API key at `/v1/vision/detect` (or `/segment`, `/depth`), the model's name in `model`
-and the picture as a file field `image`:
+and the picture as a file field `image`. A detector that finds what you name also takes `labels`, the
+names to look for (a comma-separated field, or a JSON list), and refuses a request without them (400
+`labels_required`):
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=grounding-dino-tiny -F image=@cats.jpg -F 'labels=cat, remote control' -F threshold=0.3
+```
+
+The other kinds:
 
 ```bash
 curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/detect \
@@ -578,6 +589,38 @@ A machine that cannot reach Docker Hub gets the vision image through the server,
 image ([Offline machines](#offline-machines)); or load it there (Models → Engines → `vision` → *Machine
 without registry access* gives the commands).
 
+## Classify images
+
+Image classification (1.4.4) is a model kind of its own, *Image classification* (task `image-classify`),
+answered at `/v1/vision/classify` by the same vision server; it is not text classification (`/v1/classify`).
+Two sorts of model:
+
+- **Fixed classes:** ViT, ConvNeXt V2, DINOv2 classifiers… (an `…ForImageClassification` model) know their
+  own list, often the 1,000 ImageNet classes, and answer the best of them.
+- **Zero-shot:** CLIP and SigLIP 2 sort a picture into the labels you send with each request (`labels`),
+  each read as "This is a photo of …" (`template` changes that). SigLIP scores each label on its own
+  (`multi_label: true`: several can fit, or none); CLIP shares 1 between them.
+
+1. **Models → Add a model → Recommended → Image classification** lists SigLIP 2 base and LAION's CLIP
+   ViT-B/32 (zero-shot), ViT base, ConvNeXt V2 tiny and DINOv2 small (ImageNet classes), Apache-2.0 or MIT.
+   Or search Hugging Face with the task **Image classification**.
+2. **Deploy** it like the other vision models: a CPU is enough (0.1 to 0.4 s per picture on four threads).
+   It needs the vision image of 1.4.4 or later.
+3. Call it:
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=vit-base-patch16-224 -F image=@cats.jpg -F top_k=3
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" \
+  -F model=siglip2-base -F image=@cats.jpg -F 'labels=cats on a sofa, a dog, an invoice'
+```
+
+The answer: `labels`, best first, each `{"label", "score"}`, and `multi_label`. A zero-shot classifier
+without `labels` answers 400 `labels_required`; a classifier with fixed classes given `labels` answers 400
+`labels_not_supported`.
+
 ## Try vision in the Playground
 
 The Playground's vision panel sends a picture to a vision model ([deployed like any other](#deploy-an-object-detection-model)),
@@ -593,12 +636,16 @@ templates are not offered here (apps left the console in 1.4 and are
 2. Drop a PNG, JPEG or WebP picture on the box, or **Choose an image** (at most 20 MiB).
 3. Then, by task:
    - **Object detection:** **Detect objects** draws a box with the label and score of everything the
-     model found; **Score at least** hides the weaker ones without asking again.
+     model found; **Score at least** hides the weaker ones without asking again. A detector that finds
+     what you name (1.4.4) first asks **Find these**: type the names, separated by commas (*cat, remote
+     control*), then **Find**; the slider starts at 0.3, as these models score lower.
    - **Segmentation:** click a point on something, or drag a box around it. The best mask is laid over
      the picture; the buttons above it switch between the masks the model offers. Click or drag again
      for another.
    - **Depth estimation:** **Estimate depth** shows the depth map beside the photo, brighter or warmer
      where it is nearer, in **Colour** or **Grey**. The depth is relative, not metres.
+   - **Image classification (1.4.4):** **Classify** lists the best classes with a bar for each score. A
+     zero-shot classifier first asks for **Labels**, separated by commas (*a cat, a dog, a screenshot*).
 
 Under the result: which replica answered, the picture's size and the time the model and the whole request
 took. A stopped model, or a picture it cannot read, is said in plain words. The console sends it to
@@ -782,6 +829,75 @@ the offline machine's cache. The deployment there finds it cached and downloads 
 
 **How long:** minutes per video, one at a time per replica; the others wait their turn on it.
 Raise *Longest job* under **Advanced** for long or large videos.
+
+## Classify text
+
+Text classification (1.4.4) labels texts with a small, fast model: sentiment, the language, toxicity. It
+runs on vLLM's pooling runner (recipe `vllm-pooling`) on a GPU, one card shared by memory.
+
+1. **Models → Add a model → Recommended**: *Text classification* lists a multilingual sentiment model (1 to
+   5 stars), a language detector (20 languages, Chinese among them) and a toxicity model (6 labels, each
+   scored on its own), MIT or Apache-2.0. Or search Hugging Face with the task **Text classification**: a
+   BERT, RoBERTa, XLM-RoBERTa or ModernBERT classifier with two labels or more can be added. The catalog
+   shows its labels; a reranker (one output), a zero-shot (NLI) model and DeBERTa or DistilBERT classifiers
+   are refused with the reason.
+2. **Deploy** it. The context starts at the model's own maximum when that is shorter than the engine's
+   default (512 tokens for these BERT-sized models). About 2 GiB on a shared card.
+3. It shows up under **Serving → Text classification**. **Try it** on its page sends one sentence; the
+   **Playground** takes your own texts, one per line, and shows every label's probability.
+
+Call it with an API key at `/v1/classify` (Forgeyard's own API, vLLM's shape: the OpenAI SDK has none):
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/classify \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "bert-multilingual-sentiment", "input": ["Great phone, fast delivery.", "Broke after a day."]}'
+```
+
+```json
+{"id": "classify-…", "object": "list", "created": 1795000000, "model": "bert-multilingual-sentiment",
+ "data": [{"index": 0, "label": "5 stars", "probs": [0.01, 0.01, 0.04, 0.26, 0.68], "num_classes": 5},
+          {"index": 1, "label": "1 star", "probs": [0.81, 0.14, 0.03, 0.01, 0.01], "num_classes": 5}],
+ "usage": {"prompt_tokens": 19, "total_tokens": 19, "completion_tokens": 0}}
+```
+
+From Python, with any HTTP client:
+
+```python
+import os
+import ssl
+
+import httpx
+
+ca = ssl.create_default_context(cafile="forgeyard-ca.pem")
+r = httpx.post("https://192.168.1.20:7860/v1/classify", verify=ca,
+               headers={"Authorization": f"Bearer {os.environ['FORGEYARD_API_KEY']}"},
+               json={"model": "xlm-roberta-language-detection", "input": ["今天天氣很好", "Bonjour à tous"]})
+for d in r.json()["data"]:
+    print(d["label"], round(max(d["probs"]), 3))
+```
+
+`truncate_prompt_tokens` (a number of tokens, or -1 for the model's maximum) cuts longer texts instead of
+refusing them; up to 2,048 texts per request.
+
+### Classify with a chat model, into labels you choose
+
+A chat model classifies into any labels with structured outputs: it can only answer one of them. On vLLM
+the shortest form is `structured_outputs.choice`:
+
+```bash
+curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
+  -H "Authorization: Bearer $FORGEYARD_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "qwen3-4b", "temperature": 0,
+       "chat_template_kwargs": {"enable_thinking": false},
+       "messages": [{"role": "user", "content": "Which department should handle this? 我的發票金額開錯了"}],
+       "structured_outputs": {"choice": ["billing", "shipping", "technical", "other"]}}'
+```
+
+The answer's `content` is one of the four. A JSON schema with an `enum` does the same on vLLM, llama.cpp
+and cloud providers (`response_format: {"type": "json_schema", …}`). It is slower and costlier than a
+classifier, but needs no new model, and labels can change per request. Zero-shot classifiers (NLI models
+with your labels in the request, on the CPU too) come with the transformers engine in 1.5 (#144).
 
 ## Use gated Hugging Face models
 
@@ -1032,7 +1148,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.3
+  docker.io/tonyhuang1101/forgeyard:1.4.4
 sudo docker logs forgeyard
 ```
 
@@ -1066,7 +1182,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.3 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.4 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1075,7 +1191,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.3 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.4 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1084,23 +1200,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.4
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 ```
 
-`1.4.4` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
+`1.4.5` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.3
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.4
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1108,7 +1224,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.3 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.4 .`
 
 ## Run the server as a service
 
@@ -1193,7 +1309,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.3 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1207,7 +1323,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.3
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.4
    ```
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried

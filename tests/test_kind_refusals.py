@@ -1,8 +1,9 @@
-"""Kinds of models the catalog refuses until they are supported (1.4.3, #147): zero-shot (open-vocabulary)
-object detectors, whose architectures end in ForObjectDetection like the detectors the vision server loads
-(support comes with #142), and text classifiers, tagged text-classification like many cross-encoder
-rerankers (support comes with #144). The configs and Hugging Face answers are the real ones, saved from the
-repositories in tests/fixtures/models/kinds (FY-KIND-*)."""
+"""Kinds of models that look like others (1.4.3, #147): zero-shot (open-vocabulary) object detectors, whose
+architectures end in ForObjectDetection like the detectors the vision server loads (refused in 1.4.3, supported
+since 1.4.4 as detect models marked zero_shot, #142), and text classifiers, tagged text-classification like many
+cross-encoder rerankers (served as text classification models since 1.4.4, #144: tests/test_text_classify.py). The
+configs and Hugging Face answers are the real ones, saved from the repositories in tests/fixtures/models/kinds
+(FY-KIND-*)."""
 
 from __future__ import annotations
 
@@ -77,20 +78,25 @@ def inspect(server: FakeHF, repo_id: str, task: str | None = None) -> dict:
 
 # ------------------------------------------------------------------ zero-shot detectors
 def test_fy_kind_001_zero_shot_detectors_are_known_by_model_type_or_architecture():
-    """FY-KIND-001: the real configs of Grounding DINO, OWLv2, OWL-ViT, OmDet-Turbo, MM-Grounding-DINO and LLMDet
-    are zero-shot detectors: still read as detect (their architectures end in ForObjectDetection), with the
-    problem that names #142, so the catalog refuses them as detection models. A model_type alone, an
-    architecture alone (any case) or a model_type spelled with underscores is enough; RT-DETRv2 and other
-    detectors are not zero-shot."""
+    """FY-KIND-001 (1.4.4, #142): the real configs of Grounding DINO, OWLv2, OWL-ViT, OmDet-Turbo, MM-Grounding-DINO
+    and LLMDet are zero-shot detectors: detect models (their architectures end in ForObjectDetection) marked
+    zero_shot, with no classes (id2label means nothing for them), so the catalog takes them; OmDet-Turbo, whose
+    Swin backbone comes from timm (use_timm_backbone), has the timm problem and is refused like DETR with timm. A
+    model_type alone, an architecture alone (any case) or a model_type spelled with underscores is enough;
+    RT-DETRv2 and other detectors are not zero-shot."""
     for name in ZERO_SHOT:
         cfg = config(name)
         assert vision.zero_shot(cfg), name
         s = vision.summary(cfg)
         assert s["task"] == "detect" and s["zero_shot"] is True, name
-        assert s["problem"] == vision.ZERO_SHOT_PROBLEM and "#142" in s["problem"], name
+        assert "labels" not in s and "label_examples" not in s, name
         why = vision.refusal("detect", {"kind": "hf", "license": "apache-2.0", "vision": s})
-        assert why == f"This model cannot run on Forgeyard's vision server: {vision.ZERO_SHOT_PROBLEM}.", name
-        assert "zero-shot (open-vocabulary) detector" in why
+        if name == "omdet-turbo-swin-tiny-hf":
+            assert s["problem"] == vision.TIMM_PROBLEM and "timm backbone" in why, name
+            continue
+        assert "problem" not in s and why is None, name
+        assert vision.refusal("detect", {"kind": "hf", "license": "cc-by-nc-4.0", "vision": s}).startswith(
+            "Vision models are added with a permissive licence only"), name
     assert vision.zero_shot({"model_type": "owlv2"})                                       # no architectures
     assert vision.zero_shot({"model_type": "grounding_dino", "architectures": ["Whatever"]})
     assert vision.zero_shot({"architectures": ["groundingdinoforobjectdetection"]})         # no model_type
@@ -120,26 +126,31 @@ def test_fy_kind_002_the_list_follows_the_vision_images_transformers():
         assert pins == [vision.ZERO_SHOT_CHECKED_WITH], (build, pins)
 
 
-def test_fy_kind_003_adding_a_zero_shot_detector_is_refused(owner, hf):
-    """FY-KIND-003: the inspector reads Grounding DINO and OWLv2 as detection models with the problem (the preview
-    shows it); adding either, with the task from Hugging Face or detect asked for, answers 422
-    not_a_vision_model naming #142, and re-tasking a model to detect is refused the same way. RT-DETRv2 is
-    added as before."""
+def test_fy_kind_003_a_zero_shot_detector_is_added_as_a_detection_model(owner, hf):
+    """FY-KIND-003 (1.4.4): the inspector reads Grounding DINO and OWLv2 as detection models marked zero_shot (the
+    preview says so); they are added with the task from Hugging Face (zero-shot-object-detection) or detect asked
+    for, served by the vision recipe, and the catalog says zero_shot instead of classes. RT-DETRv2 is added as
+    before, with its 80 classes."""
     m = inspect(hf, "IDEA-Research/grounding-dino-tiny")
-    assert m["task_hint"] == "detect" and m["vision"]["zero_shot"] is True and "#142" in m["vision"]["problem"]
+    assert m["task_hint"] == "detect" and m["vision"]["zero_shot"] is True and "problem" not in m["vision"]
     prev = owner.post("/api/models/inspect", json={"source": "hf://google/owlv2-base-patch16-ensemble"})
-    assert prev.status_code == 200 and "#142" in prev.json()["meta"]["vision"]["problem"]
+    assert prev.status_code == 200 and prev.json()["meta"]["vision"]["zero_shot"] is True
     for name, source, task in [("gdino", "hf://IDEA-Research/grounding-dino-tiny", None),
                                ("owl", "hf://google/owlv2-base-patch16-ensemble", "detect"),
-                               ("llmdet", "hf://iSEE-Laboratory/llmdet_tiny", None)]:
+                               ("llmdet", "hf://iSEE-Laboratory/llmdet_tiny", None),
+                               ("owlvit", "hf://google/owlvit-base-patch32", None)]:
         r = owner.post("/api/models", json={"name": name, "source": source, **({"task": task} if task else {})})
-        assert r.status_code == 422, (name, r.text)
-        d = r.json()["detail"]
-        assert d["code"] == "not_a_vision_model" and "zero-shot (open-vocabulary) detector" in d["message"], name
-        assert "support comes with #142" in d["message"]
+        assert r.status_code == 201, (name, r.text)
+        out = r.json()["model"]
+        assert out["task"] == "detect" and out["recipes"] == ["vision"], name
+        assert out["vision"]["zero_shot"] is True and "labels" not in out["vision"], name
+    r = owner.post("/api/models", json={"name": "omdet", "source": "hf://omlab/omdet-turbo-swin-tiny-hf"})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "not_a_vision_model"
+    assert "timm backbone" in r.json()["detail"]["message"]
     ok = owner.post("/api/models", json={"name": "rtdetr", "source": "hf://PekingU/rtdetr_v2_r18vd"})
     assert ok.status_code == 201, ok.text
     assert ok.json()["model"]["task"] == "detect" and ok.json()["model"]["recipes"] == ["vision"]
+    assert ok.json()["model"]["vision"]["labels"] == 80 and "zero_shot" not in ok.json()["model"]["vision"]
 
 
 def _old_row(name: str, source: str, arch: str, model_type: str, archs: list | None = None) -> dict:
@@ -147,7 +158,8 @@ def _old_row(name: str, source: str, arch: str, model_type: str, archs: list | N
     architectures, when not just `arch`)."""
     return {"kind": "hf", "repo": source[5:], "ref": "main", "revision": "c" * 40, "format": "safetensors",
             "pipeline_tag": "zero-shot-object-detection", "license": "apache-2.0", "modalities": [],
-            "task_hint": "detect", "vision": {"task": "detect", "architecture": arch},
+            "task_hint": "detect", "vision": {"task": "detect", "architecture": arch, "labels": 2,
+                                              "label_examples": ["LABEL_0", "LABEL_1"]},
             "config": {"architectures": [arch] if archs is None else archs, "model_type": model_type},
             "weights": {"bytes": 600 * MIB, "params": {"F32": 150 * MIB}},
             "files": [{"path": "config.json", "size": 2000, "oid": "a" * 40},
@@ -155,10 +167,29 @@ def _old_row(name: str, source: str, arch: str, model_type: str, archs: list | N
             "size_bytes": 600 * MIB + 2000}
 
 
-def test_fy_kind_004_a_zero_shot_detector_already_in_the_catalog_is_not_deployed(owner):
-    """FY-KIND-004: a zero-shot detector added before 1.4.3 stays in the catalog (no migration), but deploying it,
-    or estimating a deployment of it, answers 422 not_a_vision_model with the same message, known from the
-    model_type or the architecture the catalog kept; a detector that is not zero-shot still deploys."""
+NEW_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4@sha256:" + "4" * 64
+NEW_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.4.4-cuda@sha256:" + "5" * 64
+# The image the built-in recipe pinned before 1.4.4rc1.
+OLD_CPU = "docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6"
+OLD_CUDA = "docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3"
+
+
+def _vision_copy(name: str, cpu: str, cuda: str) -> str:
+    """The built-in vision recipe as a custom one named `name`, with these images."""
+    from forgeyard.models import recipes
+
+    text = recipes.builtin_recipes()["vision"][1].replace("name: vision\n", f"name: {name}\n", 1)
+    old = [v.image for v in recipes.parse_recipe(recipes.builtin_recipes()["vision"][1], builtin=True).variants]
+    return text.replace(f"image: {old[0]}", f"image: {cuda}").replace(f"image: {old[1]}", f"image: {cpu}")
+
+
+def test_fy_kind_004_a_zero_shot_detector_runs_on_a_vision_image_from_1_4_4_on(owner):
+    """FY-KIND-004 (1.4.4): a zero-shot detector added before 1.4.3 (no flag) is known from the model_type or the
+    architecture the catalog kept, and listed as zero_shot without the classes it was given then (no migration).
+    On a recipe whose Forgeyard vision image is older than 1.4.4 (the built-in one until 1.4.4rc1), deploying
+    or estimating it answers 422 vision_image_too_old naming both versions; on an image from 1.4.4 on, or another
+    image (a local build), it deploys. A detector that is not zero-shot deploys on the old image too; OmDet-Turbo,
+    which needs timm, is refused on any image (422 not_a_vision_model)."""
     add_catalog("gdino", _old_row("gdino", "hf://IDEA-Research/grounding-dino-tiny", "GroundingDinoForObjectDetection",
                                   "grounding-dino"), task="detect", fmt="safetensors",
                 source="hf://IDEA-Research/grounding-dino-tiny")
@@ -171,28 +202,117 @@ def test_fy_kind_004_a_zero_shot_detector_already_in_the_catalog_is_not_deployed
                 task="detect", fmt="safetensors", source="hf://acme/mm")
     add_catalog("rtdetr", _old_row("rtdetr", "hf://PekingU/rtdetr_v2_r18vd", "RtDetrV2ForObjectDetection",
                                    "rt_detr_v2"), task="detect", fmt="safetensors", source="hf://PekingU/rtdetr_v2_r18vd")
+    add_catalog("omdet", _old_row("omdet", "hf://omlab/omdet-turbo-swin-tiny-hf", "OmDetTurboForObjectDetection",
+                                  "omdet-turbo"), task="detect", fmt="safetensors", source="hf://omlab/omdet-turbo-swin-tiny-hf")
+    listed = {m["name"]: m for m in owner.get("/api/models").json()["models"]}
+    for model in ("gdino", "owl", "owl2", "mm"):
+        assert listed[model]["vision"]["zero_shot"] is True and "labels" not in listed[model]["vision"], model
+    assert listed["rtdetr"]["vision"]["labels"] == 2 and "zero_shot" not in listed["rtdetr"]["vision"]
+    assert owner.post("/api/recipes", json={"yaml": _vision_copy("vision-new", NEW_CPU, NEW_CUDA)}).status_code == 201
+    assert owner.post("/api/recipes", json={"yaml": _vision_copy("vision-old", OLD_CPU, OLD_CUDA)}).status_code == 201
+    assert owner.post("/api/recipes", json={"yaml": _vision_copy(
+        "vision-local", "forgeyard-local/forgeyard-vision:zs-test", "forgeyard-local/forgeyard-vision:zs-test-cuda")
+    }).status_code == 201
     cpu = make_node("cpu-a", features=("workloads", "models"))
     for model in ("gdino", "owl", "owl2", "mm"):
-        body = {"name": f"{model}-dep", "model": model, "recipe": "vision", "params": {"gpus": 0}, "machine_id": cpu,
+        body = {"name": f"{model}-dep", "model": model, "recipe": "vision-old", "params": {"gpus": 0}, "machine_id": cpu,
                 "wait": True}
         for path in ("/api/deployments", "/api/deployments/estimate"):
             r = owner.post(path, json=body)
             assert r.status_code == 422, (model, path, r.text)
-            assert r.json()["detail"] == {"code": "not_a_vision_model", "message":
-                                          f"This model cannot run on Forgeyard's vision server: {vision.ZERO_SHOT_PROBLEM}."}
+            d = r.json()["detail"]
+            assert d["code"] == "vision_image_too_old", (model, d)
+            assert "needs Forgeyard's vision image 1.4.4 or newer; the vision-old recipe runs 1.4.0" in d["message"]
     assert owner.get("/api/models").status_code == 200
-    deploy(owner, "rtdetr-dep", "rtdetr", "vision", params={"gpus": 0}, machine_id=cpu, wait=True)
-    assert vision.deploy_refusal("depth", _old_row("x", "hf://a/b", "OwlViTForObjectDetection", "owlvit")) is None
-    assert vision.deploy_refusal("detect", {**_old_row("x", "hf://a/b", "OwlViTForObjectDetection", "owlvit"),
-                                            "kind": "local"}) is None
+    deploy(owner, "rtdetr-dep", "rtdetr", "vision-old", params={"gpus": 0}, machine_id=cpu, wait=True)
+    deploy(owner, "gdino-new", "gdino", "vision-new", params={"gpus": 0}, machine_id=cpu, wait=True)
+    deploy(owner, "gdino-builtin", "gdino", "vision", params={"gpus": 0}, machine_id=cpu, wait=True)
+    deploy(owner, "owl-local", "owl", "vision-local", params={"gpus": 0}, machine_id=cpu, wait=True)
+    # OmDet-Turbo (kept from before 1.4.3) needs timm, whatever the image.
+    for recipe in ("vision", "vision-new"):
+        r = owner.post("/api/deployments", json={"name": "omdet-dep", "model": "omdet", "recipe": recipe,
+                                                 "params": {"gpus": 0}, "machine_id": cpu})
+        assert r.status_code == 422 and r.json()["detail"]["code"] == "not_a_vision_model", (recipe, r.text)
+        assert "timm backbone" in r.json()["detail"]["message"]
+
+
+def test_fy_kind_007_which_vision_images_run_zero_shot_detectors():
+    """FY-KIND-007 (1.4.4): the version is read from a Forgeyard vision image's tag (CPU or -cuda, pinned or not);
+    an image of another name has none and is taken as it is; the refusal is for zero-shot detectors only, and
+    names the oldest image of the recipe's variants."""
+    from types import SimpleNamespace as NS
+
+    assert vision.image_version("docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:" + "a" * 64) == (1, 4, 0)
+    assert vision.image_version("docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:" + "a" * 64) == (1, 4, 0)
+    assert vision.image_version("docker.io/x/forgeyard-vision:1.10.2") == (1, 10, 2)
+    for other in ("forgeyard-local/vision:test", "docker.io/x/forgeyard-vision:latest", "docker.io/x/forgeyard-vision",
+                  "docker.io/x/my-forgeyard-vision:1.4.0", None, ""):
+        assert vision.image_version(other) is None, other
+    zs = {"kind": "hf", "vision": {"task": "detect", "architecture": "Owlv2ForObjectDetection", "zero_shot": True}}
+    rt = {"kind": "hf", "vision": {"task": "detect", "architecture": "RtDetrV2ForObjectDetection"}}
+
+    def recipe(*images):
+        return NS(name="r", variants=[NS(image=i) for i in images])
+
+    old = recipe("docker.io/x/forgeyard-vision:1.4.3-cuda@sha256:" + "a" * 64, "docker.io/x/forgeyard-vision:1.4.4")
+    code, why = vision.deploy_refusal("detect", zs, old)
+    assert code == "vision_image_too_old"
+    assert why.startswith("This zero-shot detector needs Forgeyard's vision image 1.4.4 or newer; the r recipe runs 1.4.3.")
+    assert vision.deploy_refusal("detect", zs, recipe("docker.io/x/forgeyard-vision:1.4.4", "docker.io/x/forgeyard-vision:2.0.0-cuda")) is None
+    assert vision.deploy_refusal("detect", zs, recipe("local/vision:dev", None)) is None
+    assert vision.deploy_refusal("detect", rt, old) is None
+    assert vision.deploy_refusal("depth", zs, old) is None
+    assert vision.deploy_refusal("detect", zs, None) is None
+    assert vision.deploy_refusal("detect", {**zs, "kind": "local"}, old) is None
+
+
+def test_fy_kind_008_a_pre_release_vision_image_counts_as_its_release():
+    """FY-KIND-008 (1.4.4): a pre-release tag of the vision image (PEP 440 aN, bN or rcN, CPU or -cuda, pinned or
+    not) is read as the release it leads to, so 1.4.4rc1 runs zero-shot detectors and image classifiers and
+    1.4.3rc1 is refused as older than 1.4.4; the built-in recipe's own images (1.4.4rc1) are read as 1.4.4, not
+    passed as images of another name. A tag that is no PEP 440 pre-release stays unread."""
+    from types import SimpleNamespace as NS
+
+    from forgeyard.models import recipes
+
+    digest = "@sha256:" + "b" * 64
+    for tag, want in (("1.4.4rc1", (1, 4, 4)), ("1.4.4rc1-cuda", (1, 4, 4)), ("1.4.4a2", (1, 4, 4)),
+                      ("1.4.4b10-cuda", (1, 4, 4)), ("1.4.3rc1", (1, 4, 3)), ("1.4.3rc1-cuda", (1, 4, 3)),
+                      ("1.10.0rc12", (1, 10, 0))):
+        for suffix in ("", digest):
+            assert vision.image_version(f"docker.io/x/forgeyard-vision:{tag}{suffix}") == want, (tag, suffix)
+    for other in ("docker.io/x/forgeyard-vision:1.4.4rc", "docker.io/x/forgeyard-vision:1.4.4c1",
+                  "docker.io/x/forgeyard-vision:1.4.4-rc1x!", "docker.io/x/forgeyard-vision:1.4.4.rc1",
+                  "docker.io/x/forgeyard-vision:1.4.4rc1rc2"):
+        assert vision.image_version(other) is None, other
+
+    recipe, _ = recipes.builtin_recipes()["vision"]
+    images = [v.image for v in recipe.variants if v.image]
+    assert images and all("/forgeyard-vision:1.4.4rc1" in i for i in images), images
+    assert {vision.image_version(i) for i in images} == {(1, 4, 4)}
+
+    zs = {"kind": "hf", "vision": {"task": "detect", "architecture": "Owlv2ForObjectDetection", "zero_shot": True}}
+    assert vision.deploy_refusal("detect", zs, recipe) is None
+    assert vision.deploy_refusal("image-classify", {"kind": "hf"}, recipe) is None
+
+    def r(*tags):
+        return NS(name="r", variants=[NS(image=f"docker.io/x/forgeyard-vision:{t}{digest}") for t in tags])
+
+    assert vision.deploy_refusal("detect", zs, r("1.4.4rc1", "1.4.4rc1-cuda")) is None
+    for what, task, meta in (("This zero-shot detector", "detect", zs), ("Image classification", "image-classify",
+                                                                         {"kind": "hf"})):
+        code, why = vision.deploy_refusal(task, meta, r("1.4.4rc1", "1.4.3rc1-cuda"))
+        assert code == "vision_image_too_old"
+        assert why.startswith(f"{what} needs Forgeyard's vision image 1.4.4 or newer; the r recipe runs 1.4.3."), why
 
 
 # ------------------------------------------------------------------ text classifiers and rerankers
 def test_fy_kind_005_one_label_is_a_reranker_more_is_a_classifier():
     """FY-KIND-005: vLLM's rule on the real configs: bge-reranker-v2-m3 and ms-marco-MiniLM (one label) are
-    rerankers; DistilBERT SST-2 (2 labels) and an NLI cross-encoder (3) are text classifiers, refused with
-    their labels and #144; Qwen3-Reranker (a causal LM) is no sequence classifier at all. The count is read as
-    transformers reads it: id2label first, then num_labels, then its default of 2."""
+    rerankers; DistilBERT SST-2 (2 labels) and an NLI cross-encoder (3) are text classifiers, refused as rerankers
+    with their labels (1.4.4: "add it as a text classification model"); Qwen3-Reranker (a causal LM) is no sequence
+    classifier at all. The count is read as transformers reads it: id2label first, then num_labels, then its
+    default of 2."""
     assert sources.sequence_labels(config("bge-reranker-v2-m3")) == 1
     assert sources.sequence_labels(config("ms-marco-minilm-l6-v2")) == 1
     assert sources.reranker_refusal(config("bge-reranker-v2-m3")) is None
@@ -202,9 +322,10 @@ def test_fy_kind_005_one_label_is_a_reranker_more_is_a_classifier():
     assert sources.sequence_labels(config("distilbert-sst-2")) == 2
     assert sources.reranker_refusal(config("distilbert-sst-2")) == (
         "This is a text classifier with 2 labels (NEGATIVE, POSITIVE), not a reranker: a reranker has one output "
-        "(num_labels 1 in its config.json). Text classification comes with #144.")
+        "(num_labels 1 in its config.json). Add it as a text classification model.")
     nli = sources.reranker_refusal(config("nli-deberta-v3-base"))
-    assert nli.startswith("This is a text classifier with 3 labels (contradiction, entailment, neutral)") and "#144" in nli
+    assert nli.startswith("This is a text classifier with 3 labels (contradiction, entailment, neutral)")
+    assert nli.endswith("Add it as a text classification model.")
     seq = {"architectures": ["BertForSequenceClassification"]}
     assert sources.sequence_labels(seq) == 2                                     # transformers' default
     assert sources.sequence_labels({**seq, "num_labels": 1}) == 1
@@ -220,8 +341,10 @@ def test_fy_kind_006_adding_a_text_classifier_as_a_reranker_is_refused(owner, hf
     """FY-KIND-006: rerankers tagged text-classification (bge-reranker-v2-m3) or text-ranking (ms-marco-MiniLM, and
     the causal-LM Qwen3-Reranker) are inspected and added as rerank models, as before; a sentiment model tagged
     text-classification, and an NLI model (its tags say text-classification too), are refused when inspected
-    or added (422 cannot_inspect naming #144), whether the task comes from Hugging Face or rerank is asked for.
-    Asked for another task, the classifier is not read as a reranker."""
+    or added (422 cannot_inspect). 1.4.4 (#144): without a task they are read as text classifiers, and these two
+    are refused as such (vLLM runs neither DistilBERT nor DeBERTa; an NLI model needs labels in the request);
+    asked as rerankers, they are refused with their labels. Asked for another task, the classifier's hint stays
+    text classification."""
     for repo_id in ("BAAI/bge-reranker-v2-m3", "cross-encoder/ms-marco-MiniLM-L6-v2", "Qwen/Qwen3-Reranker-0.6B"):
         assert inspect(hf, repo_id)["task_hint"] == "rerank", repo_id
     for name, source in [("bge-rr", "hf://BAAI/bge-reranker-v2-m3"), ("msmarco", "hf://cross-encoder/ms-marco-MiniLM-L6-v2"),
@@ -229,21 +352,24 @@ def test_fy_kind_006_adding_a_text_classifier_as_a_reranker_is_refused(owner, hf
         r = owner.post("/api/models", json={"name": name, "source": source})
         assert r.status_code == 201, (name, r.text)
         assert r.json()["model"]["task"] == "rerank" and "vllm-pooling" in r.json()["model"]["recipes"], name
-    for repo_id, task in [("distilbert/distilbert-base-uncased-finetuned-sst-2-english", None),
-                          ("cross-encoder/nli-deberta-v3-base", None), ("cross-encoder/nli-deberta-v3-base", "rerank")]:
-        with pytest.raises(inspector.InspectError, match="text classifier .*#144"):
+    sst2, nli = "distilbert/distilbert-base-uncased-finetuned-sst-2-english", "cross-encoder/nli-deberta-v3-base"
+    for repo_id, task, why in [(sst2, None, "cannot run DistilBertForSequenceClassification"),
+                               (nli, None, "zero-shot \\(NLI\\) model"),
+                               (sst2, "rerank", "text classifier with 2 labels"),
+                               (nli, "rerank", "text classifier with 3 labels")]:
+        with pytest.raises(inspector.InspectError, match=why):
             inspect(hf, repo_id, task)
-    for name, source, task in [("sst2", "hf://distilbert/distilbert-base-uncased-finetuned-sst-2-english", None),
-                               ("sst2-rr", "hf://distilbert/distilbert-base-uncased-finetuned-sst-2-english", "rerank"),
-                               ("nli", "hf://cross-encoder/nli-deberta-v3-base", None)]:
+    for name, source, task, why in [("sst2", f"hf://{sst2}", None, "cannot run DistilBertForSequenceClassification"),
+                                    ("sst2-rr", f"hf://{sst2}", "rerank", "text classifier with 2 labels"),
+                                    ("nli", f"hf://{nli}", None, "zero-shot (NLI) model")]:
         r = owner.post("/api/models", json={"name": name, "source": source, **({"task": task} if task else {})})
         assert r.status_code == 422, (name, r.text)
         d = r.json()["detail"]
-        assert d["code"] == "cannot_inspect" and "text classifier with" in d["message"], name
-        assert "Text classification comes with #144." in d["message"]
-    prev = owner.post("/api/models/inspect", json={"source": "hf://distilbert/distilbert-base-uncased-finetuned-sst-2-english"})
+        assert d["code"] == "cannot_inspect" and why in d["message"], name
+        assert ("#144" in d["message"]) == (task is None), name
+    prev = owner.post("/api/models/inspect", json={"source": f"hf://{sst2}", "task": "rerank"})
     assert prev.status_code == 422 and "NEGATIVE, POSITIVE" in prev.json()["detail"]["message"]
-    other = inspect(hf, "distilbert/distilbert-base-uncased-finetuned-sst-2-english", "embed")
-    assert other["task_hint"] == "rerank" and other["format"] == "safetensors"
+    other = inspect(hf, sst2, "embed")
+    assert other["task_hint"] == "classify" and other["format"] == "safetensors" and "classify" not in other
     names = {m["name"] for m in owner.get("/api/models").json()["models"]}
     assert {"bge-rr", "msmarco", "qwen-rr"} <= names and not names & {"sst2", "sst2-rr", "nli"}

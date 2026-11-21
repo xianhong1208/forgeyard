@@ -36,7 +36,7 @@ PREFERENCE_KEYS = (HIDDEN, USAGE_SEEN)
 
 # Which kind of request each protocol takes, for the example call.
 EXAMPLE_ORDER = ("openai-chat", "openai-embeddings", "rerank", "openai-audio", "openai-speech", "openai-images",
-                 "openai-videos", "vision-detect", "vision-segment", "vision-depth")
+                 "openai-videos", "vision-detect", "vision-segment", "vision-depth", "vision-classify", "classify")
 
 
 def _step(sid: str, title: str, why: str, done: bool, detail: str, *, to: Optional[str], label: Optional[str],

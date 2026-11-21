@@ -416,7 +416,7 @@ function Review({ initial, onCancel, onAdded }: { initial: Pick; onCancel: () =>
           <div className="fact"><dt>Pinned to</dt><dd className="mono small">{meta.revision ? `${meta.revision.slice(0, 12)} (${meta.ref || "main"})` : "—"}</dd></div>
           <div className="fact"><dt>Download</dt><dd>{bytes(meta.size_bytes)} in {meta.file_count} files</dd></div>
           {params ? <div className="fact"><dt>Parameters</dt><dd>{(params / 1e9).toFixed(2)} B</dd></div> : null}
-          {meta.vision && <div className="fact"><dt>Vision model</dt><dd className="small">{TASK_LABEL[meta.vision.task]} · {meta.vision.architecture}{meta.vision.labels ? ` · ${meta.vision.labels} classes (${(meta.vision.label_examples ?? []).slice(0, 4).join(", ")}…)` : ""}</dd></div>}
+          {meta.vision && <div className="fact"><dt>Vision model</dt><dd className="small">{TASK_LABEL[meta.vision.task]} · {meta.vision.architecture}{meta.vision.zero_shot ? " · zero-shot: finds what you name" : meta.vision.labels ? ` · ${meta.vision.labels} classes (${(meta.vision.label_examples ?? []).slice(0, 4).join(", ")}…)` : ""}</dd></div>}
           {meta.modalities !== undefined && !meta.vision && <div className="fact"><dt>Takes</dt><dd>{mediaText(meta.modalities) === "Text only" ? "Text only" : `Text, ${mediaText(meta.modalities)?.toLowerCase()}`}</dd></div>}
           {meta.license !== undefined && <div className="fact"><dt>Licence</dt><dd className="mono small">{meta.license ?? "not stated"}{meta.gated ? " · gated" : ""}</dd></div>}
           {meta.video && <div className="fact"><dt>Pipeline</dt><dd className="small">{meta.diffusers?.pipeline ? `${meta.diffusers.pipeline}: ` : ""}{videoFacts(meta.video, meta.diffusers)}</dd></div>}

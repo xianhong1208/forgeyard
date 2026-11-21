@@ -5,15 +5,15 @@ import { HelpLink } from "../components/HelpLink";
 import { Notice } from "../components/ui";
 import { notifyUnauthorized } from "../lib/api";
 import { answerError, ms } from "../lib/gateway";
-import { DETECT_FLOOR, TASK_HELP, VISION_TYPES, boxStyle, checkImage, depthGradient, depthTables, imageLimitMb, labelColours,
-  pngUri, promptFrom, shown, targets, toImage,
+import { CLASSIFY_TOP_K, DETECT_FLOOR, MAX_LABELS, START_THRESHOLD, START_THRESHOLD_ZERO_SHOT, TASK_HELP, VISION_TYPES, ZERO_SHOT_HELP, boxStyle,
+  checkImage, depthGradient, depthTables, imageLimitMb, labelColours, parseLabels, pngUri, promptFrom, shown, targets, toImage,
   type Prompt, type VisionAnswer, type VisionOptions, type VisionTarget, type VisionTask } from "../lib/vision";
 import { useApi } from "../lib/useApi";
 
 type Picked = { file: File; url: string; width: number; height: number };
 type Result = { task: VisionTask; answer: VisionAnswer; meta: string; prompt?: Prompt };
 
-const RUN_LABEL: Record<VisionTask, string> = { detect: "Detect objects", segment: "Segment", depth: "Estimate depth" };
+const RUN_LABEL: Record<VisionTask, string> = { detect: "Detect objects", segment: "Segment", depth: "Estimate depth", "image-classify": "Classify" };
 
 // What went wrong, in plain words: the gateway's and the vision server's {"error": {code, message}}.
 export function visionError(status: number, body: unknown, limitMb: number, what: "app" | "model" = "app"): string {
@@ -33,6 +33,14 @@ export function visionError(status: number, body: unknown, limitMb: number, what
       return `The ${what} did not answer in time. A CPU can take a while on a large image; try a smaller one.`;
     case "model_not_found":
       return "This model is no longer deployed. Reload the page to see the ones that are.";
+    case "labels_required":
+      return what === "model" && e.message?.startsWith("This model classifies")
+        ? "This model chooses among the labels you give: type two or more, separated by commas."
+        : "This model finds what you name: type one or more things to find, separated by commas.";
+    case "labels_not_supported":
+      return e.message?.startsWith("This classifier")
+        ? "This classifier knows a fixed set of classes and cannot be given labels."
+        : "This detector knows a fixed set of classes and cannot be told what to find.";
     case "workload_not_found":
       return "This app is no longer exposed. Reload the page to see the ones that are.";
   }
@@ -57,7 +65,8 @@ function VisionPanel({ w }: { w: VisionTarget }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const [threshold, setThreshold] = useState(0.5);
+  const [threshold, setThreshold] = useState(w.zero_shot ? START_THRESHOLD_ZERO_SHOT : START_THRESHOLD);
+  const [find, setFind] = useState("");          // a zero-shot detector: what to find, comma-separated (1.4.4)
   const [maskAt, setMaskAt] = useState(0);
   const [colour, setColour] = useState(true);
   const [dragOver, setDragOver] = useState(false);
@@ -85,6 +94,8 @@ function VisionPanel({ w }: { w: VisionTarget }) {
 
   const run = async (prompt?: Prompt) => {
     if (!image || busy) return;
+    const asked = w.zero_shot ? parseLabels(find) : null;
+    if (asked?.error) { setErr(asked.error); return; }
     setBusy(true); setErr(null);
     const ctrl = new AbortController();
     abort.current = ctrl;
@@ -93,6 +104,8 @@ function VisionPanel({ w }: { w: VisionTarget }) {
       const form = new FormData();
       form.append("image", image.file, image.file.name || "image");
       if (w.task === "detect") form.append("threshold", String(DETECT_FLOOR));
+      if (w.task === "image-classify" && !asked) form.append("top_k", String(CLASSIFY_TOP_K));
+      if (asked) form.append("labels", JSON.stringify(asked.labels));
       if (prompt?.kind === "point") form.append("points", JSON.stringify([prompt.point]));
       if (prompt?.kind === "box") form.append("box", JSON.stringify(prompt.box));
       form.append("model", w.name);
@@ -108,7 +121,9 @@ function VisionPanel({ w }: { w: VisionTarget }) {
       if (!res.ok || !data) { setErr(visionError(res.status, data, limit, "model")); return; }
       const answer = data as VisionAnswer;
       const target = res.headers.get("X-Forgeyard-Target");
-      const count = w.task === "detect" ? `${answer.detections?.length ?? 0} objects above ${DETECT_FLOOR.toFixed(2)}` : w.task === "segment" ? `${answer.masks?.length ?? 0} masks` : null;
+      const count = w.task === "detect" ? `${answer.detections?.length ?? 0} objects above ${DETECT_FLOOR.toFixed(2)}`
+        : w.task === "segment" ? `${answer.masks?.length ?? 0} masks`
+          : w.task === "image-classify" ? `${answer.labels?.length ?? 0} labels${answer.multi_label ? ", each scored on its own" : ""}` : null;
       const meta = [target?.includes("#") ? `replica ${target.split("#")[1]}` : null, `${answer.width}×${answer.height}`, count,
         answer.ms !== undefined ? `model ${ms(answer.ms)}` : null, `total ${ms(performance.now() - started)}`].filter(Boolean).join(" · ");
       setMaskAt(0);
@@ -136,7 +151,7 @@ function VisionPanel({ w }: { w: VisionTarget }) {
         <HelpLink page="how-to" anchor="try-vision-in-the-playground">How it works</HelpLink>
       </div>
       <p className="muted small vis-about">
-        {TASK_HELP[w.task]} <span className="mono">{w.model}</span>{w.licence && <> <span className="chip mono" title="The model's licence">{w.licence}</span></>}
+        {(w.zero_shot && ZERO_SHOT_HELP[w.task]) || TASK_HELP[w.task]} <span className="mono">{w.model}</span>{w.licence && <> <span className="chip mono" title="The model's licence">{w.licence}</span></>}
         {" "}Programs call it at <code>{w.call}</code> with an API key.
       </p>
       <div className={`vis-drop${dragOver ? " on" : ""}${image ? " has-image" : ""}`} onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -153,11 +168,22 @@ function VisionPanel({ w }: { w: VisionTarget }) {
         <label htmlFor="vis-file" className="sr-only">Image</label>
       </div>
       {pickErr && <Notice tone="error">{pickErr}</Notice>}
+      {w.zero_shot && (
+        <div className="field vis-find">
+          <label htmlFor="vis-find">{w.task === "image-classify" ? "Labels" : "Find these"}</label>
+          <input id="vis-find" value={find} onChange={(e) => setFind(e.target.value)} autoComplete="off"
+            placeholder={w.task === "image-classify" ? "a cat, a dog, a screenshot, an invoice" : "cat, remote control"}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void run(); } }} aria-describedby="vis-find-help" />
+          <span id="vis-find-help" className="muted small">{w.task === "image-classify"
+            ? <>What the picture may be, separated by commas (at most {MAX_LABELS}). Each is read as “This is a photo of …”.</>
+            : <>What to look for, separated by commas (at most {MAX_LABELS}). Plain names work best: “cat”, “red car”.</>}</span>
+        </div>
+      )}
       {image && (
         <div className="row-gap vis-actions">
           {w.task !== "segment" && (busy
             ? <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
-            : <button type="button" className="btn btn-primary" disabled={!w.ready} onClick={() => void run()}>{RUN_LABEL[w.task]}</button>)}
+            : <button type="button" className="btn btn-primary" disabled={!w.ready || (w.zero_shot && !find.trim())} onClick={() => void run()}>{w.zero_shot && w.task === "detect" ? "Find" : RUN_LABEL[w.task]}</button>)}
           {w.task === "segment" && <span className="small" role="note">Click a point on the picture, or drag a box around something.</span>}
           {busy && <span className="muted small" role="status">Waiting for the model…</span>}
           {!w.ready && <span className="muted small">The model has no ready replica.</span>}
@@ -174,6 +200,7 @@ function VisionPanel({ w }: { w: VisionTarget }) {
       {image && w.task === "depth" && (
         <DepthView image={image} result={result} colour={colour} setColour={setColour} onLoaded={onLoaded} />
       )}
+      {image && w.task === "image-classify" && <Classes image={image} result={result} onLoaded={onLoaded} />}
       {result && <span className="msg-meta vis-meta">{result.meta}</span>}
     </section>
   );
@@ -332,5 +359,36 @@ function DepthView({ image, result, colour, setColour, onLoaded }: Omit<StagePro
         )}
       </div>
     </>
+  );
+}
+
+// Image classification (1.4.4, #141): the picture and its labels, best first, each with a bar of its score.
+function Classes({ image, result, onLoaded }: { image: Picked; result: Result | null; onLoaded: (el: HTMLImageElement) => void }) {
+  const answer = result?.task === "image-classify" ? result.answer : null;
+  const labels = answer?.labels ?? [];
+  return (
+    <div className={`vis-pair${answer ? " two" : ""}`}>
+      <figure className="vis-fig">
+        <img src={image.url} alt={`Your image: ${image.file.name}`} onLoad={(e) => onLoaded(e.currentTarget)} />
+      </figure>
+      {answer && (
+        <div className="vis-classes">
+          {labels.length ? (
+            <ol aria-label="Labels" className="vis-class-list">
+              {labels.map((c, i) => (
+                <li key={`${c.label}-${i}`} className={i === 0 ? "best" : undefined}>
+                  <span className="vis-class-name">{c.label}</span>
+                  <span className="mono small">{c.score.toFixed(3)}</span>
+                  <span className="vis-class-bar" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(1, c.score)) * 100}%` }} /></span>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="muted small">No labels came back.</p>}
+          <p className="muted small">{answer.multi_label
+            ? "Each label is scored on its own (0 to 1), so several can fit, or none."
+            : "The scores share 1 between the labels: the best one is the model's answer."}</p>
+        </div>
+      )}
+    </div>
   );
 }

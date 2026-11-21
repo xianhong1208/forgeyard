@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import { boxStyle, checkImage, depthTables, labelColours, promptFrom, shown, toImage } from "../lib/vision";
+import { boxStyle, checkImage, depthTables, labelColours, parseLabels, promptFrom, shown, toImage } from "../lib/vision";
 import { visionError } from "./PlaygroundVision";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -40,7 +40,7 @@ type Reply = { status: number; body?: unknown; headers?: Record<string, string> 
 
 // The Playground's picker lists the ready routes (1.4, #100): one per vision model here.
 const UP = [{ replica: 0, machine: "cpu-a", state: "healthy", ready: true, url: "http://10.0.0.5:31000/" }];
-const visionRoutes = (models = MODELS) => models.map((m, i) => ({ id: i + 1, served_name: m.name, api: `vision-${m.task}`, upstream_model: null,
+const visionRoutes = (models = MODELS) => models.map((m, i) => ({ id: i + 1, served_name: m.name, api: m.task === "image-classify" ? "vision-classify" : `vision-${m.task}`, upstream_model: null,
   deployment_id: m.deployment_id, local_only: false, spill_on_long_prompt: false, wait_ms: 0, kind: "local", has_local: true, has_cloud: false,
   targets: [], usable: true, endpoints: UP }));
 
@@ -272,4 +272,133 @@ describe("Playground: vision models (1.4; one picker since #100)", () => {
     expect(new Set(colours.values()).size).toBe(3);
     expect(checkImage(photo("a.webp", "image/webp"), 20)).toBeNull();
   });
+
+  // 1.4.4 (#142): a zero-shot detector is told what to find.
+  const ZS = { ...mbase, name: "gd", task: "detect", title: "Object detection", endpoint: "/v1/vision/detect", deployment_id: 6,
+    model: "IDEA-Research/grounding-dino-tiny", zero_shot: true };
+  const FOUND = { model: ZS.model, width: 640, height: 480, ms: 3900, detections: [
+    { label: "cat", score: 0.8, box: [10, 54, 317, 475] }, { label: "remote control", score: 0.49, box: [40, 72, 176, 118] },
+    { label: "cat", score: 0.21, box: [0, 0, 640, 480] }] };
+
+  it("FY-WEB-500: a zero-shot detector asks what to find, sends the names as labels, and its slider starts at 0.3", async () => {
+    const sent: FormData[] = [];
+    server((url, init) => {
+      if (url === "/api/playground/vision/options") return options([...MODELS, ZS]);
+      if (url === "/api/playground/vision/detect") {
+        sent.push(init?.body as FormData);
+        return { status: 200, body: FOUND, headers: { "Content-Type": "application/json", "X-Forgeyard-Target": "local:gd#0" } };
+      }
+    }, OWNER, visionRoutes([...MODELS, ZS]));
+    mount("/playground?model=gd");
+    const panel = await panelFor("Object detection");
+    expect(within(panel).getByText(/Finds what you name and draws a box/)).toBeTruthy();
+    await pick(panel, photo());
+    const find = within(panel).getByRole("button", { name: "Find" });
+    expect((find as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(panel).getByLabelText("Find these"), { target: { value: " cat, remote   control,, Cat " } });
+    fireEvent.click(find);
+    const boxes = await within(panel).findByRole("list", { name: "Detected objects" });
+    expect(JSON.parse(sent[0].get("labels") as string)).toEqual(["cat", "remote control"]);
+    expect(sent[0].get("model")).toBe("gd");
+    expect(sent[0].get("threshold")).toBe("0.1");
+    expect(within(boxes).getAllByRole("listitem").map((b) => b.getAttribute("aria-label"))).toEqual(["cat 0.80", "remote control 0.49"]);
+    expect(within(panel).getByText("2 of 3 objects shown")).toBeTruthy();
+    // Enter in the box asks again.
+    fireEvent.change(within(panel).getByLabelText("Find these"), { target: { value: "sofa" } });
+    fireEvent.keyDown(within(panel).getByLabelText("Find these"), { key: "Enter" });
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(JSON.parse(sent[1].get("labels") as string)).toEqual(["sofa"]);
+  });
+
+  it("FY-WEB-501: a detector with fixed classes has no Find these box and sends no labels; the zero-shot refusals read plainly", async () => {
+    const sent: FormData[] = [];
+    server((url, init) => {
+      if (url === "/api/playground/vision/options") return options([...MODELS, ZS]);
+      if (url === "/api/playground/vision/detect") {
+        sent.push(init?.body as FormData);
+        return { status: 200, body: DETECTED, headers: { "Content-Type": "application/json" } };
+      }
+    }, OWNER, visionRoutes([...MODELS, ZS]));
+    mount("/playground?model=det");
+    const panel = await panelFor("Object detection");
+    expect(within(panel).queryByLabelText("Find these")).toBeNull();
+    await pick(panel, photo());
+    fireEvent.click(within(panel).getByRole("button", { name: "Detect objects" }));
+    await within(panel).findByRole("list", { name: "Detected objects" });
+    expect(sent[0].get("labels")).toBeNull();
+    expect(visionError(400, { error: { code: "labels_required", message: "x" } }, 20, "model")).toMatch(/^This model finds what you name/);
+    expect(visionError(400, { error: { code: "labels_not_supported", message: "x" } }, 20, "model")).toMatch(/fixed set of classes/);
+  });
+
+  it("FY-WEB-502: the names typed are checked before anything is sent", () => {
+    expect(parseLabels(" cat , remote  control,, CAT,dog ")).toEqual({ labels: ["cat", "remote control", "dog"], error: null });
+    expect(parseLabels(" , ").error).toMatch(/Name at least one thing/);
+    expect(parseLabels(Array.from({ length: 33 }, (_, i) => `l${i}`).join(",")).error).toBe("At most 32 things at once.");
+    expect(parseLabels("x".repeat(65)).error).toMatch(/longer than 64 characters/);
+    expect(parseLabels("x".repeat(64)).error).toBeNull();
+  });
+
+  // 1.4.4 (#141): image classification, fixed classes or zero-shot.
+  const VIT = { ...mbase, name: "vit", task: "image-classify", title: "Image classification", endpoint: "/v1/vision/classify", deployment_id: 7,
+    model: "google/vit-base-patch16-224", zero_shot: false };
+  const SIG = { ...VIT, name: "siglip2", deployment_id: 8, model: "google/siglip2-base-patch16-224", zero_shot: true };
+  const classified = (labels: { label: string; score: number }[], multi = false) =>
+    ({ status: 200, body: { model: "m", width: 640, height: 480, ms: 150, labels, multi_label: multi }, headers: { "Content-Type": "application/json" } });
+
+  it("FY-WEB-504: a classifier with fixed classes sends the picture to /classify and lists the best classes with their scores", async () => {
+    const sent: FormData[] = [];
+    const urls: string[] = [];
+    server((url, init) => {
+      if (url === "/api/playground/vision/options") return options([...MODELS, VIT, SIG]);
+      if (url.startsWith("/api/playground/vision/")) {
+        urls.push(url);
+        sent.push(init?.body as FormData);
+        return classified([{ label: "tabby, tabby cat", score: 0.8562 }, { label: "Egyptian cat", score: 0.069 }]);
+      }
+    }, OWNER, visionRoutes([...MODELS, VIT, SIG]));
+    mount("/playground?model=vit");
+    const panel = await panelFor("Image classification");
+    expect(within(panel).getByText("POST /v1/vision/classify with model=vit")).toBeTruthy();
+    expect(within(panel).getByText(/Says what the picture shows/)).toBeTruthy();
+    expect(within(panel).queryByLabelText("Labels")).toBeNull();
+    await pick(panel, photo());
+    fireEvent.click(within(panel).getByRole("button", { name: "Classify" }));
+    const list = await within(panel).findByRole("list", { name: "Labels" });
+    expect(urls).toEqual(["/api/playground/vision/classify"]);
+    expect(sent[0].get("model")).toBe("vit");
+    expect(sent[0].get("top_k")).toBe("5");
+    expect(sent[0].get("labels")).toBeNull();
+    expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["tabby, tabby cat0.856", "Egyptian cat0.069"]);
+    expect(within(panel).getByText(/The scores share 1 between the labels/)).toBeTruthy();
+    expect(within(panel).getByText(/2 labels · model 150 ms/)).toBeTruthy();
+  });
+
+  it("FY-WEB-505: a zero-shot classifier asks for labels, sends them, and says its scores stand on their own", async () => {
+    const sent: FormData[] = [];
+    server((url, init) => {
+      if (url === "/api/playground/vision/options") return options([...MODELS, VIT, SIG]);
+      if (url === "/api/playground/vision/classify") {
+        sent.push(init?.body as FormData);
+        return classified([{ label: "cats on a sofa", score: 0.6305 }, { label: "a remote control", score: 0.007 }, { label: "a dog", score: 0 }], true);
+      }
+    }, OWNER, visionRoutes([...MODELS, VIT, SIG]));
+    mount("/playground?model=siglip2");
+    const panel = await panelFor("Image classification");
+    expect(within(panel).getByText(/Scores the picture against the labels you give/)).toBeTruthy();
+    await pick(panel, photo());
+    const go = within(panel).getByRole("button", { name: "Classify" });
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(panel).getByLabelText("Labels"), { target: { value: "cats on a sofa, a remote control, a dog" } });
+    fireEvent.click(go);
+    const list = await within(panel).findByRole("list", { name: "Labels" });
+    expect(JSON.parse(sent[0].get("labels") as string)).toEqual(["cats on a sofa", "a remote control", "a dog"]);
+    expect(sent[0].get("top_k")).toBeNull();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(panel).getByText(/Each label is scored on its own/)).toBeTruthy();
+    expect(visionError(400, { error: { code: "labels_required", message: "This model classifies into the labels you send" } }, 20, "model"))
+      .toMatch(/chooses among the labels you give/);
+    expect(visionError(400, { error: { code: "labels_not_supported", message: "This classifier knows a fixed set" } }, 20, "model"))
+      .toMatch(/cannot be given labels/);
+  });
 });
+

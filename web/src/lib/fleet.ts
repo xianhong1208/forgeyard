@@ -1,6 +1,7 @@
 // What runs where (1.4): machines, deployments and workloads joined, so a page can ask "what holds
 // this card" and "where does this model run". Pure functions; the icons are in components/Fleet.tsx.
 import { bytes } from "./machines";
+import { isVisionTask } from "./models";
 import type { Accelerator, Deployment, Machine, Replica, Workload } from "./types";
 
 // ---------------------------------------------------------------- machine kinds
@@ -64,26 +65,27 @@ export function memoryRows(m: Machine): Accelerator[] {
 
 // ---------------------------------------------------------------- model kinds
 
-export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "asr" | "tts" | "image" | "video" | "vision";
+export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "classify" | "asr" | "tts" | "image" | "video" | "vision";
 
 export const MODEL_KIND: Record<ModelKind, { label: string; api: string; hint: string }> = {
   chat: { label: "Chat", api: "/v1/chat/completions", hint: "Text in, text out" },
   multimodal: { label: "Multimodal chat", api: "/v1/chat/completions", hint: "Chat that also reads images, audio or video" },
   embed: { label: "Embeddings", api: "/v1/embeddings", hint: "Text to vectors, for search" },
   rerank: { label: "Rerank", api: "/v1/rerank", hint: "Orders documents by relevance" },
+  classify: { label: "Text classification", api: "/v1/classify", hint: "Labels a text: sentiment, language, toxicity…" },
   asr: { label: "Speech to text", api: "/v1/audio/transcriptions", hint: "Transcription" },
   tts: { label: "Text to speech", api: "/v1/audio/speech", hint: "Voices" },
   image: { label: "Images", api: "/v1/images/generations", hint: "Text to image" },
   video: { label: "Video", api: "/v1/videos", hint: "Text to video, as jobs" },
-  vision: { label: "Vision", api: "/v1/vision/…", hint: "Object detection, segmentation and depth" },
+  vision: { label: "Vision", api: "/v1/vision/…", hint: "Object detection, segmentation, depth and image classification" },
 };
-export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "asr", "tts", "image", "video", "vision"];
+export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "classify", "asr", "tts", "image", "video", "vision"];
 
 // A chat model that takes images, audio or video is multimodal chat.
 export function modelKind(d: Deployment): ModelKind {
   if (d.model.task === "chat") return (d.model.modalities ?? []).length > 0 ? "multimodal" : "chat";
   // 1.4: detection, segmentation and depth share one section, each row saying its task.
-  if (d.model.task === "detect" || d.model.task === "segment" || d.model.task === "depth") return "vision";
+  if (isVisionTask(d.model.task)) return "vision";
   return d.model.task;
 }
 

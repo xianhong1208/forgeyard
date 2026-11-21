@@ -13,7 +13,7 @@ body:
     attributes:
       label: Forgeyard version
       description: "`curl -k https://<server>:7860/api/health` shows it; each machine's agent version is on the Machines page."
-      placeholder: "1.4.3"
+      placeholder: "1.4.4"
     validations:
       required: true
   - type: dropdown

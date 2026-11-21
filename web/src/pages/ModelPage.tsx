@@ -12,7 +12,7 @@ import { Crumb, EngineCards, FoldButton, Jump, MachineCell, Section } from "../c
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
-import { API_LABEL, gib, mediaText, params, shortSource } from "../lib/models";
+import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource } from "../lib/models";
 import { catalogKind, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
 import type { CatalogModel, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelPage as Page, ModelPageMachine } from "../lib/types";
@@ -41,7 +41,7 @@ export function ModelPage() {
 
 function apiPath(p: Page): string | null {
   const m = p.model;
-  if (m.task === "detect" || m.task === "segment" || m.task === "depth") return `/v1/vision/${m.task}`;
+  if (VISION_TASKS.includes(m.task)) return `/v1/vision/${m.task === "image-classify" ? "classify" : m.task}`;
   const r = p.recipes[0];
   return r ? API_LABEL[r.api[m.task]] ?? null : null;
 }
@@ -193,7 +193,9 @@ function ModelAbout({ p }: { p: Page }) {
       {(m.summary.layers || m.summary.max_context) ? (
         <div className="fact"><dt>Shape</dt><dd>{[m.summary.layers && `${m.summary.layers} layers`, m.summary.kv_heads && `${m.summary.kv_heads} KV heads`, m.summary.head_dim && `head ${m.summary.head_dim}`, m.summary.max_context && `${m.summary.max_context.toLocaleString()} tokens of context`].filter(Boolean).join(" · ")}</dd></div>
       ) : null}
-      {m.vision?.labels ? <div className="fact"><dt>Classes</dt><dd>{m.vision.labels}{m.vision.label_examples?.length ? <span className="muted small"> · {m.vision.label_examples.slice(0, 6).join(", ")}…</span> : null}</dd></div> : null}
+      {m.classify?.labels ? <div className="fact"><dt>Labels</dt><dd>{m.classify.labels}{m.classify.label_names?.length ? <span className="muted small"> · {m.classify.label_names.slice(0, 8).join(", ")}{m.classify.label_names.length > 8 ? ", …" : ""}</span> : null}{m.classify.problem === "multi_label_classification" ? <span className="muted small"> · each label scored on its own</span> : null}</dd></div> : null}
+      {m.vision?.zero_shot ? <div className="fact"><dt>Classes</dt><dd>Finds what you name <span className="muted small">· zero-shot: each request lists what to find (<code>labels</code>)</span></dd></div> : null}
+      {!m.vision?.zero_shot && m.vision?.labels ? <div className="fact"><dt>Classes</dt><dd>{m.vision.labels}{m.vision.label_examples?.length ? <span className="muted small"> · {m.vision.label_examples.slice(0, 6).join(", ")}…</span> : null}</dd></div> : null}
       {m.image?.size ? <div className="fact"><dt>Native size</dt><dd>{m.image.size} × {m.image.size} px{m.image.pipeline ? <span className="muted small"> · {m.image.pipeline}</span> : null}</dd></div> : null}
       {m.voices && m.voices.length ? <div className="fact"><dt>Voices</dt><dd>{m.voices.join(", ")}</dd></div> : null}
       <div className="fact"><dt>Added</dt><dd>{m.created_by ? `by ${m.created_by} · ` : ""}{new Date(m.created_at.endsWith("Z") || m.created_at.includes("+") ? m.created_at : `${m.created_at}Z`).toLocaleDateString()}</dd></div>

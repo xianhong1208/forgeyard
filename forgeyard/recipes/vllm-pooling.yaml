@@ -1,5 +1,5 @@
-# Embedding and rerank models on vLLM's pooling runner: the same pinned image as the vllm recipe
-# (one image to pull for three kinds of model), with defaults for small models that share a card.
+# Embedding, rerank and text classification models on vLLM's pooling runner: the same pinned image as the
+# vllm recipe (one image to pull for four kinds of model), with defaults for small models that share a card.
 #
 # The KV cache only has to hold one full-length sequence (pooling requests are a single forward
 # pass), so the estimate counts one sequence, not `concurrency` of them. Model-specific flags
@@ -7,16 +7,20 @@
 # sequence classifier) are set on the catalog entry, not here.
 #
 # Embeddings: POST /v1/embeddings. Rerank: POST /v1/rerank (Jina/Cohere shape) and /score.
+# Text classification (1.4.4, #144): POST /classify, without /v1 (the gateway's /v1/classify). The runner picks
+# the classify task by itself for a sequence classifier with two labels or more (vllm/config/model.py
+# get_pooling_task: its pooler serves classify and token_classify, not embed), so no task flag is needed; the
+# catalog accepts only the architectures vLLM runs natively (forgeyard/models/textcls.py).
 name: vllm-pooling
-title: vLLM embeddings and rerank
+title: vLLM embeddings, rerank and text classification
 description: >-
-  Embedding and reranker models on vLLM's pooling runner. Small enough to share one GPU: each
-  replica reserves its estimate and vLLM is held to it.
+  Embedding, reranker and text classification models on vLLM's pooling runner. Small enough to share one GPU:
+  each replica reserves its estimate and vLLM is held to it.
 engine: vllm
 version: "0.32.0"
-tasks: [embed, rerank]
+tasks: [embed, rerank, classify]
 formats: [safetensors]
-api: {embed: openai-embeddings, rerank: rerank}
+api: {embed: openai-embeddings, rerank: rerank, classify: classify}
 upstream_model: served_name
 share: vram
 port: 8000

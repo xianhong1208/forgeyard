@@ -13,6 +13,8 @@ export const API_ENDPOINT: Record<string, string> = {
   "vision-detect": "/vision/detect",
   "vision-segment": "/vision/segment",
   "vision-depth": "/vision/depth",
+  "vision-classify": "/vision/classify",
+  classify: "/classify",
 };
 
 export const API_KIND: Record<string, string> = {
@@ -26,6 +28,8 @@ export const API_KIND: Record<string, string> = {
   "vision-detect": "object detection",
   "vision-segment": "segmentation",
   "vision-depth": "depth",
+  "vision-classify": "image classification",
+  classify: "text classification",
 };
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
@@ -50,6 +54,13 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     return {
       curl: `${curl} ${base}/rerank \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "query": "capital of France", "documents": ["Paris is in France.", "Berlin is in Germany."]}'`,
       python: `${trustUrl ? "import ssl\n\n" : ""}import httpx  # pip install httpx: rerank is not part of the OpenAI SDK\n\n${caLines}r = httpx.post("${base}/rerank", headers={"Authorization": "Bearer ${key}"},\n               json={"model": "${model}", "query": "capital of France",\n                     "documents": ["Paris is in France.", "Berlin is in Germany."]}${trustUrl ? ",\n               verify=ca" : ""})\nprint(r.json()["results"])`,
+    };
+  }
+  if (api === "classify") {
+    // 1.4.4: vLLM's /classify shape; not part of the OpenAI SDK.
+    return {
+      curl: `${curl} ${base}/classify \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${model}", "input": ["I love this!", "This is terrible."]}'`,
+      python: `${trustUrl ? "import ssl\n\n" : ""}import httpx  # pip install httpx: classify is not part of the OpenAI SDK\n\n${caLines}r = httpx.post("${base}/classify", headers={"Authorization": "Bearer ${key}"},\n               json={"model": "${model}", "input": ["I love this!", "This is terrible."]}${trustUrl ? ",\n               verify=ca" : ""})\nfor d in r.json()["data"]:\n    print(d["label"], max(d["probs"]))`,
     };
   }
   if (api === "openai-speech") {
@@ -78,6 +89,7 @@ export function snippets(gatewayUrl: string, key: string, model: string, api: st
     const extra = task === "segment" ? ` -F 'box=[40, 40, 320, 240]'` : task === "detect" ? " -F threshold=0.5" : "";
     const field = task === "segment" ? `, "box": "[40, 40, 320, 240]"` : task === "detect" ? `, "threshold": "0.5"` : "";
     const show = task === "detect" ? `for d in r.json()["detections"]:\n    print(d["label"], d["score"], d["box"])`
+      : task === "classify" ? `for c in r.json()["labels"]:\n    print(c["label"], c["score"])`
       : task === "segment" ? `print(r.json()["masks"][0]["area"], "pixels")  # each mask: a PNG in base64`
         : `open("depth.png", "wb").write(base64.b64decode(r.json()["depth_png"]))  # 16-bit, near = bright`;
     return {
