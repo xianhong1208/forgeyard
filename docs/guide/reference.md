@@ -568,8 +568,8 @@ field `labels=cat, remote control`); repeats and empty names are dropped. The vi
 its own way (Grounding DINO one lower-case prompt, "cat. remote control.", and each box takes the name whose
 words score it highest; OWL one query per name), so a name comes back as it was sent. Their scores run lower
 than a fixed detector's: start at 0.3 (Grounding DINO) or 0.1 to 0.2 (OWLv2). They need a vision image from
-1.4.4 on: until the built-in recipe's pin moves to it, deploying one answers 422 `vision_image_too_old` (a
-custom recipe that names a newer image, or a local build, runs them).
+1.4.4 on, which the built-in recipe runs (it pins `forgeyard-vision` 1.4.4rc1); on a custom recipe that names an
+older one, deploying one answers 422 `vision_image_too_old` (a local build is taken as it is).
 
 What is counted, per request that was answered (in `GET /api/usage` and on **Usage**):
 
@@ -1398,8 +1398,8 @@ recipe with only the variants you want can.
 | `sd-cpp` (1.3) | `cuda` | NVIDIA, compute capability 5.0+, driver 560+ | `ghcr.io/leejet/stable-diffusion.cpp:master-cuda` (build `3bad892`, CUDA 12.6) |
 | | `vulkan` | every AMD GPU and APU. Only the card's render node, no `/dev/kfd` | `…:master-vulkan` (build `32d516c`, Mesa RADV) |
 | | `cpu-process` | x86_64 as a process without Docker (glibc 2.39 or newer: Ubuntu 24.04, Debian 13) | release `master-1043-3be2378`, `sd-master-3be2378-bin-Linux-Ubuntu-24.04-x86_64.zip`, checked against its SHA-256. Needs a 1.3 agent (it unpacks `.zip`) |
-| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda` (torch +cu130) |
-| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.0` (linux/amd64 and arm64) |
+| `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
+| | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
 
 `vllm-pooling` serves a sequence-classification model (`…ForSequenceClassification`) as a reranker only
 when it has one output, as vLLM decides: `id2label` in its `config.json` has one entry, or `num_labels` is 1

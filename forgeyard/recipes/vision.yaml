@@ -52,8 +52,8 @@ variants:
     # torch +cu130: CUDA 13 runs on Turing (7.5) and newer, with driver 580 or newer.
     when: {vendor: nvidia, compute_capability: ">=7.5", driver: ">=580"}
     runtime: container
-    image: docker.io/tonyhuang1101/forgeyard-vision:1.4.0-cuda@sha256:773449716b20e961df38b1518422b0120b3e919239063ac128ef5b4affca47b3
+    image: docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda@sha256:9e4ef32b302cf3d82a07d69a1a55e42b28c17e9e34f8e3399bfe8918d1362376
   - name: cpu
     when: {vendor: cpu, arch: [x86_64, aarch64]}
     runtime: container
-    image: docker.io/tonyhuang1101/forgeyard-vision:1.4.0@sha256:ab60eb2164671b9158573e6afe39068dcf407cc4286d053b118e25de29c244d6
+    image: docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1@sha256:f4e5940bdbfe1c88a6712aaf708432149651e25a9a6d7318e9f382ab697c579b

@@ -58,13 +58,16 @@ version until 1.0.
     files; OWLv2 base 1.13 GiB).
   - Playground: a **Find these** box for them (comma-separated names, then **Find**; the score slider starts at
     0.3). **Try it** asks them for the test image's two shapes (or for the words sent as `input`).
-  - They need a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older (the built-in one
-    until its pin moves after the release), deploying one answers 422 `vision_image_too_old`.
+  - They need a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older, deploying one
+    answers 422 `vision_image_too_old`. The built-in recipe runs one (below).
   - `scripts/accept_vision.py` knows `grounding-dino-tiny`, `mm-grounding-dino-tiny` and `owlv2-base`: two cats,
     a remote and no giraffe on the COCO photo, `labels_required`, and `labels_not_supported` for RT-DETR.
 
 ### Changed
 
+- **The built-in `vision` recipe pins `forgeyard-vision` 1.4.4rc1** (CPU `sha256:f4e5940b…`, linux/amd64 and arm64;
+  `-cuda` `sha256:9e4ef32b…`), published by the `v1.4.4rc1` pre-release, so zero-shot detectors and image classifiers
+  deploy on it. It was 1.4.0.
 - A text classifier tagged *text classification* is read as one (1.4.3 refused it as a reranker): one output
   (`num_labels` 1) is still a reranker and two labels or more a classifier, and neither becomes the other.
   Refused as text classifiers, with the reason: zero-shot (NLI) models and DeBERTa, DistilBERT or BART classifiers,
