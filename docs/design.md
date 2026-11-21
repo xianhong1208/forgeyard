@@ -315,7 +315,12 @@ page shows that name, its usage, each replica and a small **Try it** that checks
 
   `llama-cpp` also serves `tts` (a TTS GGUF with its projector) on every variant.
 - **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
-  bits) + KV cache (2 × layers × KV heads × head size × context × concurrent sequences × bytes) +
+  bits) + KV cache (2 × layers × KV heads × head size × context × concurrent sequences × bytes;
+  1.4.5, #167: per layer kind, `forgeyard/models/kvlayout.py`: sliding-window layers hold at most
+  window − 1 + 2 × 8,192 tokens in flight per sequence, MLA one latent of `kv_lora_rank +
+  qk_rope_head_dim` values with no V and on every GPU, recurrent layers a fixed state per sequence,
+  two with prefix caching, and KV-shared layers nothing; llama.cpp: sliding layers `window ×
+  sequences + 512` cells padded to 256, MLA K only, recurrent state in 32-bit floats) +
   the recipe's engine overhead + the CUDA context (0.4 GiB, measured on an A100); GGUF = the exact
   tensor sizes of the offloaded layers + their KV cache + the logits buffer + overhead; whisper =
   the model files + overhead. A declared `vram` replaces it (required for `local://` models).
