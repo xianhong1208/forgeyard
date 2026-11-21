@@ -6,6 +6,12 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- The DCO check no longer runs on the release pull requests (`dev` → `main` and the `main` → `dev`
+  back-merge): every commit reached `dev` through its own checked pull request, and checking them again
+  failed on commits merged before the DCO was adopted (#160).
+
 ## [1.4.4] — 2026-11-21
 
 More kinds of models, part 1. Zero-shot object detectors find the objects a request names: `/v1/vision/detect`
