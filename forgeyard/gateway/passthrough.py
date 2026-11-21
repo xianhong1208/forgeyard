@@ -65,6 +65,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect, Request
 from starlette.responses import Response
 
+from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, Workload, new_session
 from forgeyard.gateway import keys
@@ -394,9 +395,13 @@ class UpstreamBroken(Exception):
 # ------------------------------------------------------------------ one request
 def record(caller: KeyCaller, name: str, status: int, started: float, *, limited: bool = False,
            bytes_in: int = 0, bytes_out: int = 0, busy_ms: int = 0) -> None:
+    seconds = time.monotonic() - started
+    # /metrics (1.4.5, #165): only called once the exposed workload was found, so its name is a known one.
+    metrics.request(endpoint="x", model=f"x:{name}", known=True, status=status, source=caller.source, target="local",
+                    seconds=seconds)
     recorder.record(source=caller.source, key_id=caller.key_id, user_id=caller.user_id, username=caller.username,
                     model=f"x:{name}", deployment_id=None, status=status,
-                    latency_ms=(time.monotonic() - started) * 1000, limited=limited,
+                    latency_ms=seconds * 1000, limited=limited,
                     units={"bytes_in": bytes_in, "bytes_out": bytes_out, "busy_ms": busy_ms})
 
 

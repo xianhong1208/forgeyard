@@ -35,6 +35,7 @@
 |---|---|---|
 | `ALLOWED_HOSTS` | — | 其他要回應的主機名稱，以逗號分隔。`localhost` 和 IP 位址一律可用；其他名稱會得到 421 |
 | `TRUSTED_PROXIES` | — | 信任其 `X-Forwarded-For` 和 `X-Forwarded-Proto` 的代理，以逗號分隔的 IP |
+| `METRICS_TOKEN` | — | `GET /metrics`（Prometheus）。留空：只有來自伺服器本機的直接請求可以讀取（其他得到 403）。有設定：每次收集都要 `Authorization: Bearer <token>`，不論從哪裡來（否則 401）。請看[指標](#metrics) |
 
 ### HTTPS
 
@@ -582,6 +583,46 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 
 - **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
 - **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
+
+## 指標
+
+`GET /metrics` 以 Prometheus 的文字格式（`text/plain`）回應，不快取。怎麼收集：[用 Prometheus 收集 Forgeyard 的指標](how-to.md#scrape-forgeyard-with-prometheus)。
+
+| 回應 | 什麼時候 |
+|---|---|
+| 200 | `METRICS_TOKEN` 留空，且請求直接來自伺服器本機（loopback 位址，沒有 `X-Forwarded-For`、`Forwarded` 或 `X-Real-IP` 標頭）；或 `METRICS_TOKEN` 有設定，且請求帶著 `Authorization: Bearer <METRICS_TOKEN>` |
+| 401 `metrics_token_required` | `METRICS_TOKEN` 有設定，但請求沒有 Bearer 權杖或帶了別的（兩種情況回應相同），附 `WWW-Authenticate: Bearer realm="metrics"` |
+| 403 `metrics_local_only` | `METRICS_TOKEN` 留空，而請求來自其他位址或經過 proxy |
+| 421 | 請求的主機名稱不是伺服器會回應的名稱（`ALLOWED_HOSTS`），所有路徑都一樣 |
+
+閘道的指標計算的是用量統計所計算的請求（`/v1`、Playground、`/x/` 和影片工作），在請求結束時計入：
+
+| 指標 | 類型 | 標籤 | 是什麼 |
+|---|---|---|---|
+| `forgeyard_gateway_requests_total` | counter | `endpoint`、`model`、`status`、`source`、`target` | 已結束的請求。`endpoint`：`chat/completions`、`embeddings`、`audio/speech`、`videos`、`x`（直通）… `status`：HTTP 狀態碼（499：用戶端離開了）。`source`：`api`（API 金鑰）或 `console`（Playground）。`target`：`local` 或 `provider` |
+| `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`、`model` | 從請求到達到結束；影片工作是從建立到結束 |
+| `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`、`model` | 從請求到達，到收到副本或供應商回應的第一批位元組：串流是第一個區塊，其他是它的狀態列。只計有收到回應的請求 |
+| `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
+| `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`refused`、`too_long`、`budget` |
+| `forgeyard_gateway_waiting` | gauge | `model` | 現在正在排隊等本地空位的請求（路由所有層加總） |
+| `forgeyard_gateway_wait_seconds` | histogram | `model` | 每個請求在隊伍裡等了多久，才拿到空位或繼續往下走 |
+
+每次收集時從資料庫讀取：
+
+| 指標 | 標籤 | 是什麼 |
+|---|---|---|
+| `forgeyard_replicas` | `deployment`、`state` | 每個模型部署各狀態的副本數：`pending`、`starting`、`running`、`healthy`、`unhealthy`、`backoff`、`exited`、`failed`、`stopping`、`stopped` |
+| `forgeyard_machines` | `status` | `online`、`offline` 和 `revoked` 的機器數 |
+| `forgeyard_machine_up` | `machine` | 機器的 agent 連線中時是 1，否則是 0 |
+| `forgeyard_gpu_memory_total_bytes`、`forgeyard_gpu_memory_free_bytes` | `machine`、`gpu` | 一張卡的記憶體和可用記憶體，依 agent 最近一次回報（`gpu`：它的編號） |
+| `forgeyard_gpu_memory_reserved_bytes` | `machine`、`gpu` | Forgeyard 的副本在這張卡上保留的量：也就是放置時計算的量 |
+| `forgeyard_machine_memory_total_bytes`、`forgeyard_machine_memory_free_bytes`、`forgeyard_machine_memory_reserved_bytes` | `machine` | 機器的 RAM，同上（CPU 副本，以及 GPU 副本留在 CPU 上的層） |
+| `forgeyard_cloud_spend_usd` | `provider` | 每個供應商這個 UTC 月份的花費，依預算的計算方式 |
+| `forgeyard_provider_budget_usd` | `provider` | 供應商的每月預算（有設定時） |
+| `forgeyard_budgets_reached` | `scope`、`threshold` | 這個月有幾個 `key`、`person` 和 `provider` 預算達到 `80` 或 `100` 百分比（絕不列出是哪些） |
+| `forgeyard_build_info` | `version` | 永遠是 1：伺服器的版本 |
+
+另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
 
 ## 應用程式（已淘汰）
 

@@ -103,7 +103,8 @@ async def handle(request: Request, endpoint: str, caller: KeyCaller) -> JSONResp
             route = proxy.fit_route(route, parsed, parsed.size)
     except GatewayError as e:
         if parsed is not None:  # a body without a model is not counted under any model
-            proxy.record(caller, parsed.model, route.deployment_id if route else None, e.status, started)
+            proxy.record(caller, parsed.model, route.deployment_id if route else None, e.status, started,
+                         endpoint=endpoint, known=route is not None)
         return e.response()
     try:
         return await proxy.forward(request, caller=caller, route=route, endpoint=endpoint, parsed=parsed, started=started)

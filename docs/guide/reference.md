@@ -44,6 +44,7 @@ are fine for almost everyone.
 |---|---|---|
 | `ALLOWED_HOSTS` | — | More host names to answer to, comma-separated. `localhost` and IP addresses always work; any other name gets 421 |
 | `TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed, comma-separated IPs |
+| `METRICS_TOKEN` | — | `GET /metrics` (Prometheus). Empty: only a direct request from the server's own host may read it (403 otherwise). Set: every scrape needs `Authorization: Bearer <token>`, from anywhere (401 otherwise). See [Metrics](#metrics) |
 
 ### HTTPS
 
@@ -746,6 +747,50 @@ Two more cases:
 - **A stream that breaks off** after it started cannot change its status any more. The gateway ends
   it with one last event, an error with the code `upstream_stream_broken`:
   `data: {"error": {…, "code": "upstream_stream_broken"}}`.
+
+## Metrics
+
+`GET /metrics` answers in the Prometheus text format (`text/plain`), uncached. How to scrape it:
+[Scrape Forgeyard with Prometheus](how-to.md#scrape-forgeyard-with-prometheus).
+
+| Answer | When |
+|---|---|
+| 200 | `METRICS_TOKEN` is empty and the request comes straight from the server's host (a loopback address, and no `X-Forwarded-For`, `Forwarded` or `X-Real-IP` header); or `METRICS_TOKEN` is set and the request carries `Authorization: Bearer <METRICS_TOKEN>` |
+| 401 `metrics_token_required` | `METRICS_TOKEN` is set and the request has no Bearer token or another one (the same answer either way), with `WWW-Authenticate: Bearer realm="metrics"` |
+| 403 `metrics_local_only` | `METRICS_TOKEN` is empty and the request comes from another address or through a proxy |
+| 421 | the request's host name is not one the server answers to (`ALLOWED_HOSTS`), as for every path |
+
+The gateway's metrics count the requests that the usage counts (`/v1`, the Playground, `/x/` and video jobs), when
+they end:
+
+| Metric | Type | Labels | What it is |
+|---|---|---|---|
+| `forgeyard_gateway_requests_total` | counter | `endpoint`, `model`, `status`, `source`, `target` | Finished requests. `endpoint`: `chat/completions`, `embeddings`, `audio/speech`, `videos`, `x` (the passthrough), … `status`: the HTTP status (499: the client went away). `source`: `api` (an API key) or `console` (the Playground). `target`: `local` or `provider` |
+| `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`, `model` | From the request's arrival to its end; for a video job, from its creation to its end |
+| `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`, `model` | From the request's arrival to the first bytes of the answer from the replica or provider: a stream's first chunk, otherwise its status line. Only requests that got an answer |
+| `forgeyard_gateway_tokens_total` | counter | `model`, `direction` | Tokens the engine or provider reported: `in` the prompt, `out` the completion |
+| `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `refused`, `too_long`, `budget` |
+| `forgeyard_gateway_waiting` | gauge | `model` | Requests waiting in line for a free local slot now (all the route's tiers) |
+| `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
+
+Read from the database at each scrape:
+
+| Metric | Labels | What it is |
+|---|---|---|
+| `forgeyard_replicas` | `deployment`, `state` | Replicas of each model deployment by state: `pending`, `starting`, `running`, `healthy`, `unhealthy`, `backoff`, `exited`, `failed`, `stopping`, `stopped` |
+| `forgeyard_machines` | `status` | Machines `online`, `offline` and `revoked` |
+| `forgeyard_machine_up` | `machine` | 1 while the machine's agent is connected, else 0 |
+| `forgeyard_gpu_memory_total_bytes`, `forgeyard_gpu_memory_free_bytes` | `machine`, `gpu` | A card's memory and its free memory, as its agent last reported them (`gpu`: its index) |
+| `forgeyard_gpu_memory_reserved_bytes` | `machine`, `gpu` | What Forgeyard's replicas reserve on the card: what placement counts |
+| `forgeyard_machine_memory_total_bytes`, `forgeyard_machine_memory_free_bytes`, `forgeyard_machine_memory_reserved_bytes` | `machine` | The same for the machine's RAM (CPU replicas, and layers a GPU replica keeps on the CPU) |
+| `forgeyard_cloud_spend_usd` | `provider` | What each provider cost this UTC month, as the budgets count it |
+| `forgeyard_provider_budget_usd` | `provider` | A provider's monthly budget, when it has one |
+| `forgeyard_budgets_reached` | `scope`, `threshold` | How many `key`, `person` and `provider` budgets reached `80` or `100` percent this month (never which) |
+| `forgeyard_build_info` | `version` | Always 1: the server's version |
+
+Plus `process_*` (the server's CPU time, memory, open files). A `model` label is a served name the gateway has a
+route for: a request for a model nobody serves counts as `_unknown`, never under the name the client sent. No
+label holds an API key, a key's id or name, a person or a prompt. Counters start from 0 when the server restarts.
 
 ## Apps (deprecated)
 
