@@ -417,7 +417,8 @@ There is no e-mail: check the audit log or the pages.
 
 The month's spend is the sum of the cost of its requests (see above), read from the usage counts when
 the server starts or a new month begins, and added to as requests finish. A cloud request that was
-answered but reported no tokens counts at its reservation until the server restarts. `GET
+answered but reported no tokens counts at its reservation; from 1.4.5 that amount is kept across restarts
+too (it is in no usage count, so the server keeps it apart, for the month). `GET
 /api/budgets` returns this month's spend per key, person and provider; admins add `?everyone=true`.
 
 ## Egress: what leaves your server

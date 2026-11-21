@@ -398,6 +398,32 @@ outside Forgeyard holds ports of the range: the agent skips them, and tries agai
 sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 ```
 
+## A machine publishes its replicas on a loopback address
+
+**You see:** *gpu-02 publishes its replicas on 127.0.0.1* under **Get started → Setup health** and on the
+machine's page, and models deployed there may answer 502 or something unexpected.
+
+**Why:** an agent publishes replicas on its own address towards the server: the local end of its connection,
+unless `FORGEYARD_BIND_ADDRESS` names another. An agent that reaches the server through an SSH tunnel or a proxy
+on its own host connects to `127.0.0.1`, so that is the address it reports, and the gateway dials `127.0.0.1` on
+the **server's** host: the server's own ports, not the machine's. From 1.4.5 the agent also tells the server its
+end of the connection; when that is the peer the server sees, nothing sits between them, the agent runs on the
+server's own host and loopback is right. Only the other machines are checked, and only those with a 1.4.5 agent.
+The warning does not appear when every port of a range of up to 64 ports is forwarded to the server's host
+(something listens on each on the server's loopback), as in the guide's
+[SSH tunnel](how-to.md#run-a-machine-without-internet-access).
+
+**Do:** one of these.
+
+- Forward the machine's port range back through the tunnel too: choose a small range
+  (`FORGEYARD_PORT_RANGE=33000-33002`) and add one `-L` per port to the `ssh` command that carries the agent's
+  connection ([how](how-to.md#run-a-machine-without-internet-access)).
+- Or give the agent an address the server can reach (its LAN or VPN address) with `FORGEYARD_BIND_ADDRESS`
+  (`--bind-address`), and open the port range there.
+
+Then restart the agent. If the server does reach the machine at that address in a way Forgeyard cannot see (a
+proxy on the server's host, say), snooze the warning.
+
 ## Errors from /v1: 401, 403, 429, 503
 
 The gateway answers errors in the OpenAI format, `{"error": {"message", "type", "param", "code"}}`.

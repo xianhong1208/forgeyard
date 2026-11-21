@@ -16,7 +16,7 @@ import {
   MACHINE_KIND, appTitle, cardLine, cardMemory, cards, machineKind, machineMemory, memoryRows, uniqueHolders, whereOnMachine, type Placement,
 } from "../lib/fleet";
 import { exact } from "../lib/format";
-import { archLabel, bytes } from "../lib/machines";
+import { archLabel, bytes, replicaAddressNote } from "../lib/machines";
 import { useDocumentTitle } from "../lib/title";
 import type { Accelerator, Machine, MachinesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -172,6 +172,12 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
           {platform && <div className="fact"><dt>Platform</dt><dd>{platform}</dd></div>}
           {m.hostname && <div className="fact"><dt>Host name</dt><dd className="mono">{m.hostname}</dd></div>}
           {m.ip && <div className="fact"><dt>Address</dt><dd className="mono">{m.ip}</dd></div>}
+          {m.runtime_info?.address && (
+            <div className="fact">
+              <dt>Replicas at</dt>
+              <dd><span className="mono">{m.runtime_info.address}</span>{replicaAddressNote(m) && <span className="muted"> · {replicaAddressNote(m)}</span>}</dd>
+            </div>
+          )}
           {drivers.length > 0 && <div className="fact"><dt>{kind === "nvidia" ? "Driver" : "ROCm"}</dt><dd>{drivers.map((d) => (kind === "nvidia" ? `driver ${d}` : `ROCm ${d}`)).join(", ")}</dd></div>}
           <div className="fact"><dt>Joined</dt><dd title={exact(m.joined_at)}>{exact(m.joined_at)}</dd></div>
         </dl>

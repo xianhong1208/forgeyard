@@ -3,14 +3,18 @@ model name must never keep a machine from connecting."""
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import logging
 import re
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from forgeyard.machines.protocol import DOWNLOAD_STATES, MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
 from forgeyard.models.cache_keys import parse
+
+log = logging.getLogger("forgeyard.machines")
 
 
 def _short(limit: int):
@@ -210,9 +214,43 @@ class CollectorStatus(_Msg):
     reason: Annotated[Optional[str], _short(400)] = None
 
 
+# 1.4.5 (#170): the note a machine page shows (under "Detection notes") for cards of a vendor this server does not
+# know, which a newer agent may report. The cards are left out; the rest of the hello is kept.
+UNKNOWN_VENDOR = "unknown vendor"
+
+
 class InventoryIn(_Msg):
     accelerators: list[AcceleratorIn] = Field(default_factory=list, max_length=256)
     collectors: dict[Annotated[str, _short(32)], CollectorStatus] = Field(default_factory=dict, max_length=16)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _leave_out_unknown_vendors(cls, value: Any) -> Any:
+        """A newer agent may report a kind of card this server does not know (a `vendor` outside VENDORS). That
+        card is left out with a warning and a detection note, instead of refusing the whole hello: refused, the
+        agent would reconnect and be refused again forever (#170)."""
+        if not isinstance(value, dict) or not isinstance(value.get("accelerators"), list):
+            return value
+        kept, unknown = [], []
+        for card in value["accelerators"]:
+            vendor = card.get("vendor") if isinstance(card, dict) else None
+            if isinstance(vendor, str) and vendor not in VENDORS:
+                unknown.append(vendor.strip()[:32])
+            else:
+                kept.append(card)
+        if not unknown:
+            return value
+        names = ", ".join(sorted(set(unknown)))
+        log.warning("An agent reported %d card(s) of a vendor this server does not know (%s); left out. "
+                    "A newer agent? Update the server to use them.", len(unknown), names)
+        collectors = value.get("collectors") if isinstance(value.get("collectors"), dict) else {}
+        if len(collectors) < 16:
+            n = len(unknown)
+            collectors = {**collectors, UNKNOWN_VENDOR: {
+                "ok": False, "count": n, "source": "server",
+                "reason": f"{n} {'card' if n == 1 else 'cards'} of a vendor this server does not know ({names}) "
+                          f"left out; update the server to use {'it' if n == 1 else 'them'}"}}
+        return {**value, "accelerators": kept, "collectors": collectors}
 
 
 def _port_range(value: Any) -> Optional[dict]:
@@ -225,9 +263,33 @@ def _port_range(value: Any) -> Optional[dict]:
     return {"low": low, "high": high}
 
 
+def _ip(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        ip = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return str(ip)
+
+
+def _connection(value: Any) -> Optional[dict]:
+    """(1.4.5, #171) {"address", "port"}: the agent's own end of this connection."""
+    if not isinstance(value, dict):
+        return None
+    address, port = _ip(value.get("address")), value.get("port")
+    if address is None or type(port) is not int or not 1 <= port <= 65535:
+        return None
+    return {"address": address, "port": port}
+
+
 def _runtime_info(value: Any) -> dict:
     """{"process": {...}, "container": {...}}: small dicts of what each runtime can do; (1.4.2) "ports": the
-    agent's host port range (servers before 1.4.2 drop it, so it never reaches them)."""
+    agent's host port range (servers before 1.4.2 drop it, so it never reaches them); (1.4.5, #171) "address":
+    the address replicas are published on, which the gateway dials, and "connection": the agent's own end of the
+    connection, which the server compares with the peer it sees and does not keep."""
     if not isinstance(value, dict):
         return {}
     out = {}
@@ -238,7 +300,22 @@ def _runtime_info(value: Any) -> dict:
     ports = _port_range(value.get("ports"))
     if ports is not None:
         out["ports"] = ports
+    address = value.get("address")
+    if isinstance(address, str) and address.strip():
+        out["address"] = address.strip()[:64]
+    connection = _connection(value.get("connection"))
+    if connection is not None:
+        out["connection"] = connection
     return out
+
+
+def same_end(connection: Optional[dict], peer: Optional[tuple]) -> bool:
+    """(1.4.5, #171) Whether the agent's own end of the connection is the peer the server sees: then nothing sits
+    between them (no tunnel, no proxy), so the agent runs on the server's own host and network, and a loopback
+    address it publishes replicas on is the server's loopback too."""
+    if not connection or not peer or len(peer) < 2:
+        return False
+    return connection.get("address") == _ip(peer[0]) and connection.get("port") == peer[1]
 
 
 # 1.4.2 (#121): how the agent runs (agent/how_it_runs.py). Kept as the agent sent it, within a size limit; the

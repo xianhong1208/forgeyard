@@ -29,8 +29,9 @@ from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
 from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn, ImageRemovedIn,
-                                         ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn)
+                                         ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn, same_end)
 from forgeyard.machines.protocol import (
+    AGENT_MESSAGES,
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
@@ -269,6 +270,11 @@ async def stream(ws: WebSocket):
     except WebSocketDisconnect:
         return
 
+    connection = hello.runtime_info.pop("connection", None)
+    if "address" in hello.runtime_info:
+        # 1.4.5 (#171): whether the agent runs on this server's own host (see messages.same_end); kept with the
+        # address its replicas are published on, for the setup advisor's loopback check.
+        hello.runtime_info["same_host"] = same_end(connection, (ws.client.host, ws.client.port) if ws.client else None)
     features = set(hello.features) & set(SERVER_FEATURES)
     conn = Connection(node_id, features=features)
     replaced = hub.attach(conn)
@@ -309,6 +315,7 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
     # agents up to 1.2.0 keep the highest revision they saw across connections and drop any lower
     # list without a word, so they took no new work until the count caught up.
     revision = time.time_ns() // 1_000_000
+    ignored: set[str] = set()  # message types this server does not know, already warned about
     try:
         while True:
             if recv is None:
@@ -384,8 +391,16 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     if kind != "image_saved" and said.ok:  # 1.4.3 (#140): the listing the server keeps
                         await run_in_threadpool(_db_call, _images_kept, node_id, said)
                     conn.answer(said.request_id, said.model_dump())
+                elif isinstance(kind, str) and kind not in AGENT_MESSAGES:
+                    # 1.4.5 (#170): a newer agent's message this server does not know. Ignored, with one warning
+                    # per kind and connection; refused, the agent would reconnect and send it again forever.
+                    if kind not in ignored and len(ignored) < 16:
+                        ignored.add(kind)
+                        log.warning("Machine %s sent a message this server does not know (%r); ignored. "
+                                    "A newer agent? Update the server.", node_id, kind[:40])
+                    ok = True
                 else:
-                    raise ValueError(f"unknown message type {kind!r}")
+                    raise ValueError(f"message type {kind!r} not expected here")
             except _ProtocolMismatch:
                 await _error_close(ws, CLOSE_PROTOCOL, "protocol_unsupported", "Protocol version changed mid-connection.")
                 return

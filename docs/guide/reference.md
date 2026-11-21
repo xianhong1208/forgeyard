@@ -1304,6 +1304,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
 | `machine-simulated` | warning | A machine reports simulated hardware |
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
+| `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
@@ -1403,6 +1404,13 @@ It needs Linux on x86_64 or aarch64, root, `curl`, and access to PyPI for the ag
 dependencies. It uses `uv` when it is installed, else a Python 3.13 or newer that is already there,
 else it installs `uv` into `/opt/forgeyard/bin`, which brings its own Python. Without systemd it
 installs everything and prints how to start the agent.
+
+What it downloads is checked (1.4.5): the agent and the list of its dependencies come from the server,
+each checked against the SHA-256 the script names; the dependencies come from PyPI at the versions the
+server's release was tested with, each file checked against its published hash (`--require-hashes`,
+nothing else installed with them); and the `uv` it installs is a fixed release (0.9.24) downloaded from
+GitHub and checked against its SHA-256, not an install script. A machine that reaches PyPI through a
+mirror (`UV_INDEX_URL`, `PIP_INDEX_URL`) still gets the same files, or none.
 
 ## Built-in recipes
 

@@ -44,6 +44,7 @@ from forgeyard.machines.protocol import (
     FEATURE_WORKLOADS,
     JOIN_PATH,
     PROTOCOL_VERSION,
+    SERVER_MESSAGES,
     STREAM_PATH,
 )
 
@@ -167,7 +168,9 @@ class Agent:
     def stop(self) -> None:
         self._stop.set()
 
-    def hello(self, inventory: dict) -> dict:
+    def hello(self, inventory: dict, local: Optional[tuple] = None) -> dict:
+        """The first message. `local`: this connection's own (address, port), which (1.4.5, #171) the server
+        compares with the peer it sees to tell whether this agent runs on its own host."""
         msg = {"v": PROTOCOL_VERSION, "type": "hello", "agent_version": __version__,
                "hostname": socket.gethostname(), "labels": self.labels, "platform": platform_info(),
                "runtimes": [], "simulated": self.inventory.simulated,
@@ -179,6 +182,13 @@ class Agent:
                                FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD]
             msg["runtimes"] = self.supervisor.available()
             msg["runtime_info"] = self.supervisor.runtime_info()
+            # 1.4.5 (#171): the address replicas are published on (what the gateway dials), and this connection's
+            # own end. Servers before 1.4.5 drop both.
+            address = getattr(self.supervisor, "address", None)
+            if address:
+                msg["runtime_info"]["address"] = address
+            if local and len(local) >= 2:
+                msg["runtime_info"]["connection"] = {"address": local[0], "port": local[1]}
             cache = self.supervisor.model_cache_info()
             if cache is not None:
                 msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
@@ -264,7 +274,11 @@ class Agent:
                                  ping_interval=10, ping_timeout=20, close_timeout=5, max_size=2**20) as ws:
             inventory = await asyncio.to_thread(self.inventory.full)
             self._fingerprint = fingerprint(inventory)
-            await ws.send(json.dumps(self.hello(inventory)))
+            local = getattr(ws, "local_address", None)
+            if self.supervisor is not None:
+                # Before the hello, which says where replicas are published (1.4.5, #171).
+                self.supervisor.set_address(local[0] if local else None)
+            await ws.send(json.dumps(self.hello(inventory, local)))
             welcome = json.loads(await asyncio.wait_for(ws.recv(), WELCOME_TIMEOUT))
             if welcome.get("type") != "welcome":
                 raise ConnectionError(f"expected welcome, got {welcome.get('type')}: {welcome.get('message')}")
@@ -278,8 +292,6 @@ class Agent:
             tasks = {asyncio.create_task(self._send_loop(ws, interval)), asyncio.create_task(self._receive_loop(ws)),
                      asyncio.create_task(self._stop.wait())}
             if self.workloads:
-                local = getattr(ws, "local_address", None)
-                self.supervisor.set_address(local[0] if local else None)
                 self.supervisor.new_connection(self.server_features)
                 tasks.add(asyncio.create_task(self._status_loop(ws)))
             elif self.supervisor is not None:
@@ -311,12 +323,22 @@ class Agent:
         raise ConnectionError(f"closed by the server ({code} {reason or ''})".strip())
 
     async def _receive_loop(self, ws) -> None:
+        ignored: set[str] = set()  # message types this agent does not know, already warned about
         async for message in ws:
             try:
                 data = json.loads(message)
             except ValueError:
                 continue
+            if not isinstance(data, dict):
+                continue
             kind = data.get("type")
+            if isinstance(kind, str) and kind not in SERVER_MESSAGES:
+                # 1.4.5 (#170): a newer server's message this agent does not know: ignored, with one warning.
+                if kind not in ignored and len(ignored) < 16:
+                    ignored.add(kind)
+                    log.warning("The server sent a message this agent does not know (%r); ignored. A newer "
+                                "server? Update the agent.", kind[:40])
+                continue
             if kind == "error":
                 log.warning("Server: %s (%s)", data.get("message"), data.get("code"))
             elif kind == "desired" and self.workloads:
