@@ -424,6 +424,41 @@ The warning does not appear when every port of a range of up to 64 ports is forw
 Then restart the agent. If the server does reach the machine at that address in a way Forgeyard cannot see (a
 proxy on the server's host, say), snooze the warning.
 
+## Traffic to a machine is not encrypted
+
+**You see:** *Traffic to gpu-02 is not encrypted: update the agent* under **Get started → Setup health** and on the
+machine's page.
+
+**Why:** from 1.4.5 the gateway reaches every replica over TLS, but gpu-02's agent is older and serves its replicas
+over plain HTTP only. So the replicas' internal keys, the prompts and the answers cross the network in clear
+between the server and gpu-02. It keeps serving: nothing stops until you update it.
+
+**Do:** update the agent (the warning's **Update command** opens the command for that machine;
+[Update an agent](how-to.md#update-an-agent)). Once the new agent connects it gets its certificate within a second,
+and the warning goes away. Models deployed there keep running across the update (the agent adopts them).
+
+## A machine has no certificate for its replicas
+
+**You see:** an error under **Get started → Setup health**: *gpu-02 has no certificate for its replicas*, *gpu-02's
+replica certificate has expired* or *… is not being renewed*; models deployed only there answer 503, the others
+answer from replicas on other machines.
+
+**Why:** a 1.4.5 agent serves its replicas over TLS only, with a certificate the server signs for that machine. It
+asks for one when it connects and renews it 10 days before it ends (it is valid 30 days). The gateway never falls
+back to plain HTTP for such a machine, so without a valid certificate its replicas cannot be reached. The error
+names the reason when the server refused the request (it is also in the server's log). Usual causes:
+
+- the agent has not been connected for a long time (an offline machine cannot renew);
+- the server cannot read or make its CA in `data/tls` (a `ca.crt` without its `ca.key`, or a read-only data
+  directory): the server's log says *no certificate can be made*;
+- the agent's state directory is not writable, or the agent cannot make a key: its log says *cannot be used*.
+
+**Do:** look at the agent's log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`) and the server's.
+Fix what they name, then restart the agent: it asks again at once. If `data/tls` lost its `ca.key`, restore it from a
+backup ([Back up and restore](how-to.md#back-up-and-restore)); a new CA also works for the replicas (every
+agent gets a new certificate by itself), but browsers and agents that trusted the old one for the server must trust
+the new one.
+
 ## Errors from /v1: 401, 403, 429, 503
 
 The gateway answers errors in the OpenAI format, `{"error": {"message", "type", "param", "code"}}`.

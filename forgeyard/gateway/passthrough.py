@@ -75,6 +75,7 @@ from forgeyard.gateway.limits import Refusal, key_limiter
 from forgeyard.gateway.proxy import (CLIENT_CLOSED, RETRYABLE, ClientGone, EngineUnreachable, client, not_taken,
                                      unless_gone, _until_disconnect)
 from forgeyard.gateway.usage import recorder
+from forgeyard.security import replica_tls
 from forgeyard.security.client import client_ip
 from forgeyard.workloads import expose
 from forgeyard.workloads.spec import NAME_RE
@@ -189,10 +190,12 @@ def load(db: DbSession, name: str) -> Optional[XRoute]:
         port = next((p for p in r.ports or [] if p.get("name") == port_name), None)
         if not port or not port.get("host_port") or not port.get("address"):
             continue
-        host = port["address"]
-        host = f"[{host}]" if ":" in host else host
-        out.replicas.append(Target(uid=r.uid, ordinal=r.ordinal, url=f"http://{host}:{port['host_port']}",
-                                   machine=r.node.name if r.node else None, secret=r.secret, protected=True))
+        dialed = replica_tls.dial(r, port)   # 1.4.5: TLS with the machine's binding, or an older agent's plain HTTP
+        if dialed is None:
+            continue
+        out.replicas.append(Target(uid=r.uid, ordinal=r.ordinal, url=dialed[0],
+                                   machine=r.node.name if r.node else None, secret=r.secret, protected=True,
+                                   tls_name=dialed[1]))
     if not out.replicas:
         out.reason = "; ".join(skipped) if skipped else _not_ready(w)
     return out
@@ -505,7 +508,7 @@ async def _send(request: Request, caller: KeyCaller, route: XRoute, path: bytes,
         http = client()
         req = http.build_request(request.method, url, content=body if body or request.method not in ("GET", "HEAD")
                                  else None, headers=request_headers(request, name, pick.secret or "", request_id),
-                                 timeout=timeout)
+                                 timeout=timeout, extensions=pick.ext)
         sent_at = time.monotonic()
         try:
             response = await unless_gone(request.receive, http.send(req, stream=True, follow_redirects=False))

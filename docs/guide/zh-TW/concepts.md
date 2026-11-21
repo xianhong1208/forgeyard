@@ -87,6 +87,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 
 閘道會把每個請求送到正在處理中請求數最少的就緒副本；如果某個副本沒有回應，就改送下一個。副本無法繞過閘道直接使用：每個副本都有一把只有閘道知道的內部金鑰，agent 會拒絕送到副本連接埠的其他所有請求。
 
+從 1.4.5 起，閘道和副本之間的流量都會**加密**：agent 以 TLS 提供副本的連接埠，憑證由 Forgeyard 的 CA 替那台機器簽發（金鑰由 agent 自己產生，絕不離開那台機器），有效 30 天，agent 會在到期前 10 天自動更新，不必重新啟動。閘道連某台機器時只接受那台機器的憑證，所以內部金鑰、提示詞和回答都不會以明文經過網路。比 1.4.5 舊的 agent 會繼續以純 HTTP 提供服務：**Setup health** 和它的機器頁面會顯示 *Traffic to <machine> is not encrypted: update the agent*（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)）。1.4.5 的 agent 絕不會被以純 HTTP 連線：沒有有效憑證時連不到它的副本，Setup health 會顯示錯誤（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)）。
+
 **Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型。一個 **Model** 選單列出已就緒的模型，像 **Serving** 一樣依種類分組，用同樣的名稱和圖示（Chat、Multimodal chat、Embeddings、Rerank、Text classification、Speech to text、Text to speech、Images、Video、Vision）；選一個就會開出它的面板：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序、文字分類（輸入文字，每段文字的各標籤機率以長條顯示）、語音轉文字、**Speak**、**Image**、**Video**，或視覺面板（送一張圖片，得到方框、遮罩或深度圖）。網址會記住選的模型（`/playground?model=<name>`）；1.3 的 Vision 分頁網址（`/playground?tab=vision`）會開出第一個就緒的視覺模型，沒有時就打開選單。沒有任何就緒的模型時，頁面會這樣說明，並指向 **Models → Catalog** 去部署一個。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
 
 ## 對話中的圖片、音訊與影片

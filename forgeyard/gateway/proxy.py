@@ -113,6 +113,7 @@ from forgeyard.gateway.limits import Admission, Refusal, key_limiter
 from forgeyard.gateway.usage import recorder
 from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
 from forgeyard.models import modalities
+from forgeyard.security import replica_tls
 
 log = logging.getLogger("forgeyard.gateway")
 balancer.listen(waiting.slot_freed)   # a freed slot wakes the first request waiting in line (1.4.5)
@@ -292,13 +293,14 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
         port = next(iter(r.ports or []), None)
         if not port or not port.get("host_port") or not port.get("address"):
             continue
-        host = port["address"]
-        host = f"[{host}]" if ":" in host else host
+        dialed = replica_tls.dial(r, port)   # 1.4.5: https:// with the machine's binding, or an older agent's http://
+        if dialed is None:
+            continue
         protected = bool(r.secret) and r.node is not None and FEATURE_REPLICA_KEYS in (r.node.features or [])
         since = as_utc(r.ready_at).timestamp() if r.ready_at else 0.0
-        replicas.append(Target(uid=r.uid, ordinal=r.ordinal, url=f"http://{host}:{port['host_port']}",
+        replicas.append(Target(uid=r.uid, ordinal=r.ordinal, url=dialed[0],
                                machine=r.node.name if r.node else None, secret=r.secret, protected=protected,
-                               ready_since=since))
+                               ready_since=since, tls_name=dialed[1]))
     params = d.params or {}
     found = (recipes or {}).get(d.recipe)
     model = d.model
@@ -775,7 +777,10 @@ def client() -> httpx.AsyncClient:
         s = get_settings()
         c = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=s.gateway_connect_timeout, read=s.gateway_read_timeout, write=60.0, pool=30.0),
-            limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
+            # 1.4.5 (#163): TLS to every replica whose agent serves it, checked against Forgeyard's CA and the
+            # machine's binding name; plain HTTP only to older agents (security/replica_tls.py).
+            transport=replica_tls.ReplicaTransport(
+                limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100)),
             trust_env=False,          # replicas are on the LAN: never through a proxy from the environment
             cookies=egress.no_cookies(),  # shared by every request: a cookie one upstream set is never kept
             follow_redirects=False)
@@ -1411,7 +1416,7 @@ class Job:
             try:
                 path = UPSTREAM_PATHS.get(self.endpoint, f"/v1/{self.endpoint}")
                 req = http.build_request("POST", f"{pick.url}{path}", content=body, headers=headers,
-                                         timeout=timeout)
+                                         timeout=timeout, extensions=pick.ext)
                 self.sent_at = time.monotonic()
                 sending = http.send(req, stream=True) if first is None else self.send_first(http, req, first)
                 response = await unless_gone(self.request.receive, sending)
@@ -1494,7 +1499,8 @@ class Job:
         obj = self.parsed.obj or {}
         names = None
         if g.speaks is not None and (ask.voice is None or ask.voice.lower() in speech.OPENAI_VOICES):
-            found = await speech.voices_for(g.deployment_id, g.speaks, client(), pick.url, pick.secret)
+            found = await speech.voices_for(g.deployment_id, g.speaks, client(), pick.url, pick.secret,
+                                            extensions=pick.ext)
             names = [v["id"] for v in found] if found is not None else None
         out, chosen = speech.body_for(obj, ask, g.speaks, names)
         out["model"] = g.upstream_model

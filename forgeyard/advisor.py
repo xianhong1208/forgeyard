@@ -416,10 +416,14 @@ def agent_outdated(ctx: Context) -> Iterator[Finding]:
     update command."""
     from forgeyard.install.update import behind
 
+    from forgeyard.machines.protocol import FEATURE_GUARD_TLS
+
     for n in ctx.nodes:
         why = behind(n)
         if why is None:
             continue
+        if not why["older"] and not why["old_protocol"] and why["missing"] == [FEATURE_GUARD_TLS]:
+            continue  # 1.4.5: said better by replica-traffic-plain ("not encrypted: update the agent")
         old_protocol = why["old_protocol"]
         if why["older"] or old_protocol:
             title = f"{n.name} runs an older agent ({n.agent_version or 'unknown'})"
@@ -432,6 +436,47 @@ def agent_outdated(ctx: Context) -> Iterator[Finding]:
                       f"{', '.join(why['missing'])}: it was built from older code. Update it.")
         yield Finding("agent-outdated", "error" if old_protocol else "warning", title, detail,
                       f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
+
+
+@check
+def replica_traffic(ctx: Context) -> Iterator[Finding]:
+    """1.4.5 (#163): how the gateway reaches each machine's replicas (security/replica_tls.py `status`). An agent too
+    old for TLS keeps serving over plain HTTP (Tony's decision on #163): a warning that opens its update command. A
+    TLS agent whose certificate is missing, expired or not renewed: an error, since its replicas cannot be reached
+    (never over plain HTTP instead)."""
+    from forgeyard.security import replica_tls
+
+    for n in ctx.nodes:
+        st = replica_tls.status(n, now=ctx.now, settings=ctx.s)
+        if st is None or st["state"] in ("ok", "pending"):
+            continue
+        if st["state"] == "plain":
+            yield Finding("replica-traffic-plain", "warning", f"Traffic to {n.name} is not encrypted: update the agent",
+                          f"The gateway sends requests, answers and the replicas' internal keys to {n.name} over plain "
+                          f"HTTP: its agent ({n.agent_version or 'of an unknown version'}) cannot serve TLS. It keeps "
+                          "serving meanwhile; once its agent is updated, that traffic is encrypted.",
+                          f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
+            continue
+        why = f" ({st['reason']})" if st.get("reason") else ""
+        if st["state"] == "missing":
+            title = f"{n.name} has no certificate for its replicas"
+            detail = (f"{n.name}'s agent serves its replicas over TLS only, and it has no certificate from this "
+                      f"server{why}. The gateway cannot reach its replicas until it has one, and never falls back to "
+                      "plain HTTP: requests go to replicas on other machines. Look at the agent's log; restarting the "
+                      "agent asks again.")
+        else:
+            end = st["not_after"][:10] if st.get("not_after") else "?"
+            title = (f"{n.name}'s replica certificate has expired" if st["state"] == "expired"
+                     else f"{n.name}'s replica certificate is not being renewed")
+            detail = (f"The certificate {n.name}'s agent serves its replicas with is valid until {end}{why}. It is "
+                      f"renewed {replica_tls.RENEW_BEFORE_DAYS} days before that while the agent is connected; "
+                      + ("an expired one is refused, so its replicas cannot be reached (never over plain HTTP instead)."
+                         if st["state"] == "expired" else "that keeps failing, and once it expires its replicas cannot "
+                                                          "be reached.")
+                      + " Look at the agent's log, and whether it is connected.")
+        yield Finding("replica-certificate", "error", title, detail,
+                      "/guide/en/troubleshooting#a-machine-has-no-certificate-for-its-replicas", "What to do",
+                      scope=f"machine:{n.id}", pages=("machines", "serving"))
 
 
 def _settled_holds(ctx: Context, node: Node):

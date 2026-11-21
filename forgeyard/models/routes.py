@@ -20,8 +20,11 @@ def _ready(r: Replica, w: Workload) -> bool:
     return r.state == "healthy" or (r.state == "running" and not health)
 
 
-def endpoints(w: Workload, *, ready_only: bool = False) -> list[dict]:
-    """Each replica's own address (its first port), ready or not."""
+def endpoints(w: Workload, *, ready_only: bool = False, tls: bool = False) -> list[dict]:
+    """Each replica's own address (its first port), ready or not: (1.4.5) https:// when its agent serves TLS, with the
+    machine's binding name the certificate must carry (`tls_name`, with `tls`; security/replica_tls.py)."""
+    from forgeyard.security import replica_tls
+
     out = []
     for r in w.replicas:
         port = next(iter(r.ports or []), None)
@@ -30,10 +33,14 @@ def endpoints(w: Workload, *, ready_only: bool = False) -> list[dict]:
         ready = _ready(r, w)
         if ready_only and not ready:
             continue
-        host = port["address"]
-        host = f"[{host}]" if ":" in host else host
-        out.append({"replica": r.ordinal, "machine": r.node.name if r.node else None, "state": r.state,
-                    "ready": ready, "url": f"http://{host}:{port['host_port']}/"})
+        dialed = replica_tls.dial(r, port)
+        if dialed is None:
+            continue
+        e = {"replica": r.ordinal, "machine": r.node.name if r.node else None, "state": r.state,
+             "ready": ready, "url": dialed[0] + "/"}
+        if tls:  # the binding name, for those that dial it (deployments' Try it); never shown
+            e["tls_name"] = dialed[1]
+        out.append(e)
     return out
 
 

@@ -7,6 +7,7 @@ import ipaddress
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
@@ -306,7 +307,29 @@ def _runtime_info(value: Any) -> dict:
     connection = _connection(value.get("connection"))
     if connection is not None:
         out["connection"] = connection
+    tls = _tls(value.get("tls"))
+    if tls is not None:
+        out["tls"] = tls
     return out
+
+
+def _tls(value: Any) -> Optional[dict]:
+    """(1.4.5, #163) {serial, not_after, name, ca}: the certificate the agent's key guards serve (what the machine's
+    page shows; the gateway checks the certificate itself on every connection)."""
+    if not isinstance(value, dict):
+        return None
+    serial, name, ca, not_after = value.get("serial"), value.get("name"), value.get("ca"), value.get("not_after")
+    if not (isinstance(serial, str) and re.fullmatch(r"[0-9a-f]{1,64}", serial)):
+        return None
+    if not (isinstance(name, str) and len(name) <= 128 and isinstance(ca, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", ca)):
+        return None
+    if not isinstance(not_after, str) or len(not_after) > 40:
+        return None
+    try:
+        datetime.fromisoformat(not_after)
+    except ValueError:
+        return None
+    return {"serial": serial, "not_after": not_after, "name": name, "ca": ca}
 
 
 def same_end(connection: Optional[dict], peer: Optional[tuple]) -> bool:
@@ -353,6 +376,15 @@ class HelloIn(_Msg):
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
     # Added in 1.4.2: how the agent runs, for its update command (older agents do not send it).
     install: Annotated[Optional[dict], BeforeValidator(_install)] = None
+
+
+class CertRequestIn(_Msg):
+    """1.4.5 ("guard_tls"): a CSR for the key the agent's replica guards serve TLS with."""
+
+    v: int
+    type: Literal["cert_request"]
+    request_id: Annotated[str, _short(64)]
+    csr: Annotated[str, _short(8192)]
 
 
 class MetricIn(_Msg):

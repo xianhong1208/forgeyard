@@ -82,11 +82,12 @@ print(sorted(m for m in mods if m not in sys.stdlib_module_names and not m.start
     allowed = {"forgeyard", "websockets", "h11", "pydantic", "pydantic_core", "annotated_types", "typing_extensions",
                "typing_inspection"}
     assert used <= allowed, used - allowed
-    assert {r.split(">=")[0] for r in wheel.REQUIRES} == {"websockets", "h11", "pydantic"}
+    # cryptography (1.4.5, #163): imported only where the guards' certificate key and CSR are made.
+    assert {r.split(">=")[0] for r in wheel.REQUIRES} == {"websockets", "h11", "pydantic", "cryptography"}
 
 
 AGENT_ALLOWED = {"forgeyard", "websockets", "h11", "pydantic", "pydantic_core", "annotated_types", "typing_extensions",
-                 "typing_inspection"}
+                 "typing_inspection", "cryptography", "cffi"}
 
 
 def _agent_reachable() -> dict[str, str]:
@@ -534,7 +535,7 @@ def test_fy_inst_020_the_dependency_lists_are_uv_locks_with_hashes():
             f"{name} is out of date: run python -m forgeyard.install.requirements"
     base = (ROOT / "forgeyard" / "install" / "agent-requirements.txt").read_text()
     pins = dict(re.findall(r"^([a-z0-9-]+)==(\S+)", base, re.M))
-    assert {"websockets", "h11", "pydantic", "pydantic-core", "typing-extensions"} <= set(pins)
+    assert {"websockets", "h11", "pydantic", "pydantic-core", "typing-extensions", "cryptography", "cffi"} <= set(pins)
     for req in wheel.REQUIRES:
         name, low = re.match(r"([a-z0-9-]+)>=(\S+)", req).groups()
         assert _version_tuple(pins[name]) >= _version_tuple(low), req
@@ -548,7 +549,7 @@ def test_fy_inst_020_the_dependency_lists_are_uv_locks_with_hashes():
     def pkg(name, hashed=True):
         files = f'sdist = {{ url = "https://x/{name}.tar.gz", hash = "sha256:{"ab" * 32}" }}\n' if hashed else ""
         return f'[[package]]\nname = "{name}"\nversion = "1.0"\nsource = {{ registry = "https://pypi.org/simple" }}\n{files}'
-    small = "version = 1\n" + "".join(pkg(n) for n in ("websockets", "pydantic"))
+    small = "version = 1\n" + "".join(pkg(n) for n in ("websockets", "pydantic", "cryptography"))
     assert "h11==1.0" in requirements.generate(small + pkg("h11"), "")
     with pytest.raises(ValueError, match="no SHA-256 for h11"):
         requirements.generate(small + pkg("h11", hashed=False), "")

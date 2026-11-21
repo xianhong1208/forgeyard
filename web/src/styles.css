@@ -115,6 +115,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .notice-info { background: var(--info-soft); border-color: #c7d9eb; color: #1e3f5e; }
 .notice-error { background: var(--bad-soft); border-color: #f2c4c0; color: #8a1a12; }
 .notice-ok { background: var(--ok-soft); border-color: #bfe0cc; color: #14512f; }
+.notice-warn { background: var(--heat-soft); border-color: #f3d39b; color: var(--heat-ink); }
 .chip { display: inline-flex; align-items: center; height: 21px; padding: 0 7px; border-radius: 4px;
   font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.02em; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
 .chip + .chip { margin-left: 6px; }
@@ -1454,6 +1455,10 @@ a.holder-chip:hover { border-color: var(--ink-2); color: var(--ink); }
 /* 1.4.2 (#121, #122): an agent behind the server, and its update command. */
 .chip-update { gap: 4px; background: var(--heat-soft); border-color: #f3d39b; color: var(--heat-ink); font-family: inherit; font-weight: 600; text-decoration: none; white-space: normal; height: auto; min-height: 21px; overflow-wrap: anywhere; }
 a.chip-update:hover { border-color: var(--heat-ink); }
+/* 1.4.5 (#163): replica traffic on a machine's page */
+.chip-tls { gap: 4px; font-weight: 600; white-space: normal; height: auto; min-height: 21px; }
+.fact dd.tls-plain { color: var(--heat-ink); font-weight: 600; }
+.fact dd.tls-missing, .fact dd.tls-expired, .fact dd.tls-expiring { color: #8a1a12; font-weight: 600; }
 .tile-foot:has(.chip-update) { flex-wrap: wrap; align-items: center; }
 .tile-foot .chip-update { position: relative; z-index: 1; font-size: 12px; white-space: nowrap; } /* above the tile's stretched link */
 .agent-update .update-why { margin: 0 0 10px; }

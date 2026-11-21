@@ -25,7 +25,8 @@ PACKAGE = Path(__file__).resolve().parent.parent
 LICENSE = PACKAGE.parent / "LICENSE"
 NAME = "forgeyard"
 # What `forgeyard agent` imports (tests/test_install.py checks the agent's modules against it).
-REQUIRES = ("websockets>=15", "h11>=0.16", "pydantic>=2.7")
+# cryptography (1.4.5, #163): the key and CSR of the key guards' TLS certificate, made on the machine.
+REQUIRES = ("websockets>=15", "h11>=0.16", "pydantic>=2.7", "cryptography>=46")
 EXTRAS = {"nvidia": ("nvidia-ml-py>=12.535",)}
 EXCLUDED_DIRS = {"__pycache__", "static"}
 _EPOCH = (2020, 1, 1, 0, 0, 0)

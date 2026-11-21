@@ -43,7 +43,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   (1.4.4) image classification at `/v1/vision/…`, deployed like any other model.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted. Admins download the key and the CA
-  as one passphrase-encrypted backup file from the console (1.4.2).
+  as one passphrase-encrypted backup file from the console (1.4.2). From 1.4.5 the gateway reaches every replica
+  over TLS too, with a certificate the CA signs for that machine (its key never leaves it).
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging

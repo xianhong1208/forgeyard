@@ -1,11 +1,12 @@
 // 1.4.2 (#121, #122): "Update the agent" on a machine's page, and the hint on its tile. Admins get the complete
 // command for that machine (GET /api/machines/{id}/agent-update), built from how its agent said it runs; everyone
 // sees whether it is behind the server.
-import { IconArrowUpCircle } from "@tabler/icons-react";
+import { IconArrowUpCircle, IconLockOpen, IconShieldX } from "@tabler/icons-react";
 import { useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 
 import { behindDetail, behindText, methodLine } from "../lib/agentUpdate";
+import { tlsChip } from "../lib/replicaTls";
 import type { AgentUpdate, Machine, UpdateStep } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { HelpLink } from "./HelpLink";
@@ -19,6 +20,25 @@ export function BehindChip({ m }: { m: Machine }) {
     <Link to={`/machines/${m.id}#update`} className="chip chip-update" title="Open the command that updates this agent">
       <IconArrowUpCircle size={13} aria-hidden="true" /> {text}
     </Link>
+  );
+}
+
+// 1.4.5 (#163): on the machine's facts line, how the gateway reaches its replicas when that needs attention: an agent
+// too old for TLS (a link to its update command) or a TLS agent without a valid certificate.
+export function TlsChip({ m }: { m: Machine }) {
+  const c = tlsChip(m);
+  if (!c) return null;
+  if (c.update) {
+    return (
+      <Link to={`/machines/${m.id}#update`} className="chip chip-update chip-plain" title="Traffic to this machine is not encrypted: open the command that updates its agent">
+        <IconLockOpen size={13} aria-hidden="true" /> {c.text}
+      </Link>
+    );
+  }
+  return (
+    <span className="chip chip-tone-bad chip-tls" title="Its agent serves its replicas over TLS only, and has no valid certificate: they cannot be reached">
+      <IconShieldX size={13} aria-hidden="true" /> {c.text}
+    </span>
   );
 }
 
@@ -64,6 +84,9 @@ export function AgentUpdateSection({ m, canManage }: { m: Machine; canManage: bo
         <h2 id="mk-update">Update the agent</h2>
         {behind && <span className="chip chip-update">{behindText(m)}</span>}
       </div>
+      {m.replica_tls?.state === "plain" && (
+        <Notice tone="warn">Traffic to this machine is not encrypted: update the agent. Until then the gateway reaches its replicas over plain HTTP; they keep serving.</Notice>
+      )}
       {behind ? (
         <p className="update-why">{behindDetail(behind)}</p>
       ) : (

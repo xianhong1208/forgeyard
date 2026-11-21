@@ -33,6 +33,12 @@ method; everything else gets 401 from the guard and never reaches the engine.
   gives up, its disconnect stops the engine.
 - **The key** is compared in constant time (hmac.compare_digest). It lives in the agent's memory only.
 
+**TLS (1.4.5, #163):** with `ssl_context` (agent/replica_tls.py) the guard speaks only TLS on its port: the
+gateway dials https:// and checks a certificate Forgeyard's CA signed for this machine; a plain HTTP request fails
+the handshake and never reaches the key check. Without a certificate in the context yet, every handshake fails. The
+internal key is checked exactly as before, now inside TLS. Without `ssl_context` (a server older than 1.4.5, which
+dials plain HTTP) the guard speaks plain HTTP as before.
+
 **Exposed workloads (1.3, /x/<name>):** the same guard fronts a plain service the gateway exposes, with
 `strip_auth`: the internal key is checked and then **removed**, so the program never sees it (the
 gateway passes no client credentials either). Everything else is the same.
@@ -49,6 +55,7 @@ import contextlib
 import hmac
 import json
 import logging
+import ssl
 import time
 from typing import Optional
 
@@ -107,8 +114,10 @@ class Guard:
     def __init__(self, *, listen: tuple[str, int], upstream: tuple[str, int], key: Optional[str], name: str = "",
                  head_timeout: float = HEAD_TIMEOUT, idle_timeout: float = IDLE_TIMEOUT,
                  body_timeout: float = BODY_TIMEOUT, connect_timeout: float = CONNECT_TIMEOUT,
-                 write_timeout: float = WRITE_TIMEOUT, strip_auth: bool = False):
+                 write_timeout: float = WRITE_TIMEOUT, strip_auth: bool = False,
+                 ssl_context: Optional[ssl.SSLContext] = None):
         self.listen = listen
+        self.ssl_context = ssl_context  # 1.4.5: TLS on the published port (None: plain HTTP, for an older server)
         self.strip_auth = strip_auth  # an exposed workload's guard: the key is removed after the check
         self.upstream = upstream
         self.name = name
@@ -127,6 +136,10 @@ class Guard:
 
     # ------------------------------------------------------------------ lifecycle
     @property
+    def tls(self) -> bool:
+        return self.ssl_context is not None
+
+    @property
     def listening(self) -> bool:
         return self._server is not None and self._server.is_serving()
 
@@ -139,8 +152,9 @@ class Guard:
     async def start(self) -> None:
         """Listen on the published address. Raises OSError when it cannot (the port is taken)."""
         host, port = self.listen
+        extra = {"ssl": self.ssl_context, "ssl_handshake_timeout": self.head_timeout} if self.ssl_context else {}
         self._server = await asyncio.start_server(self._accept, host, port, reuse_address=True,
-                                                  limit=READ_SIZE)
+                                                  limit=READ_SIZE, **extra)
 
     async def close(self) -> None:
         """Stop listening and cut every connection (the engine's ones with them)."""

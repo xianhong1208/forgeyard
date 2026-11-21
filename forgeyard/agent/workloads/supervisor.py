@@ -45,12 +45,13 @@ from typing import Callable, Optional
 from pydantic import ValidationError
 
 from forgeyard.agent import relay
+from forgeyard.agent.replica_tls import ReplicaTls
 from forgeyard.agent.workloads import health, plan, ports as portlib
 from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.process import beyond_loopback, find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.prefetch import Prefetcher
-from forgeyard.machines.protocol import FEATURE_PREFETCH, FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
+from forgeyard.machines.protocol import FEATURE_GUARD_TLS, FEATURE_PREFETCH, FEATURE_PULL_PROGRESS, PROTOCOL_VERSION
 from forgeyard.workloads import images
 from forgeyard.workloads.spec import WorkloadSpec
 
@@ -134,6 +135,11 @@ class Supervisor:
         self.gate_poll = gate_poll
         # 1.4 ("prefetch"): downloads into the model cache asked for ahead of a deployment.
         self.prefetch = Prefetcher(self)
+        # 1.4.5 (#163): the guards' TLS certificate (agent/replica_tls.py), and whether they serve TLS: only for a
+        # server that listed "guard_tls" (it dials https:// only), decided at each welcome before any guard opens.
+        self.tls = ReplicaTls(state_dir)
+        self.tls_required = False
+        self._tls_said: Optional[bool] = None
 
     # ------------------------------------------------------------------ what the agent tells the server
     def runtime_info(self) -> dict:
@@ -154,9 +160,24 @@ class Supervisor:
         return self.models.info() if self.models is not None else None
 
     def new_connection(self, features=()) -> None:
-        """Revisions order the desired lists of one connection: a new one starts its own order."""
+        """Revisions order the desired lists of one connection: a new one starts its own order. (1.4.5) Whether the
+        guards serve TLS follows the server: a guard of the other kind is opened again (`_open_guard`)."""
         self.revision = -1
         self.server_features = set(features or ())
+        want = FEATURE_GUARD_TLS in self.server_features and self.tls.usable
+        if want != self.tls_required or self._tls_said is None:
+            if want:
+                log.info("The server reaches replicas over TLS: the key guards serve TLS only.")
+            elif not self.tls.usable:
+                log.warning("This agent lacks the cryptography package, so its key guards serve plain HTTP and the "
+                            "server reports the machine's traffic as not encrypted. Install the agent's requirements.")
+            else:
+                log.warning("The server is older than 1.4.5 and reaches replicas over plain HTTP: the key guards serve "
+                            "plain HTTP to it. Update the server to encrypt that traffic.")
+            self._tls_said = want
+        if want != self.tls_required:
+            self.tls_required = want
+            self._wake.set()
 
     def set_desired(self, msg: dict) -> None:
         revision = int(msg.get("revision") or 0)
@@ -1050,6 +1071,14 @@ class Supervisor:
         None when they do, else why not (also kept in guard_errors, which fails its health)."""
         key = self.keys.get(rec.id)
         guards = self.guards.get(rec.id)
+        if guards is not None and any(g.tls != self.tls_required for g in guards):
+            # 1.4.5: the server now reaches replicas the other way (it was updated): listen again that way. Only
+            # at a new connection to a server of another kind, so nothing of the old one is still in flight.
+            log.info("Replica %s of %s: its key guard now serves %s.", rec.id[:12], rec.workload,
+                     "TLS" if self.tls_required else "plain HTTP")
+            for g in self.guards.pop(rec.id, []):
+                await g.close()
+            guards = None
         if guards is not None:
             for g in guards:
                 if not g.has_key(key[1] if key else None):
@@ -1062,7 +1091,8 @@ class Supervisor:
                 continue
             g = Guard(listen=(p.get("address") or self.address, int(p["host_port"])),
                       upstream=(plan.LOOPBACK, int(p["internal"])), key=key[1] if key else None,
-                      name=f"{rec.workload} #{rec.ordinal}", strip_auth=rec.id in self.strip)
+                      name=f"{rec.workload} #{rec.ordinal}", strip_auth=rec.id in self.strip,
+                      ssl_context=self.tls.context if self.tls_required else None)
             try:
                 await g.start()
             except OSError as e:

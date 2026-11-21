@@ -304,11 +304,12 @@ def parse_voices(data) -> list[dict]:
     return out
 
 
-async def fetch_voices(http: httpx.AsyncClient, url: str, secret: Optional[str], path: str) -> list[dict]:
+async def fetch_voices(http: httpx.AsyncClient, url: str, secret: Optional[str], path: str, *,
+                       extensions: Optional[dict] = None) -> list[dict]:
     headers = {"Accept": "application/json", "Accept-Encoding": "identity", "User-Agent": "forgeyard-gateway"}
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
-    r = await http.get(f"{url}{path}", headers=headers, timeout=VOICES_TIMEOUT)
+    r = await http.get(f"{url}{path}", headers=headers, timeout=VOICES_TIMEOUT, extensions=extensions or {})
     if r.status_code != 200:
         raise GatewayError(502, "upstream_error", f"The replica answered {r.status_code} to its voice list.")
     try:
@@ -318,7 +319,8 @@ async def fetch_voices(http: httpx.AsyncClient, url: str, secret: Optional[str],
 
 
 async def voices_for(deployment_id: int, sp: Optional[Speaks], http: httpx.AsyncClient, url: str,
-                     secret: Optional[str], *, fresh: bool = False) -> Optional[list[dict]]:
+                     secret: Optional[str], *, fresh: bool = False,
+                     extensions: Optional[dict] = None) -> Optional[list[dict]]:
     """The deployment's voices, from one of its replicas and kept for VOICES_TTL; the catalog's list
     when the engine has no voice list; None when neither is known (or the replica did not answer)."""
     if sp is None:
@@ -335,7 +337,7 @@ async def voices_for(deployment_id: int, sp: Optional[Speaks], http: httpx.Async
         if hit and hit[0] > now and not fresh:
             return hit[1]
         try:
-            found = await fetch_voices(http, url, secret, sp.voices_path)
+            found = await fetch_voices(http, url, secret, sp.voices_path, extensions=extensions)
         except (httpx.HTTPError, GatewayError):
             return [{"id": v, "name": v} for v in sp.model_voices] if sp.model_voices else None
         _voices[deployment_id] = (now + VOICES_TTL, found)

@@ -143,4 +143,35 @@ describe("updating an agent", () => {
     expect(screen.queryByRole("region", { name: "Update the agent" })).toBeNull();
     expect(screen.queryByText(/: update$/)).toBeNull();
   });
+
+  it("FY-WEB-542 an agent too old for TLS: a chip on its page opens the update command, the Agent section and the update section say it is not encrypted", async () => {
+    const data = machines();
+    data.machines[0].replica_tls = { state: "plain", not_after: null, reason: null };
+    data.machines[1].replica_tls = { state: "ok", not_after: "2026-12-21T12:00:00+00:00", reason: null };
+    server((url) => (url === "/api/machines" ? { status: 200, body: data }
+      : url === "/api/machines/1/agent-update" ? { status: 200, body: UPDATE } : undefined));
+    mount("/machines/1");
+    const chip = await screen.findByRole("link", { name: /not encrypted: update the agent/ });
+    expect(chip.getAttribute("href")).toBe("/machines/1#update");
+    expect(screen.getByText(/^Not encrypted \(plain HTTP\): its agent is older than 1\.4\.5/)).toBeTruthy();
+    const section = await screen.findByRole("region", { name: "Update the agent" });
+    expect(within(section).getByText(/Traffic to this machine is not encrypted: update the agent\./)).toBeTruthy();
+    fireEvent.click(chip);
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/machines/1#update"));
+  });
+
+  it("FY-WEB-543 a TLS machine: its certificate's expiry, no chip; one without a certificate shows the error chip", async () => {
+    const data = machines(null);
+    data.machines[0].replica_tls = { state: "ok", not_after: "2026-12-21T12:00:00+00:00", reason: null };
+    data.machines[1].replica_tls = { state: "missing", not_after: null, reason: "the CSR cannot be read" };
+    server((url) => (url === "/api/machines" ? { status: 200, body: data }
+      : url === "/api/machines/1/agent-update" || url === "/api/machines/2/agent-update" ? { status: 200, body: { ...UPDATE, behind: null } } : undefined));
+    mount("/machines/1");
+    expect(await screen.findByText("Encrypted (TLS), certificate valid until 2026-12-21")).toBeTruthy();
+    expect(screen.queryByText(/not encrypted/)).toBeNull();
+    cleanup();
+    mount(`/machines/${data.machines[1].id}`);
+    expect(await screen.findByText("no replica certificate")).toBeTruthy();
+    expect(screen.getByText(/no certificate from this server \(the CSR cannot be read\)/)).toBeTruthy();
+  });
 });
