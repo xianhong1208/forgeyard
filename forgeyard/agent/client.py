@@ -44,6 +44,7 @@ from forgeyard.machines.protocol import (
     FEATURE_WORKLOADS,
     JOIN_PATH,
     PROTOCOL_VERSION,
+    SERVER_MESSAGES,
     STREAM_PATH,
 )
 
@@ -311,12 +312,22 @@ class Agent:
         raise ConnectionError(f"closed by the server ({code} {reason or ''})".strip())
 
     async def _receive_loop(self, ws) -> None:
+        ignored: set[str] = set()  # message types this agent does not know, already warned about
         async for message in ws:
             try:
                 data = json.loads(message)
             except ValueError:
                 continue
+            if not isinstance(data, dict):
+                continue
             kind = data.get("type")
+            if isinstance(kind, str) and kind not in SERVER_MESSAGES:
+                # 1.4.5 (#170): a newer server's message this agent does not know: ignored, with one warning.
+                if kind not in ignored and len(ignored) < 16:
+                    ignored.add(kind)
+                    log.warning("The server sent a message this agent does not know (%r); ignored. A newer "
+                                "server? Update the agent.", kind[:40])
+                continue
             if kind == "error":
                 log.warning("Server: %s (%s)", data.get("message"), data.get("code"))
             elif kind == "desired" and self.workloads:

@@ -79,6 +79,12 @@ version until 1.0.
 
 ### Fixed
 
+- **Mixed server and agent versions keep working** (#170). A card of a vendor the server does not know (from a
+  newer agent) is left out of the machine, with a warning in the server's log and an *unknown vendor* line under
+  the machine page's **Detection notes**, instead of refusing the agent's hello. A message type either side does
+  not know is ignored, with one warning per connection, instead of closing the socket. Before, both closed the
+  connection with 4003, which an agent retries, so a newer agent reconnected forever. A known message that does
+  not validate is still refused.
 - RoBERTa and XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold
   512 tokens: the catalog now says 512 (BGE-M3 and its reranker: 8192, not 8194). Choosing the old maximum as the
   context would have overflowed the position table in vLLM. Models already in the catalog keep the number they were
