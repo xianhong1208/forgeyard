@@ -1481,9 +1481,10 @@ when added, or when one kept from before 1.4.3 is deployed). An image classifier
 ViT, ConvNeXt V2, DINOv2…; a timm checkpoint, `timm_wrapper`, is refused) or a CLIP-like one (marked `zero_shot`:
 CLIP, SigLIP, SigLIP 2, ALIGN, AltCLIP, Chinese-CLIP, MetaCLIP 2), served as `vision-classify`. Zero-shot
 detectors and image classifiers run on a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision`
-image is older, deploying or estimating one answers 422 `vision_image_too_old`, naming both versions; an
-image of another name (a local build) is taken as it is. OpenCLIP's own weights beside a CLIP repository's
-transformers ones (`open_clip_*`) are neither read nor downloaded.
+image is older, deploying or estimating one answers 422 `vision_image_too_old`, naming both versions (a
+pre-release such as `1.4.4rc1` counts as the release it leads to, 1.4.4); an image of another name (a local
+build) is taken as it is. OpenCLIP's own weights beside a CLIP repository's transformers ones (`open_clip_*`)
+are neither read nor downloaded.
 Estimate: the files plus 1 GiB on a GPU (and the CUDA context),
 1.25 GiB of RAM on a CPU, measured with the three recommended models (peak 0.66 to 1.12 GiB on a CPU);
 Grounding DINO and MM-Grounding-DINO add 512 MiB (their text encoder and 800-pixel features: peak 2.24 GiB on a

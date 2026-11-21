@@ -59,7 +59,8 @@ version until 1.0.
   - Playground: a **Find these** box for them (comma-separated names, then **Find**; the score slider starts at
     0.3). **Try it** asks them for the test image's two shapes (or for the words sent as `input`).
   - They need a vision image from 1.4.4 on: on a recipe whose `forgeyard-vision` image is older, deploying one
-    answers 422 `vision_image_too_old`. The built-in recipe runs one (below).
+    answers 422 `vision_image_too_old` (a pre-release tag such as `1.4.4rc1` counts as the release it leads to,
+    1.4.4). The built-in recipe runs one (below).
   - `scripts/accept_vision.py` knows `grounding-dino-tiny`, `mm-grounding-dino-tiny` and `owlv2-base`: two cats,
     a remote and no giraffe on the COCO photo, `labels_required`, and `labels_not_supported` for RT-DETR.
 
