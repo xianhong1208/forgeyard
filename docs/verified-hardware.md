@@ -1,0 +1,46 @@
+# Verified hardware
+
+[繁體中文](verified-hardware.zh-TW.md)
+
+Every release is accepted on real machines before it is tagged, not only in CI. This page lists those
+machines by hardware model and each release's pass counts, starting with 1.4.3. What ran on each kind of
+machine is in the README's [Tested on](../README.md#tested-on).
+
+## How a release is accepted
+
+- **[`scripts/accept_all.py`](../scripts/accept_all.py)**, the full regression run: every shipped feature,
+  checked through the server's API, `/v1` with the official OpenAI SDK, and the web console, on a running
+  server with real agents and real engines. Each check reports PASS, FAIL or SKIP with its reason; a check
+  that cannot run there (for example, too little free memory on a shared card) is skipped, never counted as
+  passed. The run removes what it created.
+- **[`scripts/accept_vision.py`](../scripts/accept_vision.py)**, the vision models: each one deployed with
+  the built-in `vision` recipe and called at `/v1/vision/*` on a known photo, then the refusals and the
+  usage it records.
+- The other `scripts/accept_*.py` scripts cover single features in more depth (chat with images, audio and
+  video; text to speech; image and video generation); [docs/development.md](development.md) lists them.
+
+You can run the same scripts against your own server and machines
+([how](guide/how-to.md#check-a-server-end-to-end)). The raw logs of these runs are not published: they
+name machines and networks. Only the hardware models and the counts are.
+
+## The machines
+
+| Machine | Used for |
+|---|---|
+| NVIDIA A100 80GB PCIe, an 8-GPU host shared with other work (Forgeyard limited to its cards by a GPU allowlist) | GPU engines: vLLM, vLLM-Omni, llama.cpp (CUDA), stable-diffusion.cpp (CUDA), speaches, the vision image |
+| AMD Ryzen AI MAX+ 395 with Radeon 8060S (Strix Halo APU) | Vulkan builds of llama.cpp and stable-diffusion.cpp, and the CPU; files and images through the server, for a machine without internet |
+| x86-64 machine without a GPU | CPU engines as processes and containers |
+| Google Gemini (`gemini-2.5-flash`) | the cloud tier: spill, cost and budgets |
+
+## Results per release
+
+| Release | Run | Machines | Passed | Failed |
+|---|---|---|---|---|
+| 1.4.4 | full regression (`accept_all.py`, in two runs: 233 + 163) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 396 | 0 |
+| 1.4.4 | zero-shot detection and image classification (`accept_vision.py`) | A100 | 77 | 0 |
+| 1.4.4 | zero-shot detection and image classification (`accept_vision.py`) | Ryzen AI MAX+ 395, on the CPU | 71 | 0 |
+| 1.4.4 | text classification on vLLM 0.32: three recommended models, the key guard, the Playground | A100 | all | 0 |
+| 1.4.3 | full regression (`accept_all.py`) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 303 | 0 |
+| 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
+
+Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).

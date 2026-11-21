@@ -2,8 +2,8 @@
 
 [繁體中文](ROADMAP.zh-TW.md)
 
-Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10 and revised on 2026-11-19 after an outside review; each line names what
-users get, not how it is built. Versions are minor releases unless a change breaks something.
+Where Forgeyard is going after 1.0. The order was agreed on 2026-11-10 and revised on 2026-11-19 after an outside review and again on
+2026-11-21; each line names what users get, not how it is built.
 
 ## Shipped
 
@@ -319,20 +319,51 @@ Also in 1.4.2: a relay whose source breaks off mid-file reads as one clear line 
 Also in 1.4.4: contributions are signed off under the Developer Certificate of Origin, checked on every pull
 request (#160).
 
+## Community and enterprise editions
+
+Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
+The community edition keeps everything needed to run models on your own machines: machines and their
+GPUs, memory estimates, scheduling, the `/v1` gateway, cloud spill, per-key cloud policies and budgets,
+usage, local accounts and roles, the audit log of admin actions, scale to zero and autoscaling,
+Prometheus metrics, and TLS between the gateway and the machines.
+
+Some features for larger organisations are planned for a separate **enterprise edition**: single
+sign-on with MFA and SCIM, organisations and teams with quotas and cost reports, the per-request audit
+log and its export, PII masking, tunnels for machines at other sites, more than one server for high
+availability, and extended support (longer support periods, with fixes back-ported to older releases). They
+are marked *(enterprise edition)* in the table below.
+Nothing that is in the community edition today moves to the enterprise edition.
+
 ## Next
+
+Each minor version comes as a series of small releases: its main feature first (1.5.0, 1.6.0, …), then
+the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.4.5: fixes from an outside review** | **Structured output is never silently lost:** a request with a JSON schema, grammar or guided-decoding parameter is not spilled to a cloud tier that would drop it, and any parameter dropped on the way to a cloud provider is named in an `X-Forgeyard-Dropped-Params` header. **Encrypted traffic to the machines:** the gateway talks to each replica over TLS, with a certificate the agent gets from Forgeyard's own CA, so prompts and answers no longer cross the network in plain HTTP. **Replicas move off a machine that stays offline:** after a grace period they are placed on another machine that fits. **Prometheus metrics** at `/metrics`. **Memory is never promised twice:** layers of a GGUF model left on the CPU count against the machine's RAM, an APU's shared memory is not counted both as GPU memory and as RAM, and a recipe's changed overhead updates the reservations of existing deployments. **Better estimates:** sliding-window attention (Gemma, Mistral), MLA (DeepSeek) and hybrid models are estimated from what they really keep, so models that fit are no longer refused. **No request runs twice:** a request is retried on another replica only when it never reached the first; a replica that accepts a request and then goes silent is given up after a shorter, settable wait instead of 600 s. **Fair waiting:** text requests waiting for a busy deployment are served first come, first served. **Mixed versions keep working:** a server ignores a message type or a vendor it does not know instead of dropping the agent. **A warning when a machine reports a loopback address** (an agent reached through an SSH tunnel), since the gateway would then dial its own host. Smaller fixes: `local_busy` answers carry `Retry-After`; cloud spend from answers without token counts survives a restart; the installer pins the uv it downloads by hash. **Behind the scenes:** the two largest files are split before more is built on them: the gateway's `proxy.py` (about 1,700 lines) into routing, spill, cloud and streaming parts, and the agent's `supervisor.py` (about 1,150 lines) into smaller pieces, with an explicit interface for container and process runtimes. Behaviour does not change; the existing tests and the full regression run must pass unchanged. |
-| **1.5: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight. **Engine updates:** a newer version of an engine is pointed out, and can be tried as a pinned copy. **Apps removed:** the apps API, the templates and `/x/`, deprecated in 1.4. **More kinds of models, part 2:** image embeddings (#141), image-to-image and image-to-video (#143), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
-| **1.6: teams and operations** | Groups with quotas (GPU hours, tokens). Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication. **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log can be sent out (syslog, OpenTelemetry). Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**, chosen per event; scheduled backup and restore. |
-| **1.7: more kinds of work** | **Dev environments:** Jupyter or VS Code on a GPU machine, handed back when you are done. **OpenAI-compatible Batch API:** large jobs run at quiet times. |
-| **1.8: fine-tuning** | A first-class **single-machine LoRA / QLoRA fine-tune**: pick a base model, upload a dataset, train with sensible defaults and a loss curve, then **deploy the adapter in one click** on vLLM (details below). |
+| **1.4.5: fixes from an outside review** | **Structured output is never silently lost:** a request with a JSON schema, grammar or guided-decoding parameter is not spilled to a cloud tier that would drop it, and any parameter dropped on the way to a cloud provider is named in an `X-Forgeyard-Dropped-Params` header. **Encrypted traffic to the machines:** the gateway talks to each replica over TLS, with a certificate the agent gets from Forgeyard's own CA, so prompts and answers no longer cross the network in plain HTTP. **Replicas move off a machine that stays offline:** after a grace period they are placed on another machine that fits. **Prometheus metrics** at `/metrics`. **Memory is never promised twice:** layers of a GGUF model left on the CPU count against the machine's RAM, an APU's shared memory is not counted both as GPU memory and as RAM, and a recipe's changed overhead updates the reservations of existing deployments. **Better estimates:** sliding-window attention (Gemma, Mistral), MLA (DeepSeek) and hybrid models are estimated from what they really keep, so models that fit are no longer refused. **No request runs twice:** a request is retried on another replica only when it never reached the first; a replica that accepts a request and then goes silent is given up after a shorter, settable wait instead of 600 s. **Fair waiting:** text requests waiting for a busy deployment are served first come, first served. **Mixed versions keep working:** a server ignores a message type or a vendor it does not know instead of dropping the agent. **A warning when a machine reports a loopback address** (an agent reached through an SSH tunnel), since the gateway would then dial its own host. Smaller fixes: `local_busy` answers carry `Retry-After`; cloud spend from answers without token counts survives a restart; the installer pins the uv it downloads by hash. **Behind the scenes:** the two largest files are split before more is built on them: the gateway's `proxy.py` (about 1,700 lines) into routing, spill, cloud and streaming parts, and the agent's `supervisor.py` (about 1,150 lines) into smaller pieces, with an explicit interface for container and process runtimes. Behaviour does not change; the existing tests and the full regression run must pass unchanged. **Verified hardware:** the machines each release was accepted on, and its pass counts, are published in [docs/verified-hardware.md](docs/verified-hardware.md) (#198). **Long-term support:** 1.4 becomes a long-term support line when 1.4.5 ships: security and serious bug fixes; the period is announced with 1.4.5 (#197). |
+| **1.5.0: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight (#37). |
+| **1.5.1: the console in Traditional Chinese** | The web console in Traditional Chinese as well as English. Today the console is in English only; the guide already has both (#189). |
+| **1.5.2: engine updates** | A newer version of an engine is pointed out, and can be tried as a pinned copy (#95). |
+| **1.5.3: apps removed** | The apps API, the templates and `/x/`, deprecated in 1.4, are removed, with a migration for the apps that are left (#89). |
+| **1.5.4: more kinds of models, part 2** | Image embeddings (#141), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
+| **1.5.5: image-to-image and image-to-video** | Edit an image or make variations of it from a prompt, and turn an image into a short video (#143). |
+| **1.6.0: single sign-on** *(enterprise edition)* | Sign-in through SSO (OIDC, e.g. MCP Gate or Google) and two-factor authentication (#39). |
+| **1.6.1: organisations and teams** *(enterprise edition)* | Organisations and teams, with quotas (GPU hours, tokens) and cost reports per team (#190). |
+| **1.6.2: request log and audit export** *(enterprise edition)* | **A request log with metadata only** (time, key, model, where it was served, tokens; never the content), so you can tell which key sent what where. The audit log and the request log can be sent out (syslog, OpenTelemetry), with tamper evidence (#40). |
+| **1.6.3: notifications and alerts** | Alerts (machine offline, GPU errors and temperature, failing deployments, budgets at 80% and 100%, setup health errors) sent as **notifications to Discord, Slack, Telegram, LINE, email or any webhook**. Each kind of event goes to the channels chosen for it (#191). |
+| **1.6.4: Batch API** | An **OpenAI-compatible Batch API:** large jobs run at quiet times (#192). |
+| **1.7.0: PII masking** *(enterprise edition)* | Personal data is masked in requests that go to a cloud tier, by a built-in filter or your own DLP hook. An optional, encrypted audit of request content (#193). |
+| **1.7.1: machines behind NAT** *(enterprise edition)* | A machine with no inbound ports serves through a **reverse tunnel**: requests travel over the agent's own outbound connection, so machines at other sites can join. Machines on the server's network keep being reached directly, as today, in the community edition (#194). |
+| **1.7.2: backups and safe upgrades** | Scheduled backup and restore of the server's data, and a check before an upgrade that says what it will change (migrations, agents to update; #195). |
+| **1.7.3: dev environments** | Jupyter or VS Code on a GPU machine, handed back when you are done (#38). |
+| **1.8.0: high availability** *(enterprise edition)* | **More than one server:** limits, budgets and the balancer share their state (for example in Redis), and one server is elected to schedule, so the gateway keeps answering when a server stops (#196). |
+| **1.8.1: fine-tuning** | A first-class **single-machine LoRA / QLoRA fine-tune**: pick a base model, upload a dataset, train with sensible defaults and a loss curve, then **deploy the adapter in one click** on vLLM (details below; #41). |
 
 Reinforcement learning, robotics and graph learning are not planned as model types: they are
 training and research workloads, and run as plain tasks.
 
-### 1.8: training
+### 1.8.1: fine-tuning
 
 Fine-tuning already runs today as a one-off task in your own trainer container (Unsloth,
 LLaMA-Factory, axolotl), with only the GPUs it was given. The direction under discussion is a
@@ -347,22 +378,21 @@ first-class **single-machine LoRA / QLoRA fine-tune** flow:
    `--enable-lora`, so one card serves many fine-tuned variants.
 
 Training holds whole GPUs for hours, so on shared machines it needs priorities against serving
-(preemptible jobs, quiet-hours windows). That is why it comes after 1.5 (deployments that free
-their GPUs) and 1.6 (alerts). The details are designed then; multi-machine distributed training is
+(preemptible jobs, quiet-hours windows). That is why it comes after 1.5.0 (deployments that free
+their GPUs) and 1.6.3 (alerts). The details are designed then; multi-machine distributed training is
 much later.
 
 ## Later, when there is a need
 
+- **Kubernetes and other larger platforms** (below).
 - **On-demand cloud GPUs.** A machine is rented when local capacity runs out and released when
   idle. The provider is chosen at that time.
-- **Relay through the agent.** Machines behind NAT can serve without inbound ports.
 - **Files straight from machine to machine.** Model files sent from one agent to another directly, or
   directly when the machines can reach each other and through the server otherwise, instead of always
   through the server (1.4.1).
 - **Models larger than one machine.** vLLM with Ray across several machines.
 - **Prefix-aware routing.** Requests that share a long prompt go to the replica that already has
   it cached.
-- **Several servers.** For availability, with limits and counters shared between them.
 
 ### Larger platforms: Kubernetes and others (when there is a need)
 
