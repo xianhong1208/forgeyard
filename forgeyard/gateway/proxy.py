@@ -11,7 +11,8 @@ cloud provider.
    when this tier is
    - *unavailable*: no ready replica, or no replica could be connected to;
    - *busy*: every ready replica already has as many requests in flight through this server as its
-     deployment's `concurrency` (after waiting up to the route's `wait_ms` for a slot);
+     deployment's `concurrency` (after waiting up to the route's `wait_ms` for a slot, in line, first
+     come first served: forgeyard/gateway/waiting.py, 1.4.5);
    - *refusing*: the replica answered 429 or 503;
    - *too small* (only when the route opts in): the prompt, estimated from its size, plus
      `max_tokens` does not fit the deployment's `context`.
@@ -103,7 +104,7 @@ from starlette.responses import Response
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
 from forgeyard.gateway import (budgets, classify, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech,
-                               videogen)
+                               videogen, waiting)
 from forgeyard.gateway.balancer import PROVIDER_COOLDOWN, PROVIDER_COOLDOWN_MAX, Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
@@ -113,6 +114,7 @@ from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
 from forgeyard.models import modalities
 
 log = logging.getLogger("forgeyard.gateway")
+balancer.listen(waiting.slot_freed)   # a freed slot wakes the first request waiting in line (1.4.5)
 
 # /v1/<endpoint> -> (the route protocol it needs, the body it takes)
 ENDPOINTS: dict[str, tuple[str, str]] = {
@@ -143,6 +145,7 @@ CLIENT_CLOSED = 499  # nginx's code for "the client went away": counted, but not
 LOCAL_ONLY_HEADER = "x-forgeyard-local-only"
 DROPPED_HEADER = "X-Forgeyard-Dropped-Params"   # 1.4.5: what a provider was sent without
 MAX_WAIT_MS = 10_000
+LOCAL_BUSY_RETRY_AFTER = 1   # seconds, on 503 local_busy: a slot of a text deployment frees up quickly (1.4.5)
 RETRY_AFTER_CAP = 2.0   # with no other target left, a provider's Retry-After up to this is waited for once
 BYTES_PER_TOKEN = 3     # a prompt's size in tokens, estimated on the high side (CJK is ~3 bytes a token)
 
@@ -1275,16 +1278,22 @@ class Job:
             caps = {t.uid: group_of[t.uid].concurrency for t in remaining} if can_move_on else {}
         self.queue_key = qkey = f"{route.served_name}#{tier.index}"
         q = imagegen.queue(qkey) if image else None
+        # Text requests held to the concurrency wait in line for a slot (1.4.5); without caps nobody waits.
+        line = waiting.line(qkey) if not image and any(caps.values()) else None
         self._ticket = None
+        self._place = None
         try:
-            return await self._local(tier, group_of, remaining, caps, q, can_move_on)
+            return await self._local(tier, group_of, remaining, caps, q, can_move_on, line)
         finally:
             if q is not None and self._ticket is not None:
                 q.leave(self._ticket)      # it gave up, failed or was sent: never left in the queue
                 self._ticket = None
+            if line is not None and self._place is not None:
+                line.leave(self._place)    # the same for the line (a client that went away too)
+                self._place = None
 
     async def _local(self, tier: Tier, group_of: dict, remaining: list, caps: dict, q: Optional[imagegen.Queue],
-                     can_move_on: bool) -> Union[Response, Failed]:
+                     can_move_on: bool, line: Optional[waiting.Line] = None) -> Union[Response, Failed]:
         route, parsed = self.route, self.parsed
         image = q is not None
         waited_from = 0.0
@@ -1294,8 +1303,11 @@ class Job:
         refused: Optional[Response] = None
         deadline: Optional[float] = None
         while remaining:
-            # An image request tries for a slot only when nobody is waiting before it.
+            # An image request tries for a slot only when nobody is waiting before it; so does a text
+            # request held to the concurrency (1.4.5).
             may_try = not image or q.may_try(self._ticket)
+            if line is not None:
+                may_try = may_try and line.may_try(self._place)
             pick = next((t for t in remaining if balancer.try_acquire(t.uid, caps.get(t.uid))), None) if may_try else None
             if pick is None and image:
                 if self._ticket is None:
@@ -1322,19 +1334,28 @@ class Job:
             if pick is not None and self._ticket is not None:
                 q.leave(self._ticket)
                 self._ticket = None
+            if pick is not None and self._place is not None:
+                line.leave(self._place)    # its turn: out of the line, the next one moves up
+                self._place = None
             if pick is None:
-                # Every replica left is at its deployment's concurrency.
+                # Every replica left is at its deployment's concurrency, or others wait before it.
                 if deadline is None:
                     deadline = time.monotonic() + route.wait_ms / 1000
-                if time.monotonic() < deadline:
+                left = deadline - time.monotonic()
+                if left > 0 and line is not None and self._place is None:
+                    self._place = line.join()   # None: the line is full, so it does not wait
+                    if self._place is not None:
+                        continue    # in line: look once more, so a slot freed meanwhile is not missed
+                if left > 0 and self._place is not None:
                     try:
-                        await self.pause(min(0.025, max(0.0, deadline - time.monotonic())))
+                        await unless_gone(self.request.receive, line.wait(self._place, left))
                     except ClientGone:
                         return self.gone()
                     continue
                 if refused is not None:
                     return Failed("refused", answer=refused)
-                return Failed("busy", GatewayError(503, "local_busy", f"Every replica of {route.served_name!r} is busy."))
+                return Failed("busy", GatewayError(503, "local_busy", f"Every replica of {route.served_name!r} is busy.",
+                                                   retry_after=LOCAL_BUSY_RETRY_AFTER))
             remaining.remove(pick)
             g = group_of[pick.uid]
             self.target, self.deployment_id, self.sent_to = "local", g.deployment_id, None

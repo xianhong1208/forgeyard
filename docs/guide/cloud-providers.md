@@ -123,7 +123,9 @@ when the tier is:
 - **unavailable**: no replica is ready, or none could be connected to;
 - **busy**: every ready replica already has as many requests in flight through this server as its
   deployment's *Concurrent requests* setting. With **Wait for a free local slot**, it waits up to
-  that many milliseconds first (at most 10,000; 0 by default);
+  that many milliseconds first (at most 10,000; 0 by default). Requests wait in line, first come
+  first served: a slot that frees up goes to the one that has waited longest, never to a newcomer.
+  At most 256 wait per tier; one more does not wait but moves on at once;
 - **refusing**: the engine answered 429 or 503;
 - **too small**, only when the route has **Spill a prompt that is too long**: the prompt's size
   (about 3 bytes a token, on the high side) plus `max_tokens` is more than the deployment's context.

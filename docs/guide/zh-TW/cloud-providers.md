@@ -71,7 +71,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 只有在**還沒有任何東西回傳給用戶端之前**，而且這一層處於下列狀況時，請求才會移到下一層：
 
 - **無法使用（unavailable）**：沒有任何副本就緒，或連不上任何副本；
-- **忙碌（busy）**：每個就緒副本經由這台伺服器處理中的請求數，都已達到它所屬部署的 *Concurrent requests* 設定。如果設了 **Wait for a free local slot**，會先最多等待那麼多毫秒（上限 10,000；預設 0）；
+- **忙碌（busy）**：每個就緒副本經由這台伺服器處理中的請求數，都已達到它所屬部署的 *Concurrent requests* 設定。如果設了 **Wait for a free local slot**，會先最多等待那麼多毫秒（上限 10,000；預設 0）。請求會排隊，先到先處理：空出來的位置一定給等最久的那個，絕不會給剛到的。每一層最多 256 個在等；再多一個就不等，直接往下走；
 - **拒絕（refusing）**：引擎回應 429 或 503；
 - **太小（too small）**，只在路由勾選 **Spill a prompt that is too long** 時：提示的大小（以每個 token 約 3 bytes 偏高估算）加上 `max_tokens`，超過部署的 context。
 
