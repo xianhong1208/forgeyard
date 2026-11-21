@@ -73,9 +73,15 @@ def _model(db: DbSession, ref: str) -> CatalogModel:
     return m
 
 
+# 1.4.5: how long a replica has to start answering a request it was sent (the gateway's, not the engine's:
+# changing it restarts nothing). Unset: the gateway's default, 120 s (forgeyard/gateway/proxy.py).
+FIRST_ANSWER_MIN, FIRST_ANSWER_MAX = 5, 3600
+GATEWAY_PARAMS = ("first_answer_timeout",)
+
+
 def normalise_params(recipe: Recipe, raw: dict) -> dict:
     """The deployment's parameters, checked against the recipe: its own (context, concurrency…)
-    and the common ones (gpus, share, vram, extra_args). Unknown names are refused."""
+    and the common ones (gpus, share, vram, extra_args, first_answer_timeout). Unknown names are refused."""
     out: dict = {}
     has_gpu = any(v.gpu for v in recipe.variants)
     has_cpu = any(not v.gpu for v in recipe.variants)
@@ -112,7 +118,19 @@ def normalise_params(recipe: Recipe, raw: dict) -> dict:
         raise fail(422, "invalid_params", "extra_args: one line each, at most 1024 characters")
     if extra:
         out["extra_args"] = list(extra)
-    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args"})
+    wait = raw.get("first_answer_timeout")
+    if wait not in (None, ""):
+        if all(t in ("image", "video") for t in recipe.tasks):
+            raise fail(422, "invalid_params", "first_answer_timeout: image and video deployments use their own "
+                                              "timeout")
+        try:
+            wait = int(str(wait).strip())   # True, 1.5 and "soon" are not whole numbers of seconds
+        except ValueError:
+            raise fail(422, "invalid_params", "first_answer_timeout must be a whole number of seconds") from None
+        if not FIRST_ANSWER_MIN <= wait <= FIRST_ANSWER_MAX:
+            raise fail(422, "invalid_params", f"first_answer_timeout: {FIRST_ANSWER_MIN} to {FIRST_ANSWER_MAX} seconds")
+        out["first_answer_timeout"] = wait
+    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args", "first_answer_timeout"})
     if unknown:
         raise fail(422, "invalid_params", f"{recipe.name} has no parameter {unknown[0]!r}")
     return out
@@ -442,7 +460,7 @@ def start_deployment(dep_id: int, caller: Caller = Depends(require_operator), db
 
 
 # ------------------------------------------------------------------ change (1.3.1)
-COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
+COMMON_PARAMS = ("gpus", "share", "vram", "extra_args") + GATEWAY_PARAMS
 
 
 class DeploymentEdit(BaseModel):
@@ -504,8 +522,14 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     running = w.desired_state == "running"
     live = [r for r in w.replicas if not r.final]
     params_changed = ctx.params != (d.params or {})
+
+    def for_engine(p: dict) -> dict:
+        return {k: v for k, v in p.items() if k not in GATEWAY_PARAMS}
+
+    # Only the gateway reads first_answer_timeout: changing it alone restarts nothing (1.4.5).
+    engine_changed = for_engine(ctx.params) != for_engine(d.params or {})
     moved = machine_id is not None and any(r.node_id is not None and r.node_id != machine_id for r in live)
-    restart = running and (params_changed or moved)
+    restart = running and (engine_changed or moved)
     mode = _restart_mode(running, restart, replicas)
     changes: dict[str, dict] = {}
     for k in sorted(set(ctx.params) | set(d.params or {})):

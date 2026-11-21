@@ -125,7 +125,7 @@ MEDIA_KINDS = ("image", "audio", "video")
 IMAGE_COMPONENTS = ("vae", "llm", "clip_l", "clip_g", "t5xxl")
 MODEL_FEATURES = ("mmproj", "image_pixels") + MEDIA_KINDS + ("image_single", "image_split") + IMAGE_COMPONENTS
 # Parameters every recipe has, handled by Forgeyard itself.
-COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
+COMMON_PARAMS = ("gpus", "share", "vram", "extra_args", "first_answer_timeout")
 MAX_RECIPE_BYTES = 64 * 1024
 
 

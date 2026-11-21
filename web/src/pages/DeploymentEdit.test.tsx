@@ -5,7 +5,7 @@ import { MemoryRouter, useLocation } from "react-router";
 
 import App from "../App";
 import { AuthProvider } from "../auth";
-import { editBody, editForm } from "../lib/models";
+import { deployBody, editBody, editForm, emptyDeploy, takesFirstAnswer } from "../lib/models";
 import type { CatalogResponse, Deployment, EditResponse, EstimateResponse, Placement, Replica, Workload } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -127,7 +127,7 @@ describe("changing a deployment (1.3.1)", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save and restart" })));
     const saved = fetch.mock.calls.filter(([u, i]) => u === "/api/deployments/3" && i?.method === "PATCH").map(([, i]) => JSON.parse(String(i?.body)))
       .find((b) => !b.dry_run);
-    expect(saved).toEqual({ params: { context: 16384, concurrency: 4, gpus: 1, share: "vram", vram: null, extra_args: null }, replicas: 1, machine_id: null });
+    expect(saved).toEqual({ params: { context: 16384, concurrency: 4, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null }, replicas: 1, machine_id: null });
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
@@ -210,9 +210,36 @@ describe("changing a deployment (1.3.1)", () => {
     d.workload.spec.machine_id = 5;
     const f = editForm(d, catalog.recipes[0]);
     expect(f).toEqual({ device: "gpu", gpus: "1", share: "vram", replicas: "2", machine: "5", vram: "20Gi", extraArgs: "--seed\n1",
-      params: { context: "4096", concurrency: "2" } });
+      firstAnswer: "", params: { context: "4096", concurrency: "2" } });
     expect(editBody({ ...f, vram: " ", extraArgs: "", machine: "" }, catalog.recipes[0])).toEqual({
-      params: { context: 4096, concurrency: 2, gpus: 1, share: "vram", vram: null, extra_args: null }, replicas: 2, machine_id: null });
+      params: { context: 4096, concurrency: 2, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null },
+      replicas: 2, machine_id: null });
     expect(editBody({ ...f, device: "cpu" }, catalog.recipes[0]).params).toMatchObject({ gpus: 0, vram: "20Gi", extra_args: ["--seed", "1"] });
+  });
+
+  it("FY-WEB-507: the wait for the first answer (1.4.5): kept, sent, cleared, and left out for image recipes", () => {
+    const d = dep([rep()], { params: { context: 8192, concurrency: 4, gpus: 1, share: "exclusive", first_answer_timeout: 900 } });
+    const f = editForm(d, catalog.recipes[0]);
+    expect(f.firstAnswer).toBe("900");
+    const params = (b: Record<string, unknown>) => b.params as Record<string, unknown>;
+    expect(params(editBody(f, catalog.recipes[0])).first_answer_timeout).toBe(900);
+    expect(params(editBody({ ...f, firstAnswer: " " }, catalog.recipes[0])).first_answer_timeout).toBeNull();
+    const image = { ...catalog.recipes[0], tasks: ["image" as const] };
+    expect(takesFirstAnswer(image)).toBe(false);
+    expect(takesFirstAnswer(catalog.recipes[0])).toBe(true);
+    expect("first_answer_timeout" in params(editBody(f, image))).toBe(false);
+    const body = deployBody({ ...emptyDeploy(), model: "m", recipe: "vllm", name: "x", firstAnswer: "300" }, catalog.recipes[0]);
+    expect((body.params as Record<string, unknown>).first_answer_timeout).toBe(300);
+    const plain = deployBody({ ...emptyDeploy(), model: "m", recipe: "vllm", name: "x" }, catalog.recipes[0]);
+    expect("first_answer_timeout" in (plain.params as Record<string, unknown>)).toBe(false);
+  });
+
+  it("FY-WEB-508: the edit page shows the first-answer field under Advanced, with the default as its placeholder", async () => {
+    server((url) => url === "/api/deployments/3" ? { status: 200, body: { deployment: dep([rep()]), events: [], server_time: "", can_manage: true } }
+      : url === "/api/models" ? { status: 200, body: catalog } : url === "/api/machines" ? { status: 200, body: machines } : undefined);
+    mount("/serving/3/edit");
+    const input = await screen.findByLabelText("Wait for the first answer (seconds)") as HTMLInputElement;
+    expect(input.placeholder).toBe("120");
+    expect(screen.getByText(/Changing it restarts nothing/)).toBeTruthy();
   });
 });

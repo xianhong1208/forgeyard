@@ -7,7 +7,7 @@ import { useAuth } from "../auth";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
-import { TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, type DeployForm } from "../lib/models";
+import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
 import type { CatalogModel, CatalogResponse, ContextHint, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -167,7 +167,7 @@ export function ModelDeployPage() {
                 <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
               )}
               <details className="spec-preview" style={{ marginTop: 14 }}>
-                <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, token</summary>
+                <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}token</summary>
                 <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
                 <div className="grid-3">
                   {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam} />)}
@@ -176,6 +176,11 @@ export function ModelDeployPage() {
                     <p className="field-hint">Replaces the estimate. Required for local:// models.</p></div>
                   <div className="field"><label htmlFor="d-extra">Extra engine arguments</label>
                     <textarea id="d-extra" className="mono" rows={3} value={f.extraArgs} onChange={(e) => set("extraArgs", e.target.value)} placeholder="one per line" /></div>
+                  {takesFirstAnswer(recipe) && (
+                    <div className="field"><label htmlFor="d-first">Wait for the first answer (seconds)</label>
+                      <input id="d-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
+                      <p className="field-hint">How long a replica has to start answering a request (5 to 3600). Then the request is stopped with 504 and never sent to another replica. Raise it for long answers that do not stream.</p></div>
+                  )}
                   <div className="field"><label htmlFor="d-token">Hugging Face token</label>
                     <input id="d-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)}
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />

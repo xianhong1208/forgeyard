@@ -273,7 +273,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 `no_ready_replica`：模型存在，但它沒有任何一個副本處於就緒狀態：還在下載或啟動、已停止，或所在的機器離線。錯誤訊息會列出每個副本的狀態。請查看這個部署的頁面；另見[模型有列出，卻回應 503](#a-model-is-listed-but-answers-503)。
 
-其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒）。每個錯誤碼都列在[參考資料](reference.md#errors)。
+其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504 first_answer_timeout`（副本接下了請求，但沒有在部署的 *Wait for the first answer* 內開始回應，預設 120 秒：長回答請用串流，或在 **Advanced** 調高它）。每個錯誤碼都列在[參考資料](reference.md#errors)。
 
 ### 來自雲端供應商的錯誤
 

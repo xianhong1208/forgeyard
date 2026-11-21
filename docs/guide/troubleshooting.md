@@ -457,7 +457,9 @@ deployment's page; see also [A model is listed but answers 503](#a-model-is-list
 Others: `404 model_not_found` (no model by that name for this key: see `/v1/models` and
 [A model is missing from /v1/models](#a-model-is-missing-from-v1models)), `502` (a replica could not be
 reached or refused its internal key: usually its agent restarted; it recovers within seconds),
-`504` (no answer within `GATEWAY_READ_TIMEOUT`, 600 s by default). Every code is listed in the
+`504 first_answer_timeout` (the replica took the request but did not start answering within the
+deployment's *Wait for the first answer*, 120 s by default: stream long answers, or raise it under
+**Advanced**). Every code is listed in the
 [reference](reference.md#errors).
 
 ### Errors from cloud providers

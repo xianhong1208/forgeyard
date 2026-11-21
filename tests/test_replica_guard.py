@@ -176,17 +176,29 @@ async def _conns(guard):
 
 
 def test_fy_rg_006_engine_down_keep_alive_timeouts():
-    """FY-RG-006: with the engine down the guard closes the connection without an answer (the gateway
-    then tries another replica, as when it reached a dead engine directly); a kept-alive connection
+    """FY-RG-006: with the engine down the guard answers 503 with X-Forgeyard-Not-Taken after reading the
+    request (1.4.5: the gateway then tries another replica; before, it closed without an answer, which a
+    gateway cannot tell from an engine that broke off midway); a kept-alive connection
     carries several authorised requests; a refused one is closed; Expect: 100-continue is answered by
     the guard; a request head sent too slowly is cut off; a closed guard no longer listens."""
     port = free_port()
     g = GuardThread(port, head_timeout=0.5)
     try:
         out = _raw(g.port, f"POST /invocations HTTP/1.1\r\nHost: r\r\nAuthorization: Bearer {KEY}\r\nContent-Length: 0\r\n\r\n".encode())
-        assert out == b""
-        with pytest.raises(httpx.RemoteProtocolError):
-            httpx.post(g.url + "/v1/chat/completions", headers=AUTH, json={}, trust_env=False)
+        assert out.startswith(b"HTTP/1.1 503") and b"x-forgeyard-not-taken: engine-unreachable" in out.lower()
+        big = {"messages": [{"role": "user", "content": "x" * 3_000_000}]}   # read whole before the answer: no reset
+        r = httpx.post(g.url + "/v1/chat/completions", headers=AUTH, json=big, trust_env=False)
+        assert r.status_code == 503 and r.headers["x-forgeyard-not-taken"] == "engine-unreachable"
+        assert r.json()["error"]["code"] == "engine_unreachable" and r.headers["connection"] == "close"
+        with socket.create_connection(("127.0.0.1", g.port), timeout=5) as s:   # the body is read before the answer
+            s.sendall(f"POST /v1/chat/completions HTTP/1.1\r\nHost: r\r\nAuthorization: Bearer {KEY}\r\n"
+                      "Content-Length: 10\r\n\r\n12345".encode())
+            s.settimeout(0.4)
+            with pytest.raises(socket.timeout):
+                s.recv(100)
+            s.settimeout(5)
+            s.sendall(b"67890")
+            assert s.recv(100).startswith(b"HTTP/1.1 503")
         refused = _raw(g.port, b"GET /invocations HTTP/1.1\r\nHost: r\r\n\r\nGET /invocations HTTP/1.1\r\nHost: r\r\n\r\n")
         assert refused.count(b"HTTP/1.1 401") == 1  # answered once, then closed
         with socket.create_connection(("127.0.0.1", g.port), timeout=5) as s:
@@ -458,9 +470,9 @@ def test_fy_rg_011_no_key_no_guard_and_the_key_follows_desired(tmp_path):
 
     out = asyncio.run(scenario())
     assert "internal" not in out["plain_ports"] and not out["plain_guard"]
-    # Nothing listens behind the fake container: an authorised request is closed unanswered (the
-    # gateway then tries another replica); a refused one is a 401.
-    assert out["old"] == "RemoteProtocolError" and out["old_after"] == 401 and out["new_after"] == "RemoteProtocolError"
+    # Nothing listens behind the fake container: an authorised request gets the guard's 503 "not taken"
+    # (1.4.5: the gateway then tries another replica); a refused one is a 401.
+    assert out["old"] == 503 and out["old_after"] == 401 and out["new_after"] == 503
 
 
 def _try(port: int, key):

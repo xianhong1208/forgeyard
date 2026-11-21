@@ -17,6 +17,15 @@ cloud provider.
      `max_tokens` does not fit the deployment's `context`.
    Never on other answers (a 400 would be the same anywhere), a timeout after the request was sent,
    the replica refusing the gateway's key, a client that went away, or once streaming has begun.
+   **No request runs twice** (1.4.5): another replica (or provider) is tried only when the request
+   provably never reached the first one (the connection could not be made, or no connection was free
+   in the pool: RETRYABLE). A connection that breaks once the request was being sent (SENT_BROKE) may
+   have left the engine working on it, so that answers 502 and is not tried again anywhere.
+   **The first answer** (1.4.5): once a request is sent to a replica, the replica has the deployment's
+   `first_answer_timeout` (120 s by default) to answer: the status line and headers, and for a stream
+   (SSE or streamed audio) its first bytes too. After that it is closed (the engine stops) and the
+   client gets 504 `first_answer_timeout`; it is never sent elsewhere. Later pieces of an answer may
+   take up to GATEWAY_READ_TIMEOUT each. Image requests keep their deployment's own `timeout`.
 4. Which tiers a request may use: a route marked local only, a request with
    `X-Forgeyard-Local-Only: 1`, and a key whose `cloud` setting is off never reach a provider outside
    your network; with `fallback` only as a spill target (after a local tier); with `on` also cloud-only
@@ -137,10 +146,26 @@ MAX_WAIT_MS = 10_000
 RETRY_AFTER_CAP = 2.0   # with no other target left, a provider's Retry-After up to this is waited for once
 BYTES_PER_TOKEN = 3     # a prompt's size in tokens, estimated on the high side (CJK is ~3 bytes a token)
 
-# Connecting failed, or the connection broke before the replica answered: the request did not get
-# anywhere (or the engine died with it), so another replica may take it.
-RETRYABLE = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadError,
-             httpx.WriteError, httpx.PoolTimeout)
+# The request provably never reached the replica (1.4.5): the connection could not be made, or none
+# was free in the pool. Only these move a request to another replica or provider.
+RETRYABLE = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+# The connection broke while the request was being written or its answer awaited. The engine may have
+# read it and be generating (an answer it could not send, a crash midway), so it is never tried again:
+# that could run it twice. A write that broke partway is counted here too (conservatively): which bytes
+# the engine read cannot be told from this side.
+SENT_BROKE = (httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError)
+FIRST_ANSWER_DEFAULT = 120     # seconds a replica has to start answering a request it was sent (1.4.5)
+# A replica's key guard (1.4.5) answers 503 with this header when its engine is not running: the request
+# provably reached no engine, so it is tried on the next replica like a connect error.
+NOT_TAKEN_HEADER = "x-forgeyard-not-taken"
+
+
+class EngineUnreachable(Exception):
+    """What a replica's guard said: its engine is not running (named in upstream_unreachable)."""
+
+
+def not_taken(response: httpx.Response) -> bool:
+    return response.status_code == 503 and bool(response.headers.get(NOT_TAKEN_HEADER))
 
 
 # ------------------------------------------------------------------ routes
@@ -161,6 +186,7 @@ class LocalGroup:
     speaks: Optional[speech.Speaks] = None          # text to speech: formats, voices, input cap (1.3)
     draws: Optional[imagegen.Draws] = None          # image generation: caps, default size, queue (1.3)
     films: Optional[videogen.Films] = None          # video generation: caps, default size and length (1.3)
+    first_answer: float = FIRST_ANSWER_DEFAULT      # seconds to start answering once sent (1.4.5)
 
 
 @dataclass
@@ -277,7 +303,8 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
                       concurrency=draws.concurrency if draws else _int(params.get("concurrency")),
                       context=_int(params.get("context")), running=w.desired_state == "running", accepts=accepts,
-                      speaks=speaks, draws=draws, films=films)
+                      speaks=speaks, draws=draws, films=films,
+                      first_answer=float(_int(params.get("first_answer_timeout")) or FIRST_ANSWER_DEFAULT))
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -757,6 +784,11 @@ class ClientGone(Exception):
     pass
 
 
+async def _empty():
+    return
+    yield  # an async iterator with nothing in it
+
+
 async def _until_disconnect(receive) -> None:
     while True:
         message = await receive()
@@ -787,7 +819,7 @@ class StreamResponse(Response):
     as soon as the client disconnects."""
 
     def __init__(self, upstream: httpx.Response, sse: SSEFilter, headers: dict, done: Callable[[int, Optional[dict]], None],
-                 who: str = "replica"):
+                 who: str = "replica", first: bytes = b"", chunks=None):
         # Not Response.__init__: that would declare Content-Length: 0 for the empty initial body.
         self.status_code = upstream.status_code
         self.background = None
@@ -798,6 +830,8 @@ class StreamResponse(Response):
         self.sse = sse
         self.done = done
         self.who = who
+        self.first = first                     # bytes already read (the first answer, 1.4.5)
+        self.chunks = chunks                   # the rest, when some were read
 
     async def __call__(self, scope, receive, send):
         status = self.upstream.status_code
@@ -806,7 +840,11 @@ class StreamResponse(Response):
         async def pump():
             nonlocal status
             try:
-                async for chunk in self.upstream.aiter_bytes():
+                if self.first:
+                    out = self.sse.feed(self.first)
+                    if out:
+                        await send({"type": "http.response.body", "body": out, "more_body": True})
+                async for chunk in (self.chunks if self.chunks is not None else self.upstream.aiter_bytes()):
                     out = self.sse.feed(chunk)
                     if out:
                         await send({"type": "http.response.body", "body": out, "more_body": True})
@@ -957,6 +995,9 @@ class Job:
         self.sent_at = 0.0
         self._ticket: Optional[int] = None
         self.dropped: list[str] = []                # parameters left out for the provider it was sent to (1.4.5)
+        self.first_answer: Optional[float] = None   # the replica's wait for a first answer, once sent (1.4.5)
+        self.answer_by: Optional[float] = None      # by when (monotonic) its first answer must come
+        self.answering: Optional[tuple] = None      # (group, replica) that is answering
         self.kept_from: list[str] = []              # providers skipped: they would lose the structured output
 
     # -------------------------------------------------------------- bookkeeping
@@ -1089,6 +1130,75 @@ class Job:
 
     async def pause(self, seconds: float) -> None:
         await unless_gone(self.request.receive, asyncio.sleep(seconds))
+
+    async def send_first(self, http: httpx.AsyncClient, req: httpx.Request, first: float) -> httpx.Response:
+        """http.send, but the answer's status and headers must come within `first` seconds of the request
+        being written to the replica (asyncio.TimeoutError otherwise; the request is then closed, so the
+        engine stops). Connecting and writing keep httpx's own timeouts."""
+        written = asyncio.Event()
+
+        async def trace(name: str, info: dict) -> None:
+            if name.endswith("send_request_body.complete") and not written.is_set():
+                self.answer_by = time.monotonic() + first
+                written.set()
+
+        req.extensions = {**req.extensions, "trace": trace}
+        task = asyncio.ensure_future(http.send(req, stream=True))
+        waiting = asyncio.ensure_future(written.wait())
+        try:
+            # Until the request is written (bounded, in case a transport never says so).
+            s = self.settings
+            await asyncio.wait({task, waiting}, timeout=s.gateway_connect_timeout + 60.0 + first,
+                               return_when=asyncio.FIRST_COMPLETED)
+            if not task.done():
+                if self.answer_by is None:
+                    self.answer_by = time.monotonic()
+                await asyncio.wait({task}, timeout=max(0.0, self.answer_by - time.monotonic()))
+            if task.done():
+                return task.result()
+            raise asyncio.TimeoutError()
+        finally:
+            for t in (task, waiting):
+                if not t.done():
+                    t.cancel()
+            for t in (task, waiting):
+                with contextlib.suppress(BaseException):
+                    await t
+
+    def no_first_answer(self, g: "LocalGroup", pick: Target) -> GatewayError:
+        log.warning("Replica %s of %s gave no answer within %g s of the request; closed, not tried elsewhere.",
+                    pick.ordinal, g.name, self.first_answer or 0)
+        return GatewayError(504, "first_answer_timeout",
+                            f"Replica {pick.ordinal} of {g.name!r} took the request but did not start answering within "
+                            f"{self.first_answer or 0:g} s (the deployment's first_answer_timeout). The request was "
+                            "stopped and not sent to another replica, where it could have run twice.")
+
+    async def first_chunk(self, response: httpx.Response, release: str) -> tuple[bytes, object]:
+        """A stream's first bytes, within the replica's wait for a first answer (1.4.5): (them, the rest)."""
+        chunks = response.aiter_bytes()
+        if self.answer_by is None or self.sent_to is not None or self.answering is None:
+            return b"", chunks
+        g, pick = self.answering
+        try:
+            first = await unless_gone(self.request.receive, asyncio.wait_for(
+                chunks.__anext__(), max(0.0, self.answer_by - time.monotonic())))
+        except StopAsyncIteration:
+            return b"", _empty()
+        except ClientGone:
+            await response.aclose()
+            balancer.release(release)
+            raise
+        except asyncio.TimeoutError:
+            await response.aclose()
+            balancer.release(release)
+            balancer.failed(pick.uid, reached=True)
+            raise self.no_first_answer(g, pick) from None
+        except httpx.HTTPError as e:
+            await response.aclose()
+            balancer.release(release)
+            raise GatewayError(502, "upstream_error", f"The replica's stream broke off before its first byte "
+                                                      f"({type(e).__name__}).") from None
+        return first, chunks
 
     # -------------------------------------------------------------- the tiers
     async def run(self, tiers: list[Tier]) -> Response:
@@ -1258,15 +1368,29 @@ class Job:
             if image and g.draws is not None:   # images take long: the deployment's own read timeout
                 timeout = httpx.Timeout(connect=self.settings.gateway_connect_timeout, read=g.draws.timeout,
                                         write=60.0, pool=30.0)
+            # Images keep their own timeout; everything else has the deployment's wait for a first answer,
+            # counted from the moment the request was written to the replica.
+            first = None if image else g.first_answer
+            self.first_answer = first
+            self.answer_by = None
+            if first is not None and first > self.settings.gateway_read_timeout:
+                # Each read may take as long as the first answer may (a long transcription, say).
+                timeout = httpx.Timeout(connect=self.settings.gateway_connect_timeout, read=first, write=60.0,
+                                        pool=30.0)
             try:
                 path = UPSTREAM_PATHS.get(self.endpoint, f"/v1/{self.endpoint}")
                 req = http.build_request("POST", f"{pick.url}{path}", content=body, headers=headers,
                                          timeout=timeout)
                 self.sent_at = time.monotonic()
-                response = await unless_gone(self.request.receive, http.send(req, stream=True))
+                sending = http.send(req, stream=True) if first is None else self.send_first(http, req, first)
+                response = await unless_gone(self.request.receive, sending)
             except ClientGone:
                 balancer.release(pick.uid)
                 return self.gone()
+            except asyncio.TimeoutError:
+                balancer.release(pick.uid)
+                balancer.failed(pick.uid, reached=True)
+                raise self.no_first_answer(g, pick) from None
             except RETRYABLE as e:
                 balancer.release(pick.uid)
                 balancer.failed(pick.uid)
@@ -1274,6 +1398,15 @@ class Job:
                 log.warning("Replica %s of %s did not take the request (%s); trying the next one.",
                             pick.ordinal, g.name, type(e).__name__)
                 continue
+            except SENT_BROKE as e:
+                balancer.release(pick.uid)
+                balancer.failed(pick.uid, reached=True)
+                log.warning("The connection to replica %s of %s broke after the request was sent (%s); not tried "
+                            "on another replica.", pick.ordinal, g.name, type(e).__name__)
+                raise GatewayError(502, "upstream_error", f"The connection to replica {pick.ordinal} of {g.name!r} broke "
+                                                          f"after the request was sent ({type(e).__name__}). It was not "
+                                                          "sent to another replica, since this one may have started on "
+                                                          "it; retry if it is safe to.") from None
             except httpx.TimeoutException:
                 balancer.release(pick.uid)
                 limit = g.draws.timeout if image and g.draws is not None else self.settings.gateway_read_timeout
@@ -1283,6 +1416,15 @@ class Job:
                 raise GatewayError(502, "upstream_error", f"The request to the replica failed ({type(e).__name__}).") from None
             out_headers = {"X-Forgeyard-Replica": f"{route.served_name}#{pick.ordinal}",
                            **self.headers(f"local:{g.name}#{pick.ordinal}")}
+            if not_taken(response):
+                # The replica's guard (1.4.5) says its engine never saw the request: the next replica may.
+                await response.aclose()
+                balancer.release(pick.uid)
+                balancer.failed(pick.uid)
+                last_exc = EngineUnreachable()
+                log.warning("Replica %s of %s: its engine is not running (the guard answered); trying the next one.",
+                            pick.ordinal, g.name)
+                continue
             if response.status_code in (401, 403):
                 await response.aclose()
                 balancer.release(pick.uid)
@@ -1306,6 +1448,7 @@ class Job:
                                    headers={**upstream_retry_after(response), **out_headers},
                                    media_type=response.headers.get("content-type") or "application/json")
                 continue
+            self.answering = (g, pick)
             return await self.serve(response, out_headers, strip, release=pick.uid, who="replica")
         if refused is not None:
             return Failed("refused", answer=refused)
@@ -1413,6 +1556,15 @@ class Job:
         except httpx.TimeoutException:
             balancer.release(c.key)
             raise GatewayError(504, "provider_timeout", f"{c.provider} did not answer in time.") from None
+        except SENT_BROKE as e:
+            # It may have reached the provider (and be billed there): never sent to another target.
+            balancer.release(c.key)
+            balancer.cool_down(c.key, cooldown)
+            log.warning("The connection to provider %s (%s) broke after the request was sent (%s); not tried on "
+                        "another target.", c.provider, c.upstream_model, type(e).__name__)
+            raise GatewayError(502, "provider_error", f"The connection to {c.provider} broke after the request was sent "
+                                                      f"({type(e).__name__}). It was not sent to another target, since "
+                                                      "it may have been served; retry if it is safe to.") from None
         except httpx.HTTPError as e:
             balancer.release(c.key)
             balancer.cool_down(c.key, cooldown)
@@ -1455,7 +1607,8 @@ class Job:
         return await self.serve(response, self.headers(c.label), strip, release=c.key, who=c.provider)
 
     # -------------------------------------------------------------- the answer
-    def audio(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
+    def audio(self, response: httpx.Response, out_headers: dict, release: str, who: str, first: bytes = b"",
+              chunks=None) -> Response:
         """A speech engine's 200: streamed through, its length measured, usage counted at the end."""
         fmt = self.speech_format or "wav"
         meter = speech.Meter(fmt, response.headers.get("content-type", ""), dict(response.headers),
@@ -1473,7 +1626,7 @@ class Job:
             self.finish(status, tokens)
 
         return AudioResponse(response, {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                             meter, done, who=who)
+                             meter, done, who=who, first=first, chunks=chunks)
 
     async def images(self, response: httpx.Response, out_headers: dict, release: str, who: str) -> Response:
         """An image engine's answer (1.3): read whole, rewritten in OpenAI's shape, counted."""
@@ -1541,6 +1694,13 @@ class Job:
         if self.parsed.vision is not None:
             return await self.looked(response, out_headers, release, who)
         is_sse = "text/event-stream" in response.headers.get("content-type", "")
+        streamed = response.status_code == 200 and (is_sse or self.parsed.tts is not None)
+        first, chunks = b"", None
+        if streamed:
+            try:
+                first, chunks = await self.first_chunk(response, release)
+            except ClientGone:
+                return self.gone()
         if is_sse and response.status_code == 200:
             def done(status: int, usage) -> None:
                 balancer.release(release)
@@ -1550,9 +1710,9 @@ class Job:
 
             out_headers = {**out_headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
             sse = SpeechSSE(self.speech_rate) if self.parsed.tts is not None else SSEFilter(strip)
-            return StreamResponse(response, sse, out_headers, done, who=who)
+            return StreamResponse(response, sse, out_headers, done, who=who, first=first, chunks=chunks)
         if self.parsed.tts is not None and response.status_code == 200:
-            return self.audio(response, out_headers, release, who)
+            return self.audio(response, out_headers, release, who, first, chunks)
         try:
             data = await unless_gone(self.request.receive, response.aread())
         except ClientGone:
@@ -1621,7 +1781,7 @@ class AudioResponse(Response):
     the way. Stops the upstream request as soon as the client disconnects."""
 
     def __init__(self, upstream: httpx.Response, headers: dict, meter: speech.Meter,
-                 done: Callable[[int], None], who: str = "replica"):
+                 done: Callable[[int], None], who: str = "replica", first: bytes = b"", chunks=None):
         self.status_code = upstream.status_code
         self.background = None
         ctype = upstream.headers.get("content-type") or "application/octet-stream"
@@ -1632,6 +1792,8 @@ class AudioResponse(Response):
         self.meter = meter
         self.done = done
         self.who = who
+        self.first = first
+        self.chunks = chunks
 
     async def __call__(self, scope, receive, send):
         status = self.upstream.status_code
@@ -1640,7 +1802,10 @@ class AudioResponse(Response):
         async def pump():
             nonlocal status
             try:
-                async for chunk in self.upstream.aiter_bytes():
+                if self.first:
+                    self.meter.feed(self.first)
+                    await send({"type": "http.response.body", "body": self.first, "more_body": True})
+                async for chunk in (self.chunks if self.chunks is not None else self.upstream.aiter_bytes()):
                     if chunk:
                         self.meter.feed(chunk)
                         await send({"type": "http.response.body", "body": chunk, "more_body": True})

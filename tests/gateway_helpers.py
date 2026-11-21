@@ -40,6 +40,7 @@ class FakeEngine:
         self.status: Optional[int] = None   # answer every request with this status instead
         self.retry_after: Optional[str] = None  # sent with `status`
         self.cut_after: Optional[int] = None  # a stream breaks off after this many chunks (1.2)
+        self.first_delay = 0.0      # a stream's headers go out at once, its first chunk after this (1.4.5)
         self.seen: list[dict] = []
         self.refused = 0
         self.disconnects = 0
@@ -126,6 +127,9 @@ class FakeEngine:
                 self.end_headers()
                 usage_asked = (body.get("stream_options") or {}).get("include_usage") is True
                 try:
+                    if engine.first_delay:
+                        self.wfile.flush()
+                        time.sleep(engine.first_delay)
                     for i in range(engine.chunks):
                         if engine.cut_after is not None and i == engine.cut_after:
                             self.wfile.flush()

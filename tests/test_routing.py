@@ -161,12 +161,10 @@ def test_fy_rt_006_what_never_spills(mixed, monkeypatch):
     assert r.status_code == 200 and evs[0]["choices"][0]["delta"]["content"] == "t0 "
     assert evs[-1]["error"]["code"] == "upstream_stream_broken"
     mixed.engine.cut_after = None
-    monkeypatch.setenv("GATEWAY_READ_TIMEOUT", "0.3")
-    get_settings.cache_clear()
-    proxy._clients.clear()                 # a client with the shorter timeout
+    monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 0.3)   # the wait for a first answer (1.4.5)
     mixed.engine.hold = 1.0
     r = chat(mixed.api)
-    assert r.status_code == 504 and r.json()["error"]["code"] == "upstream_timeout"
+    assert r.status_code == 504 and r.json()["error"]["code"] == "first_answer_timeout"
     assert mixed.cloud.posts() == []
 
 
