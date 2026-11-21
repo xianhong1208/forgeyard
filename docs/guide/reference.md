@@ -95,7 +95,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | Seconds to connect to a replica before trying the next one |
-| `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for each piece of an answer after the first (the first: the deployment's *Wait for the first answer*, 120 s by default, see [Retries and the wait for a first answer](#retries-and-the-wait-for-a-first-answer)) |
+| `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for a non-streamed answer's headers, or for each piece of a stream after its first (a stream's first bytes: the deployment's *Wait for the first answer*, 120 s by default, see [Retries and the wait for a first answer](#retries-and-the-wait-for-a-first-answer)) |
 | `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
@@ -320,16 +320,17 @@ What the gateway does with a request:
   Retry it yourself if that is safe. An agent older than 1.4.5 closes the connection when its engine
   is not running, which now reads as such a break: update agents to keep the failover in the few
   seconds before an agent reports a dead engine.
-- **The first answer.** Once a request was written to a replica, the replica has the deployment's
-  *Wait for the first answer* (`first_answer_timeout`, **120 s** by default, 5 to 3,600) to start
-  answering: the status line, and for a stream (`stream: true`, streamed audio) its first bytes too.
-  After that the request is closed, so the engine stops, and the answer is 504
-  `first_answer_timeout`; it is never sent to another replica. A streamed answer that has started
-  may take up to `GATEWAY_READ_TIMEOUT` (600 s) for each later piece. A non-streamed answer comes
-  only when it is finished, so raise the wait for deployments that write long answers without
-  streaming, or transcribe long recordings. Image requests keep their deployment's own *Timeout*;
-  video jobs their own; `first_answer_timeout` is refused for those deployments. It is under
-  **Advanced** in the deploy and change forms; changing it restarts nothing.
+- **The first answer of a stream.** Once a streamed request (`stream: true`, or speech with a
+  `stream_format`) was written to a replica, the replica has the deployment's *Wait for the first
+  answer* (`first_answer_timeout`, **120 s** by default, 5 to 3,600) for the status line and the
+  stream's first bytes. After that the request is closed, so the engine stops, and the answer is 504
+  `first_answer_timeout`; it is never sent to another replica. Once a stream has started, each later
+  piece may take up to `GATEWAY_READ_TIMEOUT` (600 s); a wait set above that is honoured for the first
+  bytes. **A non-streamed answer is the whole answer, so the wait does not apply to it**: it keeps
+  `GATEWAY_READ_TIMEOUT` (504 `upstream_timeout`), and long non-streamed generations and long
+  transcriptions are not cut short. Image requests keep their deployment's own *Timeout*; video jobs
+  their own; `first_answer_timeout` is refused for those deployments. It is under **Advanced** in the
+  deploy and change forms; changing it restarts nothing.
 
 ### Images, audio and video in chat
 
@@ -731,8 +732,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
 | 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |
-| 504 | `first_answer_timeout` | The replica took the request but did not start answering (status line; for a stream, its first bytes) within the deployment's *Wait for the first answer* (120 s by default). Stopped, never sent to another replica | Stream long answers, or raise the deployment's wait |
-| 504 | `upstream_timeout` | The replica gave no next piece of an answer within `GATEWAY_READ_TIMEOUT`; for images, no answer within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
+| 504 | `first_answer_timeout` | Streamed requests only: the replica took the request but sent no status line and first bytes within the deployment's *Wait for the first answer* (120 s by default). Stopped, never sent to another replica | Retry later, or raise the deployment's wait (a long prompt takes long before its first token) |
+| 504 | `upstream_timeout` | The replica gave no non-streamed answer, or no next piece of a stream, within `GATEWAY_READ_TIMEOUT`; for images, no answer within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
 | 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
 
 Two more cases:

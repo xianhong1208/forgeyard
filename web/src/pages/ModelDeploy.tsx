@@ -179,7 +179,7 @@ export function ModelDeployPage() {
                   {takesFirstAnswer(recipe) && (
                     <div className="field"><label htmlFor="d-first">Wait for the first answer (seconds)</label>
                       <input id="d-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
-                      <p className="field-hint">How long a replica has to start answering a request (5 to 3600). Then the request is stopped with 504 and never sent to another replica. Raise it for long answers that do not stream.</p></div>
+                      <p className="field-hint">Streamed answers only: how long a replica has to start streaming (5 to 3600). Then the request is stopped with 504 and never sent to another replica. A non-streamed answer keeps the gateway's read timeout.</p></div>
                   )}
                   <div className="field"><label htmlFor="d-token">Hugging Face token</label>
                     <input id="d-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)}

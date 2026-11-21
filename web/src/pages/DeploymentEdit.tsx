@@ -139,7 +139,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
                 {takesFirstAnswer(recipe) && (
                   <div className="field"><label htmlFor="e-first">Wait for the first answer (seconds)</label>
                     <input id="e-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
-                    <p className="field-hint">Empty: {FIRST_ANSWER_DEFAULT}. A replica that has not started answering by then gets the request stopped (504), never resent. Changing it restarts nothing.</p></div>
+                    <p className="field-hint">Streamed answers only. Empty: {FIRST_ANSWER_DEFAULT}. A replica that has not started streaming by then gets the request stopped (504), never resent; non-streamed answers keep the read timeout. Changing it restarts nothing.</p></div>
                 )}
               </div>
             </details>
