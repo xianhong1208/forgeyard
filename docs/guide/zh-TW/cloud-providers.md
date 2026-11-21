@@ -64,7 +64,7 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 自己取的名稱也可以只指向部署：好幾個部署共用一個名稱，或替一個部署取第二個名稱。建立方式相同。**Cloud models** 會把它們列在 *Other names for deployments* 底下，每個部署的頁面也會列出它另外回應的名稱。
 
-每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
+每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。Forgeyard 在送往供應商的路上拿掉了哪些請求參數（請見[各供應商端點做不到的事](#what-each-providers-endpoint-cannot-do)），會以逗號分隔寫在 `X-Forgeyard-Dropped-Params`，回答和供應商的錯誤上都有。
 
 ## 請求何時溢出
 
@@ -84,6 +84,15 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 - 回答已經開始串流。
 
 如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會送到本機副本，不再受 *Concurrent requests* 限制：由引擎排隊處理。
+
+**結構化輸出不會在路上遺失。** 要求特定回答形狀的請求（`json_object` 或 `json_schema` 的 `response_format`、vLLM 的 `structured_outputs` 或 `guided_json`、`guided_regex`、`guided_choice`、`guided_grammar`、llama.cpp 的 `grammar` 或 `json_schema`，或帶 `strict: true` 的工具），會略過每個會拿掉或忽略該參數的供應商目標，而不是拿回一個沒有受限的回答：
+
+- 每種雲端都會拿掉只有引擎才有的那些（`structured_outputs`、`guided_*`、`grammar`、`json_schema`），以及只有引擎認得的 `response_format` 類型；
+- Anthropic 另外會忽略 `json_object`、沒有 `strict: true` 的 `json_schema`，以及工具上的 `strict`；
+- *OpenAI-compatible server* 全部保留；
+- 供應商模型自己的拿掉清單（`drop_params`，透過 API 設定）列到其中一個時，也會為它略過。
+
+如果沒有其他目標能接，請求會得到沒有雲端時本來會得到的結果：忙碌時照樣送到本機副本；無法使用時回 503 和原因，訊息也會列出被略過的供應商和參數。只有這類供應商提供的雲端模型會回 400 `structured_output_not_supported`。
 
 在雲端層內，回應 429 或 5xx、或連不上的目標會被略過，並在 30 秒內排到最後才嘗試。同一層的多個目標會依權重分攤請求。當沒有其他目標可試、而供應商要求等待不超過 2 秒時（`Retry-After`），請求會等一次再試。
 
@@ -151,7 +160,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 
 ### OpenRouter 和其他伺服器
 
-只有它們背後某個供應商特有的功能。OpenRouter 接受 `top_k`、`min_p` 和 `repetition_penalty` 並往下傳；對其他雲端種類，請求送出時 Forgeyard 會拿掉這些以及其他只有引擎才有的參數（vLLM 的 `chat_template_kwargs`、`guided_*`，llama.cpp 的取樣設定）。
+只有它們背後某個供應商特有的功能。OpenRouter 接受 `top_k`、`min_p` 和 `repetition_penalty` 並往下傳；對其他雲端種類，請求送出時 Forgeyard 會拿掉這些以及其他只有引擎才有的參數（vLLM 的 `chat_template_kwargs`、`guided_*`，llama.cpp 的取樣設定），並寫在 `X-Forgeyard-Dropped-Params`。結構化輸出會被拿掉的請求根本不會送到那裡（[請求何時溢出](#when-a-request-spills)）。
 
 ## 費用與價格
 

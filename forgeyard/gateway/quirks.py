@@ -8,6 +8,8 @@ OpenAI-compatible endpoints, plus this small table of differences per kind of pr
 - request parameters to drop (engine extras that vLLM and llama.cpp accept and clouds refuse) or to
   rename (OpenAI's newer models refuse `max_tokens`);
 - whether embeddings and `stream_options.include_usage` exist;
+- which structured-output parameters (a JSON schema, a grammar) would not take effect there, so a
+  request that carries one is not sent to such a provider (1.4.5, `structure_lost`);
 - how `usage` is read back (cached and reasoning tokens; Anthropic always leaves those empty), and
   which OpenRouter ids a kind's models have, to suggest price matches (forgeyard/gateway/pricing.py).
 
@@ -44,6 +46,15 @@ ENGINE_EXTRAS = frozenset({
 # OpenRouter passes these sampling parameters on to the providers that take them.
 OPENROUTER_KEEPS = frozenset({"top_k", "min_p", "repetition_penalty", "top_a"})
 
+# Request parameters that constrain the shape of the answer (structured output, 1.4.5): vLLM's guided
+# decoding and structured_outputs, llama.cpp's grammar and json_schema, and OpenAI's response_format
+# when it asks for more than plain text. A request that carries one is never sent to a provider that
+# would drop or ignore it (forgeyard/gateway/proxy.py): the answer would come back unconstrained.
+STRUCTURED = ("response_format", "structured_outputs", "guided_json", "guided_regex", "guided_choice",
+              "guided_grammar", "grammar", "json_schema")
+# response_format types OpenAI's API defines; another type (vLLM's structural_tag…) only an engine takes.
+OPENAI_RESPONSE_FORMATS = ("text", "json_object", "json_schema")
+
 
 @dataclass(frozen=True)
 class Kind:
@@ -66,6 +77,12 @@ class Kind:
     # The OpenRouter model ids of this kind start with this ("openai/gpt-4o-mini"); used to suggest
     # a price match, which an admin confirms.
     catalog_vendor: str = ""
+    # Structured output the endpoint accepts but ignores (1.4.5): Anthropic's compatibility endpoint
+    # honours response_format only as a json_schema with strict: true, and ignores strict on tools.
+    schema_needs_strict: bool = False
+    tool_strict: bool = True
+    # Takes every response_format type (another server: a vLLM or llama.cpp of your own).
+    any_response_format: bool = False
     note: str = ""
 
 
@@ -75,7 +92,7 @@ KINDS: dict[str, Kind] = {k.name: k for k in (
          note="Complete on Chat Completions and embeddings. Newer models refuse max_tokens, so it is sent as "
               "max_completion_tokens."),
     Kind("anthropic", "Anthropic", "https://api.anthropic.com/v1", "", "anthropic", drop=ENGINE_EXTRAS,
-         embeddings=False, reports_cached=False, catalog_vendor="anthropic",
+         embeddings=False, reports_cached=False, catalog_vendor="anthropic", schema_needs_strict=True, tool_strict=False,
          note="Anthropic's OpenAI compatibility endpoint: no prompt caching, no thinking returned, no PDF or "
               "file input, n must be 1, usage has no cached or reasoning breakdown, and there are no embeddings."),
     Kind("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "", "bearer",
@@ -90,7 +107,7 @@ KINDS: dict[str, Kind] = {k.name: k for k in (
          drop=ENGINE_EXTRAS - OPENROUTER_KEEPS,
          note="Reports the cost of each request; routes between its own providers."),
     Kind("openai_compatible", "OpenAI-compatible server", "", "https://llm.example.org/v1", "bearer",
-         default_external=False, key_required=False,
+         default_external=False, key_required=False, any_response_format=True,
          note="Any server with the OpenAI API: a vLLM or llama.cpp of your own elsewhere, Together, Groq… Nothing "
               "is dropped. Outside your network is suggested from its address: check it for a third party."),
 )}
@@ -127,7 +144,8 @@ def outgoing(kind: str, obj: dict, endpoint: str, extra_drop: Optional[list] = N
             if old in out and new not in out:
                 out[new] = out.pop(old)
             elif old in out:
-                out.pop(old)
+                out.pop(old)                      # both given: the newer name wins
+                dropped.append(old)
         if k.name == "anthropic":
             rf = out.get("response_format")
             if isinstance(rf, dict) and rf.get("type") == "text":
@@ -135,7 +153,55 @@ def outgoing(kind: str, obj: dict, endpoint: str, extra_drop: Optional[list] = N
                 dropped.append("response_format")
     if not k.stream_usage:
         out.pop("stream_options", None)
-    return out, dropped
+    return out, sorted(dropped)
+
+
+def _strict_tools(obj: dict) -> bool:
+    tools = obj.get("tools")
+    return isinstance(tools, list) and any(
+        isinstance(t, dict) and isinstance(t.get("function"), dict) and t["function"].get("strict") is True
+        for t in tools)
+
+
+def structured(obj: Optional[dict]) -> list[str]:
+    """The structured-output parameters a request carries (`tools.strict`: a tool with strict: true)."""
+    if not isinstance(obj, dict):
+        return []
+    out = []
+    for name in STRUCTURED:
+        if name not in obj or obj[name] is None:
+            continue
+        if name == "response_format":
+            rf = obj[name]
+            if isinstance(rf, dict) and rf.get("type") in (None, "text"):
+                continue                          # plain text: nothing to lose
+        out.append(name)
+    if _strict_tools(obj):
+        out.append("tools.strict")
+    return out
+
+
+def structure_lost(kind: str, obj: Optional[dict], endpoint: str, extra_drop: Optional[list] = None) -> list[str]:
+    """The structured-output parameters of a request that would not take effect at a provider of this
+    kind: dropped on the way (the kind's or the model's drop list) or ignored by its endpoint."""
+    asked = structured(obj)
+    if not asked:
+        return []
+    k = get(kind)
+    _, dropped = outgoing(kind, obj, endpoint, extra_drop)
+    lost = [name for name in asked if name in dropped]
+    rf = obj.get("response_format")
+    if "response_format" in asked and "response_format" not in lost:
+        kind_of = rf.get("type") if isinstance(rf, dict) else None
+        if not k.any_response_format and kind_of not in OPENAI_RESPONSE_FORMATS:
+            lost.append("response_format")        # a type only engines know
+        elif k.schema_needs_strict and not (
+                kind_of == "json_schema" and isinstance(rf.get("json_schema"), dict)
+                and rf["json_schema"].get("strict") is True):
+            lost.append("response_format")        # json_object, or a schema without strict: ignored
+    if "tools.strict" in asked and (not k.tool_strict or "tools" in dropped):
+        lost.append("tools.strict")
+    return lost
 
 
 @dataclass
