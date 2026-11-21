@@ -1377,6 +1377,13 @@ dependencies. It uses `uv` when it is installed, else a Python 3.13 or newer tha
 else it installs `uv` into `/opt/forgeyard/bin`, which brings its own Python. Without systemd it
 installs everything and prints how to start the agent.
 
+What it downloads is checked (1.4.5): the agent and the list of its dependencies come from the server,
+each checked against the SHA-256 the script names; the dependencies come from PyPI at the versions the
+server's release was tested with, each file checked against its published hash (`--require-hashes`,
+nothing else installed with them); and the `uv` it installs is a fixed release (0.9.24) downloaded from
+GitHub and checked against its SHA-256, not an install script. A machine that reaches PyPI through a
+mirror (`UV_INDEX_URL`, `PIP_INDEX_URL`) still gets the same files, or none.
+
 ## Built-in recipes
 
 A recipe's variants are tried in order; the first one whose `when` matches a card (or the CPU) and

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse, Response
 
 from forgeyard.api.deps import request_is_https
-from forgeyard.install import commands, wheel
+from forgeyard.install import commands, requirements, wheel
 
 router = APIRouter(tags=["install"])
 
@@ -47,6 +47,10 @@ def install_sh(request: Request):
 def agent_wheel(name: str, request: Request):
     if not request_is_https(request):
         return _refuse("the agent is served only over HTTPS.")
+    if name in requirements.FILES:  # 1.4.5 (#172): the agent's dependencies, pinned with their hashes
+        data, sha = requirements.served(name)
+        return Response(data, media_type="text/plain; charset=utf-8",
+                        headers={"X-Checksum-SHA256": sha, "Cache-Control": "no-store"})
     fname, data, sha = wheel.cached()
     if name != fname:
         return PlainTextResponse(f"This server has the agent {fname} only.\n", status_code=404)

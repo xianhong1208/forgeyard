@@ -27,6 +27,8 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 
 資料表變更一律走 Alembic（`forgeyard/migrations`）；啟動時執行 `upgrade head`，model 與 migration 不一致時會有測試失敗。測試編號（`FY-…`）在整個專案中唯一。
 
+執行 `uv lock`（或 Dependabot 更新 `uv.lock`）之後，請執行 `uv run --no-sync python -m forgeyard.install.requirements`：它會重寫 install.sh 安裝 agent 相依套件時使用的清單（含雜湊值，`forgeyard/install/agent-requirements*.txt`）；清單和 lock 不一致時 FY-INST-020 會失敗。
+
 ## 以 digest 固定的引擎映像檔
 
 內建配方的每個容器 variant 都以 `repo:tag@sha256:<index digest>` 指定映像檔，`forgeyard/recipes/images.lock.json`
