@@ -619,6 +619,7 @@ The label names are on the catalog entry (`GET /api/models/<name>`, `classify.la
 | `X-Forgeyard-Replica` | answer | For a local answer: `<model>#<replica>` |
 | `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
 | `X-Forgeyard-Voice` | answer | Text to speech: the voice the gateway chose because the request named none, or an OpenAI voice the model does not have; `default` when the model has only its own voice |
+| `X-Forgeyard-Dropped-Params` | answer | The request parameters Forgeyard left out on the way to the provider that answered (engine-only ones such as `top_k`, `chat_template_kwargs`; a model's own drop list), comma-separated. Also on that provider's error. Missing when nothing was left out ([structured output](cloud-providers.md#when-a-request-spills) is never left out: such a request skips that provider) |
 | `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
 | `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
 
@@ -669,6 +670,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `input_reference_not_supported` | Videos: `input_reference` (or `image_reference`, `video_reference`, `audio_reference`): text to video only in 1.3 | Describe it in the prompt |
 | 400 | `variant_not_supported` | Videos: `variant=thumbnail` or `spritesheet`; the engine makes the video only | Ask for `variant=video` |
 | 4xx/5xx | `engine_error` | Images and videos: the engine refused or failed the request; its status and message are passed on | Read the message; an out-of-memory error means a smaller size or fewer images |
+| 400 | `structured_output_not_supported` | The request asks for structured output (`response_format` JSON, `structured_outputs`, `guided_*`, `grammar`, `json_schema`, a strict tool) and every provider that serves the model would drop or ignore it. The message names them and the parameter | Leave the parameter out, or use a target that takes it (an OpenAI-compatible server, a local deployment) |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
