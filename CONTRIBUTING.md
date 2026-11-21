@@ -137,5 +137,6 @@ Contributions are accepted under the [Developer Certificate of Origin](https://d
 (DCO 1.1): by adding a `Signed-off-by:` line to a commit you certify that you wrote it, or otherwise
 have the right to submit it under this licence. `git commit -s` adds the line with your configured
 name and email; the email must be the commit's author email. Merge commits and commits by bots are
-not checked. To sign off commits already on your branch: `git rebase --signoff dev`, then push with
+not checked, and neither are the release pull requests (`dev` → `main` and the `main` → `dev`
+back-merge): every commit reached `dev` through its own checked pull request. To sign off commits already on your branch: `git rebase --signoff dev`, then push with
 `--force-with-lease`.
