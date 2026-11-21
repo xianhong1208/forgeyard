@@ -72,7 +72,8 @@ from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Refusal, key_limiter
-from forgeyard.gateway.proxy import CLIENT_CLOSED, RETRYABLE, ClientGone, client, unless_gone, _until_disconnect
+from forgeyard.gateway.proxy import (CLIENT_CLOSED, RETRYABLE, ClientGone, EngineUnreachable, client, not_taken,
+                                     unless_gone, _until_disconnect)
 from forgeyard.gateway.usage import recorder
 from forgeyard.security.client import client_ip
 from forgeyard.workloads import expose
@@ -529,6 +530,15 @@ async def _send(request: Request, caller: KeyCaller, route: XRoute, path: bytes,
             balancer.release(pick.uid)
             record(caller, name, 502, started, bytes_in=len(body))
             raise GatewayError(502, "upstream_error", f"The request to the workload failed ({type(e).__name__}).") from None
+        if not_taken(response):
+            # Its guard says the program is not running (1.4.5): the request reached nothing, try the next replica.
+            await response.aclose()
+            balancer.release(pick.uid)
+            balancer.failed(pick.uid)
+            last_exc = EngineUnreachable()
+            log.warning("Replica %s of workload %s: its program is not running; trying the next one.", pick.ordinal,
+                        name)
+            continue
         if response.status_code == 401 and GUARD_REALM in response.headers.get("www-authenticate", ""):
             await response.aclose()
             balancer.release(pick.uid)

@@ -14,6 +14,24 @@ version until 1.0.
 
 ### Fixed
 
+- **No request runs twice** (#168). A request moves to another replica (or provider) only when it provably never
+  reached the first one: a connection that could not be made, no free connection, or a replica's key guard saying
+  its engine is not running. A connection that breaks once the request was sent (`ReadError`,
+  `RemoteProtocolError`, `WriteError`: the engine may be generating) is 502 and is not tried elsewhere; before, it
+  was retried on the next replica, or the next cloud target, and could run twice. The same holds for video jobs
+  and `/x/`. The agent's key guard now answers 503 with `X-Forgeyard-Not-Taken: engine-unreachable` (after reading
+  the request) when its engine is not running, instead of closing without an answer, so failover to the next
+  replica keeps working; behind an agent older than 1.4.5 that case is now a 502 until the agent reports the dead
+  engine (seconds): update the agents.
+- **A shorter, settable wait for a stream to start** (#168). Once a streamed request (`stream: true`, or speech with
+  a `stream_format`) is written to a replica, the replica has the deployment's *Wait for the first answer*
+  (`first_answer_timeout`, 120 s by default, 5 to 3,600, under **Advanced** in the deploy and change forms) for the
+  status line and the stream's first bytes. Then the request is closed (the engine stops) with 504
+  `first_answer_timeout`, never sent elsewhere; it used to wait `GATEWAY_READ_TIMEOUT` (600 s), and a stream that
+  never started came back as a 200 that broke off. A non-streamed answer is the whole answer, so it keeps
+  `GATEWAY_READ_TIMEOUT` as before: long non-streamed generations and transcriptions are not cut short. Image
+  deployments keep their own *Timeout*, video jobs theirs. Changing only this parameter restarts nothing. No
+  migration: it lives in the deployment's parameters.
 - **Mixed server and agent versions keep working** (#170). A card of a vendor the server does not know (from a
   newer agent) is left out of the machine, with a warning in the server's log and an *unknown vendor* line under
   the machine page's **Detection notes**, instead of refusing the agent's hello. A message type either side does

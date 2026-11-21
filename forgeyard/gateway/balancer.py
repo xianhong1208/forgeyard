@@ -97,10 +97,13 @@ class Balancer:
             else:
                 self.inflight.pop(uid, None)
 
-    def failed(self, uid: str) -> None:
+    def failed(self, uid: str, reached: bool = False) -> None:
+        """Try the replica last for a while. `reached`: it got the request (and then broke off or went
+        silent), so it still counts as served."""
         with self._lock:
             self._failed[uid] = (self._clock() + PENALTY, self._wall())
-            self.served[uid] = max(0, self.served.get(uid, 0) - 1)  # it never got the request
+            if not reached:
+                self.served[uid] = max(0, self.served.get(uid, 0) - 1)  # it never got the request
 
     def cool_down(self, key: str, seconds: float) -> None:
         with self._lock:

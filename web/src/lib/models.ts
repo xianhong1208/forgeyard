@@ -94,12 +94,19 @@ export type DeployForm = {
   vram: string;
   token: string;
   extraArgs: string;
+  firstAnswer: string;   // 1.4.5: seconds a replica has to start answering ("" = the gateway's default, 120)
   params: Record<string, string>;
 };
 
 export function emptyDeploy(): DeployForm {
   return { model: "", recipe: "", name: "", servedName: "", device: "gpu", gpus: "1", share: "", replicas: "1", machine: "",
-    vram: "", token: "", extraArgs: "", params: {} };
+    vram: "", token: "", extraArgs: "", firstAnswer: "", params: {} };
+}
+
+// 1.4.5: the gateway's wait for a first answer applies to every deployment but image and video ones (their own timeout).
+export const FIRST_ANSWER_DEFAULT = 120;
+export function takesFirstAnswer(recipe: Recipe | undefined): boolean {
+  return !!recipe && recipe.tasks.some((t) => t !== "image" && t !== "video");
 }
 
 // The recipe's defaults; with the model's own longest context (1.4.4), a context default longer than that starts at
@@ -132,6 +139,7 @@ export function deployBody(f: DeployForm, recipe: Recipe | undefined): Record<st
   if (f.vram.trim()) p.vram = f.vram.trim();
   const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
   if (extra.length) p.extra_args = extra;
+  if (f.firstAnswer.trim() && takesFirstAnswer(recipe)) p.first_answer_timeout = Number(f.firstAnswer.trim());
   const body: Record<string, unknown> = { name: f.name.trim(), model: f.model, recipe: f.recipe, params: p,
     replicas: Number(f.replicas || "1") };
   if (f.servedName.trim()) body.served_name = f.servedName.trim();
@@ -149,6 +157,7 @@ export type EditForm = {
   machine: string;   // "" = automatic, else the id of the machine it is pinned to
   vram: string;
   extraArgs: string;
+  firstAnswer: string;
   params: Record<string, string>;
 };
 
@@ -167,6 +176,7 @@ export function editForm(d: Deployment, recipe: Recipe): EditForm {
     replicas: String(d.workload.replica_list.length || d.workload.spec.replicas || 1),
     machine: d.workload.spec.machine_id ? String(d.workload.spec.machine_id) : "",
     vram: typeof p.vram === "number" ? sizeText(p.vram) : "", extraArgs: Array.isArray(p.extra_args) ? p.extra_args.join("\n") : "",
+    firstAnswer: typeof p.first_answer_timeout === "number" ? String(p.first_answer_timeout) : "",
     params,
   };
 }
@@ -184,6 +194,7 @@ export function editBody(f: EditForm, recipe: Recipe): Record<string, unknown> {
   p.vram = f.vram.trim() || null;
   const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
   p.extra_args = extra.length ? extra : null;
+  if (takesFirstAnswer(recipe)) p.first_answer_timeout = f.firstAnswer.trim() ? Number(f.firstAnswer.trim()) : null;
   return { params: p, replicas: Number(f.replicas || "1"), machine_id: f.machine ? Number(f.machine) : null };
 }
 

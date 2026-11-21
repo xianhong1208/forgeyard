@@ -86,7 +86,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | 連線到副本的秒數上限，超過就改試下一個 |
-| `GATEWAY_READ_TIMEOUT` | `600` | 副本回傳回應標頭或串流下一段內容的秒數上限 |
+| `GATEWAY_READ_TIMEOUT` | `600` | 副本回傳非串流回應標頭，或串流第一段之後每一段的秒數上限（串流的第一批位元組：部署的 *Wait for the first answer*，預設 120 秒，請見[重試與等待第一個回應](#retries-and-the-wait-for-a-first-answer)） |
 | `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的）。部署的配方有 *Largest request* 參數（`max_body_mb`，vLLM 與 llama.cpp 預設 64）時，改以該值為上限 |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API keys** 修改 |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
@@ -256,6 +256,11 @@ local_dirs = ["/data/models"]
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
 - 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
 - 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
+
+### 重試與等待第一個回應
+
+- **一個請求最多只執行一次。** 只有在請求確定沒有送到第一個副本時，閘道才會改試另一個副本（或供應商）：連線建立不起來（沒有程式在聽、被拒絕、`GATEWAY_CONNECT_TIMEOUT`）、沒有空出的連線，或副本的金鑰守衛回應它的引擎沒有在執行（503 帶 `X-Forgeyard-Not-Taken`，1.4.5 起的 agent）。請求送出之後才斷掉的連線（寫入請求時，或等待回應時）會回 502 `upstream_error`（供應商則為 `provider_error`），而且不會再送到別處：引擎可能已經開始處理，生成或付費的雲端請求會跑兩次。如果安全，請自己重試。1.4.5 之前的 agent 在引擎沒有執行時會直接關閉連線，現在會被當成這種斷線：請更新 agent，才能在 agent 回報引擎停止前的那幾秒內保有容錯移轉。
+- **串流的第一個回應。** 串流請求（`stream: true`，或帶 `stream_format` 的語音）寫入副本之後，副本有部署的 *Wait for the first answer*（`first_answer_timeout`，預設 **120 秒**，5 到 3,600）送出狀態列和串流的第一批位元組。超過時請求會被關閉，引擎跟著停止，回應是 504 `first_answer_timeout`；它絕不會送到另一個副本。串流開始之後，之後每一段最多可以等 `GATEWAY_READ_TIMEOUT`（600 秒）；設得比它長的等待，第一批位元組也會照設定等。**非串流的回答就是整個回答，所以這個等待不適用**：它維持 `GATEWAY_READ_TIMEOUT`（504 `upstream_timeout`），長的非串流生成和長錄音的轉錄不會被提早切斷。圖片請求維持部署自己的 *Timeout*；影片工作也是用自己的；這兩種部署不接受 `first_answer_timeout`。它在部署和修改表單的 **Advanced** 裡；修改它不會重新啟動任何東西。
 
 ### 對話中的圖片、音訊與影片
 
@@ -556,8 +561,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
 | 429 | `queue_full` | 圖片：每個副本都在忙，部署的佇列也滿了。影片：部署已經有 *Jobs at once* 個工作 | 等待 `Retry-After` 秒 |
 | 429 | `too_many_jobs` | 影片：這把金鑰（或這個人）在部署上已經有 *Jobs per key* 段影片在等待或製作中 | 等待 `Retry-After` 秒，或刪掉一段 |
-| 502 | `upstream_unreachable` | 連不上任何副本 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
-| 502 | `upstream_error` | 回應傳送到一半時，和副本或供應商的連線斷了 | 重試 |
+| 502 | `upstream_unreachable` | 連不上任何副本，或每個副本的引擎都沒有在執行 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
+| 502 | `upstream_error` | 請求送出之後，或回應傳送到一半時，和副本的連線斷了。不會送到另一個副本，以免跑兩次 | 安全的話再重試 |
 | 502 | `replica_refused_key` | 副本拒絕了閘道的內部金鑰 | 停止再啟動部署 |
 | 502 | `provider_auth_failed` | 供應商拒絕了 Forgeyard 給它的金鑰。絕不會以 401 轉給你，免得你懷疑自己的金鑰 | 由管理員修正供應商的金鑰 |
 | 502 | `provider_blocked` | 外連規則在送出前就拒絕了供應商的位址 | 由管理員檢查供應商的 base URL 和 `EGRESS_*` |
@@ -569,7 +574,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
 | 503 | `queue_timeout` | 圖片：請求等待空出副本的時間超過部署的 *Timeout* | 稍後重試，或加一個副本 |
-| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段）；圖片則是在部署的 *Timeout* 內；影片則是副本在 60 秒內沒有接下工作 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
+| 504 | `first_answer_timeout` | 只限串流請求：副本接下了請求，但沒有在部署的 *Wait for the first answer*（預設 120 秒）內送出狀態列和第一批位元組。請求已停止，絕不會送到另一個副本 | 稍後重試，或調高部署的等待（長提示在第一個 token 之前要花不少時間） |
+| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有送出非串流的回應，或串流的下一段；圖片則是在部署的 *Timeout* 內沒有回應；影片則是副本在 60 秒內沒有接下工作 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
 | 504 | `provider_timeout` | 供應商沒有及時回應（`PROVIDER_READ_TIMEOUT`，或供應商自己的逾時設定） | 稍後重試 |
 
 另外兩種情況：
@@ -717,7 +723,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 | 欄位 | 值 |
 |---|---|
-| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）和 `extra_args`（清單）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）和 `first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
 | `replicas` | 1 到 16 |
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |

@@ -95,7 +95,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | Seconds to connect to a replica before trying the next one |
-| `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for its answer's headers or the next piece of a stream |
+| `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for a non-streamed answer's headers, or for each piece of a stream after its first (a stream's first bytes: the deployment's *Wait for the first answer*, 120 s by default, see [Retries and the wait for a first answer](#retries-and-the-wait-for-a-first-answer)) |
 | `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
@@ -307,6 +307,30 @@ What the gateway does with a request:
   (`max_body_mb`, 64 MB by default for vLLM and llama.cpp deployments).
 - If you close the connection, the gateway closes its request upstream at once, so the engine stops
   generating.
+
+### Retries and the wait for a first answer
+
+- **A request runs at most once.** The gateway tries another replica (or provider) only when the
+  request provably never reached the first one: the connection could not be made (nothing listens,
+  refused, `GATEWAY_CONNECT_TIMEOUT`), no connection was free, or the replica's key guard answered
+  that its engine is not running (503 with `X-Forgeyard-Not-Taken`, from agents of 1.4.5 on). A
+  connection that breaks once the request was sent, while it was being written or while the answer
+  was awaited, is 502 `upstream_error` (`provider_error` for a provider) and is not tried anywhere
+  else: the engine may have started on it, and a generation or a paid cloud request would run twice.
+  Retry it yourself if that is safe. An agent older than 1.4.5 closes the connection when its engine
+  is not running, which now reads as such a break: update agents to keep the failover in the few
+  seconds before an agent reports a dead engine.
+- **The first answer of a stream.** Once a streamed request (`stream: true`, or speech with a
+  `stream_format`) was written to a replica, the replica has the deployment's *Wait for the first
+  answer* (`first_answer_timeout`, **120 s** by default, 5 to 3,600) for the status line and the
+  stream's first bytes. After that the request is closed, so the engine stops, and the answer is 504
+  `first_answer_timeout`; it is never sent to another replica. Once a stream has started, each later
+  piece may take up to `GATEWAY_READ_TIMEOUT` (600 s); a wait set above that is honoured for the first
+  bytes. **A non-streamed answer is the whole answer, so the wait does not apply to it**: it keeps
+  `GATEWAY_READ_TIMEOUT` (504 `upstream_timeout`), and long non-streamed generations and long
+  transcriptions are not cut short. Image requests keep their deployment's own *Timeout*; video jobs
+  their own; `first_answer_timeout` is refused for those deployments. It is under **Advanced** in the
+  deploy and change forms; changing it restarts nothing.
 
 ### Images, audio and video in chat
 
@@ -695,8 +719,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
 | 429 | `queue_full` | Images: every replica is busy and the deployment's queue is full. Videos: the deployment holds *Jobs at once* | Wait `Retry-After` seconds |
 | 429 | `too_many_jobs` | Videos: this key (or person) already has *Jobs per key* videos waiting or being made on the deployment | Wait `Retry-After` seconds, or delete one |
-| 502 | `upstream_unreachable` | No replica could be connected to | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
-| 502 | `upstream_error` | The connection to the replica or provider broke while the answer was coming | Retry |
+| 502 | `upstream_unreachable` | No replica could be connected to, or every one's engine was not running | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
+| 502 | `upstream_error` | The connection to the replica broke after the request was sent, or while the answer was coming. It is not sent to another replica, which could run it twice | Retry if that is safe |
 | 502 | `replica_refused_key` | The replica refused the gateway's internal key | Stop and start the deployment |
 | 502 | `provider_auth_failed` | The provider refused Forgeyard's key for it. Never passed on as 401, which would make you doubt your own key | An admin fixes the provider's key |
 | 502 | `provider_blocked` | The egress rules refused the provider's address before anything was sent | An admin checks the provider's base URL and `EGRESS_*` |
@@ -708,7 +732,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
 | 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |
-| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT`; for images, within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
+| 504 | `first_answer_timeout` | Streamed requests only: the replica took the request but sent no status line and first bytes within the deployment's *Wait for the first answer* (120 s by default). Stopped, never sent to another replica | Retry later, or raise the deployment's wait (a long prompt takes long before its first token) |
+| 504 | `upstream_timeout` | The replica gave no non-streamed answer, or no next piece of a stream, within `GATEWAY_READ_TIMEOUT`; for images, no answer within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
 | 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
 
 Two more cases:
@@ -900,7 +925,7 @@ value.
 
 | Field | Value |
 |---|---|
-| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`) and `extra_args` (a list). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list) and `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
 | `replicas` | 1 to 16 |
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
