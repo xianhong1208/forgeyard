@@ -76,7 +76,9 @@ fixed time for something to happen, or read a page before the data it needed had
   and, in async tests, `await until(...)`: they return as soon as the state is reached and fail naming
   `what` after the deadline, so the deadline can be generous. To have one request in flight before the
   next, start it in a thread and wait until the fake engine or app has received it (FY-IGEN-007,
-  FY-X-014, FY-PGV-008), not `time.sleep(0.2)`.
+  FY-X-014, FY-PGV-008), not `time.sleep(0.2)`. Then have the fake keep it until the test lets it go
+  (a `threading.Event`), not for a fixed time: on a busy runner the next request can take longer than
+  that time to arrive, and finds the first one already done (FY-PGV-008 held it 1 s, #204).
 - **Set up the state before the step that could race past it.** A fake job that must still be at work:
   make the fake engines hang before asking for it, not after (FY-VID-005).
 - **Fixtures must look current.** The app's liveness sweep runs every 2 s during the tests, so
