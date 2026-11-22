@@ -5,7 +5,8 @@ process collector, never a library's.
 
 **Labels are bounded on purpose.** A model label is a served name the gateway has a route for (a request for a
 model nobody serves counts under `_unknown`, since the name comes from the client), an endpoint label one of the
-gateway's endpoints, a status the HTTP status code, a machine label the machine's name and a GPU label its index.
+gateway's endpoints, a status the HTTP status code, a machine label the machine's name, a GPU label its index and a
+recipe label a recipe's name.
 No metric carries an API key, a key id, a user name, a prompt or a provider's model id. As a last guard, a label
 that has seen MAX_VALUES different values already takes `_other`.
 
@@ -62,6 +63,14 @@ SPILLS = Counter("forgeyard_gateway_spills", "Requests that left their route's f
 WAITED = Histogram("forgeyard_gateway_wait_seconds", "How long a request waited in line for a free local slot "
                    "(the route's Wait for a free local slot), per model; it then got a slot or moved on",
                    ("model",), buckets=WAIT_BUCKETS, registry=REGISTRY)
+
+# Seconds a replica takes from the agent beginning its start to its first healthy answer (1.5.0, #37): seconds for
+# llama.cpp, about a minute for a small vLLM model, many minutes with a download or a large model.
+START_BUCKETS = (1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0)
+STARTS = Histogram("forgeyard_replica_start_seconds", "How long a model replica took to start: from its agent beginning "
+                   "the start (model files, image, engine) to its first healthy answer; per recipe and model (the "
+                   "deployment's served name). From an agent older than 1.5.0, only the engine's part",
+                   ("recipe", "model"), buckets=START_BUCKETS, registry=REGISTRY)
 
 WAKE_BUCKETS = (1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 180.0, 300.0, 600.0, 1800.0)   # a wake waits up to wake_wait
 WAKE_WAITED = Histogram("forgeyard_gateway_wake_wait_seconds", "How long a request waited for its model to wake "
@@ -129,6 +138,14 @@ def waited(line_key: str, seconds: float) -> None:
         WAITED.labels(bounded("model", line_key.rsplit("#", 1)[0])).observe(max(0.0, seconds))
     except Exception:
         log.exception("Counting a wait for /metrics failed")
+
+
+def replica_started(recipe: Optional[str], model: Optional[str], seconds: float) -> None:
+    """A replica of the deployment serving `model` with `recipe` became ready after `seconds` (1.5.0)."""
+    try:
+        STARTS.labels(bounded("recipe", recipe), bounded("model", model)).observe(max(0.0, seconds))
+    except Exception:
+        log.exception("Counting a replica start for /metrics failed")
 
 
 def wake_waited(line_key: str, seconds: float) -> None:

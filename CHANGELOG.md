@@ -51,6 +51,21 @@ version until 1.0.
   wake goes back to sleep after its idle time and the next request tries a fresh wake; and a deployment made with
   the id of one just removed (SQLite reuses the highest id) no longer starts from the removed one's last request.
 
+- **How long each start takes, and faster ones** (1.5.0, #37, ahead of waking on a request). Each time a
+  replica of a deployment becomes ready, its events say how long the start took and where the time went (*ready in
+  74.2 s (model 0.3 s, image 0.1 s, engine 73.8 s)*: the model's files, waiting for another replica on a shared
+  GPU, the image, and the engine from launch to its first healthy answer); the deployment API gives the latest one
+  as `last_start`, and `/metrics` has the histogram `forgeyard_replica_start_seconds{recipe, model}`. A 1.5.0 agent
+  checks a starting replica's health every second instead of every *interval* (10 s for vLLM) until its first
+  healthy answer, and only within the recipe's start period, so a ready model is used up to 9 s sooner and a
+  replica is never called unhealthy sooner than before. The server lists the new protocol feature `start_times`
+  (the agent's hello stays at the 16 features servers up to 1.4.0 accept): an older agent keeps its cadence (the
+  server then measures the engine's part only and says so), and a 1.5.0 agent talking to an older server behaves
+  as before. Recipes can keep an engine's compile cache between starts (`engine_cache`, sent beside the spec, which
+  older agents ignore): `vllm` and `vllm-pooling` name vLLM's `VLLM_CACHE_ROOT` but keep it
+  **off** until a real start on an A100 has measured it; a custom recipe can turn it on (a directory per replica
+  under the model cache, mounted writable, removed with the deployment). No migration.
+
 ## [1.4.5] — 2026-11-22
 
 Fixes from an outside review. Structured output is never silently lost on a cloud spill (#162). The gateway

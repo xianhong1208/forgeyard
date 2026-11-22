@@ -451,6 +451,27 @@ def test_fy_wake_014_the_wait_runs_out_model_waking_with_retry_after(gw, monkeyp
     after = int(r.headers["retry-after"])
     assert waking.START_DEFAULT - 5 <= after <= waking.START_DEFAULT
     wk = waking.wake_of(dep_id(gw.owner, "chat"))
+    assert wk.expected == waking.START_DEFAULT        # no start measured yet
+    # With a measured start (forgeyard/workloads/starts.py), the next wake expects as long as it took. (Its woken
+    # replicas never started here: stopped, it falls asleep again.)
+    for i in (0, 1):
+        set_replica("chat", i, state="stopped")
+    nap(gw.owner)
+    db = new_session()
+    try:
+        from forgeyard.workloads import starts, state as wstate
+
+        w = db.scalar(select(Workload).where(Workload.name == "chat"))
+        wstate.event(db, w, starts.READY_KIND, starts.message(0, "cpu-a", {"seconds": 74.2, "phases": {}}), 0)
+        db.commit()
+    finally:
+        db.close()
+    waking.forget(wk.dep_id)
+    r = chat(gw.api)
+    assert r.status_code == 503 and 70 <= int(r.headers["retry-after"]) <= 74, r.headers
+    shown = gw.owner.get(f"/api/deployments/{wk.dep_id}").json()["deployment"]["sleep"]["waking"]
+    assert shown["expected_seconds"] == 74
+    wk = waking.wake_of(wk.dep_id)
     wk.expected, wk.t0 = 120, time.monotonic() - 100
     assert waking.retry_after([wk.dep_id]) == 20
     wk.t0 = time.monotonic() - 500

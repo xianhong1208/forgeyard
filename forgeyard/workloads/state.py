@@ -134,6 +134,9 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
         # it fetches only through the server carries no token (the server adds its own).
         replicas = [relay.attach(d, node, "replica", r.uid) for d, r in zip(replicas, reps)]
     out = {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision, "replicas": replicas}
+    from forgeyard.models import enginecache
+
+    out = enginecache.attach(db, node, out, reps)  # 1.5.0: engine compile caches kept between starts
     if node is not None and FEATURE_PREFETCH in features:
         from forgeyard.models import prefetch
 
@@ -204,7 +207,8 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
             r.download = label(r.download, "replica", r.uid)
         health = (r.spec or r.workload.spec or {}).get("health")
         ready = state == "healthy" or (state == "running" and not health)
-        if ready and r.ready_at is None:
+        became_ready = ready and r.ready_at is None
+        if became_ready:
             r.ready_at = now
             db.info.setdefault("ready_workloads", set()).add(r.workload_id)   # 1.5.0: a wake waiting for it is over
         elif state not in ("healthy", "running", "unhealthy"):
@@ -222,6 +226,10 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         if before != (r.state, r.reason, r.exit_code) and not progress_only:
             event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: "
                   f"{describe(r.state, r.reason, r.exit_code, r.pid)}", r.ordinal)
+        if became_ready and r.workload.runtime == "model":
+            from forgeyard.workloads import starts
+
+            starts.ready(db, r, node, st.start, now)  # 1.5.0: how long the start took (events, /metrics)
         if r.workload.runtime == "model":  # (a replica being stopped is "stopping": neither branch)
             from forgeyard.models import reach, scheduler
 

@@ -181,16 +181,14 @@ def by_of(caller) -> str:
 # ------------------------------------------------------------------ the wake itself
 def _last_start(db, workload_id: int) -> Optional[float]:
     """Seconds its last start took, when the server measured one (forgeyard/workloads/starts.py, 1.5.0)."""
-    try:
-        from forgeyard.workloads import starts
-    except ImportError:       # pragma: no cover (an older tree without start times)
-        return None
+    from forgeyard.workloads import starts
+
     try:
         got = starts.last_start(db, workload_id)
     except Exception:  # a start time is a hint for Retry-After: never fail a wake over it
         log.exception("Reading the last start time failed")
         return None
-    seconds = (got or {}).get("seconds") if isinstance(got, dict) else None
+    seconds = (got or {}).get("seconds")
     return float(seconds) if isinstance(seconds, (int, float)) and seconds > 0 else None
 
 
