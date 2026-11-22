@@ -255,14 +255,15 @@ export type WorkloadSpec = {
   machine_id: number | null;
 };
 
-export type WorkloadStatus = "running" | "starting" | "degraded" | "pending" | "succeeded" | "failed" | "stopping" | "stopped";
+// 1.5.0: "asleep": a deployment stopped because nobody used it (sleep when idle); Start wakes it.
+export type WorkloadStatus = "running" | "starting" | "degraded" | "pending" | "succeeded" | "failed" | "stopping" | "stopped" | "asleep";
 
 export type Workload = {
   id: number;
   name: string;
   kind: WorkloadKind;
   runtime: "container" | "process" | "model";
-  desired_state: "running" | "stopped";
+  desired_state: "running" | "stopped" | "asleep";
   generation: number;
   created_by: string | null;
   created_at: string;
@@ -444,6 +445,8 @@ export type Deployment = {
   // 1.3.1: the machine a person chose (null: Forgeyard chooses), and an edit's restarts in progress.
   pinned?: { id: number; name: string | null } | null;
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
+  // 1.5.0 (#37): sleep when idle, the last request the server saw, and when it would go to sleep.
+  sleep?: DeploymentSleep;
   // 1.5.0 (#37): how long its latest start took (source "server": measured by the server for an older agent).
   last_start?: StartTime | null;
 };
@@ -456,7 +459,12 @@ export type StartTime = {
   replica: number | null;
 };
 
-export type RestartMode = "none" | "on_start" | "rolling" | "all";
+export type DeploymentSleep = {
+  on: boolean; idle_minutes: number; asleep: boolean; last_request_at: string | null; since: string;
+  sleeps_at: string | null; held_by: string | null;
+};
+
+export type RestartMode = "none" | "on_start" | "on_wake" | "rolling" | "all";
 
 // PATCH /api/deployments/{id} (1.3.1); dry_run answers the same without `deployment`.
 export type EditResponse = {

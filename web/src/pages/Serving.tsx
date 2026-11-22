@@ -149,7 +149,7 @@ export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines:
     const tag = w.replica_list.length > 1 ? `#${r.ordinal} ` : "";
     if (frac !== null) return [<span key={r.ordinal} className="deprow-note"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {tag}{downloadText(r)}</span>];
     const text = r.not_picked_up ?? r.reason ?? r.placement_note;
-    return text && w.status !== "stopped" ? [<span key={r.ordinal} className={`deprow-note${r.not_picked_up ? " rep-stuck" : ""}`}>{tag}{text}</span>] : [];
+    return text && w.status !== "stopped" && w.status !== "asleep" ? [<span key={r.ordinal} className={`deprow-note${r.not_picked_up ? " rep-stuck" : ""}`}>{tag}{text}</span>] : [];
   });
   return (
     <div className="deprow" role="group" aria-label={`Deployment ${d.name}`}>

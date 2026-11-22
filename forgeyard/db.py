@@ -214,7 +214,7 @@ class Workload(Base):
     runtime: Mapped[str] = mapped_column(String(16))                      # container | process | model
     # Environment values are stored encrypted (forgeyard/security/crypto.py); code sees plain values.
     spec: Mapped[dict] = mapped_column(SpecJSON("workloads.spec"))
-    desired_state: Mapped[str] = mapped_column(String(16), default="running")  # running | stopped
+    desired_state: Mapped[str] = mapped_column(String(16), default="running")  # running | stopped | asleep (1.5.0)
     # Bumped on every (re)start: the agent replaces a replica whose generation differs.
     generation: Mapped[int] = mapped_column(Integer, default=1)
     owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

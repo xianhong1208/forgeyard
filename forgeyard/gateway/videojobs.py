@@ -61,6 +61,7 @@ from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Refusal, key_limiter
 from forgeyard.gateway.usage import recorder
 from forgeyard.security import replica_tls
+from forgeyard.workloads.sleep import idle, route_deployments
 
 log = logging.getLogger("forgeyard.gateway")
 
@@ -254,6 +255,9 @@ def _no_room(route: proxy.Route, groups: list[proxy.LocalGroup], why: dict, coun
         return GatewayError(429, "queue_full", f"{name!r} has {n} videos waiting or being made already (at most "
                                                f"{g.films.queue}). Try again later.",
                             retry_after=retry_after(g.deployment_id, n - g.films.queue + 1, max(1, len(g.replicas))))
+    asleep = [g for g in groups if g.asleep and not g.replicas]
+    if asleep:
+        return proxy.asleep_error(name, asleep)   # 1.5.0 (#37)
     reason = "; ".join(g.reason for g in groups if g.reason)
     return GatewayError(503, "no_ready_replica", f"{name!r} has no ready replica. {reason}".strip())
 
@@ -328,6 +332,7 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
         model = raw.strip()
         route = proxy.check_access(caller, await run_in_threadpool(_route, model), model, videogen.ENDPOINT)
         deployment_id = route.deployment_id
+        idle.used(route_deployments(route))   # 1.5.0: a video asked for is use (its job then holds it awake)
         ask = videogen.check(obj)
         groups = [g for tier in route.tiers for g in tier.locals if g.films is not None]
         if not groups:
