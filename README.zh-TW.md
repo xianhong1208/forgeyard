@@ -38,7 +38,10 @@ API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器
 兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的引擎映像檔並能刪除舊的，
 安排副本時也會計算還有多少空的主機連接埠。1.4.3 讓目錄裡的每個模型和每個引擎都有自己的頁面：
 它在哪些機器上、每台機器放不放得下、誰在使用它。1.4.4 加入零樣本物件偵測（找出你指定的東西）、
-文字分類和影像分類。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+文字分類和影像分類。1.4.5 修正外部審閱找到的問題：閘道以 TLS 連到每個副本、副本會移出一直離線的機器、Prometheus 指標、
+記憶體的估算與保留都站得住，請求也不會被執行兩次（伺服器升級後請更新 agent）。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+
+**1.4 是長期支援版本線，支援到 2027-06-30：** 提供安全性修正與嚴重錯誤的修正（[支援中的版本](SECURITY.md#supported-versions)，英文）。
 
 ## 🚀 安裝
 
@@ -51,7 +54,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker logs forgeyard
 ```
 
@@ -94,7 +97,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

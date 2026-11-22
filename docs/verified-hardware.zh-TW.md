@@ -31,11 +31,16 @@
 
 | 版本 | 執行內容 | 機器 | 通過 | 失敗 |
 |---|---|---|---|---|
+| 1.4.5 | 1.4.5rc1 的完整回歸測試（`accept_all.py`，13 項略過），兩台機器都用 rc 版 agent，所以閘道以 TLS 連到每個副本 | A100 主機、x86-64 CPU 機器、Gemini | 432 | 0 |
+| 1.4.5 | 開發期間：閘道與 agent supervisor 拆成較小的部分後的完整回歸測試（#173；29 項略過） | A100 主機、x86-64 CPU 機器、Gemini | 380 | 0 |
+| 1.4.5 | 開發期間：vLLM 0.32 上 16k context 的 Gemma 4 12B，KV cache 估算對照引擎自己的數字（#201）：估算 2.091 GiB，vLLM 2.09 GiB | A100 | 1 | 0 |
 | 1.4.4 | 完整回歸測試（`accept_all.py`，分兩次執行：233 + 163） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 396 | 0 |
 | 1.4.4 | 零樣本物件偵測與影像分類（`accept_vision.py`） | A100 | 77 | 0 |
 | 1.4.4 | 零樣本物件偵測與影像分類（`accept_vision.py`） | Ryzen AI MAX+ 395，在 CPU 上 | 71 | 0 |
 | 1.4.4 | vLLM 0.32 上的文字分類：三個推薦模型、金鑰防護、Playground | A100 | 全部 | 0 |
 | 1.4.3 | 完整回歸測試（`accept_all.py`） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 303 | 0 |
 | 1.4.3 | 網頁主控台（`accept_all.py` 的 console 群組） | 同上 | 31 | 0 |
+
+Ryzen AI MAX+ 395 那台機器沒有參加 1.4.5 的這些執行。
 
 歡迎回報在其他機器上的結果：見 [CONTRIBUTING.md](../CONTRIBUTING.md)（英文）。
