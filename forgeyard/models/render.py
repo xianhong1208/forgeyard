@@ -14,7 +14,8 @@ import posixpath
 from forgeyard.db import Accelerator
 from forgeyard.models import modalities
 from forgeyard.models.catalog import Context
-from forgeyard.models.estimate import CODEC_LABEL, GIB, gpu_memory_utilization, image_caps, image_side
+from forgeyard.models.estimate import (CODEC_LABEL, GIB, gpu_memory_utilization, image_caps, image_side,
+                                       vllm_batch_tokens)
 from forgeyard.models.recipes import IMAGE_COMPONENTS, Variant, render_text
 
 
@@ -41,6 +42,8 @@ def values(ctx: Context, variant: Variant, cards: list[Accelerator], gpu_context
         "mmproj_file": f"${{MODEL_PATH}}/{mmproj_path(meta)}" if mmproj_path(meta) else "",
         "task": getattr(ctx.model, "task", ""),   # 1.4: engines that serve several tasks (the vision server's --task)
     })
+    # vLLM's tokens per step (1.4.5, #201): passed, so the engine runs with what the estimate counted on any card.
+    out["batch_tokens"] = vllm_batch_tokens(meta, out)
     # The largest image in pixels for an image-token cap, where tokens grow with the resolution.
     tile = int(meta.get("vision_tile_px") or 0)
     out["image_max_pixels"] = int(out.get("image_tokens") or 0) * tile * tile
