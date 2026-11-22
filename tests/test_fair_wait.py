@@ -9,7 +9,7 @@ import time
 
 import httpx
 
-from forgeyard.gateway import proxy, waiting
+from forgeyard.gateway import proxy, route as groute, waiting
 from forgeyard.gateway.balancer import Target, balancer
 from tests.cloud_helpers import set_tiers
 from tests.gateway_helpers import LiveServer
@@ -245,7 +245,7 @@ def test_fy_fw_008_a_waiter_that_gets_a_slot_leaves_the_line_at_once(mixed, monk
     # Longer than the 10 s the test waits for them (and short enough that, if they are never woken, the
     # requests still finish before the test ends rather than outliving it).
     monkeypatch.setattr(waiting, "RECHECK", 20.0)
-    monkeypatch.setattr(proxy, "MAX_WAIT_MS", 20_000)
+    monkeypatch.setattr(groute, "MAX_WAIT_MS", 20_000)
     r = mixed.owner.patch(f"/api/deployments/{mixed.dep}", json={"params": {"concurrency": 2}})
     assert r.status_code == 200, r.text
     make_ready("chat", [(mixed.node, mixed.engine.port, mixed.engine.secret)])
