@@ -78,6 +78,15 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
 The gateway and cloud groups need the models group's deployments: it runs for them when it was not
 chosen. A machine that is not given skips what would run on it, saying so.
 
+Waiting has two limits (1.4.5): --timeout (40 minutes) for a deployment or workload to download and start, and
+--place-timeout (5 minutes) for one the server cannot place at all (no machine has the room: "Cannot be placed:
+GPU #4 has 1.8 GiB available, needs 3 GiB"), after which its checks are a SKIP naming that shortage. Before each
+group that deploys on the GPU machine (tts, img, video, passthrough, vision: GPU_GROUPS) the run stops what earlier
+groups left on a GPU and no later group needs, waits until it is stopped and the machine has reported its memory
+again, and removes it; the models group's deployments are only stopped (the console shows one, the cleanup removes
+them), and its speech-to-text one stays while the tts group may use it. So on a card shared with other people's
+work each group has the run's share of it.
+
 Everything the run creates is named accept-<run>-… (the run id is printed first) and removed at the
 end, also after a failure or Ctrl-C: deployments, workloads, routes, API keys, the throwaway user,
 the catalog entries it added (models it found in the catalog stay), the relay group's model in the
@@ -137,6 +146,14 @@ HERE = Path(__file__).resolve().parent
 CLIP = HERE.parent / "forgeyard" / "models" / "assets" / "jfk-ask-not.mp3"
 GPU_PROBE = HERE / "gpu_probe.py"
 GIB = 1024**3
+# How long a workload or deployment may wait for room on a machine before its checks are skipped (--place-timeout).
+PLACE_TIMEOUT = 300
+# Groups that deploy on the GPU machine's cards (1.4.5, #203). Before each, what earlier groups left on a GPU and
+# no group still to run needs is stopped, and then removed (the models group's deployments only stopped: the
+# console shows one), so that a card shared with other people's work has room for the next group's models. The
+# models group's speech-to-text deployment stays while the tts group (--tts-asr) may still use it.
+GPU_GROUPS = ("tts", "img", "video", "passthrough", "vision")
+FREE_WAIT = 120
 SDK_SPEC = "openai>=2,<4"
 PLAYWRIGHT_SPEC = "playwright>=1.48,<2"
 REEXEC = "FORGEYARD_ACCEPT_ALL_REEXEC"
@@ -198,6 +215,11 @@ PASS, FAIL, SKIP = "PASS", "FAIL", "SKIP"
 
 class Fail(Exception):
     """Something the run needed did not work: the current group stops with a FAIL."""
+
+
+class Unplaced(Fail):
+    """A workload or deployment the server found no room for (no machine has the memory, a card or a port) for
+    --place-timeout seconds: its checks are SKIPs naming the shortage, not a wait without end."""
 
 
 class Refused(Exception):
@@ -344,6 +366,9 @@ class Cleanup:
             self.say(f"cleanup: could not undo {item['label']}: {e}")
             return False
 
+    def items(self) -> list[dict]:
+        return list(self._items)
+
     @property
     def pending(self) -> int:
         return sum(1 for i in self._items if not i["done"])
@@ -416,6 +441,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     ap.add_argument("--only", help="run only these groups (comma-separated)")
     ap.add_argument("--skip", help="run every group but these")
     ap.add_argument("--timeout", type=float, default=2400, help="seconds a deployment may take to be ready")
+    ap.add_argument("--place-timeout", type=float, default=PLACE_TIMEOUT, help="seconds a workload or deployment may "
+                    "wait for room on a machine (the server places none of its replicas) before its checks are skipped, "
+                    "naming the shortage (default 300)")
     ap.add_argument("--kill-local", action="store_true",
                     help="kill the engine of a CPU replica running on THIS computer to show failover")
     ap.add_argument("--tts-asr", default="auto", help="the tts group's intelligibility check: auto (a ready "
@@ -454,6 +482,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         ap.error("--cloud-model needs --cloud-provider")
     if args.timeout <= 0:
         ap.error("--timeout must be positive")
+    if args.place_timeout <= 0:
+        ap.error("--place-timeout must be positive")
     args.server = args.server.rstrip("/")
     return args
 
@@ -726,12 +756,19 @@ class Run:
             raise Fail(f"{r.status} {r.code()}")
 
     # -- waiting
-    def wait(self, what: str, fn: Callable[[], tuple[bool, str]], timeout: float, every: float = 2.0) -> str:
-        """Poll fn() -> (done, state text) until done; prints each new state. Raises Fail on timeout."""
+    def wait(self, what: str, fn: Callable[[], tuple], timeout: float, every: float = 2.0) -> str:
+        """Poll fn() -> (done, state text) or (done, state text, unplaced) until done; prints each new state.
+        Raises Fail on timeout, and Unplaced once `unplaced` (the server's reason while a replica is on no machine:
+        see unplaced()) has been given for --place-timeout seconds in a row: the shortage, not a wait for the whole
+        timeout on a card other work holds."""
         deadline = time.monotonic() + timeout
         last, shape, said = None, None, 0.0
+        since: Optional[float] = None
+        limit = float(getattr(self.args, "place_timeout", PLACE_TIMEOUT))
         while True:
-            done, text = fn()
+            got = fn()
+            done, text = got[0], got[1]
+            why = got[2] if len(got) > 2 and not done else None
             # A new state at once; the same state with new numbers (a download) every 30 s.
             now_shape = re.sub(r"[\d.]+", "#", text)
             if text != last and (now_shape != shape or done or time.monotonic() - said >= 30):
@@ -739,9 +776,70 @@ class Run:
                 last, shape, said = text, now_shape, time.monotonic()
             if done:
                 return text
-            if time.monotonic() > deadline:
+            now = time.monotonic()
+            since = (since if since is not None else now) if why else None
+            if why and now - since >= limit:
+                raise Unplaced(f"{what}: not placed within {limit:.0f} s, {why}")
+            if now > deadline:
                 raise Fail(f"{what}: not done within {timeout:.0f} s (last: {text})")
             time.sleep(every)
+
+    def free_gpu(self, group: str, rest: list[str]) -> list[str]:
+        """Before `group` (one of GPU_GROUPS; `rest`: the groups after it): stop what earlier groups deployed on a
+        GPU and no group still to run needs, wait until its machine confirms, remove what was not the models
+        group's, and wait for the machine's next report (its free memory). Returns what it let go."""
+        keep = {"asr"} if "tts" in (group, *rest) and self.args.tts_asr != "none" else set()
+        chosen = []
+        for item in self.cleanup.items():
+            if item["done"] or not item.get("gpu") or item.get("group") in (None, group, *rest) or item.get("stopped"):
+                continue
+            if item["group"] == "models":
+                key = next((k for k, d in self.deps.items() if d["id"] == item.get("dep_id")), None)
+                if key is None or key in keep:
+                    continue
+            chosen.append(item)
+        if not chosen:
+            return []
+        log(f"freeing the GPU for {group}: " + ", ".join(i["label"] for i in chosen))
+        for item in chosen:
+            self.admin.request("POST", item["path"] + "/stop")
+            item["stopped"] = True
+
+        def stopped() -> tuple[bool, str]:
+            left = []
+            for item in chosen:
+                r = self.admin.request("GET", item["path"])
+                if r.status != 200:
+                    continue
+                w = (r.data or {}).get("deployment", {}).get("workload") or (r.data or {}).get("workload") or {}
+                if any(x["state"] not in ("stopped", "exited", "failed") and not x.get("final")
+                       for x in w.get("replica_list") or []):
+                    left.append(item["label"])
+            return not left, "still stopping: " + ", ".join(left) if left else "stopped"
+
+        m = self.machine("gpu")
+        seen = (self.machine_by_id(m["id"]) or {}).get("last_heartbeat_at") if m else None
+        try:
+            self.wait("stopping what the next group does not need", stopped, FREE_WAIT, every=2)
+            if m:
+                self.wait(f"{m['name']}'s next report of its free memory", lambda: (
+                    (self.machine_by_id(m["id"]) or {}).get("last_heartbeat_at") != seen, "waiting"), FREE_WAIT)
+        except Fail as e:
+            log(f"  {e}: going on")
+        for item in chosen:
+            if item["group"] != "models":
+                self.cleanup.now(item)
+        freed = [i["label"] for i in chosen]
+        self.report.notes.append(f"before {group}, freed the GPU of: {', '.join(freed)}")
+        return freed
+
+    def not_ready(self, name: str, e: Fail) -> None:
+        """What a wait that ended without the object ready records: SKIP naming the shortage when the server found
+        no room for it (Unplaced), else FAIL."""
+        if isinstance(e, Unplaced):
+            self.skip(name, str(e))
+        else:
+            self.check(name, False, str(e))
 
     # -- the groups
     def run_group(self, g: Group, why: str) -> None:
@@ -751,6 +849,8 @@ class Run:
         t0 = time.monotonic()
         try:
             g.fn(self)
+        except Unplaced as e:
+            self.skip(f"{g.name}: the rest of the group", str(e))
         except Fail as e:
             self.check(f"{g.name}: the group stopped", False, str(e))
         except KeyboardInterrupt:
@@ -1003,7 +1103,9 @@ def group_machines(run: Run) -> None:
 def workload(run: Run, body: dict) -> dict:
     c = run.admin
     w = c.ok("POST", "/api/workloads", body)["workload"]
-    run.cleanup.add(f"workload {w['name']}", lambda: _delete_workload(c, w["id"]))
+    item = run.cleanup.add(f"workload {w['name']}", lambda: _delete_workload(c, w["id"]))
+    gpus = ((body.get("resources") or {}).get("gpus") or {}).get("count") or 0
+    item.update(group=run.current, gpu=gpus > 0, path=f"/api/workloads/{w['id']}")
     return w
 
 
@@ -1027,13 +1129,26 @@ def replicas_text(w: dict) -> str:
                      for r in w["replica_list"]) or "no replicas"
 
 
+def unplaced(w: dict) -> Optional[str]:
+    """The server's reason while a replica of this workload (a deployment's: its "workload") is on no machine
+    because none has room for it ("Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB"), else None."""
+    why = [r["reason"] for r in w.get("replica_list") or [] if not r.get("final") and not r.get("machine")
+           and str(r.get("reason") or "").startswith("Cannot be placed")]
+    return "; ".join(dict.fromkeys(why)) or None
+
+
+def dep_poll(run: Run, dep_id: int) -> tuple[bool, str, Optional[str]]:
+    ready, text, d = deployment_state(run, dep_id)
+    return ready, text, unplaced(d["workload"])
+
+
 def wait_status(run: Run, wid: int, statuses: tuple, timeout: float) -> dict:
     holder = {}
 
     def poll():
         w = get_workload(run, wid)
         holder["w"] = w
-        return w["status"] in statuses, f"{w['status']}: {replicas_text(w)}"
+        return w["status"] in statuses, f"{w['status']}: {replicas_text(w)}", unplaced(w)
 
     run.wait(f"workload #{wid}", poll, timeout)
     return holder["w"]
@@ -1068,7 +1183,10 @@ def group_workloads(run: Run) -> None:
             continue
         workloads_on(run, role, m)
     if run.machine("gpu") and run.machine("gpu")["status"] == "online":
-        gpu_isolation(run, run.machine("gpu"))
+        try:
+            gpu_isolation(run, run.machine("gpu"))
+        except Unplaced as e:
+            run.skip(f"{run.machine('gpu')['name']}: GPU isolation", str(e))
     else:
         run.skip("GPU isolation", "no --gpu-machine given (or it is offline)")
 
@@ -1106,7 +1224,7 @@ def workloads_on(run: Run, role: str, m: dict) -> None:
             run.check(f"{name}: Start runs it again (a new generation)", w3["status"] == "running"
                       and w3["generation"] == w2["generation"] + 1, f"generation {w3['generation']}, {replicas_text(w3)}")
         except Fail as e:
-            run.check(f"{name}: the process service", False, str(e))
+            run.not_ready(f"{name}: the process service", e)
         # Tasks: one that succeeds (and shows its environment), one that retries, one killed at max_duration.
         w, out = task(run, m, f"ok-{t}", "sh", ["-c", "echo accept-hello; echo user=$(id -un); env | sort"])
         env = {ln.split("=", 1)[0]: ln.split("=", 1)[1] for ln in out.splitlines() if "=" in ln and not ln.startswith("user=")}
@@ -1142,7 +1260,7 @@ def workloads_on(run: Run, role: str, m: dict) -> None:
         run.check(f"{name}: a container task runs ({CONTAINER_IMAGE})", w["status"] == "succeeded" and "accept-container" in out,
                   f"{w['status']}: {replicas_text(w)}")
     except Fail as e:
-        run.check(f"{name}: a container task runs ({CONTAINER_IMAGE})", False, str(e))
+        run.not_ready(f"{name}: a container task runs ({CONTAINER_IMAGE})", e)
 
 
 def gpu_isolation(run: Run, m: dict) -> None:
@@ -1192,7 +1310,7 @@ def gpu_isolation(run: Run, m: dict) -> None:
                       and len(lines) == 1 and card.get("uuid", "?") in lines[0],
                       f"{w['status']}, given #{card.get('index')}, {len(lines)} GPU line(s)")
         except Fail as e:
-            run.check(f"{name}: a container sees only its card (nvidia-smi -L)", False, str(e))
+            run.not_ready(f"{name}: a container sees only its card (nvidia-smi -L)", e)
 
 
 # ------------------------------------------------------------------ group: models
@@ -1244,7 +1362,8 @@ def deploy(run: Run, key: str, spec: dict, m: dict) -> Optional[dict]:
         run.check(f"{name} ({spec['model']}): deploy", False, f"{r.status} {r.code()}: {(r.data or {}).get('detail')}")
         return None
     d = r.data["deployment"]
-    run.cleanup.add(f"deployment {name}", _delete_deployment, c, d["id"])
+    item = run.cleanup.add(f"deployment {name}", _delete_deployment, c, d["id"])
+    item.update(group=run.current, gpu=spec["device"] == "gpu", path=f"/api/deployments/{d['id']}", dep_id=d["id"])
     log(f"{name}: deployed on {where}, estimate {amount / GIB:.2f} GiB ({p.get('variant')})")
     return {"spec": spec, "deployment": d, "estimate": est, "where": where, "t0": time.monotonic()}
 
@@ -1323,12 +1442,12 @@ def group_models(run: Run) -> None:
             def poll(dep_id=d0["id"]):
                 ready, text, d = deployment_state(run, dep_id)
                 holder["d"] = d
-                return ready, text
+                return ready, text, unplaced(d["workload"])
 
             run.wait(name, poll, run.args.timeout, every=5)
             d = holder["d"]
         except Fail as e:
-            run.check(f"{name}: ready on {got['where']}", False, str(e))
+            run.not_ready(f"{name}: ready on {got['where']}", e)
             continue
         secs = time.monotonic() - got["t0"]
         run.check(f"{name}: ready on {got['where']}", True, f"after {fmt_seconds(secs)}")
@@ -1734,12 +1853,12 @@ def stopped_leaves_list(run: Run, sdk) -> None:
     finally:
         c.ok("POST", f"/api/deployments/{d['id']}/start")
     try:
-        run.wait(f"{d['name']} started again", lambda: deployment_state(run, d["id"])[:2], run.args.timeout, every=3)
+        run.wait(f"{d['name']} started again", lambda: dep_poll(run, d["id"]), run.args.timeout, every=3)
         listed = [x.id for x in sdk.models.list()]
         run.check(f"…and is listed again once started ({name})", name in listed, "")
         run.deps[key] = c.ok("GET", f"/api/deployments/{d['id']}")["deployment"]
     except Fail as e:
-        run.check(f"…and is listed again once started ({name})", False, str(e))
+        run.not_ready(f"…and is listed again once started ({name})", e)
         run.deps.pop(key, None)
 
 
@@ -2012,12 +2131,12 @@ def group_tts(run: Run) -> None:
         def poll(dep_id=d0["id"]):
             ready, text, d = deployment_state(run, dep_id)
             holder["d"] = d
-            return ready, text
+            return ready, text, unplaced(d["workload"])
 
         try:
             run.wait(d0["name"], poll, run.args.timeout, every=5)
         except Fail as e:
-            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            run.not_ready(f"{d0['name']}: ready on {got['where']}", e)
             continue
         run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
         d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
@@ -2082,12 +2201,12 @@ def group_img(run: Run) -> None:
         def poll(dep_id=d0["id"]):
             ready, text, d = deployment_state(run, dep_id)
             holder["d"] = d
-            return ready, text
+            return ready, text, unplaced(d["workload"])
 
         try:
             run.wait(d0["name"], poll, run.args.timeout, every=5)
         except Fail as e:
-            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            run.not_ready(f"{d0['name']}: ready on {got['where']}", e)
             continue
         run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
         d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
@@ -2145,13 +2264,13 @@ def group_video(run: Run) -> None:
         d0 = got["deployment"]
 
         def poll(dep_id=d0["id"]):
-            ready, text, _ = deployment_state(run, dep_id)
-            return ready, text
+            ready, text, d = deployment_state(run, dep_id)
+            return ready, text, unplaced(d["workload"])
 
         try:
             run.wait(d0["name"], poll, run.args.timeout, every=5)
         except Fail as e:
-            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            run.not_ready(f"{d0['name']}: ready on {got['where']}", e)
             continue
         run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
         d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
@@ -2202,7 +2321,7 @@ def group_passthrough(run: Run) -> None:
         try:
             w = wait_status(run, w["id"], ("running", "failed"), run.args.timeout)
         except Fail as e:
-            run.check(f"{w['name']}: ready on {m['name']}", False, str(e))
+            run.not_ready(f"{w['name']}: ready on {m['name']}", e)
             continue
         if not run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running",
                          f"{replicas_text(w)} after {fmt_seconds(time.monotonic() - t0)}"):
@@ -2240,7 +2359,7 @@ def group_passthrough(run: Run) -> None:
         try:
             w = wait_status(run, w["id"], ("running", "failed"), run.args.timeout)
         except Fail as e:
-            run.check(f"{w['name']}: ready", False, str(e))
+            run.not_ready(f"{w['name']}: ready", e)
             continue
         if run.check(f"{w['name']}: ready on {m['name']}", w["status"] == "running", replicas_text(w)):
             accept_x.exercise_template(c, run.args.server, w, ts[tid], tcheck, key, True, image, image_name)
@@ -2283,13 +2402,13 @@ def group_vision(run: Run) -> None:
         d0 = got["deployment"]
 
         def poll(dep_id=d0["id"]):
-            ready, text, _ = deployment_state(run, dep_id)
-            return ready, text
+            ready, text, d = deployment_state(run, dep_id)
+            return ready, text, unplaced(d["workload"])
 
         try:
             run.wait(d0["name"], poll, run.args.timeout, every=5)
         except Fail as e:
-            run.check(f"{d0['name']}: ready on {got['where']}", False, str(e))
+            run.not_ready(f"{d0['name']}: ready on {got['where']}", e)
             continue
         run.check(f"{d0['name']}: ready on {got['where']}", True, f"after {fmt_seconds(time.monotonic() - got['t0'])}")
         d = c.ok("GET", f"/api/deployments/{d0['id']}")["deployment"]
@@ -2858,6 +2977,15 @@ def ensure_deps(args) -> None:
 
 
 # ------------------------------------------------------------------ main
+def run_groups(run: Run, plan: list[tuple[str, str]]) -> None:
+    """The planned groups in order; before each of GPU_GROUPS, what earlier groups left on a GPU is let go."""
+    names = [g for g, _ in plan]
+    for i, (name, why) in enumerate(plan):
+        if name in GPU_GROUPS:
+            run.free_gpu(name, names[i + 1:])
+        run.run_group(GROUPS[name], why)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     ensure_deps(args)
@@ -2883,8 +3011,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         + (", ".join(f"{k} {v['name']}" for k, v in run.machines.items()) or "none given")
         + f"; groups: {', '.join(g for g, _ in args.plan)}")
     try:
-        for name, why in args.plan:
-            run.run_group(GROUPS[name], why)
+        run_groups(run, args.plan)
     except KeyboardInterrupt:
         run.report.notes.append("interrupted (Ctrl-C or SIGTERM): the remaining groups did not run")
         log("interrupted: cleaning up")

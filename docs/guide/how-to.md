@@ -1455,6 +1455,15 @@ What to know before you run it:
   caches, their fetch setting, and the images group's image and recipe. Usage rows and audit events
   of the run stay. Only on an agent older than 1.4.2, which cannot remove images, the tiny image
   `accept-<run>-image:1` stays, and the report says so.
+- **A card shared with other work** (1.4.5): a deployment or app the server cannot place, because no
+  card has the memory free, is skipped after `--place-timeout` seconds (5 minutes) with the server's
+  reason (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`), instead of waiting for
+  `--timeout` (40 minutes, which stays the limit for downloads and starts). Before each group that
+  deploys on the GPU machine (`tts`, `img`, `video`, `passthrough`, `vision`), the run stops what its
+  earlier groups left on a GPU and no later group needs, and removes it (the `models` group's
+  deployments are only stopped: the console group shows one; the speech-to-text model stays while
+  `tts` may use it), so each group has the run's share of the card to itself. The report's notes list
+  what was freed.
 - **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
   cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
   checks use the run's own keys and user.
