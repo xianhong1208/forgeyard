@@ -1150,6 +1150,33 @@ agent reconnects, so the 10 minutes count from the server's start. Set `AGENT_OF
 move replicas. Apps (deprecated) follow the same rules, except that a task stays where it is: it may still be
 running there, and running it again elsewhere could do its work twice.
 
+## Let the number of replicas follow the load
+
+A deployment that is busy at some hours and quiet at others can run more replicas only while it needs them
+([Automatic replicas](concepts.md#automatic-replicas)). It is off unless you turn it on, per deployment.
+
+1. Open the deployment on **Serving**, choose **Edit** (or deploy a new one), and set **Replicas** to **Automatic,
+   by load**. Set the fewest and the most (1 and 2 unless you change them; up to 16). Choose **Save**: nothing
+   restarts. A number outside the new bounds is brought into them at once (a replica more, or fewer).
+   - From a script: `PATCH /api/deployments/{id}` with
+     `{"params": {"autoscale": true, "min_replicas": 1, "max_replicas": 4}}`
+     ([reference](reference.md#automatic-replicas)).
+2. Set *Concurrent requests* to what one replica should take at once (the recipe's default is a good start): the
+   load is counted against it, at 80 % unless you change *Target load per replica* under **Advanced**.
+3. Watch the deployment's page: under **Replicas** it says *Automatic, 1 to 4 · 2 now*, the load against the target,
+   a replica being drained and why one more does not fit; its events list every decision.
+
+Before you rely on it:
+
+- **Room:** a replica is added only where it fits now. On a shared card, keep enough memory free, or pin the
+  deployment to a machine that has it. Two replicas of one deployment go on different machines when they can.
+- **Starting takes time:** the new replica helps only once it is ready (seconds for llama.cpp, a minute or more for
+  vLLM). Meanwhile requests wait in the line, and a key with a cloud tier may spill to it, as before.
+- **Removing waits for streams:** the replica removed takes no new requests and finishes the ones it runs, however
+  long, for up to 30 minutes; then it is removed anyway.
+- To go back to a fixed number, set **Replicas** to **Fixed number** (`{"params": {"autoscale": null}}` and a
+  `replicas` number from a script); the deployment keeps the replicas it has until you change the number.
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, open the machine, choose **Change GPU access**.

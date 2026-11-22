@@ -39,7 +39,7 @@ from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
 from forgeyard.security import replica_tls
-from forgeyard.workloads import placement, sleep, starts, state as wstate
+from forgeyard.workloads import autoscale, placement, sleep, starts, state as wstate
 from forgeyard.workloads.spec import NAME_RE, WorkloadSpec, parse_bytes
 
 router = APIRouter(prefix="/api", tags=["deployments"])
@@ -76,14 +76,15 @@ def _model(db: DbSession, ref: str) -> CatalogModel:
 # 1.4.5: how long a replica has to start answering a request it was sent (the gateway's, not the engine's:
 # changing it restarts nothing). Unset: the gateway's default, 120 s (forgeyard/gateway/proxy.py).
 FIRST_ANSWER_MIN, FIRST_ANSWER_MAX = 5, 3600
-# 1.5.0 (#37): sleep when idle and the idle time are the server's too (forgeyard/workloads/sleep.py).
-GATEWAY_PARAMS = ("first_answer_timeout",) + sleep.PARAMS
+# 1.5.0 (#37): sleep when idle and the idle time are the server's too (forgeyard/workloads/sleep.py), and so are
+# automatic replicas (forgeyard/workloads/autoscale.py).
+GATEWAY_PARAMS = ("first_answer_timeout",) + sleep.PARAMS + autoscale.PARAMS
 
 
 def normalise_params(recipe: Recipe, raw: dict) -> dict:
     """The deployment's parameters, checked against the recipe: its own (context, concurrency…)
-    and the common ones (gpus, share, vram, extra_args, first_answer_timeout, and 1.5.0's sleep_when_idle and
-    idle_minutes). Unknown names are refused."""
+    and the common ones (gpus, share, vram, extra_args, first_answer_timeout, and 1.5.0's sleep_when_idle,
+    idle_minutes and automatic replicas). Unknown names are refused."""
     out: dict = {}
     has_gpu = any(v.gpu for v in recipe.variants)
     has_cpu = any(not v.gpu for v in recipe.variants)
@@ -134,7 +135,10 @@ def normalise_params(recipe: Recipe, raw: dict) -> dict:
         out["first_answer_timeout"] = wait
     if why := sleep.normalise(raw, out):
         raise fail(422, "invalid_params", why)
-    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args", "first_answer_timeout", *sleep.PARAMS})
+    if why := autoscale.normalise(raw, out, video=autoscale.is_video(recipe)):
+        raise fail(422, "invalid_params", why)
+    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args", "first_answer_timeout", *sleep.PARAMS,
+                                            *autoscale.PARAMS})
     if unknown:
         raise fail(422, "invalid_params", f"{recipe.name} has no parameter {unknown[0]!r}")
     return out
@@ -259,6 +263,8 @@ def estimate(body: DeploymentIn, _: Caller = Depends(require_operator), db: DbSe
     """The estimate and where the replicas would go right now, before anything is created; for a model
     with a context length, also the model's maximum and the largest context that fits now."""
     ctx, recipe, m = build_context(db, body)
+    if autoscale.setting(ctx.params).on:
+        ctx.replicas = autoscale.setting(ctx.params).floor   # 1.5.0: it starts with its minimum
     _previewing(ctx, body, m)
     return {"estimate": ctx.estimate.as_dict(), "placement": scheduler.preview(db, ctx), "params": ctx.params,
             "recipe": recipe.name, "model": m.name, "context_hint": context_hint(db, body, recipe, m)}
@@ -329,6 +335,8 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
         "sleep": sleep.status(db, d),
         # 1.5.0 (#37): how long its latest start took, from its events ({seconds, phases, source, at, replica}).
         "last_start": starts.last_start(db, w.id),
+        # 1.5.0 (#37): automatic replicas, the load and the last decision.
+        "autoscale": autoscale.autoscaler.status(d),
     }
     if detail:
         from forgeyard.api.keys import deployment_usage
@@ -381,6 +389,9 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
     if db.scalar(select(GatewayRoute.id).where(GatewayRoute.served_name == served)) is not None:
         raise fail(409, "served_name_taken", f"Another deployment or route already serves the model name {served}.")
     ctx, recipe, m = build_context(db, body)
+    if autoscale.setting(ctx.params).on:
+        # 1.5.0 (#37): automatic replicas start with their minimum (at least 1); the autoscaler adds the rest.
+        body.replicas = ctx.replicas = autoscale.setting(ctx.params).floor
 
     class _Dep:
         served_name = served
@@ -533,6 +544,13 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     ctx, _, m = build_context(db, DeploymentIn(name=d.name, model=d.model.name, recipe=d.recipe, params=params,
                                                replicas=replicas, machine_id=machine_id))
     ctx.deployment = d
+    auto = autoscale.setting(ctx.params)
+    if auto.on:
+        # 1.5.0 (#37): the autoscaler sets the number; a change keeps the current one within the new bounds.
+        if body.replicas is not None and body.replicas != len(w.replicas):
+            raise fail(422, "replicas_automatic", "The number of replicas is automatic: change min_replicas and "
+                                                  "max_replicas, or turn autoscale off to set a number.")
+        replicas = ctx.replicas = autoscale.clamp(len(w.replicas), auto)
     running = w.desired_state == "running"
     live = [r for r in w.replicas if not r.final]
     params_changed = ctx.params != (d.params or {})

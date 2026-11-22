@@ -3,10 +3,12 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { FIRST_ANSWER_DEFAULT, editBody, editForm, takesFirstAnswer, type EditForm } from "../lib/models";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentResponse, EditResponse, Machine, MachineVerdict, MachinesResponse, Recipe } from "../lib/types";
+import { canAutoscale, scaleEditParams, scaleForm, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
 import { SleepSetting, WakeWaitField } from "../components/Sleep";
 import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts, paramApplies } from "./ModelDeploy";
@@ -14,7 +16,9 @@ import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts
 // What a change shows next to each changed setting.
 const CHANGE_LABEL: Record<string, string> = { share: "GPU sharing", gpus: "GPUs per replica", vram: "Memory per device",
   extra_args: "Extra engine arguments", first_answer_timeout: "Wait for the first answer (s)", replicas: "Replicas", machine_id: "Machine",
-  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes", wake_wait: "Wake wait (s)" };
+  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes", wake_wait: "Wake wait (s)",
+  autoscale: "Automatic replicas", min_replicas: "Fewest replicas", max_replicas: "Most replicas", autoscale_target: "Target load per replica (%)",
+  scale_up_seconds: "Busy for (s) before one more", scale_down_minutes: "Quiet for (min) before one fewer" };
 
 export function DeploymentEditPage() {
   const { id } = useParams();
@@ -40,8 +44,12 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
   const [planError, setPlanError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; machines?: MachineVerdict[] } | null>(null);
+  const [scale, setScale] = useState<ScaleForm>(() => scaleForm(d.params));   // 1.5.0: fixed or automatic replicas
 
   const body = editBody(f, recipe);
+  const auto = canAutoscale(recipe) && scale.mode === "auto";
+  body.params = { ...(body.params as Record<string, unknown>), ...scaleEditParams(scale) };
+  if (auto) delete body.replicas;   // the autoscaler sets the number; the bounds keep it within them
   const bodyKey = JSON.stringify(body);
 
   useEffect(() => {
@@ -111,8 +119,8 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
                     <input id="e-gpus" inputMode="numeric" value={f.gpus} onChange={(e) => set("gpus", e.target.value)} /></div>
                 </>
               )}
-              <div className="field"><label htmlFor="e-replicas">Replicas</label>
-                <input id="e-replicas" inputMode="numeric" value={f.replicas} onChange={(e) => set("replicas", e.target.value)} /></div>
+              <ReplicasField id="e" count={f.replicas} onCount={(v) => set("replicas", v)} scale={scale} onScale={setScale}
+                allowAuto={canAutoscale(recipe)} sleepOn={f.sleepOn} now={d.workload.replica_list.length} />
               <div className="field"><label htmlFor="e-machine">Machine</label>
                 <select id="e-machine" value={f.machine} onChange={(e) => set("machine", e.target.value)}>
                   <option value="">Automatic</option>
@@ -130,8 +138,9 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
               {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
             </div>
             <details className="spec-preview" style={{ marginTop: 14 }}>
-              <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}, wake wait</summary>
+              <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}, wake wait</summary>
               <div className="grid-3">
+                {auto && <ScaleAdvancedFields id="e" scale={scale} onScale={setScale} />}
                 {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
                 <div className="field"><label htmlFor="e-vram">Memory per device (override)</label>
                   <input id="e-vram" value={f.vram} onChange={(e) => set("vram", e.target.value)} placeholder="the estimate" />
@@ -188,6 +197,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
 }
 
 function changeValue(k: string, v: unknown, machines: { id: number; name: string }[]): string {
+  if (k === "autoscale") return v === true ? "on" : "off";
   if (v === null || v === undefined) return k === "machine_id" ? "automatic" : k === "vram" ? "the estimate" : k === "sleep_when_idle" ? "off" : "—";
   if (k === "sleep_when_idle") return v === true ? "on" : "off";
   if (k === "machine_id") return machines.find((m) => m.id === v)?.name ?? `machine ${String(v)}`;

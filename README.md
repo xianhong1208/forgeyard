@@ -37,6 +37,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed
   again on machines that fit. Each start of a model is timed, part by part (model files, image,
   engine), and a starting replica is checked every second, so it serves as soon as it is ready.
+  With automatic replicas (1.5.0) a deployment adds a replica when the gateway sees it busy, where
+  one fits, and drains one after quiet minutes.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.

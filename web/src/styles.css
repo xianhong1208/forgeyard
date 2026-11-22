@@ -1762,3 +1762,15 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .asleep-here > svg { color: var(--night); flex: none; margin-top: 2px; }
 .asleep-here a { color: var(--ink); }
 .asleep-here-compact { margin: 6px 0 0; }
+
+/* 1.5.0 (#37): automatic replicas on the deploy and edit forms, and the deployment page's line. */
+.label-like { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.scale-bounds .row-gap { align-items: center; flex-wrap: nowrap; }
+.scale-bounds .row-gap input { width: 5.5em; min-width: 0; flex: 1 1 0; }
+.scale-advanced { grid-column: 1 / -1; }
+.scale-advanced .grid-3 { margin-top: 10px; }
+.scale-line { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.scale-line p { margin: 0; }
+.scale-line p + p { margin-top: 4px; }
+.warn-text { color: var(--heat-ink); }
+.chip-draining { margin-left: 6px; }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Sleep when idle in the console (1.5.0, #37, PR 4): the setting on the deploy and edit forms, the Asleep and Waking
 // badges on Serving, the deployment page's "When not in use", Wake now in the Playground, and the line on Machines
-// (FY-WEB-600 to 610).
+// (FY-WEB-600 to 611).
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
@@ -502,5 +502,37 @@ describe("sleep when idle: the wake wait (1.5.0 PR 3's parameter) on the forms",
     expect(changes.textContent).toBe("Wake wait (s): — → 90");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
     expect(bodies.find((b) => !b.dry_run)!.params).toMatchObject({ wake_wait: 90, sleep_when_idle: true });
+  });
+});
+
+describe("sleep when idle with automatic replicas (1.5.0 PR 5) on the forms", () => {
+  it("FY-WEB-611: the fewest-replicas hint offers 0 as soon as the form's own Sleep when idle is ticked, on the edit and the deploy form", async () => {
+    const d = dep([rep()], { params: { context: 8192, concurrency: 4, gpus: 1, share: "exclusive" } });
+    server((url, init) => {
+      if (url === "/api/models") return { status: 200, body: catalog };
+      if (url === "/api/machines") return { status: 200, body: machinesBody };
+      if (url === "/api/deployments" && init?.method === "GET") return { status: 200, body: { deployments: [d], server_time: "", can_manage: true } };
+      if (url === "/api/deployments/estimate") return { status: 200, body: { estimate, placement: fits, params: {}, recipe: "vllm", model: "qwen3-4b" } };
+      if (url === "/api/deployments/3" && init?.method === "PATCH") {
+        const out: EditResponse = { estimate, params: {}, changes: {}, placement: fits, restart: "none", restart_text: "Nothing restarts." };
+        return { status: 200, body: out };
+      }
+      if (url === "/api/deployments/3") return { status: 200, body: { deployment: d, events: [], server_time: "", can_manage: true } };
+      return undefined;
+    });
+    const zero = () => screen.queryByText(/0 as the fewest: down to none only by sleeping when idle\./);
+    for (const [path, id] of [["/serving/3/edit", "e"], ["/serving/deploy?model=qwen3-4b", "d"]] as const) {
+      const view = mount(path);
+      const mode = (await screen.findByLabelText("Replicas", { selector: `#${id}-scale` })) as HTMLSelectElement;
+      fireEvent.change(mode, { target: { value: "auto" } });
+      expect(screen.getByText(/^1 to 16\./)).toBeTruthy();
+      expect(zero()).toBeNull();                        // sleep is off on the form (and saved off)
+      const box = screen.getByRole("checkbox", { name: /Sleep when idle/ });
+      fireEvent.click(box);
+      expect(zero()).toBeTruthy();                      // ticked, not yet saved: the hint follows the form
+      fireEvent.click(box);
+      expect(zero()).toBeNull();
+      view.unmount();
+    }
   });
 });

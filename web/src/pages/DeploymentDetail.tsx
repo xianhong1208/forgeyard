@@ -19,6 +19,7 @@ import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { RoutingEditor } from "./RouteDetail";
 import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
+import { AutoscaleLine } from "../components/Replicas";
 import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
 import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
 import { SleepBadge } from "../components/Sleep";
@@ -117,6 +118,7 @@ export function DeploymentDetailPage() {
           <WhenNotInUse d={d} canManage={canManage} />
           <section className="panel" aria-labelledby="replicas-title">
             <h2 id="replicas-title">Replicas</h2>
+            <AutoscaleLine d={d} />
             <div className="table-wrap">
               <table className="table reps-table">
                 <thead><tr><th>#</th><th>State</th><th>Machine</th><th>Device</th><th>Runs</th><th>Reserved</th><th>Since</th></tr></thead>
@@ -128,6 +130,7 @@ export function DeploymentDetailPage() {
                         <td data-label="Replica" className="mono">#{r.ordinal}</td>
                         <td data-label="State">
                           <span className={`chip chip-tone-${STATE_TONE[r.state]}`}>{stateLabel(r)}</span>
+                          {d.autoscale?.draining?.replica === r.ordinal && <span className="chip chip-tone-wait chip-draining" title="The autoscaler removes it: it takes no new requests and finishes the ones it runs.">draining</span>}
                           {frac !== null ? (
                             <div className="dl" aria-label="Download progress">
                               <span className="bar bar-dl"><span style={{ width: `${Math.round(frac * 100)}%` }} /></span>

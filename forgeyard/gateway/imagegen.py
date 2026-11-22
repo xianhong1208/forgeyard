@@ -437,6 +437,11 @@ def queue(key: str) -> Queue:
     return _queues.setdefault(key, Queue())
 
 
+def lengths() -> dict[str, int]:
+    """How many image requests wait in each queue now ({"<served name>#<tier>": n}; the autoscaler, 1.5.0)."""
+    return {key: len(q.waiting) for key, q in list(_queues.items())}
+
+
 def note_busy(key: str, seconds: float) -> None:
     old = _busy.get(key)
     _busy[key] = seconds if old is None else 0.7 * old + 0.3 * seconds
