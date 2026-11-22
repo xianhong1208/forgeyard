@@ -11,10 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload
+from forgeyard.workloads import offline
 
 
 def _ready(r: Replica, w: Workload) -> bool:
     if w.desired_state != "running" or r.final:
+        return False
+    if r.node is not None and offline.skipped(r.node):
+        # 1.4.5 (#164): its machine is offline (or revoked): not tried at all, instead of a connect error and the
+        # balancer's penalty on every request until the agent says otherwise (it cannot).
         return False
     health = (r.spec or w.spec or {}).get("health")
     return r.state == "healthy" or (r.state == "running" and not health)

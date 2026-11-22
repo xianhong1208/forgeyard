@@ -339,7 +339,7 @@ def not_picked_up(r: Replica, now: datetime, connected: Callable[[int], bool]) -
         return None
     if r.workload.desired_state != "running":
         return None
-    if r.reason and r.reason != f"waiting for {node.name} to come online":
+    if r.reason and not r.reason.startswith(f"waiting for {node.name} to come online"):  # (1.4.5: "… (pinned)")
         return None  # its agent (or the scheduler) said why
     if not connected(node.id):
         return None  # offline: the machine's own state says so
