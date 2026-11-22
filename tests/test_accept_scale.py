@@ -256,3 +256,23 @@ def test_fy_acs_010_without_machines_every_step_is_a_skip_with_its_reason(mods, 
     for need in ("--cpu-machine", "--second-cpu-machine", "--gpu-machine", "metrics_local_only"):
         assert need in text, need
     assert not calls and run.cleanup.pending == 0
+
+
+def test_fy_acs_011_agent_commands_return_when_the_shell_does(sc_mod, tmp_path):
+    """FY-ACS-011: step 6's --agent-stop/--agent-start return as soon as their shell does, even when the command
+    leaves a background job that keeps the shell's output open (`cd … && agent &`, which used to hold the call for
+    the whole 120 s while the deployment went back to sleep); their output and exit code are still reported."""
+    import os
+    import time
+
+    t0 = time.monotonic()
+    ok, how = sc_mod.Scale.agent_cmd(None, f"cd {tmp_path} && sleep 6 & echo $! > {tmp_path}/pid; echo started")
+    took = time.monotonic() - t0
+    pid = int((tmp_path / "pid").read_text())
+    try:
+        assert ok and how == "exit 0: started" and took < 3, (ok, how, took)
+        assert sc_mod.Scale.agent_cmd(None, "echo nope >&2; exit 3") == (False, "exit 3: nope")
+    finally:  # let the background job end by itself: the leak check would SIGKILL its group, which is pytest's
+        deadline = time.monotonic() + 10
+        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+            time.sleep(0.1)

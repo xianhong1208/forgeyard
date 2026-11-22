@@ -71,6 +71,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -540,12 +541,17 @@ class Scale:
         return None
 
     def agent_cmd(self, cmd: str) -> tuple[bool, str]:
-        try:
-            p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
-        except subprocess.TimeoutExpired:
-            return False, "did not return within 120 s (start the agent in the background)"
-        out = (p.stdout + p.stderr).strip()[-200:]
-        return p.returncode == 0, f"exit {p.returncode}" + (f": {out}" if out else "")
+        # Output goes to a file, not a pipe: an agent started in the background by a shell that keeps the pipe
+        # open (`cd … && cmd &`) would otherwise hold this call until the timeout although the command is done.
+        with tempfile.TemporaryFile(mode="w+") as out:
+            try:
+                p = subprocess.run(cmd, shell=True, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                                   text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                return False, "did not return within 120 s (start the agent in the background)"
+            out.seek(0)
+            text = out.read().strip()[-200:]
+        return p.returncode == 0, f"exit {p.returncode}" + (f": {text}" if text else "")
 
     def machine_status(self, mid: int) -> str:
         return (self.run.machine_by_id(mid) or {}).get("status", "gone")
