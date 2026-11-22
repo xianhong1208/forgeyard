@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from forgeyard.config import get_settings
-from forgeyard.gateway import proxy
+from forgeyard.gateway import cloud, proxy
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.usage import recorder
 from tests.cloud_helpers import (CLOUD_KEY, FakeCloud, add_provider, cloud_key, deployment_id, model_id, route_id,
@@ -199,7 +199,7 @@ class _Fixed:
 def test_fy_rt_008_the_cloud_tier_moves_on_and_cools_a_target_down(mixed, monkeypatch):
     """FY-RT-008: within the cloud tier a 429 (long Retry-After), a 5xx or a refused connection moves
     to the next target; the failed one is tried last for the cooldown."""
-    monkeypatch.setattr(proxy, "rng", _Fixed())
+    monkeypatch.setattr(cloud, "rng", _Fixed())
     other = FakeCloud("second")
     try:
         p2 = add_provider(mixed.owner, other, name="second")

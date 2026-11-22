@@ -13,7 +13,7 @@ from alembic import command
 from sqlalchemy import select, text
 
 from forgeyard.db import ApiKey, AuditEvent, BudgetAlert, Provider, ServerSetting, User, get_engine, new_session
-from forgeyard.gateway import budgets, pricing, proxy
+from forgeyard.gateway import budgets, cloud, pricing
 from forgeyard.gateway.budgets import Blocked, Hold, Ledger, Limit, ledger
 from forgeyard.gateway.pricing import Prices
 from forgeyard.gateway.usage import recorder
@@ -308,7 +308,7 @@ def test_fy_bdg_009_a_provider_budget_skips_that_provider_only(priced, monkeypat
     """FY-BDG-009: a provider whose budget cannot cover a request is skipped; another provider in the
     tier serves it, and the answer names the budget; with no other provider left, 402 names it."""
     m = priced
-    monkeypatch.setattr(proxy, "rng", _Fixed())             # the route's order: cloudy first
+    monkeypatch.setattr(cloud, "rng", _Fixed())             # the route's order: cloudy first
     second = FakeCloud("second")
     try:
         p2 = add_provider(m.owner, second, name="second")
@@ -626,7 +626,7 @@ def test_fy_bdg_018_a_providers_own_failure_is_said_before_a_budget(priced, monk
     """FY-BDG-018: one provider kept out by its budget and the other failing: the client gets the
     provider's error (502), still with the header naming the budget."""
     m = priced
-    monkeypatch.setattr(proxy, "rng", _Fixed())
+    monkeypatch.setattr(cloud, "rng", _Fixed())
     second = FakeCloud("second")
     try:
         p2 = add_provider(m.owner, second, name="second")

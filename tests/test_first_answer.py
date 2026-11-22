@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from forgeyard.gateway import proxy
+from forgeyard.gateway import proxy, route as groute
 from forgeyard.gateway.balancer import balancer
 from tests.gateway_helpers import free_port, make_ready
 from tests.test_gateway import chat, gw  # noqa: F401  (the fixture)
@@ -106,7 +106,7 @@ def test_fy_fa_004_a_silent_replica_gets_504_after_the_first_answer_wait(gw, mon
     """FY-FA-004: a replica that takes a streamed request and says nothing, not even its headers: 504
     first_answer_timeout after the wait (not GATEWAY_READ_TIMEOUT's 600 s), never sent to the other
     replica; the engine's connection is closed."""
-    monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 0.5)
+    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 0.5)
     gw.e1.gate, gw.e1.gate_streams = threading.Event(), True
     gw.e2.gate, gw.e2.gate_streams = threading.Event(), True
     try:
@@ -149,7 +149,7 @@ def test_fy_fa_006_streams_wait_for_their_first_bytes(gw, monkeypatch):  # noqa:
     """FY-FA-006: a stream whose headers come at once but whose first chunk does not come within the wait
     is 504 first_answer_timeout (not a 200 that breaks off); one whose first chunk comes in time streams
     whole even when later chunks are further apart than the wait."""
-    monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 0.5)
+    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 0.5)
     for e in (gw.e1, gw.e2):
         e.first_delay = 1.5
     r = chat(gw.api, stream=True)
@@ -171,7 +171,7 @@ def test_fy_fa_007_a_long_wait_also_lifts_the_read_timeout(gw, monkeypatch):  # 
     monkeypatch.setenv("GATEWAY_READ_TIMEOUT", "0.3")
     get_settings.cache_clear()
     proxy._clients.clear()
-    monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 3.0)
+    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 3.0)
     for e in (gw.e1, gw.e2):
         e.first_delay = 1.0
     r = chat(gw.api, stream=True)
@@ -186,7 +186,7 @@ def test_fy_fa_010_a_non_streamed_answer_keeps_the_read_timeout(gw, monkeypatch)
     not sent to the other replica either."""
     from forgeyard.config import get_settings
 
-    monkeypatch.setattr(proxy, "FIRST_ANSWER_DEFAULT", 0.3)
+    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 0.3)
     for e in (gw.e1, gw.e2):
         e.hold = 1.0
     r = chat(gw.api)

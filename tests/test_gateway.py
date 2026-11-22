@@ -461,3 +461,32 @@ def test_fy_gw_019_a_stopped_model_leaves_v1_models(gw):
         db.close()
     assert "chat" in [m["id"] for m in gw.api.get("/v1/models").json()["data"]]
     assert gw.api.get("/v1/models/chat").status_code == 200
+
+
+def test_fy_gw_020_a_body_over_the_limit_is_refused_while_it_is_read():
+    """FY-GW-020: the gateway stops reading a body at its limit, also when no Content-Length announced it (a
+    chunked upload): 413 request_too_large, and the rest of the body is not read. A body within the limit is
+    read whole."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from forgeyard.gateway import proxy
+    from forgeyard.gateway.errors import GatewayError
+
+    def request(chunks: list[bytes], sent: list):
+        async def receive():
+            body = chunks.pop(0)
+            sent.append(body)
+            return {"type": "http.request", "body": body, "more_body": bool(chunks)}
+
+        return Request({"type": "http", "method": "POST", "path": "/v1/chat/completions", "headers": []}, receive)
+
+    sent: list = []
+    big = request([b"x" * 600, b"x" * 600, b"x" * 600], sent)
+    with pytest.raises(GatewayError) as e:
+        asyncio.run(proxy.read_body(big, limit=1000))
+    assert e.value.status == 413 and e.value.code == "request_too_large"
+    assert len(sent) == 2      # stopped at the chunk that went over, the third never read
+    sent = []
+    assert asyncio.run(proxy.read_body(request([b"a" * 500, b"b" * 500], sent), limit=1000)) == b"a" * 500 + b"b" * 500

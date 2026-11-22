@@ -96,7 +96,10 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/api/routing.py` | 路由與它分層的目標 |
 | `forgeyard/api/prices.py` | 從 OpenRouter 更新價格：預覽與套用 |
 | `forgeyard/api/budgets.py` | 個人與供應商的每月預算，以及本月的花費 |
-| `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送：副本、供應商、溢出、串流 |
+| `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送（`Job`、`forward`、`record`）；下列各部分的名稱也都能從它匯入 |
+| `forgeyard/gateway/route.py`, `body.py`, `fit.py` | 路由與它的目標、誰能呼叫、請求能用哪些層；讀取並解析請求本文；能接下它的目標（媒體、大小、語音、圖片） |
+| `forgeyard/gateway/upstream.py`, `replicas.py`, `cloud.py` | 連到副本的 HTTP client、哪些情況可以重試、用戶端斷線；一層裡的副本（並行數、排隊、第一個回應）；它的供應商（順序、預算、差異） |
+| `forgeyard/gateway/streaming.py`, `answer.py` | 串流回應（SSE、音訊）；把回應轉回去並計算用量 |
 | `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API 金鑰檢查與雲端設定；每分鐘請求數與 token 數；副本順序與供應商冷卻 |
 | `forgeyard/gateway/quirks.py` | 各種供應商的差異：金鑰怎麼送、拿掉或改名的參數、怎麼讀回用量 |
 | `forgeyard/gateway/where.py` | 依種類和位址判斷新的供應商是否在你的網路外 |
@@ -118,6 +121,8 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
 | `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
 | `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門、紀錄、健康檢查 |
+| `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | 協調迴圈：迴圈本身、期望清單與回報；它在記憶體裡的狀態；每種執行環境都實作的 `Runtime` 協定（以及 `ContainerEngine`） |
+| `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | 協調迴圈的各部分：副本的啟動、結束、停止與移除；啟動前的模型、引擎與映像檔；健康檢查；金鑰守門；管理員的快取與映像檔請求 |
 | `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、agent 的更新指令與是否落後（`update.py`）、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |
