@@ -234,7 +234,7 @@ def test_fy_guide_011_the_roadmap_in_both_languages_stays_in_step():
         assert len(heading.findall(en)) == len(heading.findall(zh)), level
     row = re.compile(r"^\|\s*\*\*(\d+(?:\.\d+)+)", re.M)
     en_versions = set(row.findall(en))
-    assert {"1.4.5", "1.5.0", "1.5.5", "1.6.0", "1.7.0", "1.8.0", "1.8.1"} <= en_versions
+    assert {"1.5.0", "1.5.5", "1.6.0", "1.7.0", "1.8.0", "1.8.1"} <= en_versions
     assert set(row.findall(zh)) == en_versions
     readme = (ROOT / "README.zh-TW.md").read_text()
     assert "(ROADMAP.zh-TW.md)" in readme and "(ROADMAP.md)" not in readme

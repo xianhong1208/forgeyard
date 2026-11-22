@@ -6,6 +6,31 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.5] — 2026-11-22
+
+Fixes from an outside review. Structured output is never silently lost on a cloud spill (#162). The gateway
+reaches every replica over TLS, with a certificate Forgeyard's CA signs for that machine (#163). Replicas move off
+a machine that stays offline for 10 minutes (#164). Prometheus metrics at `/metrics` (#165). Memory is never
+promised twice (#166). The KV cache is estimated from what each kind of layer keeps (#167), with the batch size
+the card gets (#201). No request runs twice, and a stream has a settable wait for its first answer (#168).
+Requests waiting for a busy local tier are served first come, first served (#169). A server and agents of
+different versions keep working together (#170). A machine that publishes its replicas on a loopback address is
+pointed out (#171). Cloud spend survives a restart, and the installer pins the uv it downloads and checks every
+dependency by hash (#172). The gateway's proxy and the agent's supervisor are split into smaller parts, with no
+change in behaviour (#173). NVIDIA agents keep their GPUs across the host's `systemctl daemon-reload`, and a lost
+GPU is reported (#202). Flaky tests were fixed (#161, #204, #212, #215; the last one also makes a copied image
+whose source stops part way report the same words every time), and the acceptance scripts reach TLS replicas.
+
+**Update the agents** after the server, with the machine page's **Update the agent** command. Only a 1.4.5
+agent serves its replicas over TLS (an older one keeps plain HTTP, and Setup health says its traffic is not
+encrypted), answers 503 `X-Forgeyard-Not-Taken` when its engine is not running (behind an older agent that case
+is a 502 until it reports the dead engine), is given the NVIDIA device nodes and checks its GPU access, and
+reports the address it publishes its replicas on. **No migration:** the new values live in tables that exist
+already (a new `server_settings` row, a deployment's parameters, a machine's runtime details).
+
+**1.4 is a long-term support line** of the community edition until 2027-06-30: security fixes and fixes for
+serious bugs, as 1.4.x patch releases ([SECURITY.md](SECURITY.md#supported-versions)).
+
 ### Added
 
 - **How long each start takes, and faster ones** (1.5.0, #37, first step towards scale to zero). Each time a
@@ -69,6 +94,10 @@ version until 1.0.
 
 ### Changed
 
+- **1.4 is a long-term support line of the community edition until 2027-06-30** (#197): security fixes and fixes
+  for serious bugs are released as 1.4.x patch releases while 1.5 and later go on; other changes go only into the
+  newest minor release. Longer support is the enterprise edition's extended support. SECURITY.md has a table of
+  the supported versions, and the roadmap a *Support* section.
 - **The gateway's proxy and the agent's supervisor in smaller parts** (#173), with no change in behaviour. `forgeyard/gateway/proxy.py` (1,949 lines) keeps the request's way through the tiers (`Job`, `forward`, `record`) and imports the rest from `route.py`, `body.py`, `fit.py`, `upstream.py`, `replicas.py`, `cloud.py`, `streaming.py` and `answer.py`; every name it had is still importable from it. The agent's `supervisor.py` (1,171 lines) keeps the loop, the desired list and the reports; a replica's life, its downloads and pulls, its health checks, the key guards and an admin's requests are in their own modules, and its 18 dictionaries, sets and flags in memory are five typed structures (`state.py`). The runtimes now implement an explicit protocol, `Runtime` (and `ContainerEngine` for the container runtime's images), checked by a test, which also checks that the supervisor calls nothing else on them.
 - **Routing skips an offline machine's replicas at once** (#164). The gateway no longer dials a replica whose machine
   is offline (a connect error and a 15 s penalty on each replica until its agent said otherwise, which it cannot);
@@ -205,7 +234,37 @@ version until 1.0.
   400 `structured_output_not_supported`. Parameters left out on the way to a provider are named in the new
   `X-Forgeyard-Dropped-Params` header (also a `max_tokens` sent beside `max_completion_tokens`, which was dropped
   without a word).
-
+- **The KV cache is estimated from what each kind of layer keeps** (#167), so models that fit are no longer
+  refused. Sliding-window layers (Gemma 2, 3 and 4, gpt-oss, Mistral 7B v0.1) keep at most their window: on vLLM
+  the window plus the tokens in flight (two batches of up to 8,192), on llama.cpp `window x sequences + 512` cells
+  for all sequences, padded to 256. MLA models (DeepSeek V2 and V3, Kimi K2) keep one latent of
+  `kv_lora_rank + qk_rope_head_dim` values per token and layer, with no separate V, on every GPU of a replica (a
+  llama.cpp file needs `attention.key_length_mla`, which conversions since 2025 have). Hybrid and linear-attention
+  models (Qwen3-Next, Granite 4 hybrids, Falcon-H1, Jamba, Nemotron-H) grow with the context on their attention
+  layers only, plus a fixed *Recurrent state* per sequence (two on vLLM, for prefix caching), now its own line.
+  Gemma 4's KV-shared layers keep nothing of their own, and its full-attention layers are counted with their own
+  head size and KV heads. With fewer KV heads than GPUs, each GPU holds a whole head. Examples: Gemma 3 27B at a
+  context of 131,072 on vLLM, 62 to 16.9 GiB of KV cache; DeepSeek-V3 at 8,192 x 4, 53.4 to 2.1 GiB; Gemma 4 12B
+  at the defaults, 12.0 to 10.5 GiB (the recommended list's memory figures for Gemma 4 move with it). At vLLM's
+  default context Gemma 3 and gpt-oss do not change: the window plus what is in flight covers it. Falcon-H1 goes up
+  a little: its recurrent state was not counted. Plain models (Qwen3, Llama and the like) are estimated as before.
+  No migration: the layout is read when a model is added, so a model added before this keeps its old estimate
+  until it is added again.
+- **Memory is never promised twice** (#166):
+  - A GGUF model with some layers left on the CPU (*Layers on the GPU* below the model's) reserves the machine's RAM
+    for them as well: those layers, the output layer and their KV cache (and recurrent state), listed in the
+    estimate as `host_parts` and added up in its `ram`. A machine without that much RAM free is skipped with the
+    reason ("needs 1.30 GiB of RAM for the layers left on the CPU, …"), and until the replica is in the agent's
+    numbers that RAM is not promised to anything else. The token embeddings stay memory-mapped, as before.
+  - On an APU whose GPU memory is the machine's RAM (a unified-memory card that reports its GTT pool; the agent
+    picks GTT when it is larger than the BIOS carve-out), a reservation on the card counts against the RAM and one
+    on the RAM against the card, and the card never offers more than the RAM has free. A card that reports its
+    carve-out (`pool: vram`, as a Strix Halo with 96 GiB set aside) keeps memory Linux does not count as RAM, so the
+    two stay apart. An agent that does not say which pool it reports is taken to share the RAM.
+  - A deployment's estimate is made again from its recipe as it is now whenever a replica is placed (and when the
+    deployment is edited, even if no parameter changed): a custom recipe whose overhead was edited, a built-in one
+    changed by an upgrade, or a changed `GPU_CONTEXT_MIB` reach new placements. The deployment's events say when the
+    amount changed; replicas that run keep what they reserved and are not restarted for it.
 
 ## [1.4.4] — 2026-11-21
 
@@ -298,37 +357,6 @@ are now signed off under the DCO.
   context would have overflowed the position table in vLLM. Models already in the catalog keep the number they were
   added with.
 - The get-started page told vision examples to `pip install openai`; they use httpx, as rerank does.
-- **The KV cache is estimated from what each kind of layer keeps** (#167), so models that fit are no longer
-  refused. Sliding-window layers (Gemma 2, 3 and 4, gpt-oss, Mistral 7B v0.1) keep at most their window: on vLLM
-  the window plus the tokens in flight (two batches of up to 8,192), on llama.cpp `window x sequences + 512` cells
-  for all sequences, padded to 256. MLA models (DeepSeek V2 and V3, Kimi K2) keep one latent of
-  `kv_lora_rank + qk_rope_head_dim` values per token and layer, with no separate V, on every GPU of a replica (a
-  llama.cpp file needs `attention.key_length_mla`, which conversions since 2025 have). Hybrid and linear-attention
-  models (Qwen3-Next, Granite 4 hybrids, Falcon-H1, Jamba, Nemotron-H) grow with the context on their attention
-  layers only, plus a fixed *Recurrent state* per sequence (two on vLLM, for prefix caching), now its own line.
-  Gemma 4's KV-shared layers keep nothing of their own, and its full-attention layers are counted with their own
-  head size and KV heads. With fewer KV heads than GPUs, each GPU holds a whole head. Examples: Gemma 3 27B at a
-  context of 131,072 on vLLM, 62 to 16.9 GiB of KV cache; DeepSeek-V3 at 8,192 x 4, 53.4 to 2.1 GiB; Gemma 4 12B
-  at the defaults, 12.0 to 10.5 GiB (the recommended list's memory figures for Gemma 4 move with it). At vLLM's
-  default context Gemma 3 and gpt-oss do not change: the window plus what is in flight covers it. Falcon-H1 goes up
-  a little: its recurrent state was not counted. Plain models (Qwen3, Llama and the like) are estimated as before.
-  No migration: the layout is read when a model is added, so a model added before this keeps its old estimate
-  until it is added again.
-- **Memory is never promised twice** (#166):
-  - A GGUF model with some layers left on the CPU (*Layers on the GPU* below the model's) reserves the machine's RAM
-    for them as well: those layers, the output layer and their KV cache (and recurrent state), listed in the
-    estimate as `host_parts` and added up in its `ram`. A machine without that much RAM free is skipped with the
-    reason ("needs 1.30 GiB of RAM for the layers left on the CPU, …"), and until the replica is in the agent's
-    numbers that RAM is not promised to anything else. The token embeddings stay memory-mapped, as before.
-  - On an APU whose GPU memory is the machine's RAM (a unified-memory card that reports its GTT pool; the agent
-    picks GTT when it is larger than the BIOS carve-out), a reservation on the card counts against the RAM and one
-    on the RAM against the card, and the card never offers more than the RAM has free. A card that reports its
-    carve-out (`pool: vram`, as a Strix Halo with 96 GiB set aside) keeps memory Linux does not count as RAM, so the
-    two stay apart. An agent that does not say which pool it reports is taken to share the RAM.
-  - A deployment's estimate is made again from its recipe as it is now whenever a replica is placed (and when the
-    deployment is edited, even if no parameter changed): a custom recipe whose overhead was edited, a built-in one
-    changed by an upgrade, or a changed `GPU_CONTEXT_MIB` reach new placements. The deployment's events say when the
-    amount changed; replicas that run keep what they reserved and are not restarted for it.
 
 ## [1.4.3] — 2026-11-18
 

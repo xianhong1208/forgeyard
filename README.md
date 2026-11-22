@@ -64,7 +64,13 @@ engine image from one machine to another, both still through the server. 1.4.2 s
 the exact command that updates its agent, lists its engine images and removes old ones, and counts free host
 ports when placing replicas. 1.4.3 gives every catalog model and every engine its own page: where it is,
 whether it fits each machine and what uses it. 1.4.4 adds zero-shot object detection (find the objects you
-name), text classification and image classification. Every change is in the [CHANGELOG](CHANGELOG.md).
+name), text classification and image classification. 1.4.5 fixes what an outside review found: TLS from the
+gateway to every replica, replicas that move off a machine left offline, Prometheus metrics, memory estimates and
+reservations that hold, and requests that never run twice (update the agents after the server). Every change is
+in the [CHANGELOG](CHANGELOG.md).
+
+**1.4 is a long-term support line until 2027-06-30:** security fixes and serious bug fixes
+([supported versions](SECURITY.md#supported-versions)).
 
 ## 🚀 Installation
 
@@ -77,7 +83,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker logs forgeyard
 ```
 
@@ -123,7 +129,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
