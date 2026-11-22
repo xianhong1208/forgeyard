@@ -56,14 +56,14 @@ def expected_features(node: Node) -> set[str]:
     if p.FEATURE_WORKLOADS not in have:
         return want  # an inventory-only agent (no workloads): nothing to compare
     want |= {p.FEATURE_WORKLOADS, p.FEATURE_REPLICA_KEYS, p.FEATURE_REPLICA_GUARD, p.FEATURE_IMAGE_IDS,
-             p.FEATURE_ENGINE_ZIP, p.FEATURE_WORKLOAD_GUARD, p.FEATURE_GUARD_TLS, p.FEATURE_START_TIMES}
+             p.FEATURE_ENGINE_ZIP, p.FEATURE_WORKLOAD_GUARD, p.FEATURE_GUARD_TLS}
     models = p.FEATURE_MODELS in have
     if models:
         want |= {p.FEATURE_MODELS, p.FEATURE_CACHE_ADMIN, p.FEATURE_PREFETCH, p.FEATURE_RELAY, p.FEATURE_RELAY_SOURCE}
     if ((node.runtime_info or {}).get("container") or {}).get("ok"):
         want |= {p.FEATURE_IMAGE_LOAD, p.FEATURE_IMAGE_SAVE, p.FEATURE_IMAGE_REMOVE}
         if models:
-            want |= {p.FEATURE_RELAY_IMAGES, p.FEATURE_ENGINE_CACHE}
+            want.add(p.FEATURE_RELAY_IMAGES)
     return want
 
 

@@ -1,6 +1,6 @@
 """An engine's compile cache kept between starts (1.5.0, issue #37, "engine_cache"; FY-ECA-*): the recipe field (off
-in every built-in recipe), what the server sends (only for an enabled recipe, a container replica and an agent that
-lists the feature), and the agent's side (the directory, its writable mount and variable, and what it removes)."""
+in every built-in recipe), what the server sends (only for an enabled recipe and a container replica, beside the
+spec), and the agent's side (the directory, its writable mount and variable, and what it removes)."""
 
 import asyncio
 import os
@@ -60,12 +60,13 @@ def _desired(node_id):
         db.close()
 
 
-def test_fy_eca_002_sent_only_for_an_enabled_recipe_to_an_agent_that_lists_it(owner):
+def test_fy_eca_002_sent_only_for_an_enabled_recipe_beside_the_spec(owner):
     """FY-ECA-002: the built-in vllm (off) sends nothing; a copy with it enabled sends {key, env} beside the spec
-    (never in it) and the deployments that may keep one; an agent without "engine_cache" gets neither."""
+    (never in it, so an agent older than 1.5.0, which validates the spec strictly, ignores it) and the deployments
+    that may keep one, to every machine."""
     seed_catalog()
     assert owner.post("/api/recipes", json={"yaml": vllm_text()}).status_code == 201
-    new = make_node("a100", allowlist=[4], features=MODELS + ("engine_cache",), runtime_info=BOTH)
+    new = make_node("a100", allowlist=[4], features=MODELS, runtime_info=BOTH)
     old = make_node("old", allowlist=[4], features=MODELS, runtime_info=BOTH)
     plain = deploy(owner, "plain", "qwen3-4b", "vllm", params={"context": 4096, "share": "vram"},
                    machine_id=new)["deployment"]
@@ -89,7 +90,10 @@ def test_fy_eca_002_sent_only_for_an_enabled_recipe_to_an_agent_that_lists_it(ow
         db.close()
     assert msg["engine_caches"] == others and len(others) == 2  # every caching deployment, wherever it runs
     old_msg = _desired(old)
-    assert "engine_caches" not in old_msg and all("engine_cache" not in r for r in old_msg["replicas"])
+    assert old_msg["engine_caches"] == others and "engine_cache" in old_msg["replicas"][0]
+    from forgeyard.workloads.spec import WorkloadSpec
+
+    WorkloadSpec.model_validate(old_msg["replicas"][0]["spec"])  # the spec itself is what it was
     assert plain["id"] != cached["id"]
 
 
@@ -228,39 +232,14 @@ def test_fy_eca_007_without_the_block_nothing_changes(tmp_path, hf):  # noqa: F8
     assert "VLLM_CACHE_ROOT" not in next(iter(fake2.state().values()))["env"]
 
 
-def test_fy_eca_008_hello_lists_it_with_a_model_cache_and_a_container_engine(tmp_path, monkeypatch):
-    """FY-ECA-008: "engine_cache" needs both: a model cache to keep them in, a container engine to mount them."""
-    from forgeyard.agent.client import Agent
-    from forgeyard.agent.inventory import SIMULATION_ENV, SimulatedInventory
-    from forgeyard.agent.models import ModelCache
-    from forgeyard.agent.workloads.container import ContainerRuntime
-    from forgeyard.agent.workloads.process import ProcessRuntime
-    from forgeyard.agent.workloads.records import RecordStore
-    from forgeyard.agent.workloads.supervisor import Supervisor
-    from tests.workload_helpers import FakeDocker
-
-    monkeypatch.setenv(SIMULATION_ENV, "1")
-    inv = SimulatedInventory("nvidia-rtx4090x2")
-    ctr = ContainerRuntime(RecordStore(tmp_path / "s"), agent_id="a", engine=str(FakeDocker(tmp_path / "bin").path))
-    proc = ProcessRuntime(RecordStore(tmp_path / "s"), tmp_path / "work", euid=lambda: 4242)
-
-    def features(runtimes, models):
-        sup = Supervisor(tmp_path / "state", runtimes, models=models, tick=0.05)
-        return Agent("http://127.0.0.1:9", "c", inv, supervisor=sup).hello(inv.full())["features"]
-
-    assert "engine_cache" in features({"container": ctr}, ModelCache(tmp_path / "c"))
-    assert "engine_cache" not in features({"container": ctr}, None)
-    assert "engine_cache" not in features({"process": proc}, ModelCache(tmp_path / "c"))
-
-
-def test_fy_eca_009_never_for_a_process_replica(owner, tmp_path):
-    """FY-ECA-009: a caching recipe's process variant gets no engine cache from the server; and an agent given one
+def test_fy_eca_008_never_for_a_process_replica(owner, tmp_path):
+    """FY-ECA-008: a caching recipe's process variant gets no engine cache from the server; and an agent given one
     for a process replica anyway makes no directory."""
     seed_catalog()
     lcpp = yaml.safe_load(Path("forgeyard/recipes/llama-cpp.yaml").read_text())
     lcpp.update(name="lcpp-cache", engine_cache={"env": "X_ENGINE_CACHE", "enabled": True})
     assert owner.post("/api/recipes", json={"yaml": yaml.safe_dump(lcpp)}).status_code == 201
-    cpu = make_node("cpu", features=MODELS + ("engine_cache",),
+    cpu = make_node("cpu", features=MODELS,
                     runtime_info={"process": {"ok": True}, "container": {"ok": False}})
     deploy(owner, "small", "qwen3-1.7b-gguf", "lcpp-cache", params={"gpus": 0})
     msg = _desired(cpu)
@@ -276,3 +255,32 @@ def test_fy_eca_009_never_for_a_process_replica(owner, tmp_path):
                  engine_cache={"key": KEY, "env": "X_ENGINE_CACHE"})
     asyncio.run(sup._engine_cache_dir(rec))
     assert "dir" not in rec.engine_cache and not (tmp_path / "c" / "engine-cache").exists()
+
+
+def test_fy_eca_009_a_new_key_replaces_the_old_and_a_bad_block_is_dropped(tmp_path, hf):  # noqa: F811
+    """FY-ECA-009: a replica wanted again with another key (its recipe changed while it was away) loses its older
+    directory at once, before it starts; a block of another shape is dropped (no directory, no mount)."""
+    sup, fake = _ctr(tmp_path, hf)
+    old_key, new_key = "12-6921abcd-0-" + "a" * 12, "12-6921abcd-0-" + "b" * 12
+    old_dir = agent_cache.directory(tmp_path / "cache", old_key)
+    entry = model_replica("c1", container_spec(), gpus=[A100[4]], model=hf_model(hf, "acme/tiny-chat", TINY_REV))
+
+    async def scenario():
+        sup.set_desired({**desired(dict(entry, engine_cache={"key": new_key, "env": "VLLM_CACHE_ROOT"})),
+                         "engine_caches": ["12-6921abcd"]})
+        await sup.reconcile_once()
+        assert not old_dir.exists()
+        await converge(sup, lambda s: "c1" in s.records and s.records["c1"].container)
+
+    asyncio.run(scenario())
+    assert (tmp_path / "cache" / "engine-cache" / new_key).is_dir()
+
+    sup2, fake2 = _ctr(tmp_path / "b", hf)
+
+    async def bad():
+        sup2.set_desired(desired(dict(entry, engine_cache={"key": "../../etc", "env": "VLLM_CACHE_ROOT"})))
+        await converge(sup2, lambda s: "c1" in s.records and s.records["c1"].container)
+
+    asyncio.run(bad())
+    assert sup2.records["c1"].engine_cache is None
+    assert sum(1 for a in fake2.runs()[0] if a == "--mount") == 1

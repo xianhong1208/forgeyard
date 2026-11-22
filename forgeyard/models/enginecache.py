@@ -16,7 +16,7 @@ What is still kept apart, because a cache is code the engine loads:
 - the agent removes the directories of a deployment that is gone (or whose recipe no longer keeps one) and the
   older directories of a replica that starts with a new key, never one a replica uses.
 
-Only for container variants, and only to agents that list "engine_cache". Off in every built-in recipe until a real
+Only for container variants; an agent older than 1.5.0 ignores it (it is beside the spec). Off in every built-in recipe until a real
 start on an A100 has shown what it saves (docs/guide/how-to.md, "Keep vLLM's compile cache between starts").
 """
 
@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from forgeyard.db import Deployment, Node, Replica, as_utc
-from forgeyard.machines.protocol import ENGINE_CACHE_PREFIX_PARTS, FEATURE_ENGINE_CACHE
+from forgeyard.machines.protocol import ENGINE_CACHE_PREFIX_PARTS
 
 
 def deployment_prefix(dep: Deployment) -> str:
@@ -59,8 +59,8 @@ def _enabled(db: DbSession, names: set[str]) -> dict[str, str]:
 
 def attach(db: DbSession, node: Optional[Node], message: dict, reps: list[Replica]) -> dict:
     """`message` (a desired list for `node`) with each container replica of a caching recipe's `engine_cache`, and
-    `engine_caches`: the deployments whose caches the machine may keep. Unchanged for an agent without the feature."""
-    if node is None or FEATURE_ENGINE_CACHE not in (node.features or []):
+    `engine_caches`: the deployments whose caches the machine may keep. An agent older than 1.5.0 ignores both."""
+    if node is None:
         return message
     deps = db.scalars(select(Deployment)).all()
     caching = _enabled(db, {d.recipe for d in deps})

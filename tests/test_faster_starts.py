@@ -252,6 +252,7 @@ def test_fy_start_009_the_event_reads_back():
     assert starts.parse(server) == {"seconds": 51.0, "phases": {"engine": 51.0}, "source": "server"}
     assert starts.parse(starts.message(0, "a", {"seconds": 2, "phases": {}})) == {"seconds": 2.0, "phases": {},
                                                                                   "source": "agent"}
+    assert starts.parse("Replica 0 on a: ready in 3.0 s (foo 1.0 s, engine 2.0 s)")["phases"] == {"engine": 2.0}
     assert starts.parse("Replica 0 on a: healthy") is None and starts.parse("") is None
 
 
@@ -303,6 +304,8 @@ def test_fy_start_010_ready_event_metric_and_api(chat_on_cpu):
     for state in ("healthy", "unhealthy", "healthy"):
         _ready("small", node, start=start, state=state)
     assert [k for k, _ in _ready("small", node, start=start)].count("ready") == 1
+    # the latest "ready" event, not the state events written after it
+    assert owner.get(f"/api/deployments/{dep['id']}").json()["deployment"]["last_start"]["seconds"] == 12.4
 
 
 def test_fy_start_011_an_older_agent_is_measured_by_the_server(chat_on_cpu):
@@ -341,8 +344,9 @@ def test_fy_start_012_only_model_deployments(owner):
 
 
 def test_fy_start_013_the_server_lists_the_feature():
-    """FY-START-013: the server speaks "start_times" (and "engine_cache"), so a 1.5.0 agent turns them on."""
-    assert "start_times" in SERVER_FEATURES and "engine_cache" in SERVER_FEATURES
+    """FY-START-013: the server speaks "start_times", so a 1.5.0 agent turns it on. The engine cache needs no feature
+    (an older agent ignores its block)."""
+    assert "start_times" in SERVER_FEATURES and "engine_cache" not in SERVER_FEATURES
 
 
 def test_fy_start_014_metric_never_raises(monkeypatch):
@@ -355,16 +359,25 @@ def test_fy_start_014_metric_never_raises(monkeypatch):
     metrics.replica_started("vllm", "chat", 3.0)  # logged, not raised
 
 
-def test_fy_start_015_hello_lists_start_times(tmp_path):
-    """FY-START-015: an agent with workloads lists "start_times" in its hello; one without workloads does not."""
+def test_fy_start_015_the_agents_hello_does_not_grow(tmp_path, monkeypatch):
+    """FY-START-015: the agent lists neither "start_times" nor "engine_cache" in its hello: a fully equipped agent
+    still lists at most 16 features, what servers up to 1.4.0 accept (an older server would refuse more). It learns
+    whether the server measures starts from the welcome."""
     from forgeyard.agent.client import Agent
     from forgeyard.agent.inventory import SIMULATION_ENV, SimulatedInventory
+    from forgeyard.agent.models import ModelCache
+    from forgeyard.agent.workloads.container import ContainerRuntime
+    from forgeyard.agent.workloads.records import RecordStore
+    from tests.workload_helpers import FakeDocker
 
-    inv = SimulatedInventory("nvidia-rtx4090x2", environ={SIMULATION_ENV: "1"})
-    sup = Supervisor(tmp_path / "state", {}, tick=0.05)
-    with_workloads = Agent("http://127.0.0.1:9", "c", inv, supervisor=sup).hello(inv.full())
-    bare = Agent("http://127.0.0.1:9", "c", inv).hello(inv.full())
-    assert "start_times" in with_workloads["features"] and "start_times" not in (bare.get("features") or [])
+    monkeypatch.setenv(SIMULATION_ENV, "1")
+    inv = SimulatedInventory("nvidia-rtx4090x2")
+    rt = ContainerRuntime(RecordStore(tmp_path / "s"), agent_id="a", engine=str(FakeDocker(tmp_path / "bin").path))
+    sup = Supervisor(tmp_path / "state", {"container": rt}, models=ModelCache(tmp_path / "c"), tick=0.05)
+    feats = Agent("http://127.0.0.1:9", "c", inv, supervisor=sup).hello(inv.full())["features"]
+    assert "start_times" not in feats and "engine_cache" not in feats and len(feats) <= 16
+    sup.new_connection({"workloads", FEATURE_START_TIMES})
+    assert FEATURE_START_TIMES in sup.server_features
 
 
 def test_fy_start_016_without_a_health_check_ready_once_it_runs(tmp_path):

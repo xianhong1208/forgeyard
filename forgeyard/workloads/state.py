@@ -136,7 +136,7 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
     out = {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision, "replicas": replicas}
     from forgeyard.models import enginecache
 
-    out = enginecache.attach(db, node, out, reps)  # 1.5.0 ("engine_cache"): compile caches kept between starts
+    out = enginecache.attach(db, node, out, reps)  # 1.5.0: engine compile caches kept between starts
     if node is not None and FEATURE_PREFETCH in features:
         from forgeyard.models import prefetch
 

@@ -479,11 +479,6 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
         root = getattr(self.models, "root", None) if self.models is not None else None
         return Path(root) if root is not None else None
 
-    def can_cache_engines(self) -> bool:
-        """The agent may say "engine_cache": a model cache to keep them in and a container engine."""
-        rt = self.runtimes.get("container")
-        return self.engine_cache_root() is not None and rt is not None and bool(rt.info().get("ok"))
-
     def _engine_cache_keys(self) -> set[str]:
         """Every engine cache a replica here has or is wanted with."""
         out = {(r.engine_cache or {}).get("key") for r in self.records.values()}

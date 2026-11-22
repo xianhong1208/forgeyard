@@ -29,7 +29,6 @@ from forgeyard.machines.protocol import (
     CLOSE_REVOKED,
     FATAL_CLOSE_CODES,
     FEATURE_CACHE_ADMIN,
-    FEATURE_ENGINE_CACHE,
     FEATURE_ENGINE_ZIP,
     FEATURE_GPU_CHECK,
     FEATURE_GUARD_TLS,
@@ -44,7 +43,6 @@ from forgeyard.machines.protocol import (
     FEATURE_RELAY_SOURCE,
     FEATURE_REPLICA_GUARD,
     FEATURE_REPLICA_KEYS,
-    FEATURE_START_TIMES,
     FEATURE_WORKLOAD_GUARD,
     FEATURE_WORKLOADS,
     JOIN_PATH,
@@ -193,7 +191,7 @@ class Agent:
             msg["install"] = self.install
         if self.supervisor is not None:
             msg["features"] = [FEATURE_WORKLOADS, FEATURE_REPLICA_KEYS, FEATURE_REPLICA_GUARD, FEATURE_IMAGE_IDS,
-                               FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD, FEATURE_START_TIMES]
+                               FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD]
             msg["runtimes"] = self.supervisor.available()
             msg["runtime_info"] = self.supervisor.runtime_info()
             tls = self._tls()
@@ -222,8 +220,6 @@ class Agent:
                     if getattr(self.supervisor, "can_relay_images", lambda: False)():
                         msg["features"].append(FEATURE_RELAY_IMAGES)
                 msg["model_cache"] = cache
-                if getattr(self.supervisor, "can_cache_engines", lambda: False)():
-                    msg["features"].append(FEATURE_ENGINE_CACHE)  # 1.5.0: engine compile caches kept between starts
             if getattr(self.supervisor, "can_load_images", lambda: False)():
                 msg["features"].append(FEATURE_IMAGE_LOAD)
             if getattr(self.supervisor, "can_save_images", lambda: False)():
