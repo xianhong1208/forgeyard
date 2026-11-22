@@ -28,7 +28,7 @@ version until 1.0.
   edit forms, come in the next 1.5.0 steps. No migration: the settings are deployment parameters and the last use
   is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
   the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
-- **Waking on a request** (#37, 1.5.0, Tony's Q3 A). A request to an asleep model wakes it, replacing the 503
+- **Waking on a request** (#37, 1.5.0, as decided on the issue). A request to an asleep model wakes it, replacing the 503
   `model_asleep` above: **one wake per deployment** however many requests arrive (the event *Woken by a request (key
   …)*, not audited), and the requests **wait**, first come first served, up to the deployment's new parameter
   `wake_wait` (**300** seconds by default, 10 to 1,800; changing it restarts nothing), then go on to the replicas.

@@ -1,4 +1,4 @@
-"""Waking an asleep model on a request (1.5.0, #37; Tony's Q3 A). forgeyard/workloads/sleep.py puts a deployment
+"""Waking an asleep model on a request (1.5.0, #37, as decided on the issue). forgeyard/workloads/sleep.py puts a deployment
 nobody uses to sleep; this is how a request brings it back.
 
 - **One wake per deployment** however many requests arrive (single flight): the first request that finds it

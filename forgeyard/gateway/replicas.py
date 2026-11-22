@@ -108,7 +108,7 @@ class ReplicaSending:
         pairs = [(g, t) for g in tier.locals for t in g.replicas]
         sleepy = waking.sleepy(tier.locals) if not pairs else []
         if sleepy:
-            # 1.5.0 (#37, Q3 A): asleep because nobody used it, or being woken. This request wakes it (once for
+            # 1.5.0 (#37): asleep because nobody used it, or being woken. This request wakes it (once for
             # everyone), then spills while it wakes when it may move on, or else waits for a ready replica.
             self.used = True
             by = waking.by_of(self.caller)

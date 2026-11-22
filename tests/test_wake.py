@@ -1,4 +1,4 @@
-"""Waking an asleep model on a request (1.5.0, #37, Tony's Q3 A; forgeyard/gateway/waking.py): one wake however
+"""Waking an asleep model on a request (1.5.0, #37; forgeyard/gateway/waking.py): one wake however
 many requests arrive, the wake line (its order, its bound, a client leaving it), spilling to a cloud tier while it
 wakes (not structured output a provider would lose; back to waiting when the cloud fails), the honest give-ups
 (cannot_wake with the reason, at once), the wait running out (model_waking with Retry-After), a person's Stop never

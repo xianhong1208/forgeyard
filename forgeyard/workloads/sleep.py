@@ -48,7 +48,7 @@ log = logging.getLogger("forgeyard.workloads")
 
 ASLEEP = "asleep"
 IDLE_DEFAULT, IDLE_MIN, IDLE_MAX = 30, 1, 1440   # minutes (Tony, #37)
-WAKE_WAIT_DEFAULT, WAKE_WAIT_MIN, WAKE_WAIT_MAX = 300, 10, 1800   # seconds a request waits for a wake (Q3 A)
+WAKE_WAIT_DEFAULT, WAKE_WAIT_MIN, WAKE_WAIT_MAX = 300, 10, 1800   # seconds a request waits for a wake (#37)
 SWEEP_SECONDS = 30.0
 PARAMS = ("sleep_when_idle", "idle_minutes", "wake_wait")
 GIB = 1024**3
