@@ -449,6 +449,8 @@ export type Deployment = {
   sleep?: DeploymentSleep;
   // 1.5.0 (#37): how long its latest start took (source "server": measured by the server for an older agent).
   last_start?: StartTime | null;
+  // 1.5.0 (#37): automatic replicas: the bounds, the load and the last decision.
+  autoscale?: DeploymentAutoscale;
 };
 
 export type StartTime = {
@@ -457,6 +459,13 @@ export type StartTime = {
   source: "agent" | "server";
   at: string;
   replica: number | null;
+};
+
+export type DeploymentAutoscale = {
+  on: boolean; min: number; max: number; target: number; scale_up_seconds: number; scale_down_minutes: number;
+  capacity: number; replicas: number; ready: number; load: number | null; per_replica: number | null;
+  wanted: number | null; draining: { replica: number; since: string; in_flight: number } | null;
+  room: string | null; paused: string | null; last: { at: string; text: string } | null;
 };
 
 export type DeploymentSleep = {

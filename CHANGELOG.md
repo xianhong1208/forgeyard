@@ -65,6 +65,26 @@ version until 1.0.
   older agents ignore): `vllm` and `vllm-pooling` name vLLM's `VLLM_CACHE_ROOT` but keep it
   **off** until a real start on an A100 has measured it; a custom recipe can turn it on (a directory per replica
   under the model cache, mounted writable, removed with the deployment). No migration.
+- **Automatic replicas** (#37, 1.5.0). A deployment's number of replicas can follow the load the gateway sees.
+  New parameters of every deployment but video ones, read by the server (changing them restarts nothing):
+  `autoscale` (**off by default**, for deployments made before and after this change), `min_replicas` and
+  `max_replicas` (**1 to 2** by default, 1 to 16; `min_replicas` 0 only with `sleep_when_idle` on), and, under
+  Advanced, `autoscale_target` (**80 %** of a replica's *Concurrent requests*), `scale_up_seconds` (**60**) and
+  `scale_down_minutes` (**10**). The load is the requests in flight on its replicas plus those waiting in the
+  gateway's line for its slots (and its image queue), sampled every 2 s. One replica more when the last minute's
+  load is above the target, or within about 10 s at twice it; **one at a time**, and **only when it fits now** (an
+  online machine with room; the pinned one when pinned): no pending replica is left waiting for room, the page says
+  *Wants 3 replicas, room for 2: …* instead. One fewer after 10 minutes in which one replica fewer would have served
+  the load at the target; the newest is **drained first** (the gateway sends it nothing new, the requests it runs
+  finish, at most 30 minutes), then removed, and kept when the load returns or the others stop being ready. Nothing
+  changes while an edit restarts the replicas, a replica's machine is offline, or within 2 minutes of the deployment's
+  start, wake or change (requests waiting for a wake are not load: the wake starts its replicas already); an asleep deployment keeps its minimum of replicas and wakes with them. Every decision is an event
+  (kind `scaled`), not audited. The deploy and edit forms set **Replicas** to a fixed number or **Automatic, by
+  load**; the deployment page shows *Automatic, 1 to 4 · 2 now*, the load against the target and the replica being
+  drained. The deployment API gives an `autoscale` object; while it is on a change may not set another `replicas`
+  number (422 `replicas_automatic`). `/metrics`: `forgeyard_deployment_replicas{deployment,kind}` (desired, ready,
+  draining, wanted), `forgeyard_deployment_load{deployment}` and `forgeyard_autoscale_total{deployment,direction}`.
+  No migration: the settings are deployment parameters, the load samples and drains live in the server's memory.
 
 ## [1.4.5] — 2026-11-22
 

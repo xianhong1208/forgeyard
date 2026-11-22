@@ -614,6 +614,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `forgeyard_gateway_waking` | gauge | `model` | 1.5.0：現在正在等休眠中的模型喚醒的請求 |
 | `forgeyard_gateway_wake_wait_seconds` | histogram | `model` | 1.5.0：它們每個等了多久（之後被服務，或放棄） |
 | `forgeyard_deployment_wakes_total` | counter | `deployment`、`by` | 1.5.0：被喚醒的休眠部署，`by` 是 `request` 或 `person`（Start、Wake） |
+| `forgeyard_autoscale_total` | counter | `deployment`、`direction` | 1.5.0：自動調整加上（`up`）和排空後移除（`down`）的副本數 |
 
 模型部署的副本就緒時（1.5.0）：
 
@@ -626,6 +627,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 指標 | 標籤 | 是什麼 |
 |---|---|---|
 | `forgeyard_replicas` | `deployment`、`state` | 每個模型部署各狀態的副本數：`pending`、`starting`、`running`、`healthy`、`unhealthy`、`backoff`、`exited`、`failed`、`stopping`、`stopped` |
+| `forgeyard_deployment_replicas` | `deployment`、`kind` | 1.5.0：每個部署的副本數，`desired`（現在應該執行的副本數；停止或休眠時是 0）、`ready`、`draining`（自動調整正在移除的），以及開啟自動副本數時的 `wanted`（負載要求的數量，在範圍內） |
+| `forgeyard_deployment_load` | `deployment` | 1.5.0：開啟自動副本數時，最後一次取樣的處理中加上等待空位的請求數 |
 | `forgeyard_machines` | `status` | `online`、`offline` 和 `revoked` 的機器數 |
 | `forgeyard_machine_up` | `machine` | 機器的 agent 連線中時是 1，否則是 0 |
 | `forgeyard_gpu_memory_total_bytes`、`forgeyard_gpu_memory_free_bytes` | `machine`、`gpu` | 一張卡的記憶體和可用記憶體，依 agent 最近一次回報（`gpu`：它的編號） |
@@ -778,8 +781,8 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 | 欄位 | 值 |
 |---|---|
-| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）、`first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西），以及（1.5.0）`sleep_when_idle`、`idle_minutes` 和 `wake_wait`（[閒置時休眠](#sleep-when-idle)；修改它們不會重新啟動任何東西）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
-| `replicas` | 1 到 16 |
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）、`first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西），（1.5.0）`sleep_when_idle`、`idle_minutes` 和 `wake_wait`（[閒置時休眠](#sleep-when-idle)），以及自動副本數的 `autoscale`、`min_replicas`、`max_replicas`、`autoscale_target`、`scale_up_seconds` 和 `scale_down_minutes`（[自動副本數](#automatic-replicas)）；修改這些不會重新啟動任何東西。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `replicas` | 1 到 16。開啟自動副本數時（1.5.0），只能是它現在的數量（否則 422 `replicas_automatic`）：改 `min_replicas` 和 `max_replicas`（[自動副本數](#automatic-replicas)） |
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
 | `dry_run` | `true`：只檢查。回應內容相同，但沒有 `deployment`，也不會儲存任何東西 |
@@ -835,6 +838,39 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 對休眠中的部署送 `POST /api/deployments/{id}/start` 會喚醒它（事件 *Woken by …*，以 `workload.started`（帶 `woken: true`）和 `deployment.started` 記入稽核紀錄）；`POST …/stop` 會讓它變成停止（事件 *Stopped by … (it was asleep)*）。進入休眠的事件是 *Asleep: no requests for N min; frees …*，不記入稽核紀錄。對休眠中的部署送 `POST …/try` 會回應 409 `model_asleep`。經過閘道的請求（包括 `POST /v1/videos`）會喚醒它：事件 *Woken by a request (key …)*（不記入稽核紀錄），然後等待就緒的副本、轉到金鑰可以用的雲端分層（`X-Forgeyard-Spilled: waking`），或回應 503 `cannot_wake` / `model_waking`（[錯誤](#errors)）。`/v1/models`、健康檢查和主控台的頁面不會喚醒它，已停止的部署也不會被喚醒。
 
 **降版：**比 1.5.0 舊的伺服器會把 `asleep` 當作停止：模型不會列出，請求回應 503 `no_ready_replica` *The deployment is stopped*，按 Start 會啟動它。
+
+### 自動副本數
+
+1.5.0（[概念](concepts.md#automatic-replicas)）。除了影片部署以外每個部署都有的參數，在部署時（`POST /api/deployments` 的 `params`）或修改時設定；它們由伺服器讀取，所以修改它們不會重新啟動任何東西：
+
+| 參數 | 值 |
+|---|---|
+| `autoscale` | `true` 開啟自動副本數；`false`（或 `null`，或不送）關閉。預設關閉，1.5.0 之前建立的部署也一樣。只有開啟時才會留在 `params` 裡。影片部署會拒絕它（422） |
+| `min_replicas` | 最少幾個副本：1 到 16，不送時是 **1**；只有 `sleep_when_idle` 開啟時可以是 0（這時只會透過休眠降到 0，醒著時至少 1 個） |
+| `max_replicas` | 最多幾個：1 到 16，不送時是 **2**；至少是 `min_replicas` |
+| `autoscale_target` | 一個副本承擔的負載，是它 `concurrency`（recipe 沒有時算 1）的百分比：20 到 100，不送時是 **80** |
+| `scale_up_seconds` | 負載要高於目標多久才多一個副本：10 到 600，不送時是 **60**。達到目標兩倍時是 10 秒 |
+| `scale_down_minutes` | 少一個副本也夠用要持續多久才移除一個：1 到 120，不送時是 **10** |
+
+`autoscale` 關閉時，`min_replicas`、`max_replicas` 和其他參數也會保留，等開啟時使用。其他值都是 422 `invalid_params`。開啟 `autoscale` 的部署會啟動 `min_replicas` 個副本（至少 1 個），不管 `replicas` 寫多少；開啟它或修改範圍的修改，會立刻把副本數調整進範圍內。開啟時，修改不能設定另一個 `replicas` 數字（422 `replicas_automatic`）。
+
+負載是正在它的副本上處理的請求（不含正在排空的副本），加上在閘道隊伍裡等它所在路由分層空位的請求（分層有好幾個部署時平分）和它的圖片佇列，由伺服器每 2 秒取樣一次。`scale_up_seconds` 內的平均值高於 `就緒副本數 × concurrency × autoscale_target %`，或 10 秒內的平均值至少是它的兩倍時，加一個副本；不會超過 `max_replicas`，只在沒有副本正在啟動時，而且只在現在有線上機器（固定機器時是那台）放得下時。上一次變動之後的 `scale_down_minutes` 內，平均值都不超過少一個副本在目標下能承擔的量、而且少一個也不會馬上又要多加一個時，移除一個；不會低於 `min_replicas`（至少 1）。移除的是最新的副本：閘道先停止送請求給它，等到它上面沒有處理中的請求（最多 30 分鐘），然後刪掉它那一列，由它的 agent 停止它。修改正在重新啟動副本、某個副本所在的機器離線，或部署啟動、被喚醒或修改後的 2 分鐘內，都不會變動。在休眠部署的喚醒隊伍裡等的請求不算進負載：喚醒本來就會啟動它的副本，等有副本就緒，它們會進到一般流程，在那裡計入。
+
+`GET /api/deployments` 和 `GET /api/deployments/{id}` 會給每個部署一個 `autoscale` 物件：
+
+| 欄位 | 內容 |
+|---|---|
+| `on`、`min`、`max`、`target`、`scale_up_seconds`、`scale_down_minutes` | 設定（沒有設定時是預設值） |
+| `capacity` | 它的 `concurrency`（沒有時是 1） |
+| `replicas`、`ready` | 它現在的副本數（沒有結束的）和就緒的副本數 |
+| `load`、`per_replica` | `scale_up_seconds` 內的平均負載，以及每個就緒（沒在排空）副本的負載；取樣前是 `null` |
+| `wanted` | 負載要求的副本數（在範圍內） |
+| `draining` | 正在排空的副本：`{replica, since, in_flight}`，或 `null` |
+| `room` | 想多加的那一個為什麼現在放不下（*Wants 3 replicas, room for 2: …*），或 `null` |
+| `paused` | 它現在為什麼不調整（*an edit is restarting its replicas*、*a replica's machine is offline*、*it was started, woken or changed less than 2 minutes ago*），或 `null` |
+| `last` | 這台伺服器做的最後一個決定 `{at, text}`，或 `null` |
+
+每個決定都是部署的一個事件（kind `scaled`）：*Scaled up to N: …*、*Wants N replicas, room for M: …*（放不下期間只記一次）、*Draining replica N: …*、*Kept replica N: …*、*Removed replica N after draining for … s*、*Asleep with N replicas (its minimum)*。它們不記入稽核紀錄。負載樣本、排空和決定都記在伺服器的記憶體裡：重新啟動後時間窗重新開始，進行中的排空不會移除任何副本。
 
 ## 透過 API 查看機器的模型快取
 

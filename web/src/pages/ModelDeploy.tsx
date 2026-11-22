@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
 import type { CatalogModel, CatalogResponse, ContextHint, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
+import { canAutoscale, emptyScale, scaleDeployParams, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
 
 export const ESTIMATE_DELAY_MS = 400;
@@ -30,6 +32,7 @@ export function ModelDeployPage() {
   const [ctxHint, setCtxHint] = useState<{ key: string; hint: ContextHint } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; machines?: MachineVerdict[] } | null>(null);
+  const [scale, setScale] = useState<ScaleForm>(emptyScale);   // 1.5.0: a fixed number or automatic replicas
 
   const model = cat?.models.find((m) => m.name === f.model);
   const recipes = useMemo(() => compatibleRecipes(model, cat?.recipes ?? []), [model, cat]);
@@ -43,6 +46,12 @@ export function ModelDeployPage() {
   };
 
   const body = deployBody(view, recipe);
+  const auto = canAutoscale(recipe) && scale.mode === "auto";
+  if (auto) {
+    const chosen = scaleDeployParams(scale);
+    body.params = { ...(body.params as Record<string, unknown>), ...chosen.params };
+    body.replicas = chosen.replicas;
+  }
   const bodyKey = JSON.stringify({ ...body, hf_token: undefined });
   // What the context hint depends on besides the context itself: another model, recipe or machine needs a new one.
   const hintKey = JSON.stringify([view.model, view.recipe, view.device, f.machine]);
@@ -155,8 +164,8 @@ export function ModelDeployPage() {
                     extra={ctxHint && ctxHint.key === hintKey && ctxHint.hint.param === k
                       ? <ContextHintLine hint={ctxHint.hint} value={view.params[k]} pinned={!!f.machine} onPick={(n) => setParam(k, String(n))} /> : null} />
                 ))}
-                <div className="field"><label htmlFor="d-replicas">Replicas</label>
-                  <input id="d-replicas" inputMode="numeric" value={f.replicas} onChange={(e) => set("replicas", e.target.value)} /></div>
+                <ReplicasField id="d" count={f.replicas} onCount={(v) => set("replicas", v)} scale={scale} onScale={setScale}
+                  allowAuto={canAutoscale(recipe)} />
                 <div className="field"><label htmlFor="d-machine">Machine</label>
                   <select id="d-machine" value={f.machine} onChange={(e) => set("machine", e.target.value)}>
                     <option value="">Best fit (binpack)</option>
@@ -167,9 +176,10 @@ export function ModelDeployPage() {
                 <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
               )}
               <details className="spec-preview" style={{ marginTop: 14 }}>
-                <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}token</summary>
+                <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}token</summary>
                 <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
                 <div className="grid-3">
+                  {auto && <ScaleAdvancedFields id="d" scale={scale} onScale={setScale} />}
                   {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam} />)}
                   <div className="field"><label htmlFor="d-vram">Memory per device (override)</label>
                     <input id="d-vram" value={f.vram} onChange={(e) => set("vram", e.target.value)} placeholder="e.g. 20Gi" />
