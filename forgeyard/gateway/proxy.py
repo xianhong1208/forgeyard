@@ -115,6 +115,7 @@ from forgeyard.gateway.usage import recorder
 from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
 from forgeyard.models import modalities
 from forgeyard.security import replica_tls
+from forgeyard.workloads import offline
 
 log = logging.getLogger("forgeyard.gateway")
 balancer.listen(waiting.slot_freed)   # a freed slot wakes the first request waiting in line (1.4.5)
@@ -277,6 +278,8 @@ def not_ready_reason(w: Workload) -> str:
     for r in w.replicas:
         where = f" on {r.node.name}" if r.node else " (not placed)"
         state = r.reason or r.state
+        if r.node is not None and offline.skipped(r.node) and not r.final:
+            state = f"the machine is {r.node.status}" + (f"; {r.reason}" if r.reason else "")  # 1.4.5 (#164)
         parts.append(f"replica {r.ordinal}{where}: {state}")
     return ("No replica is ready yet: " + "; ".join(parts))[:400] if parts else "The deployment has no replicas."
 

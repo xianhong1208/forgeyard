@@ -82,6 +82,7 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 | Variable | Default | What it does |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Agents send a heartbeat every third of it (at least every 2 seconds) |
+| `AGENT_OFFLINE_MOVE_SECONDS` | `600` | A machine offline for this long (from its last heartbeat, or from the server's start when that is later) has the replicas of its unpinned deployments placed again on machines that fit; deployments pinned to it wait. `0`: replicas always wait for their machine ([details](how-to.md#when-a-machine-stays-offline)) |
 | `IMAGE_UPLOAD_MAX_GB` | `64` | The largest image file an admin may upload to a machine from its page (**Engine images** → **Upload an image**), in GiB. The file is streamed through the server to the agent, never stored |
 | `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 

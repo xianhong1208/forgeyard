@@ -16,6 +16,8 @@ agent 只透過伺服器的**憑證授權單位**（CA）來信任伺服器，�
 
 agent 連線中時，機器顯示 **online**；超過 30 秒沒有收到任何訊息時，顯示 **offline**（agent 每 10 秒送一次心跳）。agent 會自己重新連線。管理員可以**撤銷**一台機器（它的憑據立刻失效），或把它**移除**。
 
+機器離線期間，請求不會再送到它上面的副本。離線超過 **10 分鐘**（`AGENT_OFFLINE_MOVE_SECONDS`）時，它上面部署的副本會依部署自己的規則，重新放到放得下的機器上；**固定（pinned）**在那台機器上的部署會等它回來。機器回來時，它的 agent 會停掉已經搬走的東西。請看[機器一直離線時](how-to.md#when-a-machine-stays-offline)。
+
 停止或重新啟動 agent **不會停掉它的模型和應用程式**：重新啟動的 agent 會找到它們並接手管理。這就是安裝的服務使用 `KillMode=process` 的原因。
 
 agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列旗標讀取設定（[完整列表](reference.md#agent-settings)）。

@@ -19,6 +19,16 @@ version until 1.0.
   The guide has a how-to with a scrape configuration (also for Docker, which needs the token). New dependency
   `prometheus-client` (Apache-2.0, no dependencies of its own). No migration.
 
+- **Replicas move off a machine that stays offline** (#164). A machine offline for 10 minutes
+  (`AGENT_OFFLINE_MOVE_SECONDS`, counted from its last heartbeat, or from the server's start when that is later; 0
+  turns it off) has each replica of its unpinned deployments placed again on a machine that fits, by the
+  deployment's own rules (spread, memory, the estimate as it is now). It is the same replica with a new id, never a
+  second copy; its page says *moved: <machine> offline*. A deployment pinned to the machine waits for it, and so does
+  a replica no other machine can take (it moves on a later sweep once one can); both say so once. When the machine
+  comes back, its agent no longer finds the moved replicas in its work list and stops their engines. Apps follow the
+  same rules, except tasks, which stay (running one again elsewhere could do its work twice). A machine back within
+  the grace keeps everything. No migration.
+
 ### Security
 
 - **TLS from the gateway to every replica** (#163). The gateway used to reach a replica's key guard over plain
@@ -45,6 +55,11 @@ version until 1.0.
 
 ### Changed
 
+- **Routing skips an offline machine's replicas at once** (#164). The gateway no longer dials a replica whose machine
+  is offline (a connect error and a 15 s penalty on each replica until its agent said otherwise, which it cannot);
+  with no other ready replica the 503 says *the machine is offline*. The console counts such replicas as not ready.
+  Right after the server starts (every machine shows offline until its agent reconnects, while the engines still
+  answer), a machine not heard from since keeps its replicas in the routes for `AGENT_OFFLINE_SECONDS`.
 - The DCO check no longer runs on the release pull requests (`dev` → `main` and the `main` → `dev`
   back-merge): every commit reached `dev` through its own checked pull request, and checking them again
   failed on commits merged before the DCO was adopted (#160).

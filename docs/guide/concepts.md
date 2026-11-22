@@ -27,6 +27,11 @@ A machine shows **online** while its agent is connected, and **offline** when no
 for 30 seconds (the agent sends a heartbeat every 10). The agent reconnects by itself. An admin can
 **revoke** a machine (its credential stops working at once) or **remove** it.
 
+While a machine is offline, requests no longer go to its replicas. When it stays offline for **10 minutes**
+(`AGENT_OFFLINE_MOVE_SECONDS`), the replicas of its deployments are placed again on machines that fit, by the
+deployment's own rules; a deployment **pinned** to that machine waits for it. When the machine comes back, its
+agent stops what moved away. See [When a machine stays offline](how-to.md#when-a-machine-stays-offline).
+
 Stopping or restarting the agent **leaves its models and apps running**: a restarted agent finds them and
 takes them over. That is why the installed service uses `KillMode=process`.
 
