@@ -48,7 +48,7 @@ from typing import Callable, Optional
 
 from forgeyard.agent import relay
 from forgeyard.agent.replica_tls import ReplicaTls
-from forgeyard.agent.workloads import health, plan, ports as portlib
+from forgeyard.agent.workloads import enginecache, health, plan, ports as portlib
 from forgeyard.agent.workloads.admin import Admin
 from forgeyard.agent.workloads.checks import HealthChecks
 from forgeyard.agent.workloads.fetching import Fetching
@@ -60,7 +60,7 @@ from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.prefetch import Prefetcher
 from forgeyard.agent.workloads.runtime import Runtime
 from forgeyard.agent.workloads.state import Alias, Fetches, Guarding, Operations, Outbox, Secrets
-from forgeyard.machines.protocol import FEATURE_GUARD_TLS, FEATURE_PREFETCH, PROTOCOL_VERSION
+from forgeyard.machines.protocol import FEATURE_GUARD_TLS, FEATURE_PREFETCH, FEATURE_START_TIMES, PROTOCOL_VERSION
 from forgeyard.workloads import images
 
 __all__ = ["LIVE", "SERVICE_BACKOFF_CAP", "TAIL_CHARS", "TAIL_LINES", "TASK_BACKOFF_CAP", "Supervisor"]
@@ -135,6 +135,9 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
         self.tls = ReplicaTls(state_dir)
         self.tls_required = False
         self._tls_said: Optional[bool] = None
+        # 1.5.0 ("engine_cache"): the deployments whose compile caches may stay, and whether to look again.
+        self.engine_cache_keep: Optional[set[str]] = None
+        self.engine_cache_due = False
 
     # ------------------------------------------------------------------ what the agent tells the server
     def runtime_info(self) -> dict:
@@ -223,8 +226,14 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
                         self.strip.discard(r["id"])
             if "image_ids" in r:
                 r = {**r, "image_ids": images.parse_check(r["image_ids"])}
+            if "engine_cache" in r:
+                r = {**r, "engine_cache": enginecache.parse(r["engine_cache"])}  # 1.5.0, beside the spec
             desired[r["id"]] = r
         self.desired = desired
+        # 1.5.0 ("engine_cache"): the deployments whose engine caches this machine keeps; checked on the next round.
+        keep = enginecache.parse_keep(msg.get("engine_caches"))
+        if keep is not None:
+            self.engine_cache_keep, self.engine_cache_due = keep, True
         for rid in [rid for rid in self.relays if rid not in desired]:
             self.relays.pop(rid, None)
         self._cancel_unwanted()
@@ -239,7 +248,8 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
         self.report_event.set()
 
     def _public(self, rec: Record) -> dict:
-        return rec.public(with_tail=self.tails.get(rec.id) if rec.final else None)
+        return rec.public(with_tail=self.tails.get(rec.id) if rec.final else None,
+                          start=FEATURE_START_TIMES in self.server_features)
 
     def take_report(self) -> Optional[dict]:
         prefetch = FEATURE_PREFETCH in self.server_features
@@ -409,6 +419,9 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
             if want.get("image_ids") and want["image_ids"] != rec.image_ids:
                 rec.image_ids = want["image_ids"]  # a record from before the server or agent knew them
                 self._save(rec)
+            if not enginecache.same(want.get("engine_cache"), rec.engine_cache):
+                rec.engine_cache = want.get("engine_cache")  # the recipe turned it on or off: from the next start
+                self._save(rec)
             if (self._guarded(rec) and rec.id in self.keys and rec.state in LIVE and rec.ports
                     and not plan.guarded(rec.ports)):
                 # Started by an agent without the guard: its engine listens on the published port
@@ -424,6 +437,9 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
                     await asyncio.to_thread(container.remove_name, owned["name"])
         if self.stopping:
             return  # stops first; starts on a later round, once every stop has finished
+        if self.engine_cache_due:
+            self.engine_cache_due = False
+            await self._prune_engine_caches()
 
         for rid, want in self.desired.items():
             if rid in self.records:
@@ -435,6 +451,7 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
             rec.key_env = want.get("key_env")
             rec.guarded = bool(want.get("guarded"))
             rec.image_ids = want.get("image_ids")
+            rec.engine_cache = want.get("engine_cache")
             if rec.runtime not in self.runtimes:
                 rec.state, rec.final, rec.reason = "failed", True, f"this agent has no {rec.runtime} runtime"
             elif want.get("model") is not None or want.get("engine") is not None:
@@ -456,6 +473,48 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
             self.full_due = False
             self.full_ready = True
             self._notify()
+
+    # ------------------------------------------------------------------ engine caches (1.5.0)
+    def engine_cache_root(self) -> Optional[Path]:
+        root = getattr(self.models, "root", None) if self.models is not None else None
+        return Path(root) if root is not None else None
+
+    def can_cache_engines(self) -> bool:
+        """The agent may say "engine_cache": a model cache to keep them in and a container engine."""
+        rt = self.runtimes.get("container")
+        return self.engine_cache_root() is not None and rt is not None and bool(rt.info().get("ok"))
+
+    def _engine_cache_keys(self) -> set[str]:
+        """Every engine cache a replica here has or is wanted with."""
+        out = {(r.engine_cache or {}).get("key") for r in self.records.values()}
+        out |= {(w.get("engine_cache") or {}).get("key") for w in (self.desired or {}).values()}
+        return {k for k in out if k}
+
+    async def _prune_engine_caches(self) -> None:
+        root = self.engine_cache_root()
+        if root is None or self.engine_cache_keep is None:
+            return
+        try:
+            await asyncio.to_thread(enginecache.prune, root, set(self.engine_cache_keep), self._engine_cache_keys())
+        except OSError as e:
+            log.warning("Could not look through the engine caches in %s: %s", root, e.strerror or e)
+
+    async def _engine_cache_dir(self, rec: Record) -> None:
+        """Before a container starts: its engine cache directory, made when missing (`rec.engine_cache["dir"]`).
+        A cache that cannot be made is left out, with a warning: the engine then compiles as it did before."""
+        block, root = rec.engine_cache, self.engine_cache_root()
+        if not block or rec.runtime != "container":
+            return
+        rec.engine_cache = {k: v for k, v in block.items() if k != "dir"}
+        if root is None:
+            return
+        try:
+            path = await asyncio.to_thread(enginecache.directory, root, block["key"])
+        except (OSError, ValueError) as e:
+            log.warning("Replica %s of %s starts without its engine cache: %s", rec.id[:12], rec.workload,
+                        getattr(e, "strerror", None) or e)
+            return
+        rec.engine_cache["dir"] = str(path)
 
     def _start_due(self, now: float, restarts_only: bool = False) -> None:
         for rec in list(self.records.values()):

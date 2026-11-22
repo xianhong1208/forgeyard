@@ -778,6 +778,12 @@ they end:
 | `forgeyard_gateway_waiting` | gauge | `model` | Requests waiting in line for a free local slot now (all the route's tiers) |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
 
+When a replica of a model deployment becomes ready (1.5.0):
+
+| Metric | Type | Labels | What it is |
+|---|---|---|---|
+| `forgeyard_replica_start_seconds` | histogram | `recipe`, `model` | How long the start took: from its agent beginning it (the model's files, the image, the engine) to its first healthy answer. From an agent older than 1.5.0, the engine's part only ([See how long a model takes to start](how-to.md#see-how-long-a-model-takes-to-start)) |
+
 Read from the database at each scrape:
 
 | Metric | Labels | What it is |
@@ -794,7 +800,8 @@ Read from the database at each scrape:
 | `forgeyard_build_info` | `version` | Always 1: the server's version |
 
 Plus `process_*` (the server's CPU time, memory, open files). A `model` label is a served name the gateway has a
-route for: a request for a model nobody serves counts as `_unknown`, never under the name the client sent. No
+route for: a request for a model nobody serves counts as `_unknown`, never under the name the client sent; a
+`recipe` label is a recipe's name. No
 label holds an API key, a key's id or name, a person or a prompt. Counters start from 0 when the server restarts.
 
 ## Apps (deprecated)
@@ -1013,6 +1020,13 @@ deployment's `workload` (as in `GET /api/workloads/{id}`) names it back: `deploy
 `placement`, each machine and each placed replica lists `needs` (what it would download there:
 `model`, `engine`, `image`) and, when that machine could not reach one of those sources in the last
 hour, `unreachable`.
+
+(1.5.0) Every deployment, in the list and alone, also has `last_start`: how long its latest start
+took, `{seconds, phases, source, at, replica}`, from its events. `phases` holds the parts an agent
+tells apart, `model`, `waiting`, `image` and `engine`, which add up to `seconds`; `source` is `agent`,
+or `server` when the agent is older than 1.5.0 and the server measured the engine's part only. It is
+`null` until a replica has become ready since 1.5.0
+([See how long a model takes to start](how-to.md#see-how-long-a-model-takes-to-start)).
 
 ## A machine's model cache through the API
 
@@ -1489,6 +1503,11 @@ recipe with only the variants you want can.
 | `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
 | | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
 
+`vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`: vLLM's
+compile cache could be kept between starts, in a directory per replica on its machine, but stays off until it
+has been measured ([Keep vLLM's compile cache between starts](how-to.md#keep-vllms-compile-cache-between-starts-experimental)).
+A custom recipe turns it on with `enabled: true` (container variants only).
+
 `vllm-pooling` serves a sequence-classification model (`…ForSequenceClassification`) as a reranker only
 when it has one output, as vLLM decides: `id2label` in its `config.json` has one entry, or `num_labels` is 1
 (1.4.3, #147). One with two labels or more is a text classifier (task `classify`, 1.4.4): inspecting or adding
@@ -1636,7 +1655,7 @@ On a machine installed with the one-line install:
 | `/etc/forgeyard/agent.toml` | The agent's settings |
 | `/var/lib/forgeyard-agent/` | The credential (`credential.json`, 0600), the pinned CA (`server-ca.pem`), the replicas' records and logs |
 | `/var/lib/forgeyard-agent-work/` | One working directory per process replica |
-| `/srv/forgeyard-models/` | The model cache |
+| `/srv/forgeyard-models/` | The model cache; (1.5.0) its `engine-cache/` holds the engines' compile caches of recipes that keep them |
 | `/opt/forgeyard/` | The agent program: its Python environment and the downloaded wheel |
 | `/usr/local/bin/forgeyard` | The `forgeyard` command |
 | `/etc/systemd/system/forgeyard-agent.service` | The service (`KillMode=process`, `Restart=always`) |

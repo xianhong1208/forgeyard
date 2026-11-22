@@ -680,6 +680,29 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 用程式修改：`PATCH /api/deployments/{id}`（[參考](reference.md#change-a-deployment-through-the-api)）。
 
+## 查看模型啟動花了多久
+
+部署的副本每次就緒時，部署的事件都會寫出這次啟動花了多久、時間花在哪裡，例如 *Replica 0 on gpu-01: ready in 74.2 s (model 0.3 s, image 0.1 s, engine 73.8 s)*：
+
+- `model`：在機器的模型快取裡檢查模型檔案，或下載它們（以及行程引擎的封存檔）；
+- `waiting`：等共用同一張 GPU 的另一個副本載入完成；
+- `image`：檢查引擎的映像檔，或拉取它；
+- `engine`：從啟動引擎到它第一次健康檢查通過。
+
+各部分加起來就是總時間。同一次啟動也是 `GET /api/deployments/{id}` 和列表裡的 `last_start`（[參考](reference.md#change-a-deployment-through-the-api)），以及 `/metrics` 裡的 `forgeyard_replica_start_seconds`（[指標](reference.md#metrics)）。agent 比 1.5.0 舊時，伺服器只能量到引擎的部分，事件會寫 *measured by the server*：[更新 agent](#update-an-agent) 就能看到其他部分。
+
+副本啟動期間，1.5.0 的 agent 每秒檢查一次它的健康狀態，而不是照配方的 *interval*（vLLM 是 10 秒），所以模型一就緒，一秒內就會開始使用，而不是最多晚 10 秒。只在配方的 start period 內這樣做（這段時間裡檢查失敗不算數），而且只到第一次通過為止；之後照配方的 interval 檢查，和以前一樣，所以副本絕不會比以前更早被判定為 unhealthy。
+
+### 在兩次啟動之間保留 vLLM 的編譯快取（實驗性）
+
+vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton 編譯它的 kernel），寫到容器裡的一個目錄，容器沒了它就跟著沒了。`vllm` 和 `vllm-pooling` 配方已經寫明這個目錄（`engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`），但在真實硬體上量過之前保持關閉。要試用的話：
+
+1. 在 **Models → Engines** 選 **Add an engine**，從內建的 `vllm` 開始，取個名字（例如 `vllm-cache`），把它的 `engine_cache` 那一行改成 `enabled: true`。
+2. 用 `vllm-cache` 部署模型，參數和你的 `vllm` 部署相同。
+3. **Stop** 再 **Start** 一次：第一次啟動會編譯並填滿快取，下一次就會用它。在事件裡比較兩次啟動的 `engine` 部分。
+
+每個副本在它的機器上都有自己的目錄 `<model cache>/engine-cache/<key>`，以可寫入的方式掛載在 `/forgeyard/engine-cache`，`VLLM_CACHE_ROOT` 指向它；其他部署或副本都不會用到。vLLM 依模型、會改變計算圖的設定、它自己的程式碼和編譯器的雜湊值保存編譯結果，所以改了參數就會重新編譯，不會載入錯的計算圖。刪除部署（或它的配方不再保留快取）時目錄會被移除；副本以新的映像檔（新的配方版本）啟動時，它較舊的目錄也會被移除。需要有模型快取和容器引擎的 1.5.0 agent；行程 variant，以及較舊 agent 上的副本，啟動方式和以前一樣。不以 root 執行的映像檔無法寫入這個目錄。
+
 ## 機器一直離線時
 
 超過 30 秒（`AGENT_OFFLINE_SECONDS`）沒有收到機器的任何訊息，它就是 *offline*。從這時起：

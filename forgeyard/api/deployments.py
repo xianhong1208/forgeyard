@@ -39,7 +39,7 @@ from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
 from forgeyard.security import replica_tls
-from forgeyard.workloads import placement, state as wstate
+from forgeyard.workloads import placement, starts, state as wstate
 from forgeyard.workloads.spec import NAME_RE, WorkloadSpec, parse_bytes
 
 router = APIRouter(prefix="/api", tags=["deployments"])
@@ -321,6 +321,8 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
         "workload": workload_out(w, caller),
         "pinned": _pinned(db, w),
         "rollout": _rollout(w),
+        # 1.5.0 (#37): how long its latest start took, from its events ({seconds, phases, source, at, replica}).
+        "last_start": starts.last_start(db, w.id),
     }
     if detail:
         from forgeyard.api.keys import deployment_usage

@@ -375,7 +375,7 @@ def test_fy_upd_015_nothing_known_says_so():
 # ------------------------------------------------------------------ behind (#122)
 FULL = ("workloads", "replica_keys", "replica_guard", "image_ids", "engine_zip", "workload_guard", "models",
         "cache_admin", "prefetch", "relay", "relay_source", "relay_images", "image_load", "image_save", "image_remove",
-        "guard_tls")
+        "guard_tls", "start_times", "engine_cache")
 CONTAINER_OK = {"container": {"ok": True}}
 
 
@@ -394,7 +394,8 @@ def test_fy_upd_016_behind_by_version_protocol_or_a_missing_feature():
     assert update.behind(node(version="1.0.0", status="revoked"), "1.4.2") is None
     assert update.behind(node(version=None), "1.4.2") is None
     # what an agent declares depends on what it has: no container engine, no image features
-    no_engine = node(version="1.4.2", features=[f for f in FULL if f not in ("image_load", "image_save", "relay_images")])
+    no_engine = node(version="1.4.2", features=[f for f in FULL if f not in ("image_load", "image_save", "relay_images",
+                                                                                "engine_cache")])
     assert update.behind(no_engine, "1.4.2") is None
     assert update.expected_features(node(features=())) == set()
 

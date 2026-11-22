@@ -67,8 +67,15 @@ class Record:
     # The recorded ids of a pinned image ({ids, content}, workloads/images.py), from `desired`: a
     # copy loaded with `docker load` that matches them runs without a pull.
     image_ids: Optional[dict] = None
+    # 1.5.0 ("start_times", agent/workloads/starts.py): the start being measured ({began, mark, parts}) and the
+    # last one measured ({seconds, phases}), reported once the replica is ready.
+    start_marks: Optional[dict] = None
+    start_report: Optional[dict] = None
+    # 1.5.0 ("engine_cache", agent/workloads/enginecache.py): the engine's compile cache for this replica ({key, env}),
+    # from `desired`.
+    engine_cache: Optional[dict] = None
 
-    def public(self, *, with_tail: Optional[str] = None) -> dict:
+    def public(self, *, with_tail: Optional[str] = None, start: bool = False) -> dict:
         out = {"id": self.id, "generation": self.generation, "state": self.state, "reason": self.reason,
                "exit_code": self.exit_code, "attempt": self.attempt, "restarts": self.restarts, "final": self.final,
                "pid": self.pid, "container": self.container,
@@ -76,6 +83,8 @@ class Record:
                "started_at": self.started_at, "finished_at": self.finished_at}
         if self.download is not None:
             out["download"] = self.download
+        if start and self.start_report is not None:
+            out["start"] = self.start_report  # 1.5.0: to a server that lists "start_times"
         if with_tail is not None:
             out["log_tail"] = with_tail
         return out

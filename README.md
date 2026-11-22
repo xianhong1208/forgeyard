@@ -34,7 +34,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed
-  again on machines that fit.
+  again on machines that fit. Each start of a model is timed, part by part (model files, image,
+  engine), and a starting replica is checked every second, so it serves as soon as it is ready.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.

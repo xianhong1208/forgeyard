@@ -22,7 +22,8 @@ agent -> server
              message `model_cache` (free space, the cached models) when that changed. (1.3.1) an
              image pull is reported as a `download` with phase "image" (see "pull_progress"). (1.4)
              `model_cache.engines` lists the engine archives unpacked there (first 16 hex digits of
-             their SHA-256); older servers ignore it
+             their SHA-256); older servers ignore it. (1.5.0, "start_times") a replica that became ready carries
+             `start` {seconds, phases}: how long that start took
   logs       (M2) answer to a logs_request: the last lines of a replica's output
   image_loaded (1.4) answer to image_load: ok or why not, and each image loaded (id, tags, content id)
   relay_sent (1.4.1) answer to relay_send: how the send of a cached model file ended (ok, or not_found |
@@ -45,7 +46,9 @@ server -> agent
   desired    (M2) every replica this machine should run, with its full spec and generation; sent
              right after welcome and whenever it changes. The agent converges on it; it is
              idempotent, so a restart or reconnect just converges again. (1.4, "prefetch") beside the
-             replicas, `downloads`: what to download into the model cache without starting anything
+             replicas, `downloads`: what to download into the model cache without starting anything.
+             (1.5.0, "engine_cache") a replica's `engine_cache` {key, env} and the message's
+             `engine_caches`: the engine compile caches the machine keeps
   logs_request (M2) the last N lines of one replica's output
   cache_remove / cache_prune (1.4, "cache_admin") remove one model, or the partial downloads, from
              the agent's model cache; answered by `cache_removed` (agent -> server)
@@ -115,6 +118,8 @@ Close codes the agent acts on (4000-4999 are application codes):
 """
 
 from __future__ import annotations
+
+import re
 
 PROTOCOL_VERSION = 1
 
@@ -263,10 +268,42 @@ FEATURE_GUARD_TLS = "guard_tls"
 # failing devices change (`{"ok": null}`: nothing to check any more). While it fails the server places no process
 # workload on that machine's GPUs (containers are not affected) and the setup advisor shows an error. Server only.
 FEATURE_GPU_CHECK = "gpu_check"
+# 1.5.0 (issue #37, faster starts): how long each start takes. An agent that lists it, talking to a server that lists
+# it too:
+#   - checks a starting service's health every FAST_HEALTH_INTERVAL (1 s) instead of its `interval` until the first
+#     healthy answer, while still within its `start_period` (where failures do not count, so a faster probe can never
+#     mark it unhealthy sooner); then at `interval` as before;
+#   - reports, on each replica that became ready (healthy, or running without a health check), `start: {seconds,
+#     phases}`: the seconds from the moment it began starting this replica to that first healthy answer, and the
+#     parts it can tell apart (`model`: the model and engine archive into the model cache; `waiting`: another replica
+#     loading on a shared GPU; `image`: checking or pulling the image; `engine`: from launching the engine to its
+#     first healthy answer). The parts add up to `seconds`.
+# The server records each start in the deployment's events ("ready in 74.2 s (…)"), in the histogram
+# `forgeyard_replica_start_seconds` and the deployment API's `last_start`. From an older agent (it keeps its own
+# cadence and sends no `start`) the server measures only the engine's part, from the agent's `started_at` to the
+# status that says it is ready. An agent talking to an older server behaves as before 1.5.0.
+FEATURE_START_TIMES = "start_times"
+FAST_HEALTH_INTERVAL = 1.0
+# 1.5.0 (issue #37): an engine's compile cache kept between starts, for recipes whose `engine_cache` is enabled
+# (vLLM's VLLM_CACHE_ROOT: torch.compile graphs and their Inductor and Triton kernels). To an agent that lists it
+# (it has a model cache and a container runtime), a desired container replica of such a recipe carries
+# `engine_cache: {key, env}` beside `spec`: the agent keeps a directory <model cache>/engine-cache/<key> (mode 0700,
+# for that replica only: the key names the deployment, the replica's ordinal and its image), mounts it writable
+# into the container at ENGINE_CACHE_MOUNT, and sets the variable `env` to that path. `desired.engine_caches` lists
+# the key prefix (ENGINE_CACHE_PREFIX_PARTS dash-separated parts: the deployment) of every deployment that may keep
+# one: the agent removes a directory whose deployment is not listed (it was deleted, or its recipe turned the cache
+# off), and the other directories of a replica that starts with a new key (a new recipe version or image), never
+# one a running replica uses. Listed by both sides; process replicas never get it.
+FEATURE_ENGINE_CACHE = "engine_cache"
+ENGINE_CACHE_MOUNT = "/forgeyard/engine-cache"
+ENGINE_CACHE_PREFIX_PARTS = 2
+# <deployment id>-<its creation time, hex>-<ordinal>-<12 hex digits of the image's SHA-256> (forgeyard/models/enginecache.py)
+ENGINE_CACHE_KEY_RE = re.compile(r"^[0-9]{1,12}-[0-9a-f]{1,16}-[0-9]{1,4}-[0-9a-f]{12}$")
+ENGINE_CACHE_PREFIX_RE = re.compile(r"^[0-9]{1,12}-[0-9a-f]{1,16}$")
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
                    FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
                    FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE, FEATURE_GUARD_TLS,
-                   FEATURE_GPU_CHECK)
+                   FEATURE_GPU_CHECK, FEATURE_START_TIMES, FEATURE_ENGINE_CACHE)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

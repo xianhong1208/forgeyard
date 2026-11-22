@@ -1036,6 +1036,52 @@ the usual rules.
 
 From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
 
+## See how long a model takes to start
+
+Each time a replica of a deployment becomes ready, the deployment's events say how long that start
+took and where the time went, such as *Replica 0 on gpu-01: ready in 74.2 s (model 0.3 s, image
+0.1 s, engine 73.8 s)*:
+
+- `model`: checking the model's files in the machine's model cache, or downloading them (and a
+  process engine's archive);
+- `waiting`: waiting for another replica to finish loading on a GPU they share;
+- `image`: checking the engine's image, or pulling it;
+- `engine`: from launching the engine to its first healthy answer.
+
+The parts add up to the total. The same start is `last_start` in `GET /api/deployments/{id}` and in
+the list ([reference](reference.md#change-a-deployment-through-the-api)), and
+`forgeyard_replica_start_seconds` in `/metrics` ([Metrics](reference.md#metrics)). With an agent older
+than 1.5.0 the server can only measure the engine's part, and the event says *measured by the
+server*: [update the agent](#update-an-agent) to see the rest.
+
+While a replica starts, a 1.5.0 agent checks its health every second instead of every *interval* of
+its recipe (10 s for vLLM), so a model that is ready is used within a second, not up to 10 s later.
+It does so only during the recipe's start period, where failed checks do not count, and only until
+the first healthy answer; afterwards the checks run at the recipe's interval, as before, so a replica
+is never called unhealthy sooner than before.
+
+### Keep vLLM's compile cache between starts (experimental)
+
+At every start vLLM compiles the model (torch.compile, and Inductor and Triton compile its kernels)
+into a directory inside its container, which goes with the container. The `vllm` and `vllm-pooling`
+recipes name that directory (`engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`) but keep it off
+until it has been measured on real hardware. To try it:
+
+1. In **Models → Engines**, choose **Add an engine**, start from the built-in `vllm`, name it (for
+   example `vllm-cache`) and change its `engine_cache` line to `enabled: true`.
+2. Deploy the model with `vllm-cache`, with the same parameters as your `vllm` deployment.
+3. **Stop** and **Start** it once: the first start compiles and fills the cache, the next one uses it.
+   Compare the `engine` part of the two starts in its events.
+
+Each replica gets a directory of its own on its machine, `<model cache>/engine-cache/<key>`, mounted
+writable at `/forgeyard/engine-cache` with `VLLM_CACHE_ROOT` pointing at it; no other deployment or
+replica uses it. vLLM keeps what it compiles under a hash of the model, the settings that change the
+graph, its own code and the compiler, so a changed parameter compiles anew instead of loading a wrong
+graph. The directory goes when the deployment is deleted (or its recipe stops keeping one), and a
+replica that starts with a new image (a new recipe version) loses its older directory. It needs a
+1.5.0 agent with a model cache and a container engine; process variants, and replicas on older agents,
+start as before. An image that does not run as root cannot write to the directory.
+
 ## When a machine stays offline
 
 A machine is *offline* once nothing has been heard from it for 30 seconds (`AGENT_OFFLINE_SECONDS`). From then on:

@@ -444,6 +444,16 @@ export type Deployment = {
   // 1.3.1: the machine a person chose (null: Forgeyard chooses), and an edit's restarts in progress.
   pinned?: { id: number; name: string | null } | null;
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
+  // 1.5.0 (#37): how long its latest start took (source "server": measured by the server for an older agent).
+  last_start?: StartTime | null;
+};
+
+export type StartTime = {
+  seconds: number;
+  phases: Partial<Record<"model" | "waiting" | "image" | "engine", number>>;
+  source: "agent" | "server";
+  at: string;
+  replica: number | null;
 };
 
 export type RestartMode = "none" | "on_start" | "rolling" | "all";
