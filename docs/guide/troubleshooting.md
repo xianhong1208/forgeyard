@@ -59,6 +59,9 @@ Two agents with the same credential (a copied state directory) push each other o
 keeps only the newest connection, and closes the older one with *another agent connected with this
 credential*.
 
+Meanwhile its replicas get no requests, and after 10 minutes those of unpinned deployments move to other machines
+that fit ([When a machine stays offline](how-to.md#when-a-machine-stays-offline)).
+
 ## The installer refuses the fingerprint
 
 **You see:** `forgeyard-ca.der: FAILED` and `sha256sum: WARNING: 1 computed checksum did NOT match`,

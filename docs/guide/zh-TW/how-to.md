@@ -676,6 +676,18 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 用程式修改：`PATCH /api/deployments/{id}`（[參考](reference.md#change-a-deployment-through-the-api)）。
 
+## 機器一直離線時
+
+超過 30 秒（`AGENT_OFFLINE_SECONDS`）沒有收到機器的任何訊息，它就是 *offline*。從這時起：
+
+1. **立刻：**閘道不再把請求送到它的副本。在其他機器上也有副本的部署，繼續由那些副本回應；沒有其他就緒副本的部署回應 503 `no_ready_replica`，並說明 *the machine is offline*（或轉到它的雲端備援）。只有在伺服器自己剛啟動時，每台機器在 agent 重新連線（幾秒內）之前都顯示離線，還沒連回來的機器會在那 30 秒內保留它的副本：它們的引擎在這段時間仍然會回應。
+2. **10 分鐘之後**（`AGENT_OFFLINE_MOVE_SECONDS`，從最後一次心跳起算）：沒有固定在這台機器上的部署，它的每個副本會依部署自己的規則（分散到不同機器、記憶體足夠、依目前的估算）重新放到放得下的機器上。部署頁面會顯示 *Replica 0: moved: gpu-01 offline for 10 minutes; placing it on another machine (gpu-02 fits)*，接著是它被放到哪裡。這是同一個副本，絕不會多出一份：部署的副本數量不變。
+   - **固定（pinned）**在這台機器上的部署，副本留在原地等它回來（*waiting for gpu-01 to come online (the deployment is pinned to it)*）。
+   - **沒有其他機器放得下**時，副本也留下來等；之後某次檢查有機器放得下了，才會搬過去。
+3. **機器回來時**，它的 agent 收到的工作清單裡已經沒有搬走的副本，就會停掉它們的引擎。留下來等的副本會重新開始服務。搬走的副本不會自己搬回來：要放回去，請修改部署的機器。
+
+在 10 分鐘內回來的機器（重新開機、更新 agent、短暫斷線）什麼都不會被搬走；時間會從它下一次心跳重新起算。伺服器自己重新啟動後，每台機器在 agent 重新連線之前都會顯示離線，所以這 10 分鐘從伺服器啟動時才開始算。設定 `AGENT_OFFLINE_MOVE_SECONDS=0` 就永遠不搬移副本。應用程式（已淘汰）遵守同樣的規則，只有工作（task）會留在原地：它可能還在那裡執行，在別處再跑一次可能會把它的工作做兩次。
+
 ## 在共用機器上限制 GPU
 
 1. 開啟 **Machines**，點進這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。

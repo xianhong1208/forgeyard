@@ -1024,6 +1024,33 @@ the usual rules.
 
 From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
 
+## When a machine stays offline
+
+A machine is *offline* once nothing has been heard from it for 30 seconds (`AGENT_OFFLINE_SECONDS`). From then on:
+
+1. **At once:** the gateway no longer sends requests to its replicas. A deployment with replicas on other
+   machines keeps answering from those; one with no other ready replica answers 503 `no_ready_replica`, saying
+   *the machine is offline* (or spills to its cloud fallback). Only right after the server itself starts, when
+   every machine shows offline until its agent reconnects (seconds), a machine not heard from yet keeps its
+   replicas for those 30 seconds: their engines still answer meanwhile.
+2. **After 10 minutes** (`AGENT_OFFLINE_MOVE_SECONDS`, counted from the last heartbeat): each replica of a
+   deployment that is not pinned to that machine is placed again on a machine that fits, by the deployment's own
+   rules (spread over machines, enough memory, the estimate as it is now). Its page shows *Replica 0: moved:
+   gpu-01 offline for 10 minutes; placing it on another machine (gpu-02 fits)*, then where it was placed. It is the
+   same replica, never a second copy: the deployment keeps its number of replicas.
+   - A deployment **pinned** to the machine keeps its replicas there: they wait for it (*waiting for gpu-01 to
+     come online (the deployment is pinned to it)*).
+   - When **no other machine fits**, the replica stays and waits too, and moves on a later check once one does.
+3. **When the machine comes back**, its agent gets its work list without the replicas that moved, and stops their
+   engines. Replicas that waited start serving again. Nothing moves back by itself: to put a replica back, edit
+   the deployment's machine.
+
+A machine back within the 10 minutes (a reboot, an agent update, a short network drop) keeps everything; the time
+starts again from its next heartbeat. After the server itself restarts, every machine shows offline until its
+agent reconnects, so the 10 minutes count from the server's start. Set `AGENT_OFFLINE_MOVE_SECONDS=0` to never
+move replicas. Apps (deprecated) follow the same rules, except that a task stays where it is: it may still be
+running there, and running it again elsewhere could do its work twice.
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, open the machine, choose **Change GPU access**.

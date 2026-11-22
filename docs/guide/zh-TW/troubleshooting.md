@@ -44,6 +44,8 @@ sudo forgeyard agent config
 
 兩個使用相同憑據的 agent（例如複製了狀態目錄）會互相把對方擠掉：伺服器只保留最新的連線，並以 *another agent connected with this credential* 關閉較舊的那條。
 
+這段期間它的副本不會收到請求；10 分鐘之後，沒有固定機器的部署，副本會搬到其他放得下的機器（[機器一直離線時](how-to.md#when-a-machine-stays-offline)）。
+
 ## 安裝程式拒絕指紋
 
 **你會看到：** `forgeyard-ca.der: FAILED` 和 `sha256sum: WARNING: 1 computed checksum did NOT match`，或安裝程式顯示 `Refused: the CA … sent has fingerprint sha256:…, not sha256:…`。
