@@ -713,7 +713,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 4. 在它的頁面或 **Playground** 按 **Wake now** 喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在 Playground 的選單裡。在就緒之前它會顯示 **Waking** 和被喚醒後經過的時間，Playground 會顯示 *Waking the model (about 74 s)…*。在 1.5.0 稍後加入收到請求時自動喚醒之前，送給休眠中模型的請求會回應 503 `model_asleep`，或在金鑰可以使用雲端分層時轉到路由的雲端分層。
 5. 對休眠中的部署按 **Stop** 會真正停止它：在有人啟動它之前，它不會出現在 `/v1/models`。
 
-設定顧問兩個方向都會提醒：佔著沒人用的 GPU 記憶體的部署會出現 *had no requests for 3 days: let it sleep when idle?*；在收到的請求之間一直休眠、而且啟動要超過一分鐘的部署會出現 *woke 11 times in a day: raise its idle time*（[Setup health](reference.md#setup-health)）。
+設定顧問兩個方向都會提醒：佔著沒人用的 GPU 記憶體的部署會出現 *had no requests for 3 days: let it sleep when idle?*；在收到的請求之間一直休眠、而且啟動要超過一分鐘的部署會出現 *woke 11 times in a day: raise its idle time*（[Setup health](reference.md#setup-health-checks)）。
 
 閒置時間要依模型啟動需要多久來選：llama.cpp 的模型幾秒就就緒，大的 vLLM 模型可能要好幾分鐘，所以要給它一個遠比啟動時間長的閒置時間（預設的 30 分鐘就是）。休眠時它的記憶體可以給別人用：在共用的卡上可能被其他程式用掉，這時模型會在其他有空間的機器上啟動，或等待。
 
