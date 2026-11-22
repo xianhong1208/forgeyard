@@ -78,7 +78,13 @@ fixed time for something to happen, or read a page before the data it needed had
   next, start it in a thread and wait until the fake engine or app has received it (FY-IGEN-007,
   FY-X-014, FY-PGV-008), not `time.sleep(0.2)`. Then have the fake keep it until the test lets it go
   (a `threading.Event`), not for a fixed time: on a busy runner the next request can take longer than
-  that time to arrive, and finds the first one already done (FY-PGV-008 held it 1 s, #204).
+  that time to arrive, and finds the first one already done (FY-PGV-008 held it 1 s, #204; FY-RT-002 and
+  FY-X-014 too, #212).
+- **Do not time two things the code does at once.** Two requests the gateway sends together can reach
+  the fake in either order, and "within 0.5 s" fails on a slow runner. Hold them and check the state
+  instead: FY-FW-008 proves the second request got a slot while the first was in flight because both
+  are held at the fake engine at the same moment (`FakeEngine.held`), with the line's safety-net
+  recheck made longer than the test so only a real wake-up passes (#212).
 - **Set up the state before the step that could race past it.** A fake job that must still be at work:
   make the fake engines hang before asking for it, not after (FY-VID-005).
 - **Fixtures must look current.** The app's liveness sweep runs every 2 s during the tests, so

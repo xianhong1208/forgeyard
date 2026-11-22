@@ -228,30 +228,55 @@ def test_fy_fw_007_nobody_takes_a_free_slot_while_others_wait():
     assert seen == {"in_flight": 0, "served": 0} and left == 1     # only the one ahead is still in line
 
 
-def test_fy_fw_008_a_waiter_that_gets_a_slot_leaves_the_line_at_once(mixed):  # noqa: F811
-    """FY-FW-008: concurrency 2, both slots busy and two requests in line; both slots free up together:
-    the first in line takes one and leaves the line at once, so the second takes the other right away
-    instead of waiting for the first to finish."""
+def test_fy_fw_008_a_waiter_that_gets_a_slot_leaves_the_line_at_once(mixed, monkeypatch):  # noqa: F811
+    """FY-FW-008: concurrency 2, both slots busy and two requests in line; both slots free up: the first
+    in line takes one and leaves the line at once, so the second takes the other while the first is
+    still in flight, instead of waiting for it to finish. Both are woken: the line's safety-net recheck
+    and the route's wait are made longer than the test, so neither can stand in for a wake-up."""
+    from sqlalchemy import select
+
+    from forgeyard.db import GatewayRoute, new_session
     from tests.gateway_helpers import make_ready
 
+    # #212: this test compared when the engine received the two requests (the second within 0.5 s of the
+    # first, and not before it). The gateway sends them together, so on a busy machine either can arrive
+    # first, and the two slots need not free up within 0.5 s. Now the engine keeps both until the test lets
+    # them go: the second reaching the engine while the first is still held is the proof, at any speed.
+    # Longer than the 10 s the test waits for them (and short enough that, if they are never woken, the
+    # requests still finish before the test ends rather than outliving it).
+    monkeypatch.setattr(waiting, "RECHECK", 20.0)
+    monkeypatch.setattr(proxy, "MAX_WAIT_MS", 20_000)
     r = mixed.owner.patch(f"/api/deployments/{mixed.dep}", json={"params": {"concurrency": 2}})
     assert r.status_code == 200, r.text
     make_ready("chat", [(mixed.node, mixed.engine.port, mixed.engine.secret)])
     set_tiers(mixed.owner, "chat", [[("local", mixed.dep)], [("provider", mixed.pm)]], wait_ms=10_000)
-    mixed.engine.gate = threading.Event()
+    db = new_session()
+    try:    # more than the API allows
+        db.scalar(select(GatewayRoute).where(GatewayRoute.served_name == "chat")).wait_ms = 20_000
+        db.commit()
+    finally:
+        db.close()
+    first, second = threading.Event(), threading.Event()
+    mixed.engine.gate = first
     threads = []
     try:
         for i in range(2):
             threads.append(background(lambda i=i: chat(mixed.api, messages=[{"role": "user", "content": f"r{i}"}])))
         in_flight_soon(2)
+        wait_until(lambda: len(mixed.engine.held) == 2, "r0 and r1 held at the engine")
         for i in range(2, 4):
             threads.append(background(lambda i=i: chat(mixed.api, messages=[{"role": "user", "content": f"r{i}"}])))
             wait_until(lambda i=i: line_len() == i - 1, f"request {i} in line")
-        mixed.engine.hold = 1.0                 # every request now holds its slot a second
+        mixed.engine.gate = second      # what reaches the engine from now on waits for `second`
+        first.set()                     # r0 and r1 answer: both slots free up
+        wait_until(lambda: len(mixed.engine.held) == 4, "r2 and r3 held at the engine, r2 still in flight")
+        assert line_len() == 0
     finally:
-        mixed.engine.gate.set()
-    for t, _ in threads:
-        t.join()
-    at = {p["body"]["messages"][0]["content"]: p["at"] for p in mixed.engine.posts()}
-    assert set(at) == {"r0", "r1", "r2", "r3"} and mixed.cloud.posts() == []
-    assert at["r2"] <= at["r3"] and at["r3"] - at["r2"] < 0.5
+        first.set()
+        second.set()
+        for t, _ in threads:
+            t.join()
+    assert sorted(p["body"]["messages"][0]["content"] for p in mixed.engine.posts()) == ["r0", "r1", "r2", "r3"]
+    assert all(out["r"].status_code == 200 and out["r"].headers["x-forgeyard-target"] == "local:chat#0"
+               for _, out in threads)
+    assert mixed.cloud.posts() == []

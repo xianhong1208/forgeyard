@@ -87,11 +87,17 @@ def test_fy_rt_001_requests_stay_local_while_local_has_room(mixed):
 def test_fy_rt_002_busy_spills_the_second_request(mixed):
     """FY-RT-002: concurrency 1 and one request in flight: the second goes to the cloud tier at once
     (wait_ms 0), named in X-Forgeyard-Target, with X-Forgeyard-Spilled: busy."""
-    mixed.engine.hold = 1.0
-    t, first = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    r = chat(mixed.api)
+    # The engine keeps the first request until the test lets it go, not for a fixed second: on a busy
+    # runner the second request took longer than that second to reach the slots and found it free (#212).
+    mixed.engine.gate = threading.Event()
+    try:
+        t, first = background(lambda: chat(mixed.api))
+        in_flight_soon()
+        r = chat(mixed.api)
+    finally:
+        mixed.engine.gate.set()
     t.join()
+    assert first["r"].status_code == 200
     assert r.status_code == 200 and r.json()["choices"][0]["message"]["content"] == "hello from stub"
     assert r.headers["x-forgeyard-target"] == "provider:cloudy/gpt-mini" and r.headers["x-forgeyard-spilled"] == "busy"
     assert first["r"].headers["x-forgeyard-target"] == "local:chat#0"

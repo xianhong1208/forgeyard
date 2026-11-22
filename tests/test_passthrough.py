@@ -30,6 +30,7 @@ from forgeyard.workloads import state as wstate
 from tests.conftest import add_user, sign_in
 from tests.gateway_helpers import LiveServer, api_client, free_port, new_key
 from tests.guard_helpers import KEY, GuardThread
+from tests.waits import wait_until
 from tests.workload_helpers import make_node, service
 
 GUARDED = ("workloads", "replica_keys", "replica_guard", "workload_guard")
@@ -40,14 +41,15 @@ class App:
     """A workload's own HTTP API on 127.0.0.1:<port>, answering without a key (the guard is in front).
     /echo: what reached it; /headers: hostile response headers; /redirect?to=…: 302 there; /sse: one
     event, waits for `release`, a second one; /forever: streams until the client goes away (`gone`);
-    /slow: answers after `slow` s; /gzip: a gzip body; /status/<n>: that status; /auth401: the app's
-    own 401."""
+    /slow: answers after `slow` s, or when `hold` (a threading.Event) is set if the test gave one; /gzip:
+    a gzip body; /status/<n>: that status; /auth401: the app's own 401."""
 
     def __init__(self):
         self.seen: list[dict] = []
         self.release = threading.Event()
         self.gone = threading.Event()
         self.slow = 3.0
+        self.hold: Optional[threading.Event] = None
         app = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -108,7 +110,10 @@ class App:
                         app.gone.set()
                     return
                 if path == "/slow":
-                    time.sleep(app.slow)
+                    if app.hold is not None:
+                        app.hold.wait(30)
+                    else:
+                        time.sleep(app.slow)
                     return self._send(200, b'{"slow": true}')
                 if path == "/gzip":
                     return self._send(200, gzip.compress(b'{"zipped": true}' * 100), [("Content-Encoding", "gzip")])
@@ -132,6 +137,8 @@ class App:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def close(self):
+        if self.hold is not None:
+            self.hold.set()        # never leave a request waiting for a test that has ended
         self.server.shutdown()
         self.server.server_close()
 
@@ -439,7 +446,9 @@ def test_fy_x_014_concurrency_per_replica_and_per_key(xw):
     """FY-X-014: with concurrency 1 a second request while one is in flight is 429 workload_busy; with
     key_concurrency 1 the same key gets 429 key_busy while another key still gets through; both carry
     Retry-After, and the slots are free again afterwards."""
-    xw.app.slow = 2.0
+    # The app keeps the slow request until the test lets it go, not for a fixed time: on a busy runner
+    # the second call took longer than that time to reach the slots and found them free (#212).
+    xw.app.hold = threading.Event()
     live = LiveServer()
     other = new_key(xw.owner, "other", workloads="all")["key"]
     try:
@@ -448,31 +457,36 @@ def test_fy_x_014_concurrency_per_replica_and_per_key(xw):
 
         def start_slow():
             # The slots are taken before the request is passed on, so once the app has it they are held.
-            # A fixed sleep was not enough on a busy CI machine: the second call got in first.
             def reached():
                 return sum(e["path"] == "/slow" for e in xw.app.seen)
-            before, deadline = reached(), time.monotonic() + 5
-            t = threading.Thread(target=call, args=(xw.key,))
+            before, out = reached(), {}
+            t = threading.Thread(target=lambda: out.setdefault("r", call(xw.key)))
             t.start()
-            while reached() == before:
-                assert time.monotonic() < deadline, "the slow request never reached the app"
-                time.sleep(0.01)
-            return t
+            wait_until(lambda: reached() > before, "the slow request at the app")
+            return t, out
+
+        def let_go(held):
+            t, out = held
+            xw.app.hold.set()
+            t.join()
+            xw.app.hold.clear()
+            assert out["r"].status_code == 200 and out["r"].json() == {"slow": True}
 
         set_gateway(xw.owner, "web", expose=True, concurrency=1)
-        t = start_slow()
+        held = start_slow()
         r = call(other, "/x/web/fast")
         assert r.status_code == 429 and r.json()["error"]["code"] == "workload_busy" and r.headers["retry-after"] == "1"
-        t.join()
+        let_go(held)
         assert call(other, "/x/web/fast").status_code == 200
         set_gateway(xw.owner, "web", expose=True, key_concurrency=1)
-        t = start_slow()
+        held = start_slow()
         r = call(xw.key, "/x/web/fast")
         assert r.status_code == 429 and r.json()["error"]["code"] == "key_busy" and r.headers["retry-after"] == "1"
         assert call(other, "/x/web/fast").status_code == 200
-        t.join()
+        let_go(held)
         assert call(xw.key, "/x/web/fast").status_code == 200
     finally:
+        xw.app.hold.set()
         live.close()
     assert px.in_flight.counts == {} and sum(balancer.inflight.values()) == 0
 
