@@ -268,8 +268,8 @@ From 1.5.0 a deployment's number of replicas can **follow its load**: set **Repl
 new ones alike; turned on, it goes from **1 to 2** unless you set other bounds (1 to 16). Changing the settings
 restarts nothing.
 
-- **The load** is what the gateway sees for the deployment: requests **in flight** on its replicas plus requests
-  **waiting** in the gateway's line for one of its slots (and, for images, in its queue). A line shared by several
+- **The load** is what the gateway sees for the deployment: requests **in flight** on its replicas (not on one being
+  drained: those finish there) plus requests **waiting** in the gateway's line for one of its slots (and, for images, in its queue). A line shared by several
   deployments of one route tier counts for each in equal parts. One replica takes its *Concurrent requests* at the
   **target**, 80 % by default: 0.8 requests for a replica with *Concurrent requests* 1, 3.2 for one with 4. A recipe
   without that setting (speech to text, vision) counts one request per replica.
@@ -279,7 +279,8 @@ restarts nothing.
   the pinned machine for a pinned deployment); Forgeyard never adds a replica that would wait for room. When it
   does not fit, the deployment's page says so: *Wants 3 replicas, room for 2: …*, with each machine's reason.
 - **One fewer** after **10 minutes** in which one replica fewer would have served the load at the target (so a
-  deployment does not go back and forth between one and two). The newest replica is **drained first**: the gateway
+  deployment does not go back and forth between one and two), and not while a burst would want it back at once. The
+  newest replica is **drained first**: the gateway
   sends it nothing new, the requests it runs finish (a long stream too), and only then it is removed and its agent
   stops it. If the load rises again meanwhile, or the other replicas stop being ready, it is kept.
 - **It waits** while an edit restarts the replicas, while a replica's machine is offline (its replicas may move,

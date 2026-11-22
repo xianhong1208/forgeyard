@@ -445,6 +445,21 @@ def test_fy_asc_010_down_needs_the_load_to_fit_one_fewer(cpus, run):
     assert any(x.startswith("Draining replica 1") for x in done), done
 
 
+def test_fy_asc_022_no_drain_in_a_burst(cpus, run):
+    """FY-ASC-022: the 10-minute average says one replica fewer would do, but a burst is on now (2 in flight on the
+    replica that would stay, for the last 10 s): no drain until the burst is over."""
+    c, a, b = cpus
+    two(c, run)
+    uid0 = rows("chat")[0].uid
+    assert run.run(588) == []
+    run.gw.flight = {uid0: 2}
+    assert run.run(30) == [] and len(rows("chat")) == 2 and run.gw.drains == set()
+    run.gw.flight = {}
+    assert run.run(30) == []   # the last minute still holds the burst
+    done = until_scaled(run, 40)
+    assert done and done[0].startswith("Draining replica 1"), done
+
+
 def test_fy_asc_011_a_drain_waits_for_what_is_in_flight(cpus, run, monkeypatch):
     """FY-ASC-011: a request in flight on the replica being drained is waited for, however long (here 2 minutes);
     then it is removed; after DRAIN_MAX_SECONDS it goes anyway, and the event says how many were left."""
@@ -459,6 +474,8 @@ def test_fy_asc_011_a_drain_waits_for_what_is_in_flight(cpus, run, monkeypatch):
     run.gw.flight = {}
     done = run.run(2)
     assert done and done[0].startswith("Removed replica 1 after draining for 12"), done
+    # The stream it finished is not load the one left must take: nothing is added back (the real run's flap).
+    assert run.run(120) == [] and len(rows("chat")) == 1
     # A request that never ends: removed after DRAIN_MAX_SECONDS.
     monkeypatch.setattr(autoscale, "DRAIN_MAX_SECONDS", 300.0)
     run.load("chat", 2)

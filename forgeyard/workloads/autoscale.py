@@ -6,7 +6,7 @@
   of a replica's *Concurrent requests*), `scale_up_seconds` (60) and `scale_down_minutes` (10). Video deployments
   are never scaled automatically: a video job belongs to the replica that makes it.
 - **The load** of a deployment, sampled every SAMPLE_SECONDS in this server: the requests in flight on its
-  replicas (the gateway's balancer) plus those waiting in the gateway's line for a slot of a tier it is in (and in
+  replicas (the gateway's balancer; not those on a replica being drained, which finish there) plus those waiting in the gateway's line for a slot of a tier it is in (and in
   its image queue), a line shared by several deployments counted in equal parts. One replica takes its
   *Concurrent requests* (`concurrency`, 1 when the recipe has none) at the target: 80 % of 4 is 3.2.
 - **Up**: one replica more when the average load over the last `scale_up_seconds` is above what the ready replicas
@@ -193,8 +193,6 @@ class Drain:
     ordinal: int
     since: float               # monotonic
     at: datetime               # wall time, for the page
-    # The load without what the drained replica still runs, since the drain began: what the others must take.
-    samples: deque = field(default_factory=deque)
 
 
 @dataclass
@@ -361,6 +359,11 @@ class Autoscaler:
                 out[dep] = out.get(dep, 0.0) + n / len(deps)
         return out
 
+    def _drain_of(self, dep_id: int) -> Optional[Drain]:
+        with self._lock:
+            watch = self._watch.get(dep_id)
+            return watch.drain if watch is not None else None
+
     def _forget(self, dep_id: int) -> None:
         watch = self._watch.pop(dep_id, None)
         if watch is not None and watch.drain is not None:
@@ -382,7 +385,11 @@ class Autoscaler:
                 self._forget(d.id)
             return self._trim_asleep(db, d, s)
         live = sorted((r for r in w.replicas if not r.final), key=lambda r: r.ordinal)
-        load = waiting + sum(self.signals.in_flight(r.uid) for r in live)
+        # What the replicas that stay must take: not what a replica being drained still runs (it finishes there; counted,
+        # its stream would ask for the replica back the moment it is removed).
+        drain = self._drain_of(d.id)
+        going = drain.uid if drain is not None else None
+        load = waiting + sum(self.signals.in_flight(r.uid) for r in live if r.uid != going)
         with self._lock:
             watch = self._watch.get(d.id)
             if watch is None:
@@ -403,7 +410,6 @@ class Autoscaler:
         watch.paused = None
 
         if watch.drain is not None:
-            watch.drain.samples.append((now, max(0.0, load - self.signals.in_flight(watch.drain.uid))))
             return self._draining(db, d, s, watch, live, cap, now)
         if any(_starting(r, w) for r in live):
             return None, set(), False   # one at a time: the next once this one is ready (or failed)
@@ -422,7 +428,9 @@ class Autoscaler:
             victim = live[-1]
             serving = len(ready) - (1 if victim in ready else 0)
             avg = _average(watch.samples, now, down)
-            if serving >= 1 and avg is not None and avg <= serving * cap + 1e-9:
+            # Not in a burst either: one fewer must not be busy enough now to want the replica back at once.
+            if serving >= 1 and avg is not None and avg <= serving * cap + 1e-9 \
+                    and _up_reason(watch.samples, watch.since, s, cap, serving, now) is None:
                 return self._start_drain(db, d, s, watch, victim, avg, len(ready), now, wall)
         return None, set(), False
 
@@ -537,7 +545,7 @@ class Autoscaler:
         others = [x for x in live if x.uid != drain.uid and _ready(x, w)]
         if not others:
             return self._keep(db, d, watch, f"Kept replica {drain.ordinal}: no other replica is ready.")
-        why = _up_reason(drain.samples, drain.since, s, cap, len(others), now)
+        why = _up_reason(watch.samples, drain.since, s, cap, len(others), now)   # samples since the drain began
         if why is not None:
             return self._keep(db, d, watch, f"Kept replica {drain.ordinal}: {why}.")
         took = now - drain.since

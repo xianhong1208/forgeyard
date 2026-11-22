@@ -1086,13 +1086,13 @@ Anything else is 422 `invalid_params`. A deploy with `autoscale` on starts `min_
 whatever `replicas` says; a change that turns it on or changes the bounds brings the number into them at once. While
 it is on, a change may not set another `replicas` number (422 `replicas_automatic`).
 
-The load is the requests in flight on its replicas plus those waiting in the gateway's line for a slot of a route
+The load is the requests in flight on its replicas (not on a replica being drained) plus those waiting in the gateway's line for a slot of a route
 tier it is in (in equal parts when the tier has several deployments) and in its image queue, sampled every 2
 seconds by the server. One replica is added when the average over `scale_up_seconds` is above `ready replicas ×
 concurrency × autoscale_target %`, or the average over 10 s is at least twice that, never above `max_replicas`,
 only while no replica is starting, and only when one more fits on an online machine now (the pinned one when
 pinned). One is removed when, for `scale_down_minutes` after the last change, the average would have been at most
-what one replica fewer takes at the target; never below `min_replicas` (at least 1). The newest replica is removed:
+what one replica fewer takes at the target, and that one fewer would not want one more at once; never below `min_replicas` (at least 1). The newest replica is removed:
 the gateway first stops sending it requests, waits until nothing is in flight on it (at most 30 minutes), then its
 row goes and its agent stops it. Nothing changes while an edit restarts the replicas, a replica's machine is
 offline, or within 2 minutes after a person started or changed the deployment.
