@@ -6,6 +6,29 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Sleep when idle** (#37, 1.5.0, first step). A deployment can stop its replicas when nobody uses it and give their
+  GPU memory (or RAM) back; the model files stay in the machine's cache and the engine image in its store. Two new
+  parameters of every deployment, read by the server (changing them restarts nothing): `sleep_when_idle` (**off by
+  default**, for deployments made before and after this change) and `idle_minutes` (**30** by default, 1 to 1,440).
+  Use is every request the gateway takes for the model (any key or the Playground, also one that went to a cloud
+  tier, also while it waits), a video asked for and *Try it*; `/v1/models`, health checks, the console's polling
+  and polls of a video job are not. A sweeper (every 30 s) puts a deployment to sleep after its idle time, counted
+  from the last use or its last start, change or readiness, or the server's start (a restart never puts anything to
+  sleep early); never while a request is in flight or waiting, a replica is starting, an edit restarts its
+  replicas, or (video) a job is waiting or being made or a finished video can still be downloaded. Asleep is a new
+  desired state `asleep` (and `status` `asleep`): the model **stays in `/v1/models`**, a request to it answers
+  **503 `model_asleep`** (it spills to a cloud tier the key may use, like any tier without a ready replica),
+  **Start** (on the page: **Wake**) wakes it on the machine it ran on or its pinned machine, and **Stop** makes it
+  stopped. Going to sleep is an event (*Asleep: no requests for 30 min; frees …*), not audited; waking with Start is
+  audited as a start (`woken: true`). The deployment API gives a `sleep` object (`on`, `idle_minutes`, `asleep`,
+  `last_request_at`, `since`, `sleeps_at`, `held_by`), an edit while asleep answers `restart: on_wake`, and the
+  deployment page shows *asleep* with **Wake** and **Stop**. Waking on a request, and the settings in the deploy and
+  edit forms, come in the next 1.5.0 steps. No migration: the settings are deployment parameters and the last use
+  is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
+  the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
+
 ## [1.4.5] — 2026-11-22
 
 Fixes from an outside review. Structured output is never silently lost on a cloud spill (#162). The gateway
@@ -32,27 +55,6 @@ already (a new `server_settings` row, a deployment's parameters, a machine's run
 serious bugs, as 1.4.x patch releases ([SECURITY.md](SECURITY.md#supported-versions)).
 
 ### Added
-
-- **Sleep when idle** (#37, 1.5.0, first step). A deployment can stop its replicas when nobody uses it and give their
-  GPU memory (or RAM) back; the model files stay in the machine's cache and the engine image in its store. Two new
-  parameters of every deployment, read by the server (changing them restarts nothing): `sleep_when_idle` (**off by
-  default**, for deployments made before and after this change) and `idle_minutes` (**30** by default, 1 to 1,440).
-  Use is every request the gateway takes for the model (any key or the Playground, also one that went to a cloud
-  tier, also while it waits), a video asked for and *Try it*; `/v1/models`, health checks, the console's polling
-  and polls of a video job are not. A sweeper (every 30 s) puts a deployment to sleep after its idle time, counted
-  from the last use or its last start, change or readiness, or the server's start (a restart never puts anything to
-  sleep early); never while a request is in flight or waiting, a replica is starting, an edit restarts its
-  replicas, or (video) a job is waiting or being made or a finished video can still be downloaded. Asleep is a new
-  desired state `asleep` (and `status` `asleep`): the model **stays in `/v1/models`**, a request to it answers
-  **503 `model_asleep`** (it spills to a cloud tier the key may use, like any tier without a ready replica),
-  **Start** (on the page: **Wake**) wakes it on the machine it ran on or its pinned machine, and **Stop** makes it
-  stopped. Going to sleep is an event (*Asleep: no requests for 30 min; frees …*), not audited; waking with Start is
-  audited as a start (`woken: true`). The deployment API gives a `sleep` object (`on`, `idle_minutes`, `asleep`,
-  `last_request_at`, `since`, `sleeps_at`, `held_by`), an edit while asleep answers `restart: on_wake`, and the
-  deployment page shows *asleep* with **Wake** and **Stop**. Waking on a request, and the settings in the deploy and
-  edit forms, come in the next 1.5.0 steps. No migration: the settings are deployment parameters and the last use
-  is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
-  the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
 
 - **Prometheus metrics at `/metrics`** (#165). The gateway's finished requests by endpoint, model, status, source and
   target; their total time and time to first byte (histograms); tokens in and out; cloud spills by reason; the
