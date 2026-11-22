@@ -36,11 +36,16 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
+| 1.4.5 | full regression of 1.4.5rc1 (`accept_all.py`, 13 checks skipped), with both machines on the rc agent, so the gateway reached every replica over TLS | A100 host, x86-64 CPU machine, Gemini | 432 | 0 |
+| 1.4.5 | during development: full regression after the gateway and agent supervisor were split into smaller parts (#173; 29 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 380 | 0 |
+| 1.4.5 | during development: Gemma 4 12B at a 16k context on vLLM 0.32, the KV cache estimate against the engine's own figure (#201): 2.091 GiB estimated, 2.09 GiB in vLLM | A100 | 1 | 0 |
 | 1.4.4 | full regression (`accept_all.py`, in two runs: 233 + 163) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 396 | 0 |
 | 1.4.4 | zero-shot detection and image classification (`accept_vision.py`) | A100 | 77 | 0 |
 | 1.4.4 | zero-shot detection and image classification (`accept_vision.py`) | Ryzen AI MAX+ 395, on the CPU | 71 | 0 |
 | 1.4.4 | text classification on vLLM 0.32: three recommended models, the key guard, the Playground | A100 | all | 0 |
 | 1.4.3 | full regression (`accept_all.py`) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 303 | 0 |
 | 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
+
+The Ryzen AI MAX+ 395 machine was not part of the 1.4.5 runs.
 
 Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
