@@ -833,7 +833,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `since` | 它的閒置時間從什麼時候起算：最後一個請求、最後一次啟動或修改、副本變成就緒，或伺服器啟動的時間，取最晚的那個 |
 | `sleeps_at` | 如果沒人使用，它什麼時候會休眠（只在開啟休眠且正在執行時），每 30 秒檢查一次 |
 | `held_by` | 雖然可能已經閒置夠久，它現在為什麼不休眠：*a request is in flight*、*a replica is starting*、*an edit is restarting its replicas*、*a video is waiting or being made*、*a finished video is kept until …*；其他時候是 `null` |
-| `waking` | 請求（或 Wake）喚醒了它、還沒有副本就緒時：`{since, by, waiting, expected_seconds}`：喚醒開始的時間、誰喚醒它（*a request (key laptop)*、*a request from the Playground (owner)*，或那個人的使用者名稱）、有多少請求在等它，以及預計啟動要多久（上次啟動的時間，沒有量過時是 30 秒）。其他時候是 `null`（記在這台伺服器的記憶體裡：重新啟動後是 `null`） |
+| `waking` | 請求（或 Wake now）喚醒了它、還沒有副本就緒時：`{since, by, waiting, expected_seconds}`：喚醒開始的時間、誰喚醒它（*a request (key laptop)*、*a request from the Playground (owner)*，或那個人的使用者名稱）、有多少請求在等它，以及預計啟動要多久（上次啟動的時間，沒有量過時是 30 秒）。其他時候是 `null`（記在這台伺服器的記憶體裡：重新啟動後是 `null`） |
+| `asleep_since` | 從什麼時候開始休眠（它的 *Asleep* 事件），或 `null` |
+| `wakes` | 過去 24 小時被喚醒的次數（依它的事件） |
 
 對休眠中的部署送 `POST /api/deployments/{id}/start` 會喚醒它（事件 *Woken by …*，以 `workload.started`（帶 `woken: true`）和 `deployment.started` 記入稽核紀錄）；`POST …/stop` 會讓它變成停止（事件 *Stopped by … (it was asleep)*）。進入休眠的事件是 *Asleep: no requests for N min; frees …*，不記入稽核紀錄。對休眠中的部署送 `POST …/try` 會回應 409 `model_asleep`。經過閘道的請求（包括 `POST /v1/videos`）會喚醒它：事件 *Woken by a request (key …)*（不記入稽核紀錄），然後等待就緒的副本、轉到金鑰可以用的雲端分層（`X-Forgeyard-Spilled: waking`），或回應 503 `cannot_wake` / `model_waking`（[錯誤](#errors)）。`/v1/models`、健康檢查和主控台的頁面不會喚醒它，已停止的部署也不會被喚醒。
 
@@ -1092,6 +1094,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
+| `deployment-idle-awake` | 說明 | 1.5.0：關閉 *Sleep when idle* 的執行中部署 3 天沒有請求（Usage 的最後一天、伺服器啟動後看到的請求，或從部署、啟動或修改起算），而且佔著 GPU 記憶體：要讓它閒置時休眠嗎？ |
+| `deployment-wakes-often` | 說明 | 1.5.0：開啟 *Sleep when idle* 的部署在過去 24 小時被喚醒超過 10 次，而且上次啟動超過一分鐘：把閒置時間調長 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
 | `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |

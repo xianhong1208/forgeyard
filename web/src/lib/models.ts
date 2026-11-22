@@ -1,3 +1,4 @@
+import { IDLE_DEFAULT } from "./sleep";
 import { bytes } from "./machines";
 import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task } from "./types";
 
@@ -95,12 +96,16 @@ export type DeployForm = {
   token: string;
   extraArgs: string;
   firstAnswer: string;   // 1.4.5: seconds a replica has to start answering ("" = the gateway's default, 120)
+  // 1.5.0 (#37): sleep when idle (off by default) and its idle time in minutes ("" = 30).
+  sleepOn: boolean;
+  idleMinutes: string;
+  wakeWait: string;      // seconds a request waits for a wake ("" = 300)
   params: Record<string, string>;
 };
 
 export function emptyDeploy(): DeployForm {
   return { model: "", recipe: "", name: "", servedName: "", device: "gpu", gpus: "1", share: "", replicas: "1", machine: "",
-    vram: "", token: "", extraArgs: "", firstAnswer: "", params: {} };
+    vram: "", token: "", extraArgs: "", firstAnswer: "", sleepOn: false, idleMinutes: String(IDLE_DEFAULT), wakeWait: "", params: {} };
 }
 
 // 1.4.5: the gateway's wait for a first answer applies to every deployment but image and video ones (their own timeout).
@@ -140,6 +145,11 @@ export function deployBody(f: DeployForm, recipe: Recipe | undefined): Record<st
   const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
   if (extra.length) p.extra_args = extra;
   if (f.firstAnswer.trim() && takesFirstAnswer(recipe)) p.first_answer_timeout = Number(f.firstAnswer.trim());
+  if (f.sleepOn) {
+    p.sleep_when_idle = true;
+    if (f.idleMinutes.trim()) p.idle_minutes = Number(f.idleMinutes.trim());
+    if (f.wakeWait.trim()) p.wake_wait = Number(f.wakeWait.trim());
+  }
   const body: Record<string, unknown> = { name: f.name.trim(), model: f.model, recipe: f.recipe, params: p,
     replicas: Number(f.replicas || "1") };
   if (f.servedName.trim()) body.served_name = f.servedName.trim();
@@ -158,6 +168,9 @@ export type EditForm = {
   vram: string;
   extraArgs: string;
   firstAnswer: string;
+  sleepOn: boolean;
+  idleMinutes: string;   // "" = not set (30 when on)
+  wakeWait: string;      // "" = not set (300)
   params: Record<string, string>;
 };
 
@@ -177,6 +190,8 @@ export function editForm(d: Deployment, recipe: Recipe): EditForm {
     machine: d.workload.spec.machine_id ? String(d.workload.spec.machine_id) : "",
     vram: typeof p.vram === "number" ? sizeText(p.vram) : "", extraArgs: Array.isArray(p.extra_args) ? p.extra_args.join("\n") : "",
     firstAnswer: typeof p.first_answer_timeout === "number" ? String(p.first_answer_timeout) : "",
+    sleepOn: p.sleep_when_idle === true, idleMinutes: typeof p.idle_minutes === "number" ? String(p.idle_minutes) : "",
+    wakeWait: typeof p.wake_wait === "number" ? String(p.wake_wait) : "",
     params,
   };
 }
@@ -195,6 +210,10 @@ export function editBody(f: EditForm, recipe: Recipe): Record<string, unknown> {
   const extra = f.extraArgs.split("\n").map((l) => l.trim()).filter(Boolean);
   p.extra_args = extra.length ? extra : null;
   if (takesFirstAnswer(recipe)) p.first_answer_timeout = f.firstAnswer.trim() ? Number(f.firstAnswer.trim()) : null;
+  // 1.5.0: off is no parameter (null drops it); the idle time is kept as set, also while off.
+  p.sleep_when_idle = f.sleepOn ? true : null;
+  p.idle_minutes = f.idleMinutes.trim() ? Number(f.idleMinutes.trim()) : null;
+  p.wake_wait = f.wakeWait.trim() ? Number(f.wakeWait.trim()) : null;
   return { params: p, replicas: Number(f.replicas || "1"), machine_id: f.machine ? Number(f.machine) : null };
 }
 

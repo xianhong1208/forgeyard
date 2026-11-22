@@ -781,7 +781,7 @@ they end:
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
 | `forgeyard_gateway_waking` | gauge | `model` | 1.5.0: requests waiting for their asleep model to wake now |
 | `forgeyard_gateway_wake_wait_seconds` | histogram | `model` | 1.5.0: how long each of them waited (then served, or it gave up) |
-| `forgeyard_deployment_wakes_total` | counter | `deployment`, `by` | 1.5.0: asleep deployments woken, `by` `request` or `person` (Start, Wake) |
+| `forgeyard_deployment_wakes_total` | counter | `deployment`, `by` | 1.5.0: asleep deployments woken, `by` `request` or `person` (Start, Wake now) |
 | `forgeyard_autoscale_total` | counter | `deployment`, `direction` | 1.5.0: replicas the autoscaler added (`up`) and removed after draining them (`down`) |
 
 When a replica of a model deployment becomes ready (1.5.0):
@@ -1062,7 +1062,9 @@ deployment a `sleep` object:
 | `since` | From when its idle time counts: the last request, its last start or change, a replica becoming ready, or the server's start, whichever is latest |
 | `sleeps_at` | When it goes to sleep if nothing uses it (only while it runs with sleep on), checked every 30 s |
 | `held_by` | Why it does not sleep right now although it may be idle long enough: *a request is in flight*, *a replica is starting*, *an edit is restarting its replicas*, *a video is waiting or being made*, *a finished video is kept until …*; `null` otherwise |
-| `waking` | While a request (or Wake) woke it and no replica is ready yet: `{since, by, waiting, expected_seconds}`: when the wake began, who woke it (*a request (key laptop)*, *a request from the Playground (owner)*, or the person's user name), how many requests wait for it, and how long its start is expected to take (its last start, 30 s when none was measured). `null` otherwise (this server's memory: `null` after a restart) |
+| `waking` | While a request (or Wake now) woke it and no replica is ready yet: `{since, by, waiting, expected_seconds}`: when the wake began, who woke it (*a request (key laptop)*, *a request from the Playground (owner)*, or the person's user name), how many requests wait for it, and how long its start is expected to take (its last start, 30 s when none was measured). `null` otherwise (this server's memory: `null` after a restart) |
+| `asleep_since` | Since when it is asleep (its *Asleep* event), or `null` |
+| `wakes` | How many times it was woken in the last 24 hours (its events) |
 
 `POST /api/deployments/{id}/start` on an asleep deployment wakes it (event *Woken by …*, audited as
 `workload.started` with `woken: true` and `deployment.started`); `POST …/stop` makes it stopped (event *Stopped by
@@ -1474,6 +1476,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
+| `deployment-idle-awake` | note | 1.5.0: a running deployment with *Sleep when idle* off had no request for 3 days (Usage's last day, what the server saw since it started, or since it was deployed, started or changed) and holds GPU memory: let it sleep when idle? |
+| `deployment-wakes-often` | note | 1.5.0: a deployment with *Sleep when idle* on was woken more than 10 times in the last 24 hours and its last start took over a minute: raise its idle time |
 | `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
 | `gated-model-no-token` | note | A deployment of a gated Hugging Face model has no token of its own, and the server has none. An error once its download was refused |
 | `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |

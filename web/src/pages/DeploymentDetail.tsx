@@ -1,4 +1,4 @@
-import { IconAdjustments, IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconArrowLeft, IconMoon, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 
@@ -21,6 +21,8 @@ import { RoutingEditor } from "./RouteDetail";
 import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
 import { AutoscaleLine } from "../components/Replicas";
 import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
+import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
+import { SleepBadge } from "../components/Sleep";
 
 export function DeploymentDetailPage() {
   const { id } = useParams();
@@ -72,7 +74,7 @@ export function DeploymentDetailPage() {
             <Link to={`/serving/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
             {w.desired_state === "asleep" ? (
               <>
-                <button type="button" className="btn" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> Wake</button>
+                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> Wake now</button>
                 <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
               </>
             ) : w.desired_state === "running" ? (
@@ -90,14 +92,21 @@ export function DeploymentDetailPage() {
       {w && <NotPickedUpNotice w={w} />}
       {d?.sleep?.asleep && (
         <Notice tone="info">
-          Asleep: nobody used it for {d.sleep.idle_minutes} min, so its replicas stopped and their memory is free. The
-          model files stay on the machines. {canManage ? "Wake starts it again." : "An operator can wake it."}
+          Asleep{d.sleep.asleep_since ? ` since ${when(d.sleep.asleep_since)}` : ""}: nobody used it for {d.sleep.idle_minutes} min, so its replicas
+          stopped and their memory is free. The model files stay on the machines. The next request wakes it{canManage ? ", or Wake now" : ""}
+          {d.last_start ? `; the last start took ${seconds(d.last_start.seconds)}.` : "."}
+        </Notice>
+      )}
+      {d && sleepState(d) === "waking" && (
+        <Notice tone="info">
+          Waking: woken by {d.sleep?.waking?.by} {elapsed(d.sleep?.waking?.since)} ago; it should be ready in about {seconds(wakeSeconds(d) ?? 30)}.
+          Requests to it wait until a replica is ready (up to {d.sleep?.wake_wait ?? 300} s){d.sleep?.waking?.waiting ? `: ${d.sleep.waking.waiting} waiting now` : ""}.
         </Notice>
       )}
       {d && w && (
         <>
           <div className="wl-status">
-            <span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
+            <SleepBadge d={d} big fallback={<span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>} />
             <span>{w.ready} of {w.replicas} ready</span>
             {d.rollout && <span className="chip chip-tone-wait" title="An edit restarts the replicas one at a time: the next one once the one before it is ready.">
               updating: {d.rollout.updated} of {d.rollout.total} on the new settings</span>}
@@ -106,6 +115,7 @@ export function DeploymentDetailPage() {
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
           </div>
           <Gateway d={d} />
+          <WhenNotInUse d={d} canManage={canManage} />
           <section className="panel" aria-labelledby="replicas-title">
             <h2 id="replicas-title">Replicas</h2>
             <AutoscaleLine d={d} />
@@ -159,6 +169,38 @@ export function DeploymentDetailPage() {
         </>
       )}
     </>
+  );
+}
+
+// 1.5.0 (#37): sleep when idle, where it stands, and the start a wake waits for.
+function WhenNotInUse({ d, canManage }: { d: Deployment; canManage: boolean }) {
+  const s = d.sleep;
+  if (!s) return null;
+  const state = sleepState(d);
+  return (
+    <section className="panel sleep-panel" aria-labelledby="sleep-title">
+      <div className="panel-head">
+        <h2 id="sleep-title"><IconMoon size={16} aria-hidden="true" /> When not in use</h2>
+        {canManage && <Link to={`/serving/${d.id}/edit`} className="small">Change</Link>}
+      </div>
+      <dl className="facts">
+        <dt>Sleep when idle</dt>
+        <dd>{s.on ? `On: after ${s.idle_minutes} min without a request; a request waits up to ${s.wake_wait ?? 300} s for it to wake` : <span className="muted">Off: it keeps its memory while nobody uses it</span>}</dd>
+        <dt>Now</dt>
+        <dd>{state === "asleep" ? <>Asleep{s.asleep_since ? <> since <span title={exact(s.asleep_since)}>{when(s.asleep_since)}</span></> : null}; it holds no memory</>
+          : state === "waking" ? <>Waking, for {elapsed(s.waking?.since)} (by {s.waking?.by})</>
+            : d.workload.desired_state !== "running" ? <span className="muted">Stopped by a person: it does not wake by itself</span>
+              : s.on && s.held_by ? <>Awake, kept awake: {s.held_by}</>
+                : s.on && s.sleeps_at ? <>Awake; sleeps <span title={exact(s.sleeps_at)}>{when(s.sleeps_at)}</span> unless a request comes</>
+                  : "Awake"}</dd>
+        <dt>Last request</dt>
+        <dd>{s.last_request_at ? <span title={exact(s.last_request_at)}>{when(s.last_request_at)}</span> : <span className="muted">none since the server started</span>}</dd>
+        <dt>Last start</dt>
+        <dd>{d.last_start ? <>{seconds(d.last_start.seconds)} <span className="muted small">({when(d.last_start.at)}; a wake waits about that long)</span></>
+          : <span className="muted">not measured yet</span>}</dd>
+        {(s.on || (s.wakes ?? 0) > 0) && <><dt>Woken, last 24 h</dt><dd>{s.wakes ?? 0}</dd></>}
+      </dl>
+    </section>
   );
 }
 
