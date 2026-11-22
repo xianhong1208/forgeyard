@@ -37,7 +37,7 @@ export function SleepSetting({ prefix, on, minutes, onChange, last, other }: {
       </div>
       <div id={`${prefix}-sleep-hint`} className="field-hint sleep-hint">
         <p>{on
-          ? `After ${minutes.trim() && !problem ? minutes.trim() : IDLE_DEFAULT} min without a request its replicas stop and free their memory; the model stays listed, and Wake now or a request starts it again.`
+          ? `After ${minutes.trim() && !problem ? minutes.trim() : IDLE_DEFAULT} min without a request its replicas stop and free their memory; the model stays listed, and Wake now starts it again.`
           : `Off: it keeps its memory while nobody uses it. On, its replicas stop after the idle time (${IDLE_MIN} to ${IDLE_MAX.toLocaleString("en")} minutes) and start again when needed.`}</p>
         <p>{startHint(last, other)}</p>
         {on && <p>While it sleeps, its memory may be used by others; if none is free when it wakes, it cannot start until there is room.</p>}
