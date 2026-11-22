@@ -229,6 +229,24 @@ def devices(host_config: dict, cdi: list[str]) -> list[dict]:
     return out[:MAX_ITEMS]
 
 
+_NVIDIA_NODE = re.compile(r"^nvidia(ctl|-uvm|-uvm-tools|-modeset|[0-9]{1,3})$")
+_NVIDIA_ORDER = {"ctl": 0, "-uvm": 1, "-uvm-tools": 2, "-modeset": 3}
+
+
+def nvidia_devices(dev: Path = Path("/dev"), is_device: Callable[[Path], bool] = Path.is_char_device) -> list[str]:
+    """1.4.5 (#202): the NVIDIA device nodes this container has (what `--gpus` gave it), in the order a `docker run`
+    lists them: the control nodes, then /dev/nvidia0, 1, … The update command passes each with --device."""
+    try:
+        names = [p.name for p in dev.iterdir() if _NVIDIA_NODE.match(p.name) and is_device(p)]
+    except OSError:
+        return []
+
+    def order(name: str) -> tuple[int, int]:
+        rest = _NVIDIA_NODE.match(name).group(1)
+        return (0, _NVIDIA_ORDER[rest]) if rest in _NVIDIA_ORDER else (1, int(rest))
+    return [str(dev / n) for n in sorted(names, key=order)][:MAX_ITEMS]
+
+
 def _restart(policy: Any) -> Optional[str]:
     if not isinstance(policy, dict) or policy.get("Name") in (None, "", "no"):
         return None
@@ -261,7 +279,7 @@ def is_agent_container(inspect: dict) -> bool:
 
 
 def describe_container(inspect: dict, image: Optional[dict] = None, *, credential: Optional[str] = None,
-                       state_dir: str = STATE_IN_CONTAINER) -> dict:
+                       state_dir: str = STATE_IN_CONTAINER, nvidia_nodes: Optional[list[str]] = None) -> dict:
     """What `docker run` this container was started with, from `docker inspect <it>` and `docker image
     inspect <its image>` (to leave out the image's own environment and arguments)."""
     config = inspect.get("Config") or {}
@@ -298,6 +316,8 @@ def describe_container(inspect: dict, image: Optional[dict] = None, *, credentia
         "ports": _ports(host.get("PortBindings")) if _needs_ports(network) else [],
         "add_hosts": _strings(host.get("ExtraHosts")),
     }
+    if nvidia_nodes is not None:
+        c["nvidia_devices"] = nvidia_nodes[:MAX_ITEMS]
     c["state_kept"] = any(m.get("type") in ("volume", "bind") and _under(state_dir, m.get("target") or "")
                           for m in c["mounts"])
     out["container"] = c
@@ -389,7 +409,8 @@ def collect(*, engine_info: Optional[dict], engine: Optional[str], run: Optional
             return {"method": "container", "known": False,
                     "reason": f"{Path(engine).name} inspect could not read the agent's own container"}
         image = _inspect(engine, run, "image", "inspect", str(me.get("Image") or "")) if me.get("Image") else None
-        out = describe_container(me, image, credential=credential, state_dir=state_dir or STATE_IN_CONTAINER)
+        out = describe_container(me, image, credential=credential, state_dir=state_dir or STATE_IN_CONTAINER,
+                                 nvidia_nodes=nvidia_devices(root / "dev"))
         out["engine"] = engine_info.get("engine") or Path(engine).name
         return limit(out)
     except Exception as e:  # never keep an agent from connecting over this

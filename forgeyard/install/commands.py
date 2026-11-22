@@ -23,6 +23,12 @@ from forgeyard.install import images, requirements, wheel
 TEMPLATE = Path(__file__).with_name("install.sh")
 MODEL_CACHE = "/srv/forgeyard-models"
 # What install.sh may be told about the server: a plain https URL, nothing a shell would expand.
+# 1.4.5 (#202): `--device` for each NVIDIA device node of the host, listed by the shell where the command runs (a node
+# the host does not have is skipped: Docker refuses a --device that does not exist). Next to --gpus all: the NVIDIA
+# runtime hook behind --gpus sets up the device access behind Docker's and systemd's back, and the host's next
+# `systemctl daemon-reload` takes it from new processes in the container; a --device Docker records, so it stays.
+NVIDIA_DEVICES_SHELL = ("$(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset "
+                        "/dev/nvidia[0-9]*; do [ -e \"$d\" ] && printf -- '--device %s ' \"$d\"; done)")
 _SAFE_URL = re.compile(r"^https://([A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?(/[A-Za-z0-9._~\-/]*)?$")
 
 
@@ -102,7 +108,7 @@ def docker_command(server: str, token: str, fingerprint: Optional[str], kind: st
     when it starts a model container."""
     lines = ["docker run -d --name forgeyard-agent --restart always --network host"]
     if kind == "nvidia":
-        lines.append("--gpus all")
+        lines += ["--gpus all", NVIDIA_DEVICES_SHELL]
     elif kind == "amd":
         # Numeric ids: Docker looks group names up in the image's /etc/group, which has no
         # "render" ("Unable to find group render"). getent asks the host.

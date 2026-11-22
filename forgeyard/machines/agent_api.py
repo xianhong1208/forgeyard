@@ -28,7 +28,7 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import (CacheRemovedIn, CertRequestIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn,
+from forgeyard.machines.messages import (CacheRemovedIn, CertRequestIn, GpuCheckIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn,
                                          ImageRemovedIn, ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn,
                                          same_end)
 from forgeyard.machines.protocol import (
@@ -209,6 +209,29 @@ def _inventory(db: DbSession, node_id: int, msg: InventoryMsgIn, ip: str) -> boo
     node.last_heartbeat_at = store.utcnow()
     node.status = "online"
     store.apply_inventory(db, node, msg.inventory)
+    return True
+
+
+def _gpu_check(db: DbSession, node_id: int, msg: GpuCheckIn) -> bool:
+    """1.4.5 (#202): the agent's GPU access check changed; kept in runtime_info["gpu_check"] (None: nothing to check).
+    When new processes can open the GPUs again, what was waiting for them is placed."""
+    node = _live_node(db, node_id)
+    if node is None:
+        return False
+    info = dict(node.runtime_info or {})
+    was = (info.get("gpu_check") or {}).get("ok")
+    if msg.gpu_check is None:
+        info.pop("gpu_check", None)
+    else:
+        info["gpu_check"] = msg.gpu_check
+    node.runtime_info = info
+    now = (msg.gpu_check or {}).get("ok")
+    if was is False and now is not False:
+        log.info("New processes on machine %s can open its GPUs again.", node.name)
+        db.commit()
+        placement.place_and_poke(db)
+    elif now is False and was is not False:
+        log.warning("New processes on machine %s cannot open its GPUs: %s", node.name, msg.gpu_check.get("reason"))
     return True
 
 
@@ -396,6 +419,8 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     ok = changed is not None
                     if changed:
                         conn.dirty.set()
+                elif kind == "gpu_check" and workloads:
+                    ok = await run_in_threadpool(_db_call, _gpu_check, node_id, _parse(text, GpuCheckIn))
                 elif kind == "logs" and workloads:
                     answer = _parse(text, LogsIn)
                     conn.answer(answer.request_id, answer.model_dump())

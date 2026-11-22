@@ -54,7 +54,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, utcnow
 from forgeyard.machines.protocol import FEATURE_ENGINE_ZIP, FEATURE_MODELS, FEATURE_REPLICA_GUARD, FEATURE_WORKLOADS
-from forgeyard.machines import relay
+from forgeyard.machines import gpu_access, relay
 from forgeyard.models import reach, render, sources
 from forgeyard.models.catalog import Context, context_for, deployment_of, model_block
 from forgeyard.models.estimate import EstimateError, gib
@@ -172,6 +172,13 @@ def _runtime_problem(node: Node, variant: Variant) -> Optional[str]:
     return None
 
 
+def _gpu_access_problem(node: Node, variant: Variant) -> Optional[str]:
+    """1.4.5 (#202): a process engine on GPUs a new process there cannot open would fail at once (containers can)."""
+    if variant.runtime != "process" or not variant.gpu or variant.when.vendor not in gpu_access.failing_vendors(node):
+        return None
+    return gpu_access.process_problem(node, {variant.when.vendor})
+
+
 def _merge(cards: dict[str, list[Hold]], extra: dict[str, list[Hold]]) -> dict[str, list[Hold]]:
     out = {k: list(v) for k, v in cards.items()}
     for k, v in extra.items():
@@ -280,7 +287,8 @@ def evaluate_node(db: DbSession, node: Node, ctx: Context, *, exclude: Optional[
             if not compatible:
                 continue
             matched_hw = True
-            rt = variant_params_problem(variant, ctx.params) or _runtime_problem(node, variant)
+            rt = (variant_params_problem(variant, ctx.params) or _runtime_problem(node, variant)
+                  or _gpu_access_problem(node, variant))
             if rt:
                 problems.append(f"{variant.name}: {rt}")
                 continue

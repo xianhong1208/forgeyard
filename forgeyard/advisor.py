@@ -559,6 +559,36 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
                           pages=("machines",))
 
 
+@check
+def machine_gpu_access(ctx: Context) -> Iterator[Finding]:
+    """1.4.5 (#202): the agent's GPU access check (agent/gpu_check.py) says a new process there cannot open the GPUs.
+    In a container that is the device access the NVIDIA runtime hook set up behind systemd's back, lost when the host
+    ran `systemctl daemon-reload`: restarting the container gives it back, and the machine page's update command passes
+    the devices with --device too, which keeps them. Meanwhile process workloads are not placed on those GPUs."""
+    from forgeyard.machines import gpu_access
+
+    for n in ctx.nodes:
+        c = gpu_access.check(n)
+        if n.status != "online" or c is None or c["ok"]:
+            continue
+        failing = gpu_access.failing_vendors(n)
+        label = " and ".join(gpu_access.VENDOR_LABEL[v] for v in sorted(failing))
+        why = f" ({c['reason']})" if c.get("reason") else ""
+        held = (f" Until then no process workload or process engine is placed on its {label} GPUs; containers are not "
+                "affected, and what already runs keeps running.")
+        if gpu_access.in_container(n):
+            detail = (f"New processes on {n.name} cannot open its GPUs{why}: the agent's container lost its device "
+                      "access, e.g. after the host ran systemctl daemon-reload. Restart the agent container, and "
+                      "update it with the command on the machine's page, which keeps the access (it passes the "
+                      "devices with --device as well)." + held)
+        else:
+            detail = (f"New processes on {n.name}, running as {c.get('user') or 'the workload account'}, cannot open "
+                      f"its GPUs{why}. Check the device permissions and that account's groups, then restart the "
+                      "agent." + held)
+        yield Finding("machine-gpu-access-lost", "error", f"New processes on {n.name} cannot open its GPUs", detail,
+                      f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
+
+
 # 1.4.5 (#171): a loopback replica address works for a machine elsewhere only when its port range is forwarded to
 # the server's host (the SSH tunnel of the guide); the advisor looks for that on ranges up to this size.
 FORWARD_PROBE_MAX = 64

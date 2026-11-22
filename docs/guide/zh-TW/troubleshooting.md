@@ -250,6 +250,34 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 然後重新啟動 agent。如果伺服器其實能以 Forgeyard 看不到的方式連到那個位址（例如伺服器主機上的 proxy），就對這個警告按 **Snooze 30 days**。
 
+## 機器上的新程序打不開它的 GPU
+
+**你會看到：** **Get started → Setup health** 和機器的頁面出現錯誤 *New processes on gpu-01 cannot open its GPUs
+(/dev/nvidia0: Operation not permitted)*。那台機器上的程序引擎或應用程式一啟動就失敗，出現
+`cuInit: CUDA_ERROR_NO_DEVICE` 或 `Failed to initialize NVML: Unknown Error`，但同一台機器上容器裡的模型照常回應，機器的頁面也仍列出每張 GPU。需要在那些 GPU 上執行程序的部署會等待，原因是 *new processes there cannot open its NVIDIA GPUs*。
+
+**原因：** agent 每 5 分鐘（以及啟動時）檢查一次：以它的工作負載帳號執行的新程序，能不能打開 GPU 的裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm` 和每個 `/dev/nvidiaN`；AMD 是 `/dev/kfd` 和 render 節點）。用 `docker run --gpus all` 時，NVIDIA runtime hook 是在 Docker 和 systemd 不知道的情況下，把 GPU 裝置交給 agent 的容器。主機執行 `systemctl daemon-reload` 時（安裝套件、自動更新、任何 unit 變更：在共用主機上很常發生），systemd 會依它知道的內容重新套用容器的 cgroup，那份裝置存取權就沒了。已經打開的照常運作（agent 讀 GPU 的數值、原本在跑的引擎）；那個容器裡每一次新的開啟都會被拒絕。新的容器會重新拿到存取權，所以容器裡的模型不受影響。AMD 的 agent 也不受影響：它的指令以 `--device` 傳入 `/dev/kfd` 和 `/dev/dri`。檢查失敗期間，Forgeyard 不會把程序類工作負載放到那些 GPU 上。
+
+**做法：**
+
+1. 重新啟動 agent 容器：`sudo docker restart forgeyard-agent`。它會拿回裝置，錯誤會在下一次檢查時消失（連上伺服器時會再檢查一次）。容器裡的模型會繼續執行。
+2. 用機器頁面上 **Update the agent** 的指令更新它（錯誤上的 **Update command** 會開啟它）。從 1.4.5 起，這個指令會在 `--gpus all` 旁邊，再以 `--device` 傳入 NVIDIA 的裝置節點；Docker 會記下它們，所以 reload 不會再把它們拿走：
+
+   ```bash
+     --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     …
+   ```
+
+   1.4.5 以前的 agent 不會回報它的裝置節點；它的指令改用一小段 shell 迴圈列出主機的裝置節點（`$(for d in /dev/nvidiactl … /dev/nvidia[0-9]*; do … done)`），主機沒有的節點會跳過。如果主機上沒有 `/dev/nvidia-uvm`，先執行 `sudo nvidia-modprobe -u -c=0`。
+
+如果加了裝置參數還是發生：某些 `runc` 版本搭配 systemd 的 cgroup driver，在主機沒有 NVIDIA 裝置的 `/dev/char` 連結時，仍會丟掉這些規則。用 NVIDIA Container Toolkit 建立它們（`sudo nvidia-ctk system create-dev-char-symlinks --create-all`；NVIDIA 在 nvidia-container-toolkit 的 discussion #1133 有一條 udev 規則，讓它們在重開機後仍在），或改用 CDI 啟動 agent，取代 `--gpus all`（`--device nvidia.com/gpu=all`，先執行 `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）。把 Docker 的 cgroup driver 改成 cgroupfs 也能避免，但會重新啟動主機上的每個容器：共用主機上不要這樣做。
+
+不在容器裡（install.sh 或 checkout）時，同樣的錯誤代表工作負載帳號本身不能打開這些裝置：檢查它們的權限和那個帳號的群組（`video`、`render`），然後重新啟動 agent。
+
 ## 送往機器的流量沒有加密
 
 **你會看到：** **Get started → Setup health** 和機器的頁面出現 *Traffic to gpu-02 is not encrypted: update the agent*。

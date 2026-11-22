@@ -152,7 +152,7 @@ export function AddMachineWays({ issued, tls }: { issued: NewJoinToken; tls?: Tl
           <p className="muted small">
             <strong>Why host network:</strong> model replicas listen on the host's 127.0.0.1 behind the agent's key guard, which must
             reach them. <strong>Why the same path:</strong> the agent asks the host's Docker to mount models by their path on the
-            host.{kind === "nvidia" ? " Needs the NVIDIA Container Toolkit." : kind === "amd"
+            host.{kind === "nvidia" ? " Needs the NVIDIA Container Toolkit. The $(for d in …) line passes each NVIDIA device of the host (/dev/nvidia*) with --device as well, so the agent keeps its GPUs when the host runs systemctl daemon-reload." : kind === "amd"
               ? " Uses the host's ROCm tools, mounted read-only. The video and render groups are given by their number on the host: the image has no render group."
               : ""}
           </p>
