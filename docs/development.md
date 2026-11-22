@@ -120,7 +120,10 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/api/routing.py` | routes and their tiers of targets |
 | `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |
 | `forgeyard/api/budgets.py` | monthly budgets of people and providers, and this month's spend |
-| `forgeyard/gateway/proxy.py` | forwarding a request through a route's tiers: replicas, providers, spill, streaming |
+| `forgeyard/gateway/proxy.py` | forwarding a request through a route's tiers (`Job`, `forward`, `record`); the names of its parts below are importable from it too |
+| `forgeyard/gateway/route.py`, `body.py`, `fit.py` | a route and its targets, who may call it and the tiers a request may use; the request body read and parsed; the targets that can take it (media, size, speech, images) |
+| `forgeyard/gateway/upstream.py`, `replicas.py`, `cloud.py` | the HTTP client to the replicas, what may be retried, client disconnects; a tier's replicas (concurrency, the line, the first answer); its providers (order, budgets, quirks) |
+| `forgeyard/gateway/streaming.py`, `answer.py` | streamed answers (SSE, audio); the answer passed on and its usage counted |
 | `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API key checks and cloud settings; requests and tokens per minute; replica order and provider cooldowns |
 | `forgeyard/gateway/quirks.py` | what differs per provider kind: how the key is sent, parameters dropped or renamed, how usage is read back |
 | `forgeyard/gateway/where.py` | whether a new provider is outside your network, from its kind and its address |
@@ -142,6 +145,8 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
 | `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks, downloads ahead of a deployment (`prefetch.py`) |
+| `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | the reconciler: its loop, the desired list and the reports; its state in memory; the `Runtime` protocol every runtime implements (and `ContainerEngine`) |
+| `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | the reconciler's parts: a replica's start, end, stop and removal; model, engine and image before a start; health checks; the key guards; an admin's cache and image requests |
 | `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, an agent's update command and whether it is behind (`update.py`), the published images' names (`images.py`), the server image's health check |
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |

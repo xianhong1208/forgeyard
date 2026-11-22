@@ -55,6 +55,7 @@ version until 1.0.
 
 ### Changed
 
+- **The gateway's proxy and the agent's supervisor in smaller parts** (#173), with no change in behaviour. `forgeyard/gateway/proxy.py` (1,949 lines) keeps the request's way through the tiers (`Job`, `forward`, `record`) and imports the rest from `route.py`, `body.py`, `fit.py`, `upstream.py`, `replicas.py`, `cloud.py`, `streaming.py` and `answer.py`; every name it had is still importable from it. The agent's `supervisor.py` (1,171 lines) keeps the loop, the desired list and the reports; a replica's life, its downloads and pulls, its health checks, the key guards and an admin's requests are in their own modules, and its 18 dictionaries, sets and flags in memory are five typed structures (`state.py`). The runtimes now implement an explicit protocol, `Runtime` (and `ContainerEngine` for the container runtime's images), checked by a test, which also checks that the supervisor calls nothing else on them.
 - **Routing skips an offline machine's replicas at once** (#164). The gateway no longer dials a replica whose machine
   is offline (a connect error and a 15 s penalty on each replica until its agent said otherwise, which it cannot);
   with no other ready replica the 503 says *the machine is offline*. The console counts such replicas as not ready.
