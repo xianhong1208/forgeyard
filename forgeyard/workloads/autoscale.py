@@ -234,7 +234,7 @@ def _starting(r: Replica, w: Workload) -> bool:
 
 
 def _fmt(x: float) -> str:
-    return f"{x:.1f}".rstrip("0").rstrip(".") if abs(x) < 100 else f"{x:.0f}"
+    return f"{x:.2f}".rstrip("0").rstrip(".") if abs(x) < 100 else f"{x:.0f}"
 
 
 def _window(seconds: float) -> str:
@@ -305,10 +305,8 @@ class Autoscaler:
         try:
             rows = db.execute(select(Deployment.id, Deployment.params).join(Workload, Deployment.workload_id == Workload.id)
                               .where(Workload.desired_state.in_(("running", "asleep")))).all()
-            with self._lock:
-                watched = set(self._watch)
-            # Only those with automatic replicas on, and those it watched (turned off since: their drain ends).
-            ids = [dep_id for dep_id, params in rows if setting(params).on or dep_id in watched]
+            # Only those with automatic replicas on (a watch of one turned off, stopped or deleted ends below).
+            ids = [dep_id for dep_id, params in rows if setting(params).on]
             shares = self._shares(db, self.signals.waiting()) if ids else {}
             seen: set[int] = set()
             for dep_id in ids:
@@ -329,7 +327,7 @@ class Autoscaler:
                     place = place or added
             with self._lock:
                 for dep_id in list(self._watch):
-                    if dep_id not in seen:   # deleted, or stopped by a person
+                    if dep_id not in seen:   # turned off, stopped by a person or deleted: its drain ends
                         self._forget(dep_id)
         finally:
             for node_id in nodes:

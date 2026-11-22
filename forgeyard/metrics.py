@@ -219,12 +219,11 @@ def _deployment_replicas(db):
         g.add_metric((d.name, "desired"), desired)
         g.add_metric((d.name, "ready"), sum(1 for r in live if autoscale._ready(r, w)))
         g.add_metric((d.name, "draining"), 1 if d.id in draining else 0)
-        if autoscale.setting(d.params).on:
-            st = autoscale.autoscaler.status(d)
-            if st["wanted"] is not None:
-                g.add_metric((d.name, "wanted"), st["wanted"])
-            if d.id in loads:
-                load.add_metric((d.name,), loads[d.id])
+        wanted = autoscale.autoscaler.status(d)["wanted"]   # None unless automatic replicas are on
+        if wanted is not None:
+            g.add_metric((d.name, "wanted"), wanted)
+        if d.id in loads:
+            load.add_metric((d.name,), loads[d.id])
     return [g, load]
 
 

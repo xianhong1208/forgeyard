@@ -277,6 +277,20 @@ def test_fy_asc_004_up_after_a_minute_above_the_target(cpus, run):
     assert [x for x in run.run(2) if x.startswith("Scaled up to 2: load 1 per replica")] and len(rows("line")) == 2
 
 
+def test_fy_asc_018_the_target_is_a_share_of_concurrent_requests(cpus, run):
+    """FY-ASC-018: with Concurrent requests 5 a replica takes 4 at the target: 3 in flight (below it) and 4 (at it,
+    not above) add nothing however long; 5 adds one after a minute."""
+    c, a, b = cpus
+    auto(c, concurrency=5, max_replicas=3)
+    run.load("chat", 3)
+    assert run.run(300) == []
+    run.load("chat", 4)
+    assert run.run(300) == [] and len(rows("chat")) == 1
+    run.load("chat", 5)
+    done = until_scaled(run, 70)
+    assert done == ["Scaled up to 2: load 4.03 per replica for 60 s (target 4 of 5 concurrent)."], done
+
+
 def test_fy_asc_005_at_twice_the_target_within_ten_seconds(cpus, run):
     """FY-ASC-005: 2 in flight on one replica (2.5 times the target): one more within about 10 s, not before."""
     c, a, b = cpus
@@ -357,6 +371,17 @@ def test_fy_asc_008_pinned_scales_on_its_machine_only(cpus, run):
     cpu_row(a, vram_free=100 * GIB)
     assert run.run(30) == [] and len(rows("chat")) == 2
     assert run.scaler.status(_dep("chat"))["paused"] == "a replica's machine is offline"
+    # Right after the server starts, a machine not heard from yet still serves (#164), so nothing pauses: but one
+    # more replica is never placed on a pinned machine that is offline.
+    from forgeyard.workloads import offline
+
+    offline.server_started(utcnow() + run.wall_offset)
+    try:
+        done = run.run(10)
+        assert run.scaler.status(_dep("chat"))["paused"] is None
+        assert len(rows("chat")) == 2 and "cpu-a (pinned) is offline" in run.scaler.status(_dep("chat"))["room"], done
+    finally:
+        offline.server_started(utcnow() - timedelta(hours=1))
 
 
 # ------------------------------------------------------------------ down, drained first
@@ -399,6 +424,11 @@ def test_fy_asc_009_down_only_after_ten_minutes_below(cpus, run):
     assert [r.ordinal for r in rows("chat")] == [0] and run.gw.drains == set()
     assert workload("chat").spec["replicas"] == 1
     assert run.run(1300) == [] and len(rows("chat")) == 1   # the minimum
+    # A minimum of 2: two idle replicas stay.
+    auto(c, "pair", min_replicas=2, max_replicas=3)
+    assert len(rows("pair")) == 2
+    run.gw.flight = {}
+    assert run.run(1300) == [] and len(rows("pair")) == 2
 
 
 def test_fy_asc_010_down_needs_the_load_to_fit_one_fewer(cpus, run):
@@ -457,7 +487,7 @@ def test_fy_asc_012_a_drain_is_kept_when_load_returns_or_the_others_fail(cpus, r
     run.gw.flight = {uid0: 2, uid1: 1}
     assert run.run(8) == []
     done = run.run(2)
-    assert done == ["Kept replica 1: load 1.7 per replica for 10 s, twice the target 0.8 of 1 concurrent."], done
+    assert done == ["Kept replica 1: load 1.67 per replica for 10 s, twice the target 0.8 of 1 concurrent."], done
     assert run.gw.drains == set() and len(rows("chat")) == 2
     run.gw.flight = {}
     assert run.run(598) == []   # a full down window again after it was kept
