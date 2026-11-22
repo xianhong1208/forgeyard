@@ -150,7 +150,8 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
   part by part, and where it fits, before anything is downloaded. The KV cache counts what each layer
-  really keeps (1.4.5): a sliding-window layer (Gemma, gpt-oss, Mistral 7B) at most its window, an MLA
+  really keeps (1.4.5): a sliding-window layer (Gemma, gpt-oss, Mistral 7B) at most its window (on vLLM plus
+  two steps of 2,048 tokens it works on, 2,496 for Gemma 4, which the recipe passes so that every card agrees), an MLA
   model (DeepSeek, Kimi) one compressed latent per token, and a hybrid model (Qwen3-Next, Granite 4,
   Falcon-H1) the context on its attention layers only, plus a fixed *Recurrent state* per request.
   A GGUF model with layers left on the CPU also reserves the machine's RAM for them, and a

@@ -103,11 +103,89 @@ def _dtype_bytes(name: str) -> float:
 
 # ------------------------------------------------------------------ KV by layer kind (1.4.5, #167)
 # vLLM 0.32 keeps, per sequence, the last `window - 1` tokens of a sliding-window layer plus the tokens it has in
-# flight: two batches (async scheduling) of up to max_num_batched_tokens, which Forgeyard does not set, so vLLM picks
-# it by card: 2,048 on an A100, 8,192 on other cards of 70 GB or more (H100, H200), 16,384 from 160 GB (B200)
-# (engine/arg_utils.py: get_batch_defaults). The estimate takes 2 x 8,192: right or high below 160 GB. Plus one
-# 16-token block, as the window may not start at a block's start. Never more than the context.
-VLLM_IN_FLIGHT = 2 * 8192
+# flight: two batches (async scheduling) of up to max_num_batched_tokens (VllmConfig.max_in_flight_tokens). Left
+# unset, vLLM picks that by card (engine/arg_utils.py: get_batch_defaults, for the API server): 2,048 on an A100
+# and on cards under 70 GB, 8,192 on other cards of 70 GB or more (H100, H200), 16,384 from 160 GB (B200); then
+# raises it for a multimodal prefix-LM model to its largest item (_get_min_mm_batched_tokens) and caps it at
+# max_num_seqs x max_model_len. The estimate is made before a card is chosen, so since 1.4.5 (#201) the vllm recipe
+# passes --max-num-batched-tokens {batch_tokens} itself: vLLM's own A100 choice (vllm_batch_tokens), on every card,
+# which the estimate then counts exactly. A recipe that leaves it to vLLM is counted with 8,192: right or high below
+# 160 GB. Plus one 16-token block, as the window may not start at a block's start. Never more than the context.
+VLLM_CONCURRENT_BATCHES = 2
+VLLM_BATCH_TOKENS = 2048
+VLLM_UNSET_BATCH_TOKENS = 8192
+BATCH_FLAG = "--max-num-batched-tokens"
+# Gemma 4 with bidirectional attention over images (`use_bidirectional_attention: vision`, the 12B, 26B-A4B and
+# 31B): vLLM never splits an image, audio clip or video over two steps (disable_chunked_mm_input), so a step must
+# hold its largest item. That is a video: 32 frames x (70 soft tokens + 2 + 6 time-stamp tokens) = 2,496
+# (models/gemma4_mm.py: get_mm_max_tokens_per_item; an image is at most 1,120, the configs say 280), whether or not
+# the deployment takes video. Measured on an A100 with Gemma 4 12B: "max_num_batched_tokens=2496".
+GEMMA4_TYPES = ("gemma4", "gemma4_unified")
+GEMMA4_VIDEO_ITEM = 32 * (70 + 2 + 6)
+
+
+def vllm_mm_item_tokens(config: dict) -> Optional[int]:
+    """The largest multimodal item vLLM 0.32 must take in one step for this config.json (a multimodal prefix-LM
+    model), 0 for another Gemma 4 (E2B, E4B: chunked like text), None for a model Forgeyard does not size this way."""
+    if config.get("model_type") not in GEMMA4_TYPES:
+        return None
+    text = config.get("text_config") if isinstance(config.get("text_config"), dict) else config
+    vision_cfg = config.get("vision_config") if isinstance(config.get("vision_config"), dict) else None
+    if vision_cfg is None or text.get("use_bidirectional_attention") != "vision":
+        return 0
+    image = _int(vision_cfg.get("num_soft_tokens") or vision_cfg.get("default_output_length"))
+    return max(GEMMA4_VIDEO_ITEM, image)
+
+
+def _int(v) -> int:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
+
+def vllm_batch_tokens(meta: dict, params: dict) -> int:
+    """The --max-num-batched-tokens the vllm recipe passes ({batch_tokens}): what vLLM 0.32 picks on an A100 for
+    the API server (2,048), at most concurrency x context, and never less than the largest multimodal item of a
+    prefix-LM model while the deployment takes media (vLLM raises its own default to it; it would refuse to start
+    below it)."""
+    cfg = (meta or {}).get("config") or {}
+    item = cfg.get("mm_item_tokens")
+    if item is None and cfg.get("model_type") in GEMMA4_TYPES:
+        item = GEMMA4_VIDEO_ITEM  # added before 1.4.5 (#201): as for a Gemma 4 that takes images bidirectionally
+    images = int(params.get("images", modalities.DEFAULT_IMAGES) or 0)
+    videos = int(params.get("videos", modalities.DEFAULT_VIDEOS) or 0)
+    item = _int(item) if images > 0 or videos > 0 else 0
+    n = VLLM_BATCH_TOKENS
+    context, seqs = int(params.get("context") or 0), max(1, int(params.get("concurrency") or 1))
+    if context:
+        n = min(n, seqs * context)
+    return max(n, item)
+
+
+def _flag_value(args: list, flag: str) -> Optional[str]:
+    """The last value given to `flag` in an argument list (argparse keeps the last), or None."""
+    value = None
+    for i, a in enumerate(args):
+        a = str(a)
+        if a == flag and i + 1 < len(args):
+            value = str(args[i + 1])
+        elif a.startswith(flag + "="):
+            value = a[len(flag) + 1:]
+    return value
+
+
+def vllm_batch_size(meta: dict, recipe: Recipe, params: dict) -> int:
+    """The max_num_batched_tokens a vLLM replica runs with: what the recipe passes (or the deployment's extra engine
+    arguments, which come last), else vLLM's unset default as counted above."""
+    args = list(recipe.args) + list(params.get("extra_args") or [])
+    value = _flag_value(args, BATCH_FLAG)
+    if value == "{batch_tokens}":
+        n = vllm_batch_tokens(meta, params)
+    elif value is not None and value.isdigit() and int(value) > 0:
+        n = int(value)
+    else:
+        n = VLLM_UNSET_BATCH_TOKENS
+    return n
+
+
 VLLM_BLOCK = 16
 # vLLM keeps two states per sequence of a recurrent layer with prefix caching on (mamba_cache_mode "align":
 # MambaSpec.max_memory_usage_bytes); llama.cpp one, in 32-bit floats (llama_memory_recurrent, GGML_TYPE_F32).
@@ -122,10 +200,11 @@ def _n(x: int) -> str:
     return f"{x:,}"
 
 
-def vllm_kv(layout: dict, context: int, seqs: int, kv_bytes: int, gpus: int) -> tuple[int, int, str, str]:
+def vllm_kv(layout: dict, context: int, seqs: int, kv_bytes: int, gpus: int,
+            batch_tokens: int = VLLM_UNSET_BATCH_TOKENS) -> tuple[int, int, str, str]:
     """(KV bytes per GPU, recurrent-state bytes per GPU, their details) of one vLLM replica, from a model's
     layout: full-attention layers hold the context, sliding-window ones at most their window plus the tokens in
-    flight, recurrent ones a fixed state; for `seqs` sequences. Tensor parallel splits the KV heads (a head is
+    flight (two batches of `batch_tokens`), recurrent ones a fixed state; for `seqs` sequences. Tensor parallel splits the KV heads (a head is
     replicated when there are fewer heads than GPUs, so an MLA latent, one "head", always is) and the recurrent
     state."""
     kinds = layout.get("kinds") or ""
@@ -139,8 +218,9 @@ def vllm_kv(layout: dict, context: int, seqs: int, kv_bytes: int, gpus: int) -> 
         per_gpu_heads = max(1, heads // gpus)
         if kind == kvlayout.SLIDING:
             window = int(spec.get("window") or 0)
-            tokens = min(window - 1 + VLLM_IN_FLIGHT + VLLM_BLOCK, context)
-            held = f"{_n(tokens)} tokens (window {_n(window)} + in flight, at most the context)"
+            tokens = min(window - 1 + VLLM_CONCURRENT_BATCHES * batch_tokens + VLLM_BLOCK, context)
+            held = (f"{_n(tokens)} tokens (window {_n(window)} + {VLLM_CONCURRENT_BATCHES} x {_n(batch_tokens)} in "
+                    "flight, at most the context)")
         else:
             tokens = context
             held = f"{_n(tokens)} tokens"
@@ -235,7 +315,8 @@ def _safetensors(meta: dict, recipe: Recipe, params: dict, gpus: int, ctx: int) 
     if layout is not None:
         # 1.4.5 (#167): sliding-window, MLA, hybrid and KV-shared layers, as vLLM keeps them.
         n_seqs = 1 if recipe.estimate.kv_sequences == "one" else max(1, int(params.get("concurrency") or 1))
-        kv_gpu, state, kv_text, state_text = vllm_kv(layout, int(params.get("context") or 0), n_seqs, kv_dtype, gpus)
+        kv_gpu, state, kv_text, state_text = vllm_kv(layout, int(params.get("context") or 0), n_seqs, kv_dtype, gpus,
+                                                     vllm_batch_size(meta, recipe, params))
     else:
         per_token = 2 * cfg["layers"] * cfg["kv_heads"] * cfg["head_dim"] * kv_dtype
         seqs = "1 sequence" if recipe.estimate.kv_sequences == "one" else f"{params.get('concurrency')} sequences"

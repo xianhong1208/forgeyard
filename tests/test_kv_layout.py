@@ -14,7 +14,7 @@ import json
 import pytest
 
 from forgeyard.models import gguf, inspect, kvlayout, recipes
-from forgeyard.models.estimate import (LLAMA_UBATCH, VLLM_BLOCK, VLLM_IN_FLIGHT, VLLM_STATE_COPIES, estimate,
+from forgeyard.models.estimate import (LLAMA_UBATCH, VLLM_BATCH_TOKENS, VLLM_BLOCK, VLLM_STATE_COPIES, estimate,
                                        gguf_swa_cells)
 from tests.model_helpers import FIX
 
@@ -52,9 +52,10 @@ def kv(meta: dict, recipe: str, **params) -> dict:
     return {p.label: p.bytes for p in e.parts}
 
 
-def swa(window: int, context: int) -> int:
-    """What vLLM keeps per sequence of a sliding-window layer."""
-    return min(window - 1 + VLLM_IN_FLIGHT + VLLM_BLOCK, context)
+def swa(window: int, context: int, batch: int = VLLM_BATCH_TOKENS) -> int:
+    """What vLLM keeps per sequence of a sliding-window layer: the window and two batches in flight (the vllm recipe
+    passes --max-num-batched-tokens: 2,048 for a text-only deployment, 1.4.5 #201)."""
+    return min(window - 1 + 2 * batch + VLLM_BLOCK, context)
 
 
 # ------------------------------------------------------------------ config.json
@@ -123,8 +124,10 @@ def test_fy_kvl_004_vllm_kv_by_layer_kind():
     what vLLM has in flight, MLA's latent without V, a recurrent state per sequence (two with prefix caching) that
     does not grow with the context."""
     g3 = {"config": summary("gemma-3-27b-it"), "weights": W}
-    # At the default context the window plus what is in flight covers it all: nothing changes.
-    assert kv(g3, "vllm", context=8192, concurrency=4)["KV cache"] == 2 * 62 * 16 * 128 * 8192 * 4 * 2
+    # At the default context the window plus two batches of 2,048 (5,135 tokens) is less than the context (1.4.5, #201;
+    # with vLLM's 8,192 of an H100 it covered it all).
+    assert kv(g3, "vllm", context=8192, concurrency=4)["KV cache"] == \
+        (10 * 16 * 256 * 8192 + 52 * 16 * 256 * 5135) * 4 * 2 and swa(1024, 8192) == 5135
     long = kv(g3, "vllm", context=131072, concurrency=1)["KV cache"]
     assert long == (10 * 16 * 256 * 131072 + 52 * 16 * 256 * swa(1024, 131072)) * 2
     assert long < 2 * 62 * 16 * 128 * 131072 * 2 * 0.3
@@ -227,3 +230,95 @@ def test_fy_kvl_009_summary_stores_the_layout(name):
                                                          h.array_lengths)
     plain = gguf.parse((FIX / "qwen3-1.7b-q4_k_m.gguf-header").read_bytes()).summary()
     assert "kv_layout" not in plain
+
+
+# ------------------------------------------------------------------ vLLM's tokens per step (1.4.5, #201)
+def test_fy_kvl_010_batch_tokens_are_vllms_a100_choice():
+    """FY-KVL-010: the vllm recipe's --max-num-batched-tokens is what vLLM 0.32 picks on an A100 for the API server:
+    2,048, at most concurrency x context; for a Gemma 4 that takes images bidirectionally (12B, 26B-A4B, 31B) at
+    least its largest item, a 32-frame video of 2,496 tokens, while the deployment takes media (vLLM raises its own
+    default to it and refuses to start below it), never for E2B, E4B, Gemma 3 or gpt-oss; a Gemma 4 inspected before
+    this counts as one that does."""
+    from forgeyard.models.estimate import GEMMA4_VIDEO_ITEM, vllm_batch_tokens
+    assert GEMMA4_VIDEO_ITEM == 2496 and VLLM_BATCH_TOKENS == 2048
+    text = {"context": 8192, "concurrency": 4, "images": 4, "videos": 0}
+    for name in ("gemma-4-12b-it", "gemma-4-26b-a4b-it", "gemma-4-31b-it"):
+        s = summary(name)
+        assert s["mm_item_tokens"] == 2496, name
+        assert vllm_batch_tokens({"config": s}, text) == 2496
+        assert vllm_batch_tokens({"config": s}, {**text, "images": 0}) == 2048          # text only: chunked
+        assert vllm_batch_tokens({"config": s}, {**text, "images": 0, "videos": 1}) == 2496
+        assert vllm_batch_tokens({"config": s}, {**text, "context": 256, "concurrency": 1}) == 2496  # never below
+    for name in ("gemma-4-e2b-it", "gemma-4-e4b-it"):
+        assert summary(name)["mm_item_tokens"] == 0
+        assert vllm_batch_tokens({"config": summary(name)}, text) == 2048
+    for name in ("gemma-3-12b-it", "gpt-oss-20b"):
+        assert "mm_item_tokens" not in summary(name)
+        assert vllm_batch_tokens({"config": summary(name)}, text) == 2048
+    assert vllm_batch_tokens({"config": summary("gpt-oss-20b")}, {"context": 256, "concurrency": 2}) == 512
+    old = {k: v for k, v in summary("gemma-4-e2b-it").items() if k != "mm_item_tokens"}
+    assert vllm_batch_tokens({"config": old}, text) == 2496                       # inspected before 1.4.5: safe side
+    assert vllm_batch_tokens({}, {}) == 2048
+
+
+def test_fy_kvl_011_estimate_matches_vllm_on_an_a100():
+    """FY-KVL-011: the measured case of #201 (A100 80GB, vLLM 0.32.0, Gemma 4 12B, context 16,384 x 1, the recipe's
+    defaults: images on): vLLM logged max_num_batched_tokens=2496, 7.25 GiB of KV cache and a maximum concurrency of
+    3.47x, i.e. 2.089 GiB a request; the estimate now counts the same 2 x 2,496 in flight (it said 5.25 GiB with
+    8,192). gpt-oss and Gemma 3 count 2 x 2,048; extra engine arguments that set the flag are counted (they come
+    last); a recipe that leaves it to vLLM is counted with vLLM's H100 default, 8,192."""
+    g4 = {"config": summary("gemma-4-12b-it"), "weights": W}
+    p = kv(g4, "vllm", context=16384, concurrency=1, images=4)["KV cache"]
+    assert p == (8 * 1 * 1024 * 16384 + 40 * 8 * 512 * (1024 - 1 + 2 * 2496 + VLLM_BLOCK)) * 2
+    measured = 7.25 * GIB / 3.47
+    assert abs(p - measured) / measured < 0.005 and p >= measured * 0.999
+    e = estimate(g4, R["vllm"], {"dtype": "auto", "quantization": "none", "gpus": 1, "context": 16384,
+                                 "concurrency": 1, "images": 4, "videos": 0}, device="gpu", gpu_context=0)
+    assert "2 x 2,496 in flight" in next(x.detail for x in e.parts if x.label == "KV cache")
+    oss = {"config": summary("gpt-oss-20b"), "weights": W}
+    assert kv(oss, "vllm", context=32768, concurrency=2)["KV cache"] == \
+        (12 * 8 * 128 * 32768 + 12 * 8 * 128 * (128 - 1 + 2 * 2048 + VLLM_BLOCK)) * 2 * 2
+    g3 = {"config": summary("gemma-3-12b-it"), "weights": W}
+    assert kv(g3, "vllm", context=32768, concurrency=1, images=4)["KV cache"] == \
+        (8 * 8 * 512 * 32768 + 40 * 8 * 512 * swa(1024, 32768)) * 2
+    over = kv(oss, "vllm", context=32768, concurrency=2, extra_args=["--max-num-batched-tokens=8192"])["KV cache"]
+    assert over == (12 * 8 * 128 * 32768 + 12 * 8 * 128 * swa(128, 32768, 8192)) * 2 * 2
+    custom = R["vllm"].model_copy(update={"args": [a for a in R["vllm"].args
+                                                   if a not in ("--max-num-batched-tokens", "{batch_tokens}")]})
+    assert kv(oss, "vllm", context=32768, concurrency=2)["KV cache"] < \
+        {p.label: p.bytes for p in estimate(oss, custom, {"dtype": "auto", "quantization": "none", "gpus": 1,
+                                                          "context": 32768, "concurrency": 2}, device="gpu",
+                                            gpu_context=0).parts}["KV cache"] == \
+        (12 * 8 * 128 * 32768 + 12 * 8 * 128 * swa(128, 32768, 8192)) * 2 * 2
+
+
+def test_fy_kvl_012_the_engine_gets_what_the_estimate_counted():
+    """FY-KVL-012: the vllm recipe passes --max-num-batched-tokens {batch_tokens}, rendered from the same rule the
+    estimate counts (2,496 for Gemma 4 12B with images, 2,048 without, min(2,048, concurrency x context) for a text
+    model), so the engine and the estimate agree on every card; the flag is one Forgeyard sets (the advisor's
+    extra-arguments check names it)."""
+    from types import SimpleNamespace
+
+    from forgeyard.advisor import managed_flags
+    from forgeyard.models import render
+
+    rec = R["vllm"]
+    assert rec.args[rec.args.index("--max-num-batched-tokens") + 1] == "{batch_tokens}"
+    assert "--max-num-batched-tokens" in managed_flags(rec)
+
+    def args(meta, **params):
+        params = {"dtype": "auto", "quantization": "none", "gpus": 1, **params}
+        est = estimate(meta, rec, {**{k: q.default for k, q in rec.params.items()}, **params}, device="gpu",
+                       gpu_context=0)
+        model = SimpleNamespace(meta=meta, format="safetensors", engine_args={}, task="chat")
+        ctx = SimpleNamespace(params=params, recipe=rec, model=model, deployment=None, estimate=est)
+        a = render.args_for(ctx, rec.variants[0], render.values(ctx, rec.variants[0], [], 0))
+        return int(a[a.index("--max-num-batched-tokens") + 1]), est
+
+    g4 = {"config": summary("gemma-4-12b-it"), "weights": W, "modalities": ["image", "audio", "video"]}
+    n, est = args(g4, context=16384, concurrency=1)
+    assert n == 2496 and "2 x 2,496 in flight" in next(x.detail for x in est.parts if x.label == "KV cache")
+    assert args(g4, context=16384, concurrency=1, images=0)[0] == 2048
+    q = inspect.config_summary(json.loads((FIX / "qwen3-4b.config.json").read_text()))
+    assert args({"config": q, "weights": W}, context=8192, concurrency=4)[0] == 2048
+    assert args({"config": q, "weights": W}, context=512, concurrency=2)[0] == 1024

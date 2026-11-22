@@ -1121,6 +1121,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 部署沒有指定 context 時，如果模型本身的最大長度比配方的預設短，就從模型的最大值開始（1.4.4）：512 個 token 的 BERT 分類模型會得到 `--max-model-len 512`，而不是 8192。RoBERTa 和 XLM-RoBERTa 模型的位置從 padding index 之後開始算，所以 514 個位置嵌入只放得下 512 個 token（BGE-M3：8192）。
 
+`vllm` 會傳 `--max-num-batched-tokens`，也就是 vLLM 一個步驟處理的 token 數（1.4.5，#201）：2,048，最多 *Concurrent requests* × *Context length*；Gemma 4 12B、26B-A4B 和 31B 在部署接受圖片、音訊或影片時是 2,496（vLLM 不會把它們的一張圖片或一段影片拆到兩個步驟，最長的是 32 格的影片，2,496 個 token）。這就是 vLLM 0.32.0 在 A100 和 70 GB 以下的卡上自己會選的值。讓它自己選的話，在 H100、H200 上會是 8,192，160 GB 以上是 16,384，而估算是在選卡之前做的，無從得知：滑動視窗層（Gemma、gpt-oss）每個請求除了視窗，還要存兩個這樣的步驟，所以 Gemma 4 12B 在 16,384 × 1 時估了 5.25 GiB 的 KV cache，vLLM 實際只用了 2.09 GiB。現在兩者在每張卡上都一致。在 H100、H200 上，長的提示詞會分成比 vLLM 自己選的更多、更小的步驟讀完。
+
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
 `llama-cpp` 跑的是 llama.cpp **1.0.0**（1.3.1），這是它第一個使用語意化版本號的 release。這個 release

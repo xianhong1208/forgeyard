@@ -82,7 +82,9 @@ Placeholders: {model_path} {model_file} {model_hub} {served_name} {host} {port} 
 {keep_seconds} (video models: how long the engine keeps a finished video, the deployment's keep_minutes and an hour)
 {vae_file} {llm_file} {clip_l_file} {clip_g_file} {t5xxl_file} (image models made of separate files: the
 component's path) {gpu_budget_gib} (the reservation in GiB, less the CUDA context) {task} (1.4: the model's
-task, for engines that serve several) and any declared param.
+task, for engines that serve several) {batch_tokens} (1.4.5: vLLM's --max-num-batched-tokens, the value
+the estimate counts: 2,048, at most concurrency x context, at least a Gemma 4's largest image or video) and any
+declared param.
 Model paths become ${MODEL_PATH}, ${MODEL_FILE} and ${MODEL_HUB}, which the agent fills in (the
 mount inside a container, the cache directory for a process).
 """
@@ -117,7 +119,7 @@ ESTIMATE_METHODS = ("safetensors-kv", "gguf", "files", "fixed", "diffusers")
 BUILTIN_PLACEHOLDERS = {"model_path", "model_file", "model_hub", "served_name", "host", "port", "context",
                         "concurrency", "kv_tokens", "gpus", "gpu_util", "gpu_layers", "threads", "dtype", "repo",
                         "mmproj_file", "image_max_pixels", "gpu_util_main", "gpu_util_codec", "width", "height",
-                        "max_pixels", "gpu_budget_gib", "keep_seconds", "task"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
+                        "max_pixels", "gpu_budget_gib", "keep_seconds", "task", "batch_tokens"} | {f"{c}_file" for c in ("vae", "llm", "clip_l", "clip_g", "t5xxl")}
 MEDIA_KINDS = ("image", "audio", "video")
 # mmproj: a GGUF projector file; image_pixels: image tokens scale with the resolution (vision_tile_px).
 # Image models (1.3): image_single (one checkpoint file with everything: -m), image_split (a diffusion
