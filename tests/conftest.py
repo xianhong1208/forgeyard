@@ -25,6 +25,7 @@ from forgeyard.security import crypto, tls
 from forgeyard.security.ratelimit import limiter
 from forgeyard.workloads.autoscale import autoscaler
 from forgeyard.workloads.sleep import idle
+from forgeyard.gateway import waking
 from tests import leaks
 
 OWNER = ("owner", "harbour-lantern-71")
@@ -118,14 +119,14 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setenv("DATABASE_URL", PG_URL)
     get_settings.cache_clear()
     reset_engine()
-    for state in (limiter, balancer, key_limiter, in_flight, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, autoscaler):  # in-memory state of one server
+    for state in (limiter, balancer, key_limiter, in_flight, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, waking, autoscaler):  # in-memory state of one server
         state.reset()
     forget_ceiling()
     yield
     _close_sessions()  # tests open sessions with next(get_db()); PostgreSQL would keep their locks
     reset_engine()
     get_settings.cache_clear()
-    for state in (limiter, balancer, key_limiter, in_flight, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, autoscaler):
+    for state in (limiter, balancer, key_limiter, in_flight, recorder, ledger, hub, crypto, tls.live, reach, relay, upload, imagecopy, idle, waking, autoscaler):
         state.reset()
 
 

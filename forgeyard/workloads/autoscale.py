@@ -7,8 +7,11 @@
   are never scaled automatically: a video job belongs to the replica that makes it.
 - **The load** of a deployment, sampled every SAMPLE_SECONDS in this server: the requests in flight on its
   replicas (the gateway's balancer; not those on a replica being drained, which finish there) plus those waiting in the gateway's line for a slot of a tier it is in (and in
-  its image queue), a line shared by several deployments counted in equal parts. One replica takes its
-  *Concurrent requests* (`concurrency`, 1 when the recipe has none) at the target: 80 % of 4 is 3.2.
+  its image queue), a line shared by several deployments counted in equal parts. Requests waiting in the *wake*
+  line of an asleep deployment (forgeyard/gateway/waking.py) are not counted: a wake already starts its replicas
+  (the minimum), nothing is added while they start, and once one is ready those requests leave the wake line for
+  the normal path, where they count (in flight, or in the fair line). Counted twice over the wake, they would add a
+  replica before the first one answered. One replica takes its *Concurrent requests* (`concurrency`, 1 when the recipe has none) at the target: 80 % of 4 is 3.2.
 - **Up**: one replica more when the average load over the last `scale_up_seconds` is above what the ready replicas
   take at the target, or over the last PANIC_SECONDS at least twice that (a burst is not left waiting a minute),
   never above `max_replicas`, and **only when it fits somewhere now**: the scheduler's check of a deploy, on a
@@ -22,8 +25,9 @@
   again meanwhile, or the others no longer ready, keeps it.
 - **One at a time**: nothing is added while a replica is starting and nothing removed while one drains; nothing
   changes while an edit restarts the replicas, while a replica's machine is offline (it may be moved, #164), or
-  within PAUSE_AFTER_CHANGE of a person starting or changing the deployment.
+  within PAUSE_AFTER_CHANGE of the deployment being started, woken or changed.
 - **Asleep**: a deployment that went to sleep keeps `min_replicas` rows (at least 1), so it wakes with as many.
+  Scaling to 0 is sleep's job (forgeyard/workloads/sleep.py), never the autoscaler's.
 - Every decision is an event of the deployment ("Scaled up to 2: …", "Draining replica 1: …", "Removed replica 1
   …"), not audited (no person did it); `/metrics` has the replicas desired, ready and draining, the load and the
   decisions made.
@@ -155,7 +159,8 @@ class Signals(Protocol):
 
 
 class GatewaySignals:
-    """The real gateway: the balancer's counts and drains, the waiting lines and the image queues."""
+    """The real gateway: the balancer's counts and drains, the fair lines and the image queues (not the wake lines:
+    see the module's docstring)."""
 
     def in_flight(self, uid: str) -> int:
         from forgeyard.gateway.balancer import balancer
@@ -440,7 +445,7 @@ class Autoscaler:
         if any(r.node is not None and offline.skipped(r.node, wall) for r in live):
             return "a replica's machine is offline"
         if w.updated_at is not None and wall - as_utc(w.updated_at) < PAUSE_AFTER_CHANGE:
-            return "it was started or changed less than 2 minutes ago"
+            return "it was started, woken or changed less than 2 minutes ago"
         return None
 
     # -------------------------------------------------------------- changes

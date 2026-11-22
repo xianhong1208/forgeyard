@@ -534,7 +534,7 @@ def test_fy_asc_013_pauses(cpus, run):
     run.load("chat", 2)
     run.wall_offset = timedelta(0)   # just created
     assert run.run(60) == [] and len(rows("chat")) == 1
-    assert run.scaler.status(_dep("chat"))["paused"] == "it was started or changed less than 2 minutes ago"
+    assert run.scaler.status(_dep("chat"))["paused"] == "it was started, woken or changed less than 2 minutes ago"
     run.wall_offset = timedelta(minutes=3)
     db = new_session()
     try:
@@ -553,7 +553,7 @@ def test_fy_asc_013_pauses(cpus, run):
     c.patch(f"/api/deployments/{d['id']}", json={"params": {"autoscale_target": 70}})
     run.wall_offset = timedelta(0)
     done = run.run(2)
-    assert done == ["Kept replica 1: it was started or changed less than 2 minutes ago."], done
+    assert done == ["Kept replica 1: it was started, woken or changed less than 2 minutes ago."], done
     assert run.gw.drains == set() and len(rows("chat")) == 2
 
 
@@ -733,7 +733,7 @@ def test_fy_asc_020_a_drain_through_the_real_gateway(gw):  # noqa: F811
 
 def test_fy_asc_021_the_gateway_signals(owner):
     """FY-ASC-021: what the autoscaler reads from the gateway: requests in flight per replica, the waiting lines and
-    the image queues (added up per route tier), and the balancer's drains."""
+    the image queues (added up per route tier; not the wake lines), and the balancer's drains."""
     from forgeyard.gateway import imagegen, waiting
     from forgeyard.gateway.balancer import balancer
     from forgeyard.workloads.autoscale import GatewaySignals
@@ -752,6 +752,12 @@ def test_fy_asc_021_the_gateway_signals(owner):
         q = imagegen.queue("draw#0")
         assert q.join(8) and q.join(8) and q.join(8)
         assert s.waiting() == {"chat#0": 2, "draw#0": 3}
+        # Requests waiting for an asleep model to wake are not load: the wake starts its replicas already.
+        from forgeyard.gateway import waking
+
+        waking.line("chat#0").waiting.extend([Waiting(), Waiting(), Waiting()])
+        waking.line("sleepy#0").waiting.append(Waiting())
+        assert waking.lengths() and s.waiting() == {"chat#0": 2, "draw#0": 3}
         s.drain("u9")
         assert not s.drained("u9")
         balancer.release("u9")
@@ -759,5 +765,8 @@ def test_fy_asc_021_the_gateway_signals(owner):
         s.undrain("u9")
         assert not s.drained("u9") and not balancer.draining("u9")
     finally:
+        from forgeyard.gateway import waking
+
         waiting.forget()
         imagegen.forget()
+        waking.reset()
