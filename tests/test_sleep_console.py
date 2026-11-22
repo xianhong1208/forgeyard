@@ -185,6 +185,8 @@ def test_fy_slc_002_the_advisor_points_an_idle_gpu_deployment_at_sleep_when_idle
     ready("chat", 0)
     assert c.post(f"/api/deployments/{d['id']}/stop").status_code == 200
     assert found("deployment-idle-awake") == []
+    set_replica("chat", 0, state="healthy")                # its agent has not stopped it yet: still a person's Stop
+    assert found("deployment-idle-awake") == []
 
 
 def test_fy_slc_003_cpu_deployments_are_not_pointed_at_sleep(cpu):

@@ -12,6 +12,7 @@ import fixture from "../test/machines.json";
 import { deployBody, editBody, editForm, emptyDeploy } from "../lib/models";
 import { asleepOn, elapsed, idleProblem, sameModelStart, seconds, sleepState, startHint } from "../lib/sleep";
 import { pickerGroups } from "../lib/playground";
+import { SleepSetting } from "../components/Sleep";
 import type { CatalogResponse, Deployment, DeploymentSleep, EditResponse, Placement, Replica, RouteInfo, StartTime, Workload } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
@@ -152,7 +153,7 @@ describe("sleep when idle: the words (lib/sleep)", () => {
 });
 
 describe("sleep when idle: the deploy and edit forms", () => {
-  it("FY-WEB-602: the deploy body: off sends nothing; on sends sleep_when_idle and its minutes (30 unless changed)", () => {
+  it("FY-WEB-602: the deploy body: off sends nothing; on sends sleep_when_idle and its minutes (30 unless changed); ticking fills in 30", () => {
     const base = { ...emptyDeploy(), model: "qwen3-4b", recipe: "vllm", name: "chat" };
     expect(base.sleepOn).toBe(false);
     expect(base.idleMinutes).toBe("30");
@@ -163,6 +164,16 @@ describe("sleep when idle: the deploy and edit forms", () => {
     const empty = deployBody({ ...base, sleepOn: true, idleMinutes: "" }, recipe).params as Record<string, unknown>;
     expect(empty.sleep_when_idle).toBe(true);
     expect("idle_minutes" in empty).toBe(false);   // the server's default, 30
+    // ticking it with no idle time set (a deployment from before 1.5) fills in 30; unticking keeps what is there
+    const changed = vi.fn();
+    render(<MemoryRouter><SleepSetting prefix="x" on={false} minutes="" onChange={changed} /></MemoryRouter>);
+    expect((screen.getByLabelText("Idle minutes") as HTMLInputElement).placeholder).toBe("30");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Sleep when idle/ }));
+    expect(changed).toHaveBeenLastCalledWith(true, "30");
+    cleanup();
+    render(<MemoryRouter><SleepSetting prefix="x" on minutes="45" onChange={changed} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("checkbox", { name: /Sleep when idle/ }));
+    expect(changed).toHaveBeenLastCalledWith(false, "45");
   });
 
   it("FY-WEB-603: the deploy form shows When not in use, off by default, with the same model's last start; ticking it puts it in the request", async () => {
