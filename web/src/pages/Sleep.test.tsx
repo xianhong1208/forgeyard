@@ -197,6 +197,7 @@ describe("sleep when idle: the deploy and edit forms", () => {
     expect(minutes.disabled).toBe(true);
     expect(minutes.value).toBe("30");
     expect(within(panel).getByText(/^Off: it keeps its memory while nobody uses it/)).toBeTruthy();
+    expect(within(panel).queryByText(/its memory may be used by others/)).toBeNull();
     expect(within(panel).getByText("chat-a (the same model and engine) last started in 74 s: the first request after a sleep waits about that long.")).toBeTruthy();
     const json = () => JSON.parse(screen.getByLabelText("Deployment JSON").textContent ?? "{}");
     expect(json().params.sleep_when_idle).toBeUndefined();
@@ -226,6 +227,9 @@ describe("sleep when idle: the deploy and edit forms", () => {
     const old = editForm(dep([rep()], { params: { context: 8192, concurrency: 4, gpus: 1, share: "exclusive" } }), recipe);
     expect([old.sleepOn, old.idleMinutes]).toEqual([false, ""]);
     expect(editBody(old, recipe).params).toMatchObject({ sleep_when_idle: null, idle_minutes: null });
+    // turned off earlier with an idle time kept: off, and the time is still there for later
+    const kept = editForm(dep([rep()], { params: { context: 8192, concurrency: 4, gpus: 1, share: "exclusive", idle_minutes: 45 } }), recipe);
+    expect([kept.sleepOn, kept.idleMinutes]).toEqual([false, "45"]);
 
     const bodies: Record<string, unknown>[] = [];
     server((url, init) => {
@@ -313,6 +317,11 @@ describe("sleep when idle: Serving and the deployment page", () => {
       .toEqual(["Off: it keeps its memory while nobody uses it", "Awake", "none since the server started", "not measured yet", undefined]);
     cleanup();
 
+    d = dep([asleepRep()], { workload: workload([asleepRep()], { desired_state: "stopped", status: "stopped", ready: 0 }), sleep: sleepOf({ sleeps_at: null }) });
+    mount("/serving/3");
+    expect((await facts()).Now).toBe("Stopped by a person: it does not wake by itself");
+    cleanup();
+
     d = asleep();
     mount("/serving/3");
     expect((await facts()).Now).toBe("Asleep since 5 min ago; it holds no memory");
@@ -365,13 +374,16 @@ describe("sleep when idle: the Playground and Machines", () => {
     expect(waitingText.closest(".play-wake")!.textContent).toMatch(/Waking the model \(about 74 s\)… \d+:\d\d\. It answers once a replica is ready; a request sent now waits for it\./);
   });
 
-  it("FY-WEB-608: someone who cannot start models sees that it is asleep and whom to ask, with no button", async () => {
-    server((url) => (url === "/api/deployments" ? { status: 200, body: { deployments: [asleep()], server_time: "", can_manage: false } }
+  it("FY-WEB-608: someone who cannot start models sees that it is asleep and whom to ask, with no button; the page follows a wake it did not start", async () => {
+    let d = asleep();
+    server((url) => (url === "/api/deployments" ? { status: 200, body: { deployments: [d], server_time: "", can_manage: false } }
       : url === "/api/routes" ? { status: 200, body: { routes, cloud: "off", is_admin: false } } : undefined), USER);
     mount("/playground");
     const bar = (await screen.findByText(/is asleep/, { selector: ".play-wake strong" })).closest(".play-wake")!;
     expect(bar.textContent).toContain("An operator or admin can wake it from its page.");
     expect(within(bar as HTMLElement).queryByRole("button")).toBeNull();
+    d = waking();   // someone else woke it (or, from 1.5.0's next step, a request did): the page asks again every 2 s
+    expect(await screen.findByText(/^Waking the model \(about 74 s\)…$/, undefined, { timeout: 4000 })).toBeTruthy();
   });
 
   it("FY-WEB-609: Machines names an asleep deployment on the machine it would run on (it holds nothing), on the tile and the machine's page", async () => {
