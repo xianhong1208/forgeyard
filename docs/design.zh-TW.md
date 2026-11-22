@@ -196,7 +196,7 @@ Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 
   `llama-cpp` 在每個 variant 上也提供 `tts`（附 projector 的 TTS GGUF）。
 - **估算**（每個 replica、每張 GPU）：safetensors = 參數量 × 每參數 bytes（FP8 時 embedding 仍是 16 bit）+ KV cache
   （2 × 層數 × KV heads × head 大小 × context × 同時序列數 × bytes；1.4.5、#167 起依層的種類計算，見 `forgeyard/models/kvlayout.py`：
-  滑動視窗層每個序列最多存 window − 1 + 2 × 8,192 個進行中的 token，MLA 存一個 `kv_lora_rank + qk_rope_head_dim` 的 latent、沒有 V、每張 GPU 都有一份，
+  滑動視窗層每個序列最多存 window − 1 + 2 × `--max-num-batched-tokens` 個進行中的 token（1.4.5，#201：配方明確傳這個值，2,048，最多並行數 × 上下文，有媒體的 Gemma 4 為 2,496，也就是 vLLM 在 A100 上自己會選的值；不傳的話 vLLM 依卡片決定），MLA 存一個 `kv_lora_rank + qk_rope_head_dim` 的 latent、沒有 V、每張 GPU 都有一份，
   遞迴層每個序列一份固定大小的狀態（prefix caching 時兩份），共用 KV 的層不存；llama.cpp 的滑動層是 `window × 序列數 + 512` 格、補到 256 的倍數，
   MLA 只存 K，遞迴狀態用 32-bit float）+ 配方的引擎 overhead + CUDA context（0.4 GiB，在 A100 上量的）；
   GGUF = 卸載到 GPU 的層的實際 tensor 大小 + 這些層的 KV cache + logits buffer + overhead（留在 CPU 的層、沒有全部卸載時的 output 層與它們的 KV cache

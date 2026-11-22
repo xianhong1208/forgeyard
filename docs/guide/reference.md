@@ -1511,6 +1511,15 @@ the recipe's default (1.4.4): a 512-token BERT classifier gets `--max-model-len 
 XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold 512
 tokens (BGE-M3: 8192).
 
+`vllm` passes `--max-num-batched-tokens`, the tokens vLLM works on in one step (1.4.5, #201): 2,048, at most
+*Concurrent requests* x *Context length*, and 2,496 for Gemma 4 12B, 26B-A4B and 31B while the deployment takes
+images, audio or video (vLLM never splits one of their images or videos over two steps, and its longest, a
+32-frame video, is 2,496 tokens). That is what vLLM 0.32.0 chooses by itself on an A100 and on cards under 70 GB.
+Left to itself it would choose 8,192 on an H100 or H200 and 16,384 from 160 GB, and the estimate, made before a
+card is chosen, could not know which: a sliding-window layer (Gemma, gpt-oss) keeps its window plus two such steps
+per request, so Gemma 4 12B at 16,384 x 1 was estimated at 5.25 GiB of KV cache where vLLM used 2.09. Now the two
+agree on every card. On an H100 or H200 a long prompt is read in more, smaller steps than vLLM would choose there.
+
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
 `llama-cpp` runs llama.cpp **1.0.0** (1.3.1), its first release with a semantic version. The release's

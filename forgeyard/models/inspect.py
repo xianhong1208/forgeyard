@@ -11,6 +11,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from forgeyard.models import fetch, gguf, kvlayout, modalities, safetensors, sources, textcls, vision
+from forgeyard.models.estimate import vllm_mm_item_tokens
 from forgeyard.models.sources import Source, SourceError
 
 MAX_SHARDS = 256
@@ -74,6 +75,10 @@ def config_summary(config: dict) -> dict:
     layout = kvlayout.from_config(text)
     if layout is not None:
         out["kv_layout"] = layout
+    # 1.4.5 (#201): what one vLLM step must hold for a multimodal prefix-LM model (Gemma 4), 0 for another Gemma 4.
+    item = vllm_mm_item_tokens(config)
+    if item is not None:
+        out["mm_item_tokens"] = item
     return out
 
 

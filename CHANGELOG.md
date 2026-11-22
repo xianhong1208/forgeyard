@@ -74,6 +74,19 @@ version until 1.0.
   only stopped; its speech-to-text deployment stays for the tts group); the report's notes say what was freed.
   Everything the run makes is still removed at the end.
 
+- **The vLLM estimate and the engine agree on the tokens in flight** (#201). A sliding-window layer keeps its window
+  plus two steps of `max_num_batched_tokens`, which vLLM 0.32 chooses by card when it is not given: 2,048 on an A100
+  (raised to 2,496 for Gemma 4, its longest video), 8,192 on an H100. The estimate, made before a card is chosen,
+  counted 8,192, so on an A100 Gemma 4 12B at 16,384 x 1 was estimated at 5.25 GiB of KV cache where vLLM used
+  2.09. The `vllm` recipe now passes `--max-num-batched-tokens` itself, vLLM's own A100 value: 2,048, at most
+  concurrency x context, at least 2,496 for Gemma 4 12B, 26B-A4B and 31B while the deployment takes media (vLLM
+  refuses to start below it); the estimate counts the same, to within 0.1% of what vLLM reported for Gemma 4 12B.
+  Nothing changes on an A100 or a card under 70 GB; on an H100 or H200 a long prompt is read in smaller steps than
+  vLLM's 8,192. The flag in *Extra engine arguments* is counted too. Recommended memory for Gemma 3 and 4 and
+  gpt-oss moves with it (Gemma 4 12B 36.7 to 34.0 GiB, 31B 89.6 to 83.1). A Gemma 4 added before this is passed
+  2,496 whatever its kind (E2B and E4B need 2,048; adding them again reads it). No migration.
+
+
 - **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
   local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of
   polling every 25 ms, where whoever looked first after a release took the slot (a newcomer could starve those
