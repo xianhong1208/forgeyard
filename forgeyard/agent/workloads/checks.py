@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import asyncio
 
-from forgeyard.agent.workloads import plan
+from forgeyard.agent.workloads import plan, starts
 from forgeyard.agent.workloads.lifecycle import LIVE
 from forgeyard.agent.workloads.process import beyond_loopback
 from forgeyard.agent.workloads.records import Record
+from forgeyard.machines.protocol import FEATURE_START_TIMES
 
 
 class HealthChecks:
@@ -23,7 +24,9 @@ class HealthChecks:
             return
         if rec.started_at and now - rec.started_at < int(h.get("initial_delay") or 0):
             return
-        if rec.last_probe_at and now - rec.last_probe_at < int(h.get("interval") or 10):
+        # 1.5.0 ("start_times"): every second while it starts, then at the recipe's interval.
+        fast = FEATURE_START_TIMES in self.server_features
+        if rec.last_probe_at and now - rec.last_probe_at < starts.probe_interval(rec, h, now, fast):
             return
         port = next((p for p in rec.ports if p["name"] == h.get("port")), rec.ports[0] if rec.ports else None)
         if port is None:
@@ -65,6 +68,7 @@ class HealthChecks:
             err = self.guard_errors[rec.id]
         before = (rec.state, rec.reason)
         if err is None:
+            starts.finish(rec, self.clock())  # 1.5.0: the start is over (once: it clears its marks)
             rec.health_failures = 0
             rec.healthy_seen = True
             rec.loading = False

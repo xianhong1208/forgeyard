@@ -32,7 +32,8 @@ def online(ws, **over) -> dict:
     welcome = recv(ws)
     assert welcome["type"] == "welcome" and welcome["features"] == ["cache_admin", "gpu_check", "guard_tls", "image_load", "image_remove", "image_save", "models", "prefetch",
                                                                      "pull_progress", "relay", "relay_images",
-                                                                     "relay_source", "replica_keys", "workloads"]
+                                                                     "relay_source", "replica_keys", "start_times",
+                                                                     "workloads"]
     return welcome
 
 

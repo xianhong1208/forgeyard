@@ -611,6 +611,12 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `forgeyard_gateway_waiting` | gauge | `model` | 現在正在排隊等本地空位的請求（路由所有層加總） |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | 每個請求在隊伍裡等了多久，才拿到空位或繼續往下走 |
 
+模型部署的副本就緒時（1.5.0）：
+
+| 指標 | 類型 | 標籤 | 是什麼 |
+|---|---|---|---|
+| `forgeyard_replica_start_seconds` | histogram | `recipe`、`model` | 啟動花了多久：從 agent 開始啟動它（模型檔案、映像檔、引擎）到第一次健康檢查通過。agent 比 1.5.0 舊時只有引擎的部分（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)） |
+
 每次收集時從資料庫讀取：
 
 | 指標 | 標籤 | 是什麼 |
@@ -626,7 +632,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `forgeyard_budgets_reached` | `scope`、`threshold` | 這個月有幾個 `key`、`person` 和 `provider` 預算達到 `80` 或 `100` 百分比（絕不列出是哪些） |
 | `forgeyard_build_info` | `version` | 永遠是 1：伺服器的版本 |
 
-另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
+另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱；`recipe` 標籤是配方的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
 
 ## 應用程式（已淘汰）
 
@@ -795,6 +801,8 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 403 | | 不是管理員或操作員 |
 
 每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
+
+（1.5.0）每個部署（列表裡和單獨查詢時）還有 `last_start`：最近一次啟動花了多久，`{seconds, phases, source, at, replica}`，取自它的事件。`phases` 是 agent 分得出來的各部分：`model`、`waiting`、`image` 和 `engine`，加起來就是 `seconds`；`source` 是 `agent`，或是 `server`（agent 比 1.5.0 舊，由伺服器只量了引擎的部分）。1.5.0 之後還沒有副本就緒過時是 `null`（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)）。
 
 ### 閒置時休眠
 
@@ -1148,6 +1156,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda`（torch +cu130） |
 | | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.4rc1`（linux/amd64 與 arm64） |
 
+`vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`：vLLM 的編譯快取可以在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，但在量測之前保持關閉（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts-experimental)）。自訂配方用 `enabled: true` 開啟它（只限容器 variant）。
+
 `vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型（任務 `classify`，1.4.4）：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤。語言模型型的 reranker（Qwen3-Reranker）不受影響。
 
 當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
@@ -1212,7 +1222,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `/etc/forgeyard/agent.toml` | agent 的設定 |
 | `/var/lib/forgeyard-agent/` | 憑據（`credential.json`，0600）、釘選的 CA（`server-ca.pem`）、副本的資料與紀錄 |
 | `/var/lib/forgeyard-agent-work/` | 每個行程副本各一個工作目錄 |
-| `/srv/forgeyard-models/` | 模型快取 |
+| `/srv/forgeyard-models/` | 模型快取；（1.5.0）其中的 `engine-cache/` 存放保留編譯快取的配方的引擎編譯快取 |
 | `/opt/forgeyard/` | agent 程式：它的 Python 環境和下載下來的 wheel |
 | `/usr/local/bin/forgeyard` | `forgeyard` 指令 |
 | `/etc/systemd/system/forgeyard-agent.service` | 服務（`KillMode=process`、`Restart=always`） |
