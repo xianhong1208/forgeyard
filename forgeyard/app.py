@@ -25,6 +25,7 @@ from forgeyard.api import (
     install,
     keys,
     machines,
+    metrics as metrics_api,
     models,
     onboarding,
     passthrough,
@@ -160,6 +161,7 @@ def create_app() -> FastAPI:
     app.include_router(imagecopy.router)
     app.include_router(install.router)
     app.include_router(guide.router)
+    app.include_router(metrics_api.router)  # GET /metrics (1.4.5, #165), before the web UI's catch-all
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     def api_not_found(rest: str):

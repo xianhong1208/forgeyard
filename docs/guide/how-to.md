@@ -1441,6 +1441,69 @@ What to know before you run it:
   `/opt/google/chrome/chrome`); `--install-playwright` puts Playwright, like the OpenAI SDK, in a
   virtual environment of the script's own (`--venv`). Without it, the console group is skipped.
 
+## Scrape Forgeyard with Prometheus
+
+The server answers `GET /metrics` in the Prometheus text format: the gateway's requests, latency and tokens per
+model, cloud spills, the waiting line, replicas by state, machines, GPU memory and cloud spend
+([every metric](reference.md#metrics)). Labels are model, machine and provider names, never keys, people or
+prompts.
+
+**Who may read it.** Without `METRICS_TOKEN`, only a request from the server's own host that came through no proxy
+(no `X-Forwarded-For`, `Forwarded` or `X-Real-IP`); anyone else gets 403. With `METRICS_TOKEN` set, every scrape
+needs `Authorization: Bearer <token>`, from anywhere, the server's host included; without it or with a wrong one
+it gets 401.
+
+**Prometheus on the server's own host**, no token. Save the server's CA from **Trust this server** as
+`/etc/prometheus/forgeyard-ca.pem`; the server's certificate always names `127.0.0.1`:
+
+```yaml
+scrape_configs:
+  - job_name: forgeyard
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/forgeyard-ca.pem
+    static_configs:
+      - targets: ["127.0.0.1:7860"]
+```
+
+**Prometheus anywhere else, or in Docker:** set a token on the server (a long random value, e.g.
+`openssl rand -hex 32`) in its `.env` or with `-e METRICS_TOKEN=…`, restart it, and give Prometheus the same value
+in a file:
+
+```yaml
+scrape_configs:
+  - job_name: forgeyard
+    scheme: https
+    authorization:
+      credentials_file: /etc/prometheus/forgeyard-metrics-token
+    tls_config:
+      ca_file: /etc/prometheus/forgeyard-ca.pem
+    static_configs:
+      - targets: ["192.168.1.20:7860"]
+```
+
+- **Docker needs the token.** A request into a container through a published port does not arrive from the
+  container's loopback, and a Prometheus container is another host: neither is "this host".
+- **The name in `targets`** must be one the server answers to and its certificate names: an IP address always
+  works. For a name, such as the server's container name on a Docker network (`forgeyard:7860`), add it to
+  `ALLOWED_HOSTS` and `TLS_EXTRA_NAMES` (otherwise 421, or a certificate error).
+- **Behind your own reverse proxy**, scrape through it with the token: a request it forwards is never treated as
+  local, even from `127.0.0.1`.
+
+Some queries to start from:
+
+| Query | What it shows |
+|---|---|
+| `sum by (model) (rate(forgeyard_gateway_requests_total[5m]))` | requests per second per model |
+| `sum by (model) (rate(forgeyard_gateway_requests_total{status=~"5.."}[5m]))` | server errors per second |
+| `histogram_quantile(0.95, sum by (le, model) (rate(forgeyard_gateway_time_to_first_byte_seconds_bucket[5m])))` | the 95th percentile of the time to the first byte |
+| `sum by (model, reason) (rate(forgeyard_gateway_spills_total[1h]))` | why requests leave the local tier |
+| `forgeyard_machine_up == 0` | machines that are offline (an alert) |
+| `forgeyard_gpu_memory_free_bytes / forgeyard_gpu_memory_total_bytes` | the free share of each card |
+
+Counters start again from 0 when the server restarts (Prometheus' `rate()` handles that). The state (replicas,
+machines, memory, spend) is read from the database at each scrape: scrape every 15 to 60 seconds, not faster.
+
 ## Back up and restore
 
 **What to back up on the server**, all in its `data/` folder unless you moved it (in Docker: the

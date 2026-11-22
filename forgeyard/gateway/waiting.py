@@ -15,25 +15,31 @@ tier at its deployment's *Concurrent requests* wait in line, first come first se
   is woken if it became first.
 
 Images keep their own queue (forgeyard/gateway/imagegen.py), with its own length and timeout.
+
+/metrics (#165) reads each line's length (`lengths`) and how long each request waited in it (`Line.leave`).
 """
 
 from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections import deque
 from typing import Optional
+
+from forgeyard import metrics
 
 MAX_WAITERS = 256       # requests waiting per route tier; more do not wait
 RECHECK = 0.5           # seconds: a waiter looks again even without a wake-up
 
 
 class Waiter:
-    __slots__ = ("event", "loop")
+    __slots__ = ("event", "loop", "since")
 
     def __init__(self):
         self.loop = asyncio.get_running_loop()
         self.event = asyncio.Event()
+        self.since = time.monotonic()
 
     def wake(self) -> None:
         try:
@@ -45,7 +51,8 @@ class Waiter:
 class Line:
     """Requests waiting for a slot on one route's tier, in the order they came."""
 
-    def __init__(self):
+    def __init__(self, key: str = ""):
+        self.key = key
         self._lock = threading.Lock()
         self.waiting: deque[Waiter] = deque()
 
@@ -80,6 +87,7 @@ class Line:
             except ValueError:
                 return
             nxt = self.waiting[0] if was_first and self.waiting else None
+        metrics.waited(self.key, time.monotonic() - w.since)
         if nxt is not None:
             nxt.wake()
 
@@ -106,8 +114,15 @@ def line(key: str) -> Line:
     with _lines_lock:
         found = _lines.get(key)
         if found is None:
-            found = _lines[key] = Line()
+            found = _lines[key] = Line(key)
         return found
+
+
+def lengths() -> dict[str, int]:
+    """How many requests wait in each line now ({"<served name>#<tier>": n})."""
+    with _lines_lock:
+        lines = list(_lines.items())
+    return {key: len(ln) for key, ln in lines}
 
 
 def slot_freed(uid: str) -> None:

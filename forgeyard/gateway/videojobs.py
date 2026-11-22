@@ -51,6 +51,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, VideoJob, as_utc, new_session, utcnow
 from forgeyard.gateway import imagegen, proxy, videogen
@@ -206,6 +207,9 @@ def _count(db, job: VideoJob, status: int, units: Optional[dict] = None) -> Opti
 def _record(entry: Optional[dict]) -> None:
     if entry is not None:
         recorder.record(**entry)
+        # /metrics (1.4.5, #165): the job from its creation to its end (a video job has no first byte to time).
+        metrics.request(endpoint=videogen.ENDPOINT, model=entry["model"], known=True, status=entry["status"],
+                        source=entry["source"], target="local", seconds=entry["latency_ms"] / 1000)
 
 
 # ------------------------------------------------------------------ asking for a video
@@ -343,11 +347,13 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
             key_limiter.settle(verdict, 0)
         job, target = await _place(caller, route, fits, ask)
     except Answer as a:
-        proxy.record(caller, model or "", deployment_id, a.response.status_code, started)
+        proxy.record(caller, model or "", deployment_id, a.response.status_code, started, endpoint=videogen.ENDPOINT,
+                     known=deployment_id is not None)
         return a.response
     except GatewayError as e:
         if model is not None:
-            proxy.record(caller, model, deployment_id, e.status, started, limited=limited)
+            proxy.record(caller, model, deployment_id, e.status, started, limited=limited, endpoint=videogen.ENDPOINT,
+                         known=deployment_id is not None)
         return e.response()
     return JSONResponse(videogen.video_object(job), headers={"X-Forgeyard-Target": target})
 

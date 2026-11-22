@@ -6,6 +6,19 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Prometheus metrics at `/metrics`** (#165). The gateway's finished requests by endpoint, model, status, source and
+  target; their total time and time to first byte (histograms); tokens in and out; cloud spills by reason; the
+  waiting line for a local slot (length, and each request's wait); and, read at each scrape, replicas by state,
+  machines online and offline, each GPU's (and machine RAM's) total, free and reserved memory, each provider's spend
+  this month and budget, and how many budgets reached 80 and 100 percent. Labels are model, machine and provider
+  names only: a model nobody serves counts as `_unknown`, and no label holds a key, a person or a prompt. Access as
+  in Folio: without `METRICS_TOKEN` only a direct request from the server's host (a loopback address with no
+  forwarding header) may read it, 403 otherwise; with it every scrape needs `Authorization: Bearer`, 401 otherwise.
+  The guide has a how-to with a scrape configuration (also for Docker, which needs the token). New dependency
+  `prometheus-client` (Apache-2.0, no dependencies of its own). No migration.
+
 ### Security
 
 - **TLS from the gateway to every replica** (#163). The gateway used to reach a replica's key guard over plain
@@ -28,6 +41,7 @@ version until 1.0.
     replicas cannot be reached (requests go to other replicas) and Setup health shows an error;
   - the agent's install (`install.sh`) now also installs `cryptography` (for the key and the request), pinned
     by hash like its other dependencies.
+
 
 ### Changed
 
