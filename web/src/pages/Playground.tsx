@@ -25,6 +25,7 @@ type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?:
 // The playground talks to /api/playground/<endpoint>: the gateway's routing, as the signed-in
 // user (the session cookie and the CSRF header), counted as "console" in usage. No API key.
 async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?: FormData, localOnly = false): Promise<Response> {
+  window.dispatchEvent(new Event(SENT_EVENT));   // 1.5.0: an asleep model starts waking now; the page looks again soon
   const headers: Record<string, string> = { "X-Forgeyard": "1" };
   if (localOnly) headers["X-Forgeyard-Local-Only"] = "1";
   if (!form) headers["Content-Type"] = "application/json";
@@ -64,6 +65,12 @@ export function PlaygroundPage() {
   const { reload: reloadDeps } = deps;
   const follow = useCallback(() => { if (sleeping) { reloadDeps(); reloadRoutes(); } }, [sleeping, reloadDeps, reloadRoutes]);
   usePoll(follow, SLEEP_POLL_MS);
+  // A request to an asleep model wakes it: look again shortly after one is sent, not only at the next poll.
+  useEffect(() => {
+    const soon = () => window.setTimeout(follow, SENT_LOOK_MS);
+    window.addEventListener(SENT_EVENT, soon);
+    return () => window.removeEventListener(SENT_EVENT, soon);
+  }, [follow]);
   const sleepOf = (r: RouteInfo) => routeSleep(r, deps.data?.deployments ?? []);
   const legacy = search.get("tab");
 
@@ -122,8 +129,11 @@ export function PlaygroundPage() {
   );
 }
 
-// 1.5.0 (#37): how often the Playground asks again while the chosen model is asleep or waking.
+// 1.5.0 (#37): how often the Playground asks again while the chosen model is asleep or waking, and how soon after a
+// request is sent (the gateway starts the wake as it takes the request).
 const SLEEP_POLL_MS = 2000;
+const SENT_LOOK_MS = 400;
+const SENT_EVENT = "forgeyard:playground-sent";
 
 // 1.5.0 (#37): the chosen model is asleep (a message wakes it; operators may also Wake now) or waking (about how
 // long, from the wake under way or its last start). The request itself is sent as to any model: the gateway holds it.

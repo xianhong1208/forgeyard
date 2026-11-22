@@ -389,7 +389,8 @@ describe("sleep when idle: the Playground and Machines", () => {
     fireEvent.change(screen.getByPlaceholderText("Write a message…"), { target: { value: "hi" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(asked.length).toBe(1));
-    const waitingText = await screen.findByText(/^Waking the model \(about 80 s\)…$/, undefined, { timeout: 4000 });
+    // looked at again right after sending, well before the next 2 s poll
+    const waitingText = await screen.findByText(/^Waking the model \(about 80 s\)…$/, undefined, { timeout: 1500 });
     expect(waitingText.closest(".play-wake")!.textContent).toMatch(/Waking the model \(about 80 s\)… \d+:\d\d\. A request sent to it waits until a replica is ready \(up to 300 s\); 1 waiting now\./);
     act(() => release!());
     expect(await screen.findByText("Hello there")).toBeTruthy();
