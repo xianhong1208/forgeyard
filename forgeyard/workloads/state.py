@@ -206,6 +206,7 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
         ready = state == "healthy" or (state == "running" and not health)
         if ready and r.ready_at is None:
             r.ready_at = now
+            db.info.setdefault("ready_workloads", set()).add(r.workload_id)   # 1.5.0: a wake waiting for it is over
         elif state not in ("healthy", "running", "unhealthy"):
             r.ready_at = None  # its memory is not in use (any more): the reservation counts again
         r.updated_at = now

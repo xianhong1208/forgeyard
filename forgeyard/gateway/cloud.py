@@ -164,6 +164,7 @@ class CloudSending:
     async def _send_cloud(self, c: CloudTarget, again: bool = False) -> Union[Response, Failed]:
         parsed, endpoint = self.parsed, self.endpoint
         self.target, self.deployment_id, self.sent_to = c.key, None, c
+        self.used = True   # 1.5.0: a request a provider took still showed demand for the route (sleep when idle)
         kind = quirks.get(c.kind)
         obj = dict(parsed.obj or {})
         obj["model"] = c.upstream_model

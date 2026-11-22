@@ -1044,14 +1044,17 @@ on, per deployment.
 
 1. Turn it on with a change of the deployment's parameters: `PATCH /api/deployments/{id}` with
    `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins and operators; leave `idle_minutes` out for
-   30 minutes). A deploy takes the same two parameters. Nothing restarts. The deploy and edit forms get the
+   30 minutes; add `"wake_wait": 120` for requests to wait at most 2 minutes for it to wake instead of 5). A deploy
+   takes the same parameters. Nothing restarts. The deploy and edit forms get the
    setting later in 1.5.0.
 2. After the idle time without a request its replicas stop. Its page shows **asleep**, says why, and its events
    say *Asleep: no requests for 30 min; frees …*. The model stays in `/v1/models`; the machine keeps the model
    files and the engine image.
-3. Wake it with **Wake** on its page (`POST /api/deployments/{id}/start`). Until waking on a request arrives later
-   in 1.5.0, a request to the asleep model answers 503 `model_asleep`, or goes to the route's cloud tier when the
-   key may use one.
+3. The next request wakes it: it waits until the model is ready and is answered then (a key that may use the
+   route's cloud tier is served there meanwhile). Its events say *Woken by a request (key …)*. Or wake it yourself
+   with **Wake** on its page (`POST /api/deployments/{id}/start`); requests that arrive while it starts wait for it.
+   If it cannot wake (no room, its machine offline, its engine failing) requests get 503 `cannot_wake` with the
+   reason.
 4. **Stop** on an asleep deployment stops it for good: it leaves `/v1/models` until someone starts it.
 
 Choose the idle time by how long the model takes to start: a llama.cpp model is ready in seconds, a large vLLM
