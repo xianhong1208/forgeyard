@@ -201,7 +201,9 @@ class Watch:
 
     since: float                                   # first sample of this watch (monotonic)
     changed: float                                 # last scaling change (or the watch's start)
-    samples: deque = field(default_factory=deque)  # (monotonic time, load)
+    # (monotonic time, requests waiting, {replica uid: requests in flight on it}): kept per replica, so the load of the
+    # replicas that stay can be read without one being drained or removed.
+    samples: deque = field(default_factory=deque)
     drain: Optional[Drain] = None
     room: Optional[str] = None                     # why the one more it wants does not fit, while it does not
     paused: Optional[str] = None
@@ -266,8 +268,8 @@ class Autoscaler:
             if not s.on or watch is None:
                 return out
             now = self._clock()
-            load = _average(watch.samples, now, s.up_seconds)
             draining = watch.drain.uid if watch.drain is not None else None
+            load = _average(watch.samples, now, s.up_seconds, {r.uid for r in live} - {draining})
             ready = sum(1 for r in live if _ready(r, w) and r.uid != draining)
             out.update(load=None if load is None else round(load, 2),
                        per_replica=None if load is None or not ready else round(load / ready, 2),
@@ -285,7 +287,7 @@ class Autoscaler:
     def loads(self) -> dict[int, float]:
         """Deployment id -> its latest load sample (for /metrics)."""
         with self._lock:
-            return {dep: w.samples[-1][1] for dep, w in self._watch.items() if w.samples}
+            return {dep: _load(w.samples[-1]) for dep, w in self._watch.items() if w.samples}
 
     # -------------------------------------------------------------- one pass
     def tick(self, wall: Optional[datetime] = None) -> list[str]:
@@ -359,11 +361,6 @@ class Autoscaler:
                 out[dep] = out.get(dep, 0.0) + n / len(deps)
         return out
 
-    def _drain_of(self, dep_id: int) -> Optional[Drain]:
-        with self._lock:
-            watch = self._watch.get(dep_id)
-            return watch.drain if watch is not None else None
-
     def _forget(self, dep_id: int) -> None:
         watch = self._watch.pop(dep_id, None)
         if watch is not None and watch.drain is not None:
@@ -385,20 +382,19 @@ class Autoscaler:
                 self._forget(d.id)
             return self._trim_asleep(db, d, s)
         live = sorted((r for r in w.replicas if not r.final), key=lambda r: r.ordinal)
-        # What the replicas that stay must take: not what a replica being drained still runs (it finishes there; counted,
-        # its stream would ask for the replica back the moment it is removed).
-        drain = self._drain_of(d.id)
-        going = drain.uid if drain is not None else None
-        load = waiting + sum(self.signals.in_flight(r.uid) for r in live if r.uid != going)
+        per = {r.uid: self.signals.in_flight(r.uid) for r in live}
         with self._lock:
             watch = self._watch.get(d.id)
             if watch is None:
                 watch = self._watch[d.id] = Watch(since=now, changed=now)
-            watch.samples.append((now, load))
+            watch.samples.append((now, waiting, per))
             while watch.samples and watch.samples[0][0] < now - KEEP_SAMPLES:
                 watch.samples.popleft()
         cap = capacity(d.params) * s.target / 100
-        up_avg = _average(watch.samples, now, s.up_seconds)
+        # The load of the replicas that stay: not what a replica being drained still runs (it finishes there), nor what
+        # a removed one ran (counted, a stream finishing on it would ask for it back the moment it goes).
+        staying = {r.uid for r in live} - ({watch.drain.uid} if watch.drain is not None else set())
+        up_avg = _average(watch.samples, now, s.up_seconds, staying)
         watch.wanted = None if up_avg is None else min(max(math.ceil(up_avg / cap - 1e-9), s.floor), s.max)
 
         paused = self._paused(w, live, wall)
@@ -419,7 +415,7 @@ class Autoscaler:
                                                           f"fewer than the minimum {s.floor}")
         if not ready:
             return None, set(), False
-        why = _up_reason(watch.samples, watch.since, s, cap, len(ready), now)
+        why = _up_reason(watch.samples, watch.since, s, cap, len(ready), now, staying)
         if why is not None and len(live) < s.max:
             return self._add(db, d, s, watch, live, now, why)
         watch.room = None
@@ -427,10 +423,12 @@ class Autoscaler:
         if len(live) > s.floor and now - watch.changed >= down and now - watch.since >= down:
             victim = live[-1]
             serving = len(ready) - (1 if victim in ready else 0)
-            avg = _average(watch.samples, now, down)
-            # Not in a burst either: one fewer must not be busy enough now to want the replica back at once.
+            avg = _average(watch.samples, now, down)   # everything it ran, the replica that would go too
+            # And the ones that stay would not want one more at once (a burst on them, or their last minute above
+            # the target); what the one that goes runs is not theirs (it finishes there).
+            stay = {r.uid for r in live if r.uid != victim.uid}
             if serving >= 1 and avg is not None and avg <= serving * cap + 1e-9 \
-                    and _up_reason(watch.samples, watch.since, s, cap, serving, now) is None:
+                    and _up_reason(watch.samples, watch.since, s, cap, serving, now, stay) is None:
                 return self._start_drain(db, d, s, watch, victim, avg, len(ready), now, wall)
         return None, set(), False
 
@@ -545,7 +543,8 @@ class Autoscaler:
         others = [x for x in live if x.uid != drain.uid and _ready(x, w)]
         if not others:
             return self._keep(db, d, watch, f"Kept replica {drain.ordinal}: no other replica is ready.")
-        why = _up_reason(watch.samples, drain.since, s, cap, len(others), now)   # samples since the drain began
+        # The others' load since the drain began: what they must take once it is gone.
+        why = _up_reason(watch.samples, watch.since, s, cap, len(others), now, {x.uid for x in live if x.uid != drain.uid})
         if why is not None:
             return self._keep(db, d, watch, f"Kept replica {drain.ordinal}: {why}.")
         took = now - drain.since
@@ -594,24 +593,31 @@ class Autoscaler:
         return text, set(), False
 
 
-def _up_reason(samples, since: float, s: Setting, cap: float, ready: int, now: float) -> Optional[str]:
+def _up_reason(samples, since: float, s: Setting, cap: float, ready: int, now: float,
+               only: Optional[set] = None) -> Optional[str]:
     """Why one more replica is wanted (or a drained one kept), or None: the load over the up window above what
     `ready` replicas take at the target, or over the last PANIC_SECONDS at least twice that. A window counts only
     once the samples cover it (`since`: the first of them)."""
     target = f"target {_fmt(cap)} of {_fmt(cap * 100 / s.target)} concurrent"
     if now - since >= s.up_seconds:
-        avg = _average(samples, now, s.up_seconds)
+        avg = _average(samples, now, s.up_seconds, only)
         if avg is not None and avg > ready * cap + 1e-9:
             return f"load {_fmt(avg / ready)} per replica for {_window(s.up_seconds)} ({target})"
     if now - since >= PANIC_SECONDS:
-        avg = _average(samples, now, PANIC_SECONDS)
+        avg = _average(samples, now, PANIC_SECONDS, only)
         if avg is not None and avg >= 2 * ready * cap - 1e-9:
             return f"load {_fmt(avg / ready)} per replica for {_window(PANIC_SECONDS)}, twice the {target}"
     return None
 
 
-def _average(samples, now: float, seconds: float) -> Optional[float]:
-    xs = [load for t, load in samples if t > now - seconds - 1e-9]
+def _load(sample, only: Optional[set] = None) -> float:
+    """A sample's load: requests waiting plus those in flight (on the replicas in `only`, when given)."""
+    _, waiting, per = sample
+    return waiting + sum(n for uid, n in per.items() if only is None or uid in only)
+
+
+def _average(samples, now: float, seconds: float, only: Optional[set] = None) -> Optional[float]:
+    xs = [_load(x, only) for x in samples if x[0] > now - seconds - 1e-9]
     return sum(xs) / len(xs) if xs else None
 
 

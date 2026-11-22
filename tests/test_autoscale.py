@@ -447,7 +447,8 @@ def test_fy_asc_010_down_needs_the_load_to_fit_one_fewer(cpus, run):
 
 def test_fy_asc_022_no_drain_in_a_burst(cpus, run):
     """FY-ASC-022: the 10-minute average says one replica fewer would do, but a burst is on now (2 in flight on the
-    replica that would stay, for the last 10 s): no drain until the burst is over."""
+    replica that would stay, twice what it takes at the target): no drain while it lasts, nor while that replica's
+    last minute is above the target."""
     c, a, b = cpus
     two(c, run)
     uid0 = rows("chat")[0].uid
@@ -455,21 +456,26 @@ def test_fy_asc_022_no_drain_in_a_burst(cpus, run):
     run.gw.flight = {uid0: 2}
     assert run.run(30) == [] and len(rows("chat")) == 2 and run.gw.drains == set()
     run.gw.flight = {}
-    assert run.run(30) == []   # the last minute still holds the burst
-    done = until_scaled(run, 40)
+    assert run.run(20) == []   # its last minute is still above the target
+    done = until_scaled(run, 50)
     assert done and done[0].startswith("Draining replica 1"), done
 
 
 def test_fy_asc_011_a_drain_waits_for_what_is_in_flight(cpus, run, monkeypatch):
-    """FY-ASC-011: a request in flight on the replica being drained is waited for, however long (here 2 minutes);
-    then it is removed; after DRAIN_MAX_SECONDS it goes anyway, and the event says how many were left."""
+    """FY-ASC-011: a stream that began a minute before on the replica that goes neither holds the drain back (it is
+    not a burst) nor keeps it (it runs there, not on the others); it is waited for, however long (here 2 more
+    minutes); then the replica is removed and not added back; after DRAIN_MAX_SECONDS one goes anyway, and the event
+    says how many were left."""
     c, a, b = cpus
     two(c, run)
     uid = rows("chat")[1].uid
-    run.run(598)
+    assert run.run(538) == []
     run.gw.flight = {uid: 1}
+    assert run.run(60) == []
     done = run.run(2)
     assert done and done[0].endswith("it takes no new requests and is removed once the 1 in flight finishes."), done
+    st = run.scaler.status(_dep("chat"))
+    assert st["load"] == 0 and st["per_replica"] == 0 and st["draining"]["in_flight"] == 1   # its stream is not load
     assert run.run(120) == [] and len(rows("chat")) == 2 and run.gw.drains == {uid}
     run.gw.flight = {}
     done = run.run(2)
