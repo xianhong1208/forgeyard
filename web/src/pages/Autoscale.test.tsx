@@ -90,7 +90,7 @@ function editServer(d: Deployment, seen: Record<string, unknown>[]) {
       seen.push(b);
       const changes: EditResponse["changes"] = {};
       for (const k of ["autoscale", "min_replicas", "max_replicas", "autoscale_target"]) {
-        if (b.params[k] !== undefined && b.params[k] !== (d.params as Record<string, unknown>)[k]) changes[k] = { before: (d.params as Record<string, unknown>)[k] ?? null, after: b.params[k] };
+        if (b.params[k] !== undefined && (b.params[k] ?? null) !== ((d.params as Record<string, unknown>)[k] ?? null)) changes[k] = { before: (d.params as Record<string, unknown>)[k] ?? null, after: b.params[k] };
       }
       const out: EditResponse = { estimate, params: b.params, changes, placement, restart: "none", restart_text: "Nothing restarts." };
       return { status: 200, body: b.dry_run ? out : { ...out, deployment: d } };
@@ -120,7 +120,7 @@ describe("automatic replicas (1.5.0)", () => {
       autoscale_target: null, scale_up_seconds: null, scale_down_minutes: null });
     expect(scaleForm({ autoscale: true, min_replicas: 2, max_replicas: 5, scale_down_minutes: 20 })).toEqual({ mode: "auto", was: "auto",
       min: "2", max: "5", target: "", upSeconds: "", downMinutes: "20" });
-    expect(scaleForm({ max_replicas: 3 })).toMatchObject({ mode: "fixed", was: "fixed", min: "1", max: "3" });
+    expect(scaleForm({ max_replicas: 3 })).toMatchObject({ mode: "fixed", was: "fixed", min: "", max: "3" });
     expect(canAutoscale(llama)).toBe(true);
     expect(canAutoscale({ ...llama, tasks: ["video"] })).toBe(false);
     expect(canAutoscale(undefined)).toBe(false);
@@ -136,8 +136,9 @@ describe("automatic replicas (1.5.0)", () => {
     expect(screen.queryByLabelText("Target load per replica (%)")).toBeNull();
     fireEvent.change(mode, { target: { value: "auto" } });
     expect(screen.queryByLabelText("Number of replicas")).toBeNull();
-    expect((screen.getByLabelText("Fewest replicas") as HTMLInputElement).value).toBe("1");
-    expect((screen.getByLabelText("Most replicas") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("Fewest replicas") as HTMLInputElement).value).toBe("");   // the defaults, as placeholders
+    expect((screen.getByLabelText("Fewest replicas") as HTMLInputElement).placeholder).toBe("1");
+    expect((screen.getByLabelText("Most replicas") as HTMLInputElement).placeholder).toBe("2");
     expect(screen.getByText(/1 now\./)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Most replicas"), { target: { value: "4" } });
     expect(screen.getByText(/Advanced: scaling, /)).toBeTruthy();
@@ -150,7 +151,7 @@ describe("automatic replicas (1.5.0)", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
     const saved = seen.find((b) => !b.dry_run);
     expect(saved).toEqual({ params: { context: 4096, concurrency: 1, gpus: 0, share: "exclusive", vram: null, extra_args: null, first_answer_timeout: null,
-      autoscale: true, min_replicas: 1, max_replicas: 4, autoscale_target: 60, scale_up_seconds: null, scale_down_minutes: null }, machine_id: null });
+      autoscale: true, min_replicas: null, max_replicas: 4, autoscale_target: 60, scale_up_seconds: null, scale_down_minutes: null }, machine_id: null });
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
@@ -164,6 +165,8 @@ describe("automatic replicas (1.5.0)", () => {
     expect(mode.value).toBe("auto");
     expect((screen.getByLabelText("Most replicas") as HTMLInputElement).value).toBe("3");
     expect(screen.getByText(/0 as the fewest: down to none only by sleeping when idle/)).toBeTruthy();
+    // Opened and not touched, it changes nothing (the settings left at their defaults are not sent as values).
+    expect(await screen.findByText("Nothing has changed yet.", {}, { timeout: 3000 })).toBeTruthy();
     fireEvent.change(mode, { target: { value: "fixed" } });
     expect((screen.getByLabelText("Number of replicas") as HTMLInputElement).value).toBe("2");
     await waitFor(() => expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 3000 });

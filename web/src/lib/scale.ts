@@ -24,15 +24,15 @@ export function canAutoscale(recipe: Recipe | undefined): boolean {
   return !!recipe && !recipe.tasks.includes("video");
 }
 
-const num = (v: unknown, fallback: number) => (typeof v === "number" ? String(v) : String(fallback));
+// A setting not stored stays empty (the field shows the default as its placeholder), so opening the form and saving
+// changes nothing.
+const num = (v: unknown) => (typeof v === "number" ? String(v) : "");
 
 export function scaleForm(params: Record<string, unknown>): ScaleForm {
   return {
     mode: params.autoscale === true ? "auto" : "fixed", was: params.autoscale === true ? "auto" : "fixed",
-    min: num(params.min_replicas, SCALE_DEFAULTS.min), max: num(params.max_replicas, SCALE_DEFAULTS.max),
-    target: typeof params.autoscale_target === "number" ? String(params.autoscale_target) : "",
-    upSeconds: typeof params.scale_up_seconds === "number" ? String(params.scale_up_seconds) : "",
-    downMinutes: typeof params.scale_down_minutes === "number" ? String(params.scale_down_minutes) : "",
+    min: num(params.min_replicas), max: num(params.max_replicas), target: num(params.autoscale_target),
+    upSeconds: num(params.scale_up_seconds), downMinutes: num(params.scale_down_minutes),
   };
 }
 

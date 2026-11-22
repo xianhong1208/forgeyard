@@ -35,9 +35,9 @@ export function ReplicasField({ id, count, onCount, scale, onScale, allowAuto, s
       ) : (
         <div className="field scale-bounds"><span className="label-like" id={`${id}-bounds`}>Between</span>
           <div className="row-gap" role="group" aria-labelledby={`${id}-bounds`}>
-            <input id={`${id}-min`} aria-label="Fewest replicas" inputMode="numeric" value={scale.min} onChange={(e) => set("min", e.target.value)} />
+            <input id={`${id}-min`} aria-label="Fewest replicas" inputMode="numeric" value={scale.min} onChange={(e) => set("min", e.target.value)} placeholder={String(SCALE_DEFAULTS.min)} />
             <span className="muted">and</span>
-            <input id={`${id}-max`} aria-label="Most replicas" inputMode="numeric" value={scale.max} onChange={(e) => set("max", e.target.value)} />
+            <input id={`${id}-max`} aria-label="Most replicas" inputMode="numeric" value={scale.max} onChange={(e) => set("max", e.target.value)} placeholder={String(SCALE_DEFAULTS.max)} />
           </div>
           <p className="field-hint">1 to 16.{sleepOn ? " 0 as the fewest: down to none only by sleeping when idle." : ""}</p></div>
       )}
