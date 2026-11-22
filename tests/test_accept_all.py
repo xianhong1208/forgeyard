@@ -16,7 +16,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "accept_all.py"
 ORDER = ["server", "machines", "workloads", "models", "gateway", "cloud", "tts", "img", "video", "passthrough",
-         "vision", "relay", "images", "console"]
+         "vision", "relay", "images", "scale", "console"]
 
 
 @pytest.fixture(scope="module")
@@ -30,12 +30,13 @@ def acc():
 
 
 def test_fy_acc_001_groups_in_order_and_their_needs(acc):
-    """FY-ACC-001: the fourteen groups run in this order (1.3 adds tts, img, video and passthrough, 1.4 vision,
+    """FY-ACC-001: the fifteen groups run in this order (1.3 adds tts, img, video and passthrough, 1.4 vision,
     relay and images); gateway and cloud need the models group, the others make their own."""
     assert list(acc.GROUPS) == ORDER
     assert acc.GROUPS["gateway"].needs == ("models",) and acc.GROUPS["cloud"].needs == ("models",)
     assert all(not acc.GROUPS[g].needs for g in ("server", "machines", "workloads", "models", "tts", "img", "video",
-                                                  "passthrough", "vision", "relay", "images", "console"))
+                                                  "passthrough", "vision", "relay", "images", "scale",
+                                                  "console"))
 
 
 def test_fy_acc_002_arguments(acc):
@@ -72,7 +73,7 @@ def test_fy_acc_003_plan_keeps_what_a_chosen_group_needs(acc):
     plan = acc.plan_groups([], ["models", "console"], ORDER, needs)
     assert plan == [("server", ""), ("machines", ""), ("workloads", ""), ("models", "needed by gateway"),
                     ("gateway", ""), ("cloud", ""), ("tts", ""), ("img", ""), ("video", ""), ("passthrough", ""),
-                    ("vision", ""), ("relay", ""), ("images", "")]
+                    ("vision", ""), ("relay", ""), ("images", ""), ("scale", "")]
     assert acc.plan_groups(["cloud", "gateway"], [], ORDER, needs) == [
         ("models", "needed by gateway"), ("gateway", ""), ("cloud", "")]
     with pytest.raises(ValueError, match="unknown group 'x'"):
@@ -672,7 +673,7 @@ def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, 
     run_groups does this before the GPU groups only, and every object is still removed by the cleanup."""
     ft = FakeTime()
     monkeypatch.setattr(acc, "time", ft)
-    assert acc.GPU_GROUPS == ("tts", "img", "video", "passthrough", "vision")
+    assert acc.GPU_GROUPS == ("tts", "img", "video", "passthrough", "vision", "scale")
     run = acc.Run(acc.parse_args([]), None)
     objs = {f"/api/deployments/{i}": {"kind": "deployment", "state": "healthy"} for i in (1, 2, 3, 4, 5, 6)}
     objs["/api/workloads/7"] = {"kind": "workload", "state": "healthy"}

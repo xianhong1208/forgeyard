@@ -72,6 +72,15 @@ Groups, in the order they run (`--only` and `--skip` take comma-separated names)
              (--second-engine-machine, default another given machine that can load images; same content as the
              source, audited); then removed through Remove engine image, with a short-lived custom recipe
              naming it so that Forgeyard may (no `docker rmi` of an image no recipe names)
+  scale      sleep when idle, waking and automatic replicas (1.5, scripts/accept_scale.py's checks): a CPU model on
+             the CPU machine that sleeps after --scale-idle-minutes (1): its replicas stop, its reservation is freed,
+             /v1/models still lists it, its files stay; --scale-parallel (20) requests wake it once; Wake now and the
+             Playground wake it; with --cloud-provider a key that may spill is served by the cloud while it wakes and
+             a structured-output request waits; a short wake_wait gives 503 model_waking with Retry-After (a model
+             that starts slower than --scale-wake-wait: the vLLM one on the GPU machine); with --stoppable-agent and
+             its --agent-stop / --agent-start commands, cannot_wake while its pinned machine is offline; Stop is not
+             woken; on the two CPU machines automatic replicas 1 to 2: a load adds one, a stream on it finishes while
+             it is drained, none twice; sleep with a minimum of 0; the start times and the metrics
   console    with Playwright for Python: every main page as an admin and as a plain user, at 1440
              and 390 px: it loads, names itself in the tab, logs no error, does not scroll sideways
 
@@ -142,6 +151,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+# One module, whether run as a script or imported: scripts/accept_scale.py (the scale group) imports accept_all.
+sys.modules.setdefault("accept_all", sys.modules[__name__])
+
 HERE = Path(__file__).resolve().parent
 CLIP = HERE.parent / "forgeyard" / "models" / "assets" / "jfk-ask-not.mp3"
 GPU_PROBE = HERE / "gpu_probe.py"
@@ -152,7 +164,7 @@ PLACE_TIMEOUT = 300
 # no group still to run needs is stopped, and then removed (the models group's deployments only stopped: the
 # console shows one), so that a card shared with other people's work has room for the next group's models. The
 # models group's speech-to-text deployment stays while the tts group (--tts-asr) may still use it.
-GPU_GROUPS = ("tts", "img", "video", "passthrough", "vision")
+GPU_GROUPS = ("tts", "img", "video", "passthrough", "vision", "scale")
 FREE_WAIT = 120
 SDK_SPEC = "openai>=2,<4"
 PLAYWRIGHT_SPEC = "playwright>=1.48,<2"
@@ -464,7 +476,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     ap.add_argument("--venv", default=str(Path.home() / ".cache" / "forgeyard-accept-all"),
                     help="where to put a virtual environment with the openai SDK if it is not installed")
     ap.add_argument("--out", help="also write the report as JSON here")
+    sys.path.insert(0, str(HERE))
+    import accept_scale
+
+    accept_scale.add_args(ap)
     args = ap.parse_args(argv)
+    accept_scale.check_args(ap, args)
     try:
         args.plan = plan_groups(names_list(args.only), names_list(args.skip), list(GROUPS),
                                 {g.name: g.needs for g in GROUPS.values()})
@@ -2875,6 +2892,16 @@ def group_images(run: Run) -> None:
     run.check("the recipe that named it is gone again", r.status == 404, f"{r.status}")
 
 
+# ------------------------------------------------------------------ group: scale (1.5.0)
+@group("scale", "sleep when idle, waking, spill while waking, Stop, automatic replicas with draining, start times")
+def group_scale(run: Run) -> None:
+    """scripts/accept_scale.py's checks (its docstring lists the steps and their options)."""
+    sys.path.insert(0, str(HERE))
+    import accept_scale
+
+    accept_scale.exercise(run)
+
+
 @group("console", "the web console in a browser, as an admin and as a plain user")
 def group_console(run: Run) -> None:
     try:
@@ -2998,6 +3025,12 @@ def run_groups(run: Run, plan: list[tuple[str, str]]) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     ensure_deps(args)
+    return run_plan(args)
+
+
+def run_plan(args: argparse.Namespace) -> int:
+    """Sign in, run the planned groups, clean up, print the report (and write it with --out): the exit code.
+    scripts/accept_scale.py runs its one group with it."""
     tls = ssl.create_default_context(cafile=args.ca) if args.ca else None
     password = os.environ.get("FORGEYARD_PASSWORD") or getpass.getpass(f"Password for {args.user}: ")
     run = Run(args, tls)

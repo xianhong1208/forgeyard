@@ -1123,6 +1123,9 @@ model can take minutes, so give that one an idle time well above its start (the 
 sleeps its memory is free for others: on a shared card something else may take it, and the model then starts on
 another machine that has room, or waits.
 
+To check sleeping and waking on your own machines, run `scripts/accept_scale.py`
+([Check sleep, waking and automatic replicas](#check-sleep-waking-and-automatic-replicas)).
+
 ## When a machine stays offline
 
 A machine is *offline* once nothing has been heard from it for 30 seconds (`AGENT_OFFLINE_SECONDS`). From then on:
@@ -1176,6 +1179,9 @@ Before you rely on it:
   long, for up to 30 minutes; then it is removed anyway.
 - To go back to a fixed number, set **Replicas** to **Fixed number** (`{"params": {"autoscale": null}}` and a
   `replicas` number from a script); the deployment keeps the replicas it has until you change the number.
+
+To see a replica added under load and drained on your own machines, run `scripts/accept_scale.py`
+([Check sleep, waking and automatic replicas](#check-sleep-waking-and-automatic-replicas)).
 
 ## Restrict GPUs on a shared machine
 
@@ -1576,6 +1582,7 @@ saying so. The groups, in the order they run:
 | `vision` | detection, segmentation and depth models with the vision recipe: the results, refusals, keys and usage |
 | `relay` | models through the server: with the CPU machine's **Internet access for downloads** set to **Always through the server**, **Download to…** of a small GGUF (26 MB) arrives through the server; then a second machine (`--relay-second-machine`, default the second CPU machine, else the GPU machine) gets it from the first machine's cache. Both machines' setting goes back, and the model leaves their caches |
 | `images` | on a machine with Docker or Podman (`--engine-machine`, default the GPU machine): its engine images; an image file of a few KB that the script builds is uploaded, copied to a second machine that takes images (`--second-engine-machine`), and removed with **Remove engine image** (a recipe names it for a few seconds, since only images a recipe names may be removed) |
+| `scale` | sleep when idle, waking (by a request, **Wake now**, the Playground), spill while waking, `model_waking`, `cannot_wake`, **Stop**, automatic replicas with draining, start times and their metrics ([below](#check-sleep-waking-and-automatic-replicas)) |
 | `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
 
 `--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
@@ -1594,7 +1601,7 @@ What to know before you run it:
   card has the memory free, is skipped after `--place-timeout` seconds (5 minutes) with the server's
   reason (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`), instead of waiting for
   `--timeout` (40 minutes, which stays the limit for downloads and starts). Before each group that
-  deploys on the GPU machine (`tts`, `img`, `video`, `passthrough`, `vision`), the run stops what its
+  deploys on the GPU machine (`tts`, `img`, `video`, `passthrough`, `vision`, `scale`), the run stops what its
   earlier groups left on a GPU and no later group needs, and removes it (the `models` group's
   deployments are only stopped: the console group shows one; the speech-to-text model stays while
   `tts` may use it), so each group has the run's share of the card to itself. The report's notes list
@@ -1621,6 +1628,69 @@ What to know before you run it:
   own certificate or `TLS=off`, point `FORGEYARD_REPLICA_CA` at the server's `data/tls/ca.crt`. Without any CA the
   calls still run, and the certificate checks are skipped. Only a port that cannot be reached at all is skipped as
   another network's; one that closes the connection or shows a wrong certificate fails.
+
+### Check sleep, waking and automatic replicas
+
+`scripts/accept_scale.py` checks 1.5's [Sleep when idle](concepts.md#sleep-when-idle) and
+[Automatic replicas](concepts.md#automatic-replicas) on your own server and machines. It is also the `scale` group
+of `accept_all.py`, with the same options and the same report:
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_scale.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --cpu-machine cpu-01 --second-cpu-machine cpu-02 --gpu-machine gpu-01 \
+  --cloud-provider openai --out accept-scale.json
+```
+
+It deploys Qwen3-1.7B GGUF on llama.cpp on the CPU machine, with **Sleep when idle** and an idle time of 1 minute
+(`--scale-idle-minutes`), and checks, numbered as in its report:
+
+1. **It goes asleep:** its replicas stop and their port no longer answers, its reservation on the machine is freed
+   (`/metrics`, against what the machine's other replicas hold), `/v1/models` still lists it without waking it, and
+   the model stays in the machine's cache.
+2. **A request wakes it, once:** 20 requests at once (`--scale-parallel`) give one wake (one *Woken by a request*
+   event, `forgeyard_deployment_wakes_total{by="request"}` one more) and are all answered.
+3. **Wake now** (Start) and a Playground request wake it too, and the events say who did.
+4. **Spill while waking**, with `--cloud-provider` only: the provider becomes tier 1 of the model's route; a key
+   that may spill is answered by the cloud at once (`X-Forgeyard-Spilled: waking`, the one request that reaches the
+   provider), a structured-output request with the same key waits and is answered locally, and once the model is
+   ready the key is served locally again.
+5. **A short wait:** with *Wait while it wakes* at 10 s (`--scale-wake-wait`), a request gets 503 `model_waking`
+   with a `Retry-After` of at least 5 s and at most the last start, and the wake carries on. Only a model that starts
+   slower than that can show it: a llama.cpp model on a CPU is ready in seconds, so there the step is skipped, saying
+   so. With `--gpu-machine` the run also deploys Qwen3-0.6B on vLLM there and checks steps 1, 2 and 5 on it.
+6. **Cannot wake**, only when you name a machine whose agent the run may stop: `--stoppable-agent cpu-01` with
+   `--agent-stop` and `--agent-start`, two shell commands run on the computer where the script runs (the start
+   command must return at once, leaving the agent running). While the model sleeps, pinned to that machine, the
+   agent is stopped; a request gets 503 `cannot_wake` at once, naming the machine; once the agent is back the model
+   starts and answers. Without these options the step is skipped: the script never stops a machine it was not told
+   it may.
+7. **Stop is not woken:** **Stop** on the asleep deployment; a request gets 503 `no_ready_replica`, nothing wakes it,
+   and `/v1/models` no longer lists it.
+8. **Automatic replicas**, on the two CPU machines: a deployment with replicas *Automatic, by load* from 1 to 2,
+   *Concurrent requests* 2 and a scale-down window of 2 minutes (`--scale-down-minutes`). After its 2-minute pause,
+   4 clients (`--scale-clients`) add a second replica within about a minute, on the other machine; every request is
+   answered, and none twice (each replica's served count equals the requests sent to it). Then a long stream on the
+   new replica: the scale-down drains it while the stream runs, short requests meanwhile go to the other replica, the
+   stream ends complete, and the replica is removed only after its last byte. Nothing is added back for a minute.
+   Without a second CPU machine, or without room for two replicas, the step is skipped.
+9. **Automatic replicas with sleep:** the same deployment with *Sleep when idle* and a minimum of 0 goes asleep with
+   1 replica and a request wakes it with 1.
+10. **Start times and metrics:** each deployment's last start (`last_start`) and, on `/metrics`, the start times,
+    the wakes, the requests that waited for a wake, the deployments' replicas and load, the autoscaler's decisions
+    and the spills while waking.
+
+What to know before you run it:
+
+- **Time:** the sleepy model, automatic replicas and the vLLM model run side by side, about 15 minutes when the
+  machines already have the models; step 6 and step 7 come after them, each waiting for one more sleep.
+- **Metrics:** `/metrics` answers only a direct request from the server's own host unless the server has
+  `METRICS_TOKEN`. Run the script there, or pass `--metrics-token` (or `FORGEYARD_METRICS_TOKEN`); otherwise the
+  metric checks are skipped, saying so.
+- **It cleans up after itself,** as `accept_all.py` does: everything is named `accept-<run>-scale-…` (deployments,
+  their routes, API keys, a catalog entry it had to add) and removed at the end, also after a failure or **Ctrl-C**;
+  an agent it stopped is started again. A deployment the server cannot place is skipped after `--place-timeout`
+  seconds with the server's reason.
 
 ## Scrape Forgeyard with Prometheus
 

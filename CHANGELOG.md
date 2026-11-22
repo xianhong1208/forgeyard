@@ -99,6 +99,18 @@ version until 1.0.
   number (422 `replicas_automatic`). `/metrics`: `forgeyard_deployment_replicas{deployment,kind}` (desired, ready,
   draining, wanted), `forgeyard_deployment_load{deployment}` and `forgeyard_autoscale_total{deployment,direction}`.
   No migration: the settings are deployment parameters, the load samples and drains live in the server's memory.
+- **The scale acceptance** (#37, 1.5.0): `scripts/accept_scale.py`, also the new `scale` group of
+  `scripts/accept_all.py` (before `console`), checks sleep when idle, waking and automatic replicas on real machines
+  with a CPU model (Qwen3-1.7B GGUF on llama.cpp) so it runs anywhere: it goes asleep (replicas stopped, their port
+  closed, the reservation freed on `/metrics`, still listed, files kept), many requests at once wake it exactly once,
+  Wake now and the Playground wake it, a key that may spill is served by the cloud while it wakes and structured
+  output waits (with `--cloud-provider`), a short `wake_wait` gives 503 `model_waking` with `Retry-After` (on a model
+  that starts slower than that: `--gpu-machine` adds the same on vLLM), `cannot_wake` while its pinned machine is
+  offline (opt-in: `--stoppable-agent` with `--agent-stop` and `--agent-start`; it never stops a machine it was not
+  told it may), Stop is not woken, automatic replicas on two CPU machines (a load adds one within about a minute; a
+  stream on it finishes while it is drained; no request fails or runs twice) and with sleep and a minimum of 0, and
+  the start times and metrics. Its parts run side by side (about 15 minutes); everything it creates is removed.
+  Guide: *Check sleep, waking and automatic replicas*.
 
 ## [1.4.5] — 2026-11-22
 
