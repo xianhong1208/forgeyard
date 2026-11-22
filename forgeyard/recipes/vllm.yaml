@@ -105,6 +105,12 @@ env:
 # /health stays open, so the health check needs no key. Other paths (/invocations, /tokenize,
 # /pooling, /score, /rerank without /v1) are not guarded by vLLM; the agent's key guard covers them.
 api_key_env: VLLM_API_KEY
+# 1.5.0 (#37): vLLM compiles the model with torch.compile at every start (and Inductor and Triton its kernels), into
+# VLLM_CACHE_ROOT/torch_compile_cache/<hash of the model, config, vLLM code and compiler> (vllm/compilation/backends.py
+# and compiler_interface.py at v0.32.0), inside the container. Enabled, the agent keeps that directory on the machine,
+# one per replica, so the next start of the same replica loads what it compiled. Off until a real start on an A100
+# has measured it (docs/guide/how-to.md, "Keep vLLM's compile cache between starts").
+engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}
 variants:
   - name: cuda
     when: {vendor: nvidia, compute_capability: ">=7.0", driver: ">=580"}

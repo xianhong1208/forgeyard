@@ -447,8 +447,18 @@ export type Deployment = {
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
   // 1.5.0 (#37): sleep when idle, the last request the server saw, and when it would go to sleep.
   sleep?: DeploymentSleep;
+  // 1.5.0 (#37): how long its latest start took (source "server": measured by the server for an older agent).
+  last_start?: StartTime | null;
   // 1.5.0 (#37): automatic replicas: the bounds, the load and the last decision.
   autoscale?: DeploymentAutoscale;
+};
+
+export type StartTime = {
+  seconds: number;
+  phases: Partial<Record<"model" | "waiting" | "image" | "engine", number>>;
+  source: "agent" | "server";
+  at: string;
+  replica: number | null;
 };
 
 export type DeploymentAutoscale = {

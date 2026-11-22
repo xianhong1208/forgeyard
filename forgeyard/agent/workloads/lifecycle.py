@@ -11,7 +11,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from forgeyard.agent.workloads import plan, ports as portlib
+from forgeyard.agent.workloads import plan, ports as portlib, starts
 from forgeyard.agent.workloads.records import Record
 from forgeyard.workloads.spec import WorkloadSpec
 
@@ -118,6 +118,7 @@ class Lifecycle:
         rec.started_at, rec.finished_at, rec.next_start_at = now, None, None
         rec.deadline_hit = rec.stop_requested = rec.healthy_seen = rec.loading = False
         rec.health_failures, rec.last_probe_at, rec.pid = 0, None, None
+        starts.begin(rec, now)  # 1.5.0: how long this start takes, part by part
         self.tails.pop(rec.id, None)
         self._save(rec)
         self._notify(rec)
@@ -128,6 +129,7 @@ class Lifecycle:
                 self._save(rec)
                 self._notify(rec)
                 return
+            starts.part(rec, "model", self.clock())
             waited = False
             while self._gate_blockers(rec):
                 if rec.id not in self.records or (self.desired is not None and rec.id not in self.desired):
@@ -138,6 +140,8 @@ class Lifecycle:
                     self._notify(rec)
                     waited = True
                 await asyncio.sleep(self.gate_poll)
+            if waited:
+                starts.part(rec, "waiting", self.clock())
             rec.loading = bool(rec.gpus) and bool(spec.health)
             rec.reason = "checking the image" if rec.runtime == "container" else None
             rec.started_at = self.clock()
@@ -148,6 +152,8 @@ class Lifecycle:
                 return
             if rec.id not in self.records:
                 return
+            starts.part(rec, "image", self.clock())
+        await self._engine_cache_dir(rec)  # 1.5.0: a container's compile cache kept between starts
         if guard and rec.ports:
             # The guard first: if the published port cannot be held, the engine is not started.
             problem = await self._open_guard(rec)
@@ -171,6 +177,8 @@ class Lifecycle:
         rec.state = "starting" if spec.health else "running"
         rec.reason = "waiting for the health check" if spec.health else None
         rec.started_at = self.clock()
+        if not spec.health:
+            starts.finish(rec, rec.started_at)  # ready once it runs
         self._save(rec)
         self._notify(rec)
         log.info("Started replica %s of %s (%s).", rec.id[:12], rec.workload,

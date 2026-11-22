@@ -45,6 +45,11 @@ hardware variant. Adding an engine is adding a recipe, not changing Forgeyard's 
     api_key_env: VLLM_API_KEY        the variable the engine reads its API key from (M4): each
                                      replica gets a random key there, which only the gateway
                                      sends, so the replica's port cannot be used around it
+    engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}
+                                     1.5.0: the engine's compile cache kept between starts, in a
+                                     directory per replica on its machine, which the agent mounts
+                                     writable into the container and names in `env`. Off unless
+                                     enabled (container variants only)
     variants:                        tried in order; the first that fits a machine is used
       - name: cuda
         when: {vendor: nvidia, compute_capability: ">=8.0", driver: ">=580"}
@@ -440,6 +445,23 @@ class VideoGen(_M):
     frames_step: int = Field(default=4, ge=1, le=16)
 
 
+class EngineCache(_M):
+    """1.5.0 (#37): a directory the engine keeps its compile cache in between starts (vLLM: VLLM_CACHE_ROOT, where
+    torch.compile writes its graphs and their Inductor and Triton kernels, each under a hash of the model, the
+    configuration, the vLLM code and the compiler). `env` names the variable the engine reads it from; `enabled`
+    turns it on. Each replica of a deployment gets its own directory on its machine (forgeyard/models/enginecache.py),
+    removed with the deployment. Container variants only."""
+    env: str = Field(max_length=64)
+    enabled: bool = False
+
+    @field_validator("env")
+    @classmethod
+    def _env(cls, v: str) -> str:
+        if not ENV_KEY_RE.match(v) or v in RESERVED_ENV or v.startswith(RESERVED_ENV_PREFIXES):
+            raise ValueError(f"engine_cache.env: {v} cannot be used")
+        return v
+
+
 class Recipe(_M):
     name: str
     title: str = Field(max_length=80)
@@ -465,6 +487,8 @@ class Recipe(_M):
     # Where the engine reads its API key (M4). None: the engine has no key and its port answers
     # anyone who can reach it (the gateway still works).
     api_key_env: Optional[str] = Field(default=None, max_length=64)
+    # 1.5.0: the engine's compile cache kept between starts (EngineCache); off unless `enabled`.
+    engine_cache: Optional[EngineCache] = None
     variants: list[Variant] = Field(min_length=1, max_length=16)
     builtin: bool = False
 
@@ -521,6 +545,12 @@ class Recipe(_M):
                 raise ValueError(f"api_key_env: {key} cannot be used")
             if key in envs:
                 raise ValueError(f"api_key_env: {key} is also set in env; Forgeyard sets it per replica")
+        if self.engine_cache is not None:
+            if self.engine_cache.env in envs or self.engine_cache.env == self.api_key_env:
+                raise ValueError(f"engine_cache.env: {self.engine_cache.env} is also set elsewhere; Forgeyard sets it "
+                                 "per replica")
+            if not any(v.runtime == "container" for v in self.variants):
+                raise ValueError("engine_cache: only container variants keep one")
         if self.estimate.method == "fixed" and not self.estimate.vram:
             raise ValueError("estimate: the fixed method needs vram")
         if self.tts is not None and "tts" not in self.tasks:
