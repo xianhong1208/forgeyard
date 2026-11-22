@@ -66,6 +66,14 @@ version until 1.0.
 
 ### Fixed
 
+- **accept_all no longer waits 40 minutes for a card that has no room** (#203). A deployment or app the server
+  cannot place (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`) is skipped after `--place-timeout`
+  seconds (300 by default), naming that reason; `--timeout` (2,400) stays the limit for downloads and starts. Before
+  each group that deploys on the GPU machine (tts, img, video, passthrough, vision) the run stops what earlier groups
+  left on a GPU and no later group needs, waits for it to stop, and removes it (the models group's deployments are
+  only stopped; its speech-to-text deployment stays for the tts group); the report's notes say what was freed.
+  Everything the run makes is still removed at the end.
+
 - **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
   local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of
   polling every 25 ms, where whoever looked first after a release took the slot (a newcomer could starve those
