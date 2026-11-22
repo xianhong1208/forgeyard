@@ -319,6 +319,42 @@ Also in 1.4.2: a relay whose source breaks off mid-file reads as one clear line 
 Also in 1.4.4: contributions are signed off under the Developer Certificate of Origin, checked on every pull
 request (#160).
 
+## Shipped: 1.4.5 (2026-11-22), fixes from an outside review
+
+1. ✅ **Structured output is never silently lost** (#179, for #162): a request with a JSON schema, grammar,
+   guided-decoding parameter or strict tool skips every cloud target that would drop or ignore it, and a
+   parameter dropped on the way to a provider is named in an `X-Forgeyard-Dropped-Params` header.
+2. ✅ **Encrypted traffic to the machines** (#206, for #163): the gateway reaches every replica over TLS, with a
+   certificate Forgeyard's CA signs for that machine; its key never leaves it. An older agent keeps plain HTTP
+   and is pointed out until it is updated.
+3. ✅ **Replicas move off a machine that stays offline** (#207, for #164): after 10 minutes they are placed on
+   another machine that fits, and routing skips an offline machine's replicas at once.
+4. ✅ **Prometheus metrics** at `/metrics` (#205, for #165).
+5. ✅ **Memory is never promised twice** (#182, for #166): GGUF layers left on the CPU reserve the machine's RAM,
+   an APU's shared memory counts once, and a placement uses the recipe as it is now.
+6. ✅ **Better estimates** (#181, for #167; #209, for #201): sliding-window, MLA and hybrid models are estimated
+   from what they keep, and vLLM is given the batch size the estimate counts, so Gemma 4 12B at 16k on an A100 is
+   estimated at 2.091 GiB of KV cache where vLLM uses 2.09.
+7. ✅ **No request runs twice** (#184, for #168): a request moves to another replica only when it never reached
+   the first, and a stream that does not start is given up after a settable *Wait for the first answer* (120 s)
+   instead of 600 s.
+8. ✅ **Fair waiting** (#187, for #169): text requests waiting for a busy local tier are served first come, first
+   served; `local_busy` answers carry `Retry-After`.
+9. ✅ **Mixed versions keep working** (#180, for #170): an unknown message type or card vendor is ignored instead
+   of dropping the agent.
+10. ✅ **A warning when a machine publishes its replicas on a loopback address** (#183, for #171).
+11. ✅ **Cloud spend across restarts, and an installer that checks what it installs** (#186, for #172).
+12. ✅ **NVIDIA agents keep their GPUs across the host's `systemctl daemon-reload`** (#210, for #202): the agent
+    commands pass the device nodes, and the agent checks and reports its GPU access.
+13. ✅ **Behind the scenes** (#217, for #173): the gateway's `proxy.py` and the agent's `supervisor.py` split into
+    smaller parts, with an explicit `Runtime` interface; the tests and the full regression run passed unchanged.
+
+Also in 1.4.5: flaky tests fixed (#178, #211, #214, #216, for #161, #204, #212, #215), the acceptance scripts
+reach TLS replicas (#213) and wait a bounded time for a card with no room (#208, for #203), the machines each release was
+accepted on are published in [docs/verified-hardware.md](docs/verified-hardware.md) (#199, for #198), and 1.4
+became a long-term support line (#197, see [Support](#support)). Update the agents after the server: TLS, the
+guard's answer when its engine is not running, the NVIDIA device nodes and the replica address need a 1.4.5 agent.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -334,6 +370,13 @@ availability, and extended support (longer support periods, with fixes back-port
 are marked *(enterprise edition)* in the table below.
 Nothing that is in the community edition today moves to the enterprise edition.
 
+## Support
+
+**1.4 is a long-term support line of the community edition until 2027-06-30** (#197): security fixes and fixes
+for serious bugs come as 1.4.x patch releases, also after 1.5 and later are out. Other changes go only into
+the newest minor release. Longer support periods are the enterprise edition's extended support. The supported
+versions are listed in [SECURITY.md](SECURITY.md#supported-versions).
+
 ## Next
 
 Each minor version comes as a series of small releases: its main feature first (1.5.0, 1.6.0, …), then
@@ -341,7 +384,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.4.5: fixes from an outside review** | **Structured output is never silently lost:** a request with a JSON schema, grammar or guided-decoding parameter is not spilled to a cloud tier that would drop it, and any parameter dropped on the way to a cloud provider is named in an `X-Forgeyard-Dropped-Params` header. **Encrypted traffic to the machines:** the gateway talks to each replica over TLS, with a certificate the agent gets from Forgeyard's own CA, so prompts and answers no longer cross the network in plain HTTP. **Replicas move off a machine that stays offline:** after a grace period they are placed on another machine that fits. **Prometheus metrics** at `/metrics`. **Memory is never promised twice:** layers of a GGUF model left on the CPU count against the machine's RAM, an APU's shared memory is not counted both as GPU memory and as RAM, and a recipe's changed overhead updates the reservations of existing deployments. **Better estimates:** sliding-window attention (Gemma, Mistral), MLA (DeepSeek) and hybrid models are estimated from what they really keep, so models that fit are no longer refused. **No request runs twice:** a request is retried on another replica only when it never reached the first; a replica that accepts a request and then goes silent is given up after a shorter, settable wait instead of 600 s. **Fair waiting:** text requests waiting for a busy deployment are served first come, first served. **Mixed versions keep working:** a server ignores a message type or a vendor it does not know instead of dropping the agent. **A warning when a machine reports a loopback address** (an agent reached through an SSH tunnel), since the gateway would then dial its own host. Smaller fixes: `local_busy` answers carry `Retry-After`; cloud spend from answers without token counts survives a restart; the installer pins the uv it downloads by hash. **Behind the scenes:** the two largest files are split before more is built on them: the gateway's `proxy.py` (about 1,700 lines) into routing, spill, cloud and streaming parts, and the agent's `supervisor.py` (about 1,150 lines) into smaller pieces, with an explicit interface for container and process runtimes. Behaviour does not change; the existing tests and the full regression run must pass unchanged. **Verified hardware:** the machines each release was accepted on, and its pass counts, are published in [docs/verified-hardware.md](docs/verified-hardware.md) (#198). **Long-term support:** 1.4 becomes a long-term support line when 1.4.5 ships: security and serious bug fixes; the period is announced with 1.4.5 (#197). |
 | **1.5.0: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight (#37). |
 | **1.5.1: the console in Traditional Chinese** | The web console in Traditional Chinese as well as English. Today the console is in English only; the guide already has both (#189). |
 | **1.5.2: engine updates** | A newer version of an engine is pointed out, and can be tried as a pinned copy (#95). |
