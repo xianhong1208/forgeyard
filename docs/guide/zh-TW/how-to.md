@@ -714,6 +714,8 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 閒置時間要依模型啟動需要多久來選：llama.cpp 的模型幾秒就就緒，大的 vLLM 模型可能要好幾分鐘，所以要給它一個遠比啟動時間長的閒置時間（預設的 30 分鐘就是）。休眠時它的記憶體可以給別人用：在共用的卡上可能被其他程式用掉，這時模型會在其他有空間的機器上啟動，或等待。
 
+要在你自己的機器上檢查休眠和喚醒，執行 `scripts/accept_scale.py`（[檢查休眠、喚醒和自動副本數](#check-sleep-waking-and-automatic-replicas)）。
+
 ## 機器一直離線時
 
 超過 30 秒（`AGENT_OFFLINE_SECONDS`）沒有收到機器的任何訊息，它就是 *offline*。從這時起：
@@ -741,6 +743,8 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 - **啟動需要時間：**新副本要就緒後才幫得上忙（llama.cpp 幾秒，vLLM 一分鐘以上）。這段時間請求在隊伍裡等，有雲端分層的金鑰也可能和以前一樣轉到雲端。
 - **移除會等串流做完：**被移除的副本不再接新請求，正在處理的請求不管多長都會做完，最多 30 分鐘；之後還是會移除。
 - 要回到固定數量，把 **Replicas** 設為 **Fixed number**（用腳本：`{"params": {"autoscale": null}}` 加上 `replicas` 數字）；在你改數字之前，部署保留它現有的副本。
+
+要在你自己的機器上看到負載增加副本、再排空移除，執行 `scripts/accept_scale.py`（[檢查休眠、喚醒和自動副本數](#check-sleep-waking-and-automatic-replicas)）。
 
 ## 在共用機器上限制 GPU
 
@@ -1051,6 +1055,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
 | `relay` | 經由伺服器取得模型：把 CPU 機器的 **Internet access for downloads** 設為 **Always through the server**，用 **Download to…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
 | `images` | 在有 Docker 或 Podman 的機器上（`--engine-machine`，預設是 GPU 機器）：它的引擎映像清單；腳本自己做出一個只有幾 KB 的映像檔，上傳、複製到第二台可以接收映像的機器（`--second-engine-machine`），再用 **Remove engine image** 移除（因為只有 recipe 指名的映像才能移除，會有一個 recipe 暫時指名它幾秒鐘） |
+| `scale` | 閒置時休眠、喚醒（由請求、**Wake now**、Playground）、喚醒期間轉到雲端、`model_waking`、`cannot_wake`、**Stop**、自動副本數與排空、啟動時間，以及它們的指標（[見下方](#check-sleep-waking-and-automatic-replicas)） |
 | `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
 
 用 `--only gateway,cloud` 或 `--skip console` 選擇要跑的組別；即使沒選 `models`，`gateway` 和 `cloud` 也會部署它們需要的模型。全部沒有失敗時結束代碼是 0，有檢查失敗時是 1，無法開始執行時是 2。
@@ -1058,13 +1063,43 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 執行前要知道的事：
 
 - **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、應用程式、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣；relay 這組放進機器快取的模型、機器的取得設定，以及 images 這組的映像和 recipe 也會一併復原。這次執行留下的用量紀錄和稽核事件會保留。只有在 1.4.2 以前、無法移除映像的 agent 上，那個很小的映像 `accept-<run>-image:1` 會留下來，報告裡會說明。
-- **和別人共用的卡**（1.4.5）：伺服器因為沒有任何一張卡有足夠的可用記憶體而放不下的部署或應用程式，等了 `--place-timeout` 秒（5 分鐘）之後就會跳過，並附上伺服器給的原因（`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`），不會一直等到 `--timeout`（40 分鐘；下載和啟動仍然以它為上限）。每個會在 GPU 機器上部署的組別（`tts`、`img`、`video`、`passthrough`、`vision`）開始之前，這次執行會先停止前面組別留在 GPU 上、後面組別也用不到的東西，再把它移除（`models` 組的部署只會停止，因為 console 組要顯示其中一個；`tts` 還可能用到的語音轉文字模型會保留），讓每一組都能用到這次執行在那張卡上的空間。報告的備註會列出釋放了哪些東西。
+- **和別人共用的卡**（1.4.5）：伺服器因為沒有任何一張卡有足夠的可用記憶體而放不下的部署或應用程式，等了 `--place-timeout` 秒（5 分鐘）之後就會跳過，並附上伺服器給的原因（`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`），不會一直等到 `--timeout`（40 分鐘；下載和啟動仍然以它為上限）。每個會在 GPU 機器上部署的組別（`tts`、`img`、`video`、`passthrough`、`vision`、`scale`）開始之前，這次執行會先停止前面組別留在 GPU 上、後面組別也用不到的東西，再把它移除（`models` 組的部署只會停止，因為 console 組要顯示其中一個；`tts` 還可能用到的語音轉文字模型會保留），讓每一組都能用到這次執行在那張卡上的空間。報告的備註會列出釋放了哪些東西。
 - **只有一個請求會送到雲端供應商**，內容是固定的一小段提示，費用不到一美分。供應商的每月預算會被改動幾秒鐘再改回原值；其他預算檢查只用這次執行自己的金鑰和使用者。
 - **一次性使用者會有五次登入失敗**：伺服器允許每個位址在 15 分鐘內失敗 30 次，所以連續執行很多次時，中間要等一下。
 - **時間：**機器上已經有模型時大約 15 到 20 分鐘（沒有 GPU 機器時約 3 分鐘）；需要下載的話另外加上下載時間。
 - 加上 `--kill-local` 還會檢查容錯移轉：它會強制結束在執行這支腳本的電腦（兩台 CPU 機器之一）上那個 CPU 副本的引擎。
 - 主控台的檢查需要 Playwright for Python 和 Chrome（`--chrome`，預設 `/opt/google/chrome/chrome`）；`--install-playwright` 會把 Playwright 和 OpenAI SDK 一起裝進腳本自己的虛擬環境（`--venv`）。沒有的話，console 這組會跳過。
 - **副本連接埠的呼叫方式和閘道一樣。**agent 以 TLS 提供服務的機器（1.4.5）上，金鑰守門員的檢查（這裡和 `scripts/accept_*.py` 都一樣）會用 TLS 連到副本的位址，並要求憑證上帶有該機器的綁定名稱（`m<id>-<hash>.replica.forgeyard.invalid`，在 **Machines** 可以看到），而且只信任 Forgeyard 的 CA。每個這樣的連接埠還會多三項檢查：純 HTTP 會被拒絕、憑證能以這台機器的名稱驗證通過，以及另一台機器的名稱（有兩台機器用 TLS 時）和不屬於任何機器的名稱都會被拒絕。agent 較舊的機器照舊用純 HTTP 呼叫，並多一行說明它的流量沒有加密。CA 就是 `--ca` 給的那一個；伺服器使用自己的憑證或 `TLS=off` 時，把 `FORGEYARD_REPLICA_CA` 指向伺服器的 `data/tls/ca.crt`。完全沒有 CA 時呼叫照樣進行，只有憑證檢查會跳過。只有完全連不到的連接埠會當成在別的網路而跳過；連上後被關閉連線或憑證不對，都算失敗。
+
+### 檢查休眠、喚醒和自動副本數
+
+`scripts/accept_scale.py` 會在你自己的伺服器和機器上檢查 1.5 的[閒置時休眠](concepts.md#sleep-when-idle)和[自動副本數](concepts.md#automatic-replicas)。它也是 `accept_all.py` 的 `scale` 組，選項和報告都一樣：
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_scale.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --cpu-machine cpu-01 --second-cpu-machine cpu-02 --gpu-machine gpu-01 \
+  --cloud-provider openai --out accept-scale.json
+```
+
+它在 CPU 機器上用 llama.cpp 部署 Qwen3-1.7B GGUF，開啟 **Sleep when idle**，閒置時間 1 分鐘（`--scale-idle-minutes`），然後依報告裡的編號檢查：
+
+1. **它會休眠：**副本停止、它們的連接埠不再回應，它在機器上的保留量被釋放（`/metrics`，扣掉機器上其他副本占用的部分來比對），`/v1/models` 仍然列出它而且不會因此喚醒它，模型也留在機器的快取裡。
+2. **請求會喚醒它，而且只喚醒一次：**同時送出 20 個請求（`--scale-parallel`）只會喚醒一次（一個 *Woken by a request* 事件，`forgeyard_deployment_wakes_total{by="request"}` 多 1），而且全部都得到回應。
+3. **Wake now**（Start）和 Playground 的請求也會喚醒它，事件會寫出是誰喚醒的。
+4. **喚醒期間轉到雲端**，只有給了 `--cloud-provider` 才會執行：供應商成為模型路由的第 1 層；可以外溢的金鑰立刻由雲端回應（`X-Forgeyard-Spilled: waking`，這是唯一會送到供應商的請求），同一把金鑰的結構化輸出請求會等待並由本地回應，模型就緒後這把金鑰又回到本地服務。
+5. **很短的等待：***Wait while it wakes* 設為 10 秒（`--scale-wake-wait`）時，請求會得到 503 `model_waking`，`Retry-After` 至少 5 秒、最多是上次啟動的時間，而喚醒會繼續進行。只有啟動比這更慢的模型才看得出來：CPU 上的 llama.cpp 模型幾秒就就緒，所以這一步在那裡會跳過並說明原因。給了 `--gpu-machine` 時，這次執行也會在那台機器上用 vLLM 部署 Qwen3-0.6B，並對它檢查第 1、2、5 步。
+6. **無法喚醒**，只有在你指定一台允許這次執行停止 agent 的機器時才會執行：`--stoppable-agent cpu-01` 加上 `--agent-stop` 和 `--agent-start`，這兩個 shell 指令在執行腳本的電腦上執行（啟動指令必須立刻返回，讓 agent 繼續執行）。模型休眠時，把它固定在那台機器上，再停止 agent；請求會立刻得到 503 `cannot_wake`，並指出那台機器；agent 回來後，模型會啟動並回應。沒有這些選項時這一步會跳過：腳本絕不會停止沒有被告知可以停止的機器。
+7. **Stop 不會被喚醒：**對休眠中的部署按 **Stop**；請求會得到 503 `no_ready_replica`，沒有任何東西會喚醒它，`/v1/models` 也不再列出它。
+8. **自動副本數**，在兩台 CPU 機器上：一個副本設為 *Automatic, by load*、從 1 到 2、*Concurrent requests* 為 2、縮減時間窗為 2 分鐘（`--scale-down-minutes`）的部署。過了它的 2 分鐘暫停後，4 個用戶端（`--scale-clients`）會在大約一分鐘內增加第二個副本，放在另一台機器上；每個請求都得到回應，沒有一個被執行兩次（每個副本的服務次數等於送給它的請求數）。接著在新副本上跑一個很長的串流：串流進行中縮減會排空它，這段時間的短請求都送到另一個副本，串流完整結束，副本要等串流最後一個位元組送出之後才會被移除。之後一分鐘內不會再加回副本。沒有第二台 CPU 機器，或放不下兩個副本時，這一步會跳過。
+9. **自動副本數加上休眠：**同一個部署開啟 *Sleep when idle*、最少為 0，會以 1 個副本休眠，請求會以 1 個副本喚醒它。
+10. **啟動時間和指標：**每個部署上次啟動的時間（`last_start`），以及 `/metrics` 上的啟動時間、喚醒次數、等待喚醒的請求、部署的副本數和負載、自動調整的決定，以及喚醒期間轉到雲端的請求。
+
+執行前要知道的事：
+
+- **時間：**休眠的模型、自動副本數和 vLLM 模型會同時進行，機器上已經有模型時大約 15 分鐘；第 6 步和第 7 步在它們之後，每一步都要再等一次休眠。
+- **指標：**伺服器沒有設定 `METRICS_TOKEN` 時，`/metrics` 只回應來自伺服器本機的直接請求。請在那台主機上執行腳本，或給 `--metrics-token`（或 `FORGEYARD_METRICS_TOKEN`）；否則指標的檢查會跳過並說明原因。
+- **它會自己清理，**和 `accept_all.py` 一樣：所有東西都命名為 `accept-<run>-scale-…`（部署、它們的路由、API 金鑰、它必須新增的模型目錄項目），結束時全部移除，失敗或按下 **Ctrl-C** 也一樣；它停止過的 agent 會再啟動。伺服器放不下的部署，等了 `--place-timeout` 秒之後會跳過，並附上伺服器給的原因。
 
 ## 用 Prometheus 收集 Forgeyard 的指標
 

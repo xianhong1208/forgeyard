@@ -137,5 +137,6 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `scripts/accept_img.py` | 圖片生成在真實硬體上的驗收（也是 `accept_all.py` 的 `img` 群組） |
 | `images/vision/` | 應用程式範本（偵測、分割、深度）背後的 vision server：Dockerfile、固定版本的模型與相依套件、smoke test |
 | `scripts/accept_x.py` | `/x/` 直通在真實硬體上的驗收（也是 `accept_all.py` 的 `passthrough` 群組） |
+| `scripts/accept_scale.py` | 閒置時休眠、喚醒和自動副本數在真實硬體上的驗收（也是 `accept_all.py` 的 `scale` 群組；[做法](guide/zh-TW/how-to.md#檢查休眠喚醒和自動副本數)） |
 | `scripts/check_recommended.py`, `pin_images.py` | 對照 Hugging Face 檢查推薦模型；以 digest 固定 recipe 的映像檔 |
 | `web/` | React + TypeScript + Vite 的 UI，建置到 `forgeyard/static` |

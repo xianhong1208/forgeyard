@@ -16,6 +16,10 @@ machine is in the README's [Tested on](../README.md#tested-on).
 - **[`scripts/accept_vision.py`](../scripts/accept_vision.py)**, the vision models: each one deployed with
   the built-in `vision` recipe and called at `/v1/vision/*` on a known photo, then the refusals and the
   usage it records.
+- **[`scripts/accept_scale.py`](../scripts/accept_scale.py)** (1.5.0), sleep when idle, waking and automatic
+  replicas: a model goes asleep and frees its memory, requests wake it exactly once, a key that may spill is served
+  by the cloud meanwhile, a load adds a replica and a stream on it finishes while it is drained. It is also the
+  `scale` group of `accept_all.py`.
 - The other `scripts/accept_*.py` scripts cover single features in more depth (chat with images, audio and
   video; text to speech; image and video generation); [docs/development.md](development.md) lists them.
 
