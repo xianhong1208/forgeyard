@@ -192,6 +192,13 @@ describe("automatic replicas (1.5.0)", () => {
     expect(within(line).getByText(/Wants 3 replicas, room for 2/)).toBeTruthy();
     expect(screen.getAllByText("draining")).toHaveLength(1);
     view.unmount();
+    d = dep([rep(), rep({ ordinal: 1, id: "r2" })], { autoscale: { ...auto, wanted: 2, draining: null, room: null } });
+    const again = mount("/serving/3");
+    const steady = await screen.findByLabelText("Automatic replicas");
+    expect(within(steady).getByText("Automatic, 1 to 4 · 2 now")).toBeTruthy();
+    expect(within(steady).queryByText(/the load asks for/)).toBeNull();
+    expect(within(steady).getByText(/^Last: Draining replica 1/)).toBeTruthy();
+    again.unmount();
     d = dep([rep()]);
     mount("/serving/3");
     expect(await screen.findByRole("heading", { name: "Replicas" })).toBeTruthy();
