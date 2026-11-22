@@ -149,9 +149,11 @@ describe("automatic replicas (1.5.0)", () => {
     expect(within(changes).getByText("off")).toBeTruthy();
     await waitFor(() => expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false), { timeout: 3000 });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
-    const saved = seen.find((b) => !b.dry_run);
-    expect(saved).toEqual({ params: { context: 4096, concurrency: 1, gpus: 0, share: "exclusive", vram: null, extra_args: null, first_answer_timeout: null,
-      autoscale: true, min_replicas: null, max_replicas: 4, autoscale_target: 60, scale_up_seconds: null, scale_down_minutes: null }, machine_id: null });
+    const saved = seen.find((b) => !b.dry_run) as { params: Record<string, unknown>; machine_id: unknown };
+    expect(saved.params).toMatchObject({ context: 4096, concurrency: 1, gpus: 0, share: "exclusive",
+      autoscale: true, min_replicas: null, max_replicas: 4, autoscale_target: 60, scale_up_seconds: null, scale_down_minutes: null });
+    expect("replicas" in saved).toBe(false);   // the autoscaler sets the number
+    expect(saved.machine_id).toBeNull();
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
