@@ -991,6 +991,55 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 - 加上 `--kill-local` 還會檢查容錯移轉：它會強制結束在執行這支腳本的電腦（兩台 CPU 機器之一）上那個 CPU 副本的引擎。
 - 主控台的檢查需要 Playwright for Python 和 Chrome（`--chrome`，預設 `/opt/google/chrome/chrome`）；`--install-playwright` 會把 Playwright 和 OpenAI SDK 一起裝進腳本自己的虛擬環境（`--venv`）。沒有的話，console 這組會跳過。
 
+## 用 Prometheus 收集 Forgeyard 的指標
+
+伺服器以 Prometheus 的文字格式回應 `GET /metrics`：閘道每個模型的請求數、延遲和 token、轉到雲端的請求、排隊情況、各狀態的副本、機器、GPU 記憶體和雲端花費（[所有指標](reference.md#metrics)）。標籤只用模型、機器和供應商的名稱，絕不會有金鑰、使用者或提示內容。
+
+**誰可以讀取。**沒有設定 `METRICS_TOKEN` 時，只有來自伺服器本機、且沒有經過任何 proxy 的請求可以讀（沒有 `X-Forwarded-For`、`Forwarded` 或 `X-Real-IP`）；其他人會得到 403。設定了 `METRICS_TOKEN` 之後，每一次收集都需要 `Authorization: Bearer <token>`，不論從哪裡來，伺服器本機也一樣；沒帶或帶錯會得到 401。
+
+**Prometheus 在伺服器本機上**，不需要權杖。從 **Trust this server** 把伺服器的 CA 存成 `/etc/prometheus/forgeyard-ca.pem`；伺服器的憑證一定包含 `127.0.0.1`：
+
+```yaml
+scrape_configs:
+  - job_name: forgeyard
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/forgeyard-ca.pem
+    static_configs:
+      - targets: ["127.0.0.1:7860"]
+```
+
+**Prometheus 在其他地方，或在 Docker 裡：**在伺服器上設定一個權杖（一段很長的隨機值，例如 `openssl rand -hex 32`），寫進它的 `.env` 或用 `-e METRICS_TOKEN=…`，重新啟動伺服器，再把同一個值放在檔案裡給 Prometheus：
+
+```yaml
+scrape_configs:
+  - job_name: forgeyard
+    scheme: https
+    authorization:
+      credentials_file: /etc/prometheus/forgeyard-metrics-token
+    tls_config:
+      ca_file: /etc/prometheus/forgeyard-ca.pem
+    static_configs:
+      - targets: ["192.168.1.20:7860"]
+```
+
+- **Docker 需要權杖。**經由對外公開的連接埠進到容器的請求，不是從容器自己的 loopback 來的；Prometheus 容器則是另一台主機：兩者都不算「本機」。
+- **`targets` 裡的名稱**必須是伺服器會回應、而且憑證上有的名稱：IP 位址一定可以。如果用名稱，例如 Docker 網路上伺服器的容器名稱（`forgeyard:7860`），請把它加到 `ALLOWED_HOSTS` 和 `TLS_EXTRA_NAMES`（否則會是 421，或憑證錯誤）。
+- **在你自己的反向 proxy 後面**時，帶著權杖經由它收集：它轉送的請求絕不會被當成本機的請求，即使來自 `127.0.0.1`。
+
+可以從這些查詢開始：
+
+| 查詢 | 顯示什麼 |
+|---|---|
+| `sum by (model) (rate(forgeyard_gateway_requests_total[5m]))` | 每個模型每秒的請求數 |
+| `sum by (model) (rate(forgeyard_gateway_requests_total{status=~"5.."}[5m]))` | 每秒的伺服器錯誤 |
+| `histogram_quantile(0.95, sum by (le, model) (rate(forgeyard_gateway_time_to_first_byte_seconds_bucket[5m])))` | 第一個位元組時間的第 95 百分位數 |
+| `sum by (model, reason) (rate(forgeyard_gateway_spills_total[1h]))` | 請求為什麼離開本地層 |
+| `forgeyard_machine_up == 0` | 離線的機器（適合做告警） |
+| `forgeyard_gpu_memory_free_bytes / forgeyard_gpu_memory_total_bytes` | 每張卡可用記憶體的比例 |
+
+伺服器重新啟動時計數器會從 0 開始（Prometheus 的 `rate()` 會處理）。狀態類的指標（副本、機器、記憶體、花費）在每次收集時從資料庫讀取：每 15 到 60 秒收集一次就好，不要更快。
+
 ## 備份與還原
 
 **伺服器上要備份的東西**，除非你搬過位置，否則都在它的 `data/` 資料夾裡（用 Docker 的話是 `/data` volume，[這樣備份](#run-the-server-in-docker)）：

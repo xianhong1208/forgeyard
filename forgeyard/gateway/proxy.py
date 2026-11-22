@@ -102,6 +102,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import Response
 
+from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Deployment, GatewayRoute, ProviderModel, Replica, RouteTarget, Workload, as_utc, new_session
 from forgeyard.gateway import (budgets, classify, egress, imagegen, media as gmedia, multipart, pricing, quirks, speech,
@@ -1015,6 +1016,7 @@ class Job:
         self.answer_by: Optional[float] = None      # by when (monotonic) its first answer must come
         self.answering: Optional[tuple] = None      # (group, replica) that is answering
         self.kept_from: list[str] = []              # providers skipped: they would lose the structured output
+        self.first_byte_at: Optional[float] = None  # when the answer's first bytes came (monotonic; /metrics, 1.4.5)
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
@@ -1033,7 +1035,8 @@ class Job:
         def count() -> None:
             record(self.caller, self.route.served_name, self.deployment_id, status, self.started, u.prompt,
                    u.completion, target=self.target, cached=u.cached, reasoning=u.reasoning,
-                   spilled=self.spilled is not None, cost=self.cost, units=self.units(served))
+                   spilled=self.spilled is not None, cost=self.cost, units=self.units(served), endpoint=self.endpoint,
+                   first_byte=self.first_byte_at, spill_reason=self.spilled)
 
         hold, self.hold = self.hold, None
         if c is None or not c.external:
@@ -1726,6 +1729,7 @@ class Job:
 
     async def serve(self, response: httpx.Response, out_headers: dict, strip: bool, *, release: str,
                     who: str) -> Response:
+        self.first_byte_at = time.monotonic()  # the status line and headers are here (a stream: its first chunk, below)
         if self.parsed.image is not None:
             return await self.images(response, out_headers, release, who)
         if self.parsed.vision is not None:
@@ -1738,6 +1742,7 @@ class Job:
                 first, chunks = await self.first_chunk(response, release)
             except ClientGone:
                 return self.gone()
+            self.first_byte_at = time.monotonic()
         if is_sse and response.status_code == 200:
             def done(status: int, usage) -> None:
                 balancer.release(release)
@@ -1879,7 +1884,7 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
         verdict = key_limiter.admit(caller.key_id, caller.rpm, caller.tpm, parsed.max_tokens)
         if isinstance(verdict, Refusal):
             what = "requests" if verdict.which == "rpm" else "tokens"
-            record(caller, route.served_name, route.deployment_id, 429, started, limited=True)
+            record(caller, route.served_name, route.deployment_id, 429, started, limited=True, endpoint=endpoint)
             raise GatewayError(429, "rate_limit_exceeded",
                                f"This API key may use {verdict.limit} {what} per minute; try again in "
                                f"{verdict.retry_after} s.", retry_after=verdict.retry_after)
@@ -1924,11 +1929,18 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,
            prompt: int = 0, completion: int = 0, limited: bool = False, *, target: str = "local", cached: int = 0,
            reasoning: int = 0, spilled: bool = False, cost: Optional[pricing.Cost] = None,
-           units: Optional[dict] = None) -> None:
+           units: Optional[dict] = None, endpoint: str = "", known: bool = True, first_byte: Optional[float] = None,
+           spill_reason: Optional[str] = None) -> None:
+    """Usage, and /metrics (1.4.5, #165). `known`: `model` is a route the gateway has (not only a name a client
+    sent); `first_byte`: when the answer's first bytes came (monotonic)."""
     cost = cost or pricing.Cost(0, pricing.NONE)
+    now = time.monotonic()
+    metrics.request(endpoint=endpoint, model=model, known=known, status=status, source=caller.source, target=target,
+                    seconds=now - started, first_byte=None if first_byte is None else first_byte - started,
+                    prompt_tokens=prompt, completion_tokens=completion, spilled=spill_reason)
     recorder.record(source=caller.source, key_id=caller.key_id, user_id=caller.user_id, username=caller.username,
                     model=model, deployment_id=deployment_id, status=status,
-                    latency_ms=(time.monotonic() - started) * 1000, prompt_tokens=prompt,
+                    latency_ms=(now - started) * 1000, prompt_tokens=prompt,
                     completion_tokens=completion, limited=limited, target=target, cached_tokens=cached,
                     reasoning_tokens=reasoning, spilled=spilled, cost_picos=cost.picos, cost_method=cost.method,
                     units=units)

@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     allowed_hosts: str = ""
     # Proxies whose X-Forwarded-For (and X-Forwarded-Proto) is believed, comma-separated IPs. Empty: none.
     trusted_proxies: str = ""
+    # GET /metrics (Prometheus, 1.4.5, #165). Empty: only a direct request from this host (loopback, no proxy in
+    # between) may read it; set: every scrape needs `Authorization: Bearer <token>`, from anywhere.
+    metrics_token: str = ""
 
     # HTTPS (docs/https-and-trust.md). "on" (the default): the server speaks HTTPS with a certificate
     # from Forgeyard's own certificate authority, made on first start in data_dir/tls, or with
