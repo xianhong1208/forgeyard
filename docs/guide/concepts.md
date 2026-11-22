@@ -253,13 +253,18 @@ unless you set another (1 to 1,440 minutes). Changing either restarts nothing.
 - **After a server restart** every idle time counts from the restart: the server keeps the last request time in
   its memory, so a restart never puts a model to sleep early.
 - **Asleep is not stopped.** An asleep model stays in `/v1/models`. In 1.5.0's first steps a request to it
-  answers **503 `model_asleep`**; **Start** (on its page: **Wake**) wakes it, on the machine it ran on when that
+  answers **503 `model_asleep`**; **Start** (on its page and in the Playground: **Wake now**) wakes it, on the machine it ran on when that
   still has room, or on its pinned machine. Waking on the next request comes later in 1.5.0. **Stop** on an asleep
   deployment makes it stopped: then requests answer that it is stopped and it leaves `/v1/models`, as before.
 - **While it sleeps its memory is free**, and another deployment (or, on a shared card, something outside
   Forgeyard) may take it. Then it starts elsewhere if it fits there, or waits for room like any replica.
 - Going to sleep is recorded in the deployment's events (*Asleep: no requests for 30 min; frees 14.4 GiB on gpu-01
   GPU #4*), not in the audit log: no person did it. Waking with Start is audited as a start.
+- **In the console** (1.5.0): the deploy and edit forms have the setting under *When not in use*, with how long
+  the last start took (about what the first request after a sleep waits); Serving shows **Asleep** (a moon) and
+  **Waking**; the deployment's page has a *When not in use* card and **Wake now**; Machines names an asleep
+  deployment under the machine it would run on; the setup advisor points out a deployment that holds GPU memory
+  nobody used for 3 days, and one that wakes more than 10 times a day while taking over a minute to start.
 
 ## Images, audio and video in chat
 

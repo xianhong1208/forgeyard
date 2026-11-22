@@ -8,11 +8,13 @@ import { ApiError, api, errorText } from "../lib/api";
 import { FIRST_ANSWER_DEFAULT, editBody, editForm, takesFirstAnswer, type EditForm } from "../lib/models";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentResponse, EditResponse, Machine, MachineVerdict, MachinesResponse, Recipe } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { SleepSetting } from "../components/Sleep";
 import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts, paramApplies } from "./ModelDeploy";
 
 // What a change shows next to each changed setting.
 const CHANGE_LABEL: Record<string, string> = { share: "GPU sharing", gpus: "GPUs per replica", vram: "Memory per device",
-  extra_args: "Extra engine arguments", first_answer_timeout: "Wait for the first answer (s)", replicas: "Replicas", machine_id: "Machine" };
+  extra_args: "Extra engine arguments", first_answer_timeout: "Wait for the first answer (s)", replicas: "Replicas", machine_id: "Machine",
+  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes" };
 
 export function DeploymentEditPage() {
   const { id } = useParams();
@@ -144,6 +146,8 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
               </div>
             </details>
           </section>
+          <SleepSetting prefix="e" on={f.sleepOn} minutes={f.idleMinutes} last={d.last_start}
+            onChange={(on, minutes) => setF((cur) => ({ ...cur, sleepOn: on, idleMinutes: minutes }))} />
           <section className="panel" aria-labelledby="what-title">
             <h2 id="what-title">What saving does</h2>
             {planError ? <Notice tone="error">{planError}</Notice> : !plan ? <p className="muted small">Checking…</p> : changes.length === 0 ? (
@@ -183,7 +187,8 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
 }
 
 function changeValue(k: string, v: unknown, machines: { id: number; name: string }[]): string {
-  if (v === null || v === undefined) return k === "machine_id" ? "automatic" : k === "vram" ? "the estimate" : "—";
+  if (v === null || v === undefined) return k === "machine_id" ? "automatic" : k === "vram" ? "the estimate" : k === "sleep_when_idle" ? "off" : "—";
+  if (k === "sleep_when_idle") return v === true ? "on" : "off";
   if (k === "machine_id") return machines.find((m) => m.id === v)?.name ?? `machine ${String(v)}`;
   if (k === "vram" && typeof v === "number") return `${(v / 1024 ** 3).toFixed(2)} GiB`;
   if (k === "share") return v === "vram" ? "Share VRAM" : "Exclusive";

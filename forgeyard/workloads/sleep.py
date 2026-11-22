@@ -37,7 +37,7 @@ from typing import Iterable, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard.db import Deployment, Replica, VideoJob, Workload, as_utc, new_session, utcnow
+from forgeyard.db import Deployment, Replica, VideoJob, Workload, WorkloadEvent, as_utc, new_session, utcnow
 
 log = logging.getLogger("forgeyard.workloads")
 
@@ -200,14 +200,45 @@ def hold(db: DbSession, d: Deployment, w: Workload, now: datetime) -> Optional[s
     return video_hold(db, d, now)
 
 
+# The events that change whether a deployment runs, and the one that says it was woken (by Start, Wake now or,
+# from 1.5.0's next step, a request).
+LIFECYCLE = ("asleep", "woken", "started", "stopped", "created")
+WOKEN = "woken"
+WAKES_WINDOW = timedelta(days=1)
+
+
+def _latest(db: DbSession, w: Workload) -> Optional[WorkloadEvent]:
+    return db.scalar(select(WorkloadEvent).where(WorkloadEvent.workload_id == w.id, WorkloadEvent.kind.in_(LIFECYCLE))
+                     .order_by(WorkloadEvent.id.desc()).limit(1))
+
+
+def wakes(db: DbSession, w: Workload, now: Optional[datetime] = None) -> int:
+    """How many times it was woken in the last day (its events)."""
+    since = (now or utcnow()) - WAKES_WINDOW
+    return len(db.scalars(select(WorkloadEvent.id).where(WorkloadEvent.workload_id == w.id, WorkloadEvent.kind == WOKEN,
+                                                         WorkloadEvent.at >= since)).all())
+
+
+def ready_count(w: Workload) -> int:
+    health = (w.spec or {}).get("health")
+    return sum(1 for r in w.replicas if not r.final and (r.state == "healthy" or (r.state == "running" and not health)))
+
+
 def status(db: DbSession, d: Deployment, now: Optional[datetime] = None) -> dict:
-    """The deployment's sleep setting and where it stands, for the API (the console shows it)."""
+    """The deployment's sleep setting and where it stands, for the API (the console shows it): `asleep_since`
+    while asleep; `waking` (and `woken_at`) from a wake until a replica is ready; `wakes` in the last day."""
     now = now or utcnow()
     w = d.workload
     s = setting(d.params)
     last = idle.last(d.id)
     out = {"on": s.on, "idle_minutes": s.idle_minutes, "asleep": w.desired_state == ASLEEP,
-           "last_request_at": last, "since": idle_since(d, w), "sleeps_at": None, "held_by": None}
+           "last_request_at": last, "since": idle_since(d, w), "sleeps_at": None, "held_by": None,
+           "asleep_since": None, "waking": False, "woken_at": None, "wakes": wakes(db, w, now)}
+    latest = _latest(db, w)
+    if w.desired_state == ASLEEP:
+        out["asleep_since"] = as_utc(latest.at if latest is not None and latest.kind == ASLEEP else w.updated_at)
+    elif w.desired_state == "running" and latest is not None and latest.kind == WOKEN and not ready_count(w):
+        out["waking"], out["woken_at"] = True, as_utc(latest.at)
     if s.on and w.desired_state == "running":
         out["sleeps_at"] = out["since"] + timedelta(minutes=s.idle_minutes)
         out["held_by"] = hold(db, d, w, now)

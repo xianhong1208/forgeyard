@@ -568,7 +568,7 @@ starting, stopped, or its machine is offline. The message lists each replica's s
 deployment's page; see also [A model is listed but answers 503](#a-model-is-listed-but-answers-503).
 
 `model_asleep` (1.5.0): the deployment sleeps when idle and nobody used it for its idle time, so its replicas
-stopped. Wake it with **Wake** (Start) on its page; turn *Sleep when idle* off if it should always answer
+stopped. Wake it with **Wake now** (Start) on its page or in the Playground; turn *Sleep when idle* off if it should always answer
 ([Sleep when idle](concepts.md#sleep-when-idle)).
 
 Others: `404 model_not_found` (no model by that name for this key: see `/v1/models` and

@@ -8,8 +8,10 @@ import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
-import type { CatalogModel, CatalogResponse, ContextHint, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
+import { sameModelStart } from "../lib/sleep";
+import type { CatalogModel, CatalogResponse, ContextHint, DeploymentsResponse, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { SleepSetting } from "../components/Sleep";
 
 export const ESTIMATE_DELAY_MS = 400;
 
@@ -19,6 +21,8 @@ export function ModelDeployPage() {
   const [search] = useSearchParams();
   const { data: cat } = useApi<CatalogResponse>("/models");
   const { data: machines } = useApi<MachinesResponse>("/machines");
+  // 1.5.0: another deployment of the same model and engine tells how long a start takes.
+  const { data: deps } = useApi<DeploymentsResponse>("/deployments");
   // ?model=…&recipe=…&device=… from "Deploy it" after adding a model (its suggested recipe and device).
   const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "", recipe: search.get("recipe") ?? "",
     machine: search.get("machine") ?? "",
@@ -86,6 +90,7 @@ export function ModelDeployPage() {
   const shown = relevant.filter(([, p]) => !p.advanced);
   const advanced = relevant.filter(([, p]) => p.advanced);
   const usable = (machines?.machines ?? []).filter((m) => m.status !== "revoked");
+  const same = sameModelStart(deps?.deployments ?? [], view.model, view.recipe);
 
   return (
     <>
@@ -190,6 +195,11 @@ export function ModelDeployPage() {
                 </div>
               </details>
             </section>
+          )}
+          {recipe && (
+            <SleepSetting prefix="d" on={f.sleepOn} minutes={f.idleMinutes}
+              onChange={(on, minutes) => setF((cur) => ({ ...cur, sleepOn: on, idleMinutes: minutes }))}
+              last={same?.last} other={same?.name} />
           )}
           {error && (
             <Notice tone="error">

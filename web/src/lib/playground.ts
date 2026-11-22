@@ -4,6 +4,7 @@
 import { API_KIND } from "./gateway";
 import { MODEL_KIND_ORDER, modelKind, type ModelKind } from "./fleet";
 import { ROUTE_KIND_LABEL } from "./routing";
+import { sleepState, type SleepState } from "./sleep";
 import type { Deployment, RouteInfo } from "./types";
 
 // The kind of a route's protocol. A chat model whose deployment takes images, audio or video is
@@ -26,12 +27,21 @@ export function routeReady(r: RouteInfo): boolean {
   return r.endpoints.length > 0 || r.kind === "cloud";
 }
 
-// What the picker offers: the models the person may use that are ready now, one group per kind in
-// Serving's order; kinds with none are left out. A protocol the console has no panel for is not offered.
+// 1.5.0 (#37): a route whose own deployment is asleep or waking: offered too, with the moon (a request wakes
+// it, or Wake now does).
+export function routeSleep(r: RouteInfo, deployments: Deployment[]): SleepState {
+  if (r.deployment_id == null) return null;
+  const d = deployments.find((x) => x.id === r.deployment_id);
+  return d ? sleepState(d) : null;
+}
+
+// What the picker offers: the models the person may use that are ready now, or asleep or waking (1.5.0), one
+// group per kind in Serving's order; kinds with none are left out. A protocol the console has no panel for is
+// not offered.
 export function pickerGroups(routes: RouteInfo[], deployments: Deployment[]): [ModelKind, RouteInfo[]][] {
   const out = new Map<ModelKind, RouteInfo[]>(MODEL_KIND_ORDER.map((k) => [k, []]));
   for (const r of routes) {
-    if (r.usable === false || !routeReady(r)) continue;
+    if (r.usable === false || (!routeReady(r) && !routeSleep(r, deployments))) continue;
     const k = routeKind(r, deployments);
     if (k) out.get(k)?.push(r);
   }

@@ -28,6 +28,19 @@ version until 1.0.
   edit forms, come in the next 1.5.0 steps. No migration: the settings are deployment parameters and the last use
   is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
   the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
+- **Sleep when idle in the console** (#37, 1.5.0). The deploy and edit forms have a *When not in use* section:
+  **Sleep when idle** (off by default) and **Idle minutes** (30), with how long the last start took (on the deploy
+  form, the last start of another deployment of the same model and engine), which is about how long the first
+  request after a sleep waits, and a note that its memory may be used by others while it sleeps. **Serving** shows
+  **Asleep** (a moon; *holds nothing*, since when, and the machine it wakes on) and **Waking** with the time since it
+  was woken. The deployment page has a *When not in use* card (the setting, *sleeps in 18 min* or what keeps it
+  awake, the last request, the last start, wakes in the last 24 hours) and **Wake now** (Start). The **Playground**
+  keeps an asleep model in its picker with the moon, offers **Wake now** to operators and admins, and follows the
+  wake (*Waking the model (about 74 s)…*). **Machines** names an asleep deployment under the machine it would run on,
+  with what it holds when awake. Two setup-advisor notes: `deployment-idle-awake` (sleep off, no request for 3 days,
+  holds GPU memory: let it sleep?) and `deployment-wakes-often` (woken more than 10 times in a day and its last
+  start took over a minute: raise its idle time). The deployment API's `sleep` object gains `asleep_since`,
+  `waking`, `woken_at` and `wakes`.
 
 ## [1.4.5] — 2026-11-22
 

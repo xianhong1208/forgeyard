@@ -574,7 +574,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 502 | `provider_unreachable` | 連不上供應商 | 稍後重試 |
 | 502 | `provider_error` | 供應商回應 5xx，或送往它的請求失敗 | 稍後重試 |
 | 503 | `no_ready_replica` | 模型存在，但沒有就緒的副本：下載中、啟動中、已停止，或它的機器離線。訊息會列出每個副本的狀態 | 等待，或啟動部署 |
-| 503 | `model_asleep` | 1.5.0：模型的部署正在休眠（*Sleep when idle*：在它的閒置時間內沒人使用）。它仍然列在 `/v1/models` 裡。和任何沒有就緒副本的分層一樣，請求會轉到金鑰可以用的雲端分層 | 在它的頁面上按 **Start** 喚醒它（[閒置時休眠](#sleep-when-idle)） |
+| 503 | `model_asleep` | 1.5.0：模型的部署正在休眠（*Sleep when idle*：在它的閒置時間內沒人使用）。它仍然列在 `/v1/models` 裡。和任何沒有就緒副本的分層一樣，請求會轉到金鑰可以用的雲端分層 | 在它的頁面或 Playground 按 **Wake now** 喚醒它（[閒置時休眠](#sleep-when-idle)） |
 | 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它。帶 `Retry-After: 1` | 等 `Retry-After` 秒後重試 |
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
@@ -817,6 +817,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `since` | 它的閒置時間從什麼時候起算：最後一個請求、最後一次啟動或修改、副本變成就緒，或伺服器啟動的時間，取最晚的那個 |
 | `sleeps_at` | 如果沒人使用，它什麼時候會休眠（只在開啟休眠且正在執行時），每 30 秒檢查一次 |
 | `held_by` | 雖然可能已經閒置夠久，它現在為什麼不休眠：*a request is in flight*、*a replica is starting*、*an edit is restarting its replicas*、*a video is waiting or being made*、*a finished video is kept until …*；其他時候是 `null` |
+| `asleep_since` | 從什麼時候開始休眠（它的 *Asleep* 事件），或 `null` |
+| `waking`、`woken_at` | 它已被喚醒（Start、*Wake now*）但還沒有副本就緒，以及從什麼時候開始；其他時候是 `false` 和 `null` |
+| `wakes` | 過去 24 小時被喚醒的次數（依它的事件） |
 
 對休眠中的部署送 `POST /api/deployments/{id}/start` 會喚醒它（事件 *Woken by …*，以 `workload.started`（帶 `woken: true`）和 `deployment.started` 記入稽核紀錄）；`POST …/stop` 會讓它變成停止（事件 *Stopped by … (it was asleep)*）。進入休眠的事件是 *Asleep: no requests for N min; frees …*，不記入稽核紀錄。對休眠中的部署送 `POST …/try` 會回應 409 `model_asleep`。經過閘道的請求會回應 503 `model_asleep`（[錯誤](#errors)）。
 
@@ -1042,6 +1045,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
+| `deployment-idle-awake` | 說明 | 1.5.0：關閉 *Sleep when idle* 的執行中部署 3 天沒有請求（Usage 的最後一天、伺服器啟動後看到的請求，或從部署、啟動或修改起算），而且佔著 GPU 記憶體：要讓它閒置時休眠嗎？ |
+| `deployment-wakes-often` | 說明 | 1.5.0：開啟 *Sleep when idle* 的部署在過去 24 小時被喚醒超過 10 次，而且上次啟動超過一分鐘：把閒置時間調長 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
 | `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |

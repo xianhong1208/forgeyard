@@ -40,8 +40,8 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import __version__, settings_check
 from forgeyard.config import Settings
 from forgeyard.db import (
-    ApiKey, Deployment, GatewayRoute, Node, Provider, ProviderModel, Replica, RouteTarget, ServerSetting, User,
-    Workload, as_utc, utcnow,
+    ApiKey, Deployment, GatewayRoute, Node, Provider, ProviderModel, Replica, RouteTarget, ServerSetting, UsageDaily,
+    User, Workload, as_utc, utcnow,
 )
 
 log = logging.getLogger("forgeyard")
@@ -62,6 +62,12 @@ MARGIN_MIN = 256 * MIB
 # A running exclusive replica that reserves less than half of a card at least this big is pointed at
 # Share VRAM (1.3.1): the rest of the card could hold other models.
 LARGE_CARD = 24 * GIB
+# 1.5.0 (#37): a running deployment with sleep when idle off that had no request for this long and holds GPU memory
+# is pointed at it (Q1 A); one that sleeps on, woke more than WAKES_OFTEN times in a day and takes longer than
+# SLOW_START to start is pointed at a longer idle time (Q7 A).
+IDLE_HINT = timedelta(days=3)
+WAKES_OFTEN = 10
+SLOW_START = 60.0
 OFFLINE_GRACE = timedelta(minutes=5)
 WAITING_AFTER = timedelta(minutes=15)
 CACHE_FREE_MIN = 0.10
@@ -232,6 +238,16 @@ class Context:
         return list(self.db.scalars(select(Deployment).options(
             selectinload(Deployment.workload).selectinload(Workload.replicas).selectinload(Replica.node))
             .order_by(Deployment.name)).all())
+
+    @cached_property
+    def last_use_day(self) -> dict[int, str]:
+        """The last UTC day (YYYY-MM-DD) each deployment answered or was asked a request, from Usage."""
+        from sqlalchemy import func
+
+        rows = self.db.execute(select(UsageDaily.deployment_id, func.max(UsageDaily.day))
+                               .where(UsageDaily.deployment_id.is_not(None), UsageDaily.requests > 0)
+                               .group_by(UsageDaily.deployment_id)).all()
+        return {dep_id: day for dep_id, day in rows}
 
     @cached_property
     def cloud(self) -> dict:
@@ -753,6 +769,76 @@ def exclusive_could_share(ctx: Context) -> Iterator[Finding]:
                       "rest of the card can hold other models; they then share its compute. Change it with Edit on "
                       "the deployment (its replicas restart).", f"/serving/{d.id}/edit",
                       "Change the deployment", scope=f"deployment:{d.id}", pages=("serving", f"deployment:{d.id}"))
+
+
+def _gpu_held(d: Deployment) -> list[str]:
+    """What a deployment's settled replicas hold on GPUs: "14.4 GiB on box GPU #4", one per replica."""
+    out = []
+    for r in sorted(d.workload.replicas, key=lambda r: r.ordinal):
+        cards = [g for g in r.gpus or [] if g.get("vendor") != "cpu"]
+        if r.final or r.node is None or not cards or not r.vram or r.state not in ("healthy", "running"):
+            continue
+        indexes = ", ".join(f"#{g.get('index')}" for g in cards)
+        out.append(f"{_size(r.vram)} on {r.node.name} GPU {indexes}")
+    return out
+
+
+@check
+def deployment_idle_awake(ctx: Context) -> Iterator[Finding]:
+    """V52 (1.5.0, #37): a running deployment with sleep when idle off, no request for IDLE_HINT, holding GPU memory."""
+    from datetime import timezone
+
+    from forgeyard.workloads import sleep
+
+    for d in ctx.deployments:
+        w = d.workload
+        if w is None or w.desired_state != "running" or sleep.setting(d.params).on:
+            continue
+        held = _gpu_held(d)
+        if not held:
+            continue
+        # Quiet since its last request (Usage keeps days: the end of that day), what this server saw since it
+        # started, or when it was deployed, started or changed, whichever is latest.
+        times = [as_utc(d.created_at), as_utc(w.updated_at)]
+        if (day := ctx.last_use_day.get(d.id)) is not None:
+            times.append(datetime.fromisoformat(day).replace(tzinfo=timezone.utc) + timedelta(days=1))
+        if (seen := sleep.idle.last(d.id)) is not None:
+            times.append(as_utc(seen))
+        quiet = ctx.now - max(t for t in times if t is not None)
+        if quiet < IDLE_HINT:
+            continue
+        days = quiet.days
+        yield Finding("deployment-idle-awake", "info", f"{d.name} had no requests for {days} days: let it sleep when idle?",
+                      f"{d.name} had no requests for {days} days and holds {'; '.join(held)}. With Sleep when idle its "
+                      "replicas stop after the idle time (30 minutes by default) and give that memory back; the model "
+                      "stays listed, and Wake now (or a request) starts it again. Turn it on with Edit on the "
+                      "deployment: nothing restarts.", f"/serving/{d.id}/edit", "Change the deployment",
+                      scope=f"deployment:{d.id}", pages=("serving", f"deployment:{d.id}"))
+
+
+@check
+def deployment_wakes_often(ctx: Context) -> Iterator[Finding]:
+    """V53 (1.5.0, #37): sleep when idle on, woken more than WAKES_OFTEN times in a day, slower than SLOW_START."""
+    from forgeyard.workloads import sleep, starts
+
+    for d in ctx.deployments:
+        w = d.workload
+        s = sleep.setting(d.params)
+        if w is None or not s.on:
+            continue
+        n = sleep.wakes(ctx.db, w, ctx.now)
+        if n <= WAKES_OFTEN:
+            continue
+        last = starts.last_start(ctx.db, w.id)
+        if last is None or float(last["seconds"]) <= SLOW_START:
+            continue
+        took = round(float(last["seconds"]))
+        yield Finding("deployment-wakes-often", "info", f"{d.name} woke {n} times in a day: raise its idle time",
+                      f"{d.name} woke {n} times in the last 24 hours, and its last start took {took} s: each time, the "
+                      f"first request waited about that long. It sleeps after {s.idle_minutes} min without a request; "
+                      "a longer idle time (Edit on the deployment) keeps it awake between the requests it gets, at the "
+                      "cost of holding its memory longer.", f"/serving/{d.id}/edit", "Change the deployment",
+                      scope=f"deployment:{d.id}", pages=("serving", f"deployment:{d.id}"))
 
 
 # llama.cpp's short and long spellings of the flags Forgeyard sets.

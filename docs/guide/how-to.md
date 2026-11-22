@@ -1042,17 +1042,30 @@ A model that is used now and then (one you try in the evening, a big model for a
 memory back while nobody calls it ([Sleep when idle](concepts.md#sleep-when-idle)). It is off unless you turn it
 on, per deployment.
 
-1. Turn it on with a change of the deployment's parameters: `PATCH /api/deployments/{id}` with
-   `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins and operators; leave `idle_minutes` out for
-   30 minutes). A deploy takes the same two parameters. Nothing restarts. The deploy and edit forms get the
-   setting later in 1.5.0.
-2. After the idle time without a request its replicas stop. Its page shows **asleep**, says why, and its events
-   say *Asleep: no requests for 30 min; frees …*. The model stays in `/v1/models`; the machine keeps the model
-   files and the engine image.
-3. Wake it with **Wake** on its page (`POST /api/deployments/{id}/start`). Until waking on a request arrives later
-   in 1.5.0, a request to the asleep model answers 503 `model_asleep`, or goes to the route's cloud tier when the
-   key may use one.
-4. **Stop** on an asleep deployment stops it for good: it leaves `/v1/models` until someone starts it.
+1. Turn it on in the form: **Serving → Deploy a model**, or **Edit** on a deployment's page. Under *When not in use*
+   tick **Sleep when idle** and keep or change **Idle minutes** (30 by default, 1 to 1,440). Beside it the form says
+   how long the last start took (on the deploy form: the last start of another deployment of the same model and
+   engine), which is about how long the first request after a sleep waits. Saving only this restarts nothing. From
+   a script: `PATCH /api/deployments/{id}` with `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins
+   and operators; leave `idle_minutes` out for 30 minutes); a deploy takes the same two parameters.
+2. The deployment's page has a *When not in use* card: the setting, what it is doing now (*sleeps in 18 min unless a
+   request comes*, or what keeps it awake: a request in flight, a replica starting…), the last request, the last
+   start time and how often it was woken in the last 24 hours.
+3. After the idle time without a request its replicas stop. **Serving** shows it **Asleep** (a moon), with *holds
+   nothing* and the machine it wakes on; its page says since when, and its events say *Asleep: no requests for 30
+   min; frees …*. **Machines** names it under the machine it would run on (*qwen3-4b asleep here (14.4 GiB on GPU
+   #4 when awake)*): that memory is free for others meanwhile. The model stays in `/v1/models`; the machine keeps
+   the model files and the engine image.
+4. Wake it with **Wake now** on its page or in the **Playground**, where an asleep model stays in the picker with
+   the moon (`POST /api/deployments/{id}/start`). Until it is ready it shows **Waking** with the time since it was
+   woken, and the Playground says *Waking the model (about 74 s)…*. Until waking on a request arrives later in
+   1.5.0, a request to the asleep model answers 503 `model_asleep`, or goes to the route's cloud tier when the key
+   may use one.
+5. **Stop** on an asleep deployment stops it for good: it leaves `/v1/models` until someone starts it.
+
+The setup advisor helps with both directions: *had no requests for 3 days: let it sleep when idle?* for a
+deployment that holds GPU memory nobody uses, and *woke 11 times in a day: raise its idle time* for one that
+sleeps between the requests it gets and takes over a minute to start ([Setup health](reference.md#setup-health-checks)).
 
 Choose the idle time by how long the model takes to start: a llama.cpp model is ready in seconds, a large vLLM
 model can take minutes, so give that one an idle time well above its start (the default 30 minutes is). While it

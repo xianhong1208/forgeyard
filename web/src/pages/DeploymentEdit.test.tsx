@@ -127,7 +127,8 @@ describe("changing a deployment (1.3.1)", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save and restart" })));
     const saved = fetch.mock.calls.filter(([u, i]) => u === "/api/deployments/3" && i?.method === "PATCH").map(([, i]) => JSON.parse(String(i?.body)))
       .find((b) => !b.dry_run);
-    expect(saved).toEqual({ params: { context: 16384, concurrency: 4, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null }, replicas: 1, machine_id: null });
+    expect(saved).toEqual({ params: { context: 16384, concurrency: 4, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null,
+      sleep_when_idle: null, idle_minutes: null }, replicas: 1, machine_id: null });
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
@@ -205,7 +206,7 @@ describe("changing a deployment (1.3.1)", () => {
     expect(screen.getByText(text, { selector: ".cell-stuck" })).toBeTruthy();
   });
 
-  it("FY-WEB-570: an asleep deployment (1.5.0) says so, offers Wake (a start) and Stop, and keeps its sleep settings on edit", async () => {
+  it("FY-WEB-570: an asleep deployment (1.5.0) says so, offers Wake now (a start) and Stop, and keeps its sleep settings on edit", async () => {
     const stopped = rep({ state: "stopped", started_at: null, container: null, reason: "cancelled: the replica was stopped" });
     const sleep = { on: true, idle_minutes: 30, asleep: true, last_request_at: null, since: "2026-11-10T10:00:00Z", sleeps_at: null, held_by: null };
     const d = dep([stopped], { params: { context: 8192, concurrency: 4, gpus: 1, share: "exclusive", sleep_when_idle: true, idle_minutes: 30 },
@@ -220,14 +221,14 @@ describe("changing a deployment (1.3.1)", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     mount("/serving/3");
     expect(await screen.findByText(/Asleep: nobody used it for 30 min/)).toBeTruthy();
-    expect(screen.getByText("asleep", { selector: ".chip" })).toBeTruthy();
+    expect(screen.getByText("Asleep", { selector: ".chip" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Wake" }));
+    fireEvent.click(screen.getByRole("button", { name: "Wake now" }));
     await waitFor(() => expect(posts).toEqual(["/api/deployments/3/start"]));
     expect(await screen.findByText("Waking chat.")).toBeTruthy();
-    // The edit form sends only the recipe's and the common parameters: the sleep settings stay as they are.
-    expect("sleep_when_idle" in (editBody(editForm(d, catalog.recipes[0]), catalog.recipes[0]).params as Record<string, unknown>)).toBe(false);
+    // The edit form sends the sleep settings as they are (1.5.0 PR 4: they are on the form).
+    expect(editBody(editForm(d, catalog.recipes[0]), catalog.recipes[0]).params).toMatchObject({ sleep_when_idle: true, idle_minutes: 30 });
   });
 
   it("FY-WEB-202: the edit form's start and its PATCH body", () => {
@@ -235,9 +236,10 @@ describe("changing a deployment (1.3.1)", () => {
     d.workload.spec.machine_id = 5;
     const f = editForm(d, catalog.recipes[0]);
     expect(f).toEqual({ device: "gpu", gpus: "1", share: "vram", replicas: "2", machine: "5", vram: "20Gi", extraArgs: "--seed\n1",
-      firstAnswer: "", params: { context: "4096", concurrency: "2" } });
+      firstAnswer: "", sleepOn: false, idleMinutes: "", params: { context: "4096", concurrency: "2" } });
     expect(editBody({ ...f, vram: " ", extraArgs: "", machine: "" }, catalog.recipes[0])).toEqual({
-      params: { context: 4096, concurrency: 2, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null },
+      params: { context: 4096, concurrency: 2, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null,
+        sleep_when_idle: null, idle_minutes: null },
       replicas: 2, machine_id: null });
     expect(editBody({ ...f, device: "cpu" }, catalog.recipes[0]).params).toMatchObject({ gpus: 0, vram: "20Gi", extra_args: ["--seed", "1"] });
   });

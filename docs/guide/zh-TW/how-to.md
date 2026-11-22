@@ -684,10 +684,13 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 偶爾才用的模型（晚上才試一下的、每週跑一次工作的大模型），可以在沒人呼叫時把 GPU 記憶體還回來（[閒置時休眠](concepts.md#sleep-when-idle)）。除非你開啟它，否則它是關閉的，每個部署分開設定。
 
-1. 修改部署的參數來開啟它：對 `PATCH /api/deployments/{id}` 送 `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}`（管理員和操作員；不送 `idle_minutes` 就是 30 分鐘）。部署時也接受這兩個參數。不會重新啟動任何東西。部署和修改表單會在 1.5.0 稍後加入這個設定。
-2. 在閒置時間內沒有請求，它的副本就會停止。它的頁面會顯示 **asleep** 並說明原因，事件裡會有 *Asleep: no requests for 30 min; frees …*。模型仍然列在 `/v1/models` 裡；機器保留模型檔案和引擎映像檔。
-3. 在它的頁面按 **Wake** 喚醒它（`POST /api/deployments/{id}/start`）。在 1.5.0 稍後加入收到請求時自動喚醒之前，送給休眠中模型的請求會回應 503 `model_asleep`，或在金鑰可以使用雲端分層時轉到路由的雲端分層。
-4. 對休眠中的部署按 **Stop** 會真正停止它：在有人啟動它之前，它不會出現在 `/v1/models`。
+1. 在表單裡開啟它：**Serving → Deploy a model**，或部署頁面上的 **Edit**。在 *When not in use* 底下勾選 **Sleep when idle**，保留或修改 **Idle minutes**（預設 30，1 到 1,440）。旁邊會寫上次啟動花了多久（在部署表單上是同一個模型和引擎的另一個部署上次啟動的時間），休眠後的第一個請求大約就要等這麼久。只改這個設定不會重新啟動任何東西。用腳本：對 `PATCH /api/deployments/{id}` 送 `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}`（管理員和操作員；不送 `idle_minutes` 就是 30 分鐘）；部署時也接受這兩個參數。
+2. 部署頁面上有 *When not in use* 卡片：設定、它現在的狀況（*sleeps in 18 min unless a request comes*，或讓它保持清醒的原因：有請求正在處理、有副本正在啟動……）、最後一個請求、上次啟動的時間，以及過去 24 小時被喚醒了幾次。
+3. 在閒置時間內沒有請求，它的副本就會停止。**Serving** 會顯示 **Asleep**（月亮圖示），寫著 *holds nothing* 和它會在哪台機器上醒來；它的頁面會寫從什麼時候開始休眠，事件裡會有 *Asleep: no requests for 30 min; frees …*。**Machines** 會在它會執行的那台機器底下列出它（*qwen3-4b asleep here (14.4 GiB on GPU #4 when awake)*）：這段期間那些記憶體可以給別人用。模型仍然列在 `/v1/models` 裡；機器保留模型檔案和引擎映像檔。
+4. 在它的頁面或 **Playground** 按 **Wake now** 喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在 Playground 的選單裡。在就緒之前它會顯示 **Waking** 和被喚醒後經過的時間，Playground 會顯示 *Waking the model (about 74 s)…*。在 1.5.0 稍後加入收到請求時自動喚醒之前，送給休眠中模型的請求會回應 503 `model_asleep`，或在金鑰可以使用雲端分層時轉到路由的雲端分層。
+5. 對休眠中的部署按 **Stop** 會真正停止它：在有人啟動它之前，它不會出現在 `/v1/models`。
+
+設定顧問兩個方向都會提醒：佔著沒人用的 GPU 記憶體的部署會出現 *had no requests for 3 days: let it sleep when idle?*；在收到的請求之間一直休眠、而且啟動要超過一分鐘的部署會出現 *woke 11 times in a day: raise its idle time*（[Setup health](reference.md#setup-health)）。
 
 閒置時間要依模型啟動需要多久來選：llama.cpp 的模型幾秒就就緒，大的 vLLM 模型可能要好幾分鐘，所以要給它一個遠比啟動時間長的閒置時間（預設的 30 分鐘就是）。休眠時它的記憶體可以給別人用：在共用的卡上可能被其他程式用掉，這時模型會在其他有空間的機器上啟動，或等待。
 

@@ -447,11 +447,24 @@ export type Deployment = {
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
   // 1.5.0 (#37): sleep when idle, the last request the server saw, and when it would go to sleep.
   sleep?: DeploymentSleep;
+  // 1.5.0 (#37): how long its latest start took (source "server": measured by the server for an older agent).
+  last_start?: StartTime | null;
+};
+
+export type StartTime = {
+  seconds: number;
+  phases: Partial<Record<"model" | "waiting" | "image" | "engine", number>>;
+  source: "agent" | "server";
+  at: string;
+  replica: number | null;
 };
 
 export type DeploymentSleep = {
   on: boolean; idle_minutes: number; asleep: boolean; last_request_at: string | null; since: string;
   sleeps_at: string | null; held_by: string | null;
+  // 1.5.0 (#37, the console): since when it is asleep; woken and no replica ready yet (since woken_at); wakes in
+  // the last day.
+  asleep_since?: string | null; waking?: boolean; woken_at?: string | null; wakes?: number;
 };
 
 export type RestartMode = "none" | "on_start" | "on_wake" | "rolling" | "all";

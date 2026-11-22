@@ -27,7 +27,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   them; admins can also upload an image file to a machine, or copy an image from another machine.
   An agent older than the server says so, and its machine's page shows the exact command that updates it.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
-  shows the memory one copy needs and where it fits, and lets small models share a GPU.
+  shows the memory one copy needs and where it fits, and lets small models share a GPU. A model used now
+  and then can sleep when idle and give its memory back (1.5.0): Serving shows it asleep, and Wake now starts it.
 - **A page per model and per engine.** A catalog model's page shows which machines have it cached and
   where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
   machines already have its image or program.

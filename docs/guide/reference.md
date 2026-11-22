@@ -734,7 +734,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 502 | `provider_unreachable` | The provider could not be reached | Retry later |
 | 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
 | 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
-| 503 | `model_asleep` | 1.5.0: the model's deployment is asleep (*Sleep when idle*: nobody used it for its idle time). It stays in `/v1/models`. Like any tier without a ready replica, the request spills to a cloud tier the key may use | Wake it with **Start** on its page ([Sleep when idle](#sleep-when-idle)) |
+| 503 | `model_asleep` | 1.5.0: the model's deployment is asleep (*Sleep when idle*: nobody used it for its idle time). It stays in `/v1/models`. Like any tier without a ready replica, the request spills to a cloud tier the key may use | Wake it with **Wake now** on its page or in the Playground ([Sleep when idle](#sleep-when-idle)) |
 | 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it. Carries `Retry-After: 1` | Retry after `Retry-After` seconds |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
@@ -1040,6 +1040,9 @@ deployment a `sleep` object:
 | `since` | From when its idle time counts: the last request, its last start or change, a replica becoming ready, or the server's start, whichever is latest |
 | `sleeps_at` | When it goes to sleep if nothing uses it (only while it runs with sleep on), checked every 30 s |
 | `held_by` | Why it does not sleep right now although it may be idle long enough: *a request is in flight*, *a replica is starting*, *an edit is restarting its replicas*, *a video is waiting or being made*, *a finished video is kept until …*; `null` otherwise |
+| `asleep_since` | Since when it is asleep (its *Asleep* event), or `null` |
+| `waking`, `woken_at` | It was woken (Start, *Wake now*) and no replica is ready yet, and since when; `false` and `null` otherwise |
+| `wakes` | How many times it was woken in the last 24 hours (its events) |
 
 `POST /api/deployments/{id}/start` on an asleep deployment wakes it (event *Woken by …*, audited as
 `workload.started` with `woken: true` and `deployment.started`); `POST …/stop` makes it stopped (event *Stopped by
@@ -1397,6 +1400,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
+| `deployment-idle-awake` | note | 1.5.0: a running deployment with *Sleep when idle* off had no request for 3 days (Usage's last day, what the server saw since it started, or since it was deployed, started or changed) and holds GPU memory: let it sleep when idle? |
+| `deployment-wakes-often` | note | 1.5.0: a deployment with *Sleep when idle* on was woken more than 10 times in the last 24 hours and its last start took over a minute: raise its idle time |
 | `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
 | `gated-model-no-token` | note | A deployment of a gated Hugging Face model has no token of its own, and the server has none. An error once its download was refused |
 | `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
