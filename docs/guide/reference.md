@@ -1277,9 +1277,9 @@ image}`. The answer is `{ok, bytes, images, source: {id, name}, saved}`, each im
 | 409 | `source_offline`, `source_cannot_save` | The source is not connected, or has no container engine or is older than 1.4.1 |
 | 409 | `source_busy` | The source is already sending an image |
 | 409 | `machine_offline`, `agent_cannot_load`, `upload_busy` | The target, as for an upload (429: two in all) |
-| 409 | `image_save_failed` | The source could not save it (its words): not one of its images, or its engine failed |
+| 409 | `image_save_failed` | The source could not save it (its words) before sending a byte: not one of its images, or its engine failed |
 | 504 | `source_no_send` | The source did not start sending within 2 minutes |
-| 400 | `upload_broken` | The source's save broke off; nothing was loaded |
+| 400 | `upload_broken` | The source stopped part way, or the server stopped a source that sent nothing for 2 minutes; nothing was loaded. When the source's own answer says why (`docker save failed: …`), the message has its words (the server waits up to 10 s for them, #215) |
 | 413 | `upload_too_large` | The image is larger than `IMAGE_UPLOAD_MAX_GB` |
 | 422 | `image_load_failed` | The target's engine could not load it (the agent's words) |
 

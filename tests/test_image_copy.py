@@ -1,8 +1,9 @@
 """An admin copies an engine image from one machine to another, through the server (1.4.1, issue #104, Q4;
-FY-ICP-001…008): the listing of a machine's images and who may see it, the refusals before a byte moves, the
+FY-ICP-001…011): the listing of a machine's images and who may see it, the refusals before a byte moves, the
 source agent saving only one of its own images by its id and its own tags, the send endpoint (one POST by the
 chosen machine), a save that breaks off never loading anything, the size limit, the audit, and the whole loop
-with real agents over real HTTP and WebSocket."""
+with real agents over real HTTP and WebSocket; a source that stops part way is reported the same whichever of its
+two signs the server hears first (#215)."""
 
 import asyncio
 import http.client
@@ -465,8 +466,9 @@ def test_fy_icp_007_a_real_agent_copies_an_image_to_another_real_agent(live, img
 
 def test_fy_icp_008_a_save_that_breaks_off_or_is_too_large_loads_nothing(live, img, monkeypatch):
     """FY-ICP-008 (real agents): the source's save fails part way: its POST never ends cleanly, the target's
-    answer breaks off, so its engine is stopped before the archive ends and loads nothing; the console says so
-    and the audit log records it. An image larger than IMAGE_UPLOAD_MAX_GB is stopped there, nothing loaded."""
+    answer breaks off, so its engine is stopped before the archive ends and loads nothing; the console says it broke
+    off and what the source says (#215: whichever the server heard first, FY-ICP-009) and the audit log records it.
+    An image larger than IMAGE_UPLOAD_MAX_GB is stopped there, nothing loaded."""
     w = live
     a, b, ready = both(w)
     p = img.platforms["amd64"]
@@ -475,8 +477,8 @@ def test_fy_icp_008_a_save_that_breaks_off_or_is_too_large_loads_nothing(live, i
         wait_until(ready, "both agents connected", 15)
         status, body = w.call("POST", f"/api/machines/{w.tgt['node_id']}/images/copy",
                               {"source_id": w.src["node_id"], "image": p.config_digest})
-        assert status in (400, 409, 422), body
-        assert "broke off" in body["detail"]["message"], body
+        assert status == 400 and body["detail"]["code"] == "upload_broken", body
+        assert body["detail"]["message"] == BROKE_OFF, body
         assert w.tfake.images() == []
         w.sfake._update(lambda d: d.update(save_fail_after=None))
         monkeypatch.setattr(upload, "UNIT", 1000)  # IMAGE_UPLOAD_MAX_GB (64) * 1000 bytes
@@ -500,3 +502,149 @@ def test_fy_icp_008_a_save_that_breaks_off_or_is_too_large_loads_nothing(live, i
                    "the copy forgotten, and the source's save stopped", 8)
     recs = audits()
     assert [r["ok"] for r in recs] == [False, False, False] and all(r["from_machine"] == "src" for r in recs)
+    assert recs[0]["reason"] == BROKE_OFF[:200]
+
+
+# The fake engine writes two 64 KiB pieces of the archive, then fails (save_fails_after(120_000)).
+BROKE_OFF = ("The copy broke off after 131072 bytes: src stopped sending, so nothing was loaded on tgt. src says: docker "
+             "save failed: Error response from daemon: unexpected EOF. Fix that there, then copy the image again.")
+
+
+@pytest.mark.parametrize("first", ["the source's answer", "the broken POST"])
+def test_fy_icp_009_a_source_that_stops_part_way_is_reported_the_same_whichever_sign_comes_first(live, img,
+                                                                                                 monkeypatch, first):
+    """FY-ICP-009 (#215, real agents): a source whose save fails part way gives the server two signs: its POST
+    breaks off, and its agent answers image_saved (ok false, the bytes it sent, "docker save failed: …") on its
+    WebSocket. Either can come first, and the answer can come before the server has read a byte of the POST. Each
+    order is held here with events, not sleeps: the answer reaches the server while the POST is held before it is
+    read; or the agent's answer is held until the copy has seen the POST break off and waits for it. Both end the
+    same: 400 upload_broken, the copy broke off after the bytes the source sent, nothing was loaded on the target,
+    what the source says; the audit records those words."""
+    from forgeyard.machines import hub as hub_module
+
+    w = live
+    a, b, ready = both(w)
+    p = img.platforms["amd64"]
+    w.sfake.save_fails_after(120_000)
+    seen = {}
+    if first == "the source's answer":
+        answered = threading.Event()
+        answer, node_of = hub_module.Connection.answer, imagecopy._node_of
+
+        def heard(self, request_id, message):
+            if message.get("type") == "image_saved":
+                seen["read then"] = [s.received for s in imagecopy._sends.values()]
+            done = answer(self, request_id, message)
+            if message.get("type") == "image_saved":
+                answered.set()
+            return done
+
+        def held(credential):  # the source's POST, before the server reads it
+            assert answered.wait(30), "the source never answered"
+            return node_of(credential)
+
+        monkeypatch.setattr(hub_module.Connection, "answer", heard)
+        monkeypatch.setattr(imagecopy, "_node_of", held)
+    else:
+        waiting = threading.Event()
+        said, send_answer = imagecopy._said, a.agent._send_answer
+
+        async def waits(saved):  # the copy has seen the POST break off and waits for the source's word
+            seen["broke then"] = [(s.broke, s.received > 0) for s in imagecopy._sends.values()]
+            seen["answered then"] = saved.done()
+            waiting.set()
+            return await said(saved)
+
+        async def late(ws, kind, data, answer):
+            if kind == "image_saved":
+                assert await asyncio.to_thread(waiting.wait, 30), "the copy never waited for the source"
+            await send_answer(ws, kind, data, answer)
+
+        monkeypatch.setattr(imagecopy, "_said", waits)
+        a.agent._send_answer = late
+    with a, b:
+        wait_until(ready, "both agents connected", 15)
+        status, body = w.call("POST", f"/api/machines/{w.tgt['node_id']}/images/copy",
+                              {"source_id": w.src["node_id"], "image": p.config_digest})
+        assert status == 400 and body["detail"] == {"code": "upload_broken", "message": BROKE_OFF}, body
+        assert w.tfake.images() == []
+        wait_until(lambda: imagecopy._sends == {} and upload._uploads == {} and not a.agent._saving,
+                   "the copy forgotten, and the source's save stopped", 15)
+    if first == "the source's answer":
+        assert seen["read then"] == [0]  # the server had not read a byte of the POST when the answer came
+        assert w.tfake.loads() == []     # and the target was never asked to load
+    else:
+        assert seen["broke then"] == [(True, True)] and seen["answered then"] is False
+    [rec] = audits()
+    assert rec["ok"] is False and rec["reason"] == BROKE_OFF[:200] and rec["from_machine"] == "src"
+
+
+def test_fy_icp_010_a_source_that_sent_nothing_refused_and_one_that_sent_bytes_broke_off(owner):
+    """FY-ICP-010 (#215, agents played here): a source that answers ok false having sent no bytes refused the save
+    (409 image_save_failed, its words: FY-ICP-002); one that says it sent bytes broke off, even when the server never
+    saw a byte of its POST (400 upload_broken, the bytes it says it sent, its words without a doubled full stop)."""
+    src, tgt = joined(owner, "src"), joined(owner, "tgt")
+    image = "sha256:" + "c" * 64
+
+    def copy():
+        return InThread(lambda: owner.post(f"/api/machines/{tgt['node_id']}/images/copy",
+                                           json={"source_id": src["node_id"], "image": image}))
+
+    with connect(owner, src["credential"]) as ws, connect(owner, tgt["credential"]) as tws:
+        online(ws)
+        online(tws)
+        call = copy()
+        ask = recv_type(ws, "image_save")
+        ws.send_json({"v": 1, "type": "image_saved", "request_id": ask["request_id"], "ok": False, "bytes": 0,
+                      "reason": "docker save failed: reference does not exist"})
+        r = call.result()
+        assert r.status_code == 409 and r.json()["detail"] == {"code": "image_save_failed", "message":
+                                                               "src: docker save failed: reference does not exist"}
+        call = copy()
+        ask = recv_type(ws, "image_save")
+        ws.send_json({"v": 1, "type": "image_saved", "request_id": ask["request_id"], "ok": False, "bytes": 65536,
+                      "reason": "docker save failed: unexpected EOF."})
+        r = call.result()
+        assert r.status_code == 400 and r.json()["detail"] == {"code": "upload_broken", "message": (
+            "The copy broke off after 65536 bytes: src stopped sending, so nothing was loaded on tgt. src says: "
+            "docker save failed: unexpected EOF. Fix that there, then copy the image again.")}
+        assert imagecopy._sends == {} and upload._uploads == {}
+    assert [(a["ok"], a["reason"][:20]) for a in audits()] == [(False, "src: docker save fai"),
+                                                               (False, "The copy broke off a")]
+
+
+def test_fy_icp_011_a_post_that_breaks_off_unread_waits_for_the_sources_word(live, img, monkeypatch):
+    """FY-ICP-011 (#215, real agents): the source's save fails before its first byte, so its POST breaks off before
+    the server reads anything. When its agent says why (bytes 0), the copy is a refusal with its words (FY-ICP-002);
+    when it says nothing within SAID_GRACE, the copy broke off and the source did not say why."""
+    w = live
+    a, b, ready = both(w)
+    p = img.platforms["amd64"]
+    w.sfake.save_fails_after(0)
+    with a, b:
+        wait_until(ready, "both agents connected", 15)
+        status, body = w.call("POST", f"/api/machines/{w.tgt['node_id']}/images/copy",
+                              {"source_id": w.src["node_id"], "image": p.config_digest})
+        assert status == 409 and body["detail"] == {"code": "image_save_failed", "message":
+                                                    "src: docker save failed: Error response from daemon: unexpected "
+                                                    "EOF"}, body
+        wait_until(lambda: imagecopy._sends == {} and not a.agent._saving, "the copy forgotten", 15)
+        send_answer = a.agent._send_answer
+        dropped = threading.Event()
+
+        async def mute(ws, kind, data, answer):
+            if kind == "image_saved":
+                dropped.set()
+                return
+            await send_answer(ws, kind, data, answer)
+
+        a.agent._send_answer = mute
+        monkeypatch.setattr(imagecopy, "SAID_GRACE", 0.5)  # a time-out is what this part is about
+        status, body = w.call("POST", f"/api/machines/{w.tgt['node_id']}/images/copy",
+                              {"source_id": w.src["node_id"], "image": p.config_digest})
+        assert status == 400 and body["detail"]["code"] == "upload_broken", body
+        assert body["detail"]["message"].startswith(
+            "The copy broke off after 0 bytes: src stopped sending, so nothing was loaded on tgt. src did not say why "
+            "(it broke off after 0 bytes ("), body
+        assert dropped.is_set() and w.tfake.loads() == [] and w.tfake.images() == []
+    assert [r["ok"] for r in audits()] == [False, False]

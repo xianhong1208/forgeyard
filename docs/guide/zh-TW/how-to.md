@@ -1219,7 +1219,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 注意事項：
 
 - **信任**：只用 tag 指定的映像檔沒有記錄的 id，所以目標機器會執行來源機器在那個 tag 底下的任何東西。只從你信任的機器複製。有釘選的映像檔在執行前仍會以記錄的 id 檢查。
-- `docker save` 的資料流事先不知道大小，也不能續傳：中斷的複製會從頭重來，目標機器不會從中斷的資料流載入任何東西。
+- `docker save` 的資料流事先不知道大小，也不能續傳：中斷的複製會從頭重來，目標機器不會從中斷的資料流載入任何東西。對話框會說明中斷，以及來源機器的說明，例如 *The copy broke off after 131072 bytes: gpu-host stopped sending, so nothing was loaded on gpu-01. gpu-host says: docker save failed: …*：先在那台機器上解決，再複製一次。
 - 限制和上傳相同：每台目標機器同時只能有一個複製或上傳，全部最多兩個，最大 `IMAGE_UPLOAD_MAX_GB`；每台來源機器同時只能送一個。
 - 來源機器的 agent 必須是 1.4.1 以後、有 container 引擎；目標機器是 1.4 以後、有 container 引擎。兩台都必須在線上。每次複製和失敗的原因都會記入稽核紀錄（`node.image_copied`，包含兩台機器和載入的 id）。
 

@@ -47,6 +47,7 @@ log = logging.getLogger("forgeyard.upload")
 LIST_TIMEOUT = 30.0       # the source must list its images within this long
 START_TIMEOUT = 120.0     # and start sending a save within this long (a large image takes a while to start)
 STALL = 120.0             # a source that sends nothing for this long has broken off
+SAID_GRACE = 10.0         # how long the copy waits for the source to say how its save ended (or why it stopped)
 QUEUE_CHUNKS = 64
 _TICKET = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 _END = object()
@@ -68,6 +69,7 @@ class Send:
     claimed: bool = False
     aborted: bool = False          # the target's side is gone: the source's POST is ended
     ended: Optional[str] = None    # "finished", else why the source's side ended
+    broke: bool = False            # the source's POST broke off (a chunked body that never ended)
     received: int = 0
 
 
@@ -116,6 +118,32 @@ async def list_answer(node: Node) -> dict:
     return answer
 
 
+def _broken(source: Node, target: Node, send: Send, said) -> CopyFailed:
+    """The source stopped sending part way (#215). Whether the server noticed its POST break off before the source
+    said why on its WebSocket, or after, or before it read a byte of it, the admin is told the same: the copy broke
+    off, nothing was loaded, and what the source says (`docker save failed: …`) when it said it in time."""
+    said = said if isinstance(said, dict) else {}
+    sent = said.get("bytes") if isinstance(said.get("bytes"), int) and said.get("bytes") > 0 else send.received
+    reason = str(said.get("reason") or "").strip().rstrip(".") if said.get("ok") is False else ""
+    head = f"The copy broke off after {sent} bytes: {source.name} stopped sending, so nothing was loaded on {target.name}."
+    if reason:
+        why = f" {source.name} says: {reason}. Fix that there, then copy the image again."
+    else:
+        why = (f" {source.name} did not say why ({send.ended or 'its side ended'}). Copy the image again; if it breaks "
+               f"off again, look at {source.name}'s agent log.")
+    log.warning("Copy of an image from %s to %s: %s", source.name, target.name, head + why)
+    return CopyFailed(400, "upload_broken", head + why)
+
+
+async def _said(saved: asyncio.Future) -> Optional[dict]:
+    """What the source answered about its save, waiting up to SAID_GRACE for it; None when it did not answer."""
+    try:
+        said = await asyncio.wait_for(asyncio.shield(saved), SAID_GRACE)
+    except Exception:
+        return None
+    return said if isinstance(said, dict) else None
+
+
 def _abort(send: Send) -> None:
     if send.aborted:
         return
@@ -152,6 +180,14 @@ async def copy(source: Node, target: Node, image: str, limit: int) -> dict:
             first.cancel()
         if not send.received:
             said = saved.result() if saved.done() and not saved.cancelled() and saved.exception() is None else None
+            if said is None and send.broke:  # its POST broke off before this server read a byte: what does it say?
+                said = await _said(saved)
+                if said is None:
+                    raise _broken(source, target, send, None)
+            if isinstance(said, dict) and said.get("ok") is False and (said.get("bytes") or 0) > 0:
+                # It sent part of the image and stopped, and said so before this server read a byte of its POST
+                # (or after its POST broke off unread): the same as when the bytes did arrive (#215).
+                raise _broken(source, target, send, said)
             if said is not None:
                 raise CopyFailed(409, "image_save_failed", f"{source.name}: {said.get('reason') or 'it did not send'}")
             if saved.done():
@@ -172,9 +208,14 @@ async def copy(source: Node, target: Node, image: str, limit: int) -> dict:
                 yield item
 
         name = f"{wanted[:19]} from {source.name}"
-        answer = await upload.pipe(target, chunks(), None, name, limit=limit)
         try:
-            said = await asyncio.wait_for(asyncio.shield(saved), 10)
+            answer = await upload.pipe(target, chunks(), None, name, limit=limit)
+        except upload.UploadFailed:
+            if not send.broke:
+                raise
+            raise _broken(source, target, send, await _said(saved)) from None  # and why the source stopped (#215)
+        try:
+            said = await asyncio.wait_for(asyncio.shield(saved), SAID_GRACE)
         except Exception:
             said = {}
     finally:
@@ -261,6 +302,7 @@ async def image_send(ticket: str, request: Request):
                 send.ended = "finished"
     except Exception as e:  # the source went away, or its save broke off (a chunked body that never ended)
         send.ended = f"it broke off after {send.received} bytes ({type(e).__name__})"
+        send.broke = True
     if send.ended != "finished":
         send.ended = send.ended or f"it ended after {send.received} bytes"
         if send.aborted or not await _put(send, ConnectionError(send.ended)):

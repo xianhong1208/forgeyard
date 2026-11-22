@@ -1872,7 +1872,9 @@ What to know:
   machine has under that tag. Copy only from a machine you trust. A pinned image is still checked by its
   recorded ids before it runs.
 - A `docker save` stream has no size ahead and cannot resume: a copy that breaks off starts again from
-  the beginning, and the target loads nothing from a broken one.
+  the beginning, and the target loads nothing from a broken one. The dialog says so and what the other
+  machine says, for example *The copy broke off after 131072 bytes: gpu-host stopped sending, so nothing was
+  loaded on gpu-01. gpu-host says: docker save failed: …*: fix that on that machine, then copy again.
 - The limits are the upload's: one copy or upload at a time per target machine, two in all, at most
   `IMAGE_UPLOAD_MAX_GB`; and one copy at a time from each machine.
 - The machine copied from needs an agent of 1.4.1 or later with a container engine; the target, 1.4 or
