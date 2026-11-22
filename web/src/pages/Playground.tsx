@@ -54,7 +54,9 @@ export function PlaygroundPage() {
   const loaded = !!data && (!!deps.data || !!deps.error);
   // Cloud-only models need the cloud setting the signed-in person may give a key.
   const routes = useMemo(() => (data?.routes ?? []).filter((r) => r.usable !== false), [data]);
-  const groups = useMemo(() => (loaded ? pickerGroups(routes, deps.data?.deployments ?? []) : []), [loaded, routes, deps.data]);
+  // 1.5.0: the deployments seen asleep or waking here stay offered while they run (see pickerGroups).
+  const [woken, setWoken] = useState<ReadonlySet<number>>(() => new Set());
+  const groups = useMemo(() => (loaded ? pickerGroups(routes, deps.data?.deployments ?? [], woken) : []), [loaded, routes, deps.data, woken]);
   const offered = groups.flatMap(([, l]) => l);
   // The model in the address (?model=), else the first one offered: a chat model when there is one.
   const route = offered.find((r) => r.served_name === search.get("model")) ?? offered[0];
@@ -62,6 +64,7 @@ export function PlaygroundPage() {
   // 1.5.0 (#37): the chosen model's deployment while it is asleep or waking; followed until it is ready.
   const dep = route?.deployment_id != null ? deps.data?.deployments.find((d) => d.id === route.deployment_id) : undefined;
   const sleeping = dep ? sleepState(dep) : null;
+  if (dep && sleeping && !woken.has(dep.id)) setWoken(new Set(woken).add(dep.id));   // during render, guarded (React's pattern)
   const { reload: reloadDeps } = deps;
   const follow = useCallback(() => { if (sleeping) { reloadDeps(); reloadRoutes(); } }, [sleeping, reloadDeps, reloadRoutes]);
   usePoll(follow, SLEEP_POLL_MS);

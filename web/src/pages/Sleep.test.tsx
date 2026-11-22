@@ -155,6 +155,13 @@ describe("sleep when idle: the words (lib/sleep)", () => {
     const groups = pickerGroups([route(10), route(11), route(12), route(13), route(14, [{}])],
       [asleep({ id: 10 }), waking({ id: 11 }), stopped, starting, dep([rep()], { id: 14 })]);
     expect(groups.flatMap(([, l]) => l.map((r) => r.served_name))).toEqual(["m10", "m11", "m14"]);
+    // one this page saw asleep or waking stays offered while it runs, before its replica is listed as ready; not
+    // once a person stopped it
+    const ready = dep([rep()], { id: 15 });
+    const pick = (ds: Deployment[]) => pickerGroups([route(15)], ds, new Set([15])).flatMap(([, l]) => l.map((r) => r.served_name));
+    expect(pick([ready])).toEqual(["m15"]);
+    expect(pickerGroups([route(15)], [ready]).length).toBe(0);
+    expect(pick([dep([asleepRep()], { id: 15, workload: workload([asleepRep()], { desired_state: "stopped", status: "stopped", ready: 0 }) })])).toEqual([]);
   });
 });
 
@@ -362,10 +369,11 @@ describe("sleep when idle: the Playground and Machines", () => {
     let release: (() => void) | null = null;
     const answer = "data: " + JSON.stringify({ choices: [{ delta: { content: "Hello there" } }] }) + "\n\ndata: [DONE]\n\n";
     const asked: string[] = [];
+    let looks = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
       if (url === "/api/auth/state") return json({ needs_setup: false, registration: "off", user: OWNER });
-      if (url === "/api/deployments") return json({ deployments: [d], server_time: "", can_manage: true });
+      if (url === "/api/deployments") { looks += 1; return json({ deployments: [d], server_time: "", can_manage: true }); }
       if (url === "/api/routes") return json({ routes, cloud: "off", is_admin: true });
       if (url === "/api/playground/chat/completions") {
         asked.push(String(init?.body));
@@ -394,7 +402,12 @@ describe("sleep when idle: the Playground and Machines", () => {
     expect(waitingText.closest(".play-wake")!.textContent).toMatch(/Waking the model \(about 80 s\)… \d+:\d\d\. A request sent to it waits until a replica is ready \(up to 300 s\); 1 waiting now\./);
     act(() => release!());
     expect(await screen.findByText("Hello there")).toBeTruthy();
+    // the deployment is ready (no longer waking) while the routes the page holds still list no ready replica: the
+    // model stays on the page with its answer
+    const before = looks;
+    await waitFor(() => expect(looks).toBeGreaterThan(before), { timeout: 4000 });
     await waitFor(() => expect(screen.queryByText(/Waking the model/)).toBeNull(), { timeout: 4000 });
+    expect(screen.getByText("Hello there")).toBeTruthy();
   });
 
   it("FY-WEB-608: someone who cannot start models gets no Wake now (a request still wakes it); Wake now wakes it for operators; the page follows a wake it did not start", async () => {

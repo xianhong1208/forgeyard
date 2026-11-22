@@ -35,13 +35,20 @@ export function routeSleep(r: RouteInfo, deployments: Deployment[]): SleepState 
   return d ? sleepState(d) : null;
 }
 
+function stillWaking(r: RouteInfo, deployments: Deployment[], woken: ReadonlySet<number>): boolean {
+  if (r.deployment_id == null || !woken.has(r.deployment_id)) return false;
+  return deployments.find((x) => x.id === r.deployment_id)?.workload?.desired_state === "running";
+}
+
 // What the picker offers: the models the person may use that are ready now, or asleep or waking (1.5.0), one
 // group per kind in Serving's order; kinds with none are left out. A protocol the console has no panel for is
-// not offered.
-export function pickerGroups(routes: RouteInfo[], deployments: Deployment[]): [ModelKind, RouteInfo[]][] {
+// not offered. `woken`: deployments this page saw asleep or waking; they stay offered while they run, so the
+// moment between "no longer waking" and "its replica is listed as ready" (two lists, asked one after the other)
+// never takes the model, and the answer it is writing, off the page.
+export function pickerGroups(routes: RouteInfo[], deployments: Deployment[], woken: ReadonlySet<number> = new Set()): [ModelKind, RouteInfo[]][] {
   const out = new Map<ModelKind, RouteInfo[]>(MODEL_KIND_ORDER.map((k) => [k, []]));
   for (const r of routes) {
-    if (r.usable === false || (!routeReady(r) && !routeSleep(r, deployments))) continue;
+    if (r.usable === false || (!routeReady(r) && !routeSleep(r, deployments) && !stillWaking(r, deployments, woken))) continue;
     const k = routeKind(r, deployments);
     if (k) out.get(k)?.push(r);
   }
