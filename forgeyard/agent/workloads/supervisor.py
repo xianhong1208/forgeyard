@@ -42,7 +42,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -53,13 +52,14 @@ from forgeyard.agent.workloads import health, plan, ports as portlib
 from forgeyard.agent.workloads.admin import Admin
 from forgeyard.agent.workloads.checks import HealthChecks
 from forgeyard.agent.workloads.fetching import Fetching
-from forgeyard.agent.workloads.guard import Guard
 from forgeyard.agent.workloads.keyguards import KeyGuards
 from forgeyard.agent.workloads.lifecycle import (LIVE, SERVICE_BACKOFF_CAP, TAIL_CHARS, TAIL_LINES, TASK_BACKOFF_CAP,
                                                  Lifecycle)
 from forgeyard.agent.workloads.process import find_leader
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.prefetch import Prefetcher
+from forgeyard.agent.workloads.runtime import Runtime
+from forgeyard.agent.workloads.state import Alias, Fetches, Guarding, Operations, Outbox, Secrets
 from forgeyard.machines.protocol import FEATURE_GUARD_TLS, FEATURE_PREFETCH, PROTOCOL_VERSION
 from forgeyard.workloads import images
 
@@ -81,7 +81,15 @@ def _where(ops: dict, probes: dict) -> str:
 
 
 class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
-    def __init__(self, state_dir: Path, runtimes: dict, *, port_range: tuple[int, int] = (30000, 32767),
+    # The state in memory (state.py), each field also under the name the agent and the tests use.
+    ops, probes, stopping = Alias("work"), Alias("work"), Alias("work")
+    changed, removed, tails = Alias("outbox"), Alias("outbox"), Alias("outbox")
+    full_due, full_ready, report_event = Alias("outbox"), Alias("outbox"), Alias("outbox")
+    tokens, keys, strip = Alias("secrets"), Alias("secrets"), Alias("secrets")
+    cancels, cancelled, relays, via_server = Alias("fetches"), Alias("fetches"), Alias("fetches"), Alias("fetches")
+    guards, guard_errors = Alias("guarding"), Alias("guarding", "errors")
+
+    def __init__(self, state_dir: Path, runtimes: dict[str, Runtime], *, port_range: tuple[int, int] = (30000, 32767),
                  log_max_bytes: int = 10 * 1024**2, stop_grace: float = 10.0, tick: float = 1.0,
                  clock: Callable[[], float] = time.time, port_probe=portlib.bindable, prober=health.probe,
                  bind_address: Optional[str] = None, models=None, gate_poll: float = 1.0):
@@ -99,39 +107,22 @@ class Supervisor(Lifecycle, Fetching, HealthChecks, KeyGuards, Admin):
         self.bind_fixed = bind_address is not None
         self.desired: Optional[dict[str, dict]] = None
         self.revision = -1
-        self.ops: dict[str, asyncio.Task] = {}
-        self.probes: dict[str, asyncio.Task] = {}
-        self.changed: set[str] = set()
-        self.removed: list[dict] = []
-        self.tails: dict[str, str] = {}
-        self.full_due = False
-        self.full_ready = False
-        self.report_event = asyncio.Event()
+        # Operations and probes in flight, and the replicas being stopped.
+        self.work = Operations()
+        # What the next status message says.
+        self.outbox = Outbox()
         self._wake = asyncio.Event()
         self._owned: dict[str, dict] = {}
         self._orphans_swept = False
         self.started = 0  # replicas started by this agent process (tests and logs)
-        # M3: the model cache (None: this agent serves no models), tokens for gated models (in
-        # memory only), cancel switches for downloads in flight, and the stops in flight.
+        # M3: the model cache (None: this agent serves no models).
         self.models = models
-        self.tokens: dict[str, str] = {}
-        # M4: each model replica's internal key, {replica id: (variable or None, key)}, from
-        # `desired`. In memory only: never in a record, a log line or a status message. The guards in
-        # front of those replicas ({replica id: one per port}) and why one could not listen.
-        self.keys: dict[str, tuple[Optional[str], str]] = {}
-        self.guards: dict[str, list[Guard]] = {}
-        self.guard_errors: dict[str, str] = {}
-        # 1.3: replicas of workloads exposed at /x/ (`replica_key.strip`): their guard removes the internal
-        # key before a request reaches the program, and their health checks never carry it.
-        self.strip: set[str] = set()
-        self.cancels: dict[str, threading.Event] = {}
-        # 1.4 ("relay"): {replica id: {"model"|"engine": {path, mode}}} from the desired list, and the replicas
-        # whose download is coming through the server right now (their progress says so).
-        self.relays: dict[str, dict] = {}
-        self.via_server: set[str] = set()
-        # Why a download or pull in flight was cancelled ({replica id: "cancelled: …"}), for its last report.
-        self.cancelled: dict[str, str] = {}
-        self.stopping: set[str] = set()
+        # M3, M4, 1.3: tokens for gated models, the replicas' internal keys, the replicas whose guard strips the
+        # key: in memory only. M4: the key guards in front of model replicas, and why one could not listen.
+        self.secrets = Secrets()
+        self.guarding = Guarding()
+        # Downloads and pulls in flight: their cancel switches, why one was cancelled, the relays (1.4).
+        self.fetches = Fetches()
         # What the server speaks (its `welcome` features): pull progress goes only to a server that
         # shows it, an older one gets the plain "pulling the image" it knows.
         self.server_features: set[str] = set()
