@@ -6,7 +6,8 @@ import { Link } from "react-router";
 
 import { when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { IDLE_DEFAULT, IDLE_MAX, IDLE_MIN, elapsed, idleProblem, sleepState, startHint, type AsleepHere } from "../lib/sleep";
+import { IDLE_DEFAULT, IDLE_MAX, IDLE_MIN, WAKE_WAIT_DEFAULT, WAKE_WAIT_MAX, WAKE_WAIT_MIN, elapsed, idleProblem, sleepState, startHint,
+  wakeWaitProblem, type AsleepHere } from "../lib/sleep";
 import type { Deployment, StartTime } from "../lib/types";
 
 export function SleepSetting({ prefix, on, minutes, onChange, last, other }: {
@@ -37,7 +38,7 @@ export function SleepSetting({ prefix, on, minutes, onChange, last, other }: {
       </div>
       <div id={`${prefix}-sleep-hint`} className="field-hint sleep-hint">
         <p>{on
-          ? `After ${minutes.trim() && !problem ? minutes.trim() : IDLE_DEFAULT} min without a request its replicas stop and free their memory; the model stays listed, and Wake now starts it again.`
+          ? `After ${minutes.trim() && !problem ? minutes.trim() : IDLE_DEFAULT} min without a request its replicas stop and free their memory; the model stays listed, and the next request (or Wake now) starts it again. That request waits up to the wake wait (Advanced); a key that may use a cloud tier is served there meanwhile.`
           : `Off: it keeps its memory while nobody uses it. On, its replicas stop after the idle time (${IDLE_MIN} to ${IDLE_MAX.toLocaleString("en")} minutes) and start again when needed.`}</p>
         <p>{startHint(last, other)}</p>
         {on && <p>While it sleeps, its memory may be used by others; if none is free when it wakes, it cannot start until there is room.</p>}
@@ -54,7 +55,7 @@ export function SleepBadge({ d, fallback, big }: { d: Deployment; fallback?: Rea
     return <span className={`${cls} chip-asleep`} title={d.sleep?.asleep_since ? `Asleep since ${when(d.sleep.asleep_since)}` : undefined}>
       <IconMoon size={big ? 15 : 13} aria-hidden="true" /> Asleep</span>;
   }
-  if (s === "waking") return <span className={`${cls} chip-waking`}><IconSunrise size={big ? 15 : 13} aria-hidden="true" /> Waking {elapsed(d.sleep?.woken_at)}</span>;
+  if (s === "waking") return <span className={`${cls} chip-waking`}><IconSunrise size={big ? 15 : 13} aria-hidden="true" /> Waking {elapsed(d.sleep?.waking?.since)}</span>;
   return <>{fallback ?? null}</>;
 }
 
@@ -77,5 +78,18 @@ export function AsleepHereLine({ list, compact }: { list: AsleepHere[]; compact?
         {compact ? "" : ". It holds nothing now, so others may use that memory meanwhile; if none is free when it wakes, it waits for room or starts on another machine."}
       </span>
     </p>
+  );
+}
+
+// Under Advanced on the deploy and edit forms (1.5.0 PR 3's parameter): how long a request waits for a wake.
+export function WakeWaitField({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  const problem = wakeWaitProblem(value);
+  return (
+    <div className="field"><label htmlFor={id}>Wake wait (seconds)</label>
+      <input id={id} inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} placeholder={String(WAKE_WAIT_DEFAULT)}
+        aria-invalid={problem ? true : undefined} />
+      {problem && <p className="field-error">{problem}</p>}
+      <p className="field-hint">Sleep when idle only: how long a request to it waits while it wakes ({WAKE_WAIT_MIN} to {WAKE_WAIT_MAX.toLocaleString("en")}).
+        Empty: {WAKE_WAIT_DEFAULT}. Then it gets 503 <code>model_waking</code> with Retry-After. Saving it restarts no replica.</p></div>
   );
 }

@@ -128,7 +128,7 @@ describe("changing a deployment (1.3.1)", () => {
     const saved = fetch.mock.calls.filter(([u, i]) => u === "/api/deployments/3" && i?.method === "PATCH").map(([, i]) => JSON.parse(String(i?.body)))
       .find((b) => !b.dry_run);
     expect(saved).toEqual({ params: { context: 16384, concurrency: 4, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null,
-      sleep_when_idle: null, idle_minutes: null }, replicas: 1, machine_id: null });
+      sleep_when_idle: null, idle_minutes: null, wake_wait: null }, replicas: 1, machine_id: null });
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/serving/3"));
   });
 
@@ -236,10 +236,10 @@ describe("changing a deployment (1.3.1)", () => {
     d.workload.spec.machine_id = 5;
     const f = editForm(d, catalog.recipes[0]);
     expect(f).toEqual({ device: "gpu", gpus: "1", share: "vram", replicas: "2", machine: "5", vram: "20Gi", extraArgs: "--seed\n1",
-      firstAnswer: "", sleepOn: false, idleMinutes: "", params: { context: "4096", concurrency: "2" } });
+      firstAnswer: "", sleepOn: false, idleMinutes: "", wakeWait: "", params: { context: "4096", concurrency: "2" } });
     expect(editBody({ ...f, vram: " ", extraArgs: "", machine: "" }, catalog.recipes[0])).toEqual({
       params: { context: 4096, concurrency: 2, gpus: 1, share: "vram", vram: null, extra_args: null, first_answer_timeout: null,
-        sleep_when_idle: null, idle_minutes: null },
+        sleep_when_idle: null, idle_minutes: null, wake_wait: null },
       replicas: 2, machine_id: null });
     expect(editBody({ ...f, device: "cpu" }, catalog.recipes[0]).params).toMatchObject({ gpus: 0, vram: "20Gi", extra_args: ["--seed", "1"] });
   });

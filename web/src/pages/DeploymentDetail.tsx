@@ -20,7 +20,7 @@ import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads"
 import { RoutingEditor } from "./RouteDetail";
 import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
 import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
-import { elapsed, seconds, sleepState } from "../lib/sleep";
+import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
 import { SleepBadge } from "../components/Sleep";
 
 export function DeploymentDetailPage() {
@@ -92,14 +92,14 @@ export function DeploymentDetailPage() {
       {d?.sleep?.asleep && (
         <Notice tone="info">
           Asleep{d.sleep.asleep_since ? ` since ${when(d.sleep.asleep_since)}` : ""}: nobody used it for {d.sleep.idle_minutes} min, so its replicas
-          stopped and their memory is free. The model files stay on the machines. {canManage ? "Wake now starts it again" : "An operator can wake it"}
+          stopped and their memory is free. The model files stay on the machines. The next request wakes it{canManage ? ", or Wake now" : ""}
           {d.last_start ? `; the last start took ${seconds(d.last_start.seconds)}.` : "."}
         </Notice>
       )}
       {d && sleepState(d) === "waking" && (
         <Notice tone="info">
-          Waking: woken {elapsed(d.sleep?.woken_at)} ago{d.last_start ? `; the last start took ${seconds(d.last_start.seconds)}` : ""}. Requests to it
-          wait until a replica is ready.
+          Waking: woken by {d.sleep?.waking?.by} {elapsed(d.sleep?.waking?.since)} ago; it should be ready in about {seconds(wakeSeconds(d) ?? 30)}.
+          Requests to it wait until a replica is ready (up to {d.sleep?.wake_wait ?? 300} s){d.sleep?.waking?.waiting ? `: ${d.sleep.waking.waiting} waiting now` : ""}.
         </Notice>
       )}
       {d && w && (
@@ -182,10 +182,10 @@ function WhenNotInUse({ d, canManage }: { d: Deployment; canManage: boolean }) {
       </div>
       <dl className="facts">
         <dt>Sleep when idle</dt>
-        <dd>{s.on ? `On: after ${s.idle_minutes} min without a request` : <span className="muted">Off: it keeps its memory while nobody uses it</span>}</dd>
+        <dd>{s.on ? `On: after ${s.idle_minutes} min without a request; a request waits up to ${s.wake_wait ?? 300} s for it to wake` : <span className="muted">Off: it keeps its memory while nobody uses it</span>}</dd>
         <dt>Now</dt>
         <dd>{state === "asleep" ? <>Asleep{s.asleep_since ? <> since <span title={exact(s.asleep_since)}>{when(s.asleep_since)}</span></> : null}; it holds no memory</>
-          : state === "waking" ? <>Waking, for {elapsed(s.woken_at)}</>
+          : state === "waking" ? <>Waking, for {elapsed(s.waking?.since)} (by {s.waking?.by})</>
             : d.workload.desired_state !== "running" ? <span className="muted">Stopped by a person: it does not wake by itself</span>
               : s.on && s.held_by ? <>Awake, kept awake: {s.held_by}</>
                 : s.on && s.sleeps_at ? <>Awake; sleeps <span title={exact(s.sleeps_at)}>{when(s.sleeps_at)}</span> unless a request comes</>

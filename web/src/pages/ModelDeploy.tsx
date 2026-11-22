@@ -11,7 +11,7 @@ import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyD
 import { sameModelStart } from "../lib/sleep";
 import type { CatalogModel, CatalogResponse, ContextHint, DeploymentsResponse, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { SleepSetting } from "../components/Sleep";
+import { SleepSetting, WakeWaitField } from "../components/Sleep";
 
 export const ESTIMATE_DELAY_MS = 400;
 
@@ -172,7 +172,7 @@ export function ModelDeployPage() {
                 <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
               )}
               <details className="spec-preview" style={{ marginTop: 14 }}>
-                <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}token</summary>
+                <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}wake wait, token</summary>
                 <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
                 <div className="grid-3">
                   {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={view.params[k]} onChange={setParam} />)}
@@ -186,6 +186,7 @@ export function ModelDeployPage() {
                       <input id="d-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
                       <p className="field-hint">Streamed answers only: how long a replica has to start streaming (5 to 3600). Then the request is stopped with 504 and never sent to another replica. A non-streamed answer keeps the gateway's read timeout.</p></div>
                   )}
+                  <WakeWaitField id="d-wake" value={f.wakeWait} onChange={(v) => set("wakeWait", v)} />
                   <div className="field"><label htmlFor="d-token">Hugging Face token</label>
                     <input id="d-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)}
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />

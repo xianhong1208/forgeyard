@@ -6,8 +6,12 @@ import type { Deployment, StartTime } from "./types";
 export const IDLE_DEFAULT = 30;
 export const IDLE_MIN = 1;
 export const IDLE_MAX = 1440;
+// 1.5.0 PR 3: seconds a request waits for an asleep model to wake.
+export const WAKE_WAIT_DEFAULT = 300;
+export const WAKE_WAIT_MIN = 10;
+export const WAKE_WAIT_MAX = 1800;
 
-// Asleep (stopped because nobody used it), waking (woken, no replica ready yet), or neither.
+// Asleep (stopped because nobody used it), waking (a request or Wake now woke it, no replica ready yet), or neither.
 export type SleepState = "asleep" | "waking" | null;
 
 export function sleepState(d: Deployment): SleepState {
@@ -57,11 +61,25 @@ export function sameModelStart(deployments: Deployment[], model: string, recipe:
 
 // The idle-minutes field as the API takes it: a whole number in range, else why not.
 export function idleProblem(text: string): string | null {
+  return wholeProblem(text, IDLE_MIN, IDLE_MAX, "minutes");
+}
+
+// The wake-wait field (seconds), the same way.
+export function wakeWaitProblem(text: string): string | null {
+  return wholeProblem(text, WAKE_WAIT_MIN, WAKE_WAIT_MAX, "seconds");
+}
+
+function wholeProblem(text: string, min: number, max: number, unit: string): string | null {
   const t = text.trim();
   if (!t) return null;
-  if (!/^\d+$/.test(t)) return "A whole number of minutes.";
+  if (!/^\d+$/.test(t)) return `A whole number of ${unit}.`;
   const n = Number(t);
-  return n < IDLE_MIN || n > IDLE_MAX ? `${IDLE_MIN} to ${IDLE_MAX.toLocaleString("en")} minutes.` : null;
+  return n < min || n > max ? `${min} to ${max.toLocaleString("en")} ${unit}.` : null;
+}
+
+// About how long a wake takes: what the server expects for the wake under way, else the last start.
+export function wakeSeconds(d: Deployment): number | null {
+  return d.sleep?.waking?.expected_seconds ?? d.last_start?.seconds ?? null;
 }
 
 // Asleep deployments that would run on a machine: they hold nothing there now, but the memory map would show

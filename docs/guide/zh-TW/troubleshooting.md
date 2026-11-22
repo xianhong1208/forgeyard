@@ -336,7 +336,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 `no_ready_replica`：模型存在，但它沒有任何一個副本處於就緒狀態：還在下載或啟動、已停止，或所在的機器離線。錯誤訊息會列出每個副本的狀態。請查看這個部署的頁面；另見[模型有列出，卻回應 503](#a-model-is-listed-but-answers-503)。
 
-`model_asleep`（1.5.0）：部署開啟了閒置時休眠，而在它的閒置時間內沒人使用，所以副本停止了。在它的頁面或 Playground 按 **Wake now**（Start）喚醒它；如果它應該隨時回應，就關閉 *Sleep when idle*（[閒置時休眠](concepts.md#sleep-when-idle)）。
+`model_waking`（1.5.0）：部署開啟了閒置時休眠；請求喚醒了它，但它沒有在 `wake_wait` 內就緒。照 `Retry-After` 重試；如果一直發生，就調高 `wake_wait`（以及客戶端的逾時）、給路由一個雲端分層，或關閉 *Sleep when idle*。`cannot_wake`：它現在無法啟動，原因如訊息所述（沒有機器有空間、指定的機器離線、引擎失敗）：請查看部署的事件（[閒置時休眠](concepts.md#sleep-when-idle)）。
 
 其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504 upstream_timeout`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒），以及只限串流請求的 `504 first_answer_timeout`（串流沒有在部署的 *Wait for the first answer* 內開始，預設 120 秒：在 **Advanced** 調高它）。每個錯誤碼都列在[參考資料](reference.md#errors)。
 

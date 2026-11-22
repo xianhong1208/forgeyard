@@ -811,8 +811,9 @@ def deployment_idle_awake(ctx: Context) -> Iterator[Finding]:
         yield Finding("deployment-idle-awake", "info", f"{d.name} had no requests for {days} days: let it sleep when idle?",
                       f"{d.name} had no requests for {days} days and holds {'; '.join(held)}. With Sleep when idle its "
                       "replicas stop after the idle time (30 minutes by default) and give that memory back; the model "
-                      "stays listed, and Wake now on its page starts it again. Turn it on with Edit on the "
-                      "deployment: nothing restarts.", f"/serving/{d.id}/edit", "Change the deployment",
+                      "stays listed, and the next request (or Wake now on its page) starts it again: the request waits "
+                      "for it, or is served by a cloud tier meanwhile when its key may use one. Turn it on with Edit "
+                      "on the deployment: nothing restarts.", f"/serving/{d.id}/edit", "Change the deployment",
                       scope=f"deployment:{d.id}", pages=("serving", f"deployment:{d.id}"))
 
 

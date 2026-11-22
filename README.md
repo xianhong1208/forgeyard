@@ -28,7 +28,7 @@ them where they fit, and every program calls them at `/v1` with an API key.
   An agent older than the server says so, and its machine's page shows the exact command that updates it.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
   shows the memory one copy needs and where it fits, and lets small models share a GPU. A model used now
-  and then can sleep when idle and give its memory back (1.5.0): Serving shows it asleep, and Wake now starts it.
+  and then can sleep when idle and give its memory back (1.5.0): the next request wakes it and waits for it.
 - **A page per model and per engine.** A catalog model's page shows which machines have it cached and
   where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
   machines already have its image or program.
@@ -40,6 +40,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
+- **GPUs used only while needed (1.5.0).** A deployment can sleep when nobody calls it and give its
+  memory back; the next request wakes it and waits for the answer (or goes to the cloud meanwhile, when
+  the key may), and a model that cannot wake says why at once.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, text classification at
   `/v1/classify` (1.4.4), speech to text, text to speech, image generation, video generation as jobs, and
   vision models: object detection (1.4.4: also detectors that find what you name), segmentation, depth and

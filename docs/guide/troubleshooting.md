@@ -567,8 +567,10 @@ locked; ask an admin to change them.
 starting, stopped, or its machine is offline. The message lists each replica's state. Look at the
 deployment's page; see also [A model is listed but answers 503](#a-model-is-listed-but-answers-503).
 
-`model_asleep` (1.5.0): the deployment sleeps when idle and nobody used it for its idle time, so its replicas
-stopped. Wake it with **Wake now** (Start) on its page or in the Playground; turn *Sleep when idle* off if it should always answer
+`model_waking` (1.5.0): the deployment sleeps when idle; the request woke it, but it was not ready within its
+`wake_wait`. Retry after `Retry-After`; if it keeps happening, raise `wake_wait` (and the client's timeout), give
+the route a cloud tier, or turn *Sleep when idle* off. `cannot_wake`: it cannot start now, for the reason given (no
+room on any machine, its pinned machine offline, its engine failing): see the deployment's events
 ([Sleep when idle](concepts.md#sleep-when-idle)).
 
 Others: `404 model_not_found` (no model by that name for this key: see `/v1/models` and

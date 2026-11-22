@@ -58,7 +58,7 @@ FIRST_BYTE = Histogram("forgeyard_gateway_time_to_first_byte_seconds", "Time fro
 TOKENS = Counter("forgeyard_gateway_tokens", "Tokens the engines and providers reported, per model; direction in: "
                  "the prompt, out: the completion", ("model", "direction"), registry=REGISTRY)
 SPILLS = Counter("forgeyard_gateway_spills", "Requests that left their route's first tier (spilled to the cloud or "
-                 "another tier), per model and reason: unavailable, busy, refused, too_long, budget",
+                 "another tier), per model and reason: unavailable, busy, waking, refused, too_long, budget",
                  ("model", "reason"), registry=REGISTRY)
 WAITED = Histogram("forgeyard_gateway_wait_seconds", "How long a request waited in line for a free local slot "
                    "(the route's Wait for a free local slot), per model; it then got a slot or moved on",
@@ -72,7 +72,15 @@ STARTS = Histogram("forgeyard_replica_start_seconds", "How long a model replica 
                    "deployment's served name). From an agent older than 1.5.0, only the engine's part",
                    ("recipe", "model"), buckets=START_BUCKETS, registry=REGISTRY)
 
-SPILL_REASONS = frozenset({"unavailable", "busy", "refused", "too_long", "budget"})
+WAKE_BUCKETS = (1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 180.0, 300.0, 600.0, 1800.0)   # a wake waits up to wake_wait
+WAKE_WAITED = Histogram("forgeyard_gateway_wake_wait_seconds", "How long a request waited for its model to wake "
+                        "(1.5.0: the deployment was asleep), per model; it was then served, or gave up",
+                        ("model",), buckets=WAKE_BUCKETS, registry=REGISTRY)
+WAKES = Counter("forgeyard_deployment_wakes", "Asleep deployments woken, per deployment and by whom (request: a "
+                "request to it; person: Start, Wake now)", ("deployment", "by"), registry=REGISTRY)
+
+SPILL_REASONS = frozenset({"unavailable", "busy", "waking", "refused", "too_long", "budget"})
+WOKEN_BY = frozenset({"request", "person"})
 SOURCES = frozenset({"api", "console"})
 
 _seen: dict[str, set[str]] = {}
@@ -138,6 +146,22 @@ def replica_started(recipe: Optional[str], model: Optional[str], seconds: float)
         STARTS.labels(bounded("recipe", recipe), bounded("model", model)).observe(max(0.0, seconds))
     except Exception:
         log.exception("Counting a replica start for /metrics failed")
+
+
+def wake_waited(line_key: str, seconds: float) -> None:
+    """A request left the wake line `line_key` ("<served name>#<tier>") after `seconds` (1.5.0)."""
+    try:
+        WAKE_WAITED.labels(bounded("model", line_key.rsplit("#", 1)[0])).observe(max(0.0, seconds))
+    except Exception:
+        log.exception("Counting a wake wait for /metrics failed")
+
+
+def woken(deployment: str, by: str) -> None:
+    """An asleep deployment was woken (1.5.0), by a request or a person."""
+    try:
+        WAKES.labels(bounded("deployment", deployment), bounded("by", by, WOKEN_BY)).inc()
+    except Exception:
+        log.exception("Counting a wake for /metrics failed")
 
 
 # ------------------------------------------------------------------ the state, read at scrape time
@@ -300,17 +324,23 @@ def _budget_limits(db) -> list[tuple[str, int, int]]:
 
 
 def _waiting():
-    from forgeyard.gateway import waiting
+    from forgeyard.gateway import waiting, waking
 
-    g = GaugeMetricFamily("forgeyard_gateway_waiting", "Requests waiting in line for a free local slot now, per "
-                          "model", labels=("model",))
-    per: dict[str, int] = {}
-    for key, n in waiting.lengths().items():
-        name = bounded("model", key.rsplit("#", 1)[0])
-        per[name] = per.get(name, 0) + n
-    for name, n in sorted(per.items()):
-        g.add_metric((name,), n)
-    return [g]
+    out = []
+    for metric, text, lengths in (
+            ("forgeyard_gateway_waiting", "Requests waiting in line for a free local slot now, per model",
+             waiting.lengths()),
+            ("forgeyard_gateway_waking", "Requests waiting for their model to wake now (1.5.0), per model",
+             waking.lengths())):
+        g = GaugeMetricFamily(metric, text, labels=("model",))
+        per: dict[str, int] = {}
+        for key, n in lengths.items():
+            name = bounded("model", key.rsplit("#", 1)[0])
+            per[name] = per.get(name, 0) + n
+        for name, n in sorted(per.items()):
+            g.add_metric((name,), n)
+        out.append(g)
+    return out
 
 
 REGISTRY.register(_State())

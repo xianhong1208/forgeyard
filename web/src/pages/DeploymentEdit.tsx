@@ -8,13 +8,13 @@ import { ApiError, api, errorText } from "../lib/api";
 import { FIRST_ANSWER_DEFAULT, editBody, editForm, takesFirstAnswer, type EditForm } from "../lib/models";
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentResponse, EditResponse, Machine, MachineVerdict, MachinesResponse, Recipe } from "../lib/types";
 import { useApi } from "../lib/useApi";
-import { SleepSetting } from "../components/Sleep";
+import { SleepSetting, WakeWaitField } from "../components/Sleep";
 import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts, paramApplies } from "./ModelDeploy";
 
 // What a change shows next to each changed setting.
 const CHANGE_LABEL: Record<string, string> = { share: "GPU sharing", gpus: "GPUs per replica", vram: "Memory per device",
   extra_args: "Extra engine arguments", first_answer_timeout: "Wait for the first answer (s)", replicas: "Replicas", machine_id: "Machine",
-  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes" };
+  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes", wake_wait: "Wake wait (s)" };
 
 export function DeploymentEditPage() {
   const { id } = useParams();
@@ -130,7 +130,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
               {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
             </div>
             <details className="spec-preview" style={{ marginTop: 14 }}>
-              <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}</summary>
+              <summary>Advanced: {advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}, wake wait</summary>
               <div className="grid-3">
                 {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
                 <div className="field"><label htmlFor="e-vram">Memory per device (override)</label>
@@ -143,6 +143,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
                     <input id="e-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
                     <p className="field-hint">Streamed answers only. Empty: {FIRST_ANSWER_DEFAULT}. A replica that has not started streaming by then gets the request stopped (504), never resent; non-streamed answers keep the read timeout. Changing it restarts nothing.</p></div>
                 )}
+                <WakeWaitField id="e-wake" value={f.wakeWait} onChange={(v) => set("wakeWait", v)} />
               </div>
             </details>
           </section>

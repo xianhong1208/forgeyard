@@ -462,9 +462,15 @@ export type StartTime = {
 export type DeploymentSleep = {
   on: boolean; idle_minutes: number; asleep: boolean; last_request_at: string | null; since: string;
   sleeps_at: string | null; held_by: string | null;
-  // 1.5.0 (#37, the console): since when it is asleep; woken and no replica ready yet (since woken_at); wakes in
-  // the last day.
-  asleep_since?: string | null; waking?: boolean; woken_at?: string | null; wakes?: number;
+  // 1.5.0 PR 3: how long a request waits for a wake (seconds), and the wake under way (a request's or Wake now's).
+  wake_wait?: number; waking?: Waking | null;
+  // 1.5.0 PR 4 (the console): since when it is asleep, and how often it was woken in the last day.
+  asleep_since?: string | null; wakes?: number;
+};
+
+export type Waking = {
+  since: string; by: string; waiting: number;
+  expected_seconds: number;   // its last start, or 30 when none was measured
 };
 
 export type RestartMode = "none" | "on_start" | "on_wake" | "rolling" | "all";

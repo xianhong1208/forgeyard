@@ -31,7 +31,7 @@ from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require
 from forgeyard.api.workloads import _events, _get as get_workload, workload_out
 from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, Node, Replica, RouteTarget, Workload, get_db,
                           utcnow)
-from forgeyard.gateway import imagegen, proxy
+from forgeyard.gateway import imagegen, proxy, waking
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
 from forgeyard.models import catalog, modalities, routes, scheduler, textcls, vision
@@ -423,6 +423,8 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
                  machine_id=body.machine_id, gpus=ctx.gpus, share=ctx.share, estimate=ctx.estimate.amount,
                  token=bool(d.hf_token) or None)
     db.commit()
+    sleep.idle.forget(d.id)   # 1.5.0: a removed deployment's id may come back (SQLite): start from nothing
+    waking.forget(d.id)
     proxy.forget_ceiling()  # its max_body_mb may raise how much the gateway reads
     placement.place_and_poke(db)
     db.expire_all()
@@ -618,6 +620,8 @@ def delete_deployment(dep_id: int, caller: Caller = Depends(require_operator), d
     db.delete(w)
     audit.record(db, "deployment.deleted", actor=caller.user, target=name, ip=caller.ip, deployment_id=dep_id)
     db.commit()
+    sleep.idle.forget(dep_id)   # 1.5.0: its last request and any wake go with it (a new one may get its id)
+    waking.forget(dep_id)
     for node_id in nodes:
         hub.poke(node_id)
     placement.place_and_poke(db)

@@ -20,8 +20,13 @@
   while a request is in flight or waiting, a replica is starting, an edit is restarting its replicas, or (video)
   a job is waiting or being made, or a finished video is still kept for download.
 - **Waking**: *Start* on an asleep deployment wakes it (on its pinned machine when it is pinned, else where it
-  ran when that still fits). In 1.5.0 PR 2 a request to an asleep model answers 503 `model_asleep`; waking on a
-  request comes next. *Stop* on an asleep deployment makes it stopped: a person's Stop stays stopped.
+  ran when that still fits), and so does a request to it (forgeyard/gateway/waking.py: once however many arrive;
+  they wait up to `wake_wait` seconds, 300 by default, 10 to 1,800). *Stop* on an asleep deployment makes it
+  stopped: a person's Stop stays stopped, and requests do not wake it.
+- **A refused request is not use**: a request counts when something was done for it (sent to a replica or a
+  provider, waiting in a line or the image queue, or waking the model), not when the gateway refused it at once
+  (no ready replica of a stopped deployment, a model that cannot wake, no target for it). So a deployment that
+  cannot wake still goes back to sleep after its idle time, and the next request tries a fresh wake.
 - **Downgrade**: an older server reads `asleep` as stopped (not listed, 503 "stopped", Start works).
 """
 
@@ -43,8 +48,9 @@ log = logging.getLogger("forgeyard.workloads")
 
 ASLEEP = "asleep"
 IDLE_DEFAULT, IDLE_MIN, IDLE_MAX = 30, 1, 1440   # minutes (Tony, #37)
+WAKE_WAIT_DEFAULT, WAKE_WAIT_MIN, WAKE_WAIT_MAX = 300, 10, 1800   # seconds a request waits for a wake (#37)
 SWEEP_SECONDS = 30.0
-PARAMS = ("sleep_when_idle", "idle_minutes")
+PARAMS = ("sleep_when_idle", "idle_minutes", "wake_wait")
 GIB = 1024**3
 
 
@@ -78,26 +84,42 @@ class IdleClock:
                 if i is not None:
                     self._last[i] = at
 
-    def begin(self, ids: Iterable[int]) -> list[int]:
+    def begin(self, ids: Iterable[int]) -> "Use":
         """A request for these deployments starts: used now, and in flight until end()."""
         ids = [i for i in dict.fromkeys(ids) if i is not None]
         now = utcnow()
         with self._lock:
+            before = {i: self._last.get(i) for i in ids}
             for i in ids:
                 self._last[i] = now
                 self._active[i] = self._active.get(i, 0) + 1
-        return ids
+        return Use(ids, now, before)
 
-    def end(self, ids: Iterable[int]) -> None:
+    def end(self, use: "Use", used: bool = True) -> None:
+        """The request is over. `used` False: the gateway refused it at once (1.5.0 PR 3), so it was no use: its
+        start is taken back, unless another request used the deployment since."""
         now = utcnow()
         with self._lock:
-            for i in ids:
-                self._last[i] = now
+            for i in use.ids:
+                if used:
+                    self._last[i] = now
+                elif self._last.get(i) is use.at:
+                    if use.before.get(i) is None:
+                        self._last.pop(i, None)
+                    else:
+                        self._last[i] = use.before[i]
                 left = self._active.get(i, 0) - 1
                 if left > 0:
                     self._active[i] = left
                 else:
                     self._active.pop(i, None)
+
+    def forget(self, dep_id: int) -> None:
+        """A deployment was removed (or made): a new one that gets its id (SQLite reuses the highest one) starts
+        from nothing, not from the removed one's last request."""
+        with self._lock:
+            self._last.pop(dep_id, None)
+            self._active.pop(dep_id, None)
 
     def active(self, dep_id: int) -> int:
         with self._lock:
@@ -107,6 +129,15 @@ class IdleClock:
         """The last use this server saw (None: none since it started)."""
         with self._lock:
             return self._last.get(dep_id)
+
+
+@dataclass
+class Use:
+    """One request's use of its deployments (IdleClock.begin → end)."""
+
+    ids: list
+    at: datetime
+    before: dict
 
 
 idle = IdleClock()
@@ -122,18 +153,30 @@ def route_deployments(route) -> list[int]:
 class Setting:
     on: bool
     idle_minutes: int
+    wake_wait: int = WAKE_WAIT_DEFAULT
+
+
+def _whole(value, low: int, high: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+
+
+def wake_wait_of(params: Optional[dict]) -> int:
+    """Seconds a request waits for the deployment to wake (its `wake_wait`, else 300)."""
+    wait = (params or {}).get("wake_wait")
+    return wait if _whole(wait, WAKE_WAIT_MIN, WAKE_WAIT_MAX) else WAKE_WAIT_DEFAULT
 
 
 def setting(params: Optional[dict]) -> Setting:
     p = params or {}
     minutes = p.get("idle_minutes")
-    ok = isinstance(minutes, int) and not isinstance(minutes, bool) and IDLE_MIN <= minutes <= IDLE_MAX
-    return Setting(on=p.get("sleep_when_idle") is True, idle_minutes=minutes if ok else IDLE_DEFAULT)
+    return Setting(on=p.get("sleep_when_idle") is True,
+                   idle_minutes=minutes if _whole(minutes, IDLE_MIN, IDLE_MAX) else IDLE_DEFAULT,
+                   wake_wait=wake_wait_of(p))
 
 
 def normalise(raw: dict, out: dict) -> Optional[str]:
-    """Check the two parameters into `out`. Returns why they are refused, or None. `sleep_when_idle` is kept only
-    when on; `idle_minutes` is kept as given (also while off, for when it is turned on)."""
+    """Check the parameters into `out`. Returns why they are refused, or None. `sleep_when_idle` is kept only
+    when on; `idle_minutes` and `wake_wait` are kept as given (also while off, for when it is turned on)."""
     on = raw.get("sleep_when_idle")
     if on not in (None, ""):
         if not isinstance(on, bool):
@@ -149,6 +192,15 @@ def normalise(raw: dict, out: dict) -> Optional[str]:
         if not IDLE_MIN <= minutes <= IDLE_MAX:
             return f"idle_minutes: {IDLE_MIN} to {IDLE_MAX:,} minutes"
         out["idle_minutes"] = minutes
+    wait = raw.get("wake_wait")
+    if wait not in (None, ""):
+        try:
+            wait = int(str(wait).strip())
+        except ValueError:
+            return "wake_wait must be a whole number of seconds"
+        if not WAKE_WAIT_MIN <= wait <= WAKE_WAIT_MAX:
+            return f"wake_wait: {WAKE_WAIT_MIN} to {WAKE_WAIT_MAX:,} seconds"
+        out["wake_wait"] = wait
     return None
 
 
@@ -219,26 +271,24 @@ def wakes(db: DbSession, w: Workload, now: Optional[datetime] = None) -> int:
                                                          WorkloadEvent.at >= since)).all())
 
 
-def ready_count(w: Workload) -> int:
-    health = (w.spec or {}).get("health")
-    return sum(1 for r in w.replicas if not r.final and (r.state == "healthy" or (r.state == "running" and not health)))
-
-
 def status(db: DbSession, d: Deployment, now: Optional[datetime] = None) -> dict:
-    """The deployment's sleep setting and where it stands, for the API (the console shows it): `asleep_since`
-    while asleep; `waking` (and `woken_at`) from a wake until a replica is ready; `wakes` in the last day."""
+    """The deployment's sleep setting and where it stands, for the API (the console shows it): `waking` while a
+    request or Wake now wakes it, `asleep_since` while asleep, and `wakes` in the last day."""
     now = now or utcnow()
     w = d.workload
     s = setting(d.params)
     last = idle.last(d.id)
-    out = {"on": s.on, "idle_minutes": s.idle_minutes, "asleep": w.desired_state == ASLEEP,
+    from forgeyard.gateway import waking
+
+    out = {"on": s.on, "idle_minutes": s.idle_minutes, "wake_wait": s.wake_wait, "asleep": w.desired_state == ASLEEP,
            "last_request_at": last, "since": idle_since(d, w), "sleeps_at": None, "held_by": None,
-           "asleep_since": None, "waking": False, "woken_at": None, "wakes": wakes(db, w, now)}
-    latest = _latest(db, w)
+           # 1.5.0 PR 3: while a request (or Wake now) wakes it: since when, by whom, how many requests wait.
+           "waking": waking.status(d, w),
+           # 1.5.0 PR 4 (the console): since when it is asleep, and how often it was woken in the last day.
+           "asleep_since": None, "wakes": wakes(db, w, now)}
     if w.desired_state == ASLEEP:
+        latest = _latest(db, w)
         out["asleep_since"] = as_utc(latest.at if latest is not None and latest.kind == ASLEEP else w.updated_at)
-    elif w.desired_state == "running" and latest is not None and latest.kind == WOKEN and not ready_count(w):
-        out["waking"], out["woken_at"] = True, as_utc(latest.at)
     if s.on and w.desired_state == "running":
         out["sleeps_at"] = out["since"] + timedelta(minutes=s.idle_minutes)
         out["held_by"] = hold(db, d, w, now)
@@ -267,7 +317,7 @@ def put_to_sleep(db: DbSession, d: Deployment, connected, minutes: int) -> set[i
     frees = _frees(w)
     nodes = wstate.stop(db, w, connected, to=ASLEEP)
     wstate.event(db, w, ASLEEP, f"Asleep: no requests for {minutes} min; frees {frees}. "
-                                "The model files stay on the machine; Start wakes it.")
+                                "The model files stay on the machine; a request or Start wakes it.")
     return nodes
 
 
@@ -302,6 +352,9 @@ def sweep_once(now: Optional[datetime] = None) -> list[str]:
                     db.rollback()   # a request came in meanwhile: it stays awake
                     continue
                 db.commit()
+                from forgeyard.gateway import waking
+
+                waking.forget(d.id)   # a wake that could not be placed is over: the next request tries again
                 nodes |= stopping
                 slept.append(d.name)
                 log.info("Deployment %s is asleep: no requests for %s min.", d.name, s.idle_minutes)

@@ -109,7 +109,7 @@ async def unless_gone(receive, coro):
 class Failed:
     """A tier (or part of one) did not answer; the request may move on."""
 
-    reason: str                                # unavailable | busy | refused | too_long | budget
+    reason: str                                # unavailable | busy | waking | refused | too_long | budget
     error: Optional[GatewayError] = None
     answer: Optional[Response] = None          # an upstream answer to pass on if nothing else serves
     retry_after: Optional[float] = None

@@ -2,7 +2,7 @@
 1 to 1,440, changing them restarts nothing), the idle sweeper's timing (also after a server restart), what counts
 as use and what holds a deployment awake, `asleep` as a desired state (replicas stopped, memory freed, files kept,
 not audited), Start waking it (pinned: on its machine), Stop making it stopped, /v1/models still listing it and a
-request answering 503 model_asleep, the video rule, and what an older server reads (FY-SLP-*)."""
+request waking it (tests/test_wake.py), the video rule, and what an older server reads (FY-SLP-*)."""
 
 from __future__ import annotations
 
@@ -402,20 +402,26 @@ def test_fy_slp_019_a_request_is_use_from_its_start_to_its_end(gw):  # noqa: F81
     assert (idle.last(dep) - started).total_seconds() >= 0.5, (idle.last(dep), started)
 
 
-def test_fy_slp_014_an_asleep_model_stays_listed_and_answers_503(gw):  # noqa: F811
-    """FY-SLP-014: asleep, the model is still in /v1/models (GET /v1/models/chat too) and a request to it gets
-    503 model_asleep saying how to wake it; once a person stopped it, it leaves the list and answers that it is
-    stopped."""
+def test_fy_slp_014_an_asleep_model_stays_listed_and_a_request_wakes_it(gw):  # noqa: F811
+    """FY-SLP-014: asleep, the model is still in /v1/models (GET /v1/models/chat too); a request to it wakes it
+    (1.5.0 PR 3, forgeyard/gateway/waking.py: tests/test_wake.py has the rest) instead of the 503 model_asleep of
+    PR 2; once a person stopped it, it leaves the list and answers that it is stopped."""
+    from tests.test_routing import background
+    from tests.waits import wait_until
+
     dep = _sleep_chat(gw)
     assert sleep.sweep_once(later(31)) == ["chat"]
+    for i in (0, 1):
+        set_replica("chat", i, state="stopped")
     ids = [m["id"] for m in gw.api.get("/v1/models").json()["data"]]
     assert "chat" in ids
     assert gw.api.get("/v1/models/chat").status_code == 200
-    r = chat(gw.api)
-    assert r.status_code == 503, r.text
-    e = err(r)
-    assert e["code"] == "model_asleep" and "is asleep" in e["message"] and "Start on its page" in e["message"]
+    t, out = background(lambda: chat(gw.api))
+    wait_until(lambda: workload("chat").desired_state == "running" and all(r.node_id for r in rows("chat")), "woken")
     assert len(gw.e1.posts()) + len(gw.e2.posts()) == 0
+    make_ready("chat", [(gw.a, gw.e1.port, gw.e1.secret), (gw.b, gw.e2.port, gw.e2.secret)])
+    t.join(15)
+    assert out["r"].status_code == 200, out["r"].text
     gw.owner.post(f"/api/deployments/{dep}/stop")
     assert "chat" not in [m["id"] for m in gw.api.get("/v1/models").json()["data"]]
     r = chat(gw.api)
@@ -475,15 +481,23 @@ def test_fy_slp_016_a_video_deployment_sleeps_once_its_videos_are_done_and_gone(
         db.close()
 
 
-def test_fy_slp_018_an_asleep_video_model_answers_503_model_asleep(vid):  # noqa: F811
-    """FY-SLP-018: a video deployment with no job sleeps like any other, and a video asked of it then gets 503
-    model_asleep; no engine hears of it."""
+def test_fy_slp_018_an_asleep_video_model_is_woken_by_a_video_asked_of_it(vid):  # noqa: F811
+    """FY-SLP-018: a video deployment with no job sleeps like any other; a video asked of it then wakes it (1.5.0
+    PR 3, instead of 503 model_asleep) and no engine hears of it until a replica is ready."""
+    from tests.test_routing import background
+    from tests.waits import wait_until
+
     dep = vid.owner.get("/api/deployments").json()["deployments"][0]
     assert vid.owner.patch(f"/api/deployments/{dep['id']}", json={"params": ON}).json()["restart"] == "none"
     assert sleep.sweep_once(later(31)) == ["wan"]
-    r = make(vid.api)
-    assert r.status_code == 503 and r.json()["error"]["code"] == "model_asleep", r.text
+    for i in (0, 1):
+        set_replica("wan", i, state="stopped")
+    t, out = background(lambda: make(vid.api))
+    wait_until(lambda: workload("wan").desired_state == "running" and all(r.node_id for r in rows("wan")), "woken")
     assert all(not e.posts for e in vid.engines)
+    make_ready("wan", [(vid.gpu, e.port, e.secret) for e in vid.engines])
+    t.join(15)
+    assert out["r"].status_code == 200, out["r"].text
 
 
 # ------------------------------------------------------------------ an older server (downgrade)

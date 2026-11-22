@@ -28,20 +28,42 @@ version until 1.0.
   edit forms, come in the next 1.5.0 steps. No migration: the settings are deployment parameters and the last use
   is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
   the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
+- **Waking on a request** (#37, 1.5.0, as decided on the issue). A request to an asleep model wakes it, replacing the 503
+  `model_asleep` above: **one wake per deployment** however many requests arrive (the event *Woken by a request (key
+  …)*, not audited), and the requests **wait**, first come first served, up to the deployment's new parameter
+  `wake_wait` (**300** seconds by default, 10 to 1,800; changing it restarts nothing), then go on to the replicas.
+  Nothing is sent to the client while it waits (a stream starts with a normal 200 or a real error), and
+  `first_answer_timeout` counts only once the request reaches a replica. A key that may use the route's cloud tier
+  (`fallback` or `on`) **spills meanwhile** (`X-Forgeyard-Spilled: waking`, `reason="waking"` in
+  `forgeyard_gateway_spills_total`) and is local again once a replica is ready; structured output a provider would
+  lose is never spilled, and a request whose cloud target fails or whose budget is used up waits after all. When it
+  **cannot wake** (no machine has room, the machine it is pinned to is offline, its engine fails) the request gets
+  **503 `cannot_wake`** at once with the reason; when the wait runs out (or 256 already wait), **503
+  `model_waking`** with `Retry-After` from its last start time. A client that goes away leaves the line (the wake
+  carries on); rate limits count the request once, when it arrives. A person's **Stop** stays stopped: requests never
+  wake it. *Start* (Wake now) on an asleep deployment lets requests that arrive while it starts wait too.
+  `POST /v1/videos` wakes an asleep video model the same way. `/v1/models`, health checks and the console's polling
+  never wake anything. The deployment API's `sleep` object gains `wake_wait` and `waking` (`since`, `by`, `waiting`,
+  `expected_seconds`); `/metrics` gains `forgeyard_gateway_waking`, `forgeyard_gateway_wake_wait_seconds` and
+  `forgeyard_deployment_wakes_total{deployment, by}`. No migration.
+- Sleep when idle, two fixes found in its first real run: a request the gateway refused at once (its deployment
+  stopped, it cannot wake, no target serves the endpoint) is no longer counted as use, so a deployment that cannot
+  wake goes back to sleep after its idle time and the next request tries a fresh wake; and a deployment made with
+  the id of one just removed (SQLite reuses the highest id) no longer starts from the removed one's last request.
 - **Sleep when idle in the console** (#37, 1.5.0). The deploy and edit forms have a *When not in use* section:
-  **Sleep when idle** (off by default) and **Idle minutes** (30), with how long the last start took (on the deploy
-  form, the last start of another deployment of the same model and engine), which is about how long the first
-  request after a sleep waits, and a note that its memory may be used by others while it sleeps. **Serving** shows
-  **Asleep** (a moon; *holds nothing*, since when, and the machine it wakes on) and **Waking** with the time since it
-  was woken. The deployment page has a *When not in use* card (the setting, *sleeps in 18 min* or what keeps it
-  awake, the last request, the last start, wakes in the last 24 hours) and **Wake now** (Start). The **Playground**
-  keeps an asleep model in its picker with the moon, offers **Wake now** to operators and admins, and follows the
-  wake (*Waking the model (about 74 s)…*). **Machines** names an asleep deployment under the machine it would run on,
-  with what it holds when awake. Two setup-advisor notes: `deployment-idle-awake` (sleep off, no request for 3 days,
-  holds GPU memory: let it sleep?) and `deployment-wakes-often` (woken more than 10 times in a day and its last
-  start took over a minute: raise its idle time). The deployment API's `sleep` object gains `asleep_since`,
-  `waking`, `woken_at` and `wakes`. Get started's *Deploy it* stays done while a deployment sleeps (*Ready: chat
-  (asleep).*).
+  **Sleep when idle** (off by default) and **Idle minutes** (30), with **Wake wait** (300 s) under Advanced, how long
+  the last start took (on the deploy form, the last start of another deployment of the same model and engine), which
+  is about how long the first request after a sleep waits, and a note that its memory may be used by others while it
+  sleeps. **Serving** shows **Asleep** (a moon; *holds nothing*, since when, and the machine it wakes on) and
+  **Waking** with the time since the wake. The deployment page has a *When not in use* card (the setting, *sleeps in
+  18 min* or what keeps it awake, the last request, the last start, wakes in the last 24 hours) and **Wake now**
+  (Start). The **Playground** keeps an asleep model in its picker with the moon, sends a request to it as to any
+  model and says *Waking the model (about 74 s)…* while the gateway holds it; operators and admins also get **Wake
+  now** there. **Machines** names an asleep deployment under the machine it would run on, with what it holds when
+  awake. Two setup-advisor notes: `deployment-idle-awake` (sleep off, no request for 3 days, holds GPU memory: let
+  it sleep?) and `deployment-wakes-often` (woken more than 10 times in a day and its last start took over a minute:
+  raise its idle time). The deployment API's `sleep` object gains `asleep_since` and `wakes`. Get started's *Deploy
+  it* stays done while a deployment sleeps (*Ready: chat (asleep).*).
 
 - **How long each start takes, and faster ones** (1.5.0, #37, ahead of waking on a request). Each time a
   replica of a deployment becomes ready, its events say how long the start took and where the time went (*ready in

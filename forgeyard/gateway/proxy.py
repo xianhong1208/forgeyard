@@ -13,6 +13,8 @@ cloud provider.
    - *busy*: every ready replica already has as many requests in flight through this server as its
      deployment's `concurrency` (after waiting up to the route's `wait_ms` for a slot, in line, first
      come first served: forgeyard/gateway/waiting.py, 1.4.5);
+   - *waking* (1.5.0, #37): its deployment was asleep because nobody used it; the request wakes it
+     (forgeyard/gateway/waking.py) and, when nothing after the tier can take it either, waits for it to wake;
    - *refusing*: the replica answered 429 or 503;
    - *too small* (only when the route opts in): the prompt, estimated from its size, plus
      `max_tokens` does not fit the deployment's `context`.
@@ -114,7 +116,7 @@ from forgeyard.gateway.fit import (BYTES_PER_TOKEN, KIND_WORDS, MEDIA_ENDPOINTS,
                                    fit_images, fit_route, fit_speech, prompt_estimate, scan_media)
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
-from forgeyard.gateway.replicas import LOCAL_BUSY_RETRY_AFTER, ReplicaSending, asleep_error
+from forgeyard.gateway.replicas import LOCAL_BUSY_RETRY_AFTER, ReplicaSending
 from forgeyard.gateway.route import (CLOUD_APIS, CLOUD_ENDPOINTS, ENDPOINTS, FIRST_ANSWER_DEFAULT, LOCAL_ONLY_HEADER,
                                      MAX_WAIT_MS, UPSTREAM_PATHS, CloudTarget, LocalGroup, Route, Tier, _int, _ready,
                                      _route_query, allowed_tiers, build_route, check_access, cloud_target,
@@ -150,12 +152,15 @@ __all__ = [
     "DROPPED_HEADER", "RETRY_AFTER_CAP", "CloudSending", "_SECRETISH", "order_clouds", "provider_error",
     "retry_after", "rng",
     # replicas.py, answer.py
-    "LOCAL_BUSY_RETRY_AFTER", "ReplicaSending", "Answering", "asleep_error",
+    "LOCAL_BUSY_RETRY_AFTER", "ReplicaSending", "Answering",
     # here
     "Job", "forward", "record",
 ]
 
 log = logging.getLogger("forgeyard.gateway")
+# A tier that failed for these reasons may still serve the request: it waits there after all when nothing after it
+# could (busy: for a slot, 1.4.5; waking: for the model to wake, 1.5.0).
+WAIT_LOCAL = ("busy", "waking")
 balancer.listen(waiting.slot_freed)   # a freed slot wakes the first request waiting in line (1.4.5)
 
 
@@ -198,13 +203,17 @@ class Job(ReplicaSending, CloudSending, Answering):
         self.answering: Optional[tuple] = None      # (group, replica) that is answering
         self.kept_from: list[str] = []              # providers skipped: they would lose the structured output
         self.first_byte_at: Optional[float] = None  # when the answer's first bytes came (monotonic; /metrics, 1.4.5)
+        # 1.5.0: something was done for it (sent to a replica or provider, waited, woke the model), so it counts as
+        # use of its deployments; a request the gateway refused at once (stopped, cannot wake, no target) does not.
+        self.used = False
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
         if self.settled:
             return
         self.settled = True
-        idle.used(route_deployments(self.route))   # 1.5.0: its deployments were used until now (sleep when idle)
+        if self.used:
+            idle.used(route_deployments(self.route))   # 1.5.0: its deployments were used until now (sleep when idle)
         u = quirks.read_usage(usage)
         if self.admission is not None:
             tts = self.parsed.tts
@@ -311,11 +320,12 @@ class Job(ReplicaSending, CloudSending, Answering):
             result = await self.tier(tier, more)
             if isinstance(result, Response):
                 return result
-            if result.reason == "busy" and busy is None:
+            if result.reason in WAIT_LOCAL and busy is None:
                 busy = tier
             failure = result
         if busy is not None:
-            # Nothing after the busy tier could take it either: it waits for a local slot after all.
+            # Nothing after the busy (or waking, 1.5.0) tier could take it either: it waits for a local slot, or for
+            # the model to wake, after all.
             self.spilled = None
             result = await self.local(busy, can_move_on=False)
             if isinstance(result, Response):
@@ -340,10 +350,10 @@ class Job(ReplicaSending, CloudSending, Answering):
             result = await self.cloud(tier, more)
             if isinstance(result, Response):
                 return result
-            if failed is None or failed.reason != "busy":
+            if failed is None or failed.reason not in WAIT_LOCAL:
                 failed = result
             elif result.error is not None:
-                failed = Failed("busy", error=result.error)
+                failed = Failed(failed.reason, error=result.error)
             if more and self.spilled is None:
                 self.spilled = result.reason
         assert failed is not None
@@ -402,7 +412,7 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
         job.release()
         raise
     finally:
-        idle.end(using)
+        idle.end(using, used=job.used)
 
 
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,

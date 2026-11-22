@@ -574,7 +574,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 502 | `provider_unreachable` | 連不上供應商 | 稍後重試 |
 | 502 | `provider_error` | 供應商回應 5xx，或送往它的請求失敗 | 稍後重試 |
 | 503 | `no_ready_replica` | 模型存在，但沒有就緒的副本：下載中、啟動中、已停止，或它的機器離線。訊息會列出每個副本的狀態 | 等待，或啟動部署 |
-| 503 | `model_asleep` | 1.5.0：模型的部署正在休眠（*Sleep when idle*：在它的閒置時間內沒人使用）。它仍然列在 `/v1/models` 裡。和任何沒有就緒副本的分層一樣，請求會轉到金鑰可以用的雲端分層 | 在它的頁面或 Playground 按 **Wake now** 喚醒它（[閒置時休眠](#sleep-when-idle)） |
+| 503 | `model_waking` | 1.5.0：模型的部署原本在休眠（*Sleep when idle*），請求喚醒了它，但它沒有在部署的 `wake_wait`（預設 5 分鐘）內就緒，或已經有太多請求（256 個）在等它。`Retry-After`：它上次啟動的時間減掉已經過去的時間 | 照給的時間後重試；給客戶端更長的逾時，或給路由一個雲端分層（[閒置時休眠](#sleep-when-idle)） |
+| 503 | `cannot_wake` | 1.5.0：模型原本在休眠，現在無法喚醒；訊息會說明原因：*Cannot be placed: …*（沒有機器還有空間）、*it is pinned to …, which is offline*，或引擎失敗（*replica 0 on …: backoff …*）。立刻回應，不會等完等待時間 | 釋出記憶體、讓機器恢復上線，或查看部署的事件；部署保持喚醒，能啟動時就會啟動 |
 | 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它。帶 `Retry-After: 1` | 等 `Retry-After` 秒後重試 |
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
@@ -607,9 +608,12 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`、`model` | 從請求到達到結束；影片工作是從建立到結束 |
 | `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`、`model` | 從請求到達，到收到副本或供應商回應的第一批位元組：串流是第一個區塊，其他是它的狀態列。只計有收到回應的請求 |
 | `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
-| `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`refused`、`too_long`、`budget` |
+| `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`waking`（1.5.0）、`refused`、`too_long`、`budget` |
 | `forgeyard_gateway_waiting` | gauge | `model` | 現在正在排隊等本地空位的請求（路由所有層加總） |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | 每個請求在隊伍裡等了多久，才拿到空位或繼續往下走 |
+| `forgeyard_gateway_waking` | gauge | `model` | 1.5.0：現在正在等休眠中的模型喚醒的請求 |
+| `forgeyard_gateway_wake_wait_seconds` | histogram | `model` | 1.5.0：它們每個等了多久（之後被服務，或放棄） |
+| `forgeyard_deployment_wakes_total` | counter | `deployment`、`by` | 1.5.0：被喚醒的休眠部署，`by` 是 `request` 或 `person`（Start、Wake） |
 
 模型部署的副本就緒時（1.5.0）：
 
@@ -774,7 +778,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 | 欄位 | 值 |
 |---|---|
-| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）、`first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西），以及（1.5.0）`sleep_when_idle` 和 `idle_minutes`（[閒置時休眠](#sleep-when-idle)；修改它們不會重新啟動任何東西）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）、`first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西），以及（1.5.0）`sleep_when_idle`、`idle_minutes` 和 `wake_wait`（[閒置時休眠](#sleep-when-idle)；修改它們不會重新啟動任何東西）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
 | `replicas` | 1 到 16 |
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
@@ -806,30 +810,31 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 ### 閒置時休眠
 
-1.5.0（[概念](concepts.md#sleep-when-idle)）。每個部署都有的兩個參數，在部署時（`POST /api/deployments` 的 `params`）或修改時設定；它們由伺服器讀取，所以修改它們不會重新啟動任何東西：
+1.5.0（[概念](concepts.md#sleep-when-idle)）。每個部署都有的三個參數，在部署時（`POST /api/deployments` 的 `params`）或修改時設定；它們由伺服器讀取，所以修改它們不會重新啟動任何東西：
 
 | 參數 | 值 |
 |---|---|
 | `sleep_when_idle` | `true` 開啟；`false`（或 `null`，或不送）關閉。預設關閉，1.5.0 之前建立的部署也一樣。只有開啟時才會留在 `params` 裡 |
 | `idle_minutes` | 沒有請求多少分鐘後休眠：1 到 1,440，不送時是 **30**。休眠關閉時也會保留，等開啟時使用 |
+| `wake_wait` | 請求等休眠中的模型喚醒多少秒，之後回應 503 `model_waking`：10 到 1,800，不送時是 **300** |
 
-其他值都是 422 `invalid_params`（`"yes"`、`1`、`0`、`1441`、`1.5`）。
+其他值都是 422 `invalid_params`（`"yes"`、`1`、`0`、`1441`、`1.5`；`wake_wait` 的 `9` 或 `1801`）。
 
 休眠中的部署，它的 workload 的 `desired_state` 是 **`asleep`**，`status` 是 `asleep`（在 agent 確認之前是 `stopping`），和 `running`、`stopped` 並列；它的副本是 `stopped`。讀取 `desired_state` 的腳本應該把不認得的值當作沒有在執行。`GET /api/deployments` 和 `GET /api/deployments/{id}` 會給每個部署一個 `sleep` 物件：
 
 | 欄位 | 內容 |
 |---|---|
-| `on`、`idle_minutes` | 設定（沒有設定時是 30） |
+| `on`、`idle_minutes`、`wake_wait` | 設定（沒有設定時是 30 分鐘和 300 秒） |
 | `asleep` | 它現在是否在休眠 |
 | `last_request_at` | 這台伺服器啟動以來看到的最後一個送給它的請求，或 `null` |
 | `since` | 它的閒置時間從什麼時候起算：最後一個請求、最後一次啟動或修改、副本變成就緒，或伺服器啟動的時間，取最晚的那個 |
 | `sleeps_at` | 如果沒人使用，它什麼時候會休眠（只在開啟休眠且正在執行時），每 30 秒檢查一次 |
 | `held_by` | 雖然可能已經閒置夠久，它現在為什麼不休眠：*a request is in flight*、*a replica is starting*、*an edit is restarting its replicas*、*a video is waiting or being made*、*a finished video is kept until …*；其他時候是 `null` |
+| `waking` | 請求（或 Wake now）喚醒了它、還沒有副本就緒時：`{since, by, waiting, expected_seconds}`：喚醒開始的時間、誰喚醒它（*a request (key laptop)*、*a request from the Playground (owner)*，或那個人的使用者名稱）、有多少請求在等它，以及預計啟動要多久（上次啟動的時間，沒有量過時是 30 秒）。其他時候是 `null`（記在這台伺服器的記憶體裡：重新啟動後是 `null`） |
 | `asleep_since` | 從什麼時候開始休眠（它的 *Asleep* 事件），或 `null` |
-| `waking`、`woken_at` | 它已被喚醒（Start、*Wake now*）但還沒有副本就緒，以及從什麼時候開始；其他時候是 `false` 和 `null` |
 | `wakes` | 過去 24 小時被喚醒的次數（依它的事件） |
 
-對休眠中的部署送 `POST /api/deployments/{id}/start` 會喚醒它（事件 *Woken by …*，以 `workload.started`（帶 `woken: true`）和 `deployment.started` 記入稽核紀錄）；`POST …/stop` 會讓它變成停止（事件 *Stopped by … (it was asleep)*）。進入休眠的事件是 *Asleep: no requests for N min; frees …*，不記入稽核紀錄。對休眠中的部署送 `POST …/try` 會回應 409 `model_asleep`。經過閘道的請求會回應 503 `model_asleep`（[錯誤](#errors)）。
+對休眠中的部署送 `POST /api/deployments/{id}/start` 會喚醒它（事件 *Woken by …*，以 `workload.started`（帶 `woken: true`）和 `deployment.started` 記入稽核紀錄）；`POST …/stop` 會讓它變成停止（事件 *Stopped by … (it was asleep)*）。進入休眠的事件是 *Asleep: no requests for N min; frees …*，不記入稽核紀錄。對休眠中的部署送 `POST …/try` 會回應 409 `model_asleep`。經過閘道的請求（包括 `POST /v1/videos`）會喚醒它：事件 *Woken by a request (key …)*（不記入稽核紀錄），然後等待就緒的副本、轉到金鑰可以用的雲端分層（`X-Forgeyard-Spilled: waking`），或回應 503 `cannot_wake` / `model_waking`（[錯誤](#errors)）。`/v1/models`、健康檢查和主控台的頁面不會喚醒它，已停止的部署也不會被喚醒。
 
 **降版：**比 1.5.0 舊的伺服器會把 `asleep` 當作停止：模型不會列出，請求回應 503 `no_ready_replica` *The deployment is stopped*，按 Start 會啟動它。
 

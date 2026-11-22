@@ -1,5 +1,5 @@
 """Sleep when idle in the console (1.5.0, #37, PR 4): what the deployment API's `sleep` object adds for the console
-(`asleep_since`, `waking` and `woken_at`, `wakes` in the last day) and the two setup-advisor findings: a deployment
+(`asleep_since` and `wakes` in the last day, beside PR 3's `waking`) and the two setup-advisor findings: a deployment
 nobody used for 3 days that holds GPU memory with sleep when idle off, and one that wakes more than 10 times a day
 and takes over a minute to start (FY-SLC-*)."""
 
@@ -110,7 +110,7 @@ def test_fy_slc_001_asleep_since_waking_and_wakes_today(cpu):
     d = deploy(c, "chat", **{**CPU_BODY, "params": {**CPU_BODY["params"], **ON, "idle_minutes": 1}})["deployment"]
     ready("chat", 0)
     s = sleep_of(c, d["id"])
-    assert (s["asleep_since"], s["waking"], s["woken_at"], s["wakes"]) == (None, False, None, 0)
+    assert (s["asleep_since"], s["waking"], s["wakes"]) == (None, None, 0)
 
     assert sleep.sweep_once(now=utcnow() + timedelta(minutes=10)) == ["chat"]
     s = sleep_of(c, d["id"])
@@ -124,10 +124,11 @@ def test_fy_slc_001_asleep_since_waking_and_wakes_today(cpu):
         set_replica("chat", r.ordinal, state="stopped")
     assert c.post(f"/api/deployments/{d['id']}/start").status_code == 200
     s = sleep_of(c, d["id"])
-    assert s["waking"] is True and s["woken_at"] is not None and s["asleep_since"] is None and s["wakes"] == 1
+    assert s["waking"]["by"] == "owner" and s["waking"]["since"] is not None and s["asleep_since"] is None
+    assert s["wakes"] == 1
     ready("chat", 0)
     s = sleep_of(c, d["id"])
-    assert s["waking"] is False and s["woken_at"] is None and s["wakes"] == 1
+    assert s["waking"] is None and s["wakes"] == 1
 
     # old wakes do not count; a person's Stop and Start is never "waking"
     add_event("chat", "woken", "Woken by owner (generation 9).", utcnow() - timedelta(hours=25))
@@ -137,9 +138,9 @@ def test_fy_slc_001_asleep_since_waking_and_wakes_today(cpu):
     for r in rows("chat"):
         set_replica("chat", r.ordinal, state="stopped")
     s = sleep_of(c, d["id"])
-    assert (s["asleep"], s["asleep_since"], s["waking"]) == (False, None, False)
+    assert (s["asleep"], s["asleep_since"], s["waking"]) == (False, None, None)
     assert c.post(f"/api/deployments/{d['id']}/start").status_code == 200
-    assert sleep_of(c, d["id"])["waking"] is False
+    assert sleep_of(c, d["id"])["waking"] is None
 
 
 # ------------------------------------------------------------------ advisor: let it sleep?

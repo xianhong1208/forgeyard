@@ -11,7 +11,7 @@ import { IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmR
 import { MODEL_KIND, type ModelKind } from "../lib/fleet";
 import { firstVision, pickerDetail, pickerGroups, routeReady, routeSleep } from "../lib/playground";
 import { api, errorText } from "../lib/api";
-import { elapsed, seconds, sleepState } from "../lib/sleep";
+import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
 import { usePoll } from "../lib/poll";
 import { when } from "../lib/format";
 import { targetHeader } from "../lib/routing";
@@ -99,7 +99,7 @@ export function PlaygroundPage() {
         <div className="play-bar">
           <ModelPicker groups={groups} value={route} onPick={pick} startOpen={legacy === "vision" && !vision} sleepOf={sleepOf} />
           <p className="muted small play-ready">
-            {route.kind === "cloud" ? "Served by a cloud provider." : sleeping === "asleep" ? "Asleep: no replica holds memory now."
+            {route.kind === "cloud" ? "Served by a cloud provider." : sleeping === "asleep" ? "Asleep: a request wakes it."
               : sleeping === "waking" ? "Waking: no replica is ready yet." : `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}`}
             {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
             {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>Deployment</Link>
@@ -125,7 +125,8 @@ export function PlaygroundPage() {
 // 1.5.0 (#37): how often the Playground asks again while the chosen model is asleep or waking.
 const SLEEP_POLL_MS = 2000;
 
-// 1.5.0 (#37): the chosen model is asleep (Wake now, for operators) or waking (about how long, from its last start).
+// 1.5.0 (#37): the chosen model is asleep (a message wakes it; operators may also Wake now) or waking (about how
+// long, from the wake under way or its last start). The request itself is sent as to any model: the gateway holds it.
 function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; onWoken: () => void }) {
   const state = sleepState(d);
   const [busy, setBusy] = useState(false);
@@ -136,7 +137,9 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
     const t = window.setInterval(() => tick((n) => n + 1), 1000);
     return () => window.clearInterval(t);
   }, [state]);
-  const about = d.last_start ? ` (about ${seconds(d.last_start.seconds)})` : "";
+  const expect = wakeSeconds(d);
+  const about = expect ? ` (about ${seconds(expect)})` : "";
+  const wait = d.sleep?.wake_wait ?? 300;
   const wake = async () => {
     setBusy(true);
     setError(null);
@@ -150,10 +153,12 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
     }
   };
   if (state === "waking") {
+    const waiting = d.sleep?.waking?.waiting ?? 0;
     return (
       <div className="play-wake" role="status" aria-live="polite">
         <IconMoon size={16} aria-hidden="true" />
-        <span><strong>Waking the model{about}…</strong> <span className="mono">{elapsed(d.sleep?.woken_at)}</span>. It answers once a replica is ready; a request sent now waits for it.</span>
+        <span><strong>Waking the model{about}…</strong> <span className="mono">{elapsed(d.sleep?.waking?.since)}</span>. A request sent to it waits
+          until a replica is ready (up to {wait} s){waiting ? `; ${waiting} waiting now` : ""}.</span>
       </div>
     );
   }
@@ -162,10 +167,11 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
       <IconMoon size={16} aria-hidden="true" />
       <span>
         <strong>{d.name} is asleep</strong>{d.sleep?.asleep_since ? ` since ${when(d.sleep.asleep_since)}` : ""}: nobody used it for {d.sleep?.idle_minutes ?? 30} min, so it holds no memory.{" "}
-        {canWake ? `Wake it to try it${about ? `; the last start took ${seconds(d.last_start!.seconds)}` : ""}.` : "An operator or admin can wake it from its page."}
+        Send a request and it wakes: the request waits until it is ready{about}, up to {wait} s, or is answered by a cloud tier
+        meanwhile when you may use one.
         {error && <span className="field-error"> {error}</span>}
       </span>
-      {canWake && <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void wake()}>{busy ? "Waking…" : "Wake now"}</button>}
+      {canWake && <button type="button" className="btn" disabled={busy} onClick={() => void wake()}>{busy ? "Waking…" : "Wake now"}</button>}
     </div>
   );
 }

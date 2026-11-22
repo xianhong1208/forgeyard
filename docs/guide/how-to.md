@@ -1089,11 +1089,14 @@ memory back while nobody calls it ([Sleep when idle](concepts.md#sleep-when-idle
 on, per deployment.
 
 1. Turn it on in the form: **Serving → Deploy a model**, or **Edit** on a deployment's page. Under *When not in use*
-   tick **Sleep when idle** and keep or change **Idle minutes** (30 by default, 1 to 1,440). Beside it the form says
-   how long the last start took (on the deploy form: the last start of another deployment of the same model and
-   engine), which is about how long the first request after a sleep waits. Saving only this restarts nothing. From
-   a script: `PATCH /api/deployments/{id}` with `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins
-   and operators; leave `idle_minutes` out for 30 minutes); a deploy takes the same two parameters.
+   tick **Sleep when idle** and keep or change **Idle minutes** (30 by default, 1 to 1,440); under **Advanced**,
+   **Wake wait** is how long a request waits for it to wake (300 seconds by default, 10 to 1,800). Beside the
+   setting the form says how long the last start took (on the deploy form: the last start of another deployment of
+   the same model and engine), which is about how long the first request after a sleep waits. Saving only these
+   restarts nothing. From a script: `PATCH /api/deployments/{id}` with
+   `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins and operators; leave `idle_minutes` out for
+   30 minutes; add `"wake_wait": 120` for requests to wait at most 2 minutes for it to wake instead of 5); a deploy
+   takes the same parameters.
 2. The deployment's page has a *When not in use* card: the setting, what it is doing now (*sleeps in 18 min unless a
    request comes*, or what keeps it awake: a request in flight, a replica starting…), the last request, the last
    start time and how often it was woken in the last 24 hours.
@@ -1102,11 +1105,13 @@ on, per deployment.
    min; frees …*. **Machines** names it under the machine it would run on (*qwen3-4b asleep here (14.4 GiB on GPU
    #4 when awake)*): that memory is free for others meanwhile. The model stays in `/v1/models`; the machine keeps
    the model files and the engine image.
-4. Wake it with **Wake now** on its page or in the **Playground**, where an asleep model stays in the picker with
-   the moon (`POST /api/deployments/{id}/start`). Until it is ready it shows **Waking** with the time since it was
-   woken, and the Playground says *Waking the model (about 74 s)…*. Until waking on a request arrives later in
-   1.5.0, a request to the asleep model answers 503 `model_asleep`, or goes to the route's cloud tier when the key
-   may use one.
+4. The next request wakes it: it waits until the model is ready, up to the wake wait, and is answered then (a key
+   that may use the route's cloud tier is served there meanwhile). Its events say *Woken by a request (key …)*. Or
+   wake it yourself with **Wake now** on its page or in the **Playground**, where an asleep model stays in the
+   picker with the moon (`POST /api/deployments/{id}/start`); requests that arrive while it starts wait for it.
+   Until it is ready Serving shows **Waking** with the time since the wake, and the Playground, which simply sends
+   your message, says *Waking the model (about 74 s)…* while it waits. If it cannot wake (no room, its machine
+   offline, its engine failing) requests get 503 `cannot_wake` with the reason.
 5. **Stop** on an asleep deployment stops it for good: it leaves `/v1/models` until someone starts it.
 
 The setup advisor helps with both directions: *had no requests for 3 days: let it sleep when idle?* for a
