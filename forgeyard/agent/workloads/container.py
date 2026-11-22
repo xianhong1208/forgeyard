@@ -52,6 +52,7 @@ from forgeyard.agent.workloads import plan
 from forgeyard.agent.workloads import pull as pulling
 from forgeyard.agent.workloads.records import Record, RecordStore
 from forgeyard.agent.workloads.runtime import Observation, StartError
+from forgeyard.machines.protocol import ENGINE_CACHE_MOUNT
 from forgeyard.workloads import images
 from forgeyard.workloads.spec import ContainerRuntime as ContainerSpec, WorkloadSpec
 
@@ -391,8 +392,16 @@ class ContainerRuntime:
             if "," in host or not os.path.isdir(host):
                 raise StartError(f"cannot mount the model directory {host}")
             mounts = [(host, sources.container_paths(rec.model)["mount"])]
+        cache_mount, cache_env = None, None
+        cache = rec.engine_cache or {}
+        if cache.get("dir"):
+            # 1.5.0: the replica's own engine cache (agent/workloads/enginecache.py), the only writable mount.
+            if "," in cache["dir"] or not os.path.isdir(cache["dir"]):
+                raise StartError(f"cannot mount the engine cache {cache['dir']}")
+            cache_mount = (cache["dir"], ENGINE_CACHE_MOUNT)
+            cache_env = {cache["env"]: ENGINE_CACHE_MOUNT}
         env = plan.container_env(spec.env, rec.gpus, rec.ports, replica_id=rec.id, workload=rec.workload,
-                                 ordinal=rec.ordinal, extra=extra, secret=secret)
+                                 ordinal=rec.ordinal, extra=extra, secret=secret, cache=cache_env)
         fd = os.open(env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(plan.env_file_text(env))
@@ -406,7 +415,8 @@ class ContainerRuntime:
             args=plan.substitute(rt.args, {}, extra) if extra else rt.args, env_file=str(env_file),
             labels=self.labels(rec), ports=rec.ports, bind=address, cpu=spec.resources.cpu,
             memory=spec.resources.memory, gpus=rec.gpus, gpu_mode=self._info.get("gpu_mode"),
-            render_devices=devices, render_gids=gids, log_max_bytes=self.log_max_bytes, mounts=mounts)
+            render_devices=devices, render_gids=gids, log_max_bytes=self.log_max_bytes, mounts=mounts,
+            cache_mount=cache_mount)
         try:
             r = self._run(argv, timeout=RUN_TIMEOUT)
             if r.returncode != 0 and CREDENTIAL_HELPER_FAILED in (r.stderr or ""):
