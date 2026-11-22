@@ -1357,6 +1357,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-simulated` | warning | A machine reports simulated hardware |
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
+| `machine-gpu-access-lost` | error | New processes on an online machine cannot open its GPUs (the agent checks every 5 minutes as its workload account; an agent container started with `--gpus` alone loses that access when the host runs `systemctl daemon-reload`). Process workloads are not placed on those GPUs meanwhile; the fix opens the machine's update command ([what to do](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |

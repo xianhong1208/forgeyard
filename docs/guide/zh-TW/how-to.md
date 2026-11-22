@@ -90,6 +90,7 @@ sudo docker save ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d 
 ```bash
 sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
+  $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -99,6 +100,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
   docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
+
+`$(for d in …)` 那一行會再用 `--device` 傳入主機上每個 NVIDIA 裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm`、`/dev/nvidia-uvm-tools`、`/dev/nvidia-modeset` 和每個 `/dev/nvidiaN`），主機沒有的會跳過。Docker 可以同時接受它們和 `--gpus all`，而且這很重要：`--gpus` 給的裝置是在 Docker 和 systemd 不知道的情況下設定的，主機下一次執行 `systemctl daemon-reload` 時，容器裡的新程序就會失去它們；用 `--device` 給的則會留著（[機器上的新程序打不開它的 GPU](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)）。如果還沒有 `/dev/nvidia-uvm`（主機開機後還沒跑過 CUDA 程式），先執行 `sudo nvidia-modprobe -u -c=0`。設定好 CDI（`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）的話，可以改用 `--device nvidia.com/gpu=all` 取代這兩者：CDI 會宣告這些裝置，所以它們也會留著。
 
 接著：
 
@@ -202,6 +205,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
    ```bash
    sudo docker run -d --name forgeyard-agent --restart always --network host --gpus all \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -927,6 +931,11 @@ sudo systemctl enable --now forgeyard
      --restart always \
      --network host \
      --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     --device /dev/nvidia1 \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -936,6 +945,8 @@ sudo systemctl enable --now forgeyard
      -e HF_TOKEN="$HF_TOKEN" \
      docker.io/tonyhuang1101/forgeyard-agent:1.4.4
    ```
+
+   在 NVIDIA 機器上，指令還會在 `--gpus` 旁邊用 `--device` 傳入 GPU 的裝置節點（1.4.5 起是 agent 回報的那些；較舊的 agent 則用一小段 shell 迴圈列出主機上的），所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。
 
    經由伺服器取得檔案的機器（**Always through the server**）則改為搬運映像檔：在能連到 Docker Hub 的機器上 `docker save`，透過 `ssh` 直接送進那台機器的 `docker load`（把 `USER` 換掉），再執行同樣的 `docker rm -f` 與 `docker run`。其他機器也會在 *cannot reach the registry?* 底下列出這個做法。
 - **用 install.sh 安裝的**：再執行一次單行安裝，但不加 `--join`（[原因](#upgrade-the-server-and-the-agents)）。

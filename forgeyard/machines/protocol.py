@@ -31,6 +31,8 @@ agent -> server
   image_saved (1.4.1) answer to image_save: how the send of an image ended, and which image it was
   image_removed (1.4.2) answer to image_remove: removed (the image, the bytes freed, the space after) or why not
   cert_request (1.4.5, "guard_tls") a CSR for the key the agent's replica guards serve TLS with
+  gpu_check  (1.4.5, "gpu_check") whether a new process can still open the machine's GPUs, when that changed
+             (see FEATURE_GPU_CHECK); hello's `runtime_info.gpu_check` carries it too
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -130,7 +132,7 @@ CLOSE_RESTART = 1012
 # agent newer than its server (or older) keeps working: what it adds is gated by `features` anyway. The same holds
 # for a card of a `vendor` outside VENDORS: the server leaves that card out and keeps the rest of the hello.
 AGENT_MESSAGES = ("hello", "heartbeat", "inventory", "status", "logs", "cache_removed", "image_loaded", "relay_sent",
-                  "image_listed", "image_saved", "image_removed", "cert_request")
+                  "image_listed", "image_saved", "image_removed", "cert_request", "gpu_check")
 SERVER_MESSAGES = ("welcome", "error", "desired", "logs_request", "cache_remove", "cache_prune", "image_load",
                    "relay_send", "image_list", "image_save", "image_remove", "certificate")
 
@@ -253,9 +255,18 @@ FEATURE_IMAGE_REMOVE = "image_remove"
 # advisor says so ("traffic to this machine is not encrypted: update the agent"). A server without it gets plain
 # HTTP from every agent: the agent's guards serve TLS only when the server listed it in the welcome.
 FEATURE_GUARD_TLS = "guard_tls"
+# 1.4.5 (issue #202): an agent with process workloads and GPUs probes, at start and every 5 minutes, whether a new
+# process running as its workload account can still open the GPU device nodes (agent/gpu_check.py: after the host's
+# `systemctl daemon-reload` an agent container started with `--gpus all` alone keeps its open handles but loses new
+# opens). hello's `runtime_info.gpu_check` carries the result ({ok, at, user, devices: [{path, vendor, ok, error}],
+# reason}), and to a server that lists this feature the agent sends `gpu_check {gpu_check}` whenever the verdict or the
+# failing devices change (`{"ok": null}`: nothing to check any more). While it fails the server places no process
+# workload on that machine's GPUs (containers are not affected) and the setup advisor shows an error. Server only.
+FEATURE_GPU_CHECK = "gpu_check"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
                    FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
-                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE, FEATURE_GUARD_TLS)
+                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE, FEATURE_GUARD_TLS,
+                   FEATURE_GPU_CHECK)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

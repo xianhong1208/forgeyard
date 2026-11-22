@@ -86,6 +86,26 @@ version until 1.0.
   gpt-oss moves with it (Gemma 4 12B 36.7 to 34.0 GiB, 31B 89.6 to 83.1). A Gemma 4 added before this is passed
   2,496 whatever its kind (E2B and E4B need 2,048; adding them again reads it). No migration.
 
+- **NVIDIA agents keep their GPUs across the host's `systemctl daemon-reload`, and a lost GPU is reported** (#202).
+  With `docker run --gpus all` alone, the NVIDIA runtime hook gives the agent's container its devices behind Docker's
+  and systemd's back; the host's next `systemctl daemon-reload` took that access from new processes in the container
+  (open handles kept working), so a new process workload failed with `cuInit: CUDA_ERROR_NO_DEVICE` while containers
+  and the inventory looked fine. Now:
+  - every NVIDIA agent command Forgeyard gives (Add a machine → Docker, the machine page's update command, the guide
+    and the README) also passes the device nodes with `--device` (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
+    `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and each `/dev/nvidiaN`), which Docker records, so they stay. The
+    update command names the nodes a 1.4.5 agent reports; for an older agent, and in the Add-a-machine form (before
+    any inventory), a short shell loop lists the host's, skipping one the host does not have. The rest of the
+    update command is unchanged. CDI (`--device nvidia.com/gpu=all`) is documented as the alternative;
+  - the agent checks at start and every 5 minutes that a new process, run as its workload account the way a process
+    workload starts, can open its GPU device nodes (NVIDIA: `/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidiaN`;
+    AMD: `/dev/kfd` and the render nodes), and reports the result (`runtime_info.gpu_check`; a `gpu_check` message
+    when it changes, to a server that lists the feature `gpu_check`). While it fails, Setup health shows an error
+    (`machine-gpu-access-lost`: restart the agent container and update it with the machine page's command) and no
+    process workload or process engine is placed on those GPUs, with the reason on the waiting replica; containers
+    are not affected. Once the GPUs open again, what waited is placed.
+  The guide's troubleshooting page explains the cause and the fix. No migration.
+
 
 - **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
   local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of

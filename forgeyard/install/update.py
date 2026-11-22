@@ -20,6 +20,7 @@ from typing import Any, Optional
 from forgeyard import __version__
 from forgeyard.db import Node
 from forgeyard.install import images
+from forgeyard.install.commands import NVIDIA_DEVICES_SHELL
 from forgeyard.machines import protocol as p
 
 GUIDE = "/guide/en/how-to#update-an-agent"
@@ -33,6 +34,12 @@ GPUS = re.compile(r"^(all|\d{1,3}|device=[A-Za-z0-9,:_-]{1,200})$")
 RESTART = re.compile(r"^(always|unless-stopped|on-failure(:\d{1,4})?)$")
 IMAGE_FILE = "forgeyard-agent.tar.gz"
 MAX_LIST = 64
+# 1.4.5 (#202): an NVIDIA agent container also gets its device nodes with --device, next to --gpus. The NVIDIA runtime
+# hook behind --gpus sets up the container's device access without Docker or systemd knowing, and the host's next
+# `systemctl daemon-reload` takes it away from new processes (agent/gpu_check.py); a --device Docker records, so it
+# stays. The agent reports the nodes it has (how_it_runs.py `nvidia_devices`); for an older agent the shell lists the
+# host's when the command runs (commands.NVIDIA_DEVICES_SHELL).
+NVIDIA_NODE = re.compile(r"^/dev/nvidia(?:ctl|-uvm|-uvm-tools|-modeset|[0-9]{1,3})$")
 
 
 def version_tuple(v: Optional[str]) -> tuple[int, ...]:
@@ -119,6 +126,9 @@ def run_flags(c: dict, notes: list[str]) -> list[str]:
     runtime = _clean(c.get("runtime"), 64)
     if runtime:
         flags.append(f"--runtime {_q(runtime)}")
+    nvidia = (isinstance(gpus, str) and GPUS.match(gpus) is not None) or runtime == "nvidia"
+    if nvidia:
+        flags += nvidia_device_flags(c, notes)
     for d in _list(c.get("devices")):
         host = _clean((d or {}).get("host"), 256) if isinstance(d, dict) else None
         if not host:
@@ -191,6 +201,26 @@ def run_flags(c: dict, notes: list[str]) -> list[str]:
         notes.append("Left out, as the agent reported them in a form that cannot be repeated safely: "
                      + ", ".join(skipped) + ". Add them by hand if the agent needs them.")
     return flags
+
+
+def nvidia_device_flags(c: dict, notes: list[str]) -> list[str]:
+    """1.4.5 (#202): `--device` for each NVIDIA device node the container has and was not already given with --device:
+    the ones the agent reported, or (an agent before 1.4.5, with every GPU) the host's, listed by the shell."""
+    given = {d.get("host") for d in _list(c.get("devices")) if isinstance(d, dict)}
+    reported = c.get("nvidia_devices")
+    nodes = [d for d in _list(reported) if isinstance(d, str) and NVIDIA_NODE.match(d)]
+    if nodes:
+        return [f"--device {d}" for d in dict.fromkeys(nodes) if d not in given]
+    if any(isinstance(h, str) and NVIDIA_NODE.match(h) for h in given):
+        return []  # already passed by hand
+    if c.get("gpus") == "all" or (c.get("runtime") == "nvidia" and not c.get("gpus")):
+        notes.append("The NVIDIA device nodes are listed by the shell when you run the command ($(for d in …), "
+                     "--device for each /dev/nvidia* node of the host), so that the agent keeps its GPUs when the host "
+                     "runs `systemctl daemon-reload`. From 1.4.5 on the agent reports them and this page names each.")
+        return [NVIDIA_DEVICES_SHELL]
+    notes.append("Add --device for /dev/nvidiactl, /dev/nvidia-uvm and each /dev/nvidiaN of the GPUs it uses (ls "
+                 "/dev/nvidia*), so that the agent keeps its GPUs when the host runs `systemctl daemon-reload`.")
+    return []
 
 
 def container_plan(node: Node, report: dict, image: images.AgentImage, version: str, offline: bool) -> dict:

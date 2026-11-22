@@ -262,6 +262,25 @@ class ProcessRuntime:
                 continue
         return sorted(g for g in gids if g != 0)
 
+    def probe(self, inner: list[str], *, vendors: set[str], timeout: float) -> subprocess.CompletedProcess:
+        """1.4.5 (#202): run a short command the way a replica starts (agent/gpu_check.py): as the workload account,
+        with the device groups a replica with GPUs of these vendors gets, in a systemd scope when replicas get one,
+        a new session, an empty environment but PATH, and no open files of the agent's. Its output comes back."""
+        if not self._info.get("ok"):
+            raise OSError("the process runtime is not available")
+        groups = self._device_gids([{"vendor": v} for v in sorted(vendors)])
+        kwargs: dict = {}
+        if self.limits == "systemd":
+            argv = plan.systemd_argv(f"forgeyard-gpu-check-{os.getpid()}-{time.monotonic_ns() % 10**9}", cpu=None,
+                                     memory=None, uid=self.uid, gid=self.gid, groups=groups, inner=inner)
+        else:
+            argv = inner
+            if self.switch:
+                kwargs = {"user": self.uid, "group": self.gid, "extra_groups": groups}
+        env = {"PATH": plan.BASIC_PATH, "LANG": "C.UTF-8", "USER": self.user, "LOGNAME": self.user, "HOME": "/"}
+        return subprocess.run(argv, env=env, cwd="/", stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              timeout=timeout, start_new_session=True, close_fds=True, check=False, **kwargs)
+
     # ------------------------------------------------------------------ lifecycle
     def start(self, rec: Record, address: str, secret: Optional[dict[str, str]] = None) -> None:
         if not self._info.get("ok"):

@@ -150,6 +150,15 @@ export function carryCommands(image: AgentImage): { save: string; load: string }
   return { save: lines.join(" && \\\n  "), load: `gunzip -c ${IMAGE_FILE} | sudo docker load` };
 }
 
+// 1.4.5 (#202): `--device` for each NVIDIA device node of the host, listed by the shell where the command runs (a node
+// the host does not have is skipped: Docker refuses a --device that does not exist). Next to --gpus all, because the
+// NVIDIA runtime hook behind --gpus sets up the device access behind Docker's and systemd's back, and the host's next
+// `systemctl daemon-reload` takes it from new processes in the container; a --device Docker records, so it stays.
+// The same text as forgeyard/install/commands.py NVIDIA_DEVICES_SHELL.
+export const NVIDIA_DEVICES =
+  "$(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; " +
+  "do [ -e \"$d\" ] && printf -- '--device %s ' \"$d\"; done)";
+
 const AMD_GROUPS = [
   '--group-add "$(getent group video | cut -d: -f3)"',
   '--group-add "$(getent group render | cut -d: -f3)"',
@@ -163,7 +172,7 @@ export function runCommand(kind: DockerKind, form: DockerForm, join: DockerJoin)
   const range = form.portRange.trim();
   const lines = ["sudo docker run -d --name forgeyard-agent --restart always --network host"];
   if (kind === "nvidia") {
-    lines.push("--gpus all");
+    lines.push("--gpus all", NVIDIA_DEVICES);
   } else if (kind === "amd") {
     // Numeric ids: Docker looks group names up in the image's /etc/group, which has no "render".
     lines.push("--device /dev/kfd --device /dev/dri", ...AMD_GROUPS, "-v /opt/rocm:/opt/rocm:ro");
