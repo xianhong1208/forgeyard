@@ -427,6 +427,55 @@ The warning does not appear when every port of a range of up to 64 ports is forw
 Then restart the agent. If the server does reach the machine at that address in a way Forgeyard cannot see (a
 proxy on the server's host, say), snooze the warning.
 
+## New processes on a machine cannot open its GPUs
+
+**You see:** an error under **Get started → Setup health** and on the machine's page: *New processes on gpu-01 cannot
+open its GPUs (/dev/nvidia0: Operation not permitted)*. A process engine or app there fails at once with
+`cuInit: CUDA_ERROR_NO_DEVICE` or `Failed to initialize NVML: Unknown Error`, while models in containers on the same
+machine keep answering and the machine's page still lists every GPU. Deployments that need a process on those GPUs
+wait, with the reason *new processes there cannot open its NVIDIA GPUs*.
+
+**Why:** the agent checks every 5 minutes, and when it starts, that a new process running as its workload account
+can open the GPU device nodes (`/dev/nvidiactl`, `/dev/nvidia-uvm` and each `/dev/nvidiaN`; on AMD `/dev/kfd` and
+the render nodes). With `docker run --gpus all` the NVIDIA runtime hook gives the agent's container its GPU devices
+behind Docker's and systemd's back. When the host runs `systemctl daemon-reload` (a package install, an unattended
+upgrade, any unit change: often, on a shared host), systemd applies the container's cgroup again from what it knows,
+and that device access is gone. What is already open keeps working (the agent's GPU readings, the engines that were
+running); every new open inside that container is refused. New containers get the access afresh, so models in
+containers are not affected. AMD agents are not affected either: their command passes `/dev/kfd` and `/dev/dri` with
+`--device`. While the check fails, Forgeyard places no process workload on those GPUs.
+
+**Do:**
+
+1. Restart the agent container: `sudo docker restart forgeyard-agent`. It gets its devices back and the error goes
+   away at its next check (it checks again when it connects). Models in containers keep running.
+2. Update it with the machine page's **Update the agent** command (the error's **Update command** opens it). From
+   1.4.5 that command passes the NVIDIA device nodes with `--device` next to `--gpus all`, which Docker records, so a
+   reload no longer takes them away:
+
+   ```bash
+     --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     …
+   ```
+
+   An agent before 1.4.5 does not report its device nodes; its command lists the host's with a short shell loop
+   instead (`$(for d in /dev/nvidiactl … /dev/nvidia[0-9]*; do … done)`), which skips a node the host does not have.
+   If `/dev/nvidia-uvm` is missing on the host, run `sudo nvidia-modprobe -u -c=0` first.
+
+If it still happens with the device flags: some `runc` versions with systemd's cgroup driver drop the rules anyway
+when the host has no `/dev/char` links for the NVIDIA devices. Create them with the NVIDIA Container Toolkit
+(`sudo nvidia-ctk system create-dev-char-symlinks --create-all`; NVIDIA's discussion #1133 of nvidia-container-toolkit
+has a udev rule that keeps them after a reboot), or start the agent with CDI instead of `--gpus all`
+(`--device nvidia.com/gpu=all`, after `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`). Changing Docker's
+cgroup driver to cgroupfs also avoids it, but restarts every container on the host: not on a shared host.
+
+Outside a container (install.sh or a checkout) the same error means the workload account itself may not open the
+devices: check their permissions and the account's groups (`video`, `render`), then restart the agent.
+
 ## Traffic to a machine is not encrypted
 
 **You see:** *Traffic to gpu-02 is not encrypted: update the agent* under **Get started → Setup health** and on the

@@ -502,3 +502,255 @@ def test_fy_acc_020_a_broken_off_download_leaves_nothing_but_never_takes_others(
     fake.calls.clear()
     acc._remove_partials(run, box, "x", wait=25)    # nothing shows within the wait: nothing asked
     assert all(m == "GET" for m, _, _ in fake.calls)
+
+
+# ------------------------------------------------------------------ waits with a limit for room (1.4.5, #203)
+class FakeTime:
+    """time for accept_all: monotonic() moves only when sleep() is called."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+    def __getattr__(self, name):
+        import time
+        return getattr(time, name)
+
+
+def rep(state="pending", machine=None, reason=None, final=False, **kw):
+    return {"ordinal": 0, "state": state, "machine": machine, "reason": reason, "final": final, **kw}
+
+
+SHORT = "Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB"
+
+
+def test_fy_acc_021_a_replica_with_no_room_is_named(acc):
+    """FY-ACC-021: unplaced() gives the server's reason while a replica is on no machine because none has room
+    (`Cannot be placed: …`, said once for several replicas), and nothing for a replica that is placed (even still
+    pending or downloading there), finished, or waiting for another reason."""
+    assert acc.unplaced({"replica_list": [rep(reason=SHORT)]}) == SHORT
+    assert acc.unplaced({"replica_list": [rep(reason=SHORT), {**rep(reason=SHORT), "ordinal": 1}]}) == SHORT
+    on = {"id": 3, "name": "gpu-01"}
+    for r in (rep(machine=on, reason=SHORT), rep(state="downloading", machine=on), rep(reason=SHORT, final=True),
+              rep(reason="waiting for gpu-01 to come online"), rep(), rep(state="healthy", machine=on)):
+        assert acc.unplaced({"replica_list": [r]}) is None, r
+    assert acc.unplaced({"replica_list": []}) is None and acc.unplaced({}) is None
+    assert acc.unplaced({"replica_list": [rep(machine=on), rep(reason=SHORT)]}) == SHORT
+
+
+def test_fy_acc_022_waiting_for_room_has_its_own_limit(acc, monkeypatch):
+    """FY-ACC-022: a wait whose object stays unplaced for --place-timeout seconds in a row (300 by default) ends
+    with Unplaced naming the shortage, long before --timeout; a replica that is placed in between starts the count
+    again; one that is placed and slow still has the whole --timeout and then fails as before (Fail, not
+    Unplaced); a poll without the third value is never cut short."""
+    ft = FakeTime()
+    monkeypatch.setattr(acc, "time", ft)
+    run = acc.Run(acc.parse_args([]), None)
+    assert run.args.place_timeout == acc.PLACE_TIMEOUT == 300 and run.args.timeout == 2400
+    t0 = ft.t
+    with pytest.raises(acc.Unplaced) as e:
+        run.wait("accept-x-depth", lambda: (False, "pending", SHORT), run.args.timeout, every=5)
+    assert 300 <= ft.t - t0 < 310 and SHORT in str(e.value) and "within 300 s" in str(e.value)
+    assert isinstance(e.value, acc.Fail)
+    # Placed now and then: the count starts again each time, so only --timeout ends it.
+    n = {"i": 0}
+
+    def flaky():
+        n["i"] += 1
+        return False, "pending", (SHORT if n["i"] % 50 else None)
+
+    t0 = ft.t
+    with pytest.raises(acc.Fail) as e:
+        run.wait("w", flaky, 1000, every=5)
+    assert not isinstance(e.value, acc.Unplaced) and ft.t - t0 > 1000
+    t0 = ft.t
+    with pytest.raises(acc.Fail) as e:
+        run.wait("w", lambda: (False, "downloading", None), 600, every=5)
+    assert not isinstance(e.value, acc.Unplaced) and ft.t - t0 > 600
+    with pytest.raises(acc.Fail) as e:
+        run.wait("w", lambda: (False, "pending"), 600, every=5)
+    assert not isinstance(e.value, acc.Unplaced)
+    # Ready while the reason is still given (the last poll): done wins.
+    assert run.wait("w", lambda: (True, "running", SHORT), 10) == "running"
+    short = acc.Run(acc.parse_args(["--place-timeout", "20"]), None)
+    t0 = ft.t
+    with pytest.raises(acc.Unplaced):
+        short.wait("w", lambda: (False, "pending", SHORT), 2400, every=2)
+    assert 20 <= ft.t - t0 < 23
+    with pytest.raises(SystemExit):
+        acc.parse_args(["--place-timeout", "0"])
+
+
+def test_fy_acc_023_no_room_is_a_skip_not_a_failure(acc, monkeypatch):
+    """FY-ACC-023: what waited for room records a SKIP with the shortage (not_ready), any other failed wait a FAIL;
+    an Unplaced that leaves a group ends it as a SKIP of the rest of the group; a workload's and a deployment's
+    waits pass the reason on (wait_status, dep_poll)."""
+    ft = FakeTime()
+    monkeypatch.setattr(acc, "time", ft)
+    run = acc.Run(acc.parse_args(["--place-timeout", "10"]), None)
+    run.current = "passthrough"
+    run.not_ready("accept-x-depth: ready", acc.Unplaced(f"workload #9: not placed within 10 s, {SHORT}"))
+    run.not_ready("accept-x-seg: ready", acc.Fail("workload #8: not done within 2400 s"))
+
+    def group(r):
+        r.check("one", True)
+        raise acc.Unplaced(SHORT)
+
+    run.run_group(acc.Group("workloads", "W", group), "")
+    got = [(c.group, c.name, c.status) for c in run.report.checks]
+    assert got == [("passthrough", "accept-x-depth: ready", "SKIP"), ("passthrough", "accept-x-seg: ready", "FAIL"),
+                   ("workloads", "one", "PASS"), ("workloads", "workloads: the rest of the group", "SKIP")]
+    assert SHORT in run.report.checks[0].detail and SHORT in run.report.checks[3].detail
+
+    class Admin:
+        def ok(self, method, path, body=None, **kw):
+            if path.startswith("/api/workloads/"):
+                return {"workload": {"status": "pending", "replica_list": [rep(reason=SHORT)]}}
+            return {"deployment": {"name": "d", "workload": {"replica_list": [rep(reason=SHORT)]}}}
+
+    run.admin = Admin()
+    with pytest.raises(acc.Unplaced):
+        acc.wait_status(run, 9, ("running", "failed"), 2400)
+    assert acc.dep_poll(run, 7) == (False, f"#0 - pending ({SHORT})", SHORT)
+    # The GPU isolation checks of the workloads group: a SKIP of their own, after the machine's other checks.
+    gpu = {"id": 1, "name": "gpu-01", "status": "online"}
+    run.machines = {"gpu": gpu}
+    monkeypatch.setattr(run, "fresh_machine", lambda role: gpu)
+    monkeypatch.setattr(acc, "workloads_on", lambda r, role, m: r.check(f"{m['name']}: a task", True))
+
+    def no_room(r, m):
+        raise acc.Unplaced(f"workload #5: not placed within 10 s, {SHORT}")
+
+    monkeypatch.setattr(acc, "gpu_isolation", no_room)
+    run.run_group(acc.GROUPS["workloads"], "")
+    assert [(c.name, c.status) for c in run.report.checks[-2:]] == [("gpu-01: a task", "PASS"),
+                                                                     ("gpu-01: GPU isolation", "SKIP")]
+
+
+class GpuAdmin:
+    """The admin's client for free_gpu: deployments and workloads it knows, their replicas stop when asked."""
+
+    def __init__(self, objects: dict):
+        self.objects = objects          # path -> {"kind": "deployment"|"workload", "state": …}
+        self.calls: list[tuple[str, str]] = []
+
+    def request(self, method, path, body=None, **kw):
+        self.calls.append((method, path))
+        base = path.removesuffix("/stop")
+        o = self.objects.get(base)
+        if o is None:
+            return acc_resp(404, {})
+        if method == "POST" and path.endswith("/stop"):
+            o["state"] = "stopped"
+            return acc_resp(200, {"ok": True})
+        if method == "DELETE":
+            self.objects.pop(base)
+            return acc_resp(200, {"ok": True})
+        w = {"replica_list": [rep(state=o["state"], machine={"id": 1, "name": "gpu-01"})]}
+        return acc_resp(200, {"deployment": {"workload": w}} if o["kind"] == "deployment" else {"workload": w})
+
+    def ok(self, method, path, body=None, **kw):
+        return self.request(method, path, body).data
+
+
+def acc_resp(status, data):
+    import json as _json
+    from types import SimpleNamespace
+    return SimpleNamespace(status=status, data=data, body=_json.dumps(data).encode(), code=lambda: "")
+
+
+def test_fy_acc_024_before_a_gpu_group_the_run_lets_go_of_its_own_gpu_work(acc, monkeypatch):
+    """FY-ACC-024: before each GPU group (tts, img, video, passthrough, vision) the run stops what earlier groups
+    deployed on a GPU, waits until that is stopped, removes it (the models group's deployments are only stopped:
+    the console shows one; they are removed at the end like everything else), and notes it; the models group's
+    speech-to-text deployment stays while the tts group may use it (--tts-asr), CPU work and the group's own stay;
+    run_groups does this before the GPU groups only, and every object is still removed by the cleanup."""
+    ft = FakeTime()
+    monkeypatch.setattr(acc, "time", ft)
+    assert acc.GPU_GROUPS == ("tts", "img", "video", "passthrough", "vision")
+    run = acc.Run(acc.parse_args([]), None)
+    objs = {f"/api/deployments/{i}": {"kind": "deployment", "state": "healthy"} for i in (1, 2, 3, 4, 5, 6)}
+    objs["/api/workloads/7"] = {"kind": "workload", "state": "healthy"}
+    run.admin = admin = GpuAdmin(objs)
+    deleted = []
+
+    def made(group, label, path, gpu, **kw):
+        item = run.cleanup.add(label, lambda: (admin.request("DELETE", path), deleted.append(label)))
+        item.update(group=group, gpu=gpu, path=path, **kw)
+        return item
+
+    made("models", "deployment chat", "/api/deployments/1", True, dep_id=1)
+    made("models", "deployment asr", "/api/deployments/2", True, dep_id=2)
+    made("models", "deployment cpu", "/api/deployments/3", False, dep_id=3)
+    run.deps = {"chat": {"id": 1}, "asr": {"id": 2}, "cpu": {"id": 3}}
+    made("tts", "deployment tts-gpu", "/api/deployments/4", True, dep_id=4)
+    made("tts", "deployment tts-cpu", "/api/deployments/5", False, dep_id=5)
+    made("img", "deployment img-gpu", "/api/deployments/6", True, dep_id=6)
+    made("passthrough", "workload x-depth", "/api/workloads/7", True)
+    # Before tts: chat stops (asr stays: tts may use it); nothing of tts's own yet.
+    assert run.free_gpu("tts", ["img", "video", "passthrough", "vision", "console"]) == ["deployment chat"]
+    assert ("POST", "/api/deployments/1/stop") in admin.calls and ("POST", "/api/deployments/2/stop") not in admin.calls
+    assert objs["/api/deployments/1"]["state"] == "stopped" and "/api/deployments/1" in objs and not deleted
+    # Before img: asr (tts is over) and tts's GPU deployment go; tts's CPU one and img's own stay.
+    admin.calls.clear()
+    assert run.free_gpu("img", ["video", "passthrough"]) == ["deployment asr", "deployment tts-gpu"]
+    assert deleted == ["deployment tts-gpu"] and "/api/deployments/2" in objs and "/api/deployments/5" in objs
+    assert ("POST", "/api/deployments/1/stop") not in admin.calls          # stopped once
+    assert run.free_gpu("img", ["video", "passthrough"]) == []
+    # Before passthrough: img's GPU deployment; then vision: passthrough's GPU workload.
+    assert run.free_gpu("passthrough", ["vision"]) == ["deployment img-gpu"]
+    assert run.free_gpu("vision", []) == ["workload x-depth"] and "/api/workloads/7" not in objs
+    assert any("before img, freed the GPU of: deployment asr, deployment tts-gpu" == n for n in run.report.notes)
+    # --tts-asr none: the speech-to-text deployment is not kept for tts.
+    r2 = acc.Run(acc.parse_args(["--tts-asr", "none"]), None)
+    r2.admin = GpuAdmin({"/api/deployments/2": {"kind": "deployment", "state": "healthy"}})
+    r2.cleanup.add("deployment asr", lambda: None).update(group="models", gpu=True, path="/api/deployments/2", dep_id=2)
+    r2.deps = {"asr": {"id": 2}}
+    assert r2.free_gpu("tts", []) == ["deployment asr"]
+    # The cleanup still removes everything at the end, once.
+    run.cleanup.run()
+    assert sorted(deleted) == sorted(["deployment tts-gpu", "deployment img-gpu", "workload x-depth", "deployment chat",
+                                      "deployment asr", "deployment cpu", "deployment tts-cpu"])
+    # run_groups: free_gpu before the GPU groups only, with the groups after it.
+    order = []
+    monkeypatch.setattr(acc.Run, "free_gpu", lambda self, g, rest: order.append(("free", g, tuple(rest))))
+    monkeypatch.setattr(acc.Run, "run_group", lambda self, g, why: order.append(("run", g.name)))
+    acc.run_groups(run, [("models", ""), ("gateway", ""), ("tts", ""), ("relay", ""), ("vision", ""), ("console", "")])
+    assert order == [("run", "models"), ("run", "gateway"), ("free", "tts", ("relay", "vision", "console")),
+                     ("run", "tts"), ("run", "relay"), ("free", "vision", ("console",)), ("run", "vision"),
+                     ("run", "console")]
+
+
+def test_fy_acc_025_what_it_deploys_says_where_it_runs(acc):
+    """FY-ACC-025: a deployment or workload the run makes is registered for the cleanup with its group, its path
+    and whether it takes a GPU (a GPU model, a workload asking for GPUs), which is what free_gpu goes by."""
+    run = acc.Run(acc.parse_args([]), None)
+    run.current = "tts"
+
+    class Admin:
+        def ok(self, method, path, body=None, **kw):
+            if path == "/api/deployments/estimate":
+                return {"placement": {"fits": True, "placed": [{"machine": "gpu-01", "gpus": [4], "variant": "cuda"}]},
+                        "estimate": {"amount": 3 * 1024**3}}
+            return {"workload": {"id": 11, "name": body["name"]}}
+
+        def request(self, method, path, body=None, **kw):
+            return acc_resp(201, {"deployment": {"id": 21, "name": body["name"]}})
+
+    run.admin = Admin()
+    m = {"id": 1, "name": "gpu-01", "accelerators": [{"index": 4, "vendor": "nvidia", "allowed": True}]}
+    spec = {"model": "qwen3-tts-0.6b", "recipe": "vllm-omni-tts", "params": {"gpus": 1}, "device": "gpu"}
+    assert acc.deploy(run, "tts-gpu", spec, m)["deployment"]["id"] == 21
+    acc.deploy(run, "tts-cpu", {**spec, "params": {"gpus": 0}, "device": "cpu"}, {**m, "accelerators": []})
+    acc.workload(run, {"name": "x", "resources": {"gpus": {"count": 1, "vram": "3Gi"}}})
+    acc.workload(run, {"name": "y", "runtime": {"type": "process"}})
+    got = [(i["label"], i["group"], i["gpu"], i["path"]) for i in run.cleanup.items()]
+    assert got == [(f"deployment {run.name('tts-gpu')}", "tts", True, "/api/deployments/21"),
+                   (f"deployment {run.name('tts-cpu')}", "tts", False, "/api/deployments/21"),
+                   ("workload x", "tts", True, "/api/workloads/11"), ("workload y", "tts", False, "/api/workloads/11")]
+    assert run.cleanup.items()[0]["dep_id"] == 21

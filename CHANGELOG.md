@@ -66,6 +66,46 @@ version until 1.0.
 
 ### Fixed
 
+- **accept_all no longer waits 40 minutes for a card that has no room** (#203). A deployment or app the server
+  cannot place (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`) is skipped after `--place-timeout`
+  seconds (300 by default), naming that reason; `--timeout` (2,400) stays the limit for downloads and starts. Before
+  each group that deploys on the GPU machine (tts, img, video, passthrough, vision) the run stops what earlier groups
+  left on a GPU and no later group needs, waits for it to stop, and removes it (the models group's deployments are
+  only stopped; its speech-to-text deployment stays for the tts group); the report's notes say what was freed.
+  Everything the run makes is still removed at the end.
+
+- **The vLLM estimate and the engine agree on the tokens in flight** (#201). A sliding-window layer keeps its window
+  plus two steps of `max_num_batched_tokens`, which vLLM 0.32 chooses by card when it is not given: 2,048 on an A100
+  (raised to 2,496 for Gemma 4, its longest video), 8,192 on an H100. The estimate, made before a card is chosen,
+  counted 8,192, so on an A100 Gemma 4 12B at 16,384 x 1 was estimated at 5.25 GiB of KV cache where vLLM used
+  2.09. The `vllm` recipe now passes `--max-num-batched-tokens` itself, vLLM's own A100 value: 2,048, at most
+  concurrency x context, at least 2,496 for Gemma 4 12B, 26B-A4B and 31B while the deployment takes media (vLLM
+  refuses to start below it); the estimate counts the same, to within 0.1% of what vLLM reported for Gemma 4 12B.
+  Nothing changes on an A100 or a card under 70 GB; on an H100 or H200 a long prompt is read in smaller steps than
+  vLLM's 8,192. The flag in *Extra engine arguments* is counted too. Recommended memory for Gemma 3 and 4 and
+  gpt-oss moves with it (Gemma 4 12B 36.7 to 34.0 GiB, 31B 89.6 to 83.1). A Gemma 4 added before this is passed
+  2,496 whatever its kind (E2B and E4B need 2,048; adding them again reads it). No migration.
+
+- **NVIDIA agents keep their GPUs across the host's `systemctl daemon-reload`, and a lost GPU is reported** (#202).
+  With `docker run --gpus all` alone, the NVIDIA runtime hook gives the agent's container its devices behind Docker's
+  and systemd's back; the host's next `systemctl daemon-reload` took that access from new processes in the container
+  (open handles kept working), so a new process workload failed with `cuInit: CUDA_ERROR_NO_DEVICE` while containers
+  and the inventory looked fine. Now:
+  - every NVIDIA agent command Forgeyard gives (Add a machine → Docker, the machine page's update command, the guide
+    and the README) also passes the device nodes with `--device` (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
+    `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and each `/dev/nvidiaN`), which Docker records, so they stay. The
+    update command names the nodes a 1.4.5 agent reports; for an older agent, and in the Add-a-machine form (before
+    any inventory), a short shell loop lists the host's, skipping one the host does not have. The rest of the
+    update command is unchanged. CDI (`--device nvidia.com/gpu=all`) is documented as the alternative;
+  - the agent checks at start and every 5 minutes that a new process, run as its workload account the way a process
+    workload starts, can open its GPU device nodes (NVIDIA: `/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidiaN`;
+    AMD: `/dev/kfd` and the render nodes), and reports the result (`runtime_info.gpu_check`; a `gpu_check` message
+    when it changes, to a server that lists the feature `gpu_check`). While it fails, Setup health shows an error
+    (`machine-gpu-access-lost`: restart the agent container and update it with the machine page's command) and no
+    process workload or process engine is placed on those GPUs, with the reason on the waiting replica; containers
+    are not affected. Once the GPUs open again, what waited is placed.
+  The guide's troubleshooting page explains the cause and the fix. No migration.
+
 - **The acceptance scripts reach TLS replicas** (follow-up of #163). Since 1.4.5 an agent with `guard_tls` serves its
   replica ports over TLS only, so the scripts' direct calls to a replica's own port (the key guard's 401 without the
   internal key and with a client's key, vLLM's open paths) found the port closed and reported it unreachable or
@@ -79,6 +119,7 @@ version until 1.0.
   that its traffic is not encrypted. `accept_vision` no longer counts a port that does not answer as refused: only
   the key guard's 401 passes. `accept_all` skips only a port it cannot reach at all as another network's; a closed
   connection or a wrong certificate is a failure.
+
 - **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
   local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of
   polling every 25 ms, where whoever looked first after a release took the slot (a newcomer could starve those

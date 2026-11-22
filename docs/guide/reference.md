@@ -1357,6 +1357,7 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `machine-simulated` | warning | A machine reports simulated hardware |
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
 | `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
+| `machine-gpu-access-lost` | error | New processes on an online machine cannot open its GPUs (the agent checks every 5 minutes as its workload account; an agent container started with `--gpus` alone loses that access when the host runs `systemctl daemon-reload`). Process workloads are not placed on those GPUs meanwhile; the fix opens the machine's update command ([what to do](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
@@ -1510,6 +1511,15 @@ The context of a deployment that names none starts at the model's own maximum wh
 the recipe's default (1.4.4): a 512-token BERT classifier gets `--max-model-len 512`, not 8192. RoBERTa and
 XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold 512
 tokens (BGE-M3: 8192).
+
+`vllm` passes `--max-num-batched-tokens`, the tokens vLLM works on in one step (1.4.5, #201): 2,048, at most
+*Concurrent requests* x *Context length*, and 2,496 for Gemma 4 12B, 26B-A4B and 31B while the deployment takes
+images, audio or video (vLLM never splits one of their images or videos over two steps, and its longest, a
+32-frame video, is 2,496 tokens). That is what vLLM 0.32.0 chooses by itself on an A100 and on cards under 70 GB.
+Left to itself it would choose 8,192 on an H100 or H200 and 16,384 from 160 GB, and the estimate, made before a
+card is chosen, could not know which: a sliding-window layer (Gemma, gpt-oss) keeps its window plus two such steps
+per request, so Gemma 4 12B at 16,384 x 1 was estimated at 5.25 GiB of KV cache where vLLM used 2.09. Now the two
+agree on every card. On an H100 or H200 a long prompt is read in more, smaller steps than vLLM would choose there.
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 

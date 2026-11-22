@@ -1011,6 +1011,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
 | `machine-loopback-address` | 警告 | 不是伺服器主機的機器把副本公開在 loopback 位址上（透過 tunnel 或 proxy），而且它的連接埠範圍沒有轉送到伺服器的主機（[做法](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)） |
+| `machine-gpu-access-lost` | 錯誤 | 線上機器的新程序打不開它的 GPU（agent 每 5 分鐘以工作負載帳號檢查一次；只用 `--gpus` 啟動的 agent 容器，在主機執行 `systemctl daemon-reload` 後會失去這份存取權）。這段期間不會把程序類工作負載放到那些 GPU 上；修正連結會開啟機器的更新指令（[做法](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)） |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
@@ -1120,6 +1121,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
 
 部署沒有指定 context 時，如果模型本身的最大長度比配方的預設短，就從模型的最大值開始（1.4.4）：512 個 token 的 BERT 分類模型會得到 `--max-model-len 512`，而不是 8192。RoBERTa 和 XLM-RoBERTa 模型的位置從 padding index 之後開始算，所以 514 個位置嵌入只放得下 512 個 token（BGE-M3：8192）。
+
+`vllm` 會傳 `--max-num-batched-tokens`，也就是 vLLM 一個步驟處理的 token 數（1.4.5，#201）：2,048，最多 *Concurrent requests* × *Context length*；Gemma 4 12B、26B-A4B 和 31B 在部署接受圖片、音訊或影片時是 2,496（vLLM 不會把它們的一張圖片或一段影片拆到兩個步驟，最長的是 32 格的影片，2,496 個 token）。這就是 vLLM 0.32.0 在 A100 和 70 GB 以下的卡上自己會選的值。讓它自己選的話，在 H100、H200 上會是 8,192，160 GB 以上是 16,384，而估算是在選卡之前做的，無從得知：滑動視窗層（Gemma、gpt-oss）每個請求除了視窗，還要存兩個這樣的步驟，所以 Gemma 4 12B 在 16,384 × 1 時估了 5.25 GiB 的 KV cache，vLLM 實際只用了 2.09 GiB。現在兩者在每張卡上都一致。在 H100、H200 上，長的提示詞會分成比 vLLM 自己選的更多、更小的步驟讀完。
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 

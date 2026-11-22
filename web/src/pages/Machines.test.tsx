@@ -8,6 +8,7 @@ import { AuthProvider } from "../auth";
 import fixture from "../test/machines.json";
 import type { Deployment, Replica, Workload } from "../lib/types";
 import { POLL_MS } from "./Machines";
+import { NVIDIA_DEVICES } from "../lib/dockerAgent";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 type Reply = { status: number; body: unknown };
@@ -225,6 +226,9 @@ describe("machines page", () => {
     expect(screen.getByLabelText("Build command").textContent).toBe("sudo docker build -f Dockerfile.agent -t forgeyard-agent:1.1.0 .");
     const docker = () => screen.getByLabelText("Docker command").textContent ?? "";
     expect(docker()).toMatch(/^sudo docker run -d --name forgeyard-agent .*\n {2}--gpus all \\\n/);
+    // FY-WEB-544 (1.4.5, #202): the NVIDIA devices are passed with --device too, listed by the shell, and the page says why.
+    expect(docker()).toContain(`--gpus all \\\n  ${NVIDIA_DEVICES} \\\n`);
+    expect(screen.getByText(/passes each NVIDIA device of the host \(\/dev\/nvidia\*\) with --device as well, so the agent keeps its GPUs when the host runs systemctl daemon-reload/)).toBeTruthy();
     for (const part of ["-e FORGEYARD_SERVER=https://forge.lan:7860", `-e FORGEYARD_CA_FINGERPRINT=${fp}`, "-e FORGEYARD_JOIN_TOKEN=fyj_secret",
       "-v /srv/forgeyard-models:/srv/forgeyard-models", "-e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models"]) expect(docker()).toContain(part);
     expect(docker().endsWith("\n  forgeyard-agent:1.1.0")).toBe(true);

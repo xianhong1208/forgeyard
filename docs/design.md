@@ -319,7 +319,9 @@ page shows that name, its usage, each replica and a small **Try it** that checks
 - **Estimate** (per replica, per GPU): safetensors = parameters × bytes (FP8 keeps embeddings in 16
   bits) + KV cache (2 × layers × KV heads × head size × context × concurrent sequences × bytes;
   1.4.5, #167: per layer kind, `forgeyard/models/kvlayout.py`: sliding-window layers hold at most
-  window − 1 + 2 × 8,192 tokens in flight per sequence, MLA one latent of `kv_lora_rank +
+  window − 1 + 2 × `--max-num-batched-tokens` in flight per sequence (1.4.5, #201: the recipe passes it,
+  2,048, at most concurrency × context, 2,496 for Gemma 4 with media, vLLM's own A100 choice; unset, vLLM picks
+  it by card), MLA one latent of `kv_lora_rank +
   qk_rope_head_dim` values with no V and on every GPU, recurrent layers a fixed state per sequence,
   two with prefix caching, and KV-shared layers nothing; llama.cpp: sliding layers `window ×
   sequences + 512` cells padded to 256, MLA K only, recurrent state in 32-bit floats) +
