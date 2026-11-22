@@ -447,6 +447,15 @@ export type Deployment = {
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
   // 1.5.0 (#37): sleep when idle, the last request the server saw, and when it would go to sleep.
   sleep?: DeploymentSleep;
+  // 1.5.0 (#37): automatic replicas: the bounds, the load and the last decision.
+  autoscale?: DeploymentAutoscale;
+};
+
+export type DeploymentAutoscale = {
+  on: boolean; min: number; max: number; target: number; scale_up_seconds: number; scale_down_minutes: number;
+  capacity: number; replicas: number; ready: number; load: number | null; per_replica: number | null;
+  wanted: number | null; draining: { replica: number; since: string; in_flight: number } | null;
+  room: string | null; paused: string | null; last: { at: string; text: string } | null;
 };
 
 export type DeploymentSleep = {
