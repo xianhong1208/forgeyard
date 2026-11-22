@@ -8,6 +8,7 @@ import logging
 import platform
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -18,7 +19,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus, InvalidURI
 
 from forgeyard import __version__
-from forgeyard.agent import replica_tls, trust
+from forgeyard.agent import gpu_check, replica_tls, trust
 from forgeyard.agent.backoff import Backoff
 from forgeyard.agent.inventory import Inventory, fingerprint
 from forgeyard.agent.relay import RelayClient
@@ -29,6 +30,7 @@ from forgeyard.machines.protocol import (
     FATAL_CLOSE_CODES,
     FEATURE_CACHE_ADMIN,
     FEATURE_ENGINE_ZIP,
+    FEATURE_GPU_CHECK,
     FEATURE_GUARD_TLS,
     FEATURE_IMAGE_IDS,
     FEATURE_IMAGE_LOAD,
@@ -168,6 +170,12 @@ class Agent:
             from forgeyard.agent.share import Sender
 
             self.sender = Sender(models, self.relay_client)
+        # 1.4.5 (#202): whether new processes can still open the GPUs (agent/gpu_check.py), through the process runtime.
+        process = (getattr(supervisor, "runtimes", None) or {}).get("process") if supervisor is not None else None
+        self.gpu_check = (gpu_check.GpuCheck(process, simulated=getattr(inventory, "simulated", False))
+                          if process is not None else None)
+        self.gpu_check_every = gpu_check.CHECK_EVERY
+        self._accelerators: list[dict] = []
 
     def stop(self) -> None:
         self._stop.set()
@@ -199,6 +207,9 @@ class Agent:
                 msg["runtime_info"]["address"] = address
             if local and len(local) >= 2:
                 msg["runtime_info"]["connection"] = {"address": local[0], "port": local[1]}
+            if self.gpu_check is not None and self.gpu_check.last is not None:
+                # 1.4.5 (#202): older servers drop it.
+                msg["runtime_info"]["gpu_check"] = self.gpu_check.last
             cache = self.supervisor.model_cache_info()
             if cache is not None:
                 msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
@@ -284,6 +295,9 @@ class Agent:
                                  ping_interval=10, ping_timeout=20, close_timeout=5, max_size=2**20) as ws:
             inventory = await asyncio.to_thread(self.inventory.full)
             self._fingerprint = fingerprint(inventory)
+            self._accelerators = inventory["accelerators"]
+            if self._gpu_check_due():
+                await asyncio.to_thread(self._run_gpu_check)
             local = getattr(ws, "local_address", None)
             if self.supervisor is not None:
                 # Before the hello, which says where replicas are published (1.4.5, #171).
@@ -304,6 +318,8 @@ class Agent:
             if self.workloads:
                 self.supervisor.new_connection(self.server_features)
                 tasks.add(asyncio.create_task(self._status_loop(ws)))
+                if self.gpu_check is not None:
+                    tasks.add(asyncio.create_task(self._gpu_check_loop(ws)))
                 if self._tls() is not None and FEATURE_GUARD_TLS in self.server_features:
                     want = welcome.get("replica_tls") if isinstance(welcome.get("replica_tls"), dict) else None
                     if want is None:
@@ -388,6 +404,34 @@ class Agent:
                 task = asyncio.create_task(self._answer_relay_send(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+
+    # ------------------------------------------------------------------ 1.4.5 (#202): can new processes open the GPUs
+    def _gpu_check_due(self) -> bool:
+        if self.gpu_check is None:
+            return False
+        last = self.gpu_check.checked_at
+        return last is None or time.monotonic() - last >= self.gpu_check_every
+
+    def _run_gpu_check(self) -> Optional[dict]:
+        try:
+            return self.gpu_check.run(self._accelerators)
+        except Exception:  # a check must never take the agent down
+            log.exception("The GPU access check failed")
+            return self.gpu_check.last
+        finally:
+            self.gpu_check.checked_at = time.monotonic()
+
+    async def _gpu_check_loop(self, ws) -> None:
+        """Every gpu_check_every seconds: probe again, and tell a server that lists "gpu_check" when the verdict or
+        the failing devices changed (hello already carried the result the connection started with)."""
+        sent = self.gpu_check.last
+        while True:
+            await asyncio.sleep(self.gpu_check_every)
+            result = await asyncio.to_thread(self._run_gpu_check)
+            if FEATURE_GPU_CHECK in self.server_features and gpu_check.changed(sent, result):
+                await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "gpu_check",
+                                          "gpu_check": result or {"ok": None}}))
+                sent = result
 
     # ------------------------------------------------------------------ 1.4.5 (#163): the guards' certificate
     def _tls(self):
@@ -616,6 +660,7 @@ class Agent:
                 fp = fingerprint(inventory)
                 if fp != self._fingerprint:
                     self._fingerprint = fp
+                    self._accelerators = inventory["accelerators"]
                     log.info("Hardware changed; sending the full inventory.")
                     await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "inventory", "inventory": {
                         "accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}))

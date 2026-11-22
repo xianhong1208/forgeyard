@@ -158,6 +158,7 @@ page's command looks like this (with your server's address, fingerprint and join
 ```bash
 sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
+  $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -167,6 +168,16 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
   docker.io/tonyhuang1101/forgeyard-agent:1.4.4
 ```
+
+The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
+`/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and every `/dev/nvidiaN`) with `--device` as well, skipping one the host
+does not have. Docker accepts them next to `--gpus all`, and it matters: the devices `--gpus` gives are set up behind
+Docker's and systemd's back, and the host's next `systemctl daemon-reload` takes them away from new processes in the
+container, while the ones given with `--device` stay
+([New processes on a machine cannot open its GPUs](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)).
+If `/dev/nvidia-uvm` is not there yet (no CUDA program has run on the host since it started), run
+`sudo nvidia-modprobe -u -c=0` first. With CDI set up (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`)
+you can use `--device nvidia.com/gpu=all` instead of both: CDI declares the devices, so they stay too.
 
 Then:
 
@@ -299,6 +310,7 @@ A machine that already joined keeps its identity if the container gets its state
 
    ```bash
    sudo docker run -d --name forgeyard-agent --restart always --network host --gpus all \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1351,6 +1363,11 @@ that machine's agent to the server's version, made from what the agent reported 
      --restart always \
      --network host \
      --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     --device /dev/nvidia1 \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1360,6 +1377,10 @@ that machine's agent to the server's version, made from what the agent reported 
      -e HF_TOKEN="$HF_TOKEN" \
      docker.io/tonyhuang1101/forgeyard-agent:1.4.4
    ```
+
+   On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
+   the ones the agent reports; for an older agent the host's, listed by a short shell loop), so the agent keeps its
+   GPUs when the host runs `systemctl daemon-reload`.
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried
    instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there

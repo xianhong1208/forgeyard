@@ -310,7 +310,45 @@ def _runtime_info(value: Any) -> dict:
     tls = _tls(value.get("tls"))
     if tls is not None:
         out["tls"] = tls
+    gpu = parse_gpu_check(value.get("gpu_check"))
+    if gpu is not None:
+        out["gpu_check"] = gpu
     return out
+
+
+# 1.4.5 (#202): what the agent's GPU access check found (agent/gpu_check.py). Only these fields, cut to size.
+GPU_CHECK_DEVICES = 64
+_DEVICE_PATH = re.compile(r"^/[A-Za-z0-9._/-]{1,255}$")
+
+
+def parse_gpu_check(value: Any) -> Optional[dict]:
+    """{ok, at, user, devices: [{path, vendor, ok, error}], reason}, or None (absent, `ok` null, or not of that shape)."""
+    if not isinstance(value, dict) or not isinstance(value.get("ok"), bool):
+        return None
+    devices = []
+    for d in value.get("devices") if isinstance(value.get("devices"), list) else []:
+        if not isinstance(d, dict) or not isinstance(d.get("ok"), bool):
+            continue
+        path, vendor = d.get("path"), d.get("vendor")
+        if not (isinstance(path, str) and _DEVICE_PATH.match(path) and vendor in ("nvidia", "amd")):
+            continue
+        item = {"path": path, "vendor": vendor, "ok": d["ok"]}
+        if not d["ok"] and isinstance(d.get("error"), str):
+            item["error"] = _plain(d["error"], 160)
+        devices.append(item)
+        if len(devices) >= GPU_CHECK_DEVICES:
+            break
+    out: dict = {"ok": value["ok"] and all(d["ok"] for d in devices), "devices": devices}
+    for key, limit in (("at", 40), ("user", 64), ("reason", 300)):
+        if isinstance(value.get(key), str) and value[key].strip():
+            out[key] = _plain(value[key], limit)
+    if not out["ok"] and "reason" not in out:
+        out["reason"] = "a new process could not open the GPUs"
+    return out
+
+
+def _plain(text: str, limit: int) -> str:
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", text).strip()[:limit]
 
 
 def _tls(value: Any) -> Optional[dict]:
@@ -376,6 +414,14 @@ class HelloIn(_Msg):
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
     # Added in 1.4.2: how the agent runs, for its update command (older agents do not send it).
     install: Annotated[Optional[dict], BeforeValidator(_install)] = None
+
+
+class GpuCheckIn(_Msg):
+    """1.4.5 ("gpu_check", #202): the agent's GPU access check changed. `gpu_check` None: nothing to check any more."""
+
+    v: int
+    type: Literal["gpu_check"]
+    gpu_check: Annotated[Optional[dict], BeforeValidator(parse_gpu_check)] = None
 
 
 class CertRequestIn(_Msg):

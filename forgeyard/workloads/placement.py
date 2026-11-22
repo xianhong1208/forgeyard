@@ -59,6 +59,7 @@ from datetime import timedelta
 
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, Workload, as_utc, utcnow
+from forgeyard.machines import gpu_access
 from forgeyard.machines.protocol import FEATURE_WORKLOADS
 from forgeyard.workloads import expose
 from forgeyard.workloads.spec import WorkloadSpec
@@ -310,10 +311,12 @@ def runtime_problem(node: Node, spec: WorkloadSpec, exposed: bool = False) -> Op
 
 
 def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
-                container_nvidia: bool = True, holds: Optional[dict[str, list[Hold]]] = None
+                container_nvidia: bool = True, holds: Optional[dict[str, list[Hold]]] = None,
+                skip_vendors: frozenset[str] = frozenset()
                 ) -> tuple[Optional[list[Accelerator]], Optional[str]]:
     """The cards for one replica, or the reason there are none. Only allowed, free cards (or, for
-    workloads sharing VRAM, cards shared only with such workloads and with enough memory left)."""
+    workloads sharing VRAM, cards shared only with such workloads and with enough memory left).
+    `skip_vendors` (1.4.5, #202): vendors whose cards a new process here cannot open; not chosen."""
     want = spec.resources.gpus
     if want.wanted == 0:
         return [], None
@@ -344,6 +347,7 @@ def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
         free.sort(key=lambda a: available(a, holds.get(a.key, [])))
     if spec.runtime_type == "container" and not container_nvidia:
         free = [a for a in free if a.vendor != "nvidia"]
+    free = [a for a in free if a.vendor not in skip_vendors]
     by_vendor: dict[str, list[Accelerator]] = {}
     for a in (free if want.share == "vram" else sorted(free, key=lambda a: (a.vendor, a.index))):
         by_vendor.setdefault(a.vendor, []).append(a)
@@ -380,7 +384,15 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
     if problem:
         return None, problem
     container_nvidia = bool(((node.runtime_info or {}).get("container") or {}).get("nvidia"))
-    return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards)
+    skip: frozenset[str] = frozenset()
+    if spec.runtime_type == "process" and res.gpus.wanted:
+        # 1.4.5 (#202): new processes there cannot open these cards (the agent's GPU access check); containers can.
+        failing = gpu_access.failing_vendors(node)
+        gpu_vendors = {a.vendor for a in node.accelerators if is_gpu(a)}
+        if res.gpus.vendor in failing or (res.gpus.vendor is None and failing and gpu_vendors <= failing):
+            return None, gpu_access.process_problem(node, failing if res.gpus.vendor is None else {res.gpus.vendor})
+        skip = frozenset(failing)
+    return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards, skip)
 
 
 def gpu_ref(a: Accelerator, *, kfd: bool = True) -> dict:
