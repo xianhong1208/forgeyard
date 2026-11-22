@@ -208,6 +208,16 @@ The gateway sends each request to the ready replica with the fewest requests in 
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
 that only the gateway knows, and the agent refuses every other request on the replica's port.
 
+From 1.4.5 the traffic between the gateway and the replicas is **encrypted**: the agent serves the replica's port
+with TLS, with a certificate Forgeyard's CA signs for that machine (the agent makes the key; it never leaves the
+machine), valid 30 days and renewed by the agent 10 days before it ends, without a restart. The gateway accepts
+only that machine's certificate when it dials that machine, so the internal key, the prompts and the answers never
+cross the network in clear. An agent older than 1.4.5 keeps serving over plain HTTP: **Setup health** and its
+machine's page say *Traffic to <machine> is not encrypted: update the agent*
+([more](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)). A 1.4.5 agent is never reached over plain
+HTTP: without a valid certificate its replicas cannot be reached, and Setup health shows an error
+([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)).
+
 The **Playground** tries a model through the same gateway, as you, without an API key. One **Model**
 picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,
 Multimodal chat, Embeddings, Rerank, Text classification, Speech to text, Text to speech, Images, Video,

@@ -28,14 +28,16 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn, ImageRemovedIn,
-                                         ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn, same_end)
+from forgeyard.machines.messages import (CacheRemovedIn, CertRequestIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn,
+                                         ImageRemovedIn, ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn,
+                                         same_end)
 from forgeyard.machines.protocol import (
     AGENT_MESSAGES,
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
     CLOSE_REVOKED,
+    FEATURE_GUARD_TLS,
     FEATURE_WORKLOADS,
     JOIN_PATH,
     MAX_MESSAGE_BYTES,
@@ -44,6 +46,7 @@ from forgeyard.machines.protocol import (
     STREAM_PATH,
 )
 from forgeyard.workloads import placement, state as wstate
+from forgeyard.security import replica_tls
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -143,7 +146,35 @@ def _hello(db: DbSession, node_id: int, hello: HelloIn, ip: str) -> Optional[dic
     from forgeyard.models import prefetch
 
     prefetch.on_hello(db, node)
-    return {"node_id": node.id, "name": node.name}
+    out = {"node_id": node.id, "name": node.name}
+    if FEATURE_GUARD_TLS in hello.features and FEATURE_WORKLOADS in hello.features:
+        # 1.4.5 (#163): the name its guards' certificate must carry and the CA that signs it; the agent asks for a
+        # certificate when it has none for both (security/replica_tls.py).
+        try:
+            replica_tls.ensure_ca()
+            out["replica_tls"] = {"name": replica_tls.binding_name(node), "ca": replica_tls.ca_fingerprint()}
+        except replica_tls.IssueError as e:
+            log.error("Machine %r serves its replicas over TLS, but no certificate can be made for it: %s", node.name,
+                      e.reason)
+            replica_tls.record_error(node, e.reason)
+    return out
+
+
+def _issue(db: DbSession, node_id: int, csr: str) -> Optional[dict]:
+    """1.4.5 ("guard_tls"): sign the machine's key guards' certificate. None: the machine was revoked."""
+    node = _live_node(db, node_id)
+    if node is None:
+        return None
+    try:
+        chain, info = replica_tls.issue(node, csr)
+    except replica_tls.IssueError as e:
+        replica_tls.record_error(node, e.reason)
+        log.warning("Refused a replica certificate for machine %r: %s", node.name, e.reason)
+        return {"ok": False, "code": e.code, "reason": e.reason}
+    replica_tls.record(node, info)
+    log.info("Signed the replica certificate of machine %r (%s, serial %s, until %s).", node.name, info["name"],
+             info["serial"][:16], info["not_after"][:10])
+    return {"ok": True, "chain": chain, "name": info["name"], "not_after": info["not_after"], "ca": info["ca"]}
 
 
 def _images_kept(db: DbSession, node_id: int, said) -> None:
@@ -316,6 +347,7 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
     # list without a word, so they took no new work until the count caught up.
     revision = time.time_ns() // 1_000_000
     ignored: set[str] = set()  # message types this server does not know, already warned about
+    certified = 0.0            # 1.4.5: when this connection last got a certificate (monotonic)
     try:
         while True:
             if recv is None:
@@ -384,6 +416,21 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     sent = _parse(text, RelaySentIn)
                     ok = True
                     conn.answer(sent.request_id, sent.model_dump())
+                elif kind == "cert_request" and workloads and FEATURE_GUARD_TLS in conn.features:
+                    asked = _parse(text, CertRequestIn)
+                    ok = True
+                    if certified and time.monotonic() - certified < replica_tls.ISSUE_EVERY:
+                        answer = {"ok": False, "code": "too_often",
+                                  "reason": f"one certificate per {replica_tls.ISSUE_EVERY:g} s on a connection"}
+                    else:
+                        answer = await run_in_threadpool(_db_call, _issue, node_id, asked.csr)
+                        if answer is None:
+                            ok = False
+                        elif answer["ok"]:
+                            certified = time.monotonic()
+                    if answer is not None:
+                        await ws.send_json({"v": PROTOCOL_VERSION, "type": "certificate",
+                                            "request_id": asked.request_id, **answer})
                 elif kind in ("image_listed", "image_saved", "image_removed") and workloads:
                     said = _parse(text, {"image_listed": ImageListedIn, "image_saved": ImageSavedIn,
                                          "image_removed": ImageRemovedIn}[kind])

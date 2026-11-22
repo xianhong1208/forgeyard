@@ -30,6 +30,7 @@ agent -> server
   image_listed (1.4.1) answer to image_list: the images in the agent's container engine
   image_saved (1.4.1) answer to image_save: how the send of an image ended, and which image it was
   image_removed (1.4.2) answer to image_remove: removed (the image, the bytes freed, the space after) or why not
+  cert_request (1.4.5, "guard_tls") a CSR for the key the agent's replica guards serve TLS with
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -55,6 +56,7 @@ server -> agent
              `image_listed` / `image_saved`
   image_remove (1.4.2, "image_remove") remove one engine image by its id (an admin asked); answered by
              `image_removed`
+  certificate (1.4.5, "guard_tls") answer to cert_request: the signed certificate chain, or why not
   error      a refused message; the server closes the connection after it
 
 HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
@@ -128,9 +130,9 @@ CLOSE_RESTART = 1012
 # agent newer than its server (or older) keeps working: what it adds is gated by `features` anyway. The same holds
 # for a card of a `vendor` outside VENDORS: the server leaves that card out and keeps the rest of the hello.
 AGENT_MESSAGES = ("hello", "heartbeat", "inventory", "status", "logs", "cache_removed", "image_loaded", "relay_sent",
-                  "image_listed", "image_saved", "image_removed")
+                  "image_listed", "image_saved", "image_removed", "cert_request")
 SERVER_MESSAGES = ("welcome", "error", "desired", "logs_request", "cache_remove", "cache_prune", "image_load",
-                   "relay_send", "image_list", "image_save", "image_remove")
+                   "relay_send", "image_list", "image_save", "image_remove", "certificate")
 
 # The agent stops on these instead of reconnecting.
 FATAL_CLOSE_CODES = {CLOSE_REVOKED, CLOSE_PROTOCOL, CLOSE_REPLACED}
@@ -236,9 +238,24 @@ IMAGE_SEND_PATH = "/agent/v1/image-send"
 # free_bytes, total_bytes}` (code not_found | agent_image | in_use | failed). The server offers only images a recipe
 # names. Listed by both sides; only an agent that lists it is asked.
 FEATURE_IMAGE_REMOVE = "image_remove"
+# 1.4.5 (issue #163): TLS from the gateway to every replica. An agent that lists it (it has the `cryptography`
+# package) serves its key guards with TLS once the server lists it too, with a certificate Forgeyard's CA signs:
+#   - the welcome carries `replica_tls: {name, ca}`: the machine's binding name (the only name in its certificate,
+#     security/replica_tls.py `binding_name`) and the SHA-256 fingerprint of the CA that signs it;
+#   - the agent makes a new EC P-256 key (it never leaves the machine) and sends `cert_request {request_id, csr}`
+#     when it has no certificate for that name and CA, or one with fewer than RENEW_BEFORE_DAYS left (checked at
+#     every welcome and every hour); the server answers `certificate {request_id, ok, chain, name, not_after, ca}`
+#     (the leaf, then the CA) or `{ok: false, code, reason}` (code too_often | refused | failed). The server takes
+#     only the CSR's public key: the name and everything else in the certificate are its own;
+#   - hello's `runtime_info.tls` ({serial, not_after, name, ca}) says which certificate the guards serve now.
+# The gateway then dials that machine's replicas at https:// and accepts only a chain to Forgeyard's CA naming
+# that machine's binding name. An agent without it (older than 1.4.5) is dialled over plain HTTP, and the setup
+# advisor says so ("traffic to this machine is not encrypted: update the agent"). A server without it gets plain
+# HTTP from every agent: the agent's guards serve TLS only when the server listed it in the welcome.
+FEATURE_GUARD_TLS = "guard_tls"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
                    FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
-                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE)
+                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE, FEATURE_GUARD_TLS)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

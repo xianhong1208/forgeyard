@@ -44,6 +44,8 @@
 
 `TLS`、`TLS_CERT_FILE`、`TLS_KEY_FILE` 和 `TLS_CA_FILE` 在[常用設定](#common-settings)裡。
 
+從閘道到副本的流量（1.4.5）不論這些設定為何都會加密：`data/tls` 裡 Forgeyard 的 CA 會替每個 agent 簽發副本憑證（使用自己的憑證或 `TLS=off` 時，第一次用到才會在那裡建立）。沒有東西需要設定；請見[部署與閘道](concepts.md#deployments-and-the-gateway)。
+
 ### 資料與機密
 
 | 變數 | 預設值 | 用途 |
@@ -957,6 +959,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `certificate-expiring` | 警告 | 你自己的憑證在 30 天內到期，或 Forgeyard 的 CA 在 90 天內到期。14 天內到期則是錯誤 |
 | `registrations-pending` | 提示 | 有人在等待核准 |
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
+| `replica-traffic-plain` | 警告 | 送往某台機器的流量沒有加密：它的 agent 比 1.4.5 舊，閘道以純 HTTP 連它；修正連結會開啟它的更新指令（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)） |
+| `replica-certificate` | 錯誤 | 某台機器的 agent 以 TLS 提供副本，卻沒有這台伺服器簽發的憑證，或憑證已過期、沒有在更新（剩不到 3 天）：連不到它的副本（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)） |
 | `gpus-shared-no-allowlist` | 警告 | 某台機器的顯示卡佔用的記憶體比 Forgeyard 在那裡保留的多出至少 1 GiB，而且沒有人選擇它的 GPU 存取 |
 | `machine-no-models` | 提示 | 某個上線的 agent 沒有模型快取，所以不會有模型放到那裡。如果它有 GPU，則是警告 |
 | `apps-deprecated` | 警告 | 有應用程式（不是模型的 workload）：它們、它們的 API 和 `/x/` 會在 1.5 移除 |

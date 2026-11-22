@@ -29,11 +29,18 @@ class Target:
 
     uid: str
     ordinal: int
-    url: str                         # http://address:port
+    url: str                         # http://address:port, or (1.4.5) https://address:port
     machine: Optional[str]
     secret: Optional[str]            # its internal key (never logged or returned)
     protected: bool                  # its agent gave the engine that key
     ready_since: float = 0.0         # when it last became ready (epoch seconds)
+    # 1.4.5 (#163): the machine's binding name its guard's certificate must carry (https:// only; None: plain HTTP).
+    tls_name: Optional[str] = None
+
+    @property
+    def ext(self) -> dict:
+        """The request extensions that make the gateway check this replica's machine (security/replica_tls.py)."""
+        return {"sni_hostname": self.tls_name} if self.tls_name else {}
 
 
 class Balancer:

@@ -248,6 +248,26 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 然後重新啟動 agent。如果伺服器其實能以 Forgeyard 看不到的方式連到那個位址（例如伺服器主機上的 proxy），就對這個警告按 **Snooze 30 days**。
 
+## 送往機器的流量沒有加密
+
+**你會看到：** **Get started → Setup health** 和機器的頁面出現 *Traffic to gpu-02 is not encrypted: update the agent*。
+
+**原因：** 從 1.4.5 起，閘道以 TLS 連每個副本，但 gpu-02 的 agent 比較舊，只能以純 HTTP 提供副本。所以副本的內部金鑰、提示詞和回答，在伺服器和 gpu-02 之間都以明文經過網路。它會繼續服務：在你更新之前，什麼都不會停。
+
+**做法：** 更新 agent（警告上的 **Update command** 會開啟那台機器的指令；[更新 agent](how-to.md#update-an-agent)）。新的 agent 連上後一秒內就會拿到憑證，警告就會消失。部署在那裡的模型在更新期間會繼續執行（agent 會接手它們）。
+
+## 機器沒有副本的憑證
+
+**你會看到：** **Get started → Setup health** 出現錯誤：*gpu-02 has no certificate for its replicas*、*gpu-02's replica certificate has expired* 或 *… is not being renewed*；只部署在那台機器上的模型回應 503，其他模型則由其他機器上的副本回應。
+
+**原因：** 1.4.5 的 agent 只以 TLS 提供副本，用的是伺服器替那台機器簽發的憑證。它在連線時申請，並在到期前 10 天更新（有效 30 天）。對這樣的機器，閘道絕不會退回純 HTTP，所以沒有有效憑證時就連不到它的副本。如果伺服器拒絕了申請，錯誤會寫出原因（伺服器紀錄裡也有）。常見原因：
+
+- agent 已經很久沒有連線（離線的機器無法更新憑證）；
+- 伺服器無法讀取或建立 `data/tls` 裡的 CA（有 `ca.crt` 卻沒有 `ca.key`，或資料目錄是唯讀的）：伺服器紀錄會寫 *no certificate can be made*；
+- agent 的狀態目錄無法寫入，或 agent 無法產生金鑰：它的紀錄會寫 *cannot be used*。
+
+**做法：** 查看 agent 的紀錄（`journalctl -u forgeyard-agent` 或 `docker logs forgeyard-agent`）和伺服器的紀錄。修正它們指出的問題，然後重新啟動 agent：它會立刻重新申請。如果 `data/tls` 遺失了 `ca.key`，請從備份還原（[備份與還原](how-to.md#back-up-and-restore)）；新的 CA 對副本也行得通（每個 agent 會自己拿到新憑證），但先前為了伺服器信任舊 CA 的瀏覽器和 agent，必須改為信任新的。
+
 ## 來自 /v1 的錯誤：401、403、429、503
 
 閘道以 OpenAI 的格式回應錯誤：`{"error": {"message", "type", "param", "code"}}`。`code` 會說明發生了什麼事。

@@ -295,7 +295,7 @@ async def voices(model: Optional[str], caller: KeyCaller):
         raise GatewayError(503, "no_ready_replica", f"{model!r} has no ready replica. {reason}".strip())
     t = balancer.order(f"{route.served_name}#voices", [t for _, t in ready])[0]
     g = next(gr for gr, tr in ready if tr.uid == t.uid)
-    found = await speech.voices_for(g.deployment_id, g.speaks, proxy.client(), t.url, t.secret)
+    found = await speech.voices_for(g.deployment_id, g.speaks, proxy.client(), t.url, t.secret, extensions=t.ext)
     if found is None:
         raise GatewayError(502, "upstream_error", f"{model!r} did not list its voices.")
     ids = [v["id"] for v in found]

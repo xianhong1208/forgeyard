@@ -6,6 +6,29 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Security
+
+- **TLS from the gateway to every replica** (#163). The gateway used to reach a replica's key guard over plain
+  HTTP, so the replica's internal key, every prompt and every answer crossed the network in clear between the
+  server and the machine. A 1.4.5 agent now serves its key guards with TLS, and the gateway dials `https://`:
+  - the agent makes its own key (EC P-256; it never leaves the machine) and sends a certificate request over its
+    authenticated connection; the server signs it with Forgeyard's CA (made in `data/tls` on first use when the
+    server runs with its own certificate or `TLS=off`). The certificate names the machine and nothing else
+    (`m<id>-<16 hex>.replica.forgeyard.invalid`, from the machine's credential); it carries no address, which the
+    agent reports itself and which the CA's trust must not cover. Valid 30 days, renewed by the agent 10 days
+    before it ends (it checks at every connection and every hour), loaded without a restart. Key and certificate
+    are kept in the agent's state directory (`replica-tls/`, 0600);
+  - the gateway trusts only Forgeyard's CA and checks the machine's name as the host name, so another machine's
+    certificate is refused; one connection pool per machine. `/v1`, `/x/`, vision, video jobs and the console's
+    **Try it** all go this way; the internal key is still checked, now inside TLS, and the guard's
+    `X-Forgeyard-Not-Taken` failover works as before;
+  - an agent older than 1.4.5 keeps serving over plain HTTP (upgrading never interrupts serving), and **Setup
+    health** and its machine's page say *Traffic to <machine> is not encrypted: update the agent*, which opens its
+    update command. A 1.4.5 agent is never reached over plain HTTP: while its certificate is missing or expired its
+    replicas cannot be reached (requests go to other replicas) and Setup health shows an error;
+  - the agent's install (`install.sh`) now also installs `cryptography` (for the key and the request), pinned
+    by hash like its other dependencies.
+
 ### Changed
 
 - The DCO check no longer runs on the release pull requests (`dev` → `main` and the `main` → `dev`

@@ -372,7 +372,8 @@ def test_fy_upd_015_nothing_known_says_so():
 
 # ------------------------------------------------------------------ behind (#122)
 FULL = ("workloads", "replica_keys", "replica_guard", "image_ids", "engine_zip", "workload_guard", "models",
-        "cache_admin", "prefetch", "relay", "relay_source", "relay_images", "image_load", "image_save", "image_remove")
+        "cache_admin", "prefetch", "relay", "relay_source", "relay_images", "image_load", "image_save", "image_remove",
+        "guard_tls")
 CONTAINER_OK = {"container": {"ok": True}}
 
 

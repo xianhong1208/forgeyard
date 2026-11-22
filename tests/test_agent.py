@@ -328,7 +328,8 @@ def test_fy_agt_030_workloads_end_to_end_with_an_agent_restart(monkeypatch, tmp_
             run = asyncio.create_task(agent.run())
             assert await _wait(lambda: api("GET", "/api/machines")["machines"][0]["features"] == ["workloads", "replica_keys",
                                                                                           "replica_guard", "image_ids",
-                                                                                          "engine_zip", "workload_guard"])
+                                                                                          "engine_zip", "workload_guard",
+                                                                                          "guard_tls"])
             job = api("POST", "/api/workloads", {"name": "job", "kind": "task",
                                                  "runtime": {"type": "process", "command": "sh",
                                                              "args": ["-c", "echo working; exit 0"]}})["workload"]

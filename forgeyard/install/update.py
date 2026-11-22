@@ -49,7 +49,7 @@ def expected_features(node: Node) -> set[str]:
     if p.FEATURE_WORKLOADS not in have:
         return want  # an inventory-only agent (no workloads): nothing to compare
     want |= {p.FEATURE_WORKLOADS, p.FEATURE_REPLICA_KEYS, p.FEATURE_REPLICA_GUARD, p.FEATURE_IMAGE_IDS,
-             p.FEATURE_ENGINE_ZIP, p.FEATURE_WORKLOAD_GUARD}
+             p.FEATURE_ENGINE_ZIP, p.FEATURE_WORKLOAD_GUARD, p.FEATURE_GUARD_TLS}
     models = p.FEATURE_MODELS in have
     if models:
         want |= {p.FEATURE_MODELS, p.FEATURE_CACHE_ADMIN, p.FEATURE_PREFETCH, p.FEATURE_RELAY, p.FEATURE_RELAY_SOURCE}

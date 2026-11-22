@@ -53,6 +53,10 @@ are fine for almost everyone.
 
 `TLS`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `TLS_CA_FILE` are under [Common settings](#common-settings).
 
+Traffic from the gateway to the replicas (1.4.5) is encrypted whatever these say: Forgeyard's CA in `data/tls`
+signs each agent's replica certificate (it is made there on first use with your own certificate or `TLS=off`).
+There is nothing to set; see [Deployments and the gateway](concepts.md#deployments-and-the-gateway).
+
 ### Data and secrets
 
 | Variable | Default | What it does |
@@ -1297,6 +1301,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `certificate-expiring` | warning | Your own certificate expires within 30 days, or Forgeyard's CA within 90. An error within 14 days |
 | `registrations-pending` | note | People are waiting for approval |
 | `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
+| `replica-traffic-plain` | warning | Traffic to a machine is not encrypted: its agent is older than 1.4.5 and is reached over plain HTTP; the fix opens its update command ([more](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)) |
+| `replica-certificate` | error | A machine whose agent serves its replicas over TLS has no certificate from this server, or it expired or is not being renewed (fewer than 3 days left): its replicas cannot be reached ([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)) |
 | `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
 | `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
 | `apps-deprecated` | warning | Apps (workloads that are not models) exist: they, their API and `/x/` are removed in 1.5 |
