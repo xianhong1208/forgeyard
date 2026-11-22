@@ -66,6 +66,15 @@ version until 1.0.
 
 ### Fixed
 
+- **A copied image whose source stops part way is reported the same way every time** (#215). The server hears two
+  things when the source machine's `docker save` fails mid-copy: its send breaking off, and its agent saying why. It
+  used to answer with whichever came first, so the console showed either *The upload broke off after N bytes
+  (ConnectionError: …)* with no reason, or only the source's *docker save failed: …* with no word that the copy broke
+  off (also when the server had not read a byte of the send yet). Now it waits up to 10 s for the source's word and
+  says both: *The copy broke off after N bytes: <source> stopped sending, so nothing was loaded on <target>.
+  <source> says: docker save failed: …*, or that the source did not say why. The audit event records the same words.
+  A source that refuses before sending a byte is still *image_save_failed* with its reason.
+
 - **accept_all no longer waits 40 minutes for a card that has no room** (#203). A deployment or app the server
   cannot place (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`) is skipped after `--place-timeout`
   seconds (300 by default), naming that reason; `--timeout` (2,400) stays the limit for downloads and starts. Before

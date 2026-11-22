@@ -952,9 +952,9 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | 409 | `source_offline`、`source_cannot_save` | 來源沒有連線，或沒有 container 引擎、或比 1.4.1 舊 |
 | 409 | `source_busy` | 來源已經在送一個映像檔 |
 | 409 | `machine_offline`、`agent_cannot_load`、`upload_busy` | 目標機器，同上傳（全部兩個時是 429） |
-| 409 | `image_save_failed` | 來源無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
+| 409 | `image_save_failed` | 來源在送出任何位元組之前就無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
 | 504 | `source_no_send` | 來源 2 分鐘內沒有開始送 |
-| 400 | `upload_broken` | 來源的儲存中斷；什麼都沒有載入 |
+| 400 | `upload_broken` | 來源送到一半停了，或伺服器停掉一個 2 分鐘都沒送資料的來源；什麼都沒有載入。來源自己的回覆說明了原因（`docker save failed: …`）時，訊息會包含它的說明（伺服器最多等 10 秒，#215） |
 | 413 | `upload_too_large` | 映像檔超過 `IMAGE_UPLOAD_MAX_GB` |
 | 422 | `image_load_failed` | 目標機器的引擎無法載入（agent 的說明） |
 
