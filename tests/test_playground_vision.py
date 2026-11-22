@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -32,11 +31,14 @@ DETECTED = {"model": "PekingU/rtdetr_v2_r18vd", "width": 640, "height": 480,
 
 class VisionApp:
     """A vision server's HTTP API on 127.0.0.1:<port> (the guard is in front): POST /v1/<task> records what
-    reached it and answers like images/vision; `hold` s before answering; `release` lets held ones go."""
+    reached it and answers like images/vision; the next `holds` requests wait for `release` before answering (not
+    for a time: a held request stays in flight however slow the machine is)."""
 
     def __init__(self):
         self.seen: list[dict] = []
-        self.hold = 0.0
+        self.holds = 0
+        self.release = threading.Event()
+        self._lock = threading.Lock()
         app = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -48,10 +50,13 @@ class VisionApp:
             def _any(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n) if n else b""
-                app.seen.append({"method": self.command, "path": self.path, "body": body,
-                                 "headers": {k.lower(): v for k, v in self.headers.items()}})
-                if app.hold:
-                    time.sleep(app.hold)
+                with app._lock:
+                    held = app.holds > 0
+                    app.holds -= held
+                    app.seen.append({"method": self.command, "path": self.path, "body": body,
+                                     "headers": {k.lower(): v for k, v in self.headers.items()}})
+                if held:
+                    app.release.wait(30)
                 out = json.dumps(DETECTED).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -69,6 +74,7 @@ class VisionApp:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def close(self):
+        self.release.set()
         self.server.shutdown()
         self.server.server_close()
 
@@ -230,7 +236,6 @@ def test_fy_pgv_008_concurrency_per_replica_and_per_person(vw):
     slots are free afterwards."""
     o = vw.owner
     add_user(o, "alice")
-    vw.app.hold = 1.0
     live = LiveServer()
     try:
         def browser(username, password):
@@ -244,30 +249,40 @@ def test_fy_pgv_008_concurrency_per_replica_and_per_person(vw):
             return c.post("/api/playground/vision/detector/detect", **image_form())
 
         def in_flight(c):
-            # The slots are taken before the image is passed on, so once the app has it they are held (a fixed
-            # sleep is not enough on a busy CI machine: the second call could get in first).
+            # The slots are taken before the image is passed on, so once the app has it they are held, and the app
+            # keeps it until released (a fixed sleep there let it finish first on a busy CI machine: the second call
+            # then got through, #204).
             before = len(vw.app.seen)
-            t = threading.Thread(target=call, args=(c,))
+            vw.app.release.clear()
+            vw.app.holds = 1
+            done: list = []
+            t = threading.Thread(target=lambda: done.append(call(c)))
             t.start()
             wait_until(lambda: len(vw.app.seen) > before, "the first image at the app")
-            return t
+            return t, done
+
+        def finish(t, done):
+            vw.app.release.set()
+            t.join()
+            assert done and done[0].status_code == 200
 
         set_gateway(o, "detector", expose=True, concurrency=1)
-        t = in_flight(me)
+        flight = in_flight(me)
         r = call(alice)
         assert r.status_code == 429 and r.json()["error"]["code"] == "workload_busy" and r.headers["retry-after"] == "1"
-        t.join()
+        finish(*flight)
         set_gateway(o, "detector", expose=True, key_concurrency=1)
-        t = in_flight(me)
+        flight = in_flight(me)
         r = call(me)
         assert r.status_code == 429 and r.json()["error"]["code"] == "key_busy"
         assert r.json()["error"]["message"].startswith("You already have 1 request in flight")
         assert call(alice).status_code == 200
-        t.join()
+        finish(*flight)
         assert call(me).status_code == 200
         me.close()
         alice.close()
     finally:
+        vw.app.release.set()
         live.close()
     assert px.in_flight.counts == {} and sum(balancer.inflight.values()) == 0
 
