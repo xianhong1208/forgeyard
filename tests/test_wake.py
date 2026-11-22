@@ -583,18 +583,20 @@ def test_fy_wake_020_what_counts_as_use(gw):  # noqa: F811
 
 
 def test_fy_wake_021_a_new_deployment_with_a_removed_ones_id_starts_from_nothing(cpus):
-    """FY-WAKE-021: a deployment removed and made again gets the same id here (SQLite reuses the highest one): its
-    last request and any wake are forgotten with the old one, so the new one's idle time starts fresh."""
+    """FY-WAKE-021: a deployment removed and made again may get the same id (SQLite reuses the highest one): its
+    last request and any wake are forgotten with the old one, and the new one's idle time starts fresh."""
     c, a, b = cpus
     d = deploy(c, "chat", **CPU_BODY)["deployment"]["id"]
     idle.used([d], at=later(-50))
     waking._wakes[d] = waking.Wake(d, "chat", "a request")
     assert c.delete(f"/api/deployments/{d}").status_code == 200
     assert idle.last(d) is None and waking.wake_of(d) is None
-    idle.used([d], at=later(-50))   # (a request still finishing for the removed one)
+    # (A request still finishing for the removed one.) The new deployment gets the same id on SQLite, the next one
+    # from a sequence on PostgreSQL: whichever it gets starts from nothing.
+    idle.used([d, d + 1], at=later(-50))
     again = deploy(c, "chat", **CPU_BODY)["deployment"]
-    assert again["id"] == d
-    assert idle.last(d) is None and again["sleep"]["last_request_at"] is None
+    assert again["id"] in (d, d + 1)
+    assert idle.last(again["id"]) is None and again["sleep"]["last_request_at"] is None
 
 
 # ------------------------------------------------------------------ settings, video
