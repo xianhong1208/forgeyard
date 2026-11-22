@@ -693,13 +693,11 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 副本啟動期間，1.5.0 的 agent 每秒檢查一次它的健康狀態，而不是照配方的 *interval*（vLLM 是 10 秒），所以模型一就緒，一秒內就會開始使用，而不是最多晚 10 秒。只在配方的 start period 內這樣做（這段時間裡檢查失敗不算數），而且只到第一次通過為止；之後照配方的 interval 檢查，和以前一樣，所以副本絕不會比以前更早被判定為 unhealthy。
 
-### 在兩次啟動之間保留 vLLM 的編譯快取（實驗性）
+### 在兩次啟動之間保留 vLLM 的編譯快取
 
-vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton 編譯它的 kernel），寫到容器裡的一個目錄，容器沒了它就跟著沒了。`vllm` 和 `vllm-pooling` 配方已經寫明這個目錄（`engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`），但在真實硬體上量過之前保持關閉。要試用的話：
+vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton 編譯它的 kernel），寫到容器裡的一個目錄，容器沒了它就會跟著沒了。從 1.5.0 起，`vllm` 和 `vllm-pooling` 配方會把這個目錄保留在機器上（`engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`），所以只有副本的第一次啟動需要編譯；之後的啟動（包括[休眠](#let-a-deployment-sleep-when-nobody-uses-it)後被喚醒）都會載入編譯好的結果。在 A100 上用 Qwen3-0.6B 量過：第一次啟動兩者都是 118 秒；重新啟動沒有快取要 114 秒，有快取只要 57 秒，兩者的回答相同；目錄大小 44 MiB。在部署的事件裡可以看到：重新啟動後 *ready in …* 的 `engine` 部分。
 
-1. 在 **Models → Engines** 選 **Add an engine**，從內建的 `vllm` 開始，取個名字（例如 `vllm-cache`），把它的 `engine_cache` 那一行改成 `enabled: true`。
-2. 用 `vllm-cache` 部署模型，參數和你的 `vllm` 部署相同。
-3. **Stop** 再 **Start** 一次：第一次啟動會編譯並填滿快取，下一次就會用它。在事件裡比較兩次啟動的 `engine` 部分。
+使用它不需要做任何事。如果要不用它啟動（例如追查問題時想先排除它），在 **Models → Engines** 選 **Add an engine**，從內建的 `vllm` 開始，取個名字（例如 `vllm-nocache`），把它的 `engine_cache` 那一行改成 `enabled: false`，再用它部署。開啟或關閉都不會重新啟動正在執行的副本：從副本的下一次啟動開始生效。
 
 每個副本在它的機器上都有自己的目錄 `<model cache>/engine-cache/<key>`，以可寫入的方式掛載在 `/forgeyard/engine-cache`，`VLLM_CACHE_ROOT` 指向它；其他部署或副本都不會用到。vLLM 依模型、會改變計算圖的設定、它自己的程式碼和編譯器的雜湊值保存編譯結果，所以改了參數就會重新編譯，不會載入錯的計算圖。刪除部署（或它的配方不再保留快取）時目錄會被移除；副本以新的映像檔（新的配方版本）啟動時，它較舊的目錄也會被移除。需要有模型快取和容器引擎的 1.5.0 agent；行程 variant，以及較舊 agent 上的副本，啟動方式和以前一樣。不以 root 執行的映像檔無法寫入這個目錄。
 

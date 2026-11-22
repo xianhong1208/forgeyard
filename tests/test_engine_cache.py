@@ -1,5 +1,5 @@
-"""An engine's compile cache kept between starts (1.5.0, issue #37, "engine_cache"; FY-ECA-*): the recipe field (off
-in every built-in recipe), what the server sends (only for an enabled recipe and a container replica, beside the
+"""An engine's compile cache kept between starts (1.5.0, issue #37, "engine_cache"; FY-ECA-*): the recipe field (on
+in vllm and vllm-pooling since it was measured on an A100), what the server sends (only for an enabled recipe and a container replica, beside the
 spec), and the agent's side (the directory, its writable mount and variable, and what it removes)."""
 
 import asyncio
@@ -27,20 +27,22 @@ KEY = "12-6921abcd-0-0123456789ab"
 
 def vllm_text(name="vllm-cache", enabled=True) -> str:
     text = Path("forgeyard/recipes/vllm.yaml").read_text().replace("name: vllm\n", f"name: {name}\n")
-    return text.replace("engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}",
+    assert "engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}" in text
+    return text.replace("engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}",
                         f"engine_cache: {{env: VLLM_CACHE_ROOT, enabled: {'true' if enabled else 'false'}}}")
 
 
 # ------------------------------------------------------------------ the recipe
-def test_fy_eca_001_off_in_every_builtin_recipe_and_validated():
-    """FY-ECA-001: vllm and vllm-pooling name VLLM_CACHE_ROOT but keep it off (not measured yet); no built-in recipe
-    turns it on; a reserved variable, one the recipe sets itself, or a recipe without a container variant is
+def test_fy_eca_001_on_in_the_vllm_recipes_and_validated():
+    """FY-ECA-001: vllm and vllm-pooling keep VLLM_CACHE_ROOT between starts (on since an A100 measured it: a restart
+    took half the time); no other built-in recipe names one; a custom copy can turn it off; a reserved variable, one the recipe sets itself, or a recipe without a container variant is
     refused."""
     builtin = {n: r for n, (r, _) in builtin_recipes().items()}
     assert {n for n, r in builtin.items() if r.engine_cache is not None} == {"vllm", "vllm-pooling"}
-    assert all(not r.engine_cache.enabled and r.engine_cache.env == "VLLM_CACHE_ROOT"
+    assert all(r.engine_cache.enabled and r.engine_cache.env == "VLLM_CACHE_ROOT"
                for r in builtin.values() if r.engine_cache is not None)
     assert parse_recipe(vllm_text()).engine_cache.enabled is True
+    assert parse_recipe(vllm_text(enabled=False)).engine_cache.enabled is False
     for env in ("PORT", "FORGEYARD_X", "CUDA_VISIBLE_DEVICES", "VLLM_API_KEY", "HF_HUB_OFFLINE", "1BAD"):
         with pytest.raises(RecipeError):
             parse_recipe(vllm_text().replace("env: VLLM_CACHE_ROOT", f"env: {env}"))
@@ -61,18 +63,18 @@ def _desired(node_id):
 
 
 def test_fy_eca_002_sent_only_for_an_enabled_recipe_beside_the_spec(owner):
-    """FY-ECA-002: the built-in vllm (off) sends nothing; a copy with it enabled sends {key, env} beside the spec
+    """FY-ECA-002: a copy of vllm with it turned off sends nothing; the built-in vllm sends {key, env} beside the spec
     (never in it, so an agent older than 1.5.0, which validates the spec strictly, ignores it) and the deployments
     that may keep one, to every machine."""
     seed_catalog()
-    assert owner.post("/api/recipes", json={"yaml": vllm_text()}).status_code == 201
+    assert owner.post("/api/recipes", json={"yaml": vllm_text("vllm-off", enabled=False)}).status_code == 201
     new = make_node("a100", allowlist=[4], features=MODELS, runtime_info=BOTH)
     old = make_node("old", allowlist=[4], features=MODELS, runtime_info=BOTH)
-    plain = deploy(owner, "plain", "qwen3-4b", "vllm", params={"context": 4096, "share": "vram"},
+    plain = deploy(owner, "plain", "qwen3-4b", "vllm-off", params={"context": 4096, "share": "vram"},
                    machine_id=new)["deployment"]
-    cached = deploy(owner, "cached", "qwen3-4b", "vllm-cache", params={"context": 4096, "share": "vram"},
+    cached = deploy(owner, "cached", "qwen3-4b", "vllm", params={"context": 4096, "share": "vram"},
                     machine_id=new)["deployment"]
-    deploy(owner, "elsewhere", "qwen3-4b", "vllm-cache", params={"context": 4096, "share": "vram"}, machine_id=old)
+    deploy(owner, "elsewhere", "qwen3-4b", "vllm", params={"context": 4096, "share": "vram"}, machine_id=old)
     msg = _desired(new)
     by = {r["workload"]: r for r in msg["replicas"]}
     assert "engine_cache" not in by["plain"]
@@ -85,7 +87,7 @@ def test_fy_eca_002_sent_only_for_an_enabled_recipe_beside_the_spec(owner):
         assert block["key"] == enginecache.key_for(dep, 0, image)
         assert block["key"].startswith(f"{dep.id}-") and agent_cache.parse(block) == block
         others = sorted(enginecache.deployment_prefix(d) for d in db.scalars(select(Deployment)).all()
-                        if d.recipe == "vllm-cache")
+                        if d.recipe == "vllm")
     finally:
         db.close()
     assert msg["engine_caches"] == others and len(others) == 2  # every caching deployment, wherever it runs

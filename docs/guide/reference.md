@@ -1606,10 +1606,11 @@ recipe with only the variants you want can.
 | `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
 | | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
 
-`vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`: vLLM's
-compile cache could be kept between starts, in a directory per replica on its machine, but stays off until it
-has been measured ([Keep vLLM's compile cache between starts](how-to.md#keep-vllms-compile-cache-between-starts-experimental)).
-A custom recipe turns it on with `enabled: true` (container variants only).
+`vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`: vLLM's
+compile cache is kept between starts, in a directory per replica on its machine, so a restart or a wake loads
+what the first start compiled ([Keep vLLM's compile cache between starts](how-to.md#keep-vllms-compile-cache-between-starts)).
+A custom recipe can turn it off with `enabled: false`, or on for another engine with `enabled: true` (container
+variants only).
 
 `vllm-pooling` serves a sequence-classification model (`…ForSequenceClassification`) as a reranker only
 when it has one output, as vLLM decides: `id2label` in its `config.json` has one entry, or `num_labels` is 1
