@@ -215,7 +215,8 @@ describe("sleep when idle: the deploy and edit forms", () => {
     expect(minutes.value).toBe("30");
     expect(within(panel).getByText(/^Off: it keeps its memory while nobody uses it/)).toBeTruthy();
     expect(within(panel).queryByText(/its memory may be used by others/)).toBeNull();
-    expect(within(panel).getByText("chat-a (the same model and engine) last started in 74 s: the first request after a sleep waits about that long.")).toBeTruthy();
+    // once the deployments list is in (it comes on its own request)
+    expect(await within(panel).findByText("chat-a (the same model and engine) last started in 74 s: the first request after a sleep waits about that long.")).toBeTruthy();
     const json = () => JSON.parse(screen.getByLabelText("Deployment JSON").textContent ?? "{}");
     expect(json().params.sleep_when_idle).toBeUndefined();
     fireEvent.click(box);
