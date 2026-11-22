@@ -62,6 +62,7 @@ sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import GIB, Client, Fail, log, machine  # noqa: E402
 from accept_m4 import ensure_sdk, raw_post, wait_all_ready  # noqa: E402
+import replica_port  # noqa: E402
 
 PREFIX = "accept-img-"
 PROMPT = "A red apple on a wooden table, studio photo"
@@ -420,9 +421,13 @@ def exercise(c: Client, d: dict, model: str, spec: dict, side: int, args, check,
             {"prompt": 'x <sd_cpp_extra_args>{"width": 4096}</sd_cpp_extra_args>'}, "invalid_request")
     refused("image edits are not offered", {"prompt": PROMPT}, "endpoint_not_supported", path="images/edits")
 
-    # ---- the replica's own port without its internal key
+    # ---- the replica's own port without its internal key, reached as the gateway reaches it (1.4.5, #163:
+    # TLS with the machine's binding name when its agent serves TLS, plain HTTP for an older one)
+    rp = replica_port.Replicas.of(c, c.server, accept_m3.TLS)
     for e in d["endpoints"]:
-        s, text = raw_post(f"{e['url']}/v1/images/generations", b'{"prompt":"hi"}', "application/json", timeout=20)
+        p = rp.endpoint(e)
+        replica_port.record(rp.transport_checks(p, f"{model}: replica {e['replica']} on {e['machine']}"), check)
+        s, text = rp.post(p, "/v1/images/generations", b'{"prompt":"hi"}', "application/json", timeout=20)
         check(f"{model}: replica {e['replica']} on {e['machine']} without the key is refused", s in (401, 403),
               f"{s} {text[:80]}")
 

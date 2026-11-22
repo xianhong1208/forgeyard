@@ -23,7 +23,9 @@ each exposed at /x/accept-x-<kind> and checked:
      nothing in flight (the next request is answered at once);
   7. limits: a body over max_body_mb (413), rpm on a key (429 with Retry-After), concurrency 1 (429
      workload_busy while one request is in flight), a read timeout (504);
-  8. the replica's published port answers 401 without the gateway's internal key, also with an API key;
+  8. the replica's published port answers 401 without the gateway's internal key, also with an API key, reached
+     as the gateway reaches it: on a TLS machine (1.4.5) over TLS with its binding name, plus plain HTTP
+     refused and the certificate checked (scripts/replica_port.py);
   9. usage: the run's key shows requests, bytes in and out and busy time under x:<name>;
  10. turning Expose off: 404 at once.
 
@@ -71,6 +73,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import Client, Fail, log, machine  # noqa: E402
+import replica_port  # noqa: E402
 
 PREFIX = "accept-x-"
 KINDS = ("process", "container")
@@ -352,17 +355,18 @@ def exercise(c: Client, base: str, w: dict, check: Callable, new_key: Callable[[
     check(f"{t}: the key's rpm applies (4th in a minute: 429 with Retry-After)", codes == [200] * 3 and s == 429
           and code(data) == "rate_limit_exceeded" and int(h4.get("retry-after") or 0) >= 1, f"{codes} then {s}")
 
-    # 8. the published port itself
+    # 8. the published port itself, reached as the gateway reaches it (1.4.5: TLS with the machine's binding name
+    # when its agent serves TLS, plain HTTP for an older one; scripts/replica_port.py)
     rep = c.ok("GET", f"/api/workloads/{wid}")["workload"]["replica_list"][0]
     port = (rep.get("ports") or [{}])[0]
-    direct = f"http://{port.get('address')}:{port.get('host_port')}"
-    try:
-        s1, _, _ = request(direct, "GET", "/echo", timeout=10)
-        s2, _, _ = request(direct, "GET", "/echo", key=key, timeout=10)
-    except OSError as e:
-        s1 = s2 = f"unreachable ({e})"
+    rp = replica_port.Replicas.of(c, base, accept_m3.TLS)
+    p = rp.published((rep.get("machine") or {}).get("name"), port)
+    replica_port.record(rp.transport_checks(p, f"{t} (published port)"), check)
+    a1 = rp.request(p, "GET", "/echo", timeout=10)
+    a2 = rp.request(p, "GET", "/echo", headers={"Authorization": f"Bearer {key}"}, timeout=10)
     check(f"{t}: the replica's published port answers 401 without the internal key, also with an API key",
-          s1 == 401 and s2 == 401, f"{direct}: {s1}, {s2}")
+          a1.status == 401 and a2.status == 401 and "replica_key_required" in a1.text,
+          f"{p.url}: {a1.status or a1.error}, {a2.status or a2.error}")
 
     # 9. usage
     time.sleep(1)

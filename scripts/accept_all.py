@@ -1698,6 +1698,12 @@ def group_gateway(run: Run) -> None:
 
 
 def guard_checks(run: Run, api_key: str) -> None:
+    """Every replica's own port, called around the gateway the way the gateway reaches it (1.4.5, #163: TLS with the
+    machine's binding name when its agent serves TLS, plain HTTP for an older one; scripts/replica_port.py): how the
+    port is reached, then the key guard's refusals."""
+    sys.path.insert(0, str(HERE))
+    import replica_port
+
     probes = {"openai-chat": ("/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
               "openai-embeddings": ("/v1/embeddings", {"input": "x"}),
               "rerank": ("/v1/rerank", {"query": "q", "documents": ["a"]}),
@@ -1705,34 +1711,39 @@ def guard_checks(run: Run, api_key: str) -> None:
     open_paths = (("/invocations", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
                   ("/rerank", {"query": "q", "documents": ["a"]}), ("/pooling", {"input": "x"}),
                   ("/classify", {"input": "x"}))
+    rp = replica_port.Replicas.of(run.admin, run.args.server, run.tls)
     unreachable = []
     for key, d in run.deps.items():
         api = (d.get("route") or {}).get("api") or ({"asr": "openai-audio", "embed": "openai-embeddings",
                                                       "rerank": "rerank", "classify": "classify"}.get(key, "openai-chat"))
         for e in d["endpoints"]:
-            base = e["url"].rstrip("/")
+            p = rp.endpoint(e)
             what = f"{d['name']} #{e['replica']} on {e['machine']}"
             if api == "openai-audio":
                 body, ctype = multipart({"model": d["route"]["upstream_model"]}, "file", CLIP)
-                r = raw(base + "/v1/audio/transcriptions", "POST", body, {"Content-Type": ctype}, None, 30)
+                r = rp.request(p, "POST", "/v1/audio/transcriptions", body, {"Content-Type": ctype}, 30)
             else:
                 path, payload = probes[api]
-                r = raw(base + path, "POST", json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
-                        {"Content-Type": "application/json"}, None, 30)
-            if r.status == 0:
+                r = rp.request(p, "POST", path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
+                               {"Content-Type": "application/json"}, 30)
+            # Only a port that cannot be reached at all is another network's; a closed connection or a refused
+            # certificate is a failure.
+            if r.status == 0 and r.failure == "unreachable":
                 unreachable.append(f"{what} ({r.error})")
                 continue
+            replica_port.record(rp.transport_checks(p, what), run.check)
             run.check(f"{what}: a direct call without the internal key gets 401 from the key guard",
-                      r.status == 401 and "replica_key_required" in r.text, f"{r.status} {r.text[:60]}")
-            r = raw(base + "/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
-            run.check(f"{what}: a client's API key does not open the replica's port", r.status == 401, f"{r.status}")
+                      r.status == 401 and "replica_key_required" in r.text, f"{r.status} {r.text[:60]} ({p.url})")
+            r = rp.request(p, "GET", "/v1/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
+            run.check(f"{what}: a client's API key does not open the replica's port", r.status == 401,
+                      f"{r.status or r.error}")
             if d["recipe"].startswith("vllm"):
                 bad = {}
                 for path, payload in open_paths:
-                    r = raw(base + path, "POST", json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
-                            {"Content-Type": "application/json"}, None, 30)
+                    r = rp.request(p, "POST", path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
+                                   {"Content-Type": "application/json"}, 30)
                     if not (r.status == 401 and "replica_key_required" in r.text):
-                        bad[path] = r.status
+                        bad[path] = r.status or r.error
                 run.check(f"{what}: vLLM's open paths (/invocations, /rerank, /pooling, /classify) are guarded", not bad,
                           f"not 401: {bad}" if bad else "401 on all four")
     if unreachable:
@@ -2415,9 +2426,7 @@ def group_vision(run: Run) -> None:
         report: dict = {}
         other = accept_vision.other_model(c, d["name"])
         narrow = run.new_key(f"vision-narrow-{role}-{spec['task']}", models=[other])["key"] if other else None
-        accept_vision.exercise(run.args.server, d, d["name"], spec, lambda label, ok, detail="", info=False:
-                               run.skip(label, f"information: {detail}") if info else run.check(label, ok, detail),
-                               key, narrow, image, filename, report)
+        accept_vision.exercise(run.args.server, d, d["name"], spec, run.check, key, narrow, image, filename, report, c)
         run.report.info.setdefault("vision", {})[d["name"]] = report.get(d["name"])
         _delete_deployment(c, d0["id"])
 

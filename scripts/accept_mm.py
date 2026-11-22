@@ -56,6 +56,7 @@ sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import GIB, Client, Fail, log, machine  # noqa: E402
 from accept_m4 import ensure_sdk, raw_post, wait_all_ready  # noqa: E402
+import replica_port  # noqa: E402
 
 PREFIX = "accept-mm-"
 MODELS = {
@@ -201,9 +202,9 @@ def main() -> int:
                     "deployments": {}}
     added: list[str] = []
 
-    def check(name: str, ok: bool, detail="", info: bool = False) -> None:
-        report["checks"].append({"check": name, "ok": bool(ok), "detail": detail, "info": info})
-        log(("INFO" if info else "PASS" if ok else "FAIL") + f"  {name}" + (f"  ({detail})" if detail else ""))
+    def check(name: str, ok: bool, detail="", info: bool = False, skip: bool = False) -> None:
+        report["checks"].append({"check": name, "ok": bool(ok), "detail": detail, "info": info or skip, "skip": skip})
+        log(("SKIP" if skip else "INFO" if info else "PASS" if ok else "FAIL") + f"  {name}" + (f"  ({detail})" if detail else ""))
 
     def card(index: int) -> dict:
         return next(a for a in machine(c, m["name"])["accelerators"] if a["index"] == index and a["vendor"] != "cpu")
@@ -364,9 +365,13 @@ def exercise(c: Client, d: dict, model: str, args, check, httpx, openai, report:
     big = "data:image/png;base64," + "A" * ((limit + 2) * 1024**2)
     refused(f"a body over {limit} MiB is refused", [image_part(big)], 413, ("request_too_large",))
 
-    # ---- the replica's own port without its internal key
+    # ---- the replica's own port without its internal key, reached as the gateway reaches it (1.4.5, #163:
+    # TLS with the machine's binding name when its agent serves TLS, plain HTTP for an older one)
+    rp = replica_port.Replicas.of(c, c.server, accept_m3.TLS)
     for e in d["endpoints"]:
-        s, text = raw_post(f"{e['url']}/v1/chat/completions", b"{}", "application/json", timeout=20)
+        p = rp.endpoint(e)
+        replica_port.record(rp.transport_checks(p, f"{model}: replica {e['replica']} on {e['machine']}"), check)
+        s, text = rp.post(p, "/v1/chat/completions", b"{}", "application/json", timeout=20)
         check(f"{model}: replica {e['replica']} on {e['machine']} without the key is refused", s == 401,
               f"{s} {text[:80]}")
 

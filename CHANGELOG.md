@@ -106,6 +106,19 @@ version until 1.0.
     are not affected. Once the GPUs open again, what waited is placed.
   The guide's troubleshooting page explains the cause and the fix. No migration.
 
+- **The acceptance scripts reach TLS replicas** (follow-up of #163). Since 1.4.5 an agent with `guard_tls` serves its
+  replica ports over TLS only, so the scripts' direct calls to a replica's own port (the key guard's 401 without the
+  internal key and with a client's key, vLLM's open paths) found the port closed and reported it unreachable or
+  failed. A shared helper, `scripts/replica_port.py`, now calls those ports the way the gateway does: over TLS to the
+  replica's address, with the machine's binding name for SNI and the host name check, trusting only Forgeyard's CA
+  (`--ca`, or `FORGEYARD_REPLICA_CA` for a server with its own certificate or `TLS=off`, else the server's
+  `/api/tls/ca.pem`); plain HTTP for an older agent's machine, as before. `accept_all`, `accept_x`, `accept_m4`,
+  `accept_mm`, `accept_img`, `accept_tts`, `accept_video` and `accept_vision` use it. New checks on each TLS port:
+  plain HTTP refused, the certificate verifies with the machine's name, another TLS machine's name (skipped with only
+  one) and a name no machine has refused (only a host name mismatch counts). A plain machine gets an information line
+  that its traffic is not encrypted. `accept_vision` no longer counts a port that does not answer as refused: only
+  the key guard's 401 passes. `accept_all` skips only a port it cannot reach at all as another network's; a closed
+  connection or a wrong certificate is a failure.
 
 - **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
   local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of

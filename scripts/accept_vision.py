@@ -19,7 +19,8 @@ cpu, default: gpu when the machine has an allowed GPU):
      red square of a generated image (the mask covers the square); depth on the photo (a 16-bit PNG of the
      photo's size, far and near differ). Each call is timed;
   3. the refusals: no key (401), the wrong task's endpoint (400 wrong_endpoint), no image (400), a key whose
-     allowlist lacks the model (403), and the replica's own port without its key (401 or closed);
+     allowlist lacks the model (403), and the replica's own port without its key (401 from the key guard; on a TLS
+     machine, 1.4.5, over TLS with its binding name, plus plain HTTP refused and the certificate checked);
   4. reads the usage of the run's own key: one image per answered request, its kilopixels, busy time;
 
 then removes what it created and prints a report (JSON with --out). Everything is named accept-vis-*, and
@@ -61,6 +62,7 @@ sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import GIB, Client, Fail, log, machine  # noqa: E402
 from accept_m4 import wait_all_ready  # noqa: E402
+import replica_port  # noqa: E402
 
 PREFIX = "accept-vis-"
 COCO_CATS = "http://images.cocodataset.org/val2017/000000039769.jpg"   # CC BY 4.0, two cats and two remotes
@@ -201,9 +203,10 @@ def other_model(c, name: str) -> Optional[str]:
 
 
 def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narrow: Optional[str], image: bytes, filename: str,
-             report: dict) -> int:
-    """The calls and refusals for one ready deployment (also used by scripts/accept_all.py). Returns how many
-    requests were answered (each counts one image)."""
+             report: dict, client: Client) -> int:
+    """The calls and refusals for one ready deployment (also used by scripts/accept_all.py); `client` is the signed-in
+    session (the machines' binding names for the replica ports). Returns how many requests were answered (each
+    counts one image)."""
     base = server.rstrip("/") + "/v1/vision/"
     task = spec["task"]
     info = report.setdefault(name, {})
@@ -310,12 +313,20 @@ def exercise(server: str, d: dict, name: str, spec: dict, check, key: str, narro
     else:
         s, data, _ = post(base + PATH[task], tiny, "application/json", narrow)
         check(f"{name}: a key without the model: 403", s == 403 and code(data) == "model_not_allowed", f"{s} {code(data)}")
-    rep = d["workload"]["replica_list"][0]
-    port = next(iter(rep.get("ports") or []), {})
-    if port.get("host_port") and port.get("address"):
-        url = f"http://{port['address']}:{port['host_port']}/v1/vision/{PATH[task]}"
-        s, data, _ = post(url, tiny, "application/json", None, timeout=15)
-        check(f"{name}: the replica's own port without its key: refused", s in (0, 401), f"{s} {code(data)}")
+    # The replica's own port without its key, reached as the gateway reaches it (1.4.5, #163: TLS with the machine's
+    # binding name when its agent serves TLS, plain HTTP for an older one; scripts/replica_port.py). Only the key
+    # guard's 401 counts: a port that does not answer is not a refusal.
+    rp = replica_port.Replicas.of(client, server, accept_m3.TLS)
+    ends = d.get("endpoints") or []
+    if not ends:
+        check(f"{name}: the replica's own port without its key: refused", False, "the deployment lists no endpoint")
+    for e in ends:
+        p = rp.endpoint(e)
+        what = f"{name}: replica {e['replica']} on {e['machine']}"
+        replica_port.record(rp.transport_checks(p, what), check)
+        s, text = rp.post(p, f"/v1/vision/{PATH[task]}", tiny, "application/json", timeout=15)
+        check(f"{what}: its own port without its key: 401 from the key guard",
+              s == 401 and "replica_key_required" in text, f"{s} {text[:80]}")
     # Answered requests (a refused one, 400, is not counted): one for depth and a classifier with fixed classes.
     return 1 if task == "depth" or (task == "image-classify" and not spec.get("zero_shot")) else 2
 
@@ -360,9 +371,9 @@ def main() -> int:
     report: dict = {"server": args.server, "machine": m["name"], "device": device, "checks": [], "deployments": {}}
     added: list[str] = []
 
-    def check(label: str, ok, detail="", info: bool = False) -> None:
-        report["checks"].append({"check": label, "ok": bool(ok), "detail": detail, "info": info})
-        log(f"{'INFO' if info else 'PASS' if ok else 'FAIL'}  {label}" + (f"  ({detail})" if detail else ""))
+    def check(label: str, ok, detail="", info: bool = False, skip: bool = False) -> None:
+        report["checks"].append({"check": label, "ok": bool(ok), "detail": detail, "info": info or skip, "skip": skip})
+        log(f"{'SKIP' if skip else 'INFO' if info else 'PASS' if ok else 'FAIL'}  {label}" + (f"  ({detail})" if detail else ""))
 
     def card(index: int) -> dict:
         return next(a for a in machine(c, m["name"])["accelerators"] if a["index"] == index and a["vendor"] != "cpu")
@@ -404,7 +415,8 @@ def main() -> int:
             other = other_model(c, dep_name)
             narrow = c.ok("POST", "/api/keys", {"name": f"{key_name}-narrow-{len(report['deployments'])}",
                                                 "models": [other]})["key"] if other else None
-            served += exercise(c.server, d, dep_name, spec, check, key, narrow, image, filename, report["deployments"])
+            served += exercise(c.server, d, dep_name, spec, check, key, narrow, image, filename, report["deployments"],
+                               c)
             if index is not None:
                 after = accept_m3.settle_card(c, m["name"], card(index)["key"])
                 used = (after["vram_total"] - after["vram_free"]) - (before["vram_total"] - before["vram_free"])
