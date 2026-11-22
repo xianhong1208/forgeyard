@@ -35,7 +35,9 @@ export function DeploymentDetailPage() {
     if (!d) return;
     const text = {
       stop: `Stop ${d.name}? Its replicas are stopped and their memory freed; the model stays in the machines' caches.`,
-      start: `Start ${d.name} again? Its replicas are placed again.`,
+      start: d.workload.desired_state === "asleep"
+        ? `Wake ${d.name}? Its replicas start again, on the machines they ran on when those still have room.`
+        : `Start ${d.name} again? Its replicas are placed again.`,
       delete: `Delete ${d.name}? Its replicas are stopped and its route removed. The cached model files stay on the machines.`,
     }[what];
     if (!window.confirm(text)) return;
@@ -48,7 +50,8 @@ export function DeploymentDetailPage() {
         return;
       }
       await api(`/deployments/${d.id}/${what}`, { method: "POST" });
-      setMessage({ tone: "ok", text: what === "stop" ? `Stopping ${d.name}.` : `Starting ${d.name} again.` });
+      const waking = d.workload.desired_state === "asleep";
+      setMessage({ tone: "ok", text: what === "stop" ? `Stopping ${d.name}.` : waking ? `Waking ${d.name}.` : `Starting ${d.name} again.` });
       reload();
     } catch (e) {
       setMessage({ tone: "error", text: errorText(e) });
@@ -66,7 +69,12 @@ export function DeploymentDetailPage() {
         actions={d && w && canManage && (
           <>
             <Link to={`/serving/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
-            {w.desired_state === "running" ? (
+            {w.desired_state === "asleep" ? (
+              <>
+                <button type="button" className="btn" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> Wake</button>
+                <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
+              </>
+            ) : w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             ) : (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> Start</button>
@@ -79,6 +87,12 @@ export function DeploymentDetailPage() {
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       {w && <NotPickedUpNotice w={w} />}
+      {d?.sleep?.asleep && (
+        <Notice tone="info">
+          Asleep: nobody used it for {d.sleep.idle_minutes} min, so its replicas stopped and their memory is free. The
+          model files stay on the machines. {canManage ? "Wake starts it again." : "An operator can wake it."}
+        </Notice>
+      )}
       {d && w && (
         <>
           <div className="wl-status">

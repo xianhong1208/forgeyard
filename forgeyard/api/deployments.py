@@ -39,7 +39,7 @@ from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
 from forgeyard.security import replica_tls
-from forgeyard.workloads import placement, state as wstate
+from forgeyard.workloads import placement, sleep, state as wstate
 from forgeyard.workloads.spec import NAME_RE, WorkloadSpec, parse_bytes
 
 router = APIRouter(prefix="/api", tags=["deployments"])
@@ -76,12 +76,14 @@ def _model(db: DbSession, ref: str) -> CatalogModel:
 # 1.4.5: how long a replica has to start answering a request it was sent (the gateway's, not the engine's:
 # changing it restarts nothing). Unset: the gateway's default, 120 s (forgeyard/gateway/proxy.py).
 FIRST_ANSWER_MIN, FIRST_ANSWER_MAX = 5, 3600
-GATEWAY_PARAMS = ("first_answer_timeout",)
+# 1.5.0 (#37): sleep when idle and the idle time are the server's too (forgeyard/workloads/sleep.py).
+GATEWAY_PARAMS = ("first_answer_timeout",) + sleep.PARAMS
 
 
 def normalise_params(recipe: Recipe, raw: dict) -> dict:
     """The deployment's parameters, checked against the recipe: its own (context, concurrency…)
-    and the common ones (gpus, share, vram, extra_args, first_answer_timeout). Unknown names are refused."""
+    and the common ones (gpus, share, vram, extra_args, first_answer_timeout, and 1.5.0's sleep_when_idle and
+    idle_minutes). Unknown names are refused."""
     out: dict = {}
     has_gpu = any(v.gpu for v in recipe.variants)
     has_cpu = any(not v.gpu for v in recipe.variants)
@@ -130,7 +132,9 @@ def normalise_params(recipe: Recipe, raw: dict) -> dict:
         if not FIRST_ANSWER_MIN <= wait <= FIRST_ANSWER_MAX:
             raise fail(422, "invalid_params", f"first_answer_timeout: {FIRST_ANSWER_MIN} to {FIRST_ANSWER_MAX} seconds")
         out["first_answer_timeout"] = wait
-    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args", "first_answer_timeout"})
+    if why := sleep.normalise(raw, out):
+        raise fail(422, "invalid_params", why)
+    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args", "first_answer_timeout", *sleep.PARAMS})
     if unknown:
         raise fail(422, "invalid_params", f"{recipe.name} has no parameter {unknown[0]!r}")
     return out
@@ -321,6 +325,8 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
         "workload": workload_out(w, caller),
         "pinned": _pinned(db, w),
         "rollout": _rollout(w),
+        # 1.5.0 (#37): sleep when idle, the last request this server saw, and when it would go to sleep.
+        "sleep": sleep.status(db, d),
     }
     if detail:
         from forgeyard.api.keys import deployment_usage
@@ -482,9 +488,9 @@ class DeploymentEdit(BaseModel):
     dry_run: bool = False
 
 
-def _restart_mode(running: bool, restart: bool, replicas: int) -> str:
+def _restart_mode(running: bool, restart: bool, replicas: int, asleep: bool = False) -> str:
     if not running:
-        return "on_start"
+        return "on_wake" if asleep else "on_start"
     if not restart:
         return "none"
     return "rolling" if replicas > 1 else "all"
@@ -493,6 +499,7 @@ def _restart_mode(running: bool, restart: bool, replicas: int) -> str:
 RESTART_TEXT = {
     "none": "Nothing restarts.",
     "on_start": "It is stopped: the new settings apply when it is started.",
+    "on_wake": "It is asleep: the new settings apply when it wakes.",
     "rolling": "The replicas restart one at a time; each waits until the one before it is ready.",
     "all": "Its replica restarts: the model does not answer until the new one is ready.",
 }
@@ -529,11 +536,12 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     def for_engine(p: dict) -> dict:
         return {k: v for k, v in p.items() if k not in GATEWAY_PARAMS}
 
-    # Only the gateway reads first_answer_timeout: changing it alone restarts nothing (1.4.5).
+    # Only the server reads first_answer_timeout (1.4.5) and the sleep settings (1.5.0): changing them alone
+    # restarts nothing.
     engine_changed = for_engine(ctx.params) != for_engine(d.params or {})
     moved = machine_id is not None and any(r.node_id is not None and r.node_id != machine_id for r in live)
     restart = running and (engine_changed or moved)
-    mode = _restart_mode(running, restart, replicas)
+    mode = _restart_mode(running, restart, replicas, asleep=w.desired_state == sleep.ASLEEP)
     changes: dict[str, dict] = {}
     for k in sorted(set(ctx.params) | set(d.params or {})):
         if (d.params or {}).get(k) != ctx.params.get(k):
@@ -787,11 +795,14 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     import time
 
     d = _get(db, dep_id)
+    sleep.idle.used([d.id])   # 1.5.0: a test request is use, like any other
     route = routes.own_route(db, d.id)
     own = next((t for t in route.targets if t.kind == "local" and t.deployment_id == d.id), None) if route else None
     upstream = own.upstream_model if own and own.upstream_model else d.served_name
     target = next(iter(routes.endpoints(d.workload, ready_only=True, tls=True)), None)
     if route is None or target is None:
+        if d.workload.desired_state == sleep.ASLEEP:
+            raise fail(409, "model_asleep", f"{d.name} is asleep: nobody used it for a while. Start it to wake it.")
         raise fail(409, "not_ready", "No replica of this deployment is ready yet.")
     recipe = catalog.get_recipe(db, d.recipe)
     voice = recipe.speech.default_voice if recipe is not None and recipe.tts is not None else None

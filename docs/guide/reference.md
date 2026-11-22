@@ -734,6 +734,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 502 | `provider_unreachable` | The provider could not be reached | Retry later |
 | 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
 | 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
+| 503 | `model_asleep` | 1.5.0: the model's deployment is asleep (*Sleep when idle*: nobody used it for its idle time). It stays in `/v1/models`. Like any tier without a ready replica, the request spills to a cloud tier the key may use | Wake it with **Start** on its page ([Sleep when idle](#sleep-when-idle)) |
 | 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it. Carries `Retry-After: 1` | Retry after `Retry-After` seconds |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
@@ -975,7 +976,7 @@ value.
 
 | Field | Value |
 |---|---|
-| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list) and `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list), `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing), and (1.5.0) `sleep_when_idle` and `idle_minutes` ([Sleep when idle](#sleep-when-idle); changing them restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
 | `replicas` | 1 to 16 |
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
@@ -988,7 +989,7 @@ The model, the recipe, the name and the served name cannot be changed (422). The
 | `estimate` | The new estimate |
 | `placement` | Where each replica would go, as for a deploy; `previous` marks a replica that stays on its machine, and `share_hint` is set when an exclusive model needs half its card or less |
 | `changes` | `{name: {before, after}}` for each parameter, `replicas` and `machine_id` that changes; `{}` when nothing does |
-| `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, or `on_start` (stopped: the settings apply when it starts) |
+| `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, `on_start` (stopped: the settings apply when it starts), or (1.5.0) `on_wake` (asleep: the settings apply when it wakes) |
 | `restart_text` | The same in a sentence |
 | `deployment` | The deployment after saving (not on a dry run) |
 
@@ -1013,6 +1014,41 @@ deployment's `workload` (as in `GET /api/workloads/{id}`) names it back: `deploy
 `placement`, each machine and each placed replica lists `needs` (what it would download there:
 `model`, `engine`, `image`) and, when that machine could not reach one of those sources in the last
 hour, `unreachable`.
+
+### Sleep when idle
+
+1.5.0 ([concepts](concepts.md#sleep-when-idle)). Two parameters of every deployment, set on deploy
+(`POST /api/deployments`, in `params`) or with a change; the server reads them, so changing them restarts nothing:
+
+| Parameter | Value |
+|---|---|
+| `sleep_when_idle` | `true` turns it on; `false` (or `null`, or leaving it out) turns it off. Off by default, also for deployments made before 1.5.0. Kept in `params` only while on |
+| `idle_minutes` | Minutes without a request before it sleeps: 1 to 1,440, **30** when left out. Kept while sleep is off too, for when it is turned on |
+
+Anything else is 422 `invalid_params` (`"yes"`, `1`, `0`, `1441`, `1.5`).
+
+An asleep deployment's workload has `desired_state` **`asleep`** and `status` `asleep` (`stopping` until its
+agents confirm), beside `running` and `stopped`; its replicas are `stopped`. Scripts that read `desired_state`
+should treat an unknown value as not running. `GET /api/deployments` and `GET /api/deployments/{id}` give each
+deployment a `sleep` object:
+
+| Field | What it is |
+|---|---|
+| `on`, `idle_minutes` | The setting (30 when not set) |
+| `asleep` | It is asleep now |
+| `last_request_at` | The last request this server saw for it since it started, or `null` |
+| `since` | From when its idle time counts: the last request, its last start or change, a replica becoming ready, or the server's start, whichever is latest |
+| `sleeps_at` | When it goes to sleep if nothing uses it (only while it runs with sleep on), checked every 30 s |
+| `held_by` | Why it does not sleep right now although it may be idle long enough: *a request is in flight*, *a replica is starting*, *an edit is restarting its replicas*, *a video is waiting or being made*, *a finished video is kept until …*; `null` otherwise |
+
+`POST /api/deployments/{id}/start` on an asleep deployment wakes it (event *Woken by …*, audited as
+`workload.started` with `woken: true` and `deployment.started`); `POST …/stop` makes it stopped (event *Stopped by
+… (it was asleep)*). Going to sleep is the event *Asleep: no requests for N min; frees …* and is not audited. `POST
+…/try` on an asleep deployment answers 409 `model_asleep`. A request through the gateway answers 503
+`model_asleep` ([Errors](#errors)).
+
+**Downgrade:** a server older than 1.5.0 reads `asleep` as stopped: the model is not listed, a request answers 503
+`no_ready_replica` *The deployment is stopped*, and Start starts it.
 
 ## A machine's model cache through the API
 

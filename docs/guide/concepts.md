@@ -235,6 +235,32 @@ model ready, the page says so and points to **Models → Catalog** to deploy one
 `console` in Usage, and its cloud setting is **Allowed** for admins and, for everyone else, the most they
 may give their own keys.
 
+## Sleep when idle
+
+From 1.5.0 a deployment can **sleep when nobody uses it**: after its *idle time* without a request its replicas
+stop, as with **Stop**, and the GPU memory (or RAM) they held is free for other deployments. The model files stay
+in the machine's model cache and the engine image in its store, so starting again needs no download. It is **off
+by default**, for deployments made before 1.5.0 and new ones alike; turned on, the idle time is **30 minutes**
+unless you set another (1 to 1,440 minutes). Changing either restarts nothing.
+
+- **What counts as use:** every request the gateway takes for the model, from any key or the Playground (also one
+  that then went to a cloud tier, and while it waits in line or in the image queue), a video asked for, and *Try
+  it*. `/v1/models`, health checks, the console's pages and polls of a video job do not.
+- **When it sleeps:** once no request came for the idle time, counted from the last request, or from when the
+  deployment was started, changed or became ready, whichever is later. Not while a request is in flight, a replica
+  is starting, an edit is restarting its replicas, or (video) a job is waiting or being made, or a finished video
+  can still be downloaded (it would be lost with the replica). The server checks every 30 seconds.
+- **After a server restart** every idle time counts from the restart: the server keeps the last request time in
+  its memory, so a restart never puts a model to sleep early.
+- **Asleep is not stopped.** An asleep model stays in `/v1/models`. In 1.5.0's first steps a request to it
+  answers **503 `model_asleep`**; **Start** (on its page: **Wake**) wakes it, on the machine it ran on when that
+  still has room, or on its pinned machine. Waking on the next request comes later in 1.5.0. **Stop** on an asleep
+  deployment makes it stopped: then requests answer that it is stopped and it leaves `/v1/models`, as before.
+- **While it sleeps its memory is free**, and another deployment (or, on a shared card, something outside
+  Forgeyard) may take it. Then it starts elsewhere if it fits there, or waits for room like any replica.
+- Going to sleep is recorded in the deployment's events (*Asleep: no requests for 30 min; frees 14.4 GiB on gpu-01
+  GPU #4*), not in the audit log: no person did it. Waking with Start is audited as a start.
+
 ## Images, audio and video in chat
 
 Models that read images (Qwen3-VL, Gemma 3 and 4, and similar) take them in

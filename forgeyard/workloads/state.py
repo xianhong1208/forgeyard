@@ -214,7 +214,7 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
             desired_changed = True
         progress_only = (before[0] == r.state and st.download is not None
                          and (before[1] or "").startswith(("downloading", "pulling the image")))
-        if (r.workload.desired_state == "stopped" and r.reason
+        if (r.workload.desired_state in ("stopped", "asleep") and r.reason
                 and r.reason.startswith("cancelled: the ") and r.reason.endswith(" was removed")):
             # The agent only sees that the replica is no longer wanted; here it was stopped, not removed.
             r.reason = r.reason.removesuffix(" was removed") + " was stopped"
@@ -281,9 +281,10 @@ def reset_replica(r: Replica, generation: int) -> None:
     r.updated_at = utcnow()
 
 
-def stop(db: DbSession, w: Workload, connected) -> set[int]:
-    """Ask every replica to stop. Returns the machines to poke."""
-    w.desired_state = "stopped"
+def stop(db: DbSession, w: Workload, connected, to: str = "stopped") -> set[int]:
+    """Ask every replica to stop: stopped by a person, or (1.5.0, `to="asleep"`) asleep because nobody used it
+    (forgeyard/workloads/sleep.py). Returns the machines to poke."""
+    w.desired_state = to
     w.updated_at = utcnow()
     nodes: set[int] = set()
     for r in w.replicas:
@@ -360,13 +361,14 @@ def not_picked_up(r: Replica, now: datetime, connected: Callable[[int], bool]) -
 
 
 def summary(w: Workload) -> dict:
-    """One status for the list: running / starting / degraded / succeeded / failed / stopped…"""
+    """One status for the list: running / starting / degraded / succeeded / failed / stopped / asleep…"""
     reps = w.replicas
     states = [r.state for r in reps]
     health = (w.spec or {}).get("health")
     ready = sum(1 for r in reps if r.state == "healthy" or (r.state == "running" and not health))
     if w.desired_state != "running":
-        status = "stopping" if "stopping" in states else "stopped"
+        # 1.5.0: asleep (stopped because nobody used it; Start wakes it). Anything else not running is stopped.
+        status = "stopping" if "stopping" in states else ("asleep" if w.desired_state == "asleep" else "stopped")
     elif w.kind == "task":
         if reps and all(r.final for r in reps):
             status = "succeeded" if all(r.state == "exited" and r.exit_code == 0 for r in reps) else "failed"

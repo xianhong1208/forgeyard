@@ -205,6 +205,31 @@ describe("changing a deployment (1.3.1)", () => {
     expect(screen.getByText(text, { selector: ".cell-stuck" })).toBeTruthy();
   });
 
+  it("FY-WEB-570: an asleep deployment (1.5.0) says so, offers Wake (a start) and Stop, and keeps its sleep settings on edit", async () => {
+    const stopped = rep({ state: "stopped", started_at: null, container: null, reason: "cancelled: the replica was stopped" });
+    const sleep = { on: true, idle_minutes: 30, asleep: true, last_request_at: null, since: "2026-11-10T10:00:00Z", sleeps_at: null, held_by: null };
+    const d = dep([stopped], { params: { context: 8192, concurrency: 4, gpus: 1, share: "exclusive", sleep_when_idle: true, idle_minutes: 30 },
+      workload: workload([stopped], { desired_state: "asleep", status: "asleep", ready: 0 }), sleep });
+    const posts: string[] = [];
+    server((url, init) => {
+      if (init?.method === "POST") { posts.push(url); return { status: 200, body: { deployment: d } }; }
+      if (url === "/api/deployments/3") return { status: 200, body: { deployment: d, events: [], server_time: "", can_manage: true } };
+      if (url === "/api/deployments") return { status: 200, body: { deployments: [d], server_time: "", can_manage: true } };
+      return undefined;
+    });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    mount("/serving/3");
+    expect(await screen.findByText(/Asleep: nobody used it for 30 min/)).toBeTruthy();
+    expect(screen.getByText("asleep", { selector: ".chip" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Wake" }));
+    await waitFor(() => expect(posts).toEqual(["/api/deployments/3/start"]));
+    expect(await screen.findByText("Waking chat.")).toBeTruthy();
+    // The edit form sends only the recipe's and the common parameters: the sleep settings stay as they are.
+    expect("sleep_when_idle" in (editBody(editForm(d, catalog.recipes[0]), catalog.recipes[0]).params as Record<string, unknown>)).toBe(false);
+  });
+
   it("FY-WEB-202: the edit form's start and its PATCH body", () => {
     const d = dep([rep(), rep({ ordinal: 1 })], { params: { context: 4096, concurrency: 2, gpus: 1, share: "vram", vram: 20 * GIB, extra_args: ["--seed", "1"] } });
     d.workload.spec.machine_id = 5;
