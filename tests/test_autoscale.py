@@ -16,6 +16,7 @@ from forgeyard.workloads import autoscale, placement, sleep
 from forgeyard.workloads.autoscale import Autoscaler
 from tests.test_deploy_edit import CPU_BODY, cpu_row, ready, rows, set_replica, workload
 from tests.test_scheduler import MODELS, deploy, seed_catalog
+from tests.test_gateway import gw  # noqa: F401  (the fixture)
 from tests.workload_helpers import make_node
 
 GIB = 1024**3
@@ -225,10 +226,10 @@ def test_fy_asc_003_video_is_never_scaled(owner):
     finally:
         db.close()
     ready("wan", 0)
-    gw = FakeGateway()
+    fake = FakeGateway()
     clock = Clock()
-    s = Autoscaler(gw, clock)
-    gw.flight = {rows("wan")[0].uid: 50}
+    s = Autoscaler(fake, clock)
+    fake.flight = {rows("wan")[0].uid: 50}
     for _ in range(60):
         clock.t += 2
         assert s.tick(wall=utcnow() + timedelta(minutes=5)) == []
@@ -614,3 +615,124 @@ def test_fy_asc_017_metrics(cpus, run):
                  'forgeyard_autoscale_total{deployment="chat",direction="up"}'):
         assert line in text, (line, [x for x in text.splitlines() if "deployment_" in x or "autoscale" in x])
     assert 'forgeyard_deployment_replicas{deployment="fixed",kind="wanted"}' not in text
+
+
+# ------------------------------------------------------------------ the gateway: draining and what it reads
+def test_fy_asc_019_the_balancer_drains_a_replica():
+    """FY-ASC-019: a replica being drained takes no new slot (with a cap or without), comes last in the order, and
+    is drained only once nothing is in flight on it; undrained it takes requests again; reset forgets drains."""
+    from forgeyard.gateway.balancer import Balancer, Target
+
+    b = Balancer()
+    t0, t1 = Target("u0", 0, "http://a", None, None, False), Target("u1", 1, "http://b", None, None, False)
+    assert b.try_acquire("u1", None)
+    b.drain("u1")
+    assert b.draining("u1") and not b.drained("u1")   # one in flight
+    assert not b.try_acquire("u1", None) and not b.try_acquire("u1", 8)
+    b.release("u1")
+    assert b.drained("u1") and not b.drained("u0")
+    for _ in range(4):   # both idle: it comes last every time, not in turn
+        assert b.order("r", [t1, t0])[0] is t0 and b.order("r", [t0, t1])[0] is t0
+    b.undrain("u1")
+    assert not b.draining("u1") and not b.drained("u1") and b.try_acquire("u1", None)
+    b.drain("u0")
+    b.reset()
+    assert not b.draining("u0") and b.try_acquire("u0", 1)
+
+
+def test_fy_asc_020_a_drain_through_the_real_gateway(gw):  # noqa: F811
+    """FY-ASC-020: two ready replicas behind the gateway; the autoscaler drains replica 1 while a stream is in flight
+    on it: new requests all go to replica 0 even when it is the busier one, the stream is not cut, and replica 1 is
+    removed only once the stream has ended, then requests keep going to replica 0. No request reaches two engines."""
+    import threading
+
+    from forgeyard.db import Deployment
+    from forgeyard.gateway.balancer import balancer
+    from tests.test_gateway import chat as gw_chat
+    from tests.waits import wait_until
+
+    db = new_session()
+    try:
+        dep = db.scalar(select(Deployment).where(Deployment.name == "chat"))
+        dep.params = {**dep.params, **AUTO}
+        db.commit()
+    finally:
+        db.close()
+    uid0, uid1 = [r.uid for r in rows("chat")]
+    clock = Clock()
+    scaler = Autoscaler(clock=clock)
+    wall = utcnow() + timedelta(minutes=3)
+
+    def tick():
+        clock.t += autoscale.SAMPLE_SECONDS
+        return scaler.tick(wall=wall)
+
+    for _ in range(300):   # 600 s with nothing in flight, the first sample 2 s in
+        assert tick() == []
+    gate = threading.Event()
+    gw.e2.gate, gw.e2.gate_streams = gate, True
+    balancer.failed(uid0)   # so the stream goes to replica 1
+    got: dict = {}
+    stream = threading.Thread(target=lambda: got.update(r=gw_chat(gw.api, stream=True)))
+    stream.start()
+    wait_until(lambda: len(gw.e2.posts()) == 1, "the stream reached replica 1")
+    balancer._failed.clear()
+    done = tick()
+    assert done and done[0].startswith("Draining replica 1:") and done[0].endswith(
+        "it takes no new requests and is removed once the 1 in flight finishes."), done
+    assert balancer.draining(uid1)
+    # Replica 0 holds one request: with a request on each, replica 1 would get the next ones in turn.
+    held = threading.Event()
+    gw.e1.gate = held
+    busy: dict = {}
+    first = threading.Thread(target=lambda: busy.update(r=gw_chat(gw.api)))
+    first.start()
+    wait_until(lambda: len(gw.e1.held) == 1, "a request held on replica 0")
+    gw.e1.gate = None
+    assert [gw_chat(gw.api).headers["x-forgeyard-replica"] for _ in range(4)] == ["chat#0"] * 4
+    assert len(gw.e2.posts()) == 1
+    assert tick() == [] and len(rows("chat")) == 2   # the stream is still in flight on it
+    held.set()
+    gate.set()
+    first.join(30)
+    stream.join(30)
+    assert busy["r"].status_code == 200 and got["r"].status_code == 200
+    assert got["r"].headers["x-forgeyard-replica"] == "chat#1" and got["r"].text.rstrip().endswith("data: [DONE]")
+    assert gw.e2.finished_streams == 1
+    done = tick()
+    assert done and done[0].startswith("Removed replica 1 after draining for ") and done[0].endswith("1 replica now."), done
+    assert [r.ordinal for r in rows("chat")] == [0] and not balancer.draining(uid1)
+    assert [gw_chat(gw.api).headers["x-forgeyard-replica"] for _ in range(2)] == ["chat#0"] * 2
+    assert len(gw.e1.posts()) == 7 and len(gw.e2.posts()) == 1   # 1 held + 4 + 2, and the stream: each once
+
+
+def test_fy_asc_021_the_gateway_signals(owner):
+    """FY-ASC-021: what the autoscaler reads from the gateway: requests in flight per replica, the waiting lines and
+    the image queues (added up per route tier), and the balancer's drains."""
+    from forgeyard.gateway import imagegen, waiting
+    from forgeyard.gateway.balancer import balancer
+    from forgeyard.workloads.autoscale import GatewaySignals
+
+    s = GatewaySignals()
+    waiting.forget()
+    imagegen.forget()
+    try:
+        assert balancer.try_acquire("u9", None) and s.in_flight("u9") == 1
+        line = waiting.line("chat#0")
+        class Waiting:
+            def wake(self):
+                pass
+
+        line.waiting.extend([Waiting(), Waiting()])   # two waiting (the line only counts them here)
+        q = imagegen.queue("draw#0")
+        assert q.join(8) and q.join(8) and q.join(8)
+        assert s.waiting() == {"chat#0": 2, "draw#0": 3}
+        s.drain("u9")
+        assert not s.drained("u9")
+        balancer.release("u9")
+        assert s.drained("u9")
+        s.undrain("u9")
+        assert not s.drained("u9") and not balancer.draining("u9")
+    finally:
+        waiting.forget()
+        imagegen.forget()
