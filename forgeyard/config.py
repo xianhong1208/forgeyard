@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     allowed_hosts: str = ""
     # Proxies whose X-Forwarded-For (and X-Forwarded-Proto) is believed, comma-separated IPs. Empty: none.
     trusted_proxies: str = ""
+    # GET /metrics (Prometheus, 1.4.5, #165). Empty: only a direct request from this host (loopback, no proxy in
+    # between) may read it; set: every scrape needs `Authorization: Bearer <token>`, from anywhere.
+    metrics_token: str = ""
 
     # HTTPS (docs/https-and-trust.md). "on" (the default): the server speaks HTTPS with a certificate
     # from Forgeyard's own certificate authority, made on first start in data_dir/tls, or with
@@ -121,6 +124,10 @@ class Settings(BaseSettings):
     # Machines: a machine with nothing heard for this long is shown offline (a server-side check, so a
     # silent network drop counts). Agents send a heartbeat every third of it (at least 2 s).
     agent_offline_seconds: int = 30
+    # 1.4.5 (#164): a machine offline for this long has the replicas of its unpinned deployments placed again on
+    # machines that fit (counted from the last heartbeat, or from the server's start when that is later). A
+    # deployment pinned to the machine waits for it. 0: replicas always wait for their machine.
+    agent_offline_move_seconds: int = Field(default=600, ge=0)
     # The agent image the Machines page puts in its `docker run` (forgeyard/install/images.py). Empty:
     # the published one, docker.io/<namespace>/forgeyard-agent, or a local build while none is
     # published. Without :TAG or @sha256:DIGEST the tag is this server's version. A mirror or a

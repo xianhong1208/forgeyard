@@ -27,7 +27,7 @@ from forgeyard.machines import cache, engineimages, imagecopy, store, upload
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import CLOSE_REVOKED, FEATURE_IMAGE_REMOVE, FETCH_VIA
 from forgeyard.models import prefetch
-from forgeyard.security import tls
+from forgeyard.security import replica_tls, tls
 from forgeyard.workloads import images, placement, state as wstate
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
@@ -58,6 +58,8 @@ def machine_out(n: Node, db: Optional[DbSession] = None) -> dict:
         "runtime_info": {k: v for k, v in (n.runtime_info or {}).items() if k not in ("install", "images")},
         # 1.4.2 (#122): why the agent should be updated (older, older protocol, a feature missing), or null.
         "agent_behind": agent_update.behind(n), "server_version": __version__,
+        # 1.4.5 (#163): how the gateway reaches its replicas: plain (an older agent) or TLS, and its certificate.
+        "replica_tls": replica_tls.status(n),
         "fetch_via": n.fetch_via or "auto",
         # 1.4: the largest image file an admin may upload to a machine (IMAGE_UPLOAD_MAX_GB).
         "image_upload_max_bytes": get_settings().image_upload_max_gb * upload.UNIT,

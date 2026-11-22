@@ -35,6 +35,7 @@
 |---|---|---|
 | `ALLOWED_HOSTS` | — | 其他要回應的主機名稱，以逗號分隔。`localhost` 和 IP 位址一律可用；其他名稱會得到 421 |
 | `TRUSTED_PROXIES` | — | 信任其 `X-Forwarded-For` 和 `X-Forwarded-Proto` 的代理，以逗號分隔的 IP |
+| `METRICS_TOKEN` | — | `GET /metrics`（Prometheus）。留空：只有來自伺服器本機的直接請求可以讀取（其他得到 403）。有設定：每次收集都要 `Authorization: Bearer <token>`，不論從哪裡來（否則 401）。請看[指標](#metrics) |
 
 ### HTTPS
 
@@ -43,6 +44,8 @@
 | `TLS_EXTRA_NAMES` | — | 要加進 Forgeyard 自己的伺服器憑證的其他名稱或 IP 位址，以逗號分隔。使用自己的憑證時會被忽略 |
 
 `TLS`、`TLS_CERT_FILE`、`TLS_KEY_FILE` 和 `TLS_CA_FILE` 在[常用設定](#common-settings)裡。
+
+從閘道到副本的流量（1.4.5）不論這些設定為何都會加密：`data/tls` 裡 Forgeyard 的 CA 會替每個 agent 簽發副本憑證（使用自己的憑證或 `TLS=off` 時，第一次用到才會在那裡建立）。沒有東西需要設定；請見[部署與閘道](concepts.md#deployments-and-the-gateway)。
 
 ### 資料與機密
 
@@ -68,6 +71,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
+| `AGENT_OFFLINE_MOVE_SECONDS` | `600` | 離線這麼久的機器（從最後一次心跳起算，伺服器啟動得更晚時從伺服器啟動起算），它上面沒有固定機器的部署，副本會重新放到放得下的機器上；固定在它上面的部署會等它。`0`：副本永遠等原本的機器（[詳細說明](how-to.md#when-a-machine-stays-offline)） |
 | `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**Engine images** → **Upload an image**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
 | `AGENT_IMAGE` | — | **Add a machine** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
@@ -86,7 +90,7 @@
 | 變數 | 預設值 | 用途 |
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | 連線到副本的秒數上限，超過就改試下一個 |
-| `GATEWAY_READ_TIMEOUT` | `600` | 副本回傳回應標頭或串流下一段內容的秒數上限 |
+| `GATEWAY_READ_TIMEOUT` | `600` | 副本回傳非串流回應標頭，或串流第一段之後每一段的秒數上限（串流的第一批位元組：部署的 *Wait for the first answer*，預設 120 秒，請見[重試與等待第一個回應](#retries-and-the-wait-for-a-first-answer)） |
 | `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的）。部署的配方有 *Largest request* 參數（`max_body_mb`，vLLM 與 llama.cpp 預設 64）時，改以該值為上限 |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API keys** 修改 |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
@@ -256,6 +260,11 @@ local_dirs = ["/data/models"]
 - 串流的對話或補全會多要一個最後的用量區塊（`stream_options.include_usage`），以便計算 token。如果你沒有要求，閘道會再把它拿掉。
 - 請求內容最多 `GATEWAY_MAX_BODY_MB`（32 MB），或模型自己的 *Largest request*（`max_body_mb`，vLLM 與 llama.cpp 部署預設 64 MB）。
 - 你關閉連線時，閘道會立刻關閉往上游的請求，引擎就會停止生成。
+
+### 重試與等待第一個回應
+
+- **一個請求最多只執行一次。** 只有在請求確定沒有送到第一個副本時，閘道才會改試另一個副本（或供應商）：連線建立不起來（沒有程式在聽、被拒絕、`GATEWAY_CONNECT_TIMEOUT`）、沒有空出的連線，或副本的金鑰守衛回應它的引擎沒有在執行（503 帶 `X-Forgeyard-Not-Taken`，1.4.5 起的 agent）。請求送出之後才斷掉的連線（寫入請求時，或等待回應時）會回 502 `upstream_error`（供應商則為 `provider_error`），而且不會再送到別處：引擎可能已經開始處理，生成或付費的雲端請求會跑兩次。如果安全，請自己重試。1.4.5 之前的 agent 在引擎沒有執行時會直接關閉連線，現在會被當成這種斷線：請更新 agent，才能在 agent 回報引擎停止前的那幾秒內保有容錯移轉。
+- **串流的第一個回應。** 串流請求（`stream: true`，或帶 `stream_format` 的語音）寫入副本之後，副本有部署的 *Wait for the first answer*（`first_answer_timeout`，預設 **120 秒**，5 到 3,600）送出狀態列和串流的第一批位元組。超過時請求會被關閉，引擎跟著停止，回應是 504 `first_answer_timeout`；它絕不會送到另一個副本。串流開始之後，之後每一段最多可以等 `GATEWAY_READ_TIMEOUT`（600 秒）；設得比它長的等待，第一批位元組也會照設定等。**非串流的回答就是整個回答，所以這個等待不適用**：它維持 `GATEWAY_READ_TIMEOUT`（504 `upstream_timeout`），長的非串流生成和長錄音的轉錄不會被提早切斷。圖片請求維持部署自己的 *Timeout*；影片工作也是用自己的；這兩種部署不接受 `first_answer_timeout`。它在部署和修改表單的 **Advanced** 裡；修改它不會重新啟動任何東西。
 
 ### 對話中的圖片、音訊與影片
 
@@ -482,8 +491,9 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `X-Forgeyard-Replica` | 回應 | 本機回答時：`<model>#<replica>` |
 | `X-Forgeyard-Spilled` | 回應 | 請求離開第一層的原因：`unavailable`、`busy`、`refused`、`too_long` 或 `budget`。第一層回答時沒有這個標頭 |
 | `X-Forgeyard-Voice` | 回應 | 文字轉語音：請求沒指定聲音、或指定了模型沒有的 OpenAI 聲音時，閘道所選的聲音；模型只有自己的一種聲音時為 `default` |
+| `X-Forgeyard-Dropped-Params` | 回應 | Forgeyard 在送往回答的供應商途中拿掉的請求參數（只有引擎才有的，例如 `top_k`、`chat_template_kwargs`；模型自己的拿掉清單），以逗號分隔。該供應商回錯誤時也會帶上。沒有拿掉任何參數時沒有這個標頭（[結構化輸出](cloud-providers.md#when-a-request-spills)永遠不會被拿掉：這種請求會略過那個供應商） |
 | `X-Forgeyard-Budget-Exhausted` | 回應 | 讓請求無法送往雲端供應商的預算，以逗號分隔：`key`、`person` 或 `provider:<name>`。由其他目標成功回答時也會帶上 |
-| `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`，以及原樣轉回的副本或供應商自己的 429 或 503 |
+| `Retry-After` | 回應 | 要等待的秒數，出現在 429 `rate_limit_exceeded`、供應商有提供時的 429 `provider_rate_limited`、503 `local_busy`（1），以及原樣轉回的副本或供應商自己的 429 或 503 |
 
 ### 錯誤
 
@@ -530,6 +540,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 400 | `input_reference_not_supported` | 影片：帶了 `input_reference`（或 `image_reference`、`video_reference`、`audio_reference`）：1.3 只支援文字轉影片 | 改在提示裡描述 |
 | 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；引擎只做影片 | 改用 `variant=video` |
 | 4xx/5xx | `engine_error` | 圖片與影片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
+| 400 | `structured_output_not_supported` | 請求要求結構化輸出（JSON 的 `response_format`、`structured_outputs`、`guided_*`、`grammar`、`json_schema`、strict 工具），但提供這個模型的每個供應商都會拿掉或忽略它。訊息會列出它們和參數 | 拿掉這個參數，或改用接受它的目標（OpenAI 相容伺服器、本機部署） |
 | 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
@@ -554,8 +565,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 429 | `provider_rate_limited` | 每個能提供服務的雲端目標都達到速率限制 | 有 `Retry-After` 就等待那麼多秒 |
 | 429 | `queue_full` | 圖片：每個副本都在忙，部署的佇列也滿了。影片：部署已經有 *Jobs at once* 個工作 | 等待 `Retry-After` 秒 |
 | 429 | `too_many_jobs` | 影片：這把金鑰（或這個人）在部署上已經有 *Jobs per key* 段影片在等待或製作中 | 等待 `Retry-After` 秒，或刪掉一段 |
-| 502 | `upstream_unreachable` | 連不上任何副本 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
-| 502 | `upstream_error` | 回應傳送到一半時，和副本或供應商的連線斷了 | 重試 |
+| 502 | `upstream_unreachable` | 連不上任何副本，或每個副本的引擎都沒有在執行 | 通常是 agent 或引擎重新啟動了，會自己恢復。檢查部署 |
+| 502 | `upstream_error` | 請求送出之後，或回應傳送到一半時，和副本的連線斷了。不會送到另一個副本，以免跑兩次 | 安全的話再重試 |
 | 502 | `replica_refused_key` | 副本拒絕了閘道的內部金鑰 | 停止再啟動部署 |
 | 502 | `provider_auth_failed` | 供應商拒絕了 Forgeyard 給它的金鑰。絕不會以 401 轉給你，免得你懷疑自己的金鑰 | 由管理員修正供應商的金鑰 |
 | 502 | `provider_blocked` | 外連規則在送出前就拒絕了供應商的位址 | 由管理員檢查供應商的 base URL 和 `EGRESS_*` |
@@ -563,17 +574,58 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 502 | `provider_unreachable` | 連不上供應商 | 稍後重試 |
 | 502 | `provider_error` | 供應商回應 5xx，或送往它的請求失敗 | 稍後重試 |
 | 503 | `no_ready_replica` | 模型存在，但沒有就緒的副本：下載中、啟動中、已停止，或它的機器離線。訊息會列出每個副本的狀態 | 等待，或啟動部署 |
-| 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它 | 重試 |
+| 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它。帶 `Retry-After: 1` | 等 `Retry-After` 秒後重試 |
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
 | 503 | `queue_timeout` | 圖片：請求等待空出副本的時間超過部署的 *Timeout* | 稍後重試，或加一個副本 |
-| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有回應（或沒有送出串流的下一段）；圖片則是在部署的 *Timeout* 內；影片則是副本在 60 秒內沒有接下工作 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
+| 504 | `first_answer_timeout` | 只限串流請求：副本接下了請求，但沒有在部署的 *Wait for the first answer*（預設 120 秒）內送出狀態列和第一批位元組。請求已停止，絕不會送到另一個副本 | 稍後重試，或調高部署的等待（長提示在第一個 token 之前要花不少時間） |
+| 504 | `upstream_timeout` | 副本在 `GATEWAY_READ_TIMEOUT` 內沒有送出非串流的回應，或串流的下一段；圖片則是在部署的 *Timeout* 內沒有回應；影片則是副本在 60 秒內沒有接下工作 | 降低 `max_tokens`，或調高設定；圖片則用小一點的尺寸或少一點步數 |
 | 504 | `provider_timeout` | 供應商沒有及時回應（`PROVIDER_READ_TIMEOUT`，或供應商自己的逾時設定） | 稍後重試 |
 
 另外兩種情況：
 
 - **引擎或供應商本身的錯誤**會以它自己的狀態碼轉給你。副本的回應原封不動轉送（例如提示太長時 vLLM 回的 400）。供應商的其他 4xx 保留它的狀態碼和 `code`，訊息前面加上供應商的名稱，看起來像金鑰的內容會被移除。沒有其他副本或層級能接手時，副本的 429 或 503 會轉給你。
 - **串流開始後才中斷**時，狀態碼已經無法更改。閘道會送出最後一個事件結束它，也就是錯誤碼為 `upstream_stream_broken` 的錯誤：`data: {"error": {…, "code": "upstream_stream_broken"}}`。
+
+## 指標
+
+`GET /metrics` 以 Prometheus 的文字格式（`text/plain`）回應，不快取。怎麼收集：[用 Prometheus 收集 Forgeyard 的指標](how-to.md#scrape-forgeyard-with-prometheus)。
+
+| 回應 | 什麼時候 |
+|---|---|
+| 200 | `METRICS_TOKEN` 留空，且請求直接來自伺服器本機（loopback 位址，沒有 `X-Forwarded-For`、`Forwarded` 或 `X-Real-IP` 標頭）；或 `METRICS_TOKEN` 有設定，且請求帶著 `Authorization: Bearer <METRICS_TOKEN>` |
+| 401 `metrics_token_required` | `METRICS_TOKEN` 有設定，但請求沒有 Bearer 權杖或帶了別的（兩種情況回應相同），附 `WWW-Authenticate: Bearer realm="metrics"` |
+| 403 `metrics_local_only` | `METRICS_TOKEN` 留空，而請求來自其他位址或經過 proxy |
+| 421 | 請求的主機名稱不是伺服器會回應的名稱（`ALLOWED_HOSTS`），所有路徑都一樣 |
+
+閘道的指標計算的是用量統計所計算的請求（`/v1`、Playground、`/x/` 和影片工作），在請求結束時計入：
+
+| 指標 | 類型 | 標籤 | 是什麼 |
+|---|---|---|---|
+| `forgeyard_gateway_requests_total` | counter | `endpoint`、`model`、`status`、`source`、`target` | 已結束的請求。`endpoint`：`chat/completions`、`embeddings`、`audio/speech`、`videos`、`x`（直通）… `status`：HTTP 狀態碼（499：用戶端離開了）。`source`：`api`（API 金鑰）或 `console`（Playground）。`target`：`local` 或 `provider` |
+| `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`、`model` | 從請求到達到結束；影片工作是從建立到結束 |
+| `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`、`model` | 從請求到達，到收到副本或供應商回應的第一批位元組：串流是第一個區塊，其他是它的狀態列。只計有收到回應的請求 |
+| `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
+| `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`refused`、`too_long`、`budget` |
+| `forgeyard_gateway_waiting` | gauge | `model` | 現在正在排隊等本地空位的請求（路由所有層加總） |
+| `forgeyard_gateway_wait_seconds` | histogram | `model` | 每個請求在隊伍裡等了多久，才拿到空位或繼續往下走 |
+
+每次收集時從資料庫讀取：
+
+| 指標 | 標籤 | 是什麼 |
+|---|---|---|
+| `forgeyard_replicas` | `deployment`、`state` | 每個模型部署各狀態的副本數：`pending`、`starting`、`running`、`healthy`、`unhealthy`、`backoff`、`exited`、`failed`、`stopping`、`stopped` |
+| `forgeyard_machines` | `status` | `online`、`offline` 和 `revoked` 的機器數 |
+| `forgeyard_machine_up` | `machine` | 機器的 agent 連線中時是 1，否則是 0 |
+| `forgeyard_gpu_memory_total_bytes`、`forgeyard_gpu_memory_free_bytes` | `machine`、`gpu` | 一張卡的記憶體和可用記憶體，依 agent 最近一次回報（`gpu`：它的編號） |
+| `forgeyard_gpu_memory_reserved_bytes` | `machine`、`gpu` | Forgeyard 的副本在這張卡上保留的量：也就是放置時計算的量 |
+| `forgeyard_machine_memory_total_bytes`、`forgeyard_machine_memory_free_bytes`、`forgeyard_machine_memory_reserved_bytes` | `machine` | 機器的 RAM，同上（CPU 副本，以及 GPU 副本留在 CPU 上的層） |
+| `forgeyard_cloud_spend_usd` | `provider` | 每個供應商這個 UTC 月份的花費，依預算的計算方式 |
+| `forgeyard_provider_budget_usd` | `provider` | 供應商的每月預算（有設定時） |
+| `forgeyard_budgets_reached` | `scope`、`threshold` | 這個月有幾個 `key`、`person` 和 `provider` 預算達到 `80` 或 `100` 百分比（絕不列出是哪些） |
+| `forgeyard_build_info` | `version` | 永遠是 1：伺服器的版本 |
+
+另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
 
 ## 應用程式（已淘汰）
 
@@ -715,7 +767,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 | 欄位 | 值 |
 |---|---|
-| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）和 `extra_args`（清單）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）和 `first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
 | `replicas` | 1 到 16 |
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
@@ -900,9 +952,9 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | 409 | `source_offline`、`source_cannot_save` | 來源沒有連線，或沒有 container 引擎、或比 1.4.1 舊 |
 | 409 | `source_busy` | 來源已經在送一個映像檔 |
 | 409 | `machine_offline`、`agent_cannot_load`、`upload_busy` | 目標機器，同上傳（全部兩個時是 429） |
-| 409 | `image_save_failed` | 來源無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
+| 409 | `image_save_failed` | 來源在送出任何位元組之前就無法儲存（它的說明）：不是它的映像檔，或它的引擎失敗 |
 | 504 | `source_no_send` | 來源 2 分鐘內沒有開始送 |
-| 400 | `upload_broken` | 來源的儲存中斷；什麼都沒有載入 |
+| 400 | `upload_broken` | 來源送到一半停了，或伺服器停掉一個 2 分鐘都沒送資料的來源；什麼都沒有載入。來源自己的回覆說明了原因（`docker save failed: …`）時，訊息會包含它的說明（伺服器最多等 10 秒，#215） |
 | 413 | `upload_too_large` | 映像檔超過 `IMAGE_UPLOAD_MAX_GB` |
 | 422 | `image_load_failed` | 目標機器的引擎無法載入（agent 的說明） |
 
@@ -949,6 +1001,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `certificate-expiring` | 警告 | 你自己的憑證在 30 天內到期，或 Forgeyard 的 CA 在 90 天內到期。14 天內到期則是錯誤 |
 | `registrations-pending` | 提示 | 有人在等待核准 |
 | `agent-outdated` | 警告 | 某台機器的 agent 比伺服器舊。如果它的協定比較舊，則是錯誤 |
+| `replica-traffic-plain` | 警告 | 送往某台機器的流量沒有加密：它的 agent 比 1.4.5 舊，閘道以純 HTTP 連它；修正連結會開啟它的更新指令（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)） |
+| `replica-certificate` | 錯誤 | 某台機器的 agent 以 TLS 提供副本，卻沒有這台伺服器簽發的憑證，或憑證已過期、沒有在更新（剩不到 3 天）：連不到它的副本（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)） |
 | `gpus-shared-no-allowlist` | 警告 | 某台機器的顯示卡佔用的記憶體比 Forgeyard 在那裡保留的多出至少 1 GiB，而且沒有人選擇它的 GPU 存取 |
 | `machine-no-models` | 提示 | 某個上線的 agent 沒有模型快取，所以不會有模型放到那裡。如果它有 GPU，則是警告 |
 | `apps-deprecated` | 警告 | 有應用程式（不是模型的 workload）：它們、它們的 API 和 `/x/` 會在 1.5 移除 |
@@ -956,6 +1010,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `model-cache-full` | 警告 | 某台機器的模型快取磁碟剩餘空間不到 10% |
 | `machine-simulated` | 警告 | 某台機器回報的是模擬的硬體 |
 | `machine-offline-with-replicas` | 警告 | 某台機器離線超過 5 分鐘，上面還有放置的副本 |
+| `machine-loopback-address` | 警告 | 不是伺服器主機的機器把副本公開在 loopback 位址上（透過 tunnel 或 proxy），而且它的連接埠範圍沒有轉送到伺服器的主機（[做法](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)） |
+| `machine-gpu-access-lost` | 錯誤 | 線上機器的新程序打不開它的 GPU（agent 每 5 分鐘以工作負載帳號檢查一次；只用 `--gpus` 啟動的 agent 容器，在主機執行 `systemctl daemon-reload` 後會失去這份存取權）。這段期間不會把程序類工作負載放到那些 GPU 上；修正連結會開啟機器的更新指令（[做法](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)） |
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
@@ -1036,6 +1092,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 
 再執行一次時，它會把 agent 升級到伺服器的版本，並保留設定和憑據。它需要 x86_64 或 aarch64 的 Linux、root 權限、`curl`，以及能連上 PyPI 以下載 agent 的少數幾個相依套件。它會優先使用已安裝的 `uv`，否則使用系統上已有的 Python 3.13 或更新版本，再不然就把 `uv` 安裝到 `/opt/forgeyard/bin`，它會自備 Python。沒有 systemd 的話，它會安裝好所有東西，並印出啟動 agent 的方法。
 
+它下載的東西都會經過檢查（1.4.5）：agent 和它的相依套件清單來自伺服器，各自對照腳本裡寫明的 SHA-256；相依套件從 PyPI 下載，版本固定為這個伺服器版本測試過的版本，每個檔案都要符合它公開的雜湊值（`--require-hashes`，不會連帶安裝其他套件）；它安裝的 `uv` 是固定的版本（0.9.24），從 GitHub 下載並對照 SHA-256，而不是執行安裝腳本。透過鏡像站連到 PyPI 的機器（`UV_INDEX_URL`、`PIP_INDEX_URL`）拿到的仍是同樣的檔案，否則就不安裝。
+
 ## 內建配方
 
 配方的 variant 依序嘗試；第一個 `when` 符合某張卡（或 CPU）、而且機器上有它的執行環境的 variant，就用來執行副本。部署不能自己選 variant；只放你要的 variant 的自訂配方可以。
@@ -1063,6 +1121,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
 
 部署沒有指定 context 時，如果模型本身的最大長度比配方的預設短，就從模型的最大值開始（1.4.4）：512 個 token 的 BERT 分類模型會得到 `--max-model-len 512`，而不是 8192。RoBERTa 和 XLM-RoBERTa 模型的位置從 padding index 之後開始算，所以 514 個位置嵌入只放得下 512 個 token（BGE-M3：8192）。
+
+`vllm` 會傳 `--max-num-batched-tokens`，也就是 vLLM 一個步驟處理的 token 數（1.4.5，#201）：2,048，最多 *Concurrent requests* × *Context length*；Gemma 4 12B、26B-A4B 和 31B 在部署接受圖片、音訊或影片時是 2,496（vLLM 不會把它們的一張圖片或一段影片拆到兩個步驟，最長的是 32 格的影片，2,496 個 token）。這就是 vLLM 0.32.0 在 A100 和 70 GB 以下的卡上自己會選的值。讓它自己選的話，在 H100、H200 上會是 8,192，160 GB 以上是 16,384，而估算是在選卡之前做的，無從得知：滑動視窗層（Gemma、gpt-oss）每個請求除了視窗，還要存兩個這樣的步驟，所以 Gemma 4 12B 在 16,384 × 1 時估了 5.25 GiB 的 KV cache，vLLM 實際只用了 2.09 GiB。現在兩者在每張卡上都一致。在 H100、H200 上，長的提示詞會分成比 vLLM 自己選的更多、更小的步驟讀完。
 
 `llama-cpp` 也提供文字轉語音：搭配 TTS GGUF 與它的 projector，上面每種 variant 都可以。
 
@@ -1095,7 +1155,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.4.4`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.4.5`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。

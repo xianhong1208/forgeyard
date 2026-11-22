@@ -22,14 +22,22 @@ method; everything else gets 401 from the guard and never reaches the engine.
 - **Disconnects:** when the client goes away mid-request, the engine's connection is closed at once,
   so the engine stops generating.
 - **Engine down:** if the engine's port does not accept the connection (restarting, crashed), the
-  guard closes the client's connection without an answer. The gateway treats that as "this replica
-  did not take the request" and tries the next replica, exactly as when it reached the engine
-  directly. A refused or broken request never becomes a 502 that the gateway would pass on.
+  guard reads the rest of the request (so closing does not reset the connection), answers 503 with
+  `X-Forgeyard-Not-Taken: engine-unreachable` and closes. That header says the engine never saw the
+  request, so the gateway tries the next replica (1.4.5). Before 1.4.5 the guard closed without an
+  answer, which a gateway can no longer tell from an engine that broke off midway (and so never
+  retries elsewhere: that could run a request twice).
 - **Timeouts:** 30 s for a request's head, 75 s idle between requests on a kept-alive connection,
   300 s without a byte of an upload, 10 s to connect to the engine, 300 s for a write to drain. No
   limit on how long the engine takes to answer: the gateway has its own read timeout, and when it
   gives up, its disconnect stops the engine.
 - **The key** is compared in constant time (hmac.compare_digest). It lives in the agent's memory only.
+
+**TLS (1.4.5, #163):** with `ssl_context` (agent/replica_tls.py) the guard speaks only TLS on its port: the
+gateway dials https:// and checks a certificate Forgeyard's CA signed for this machine; a plain HTTP request fails
+the handshake and never reaches the key check. Without a certificate in the context yet, every handshake fails. The
+internal key is checked exactly as before, now inside TLS. Without `ssl_context` (a server older than 1.4.5, which
+dials plain HTTP) the guard speaks plain HTTP as before.
 
 **Exposed workloads (1.3, /x/<name>):** the same guard fronts a plain service the gateway exposes, with
 `strip_auth`: the internal key is checked and then **removed**, so the program never sees it (the
@@ -47,6 +55,7 @@ import contextlib
 import hmac
 import json
 import logging
+import ssl
 import time
 from typing import Optional
 
@@ -74,6 +83,15 @@ REFUSAL = json.dumps({"error": {
     "type": "invalid_request_error", "param": None, "code": "replica_key_required"}}).encode()
 
 
+# 1.4.5: the answer when the engine is not there. The header is what the gateway looks for; the body is
+# for anyone else.
+NOT_TAKEN_HEADER = b"x-forgeyard-not-taken"
+NOT_TAKEN = json.dumps({"error": {
+    "message": "The engine of this replica is not running (it is starting, restarting or stopped).",
+    "type": "service_unavailable", "param": None, "code": "engine_unreachable"}}).encode()
+MAX_DRAIN = 64 * 1024 * 1024    # bytes of a request body read (and dropped) before answering NOT_TAKEN
+
+
 class _Gone(Exception):
     """The client went away (or broke the protocol): stop, close everything."""
 
@@ -96,8 +114,10 @@ class Guard:
     def __init__(self, *, listen: tuple[str, int], upstream: tuple[str, int], key: Optional[str], name: str = "",
                  head_timeout: float = HEAD_TIMEOUT, idle_timeout: float = IDLE_TIMEOUT,
                  body_timeout: float = BODY_TIMEOUT, connect_timeout: float = CONNECT_TIMEOUT,
-                 write_timeout: float = WRITE_TIMEOUT, strip_auth: bool = False):
+                 write_timeout: float = WRITE_TIMEOUT, strip_auth: bool = False,
+                 ssl_context: Optional[ssl.SSLContext] = None):
         self.listen = listen
+        self.ssl_context = ssl_context  # 1.4.5: TLS on the published port (None: plain HTTP, for an older server)
         self.strip_auth = strip_auth  # an exposed workload's guard: the key is removed after the check
         self.upstream = upstream
         self.name = name
@@ -116,6 +136,10 @@ class Guard:
 
     # ------------------------------------------------------------------ lifecycle
     @property
+    def tls(self) -> bool:
+        return self.ssl_context is not None
+
+    @property
     def listening(self) -> bool:
         return self._server is not None and self._server.is_serving()
 
@@ -128,8 +152,9 @@ class Guard:
     async def start(self) -> None:
         """Listen on the published address. Raises OSError when it cannot (the port is taken)."""
         host, port = self.listen
+        extra = {"ssl": self.ssl_context, "ssl_handshake_timeout": self.head_timeout} if self.ssl_context else {}
         self._server = await asyncio.start_server(self._accept, host, port, reuse_address=True,
-                                                  limit=READ_SIZE)
+                                                  limit=READ_SIZE, **extra)
 
     async def close(self) -> None:
         """Stop listening and cut every connection (the engine's ones with them)."""
@@ -244,6 +269,31 @@ class Guard:
                 (b"content-length", b"0"), (b"connection", b"close")])))
             await self._write(writer, conn.send(h11.EndOfMessage()))
 
+    async def _not_taken(self, conn: h11.Connection, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                         req: h11.Request) -> None:
+        """503 with X-Forgeyard-Not-Taken: the request reached no engine. Its body is read first (up to
+        MAX_DRAIN, within the body timeout), so the close that follows does not reset the connection
+        before the client has read the answer."""
+        with contextlib.suppress(Exception):
+            if not conn.they_are_waiting_for_100_continue:
+                drained = 0
+                while True:
+                    event = await self._next(conn, reader, self.body_timeout)
+                    if isinstance(event, h11.Data):
+                        drained += len(event.data)
+                        if drained > MAX_DRAIN:
+                            return
+                    elif isinstance(event, h11.EndOfMessage):
+                        break
+                    else:
+                        return
+            body = b"" if req.method == b"HEAD" else NOT_TAKEN
+            await self._write(writer, conn.send(h11.Response(status_code=503, headers=[
+                (b"content-type", b"application/json"), (b"content-length", str(len(NOT_TAKEN)).encode()),
+                (NOT_TAKEN_HEADER, b"engine-unreachable"), (b"retry-after", b"1"), (b"connection", b"close")])))
+            await self._write(writer, conn.send(h11.Data(data=body)) if body else None)
+            await self._write(writer, conn.send(h11.EndOfMessage()))
+
     # ------------------------------------------------------------------ one request to the engine
     async def _forward(self, conn: h11.Connection, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
                        req: h11.Request) -> bool:
@@ -252,7 +302,8 @@ class Guard:
             up_reader, up_writer = await asyncio.wait_for(
                 asyncio.open_connection(*self.upstream, limit=READ_SIZE), self.connect_timeout)
         except (OSError, asyncio.TimeoutError):
-            # The engine is not there: no answer, so the gateway tries another replica.
+            # The engine is not there: say so, so the gateway tries another replica.
+            await self._not_taken(conn, reader, writer, req)
             return False
         self.forwarded += 1
         self._writers.add(up_writer)

@@ -8,6 +8,7 @@ import logging
 import platform
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -18,7 +19,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus, InvalidURI
 
 from forgeyard import __version__
-from forgeyard.agent import trust
+from forgeyard.agent import gpu_check, replica_tls, trust
 from forgeyard.agent.backoff import Backoff
 from forgeyard.agent.inventory import Inventory, fingerprint
 from forgeyard.agent.relay import RelayClient
@@ -29,6 +30,8 @@ from forgeyard.machines.protocol import (
     FATAL_CLOSE_CODES,
     FEATURE_CACHE_ADMIN,
     FEATURE_ENGINE_ZIP,
+    FEATURE_GPU_CHECK,
+    FEATURE_GUARD_TLS,
     FEATURE_IMAGE_IDS,
     FEATURE_IMAGE_LOAD,
     FEATURE_IMAGE_REMOVE,
@@ -44,6 +47,7 @@ from forgeyard.machines.protocol import (
     FEATURE_WORKLOADS,
     JOIN_PATH,
     PROTOCOL_VERSION,
+    SERVER_MESSAGES,
     STREAM_PATH,
 )
 
@@ -156,6 +160,9 @@ class Agent:
             models.relay_client = self.relay_client
         self.server_features: set[str] = set()
         self._answers: set[asyncio.Task] = set()
+        # 1.4.5 (#163): the binding name and CA the server gave in its welcome, and a wake-up for the certificate loop.
+        self._tls_want: Optional[dict] = None
+        self._tls_wake = asyncio.Event()
         # 1.4.1 ("relay_source"): sends a cached model file to the server for another machine.
         self._saving = False  # 1.4.1 ("image_save"): an image being sent for another machine
         self.sender = None
@@ -163,11 +170,19 @@ class Agent:
             from forgeyard.agent.share import Sender
 
             self.sender = Sender(models, self.relay_client)
+        # 1.4.5 (#202): whether new processes can still open the GPUs (agent/gpu_check.py), through the process runtime.
+        process = (getattr(supervisor, "runtimes", None) or {}).get("process") if supervisor is not None else None
+        self.gpu_check = (gpu_check.GpuCheck(process, simulated=getattr(inventory, "simulated", False))
+                          if process is not None else None)
+        self.gpu_check_every = gpu_check.CHECK_EVERY
+        self._accelerators: list[dict] = []
 
     def stop(self) -> None:
         self._stop.set()
 
-    def hello(self, inventory: dict) -> dict:
+    def hello(self, inventory: dict, local: Optional[tuple] = None) -> dict:
+        """The first message. `local`: this connection's own (address, port), which (1.4.5, #171) the server
+        compares with the peer it sees to tell whether this agent runs on its own host."""
         msg = {"v": PROTOCOL_VERSION, "type": "hello", "agent_version": __version__,
                "hostname": socket.gethostname(), "labels": self.labels, "platform": platform_info(),
                "runtimes": [], "simulated": self.inventory.simulated,
@@ -179,6 +194,22 @@ class Agent:
                                FEATURE_ENGINE_ZIP, FEATURE_WORKLOAD_GUARD]
             msg["runtimes"] = self.supervisor.available()
             msg["runtime_info"] = self.supervisor.runtime_info()
+            tls = self._tls()
+            if tls is not None:
+                # 1.4.5 (#163): the guards serve TLS to a server that lists it too, and this is what they serve now.
+                msg["features"].append(FEATURE_GUARD_TLS)
+                if tls.report():
+                    msg["runtime_info"]["tls"] = tls.report()
+            # 1.4.5 (#171): the address replicas are published on (what the gateway dials), and this connection's
+            # own end. Servers before 1.4.5 drop both.
+            address = getattr(self.supervisor, "address", None)
+            if address:
+                msg["runtime_info"]["address"] = address
+            if local and len(local) >= 2:
+                msg["runtime_info"]["connection"] = {"address": local[0], "port": local[1]}
+            if self.gpu_check is not None and self.gpu_check.last is not None:
+                # 1.4.5 (#202): older servers drop it.
+                msg["runtime_info"]["gpu_check"] = self.gpu_check.last
             cache = self.supervisor.model_cache_info()
             if cache is not None:
                 msg["features"] += [FEATURE_MODELS, FEATURE_CACHE_ADMIN, FEATURE_PREFETCH]
@@ -264,7 +295,14 @@ class Agent:
                                  ping_interval=10, ping_timeout=20, close_timeout=5, max_size=2**20) as ws:
             inventory = await asyncio.to_thread(self.inventory.full)
             self._fingerprint = fingerprint(inventory)
-            await ws.send(json.dumps(self.hello(inventory)))
+            self._accelerators = inventory["accelerators"]
+            if self._gpu_check_due():
+                await asyncio.to_thread(self._run_gpu_check)
+            local = getattr(ws, "local_address", None)
+            if self.supervisor is not None:
+                # Before the hello, which says where replicas are published (1.4.5, #171).
+                self.supervisor.set_address(local[0] if local else None)
+            await ws.send(json.dumps(self.hello(inventory, local)))
             welcome = json.loads(await asyncio.wait_for(ws.recv(), WELCOME_TIMEOUT))
             if welcome.get("type") != "welcome":
                 raise ConnectionError(f"expected welcome, got {welcome.get('type')}: {welcome.get('message')}")
@@ -278,10 +316,18 @@ class Agent:
             tasks = {asyncio.create_task(self._send_loop(ws, interval)), asyncio.create_task(self._receive_loop(ws)),
                      asyncio.create_task(self._stop.wait())}
             if self.workloads:
-                local = getattr(ws, "local_address", None)
-                self.supervisor.set_address(local[0] if local else None)
                 self.supervisor.new_connection(self.server_features)
                 tasks.add(asyncio.create_task(self._status_loop(ws)))
+                if self.gpu_check is not None:
+                    tasks.add(asyncio.create_task(self._gpu_check_loop(ws)))
+                if self._tls() is not None and FEATURE_GUARD_TLS in self.server_features:
+                    want = welcome.get("replica_tls") if isinstance(welcome.get("replica_tls"), dict) else None
+                    if want is None:
+                        log.error("The server reaches replicas over TLS but sent no certificate details: the key "
+                                  "guards refuse every connection until it does. See the server's log.")
+                    else:
+                        self._tls_want = want
+                        tasks.add(asyncio.create_task(self._tls_loop(ws)))
             elif self.supervisor is not None:
                 log.warning("The server does not run workloads (an older Forgeyard); only reporting hardware.")
             try:
@@ -311,12 +357,22 @@ class Agent:
         raise ConnectionError(f"closed by the server ({code} {reason or ''})".strip())
 
     async def _receive_loop(self, ws) -> None:
+        ignored: set[str] = set()  # message types this agent does not know, already warned about
         async for message in ws:
             try:
                 data = json.loads(message)
             except ValueError:
                 continue
+            if not isinstance(data, dict):
+                continue
             kind = data.get("type")
+            if isinstance(kind, str) and kind not in SERVER_MESSAGES:
+                # 1.4.5 (#170): a newer server's message this agent does not know: ignored, with one warning.
+                if kind not in ignored and len(ignored) < 16:
+                    ignored.add(kind)
+                    log.warning("The server sent a message this agent does not know (%r); ignored. A newer "
+                                "server? Update the agent.", kind[:40])
+                continue
             if kind == "error":
                 log.warning("Server: %s (%s)", data.get("message"), data.get("code"))
             elif kind == "desired" and self.workloads:
@@ -342,10 +398,90 @@ class Agent:
                 task = asyncio.create_task(self._answer_image_remove(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+            elif kind == "certificate" and self.workloads and self._tls() is not None:
+                self._certificate(data)
             elif kind == "relay_send" and self.workloads and FEATURE_RELAY_SOURCE in self.server_features:
                 task = asyncio.create_task(self._answer_relay_send(ws, data))
                 self._answers.add(task)
                 task.add_done_callback(self._answers.discard)
+
+    # ------------------------------------------------------------------ 1.4.5 (#202): can new processes open the GPUs
+    def _gpu_check_due(self) -> bool:
+        if self.gpu_check is None:
+            return False
+        last = self.gpu_check.checked_at
+        return last is None or time.monotonic() - last >= self.gpu_check_every
+
+    def _run_gpu_check(self) -> Optional[dict]:
+        try:
+            return self.gpu_check.run(self._accelerators)
+        except Exception:  # a check must never take the agent down
+            log.exception("The GPU access check failed")
+            return self.gpu_check.last
+        finally:
+            self.gpu_check.checked_at = time.monotonic()
+
+    async def _gpu_check_loop(self, ws) -> None:
+        """Every gpu_check_every seconds: probe again, and tell a server that lists "gpu_check" when the verdict or
+        the failing devices changed (hello already carried the result the connection started with)."""
+        sent = self.gpu_check.last
+        while True:
+            await asyncio.sleep(self.gpu_check_every)
+            result = await asyncio.to_thread(self._run_gpu_check)
+            if FEATURE_GPU_CHECK in self.server_features and gpu_check.changed(sent, result):
+                await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "gpu_check",
+                                          "gpu_check": result or {"ok": None}}))
+                sent = result
+
+    # ------------------------------------------------------------------ 1.4.5 (#163): the guards' certificate
+    def _tls(self):
+        """The guards' TLS (agent/replica_tls.py), or None: no workloads, or no cryptography package."""
+        tls = getattr(self.supervisor, "tls", None) if self.supervisor is not None else None
+        return tls if tls is not None and tls.usable else None
+
+    async def _tls_loop(self, ws) -> None:
+        """Ask for a certificate when there is none for this machine and CA, or when it gets old: now, then every
+        hour. A request not answered within a minute is sent again; after a refusal, five minutes later."""
+        tls = self._tls()
+        while True:
+            want = self._tls_want or {}
+            reason = tls.wants(want.get("name"), want.get("ca"))
+            now = asyncio.get_running_loop().time()
+            waiting = tls.requested_at and now - tls.requested_at < replica_tls.ANSWER_WAIT and tls._pending
+            resting = tls.refused_at and now - tls.refused_at < replica_tls.RETRY_AFTER
+            if reason and not waiting and not resting:
+                request_id, csr = await asyncio.to_thread(tls.request)
+                tls.requested_at = now
+                log.info("Asking the server for the key guards' certificate (%s).", reason)
+                await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "cert_request", "request_id": request_id,
+                                          "csr": csr}))
+            self._tls_wake.clear()
+            delay = replica_tls.CHECK_EVERY if not reason else replica_tls.ANSWER_WAIT / 4
+            try:
+                await asyncio.wait_for(self._tls_wake.wait(), delay)
+            except asyncio.TimeoutError:
+                pass
+
+    def _certificate(self, data: dict) -> None:
+        tls = self._tls()
+        want = self._tls_want or {}
+        if not tls.answers(data.get("request_id")):
+            log.info("Ignored a certificate answer to an earlier request.")
+            return
+        if data.get("ok") is True:
+            try:
+                info = tls.install(data.get("request_id"), data.get("chain"), name=want.get("name"), ca=want.get("ca"))
+            except (replica_tls.CertificateRefused, ValueError, OSError, ssl.SSLError) as e:
+                log.error("The server's certificate for the key guards cannot be used: %s.", e)
+                tls.refused(data.get("request_id"), asyncio.get_running_loop().time())
+            else:
+                log.info("The key guards serve TLS with a certificate for %s, valid until %s.", info["name"],
+                         info["not_after"][:10])
+        else:
+            log.error("The server did not sign the key guards' certificate (%s): %s", data.get("code"),
+                      data.get("reason"))
+            tls.refused(data.get("request_id"), asyncio.get_running_loop().time())
+        self._tls_wake.set()
 
     async def _answer_logs(self, ws, data: dict) -> None:
         replica = str(data.get("replica") or "")
@@ -524,6 +660,7 @@ class Agent:
                 fp = fingerprint(inventory)
                 if fp != self._fingerprint:
                     self._fingerprint = fp
+                    self._accelerators = inventory["accelerators"]
                     log.info("Hardware changed; sending the full inventory.")
                     await ws.send(json.dumps({"v": PROTOCOL_VERSION, "type": "inventory", "inventory": {
                         "accelerators": inventory["accelerators"], "collectors": inventory["collectors"]}}))

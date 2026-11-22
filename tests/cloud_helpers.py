@@ -23,7 +23,8 @@ class FakeCloud:
     """http://127.0.0.1:<port>/v1 answering /models, /chat/completions, /completions and /embeddings.
 
     `statuses`: answers to give first, one per request (e.g. [429, 200]); after them `status` (None:
-    a normal answer). `style`: "openai" or "anthropic" (which auth header it requires, and its usage)."""
+    a normal answer). `style`: "openai", "anthropic" or "azure" (which auth header it requires, and its
+    usage: Azure answers like OpenAI)."""
 
     def __init__(self, name: str = "cloud", key: Optional[str] = CLOUD_KEY, *, style: str = "openai",
                  chunks: int = 3, delay: float = 0.0, hold: float = 0.0, tls_dir=None):
@@ -68,6 +69,8 @@ class FakeCloud:
                     return True
                 if cloud.style == "anthropic":
                     return self.headers.get("x-api-key") == cloud.key
+                if cloud.style == "azure":
+                    return self.headers.get("api-key") == cloud.key
                 return self.headers.get("Authorization") == f"Bearer {cloud.key}"
 
             def _record(self, raw: bytes) -> dict:

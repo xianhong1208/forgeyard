@@ -51,6 +51,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, VideoJob, as_utc, new_session, utcnow
 from forgeyard.gateway import imagegen, proxy, videogen
@@ -59,6 +60,7 @@ from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Refusal, key_limiter
 from forgeyard.gateway.usage import recorder
+from forgeyard.security import replica_tls
 
 log = logging.getLogger("forgeyard.gateway")
 
@@ -132,6 +134,11 @@ class Where:
     secret: Optional[str]
     epoch: str
     gone: Optional[str] = None       # why it cannot hold the job any more: replica_gone | replica_restarted
+    tls_name: Optional[str] = None   # 1.4.5: the machine's binding name (https:// only)
+
+    @property
+    def ext(self) -> dict:
+        return replica_tls.ext(self.tls_name)
 
 
 def epoch_of(r: Replica) -> str:
@@ -153,12 +160,12 @@ def where(db, uid: str, epoch: str) -> Where:
     elif now != epoch or r.state == "backoff":
         gone = "replica_restarted"
     port = next(iter(r.ports or []), None)
-    url = None
+    url = name = None
     if port and port.get("host_port") and port.get("address"):
-        host = port["address"]
-        host = f"[{host}]" if ":" in host else host
-        url = f"http://{host}:{port['host_port']}"
-    return Where(url, r.secret, now, gone)
+        dialed = replica_tls.dial(r, port)   # 1.4.5: TLS with the machine's binding, or an older agent's plain HTTP
+        if dialed is not None:
+            url, name = dialed
+    return Where(url, r.secret, now, gone, name)
 
 
 def _headers(secret: Optional[str], **more) -> dict:
@@ -200,6 +207,9 @@ def _count(db, job: VideoJob, status: int, units: Optional[dict] = None) -> Opti
 def _record(entry: Optional[dict]) -> None:
     if entry is not None:
         recorder.record(**entry)
+        # /metrics (1.4.5, #165): the job from its creation to its end (a video job has no first byte to time).
+        metrics.request(endpoint=videogen.ENDPOINT, model=entry["model"], known=True, status=entry["status"],
+                        source=entry["source"], target="local", seconds=entry["latency_ms"] / 1000)
 
 
 # ------------------------------------------------------------------ asking for a video
@@ -272,7 +282,8 @@ async def _send(g: proxy.LocalGroup, t: Target, ask: videogen.Ask):
     http = proxy.client()
     try:
         r = await http.post(f"{t.url}/v1/videos", content=body, timeout=_timeout(SUBMIT_TIMEOUT),
-                            headers=_headers(t.secret, **{"Content-Type": ctype, "Accept": "application/json"}))
+                            headers=_headers(t.secret, **{"Content-Type": ctype, "Accept": "application/json"}),
+                            extensions=t.ext)
     except proxy.RETRYABLE as e:
         balancer.failed(t.uid)
         log.warning("Replica %s of %s did not take the video (%s); trying the next one.", t.ordinal, g.name,
@@ -336,11 +347,13 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
             key_limiter.settle(verdict, 0)
         job, target = await _place(caller, route, fits, ask)
     except Answer as a:
-        proxy.record(caller, model or "", deployment_id, a.response.status_code, started)
+        proxy.record(caller, model or "", deployment_id, a.response.status_code, started, endpoint=videogen.ENDPOINT,
+                     known=deployment_id is not None)
         return a.response
     except GatewayError as e:
         if model is not None:
-            proxy.record(caller, model, deployment_id, e.status, started, limited=limited)
+            proxy.record(caller, model, deployment_id, e.status, started, limited=limited, endpoint=videogen.ENDPOINT,
+                         known=deployment_id is not None)
         return e.response()
     return JSONResponse(videogen.video_object(job), headers={"X-Forgeyard-Target": target})
 
@@ -450,7 +463,7 @@ async def _abort(snap: Snap) -> None:
         return
     with contextlib.suppress(httpx.HTTPError):
         await proxy.client().delete(f"{w.url}/v1/videos/{snap.upstream_id}", headers=_headers(w.secret),
-                                    timeout=_timeout(DELETE_TIMEOUT))
+                                    timeout=_timeout(DELETE_TIMEOUT), extensions=w.ext)
 
 
 async def refresh(job_id: int) -> None:
@@ -474,7 +487,7 @@ async def refresh(job_id: int) -> None:
             return
         try:
             r = await proxy.client().get(f"{w.url}/v1/videos/{snap.upstream_id}", headers=_headers(w.secret),
-                                         timeout=_timeout(STATUS_TIMEOUT))
+                                         timeout=_timeout(STATUS_TIMEOUT), extensions=w.ext)
         except httpx.HTTPError as e:
             log.info("Video job %s: its replica did not answer (%s); asking again later.", job_id, type(e).__name__)
             return
@@ -562,7 +575,8 @@ async def remove(public_id: str, caller: KeyCaller) -> dict:
             for attempt in range(2):
                 try:
                     r = await proxy.client().delete(f"{snap.where.url}/v1/videos/{job.upstream_id}",
-                                                    headers=_headers(snap.where.secret), timeout=_timeout(DELETE_TIMEOUT))
+                                                    headers=_headers(snap.where.secret), timeout=_timeout(DELETE_TIMEOUT),
+                                                    extensions=snap.where.ext)
                 except httpx.HTTPError:
                     break
                 if r.status_code != 409 or attempt:
@@ -621,7 +635,8 @@ async def content(public_id: str, caller: KeyCaller, request: Request) -> Respon
     http = proxy.client()
     try:
         upstream = await http.send(http.build_request("GET", f"{w.url}/v1/videos/{job.upstream_id}/content",
-                                                      headers=headers, timeout=_timeout(get_settings().gateway_read_timeout)),
+                                                      headers=headers, timeout=_timeout(get_settings().gateway_read_timeout),
+                                                      extensions=w.ext),
                                    stream=True)
     except httpx.HTTPError as e:
         raise GatewayError(502, "upstream_unreachable", f"The replica that holds this video could not be reached "
@@ -683,7 +698,8 @@ async def expire(job_id: int) -> None:
     if snap.where.url and not snap.where.gone:
         with contextlib.suppress(httpx.HTTPError):
             await proxy.client().delete(f"{snap.where.url}/v1/videos/{snap.upstream_id}",
-                                        headers=_headers(snap.where.secret), timeout=_timeout(DELETE_TIMEOUT))
+                                        headers=_headers(snap.where.secret), timeout=_timeout(DELETE_TIMEOUT),
+                                        extensions=snap.where.ext)
 
     def mark() -> None:
         with _db() as db:

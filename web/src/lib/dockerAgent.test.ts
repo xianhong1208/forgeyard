@@ -10,6 +10,7 @@ import {
   loadForm,
   modelDirError,
   nameError,
+  NVIDIA_DEVICES,
   portRangeError,
   runCommand,
   saveForm,
@@ -53,6 +54,7 @@ describe("docker run command for the agent", () => {
     expect(nvidia.split(" \\\n  ")).toEqual([
       "sudo docker run -d --name forgeyard-agent --restart always --network host",
       "--gpus all",
+      NVIDIA_DEVICES,
       "-v /var/run/docker.sock:/var/run/docker.sock",
       "-v forgeyard-agent:/var/lib/forgeyard-agent",
       "-v /srv/forgeyard-models:/srv/forgeyard-models",
@@ -70,7 +72,7 @@ describe("docker run command for the agent", () => {
     const cpu = runCommand("cpu", form(), { ...JOIN, fingerprint: null })!;
     expect(cpu).not.toMatch(/--gpus|--device|--group-add|\/opt\/rocm|FORGEYARD_CA_FINGERPRINT/);
     expect(cpu.split(" \\\n  ")[1]).toBe("-v /var/run/docker.sock:/var/run/docker.sock");
-    expect(runCommand("nvidia", form(), { ...JOIN, fingerprint: null })).not.toMatch(/--device|--group-add/);
+    expect(runCommand("nvidia", form(), { ...JOIN, fingerprint: null })).not.toMatch(/--group-add|kfd|\/dev\/dri/);
   });
 
   it("FY-WEB-126 the model directory fills both sides of -v and the model cache; spaces and a trailing / are cleaned", () => {

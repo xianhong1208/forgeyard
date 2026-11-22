@@ -113,10 +113,14 @@ export type Machine = {
   fetch_via?: FetchVia;
   // 1.4: the largest image file an admin may upload to it (IMAGE_UPLOAD_MAX_GB).
   image_upload_max_bytes?: number;
-  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>>;
+  // 1.4.5 (#171): `address`, where its replicas are published (what the gateway dials); `same_host`, whether its
+  // agent runs on the server's own host (agents before 1.4.5 report neither).
+  runtime_info?: Partial<Record<"process" | "container", RuntimeInfo>> & { address?: string; same_host?: boolean };
   // 1.4.2 (#122): why its agent should be updated (null: it need not be), and the server's version.
   agent_behind?: AgentBehind | null;
   server_version?: string;
+  // 1.4.5 (#163): how the gateway reaches its replicas (null: it runs no workloads).
+  replica_tls?: ReplicaTls | null;
   model_cache?: { ok?: boolean; free_bytes?: number | null; cached?: string[]; reason?: string | null };
   accelerators: Accelerator[];
 };
@@ -636,6 +640,13 @@ export type DownloadTargets = {
 };
 
 // 1.4.2 (#122): an agent older than the server, of an older protocol, or without a feature such an agent declares.
+// 1.4.5 (#163): plain = an agent before 1.4.5 (not encrypted); the rest are TLS and its certificate.
+export type ReplicaTls = {
+  state: "plain" | "ok" | "pending" | "missing" | "expiring" | "expired";
+  not_after: string | null;
+  reason: string | null;
+};
+
 export type AgentBehind = { agent: string | null; server: string; older: boolean; old_protocol: boolean; missing: string[] };
 
 // 1.4.2 (#121): GET /api/machines/{id}/agent-update (admins): the command that updates a machine's agent.

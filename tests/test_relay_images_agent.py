@@ -74,6 +74,20 @@ def box(tmp_path):
     b.close()
 
 
+def part_sizes(cache_root: Path) -> list[int]:
+    """The sizes of the downloads in progress. A small blob's `.part` is renamed into place as soon as it is
+    complete, so one listed a moment ago may be gone by the time it is looked at: that one is skipped. (#161: the
+    FileNotFoundError it raised ended the thread that was to cancel the pull, which then stalled on every retry
+    and failed with "timed out".)"""
+    sizes = []
+    for f in (cache_root / ".partial").rglob("*.part"):
+        try:
+            sizes.append(f.stat().st_size)
+        except FileNotFoundError:
+            pass
+    return sizes
+
+
 def members(archive: bytes) -> dict[str, bytes]:
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         return {m.name: (tar.extractfile(m).read() if m.isfile() else None) for m in tar.getmembers()}
@@ -318,14 +332,21 @@ def test_fy_relay_040_a_cancel_keeps_the_staging_and_the_next_try_resumes(tmp_pa
         big = p.layers[1]
         b.relay.stall_after = 50_000
         cancel = threading.Event()
+        failed: list[BaseException] = []
+
         def cancel_once_stalled():  # a condition, not a fixed time: the large layer has started and stalled
-            wait_until(lambda: any(f.stat().st_size >= 50_000 for f in (b.cache.root / ".partial").rglob("*.part")),
-                       "the large layer's first bytes on disk", 30)
-            cancel.set()
+            try:
+                wait_until(lambda: any(n >= 50_000 for n in part_sizes(b.cache.root)),
+                           "the large layer's first bytes on disk", 30)
+            except BaseException as e:  # (#161) never leave the pull stalled: cancel it, then fail with this
+                failed.append(e)
+            finally:
+                cancel.set()
 
         threading.Thread(target=cancel_once_stalled, daemon=True).start()
         with pytest.raises(pulling.PullCancelled):
             b.ensure(cancel=cancel)
+        assert not failed, failed
         [staged] = b.staging()
         assert (staged / p.config_digest[7:]).exists() and (staged / p.layers[0][7:]).exists()
         assert b.cache.detail()["partial_bytes"] > 0

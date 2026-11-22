@@ -65,6 +65,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect, Request
 from starlette.responses import Response
 
+from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, Workload, new_session
 from forgeyard.gateway import keys
@@ -72,8 +73,10 @@ from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Refusal, key_limiter
-from forgeyard.gateway.proxy import CLIENT_CLOSED, RETRYABLE, ClientGone, client, unless_gone, _until_disconnect
+from forgeyard.gateway.proxy import (CLIENT_CLOSED, RETRYABLE, ClientGone, EngineUnreachable, client, not_taken,
+                                     unless_gone, _until_disconnect)
 from forgeyard.gateway.usage import recorder
+from forgeyard.security import replica_tls
 from forgeyard.security.client import client_ip
 from forgeyard.workloads import expose
 from forgeyard.workloads.spec import NAME_RE
@@ -188,10 +191,12 @@ def load(db: DbSession, name: str) -> Optional[XRoute]:
         port = next((p for p in r.ports or [] if p.get("name") == port_name), None)
         if not port or not port.get("host_port") or not port.get("address"):
             continue
-        host = port["address"]
-        host = f"[{host}]" if ":" in host else host
-        out.replicas.append(Target(uid=r.uid, ordinal=r.ordinal, url=f"http://{host}:{port['host_port']}",
-                                   machine=r.node.name if r.node else None, secret=r.secret, protected=True))
+        dialed = replica_tls.dial(r, port)   # 1.4.5: TLS with the machine's binding, or an older agent's plain HTTP
+        if dialed is None:
+            continue
+        out.replicas.append(Target(uid=r.uid, ordinal=r.ordinal, url=dialed[0],
+                                   machine=r.node.name if r.node else None, secret=r.secret, protected=True,
+                                   tls_name=dialed[1]))
     if not out.replicas:
         out.reason = "; ".join(skipped) if skipped else _not_ready(w)
     return out
@@ -393,9 +398,13 @@ class UpstreamBroken(Exception):
 # ------------------------------------------------------------------ one request
 def record(caller: KeyCaller, name: str, status: int, started: float, *, limited: bool = False,
            bytes_in: int = 0, bytes_out: int = 0, busy_ms: int = 0) -> None:
+    seconds = time.monotonic() - started
+    # /metrics (1.4.5, #165): only called once the exposed workload was found, so its name is a known one.
+    metrics.request(endpoint="x", model=f"x:{name}", known=True, status=status, source=caller.source, target="local",
+                    seconds=seconds)
     recorder.record(source=caller.source, key_id=caller.key_id, user_id=caller.user_id, username=caller.username,
                     model=f"x:{name}", deployment_id=None, status=status,
-                    latency_ms=(time.monotonic() - started) * 1000, limited=limited,
+                    latency_ms=seconds * 1000, limited=limited,
                     units={"bytes_in": bytes_in, "bytes_out": bytes_out, "busy_ms": busy_ms})
 
 
@@ -504,7 +513,7 @@ async def _send(request: Request, caller: KeyCaller, route: XRoute, path: bytes,
         http = client()
         req = http.build_request(request.method, url, content=body if body or request.method not in ("GET", "HEAD")
                                  else None, headers=request_headers(request, name, pick.secret or "", request_id),
-                                 timeout=timeout)
+                                 timeout=timeout, extensions=pick.ext)
         sent_at = time.monotonic()
         try:
             response = await unless_gone(request.receive, http.send(req, stream=True, follow_redirects=False))
@@ -529,6 +538,15 @@ async def _send(request: Request, caller: KeyCaller, route: XRoute, path: bytes,
             balancer.release(pick.uid)
             record(caller, name, 502, started, bytes_in=len(body))
             raise GatewayError(502, "upstream_error", f"The request to the workload failed ({type(e).__name__}).") from None
+        if not_taken(response):
+            # Its guard says the program is not running (1.4.5): the request reached nothing, try the next replica.
+            await response.aclose()
+            balancer.release(pick.uid)
+            balancer.failed(pick.uid)
+            last_exc = EngineUnreachable()
+            log.warning("Replica %s of workload %s: its program is not running; trying the next one.", pick.ordinal,
+                        name)
+            continue
         if response.status_code == 401 and GUARD_REALM in response.headers.get("www-authenticate", ""):
             await response.aclose()
             balancer.release(pick.uid)

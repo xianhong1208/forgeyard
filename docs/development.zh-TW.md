@@ -27,6 +27,8 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 
 資料表變更一律走 Alembic（`forgeyard/migrations`）；啟動時執行 `upgrade head`，model 與 migration 不一致時會有測試失敗。測試編號（`FY-…`）在整個專案中唯一。
 
+執行 `uv lock`（或 Dependabot 更新 `uv.lock`）之後，請執行 `uv run --no-sync python -m forgeyard.install.requirements`：它會重寫 install.sh 安裝 agent 相依套件時使用的清單（含雜湊值，`forgeyard/install/agent-requirements*.txt`）；清單和 lock 不一致時 FY-INST-020 會失敗。
+
 ## 以 digest 固定的引擎映像檔
 
 內建配方的每個容器 variant 都以 `repo:tag@sha256:<index digest>` 指定映像檔，`forgeyard/recipes/images.lock.json`
@@ -58,7 +60,13 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 - **等狀態，不要等時間。** `tests/waits.py` 有 `wait_until(predicate, what, timeout=10)`，非同步測試用
   `await until(...)`：狀態一到就返回，超過期限才失敗並說出 `what`，所以期限可以放寬。要先有一個請求在處理中，
   就在執行緒裡送出它，再等假的 engine 或 app 收到（FY-IGEN-007、FY-X-014、FY-PGV-008），不要
-  `time.sleep(0.2)`。
+  `time.sleep(0.2)`。接著讓假的那一方一直留著它，直到測試放行（`threading.Event`），不要只留固定的時間：
+  在忙碌的 runner 上，下一個請求可能比那段時間更晚才到，發現第一個已經結束了（FY-PGV-008 留了 1 秒，#204；
+  FY-RT-002 與 FY-X-014 也是，#212）。
+- **不要替程式同時做的兩件事計時。** gateway 同時送出的兩個請求，可能以任一順序到達假的 engine，而「0.5 秒內」
+  在慢的 runner 上會失敗。改成把它們留住、檢查狀態：FY-FW-008 證明第二個請求在第一個仍在處理時就拿到名額，
+  因為兩者在同一時刻都被留在假 engine（`FakeEngine.held`）；並把等待隊伍的安全網重查時間設得比測試還長，
+  只有真正的喚醒才會通過（#212）。
 - **先把狀態準備好，再做可能搶先的那一步。** 一個必須還在進行中的假工作：先讓假 engine 卡住再送出，而不是送出後才設定（FY-VID-005）。
 - **Fixture 要看起來是現在的。** 測試期間 app 的 liveness 檢查每 2 秒跑一次，所以 `make_node` 會說它的機器剛剛才回報過；
   沒有 heartbeat 的機器在慢的測試裡會變成離線，下一次部署就得到 409。
@@ -88,7 +96,10 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/api/routing.py` | 路由與它分層的目標 |
 | `forgeyard/api/prices.py` | 從 OpenRouter 更新價格：預覽與套用 |
 | `forgeyard/api/budgets.py` | 個人與供應商的每月預算，以及本月的花費 |
-| `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送：副本、供應商、溢出、串流 |
+| `forgeyard/gateway/proxy.py` | 把請求依路由的各層轉送（`Job`、`forward`、`record`）；下列各部分的名稱也都能從它匯入 |
+| `forgeyard/gateway/route.py`, `body.py`, `fit.py` | 路由與它的目標、誰能呼叫、請求能用哪些層；讀取並解析請求本文；能接下它的目標（媒體、大小、語音、圖片） |
+| `forgeyard/gateway/upstream.py`, `replicas.py`, `cloud.py` | 連到副本的 HTTP client、哪些情況可以重試、用戶端斷線；一層裡的副本（並行數、排隊、第一個回應）；它的供應商（順序、預算、差異） |
+| `forgeyard/gateway/streaming.py`, `answer.py` | 串流回應（SSE、音訊）；把回應轉回去並計算用量 |
 | `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API 金鑰檢查與雲端設定；每分鐘請求數與 token 數；副本順序與供應商冷卻 |
 | `forgeyard/gateway/quirks.py` | 各種供應商的差異：金鑰怎麼送、拿掉或改名的參數、怎麼讀回用量 |
 | `forgeyard/gateway/where.py` | 依種類和位址判斷新的供應商是否在你的網路外 |
@@ -110,6 +121,8 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
 | `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
 | `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門、紀錄、健康檢查 |
+| `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | 協調迴圈：迴圈本身、期望清單與回報；它在記憶體裡的狀態；每種執行環境都實作的 `Runtime` 協定（以及 `ContainerEngine`） |
+| `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | 協調迴圈的各部分：副本的啟動、結束、停止與移除；啟動前的模型、引擎與映像檔；健康檢查；金鑰守門；管理員的快取與映像檔請求 |
 | `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、agent 的更新指令與是否落後（`update.py`）、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |

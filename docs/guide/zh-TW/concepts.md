@@ -16,6 +16,8 @@ agent 只透過伺服器的**憑證授權單位**（CA）來信任伺服器，�
 
 agent 連線中時，機器顯示 **online**；超過 30 秒沒有收到任何訊息時，顯示 **offline**（agent 每 10 秒送一次心跳）。agent 會自己重新連線。管理員可以**撤銷**一台機器（它的憑據立刻失效），或把它**移除**。
 
+機器離線期間，請求不會再送到它上面的副本。離線超過 **10 分鐘**（`AGENT_OFFLINE_MOVE_SECONDS`）時，它上面部署的副本會依部署自己的規則，重新放到放得下的機器上；**固定（pinned）**在那台機器上的部署會等它回來。機器回來時，它的 agent 會停掉已經搬走的東西。請看[機器一直離線時](how-to.md#when-a-machine-stays-offline)。
+
 停止或重新啟動 agent **不會停掉它的模型和應用程式**：重新啟動的 agent 會找到它們並接手管理。這就是安裝的服務使用 `KillMode=process` 的原因。
 
 agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列旗標讀取設定（[完整列表](reference.md#agent-settings)）。
@@ -66,7 +68,7 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 - **引擎**（engine）描述某一類模型要怎麼執行：用哪個程式、哪個容器映像檔（以 digest 釘選）或發行版本、哪些參數，以及需要多少記憶體。API 和 YAML 檔案稱它為 **recipe**（配方；`/api/recipes`、`forgeyard/recipes/*.yaml`）；管理員在 **Engines** 分頁加入自訂的。內建的有：`vllm`（NVIDIA 和 AMD 上的對話模型）、`vllm-pooling`（嵌入、重排序與文字分類）、`llama-cpp`（NVIDIA、AMD（ROCm 或 Vulkan）或 CPU 上的 GGUF）和 `faster-whisper`（語音轉文字）。
 - 目錄裡的每個模型都有**自己的頁面**（1.4.3），點它的名稱就會打開：`/models/<name>`。頁面上有模型的資訊（來源與版本、授權、任務、架構）、**哪些機器的模型快取裡有它**、用引擎的預設值現在**放不放得下**每台機器、它的部署、能執行它的引擎，以及它的檔案和大小。每個引擎也有自己的頁面 `/models/engines/<name>`：它的變體（每種硬體用的映像檔或程式，以及是否以 digest 釘選）、**哪些機器已經有那個映像檔或程式**、它的參數，以及使用它的部署和模型。主控台裡所有模型和引擎的名稱都連到這些頁面。管理員可以在模型頁面設定**顯示名稱**；模型的名稱本身不變，因為部署記錄的是它，所以 `deploy`、`deployments`、`routes`、`engines`、`catalog`、`sources`、`recommended`、`search` 和 `inspect` 不能當模型名稱。（[查看模型或引擎](how-to.md#look-at-a-model-or-an-engine)）
 - **Sources**（管理員）說明模型可以從哪裡來：GGUF 網址允許的主機、`local://` 模型的目錄，以及伺服器的 Hugging Face 權杖。
-- **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。
+- **估算**是一份副本需要的記憶體：權重、依你選的上下文長度和並行數計算的 KV cache、引擎本身的額外開銷、CUDA context，以及能讀圖片的模型的視覺編碼器。部署頁面會在下載任何東西之前，逐項顯示估算結果和放得下的位置。KV cache 依每一層實際保存的內容計算（1.4.5）：滑動視窗層（Gemma、gpt-oss、Mistral 7B）最多只存視窗長度（vLLM 上再加兩個處理中的步驟，每個 2,048 個 token，Gemma 4 是 2,496；配方會明確傳這個值，所以每張卡都一樣），MLA 模型（DeepSeek、Kimi）每個 token 只存一個壓縮的 latent，混合模型（Qwen3-Next、Granite 4、Falcon-H1）只有注意力層會隨上下文長度增加，另外每個請求有固定大小的 *Recurrent state*。留在 CPU 上的 GGUF 層也會在那台機器的 RAM 預留記憶體；每次放置副本時，部署的估算都會依引擎目前的設定重新計算。
 - 每台機器上的**模型快取**（以 root 執行的 agent 預設是 `/srv/forgeyard-models`）保存下載下來的檔案，檔案會以 checksum 檢查，並由這台機器上的所有副本共用。容器會以唯讀方式掛載自己的模型。機器的頁面會列出快取裡有什麼和大小，並可刪除那台機器上沒有部署在用的項目（[釋出機器上的磁碟空間](how-to.md#free-disk-space-on-a-machine)）。**Download to…** 可以在部署之前先把模型和引擎放進去（[部署之前先下載模型](how-to.md#download-a-model-before-deploying-it)）。連不到 Hugging Face 或 GitHub 的機器會**經由伺服器**取得檔案，伺服器只轉送、不存檔；agent 會像檢查任何下載一樣檢查它們。1.4.1 起，模型檔會先從快取裡已經有它的另一台機器取得（仍然經由伺服器），之後才用網際網路。有釘選的引擎映像檔也會這樣一層一層送過去，管理員也可以從機器的頁面上傳任何映像檔，或從另一台機器的引擎複製映像檔（1.4.1）；完整流程請看[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)。模型在不在某台機器上，一律以它的 agent 回報的為準，所以手動複製過去的模型也算。
 - **受限（gated）**的 Hugging Face 模型需要一個接受過它授權條款的帳號的權杖。伺服器保存**一個 Hugging Face 權杖**（管理員在 **Models → Sources** 設定，加密儲存），用來檢查和下載這些模型；部署也可以帶自己的權杖，對該部署優先使用。
 
@@ -86,6 +88,8 @@ agent 從 `/etc/forgeyard/agent.toml`、`FORGEYARD_*` 環境變數和命令列�
 每個就緒的部署都以它的模型名稱，在 **`https://<server>:7860/v1`**（也就是**閘道**）以 OpenAI API 提供服務：`/v1/models`、`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/score`、`/v1/audio/transcriptions` 和 `/translations`，以及 Forgeyard 自己的 `/v1/classify`（文字分類）。`/v1/models` 列出你的金鑰可以用的模型；部署停止後，它會從清單消失，直到再次啟動為止，除非它的路由能把請求送到你的金鑰可以用的雲端供應商。
 
 閘道會把每個請求送到正在處理中請求數最少的就緒副本；如果某個副本沒有回應，就改送下一個。副本無法繞過閘道直接使用：每個副本都有一把只有閘道知道的內部金鑰，agent 會拒絕送到副本連接埠的其他所有請求。
+
+從 1.4.5 起，閘道和副本之間的流量都會**加密**：agent 以 TLS 提供副本的連接埠，憑證由 Forgeyard 的 CA 替那台機器簽發（金鑰由 agent 自己產生，絕不離開那台機器），有效 30 天，agent 會在到期前 10 天自動更新，不必重新啟動。閘道連某台機器時只接受那台機器的憑證，所以內部金鑰、提示詞和回答都不會以明文經過網路。比 1.4.5 舊的 agent 會繼續以純 HTTP 提供服務：**Setup health** 和它的機器頁面會顯示 *Traffic to <machine> is not encrypted: update the agent*（[更多](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)）。1.4.5 的 agent 絕不會被以純 HTTP 連線：沒有有效憑證時連不到它的副本，Setup health 會顯示錯誤（[做法](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)）。
 
 **Playground** 讓你以自己的身分、不需要 API 金鑰，透過同一個閘道試用模型。一個 **Model** 選單列出已就緒的模型，像 **Serving** 一樣依種類分組，用同樣的名稱和圖示（Chat、Multimodal chat、Embeddings、Rerank、Text classification、Speech to text、Text to speech、Images、Video、Vision）；選一個就會開出它的面板：對話（串流，能讀圖片的模型也可以附上圖片）、嵌入、重排序、文字分類（輸入文字，每段文字的各標籤機率以長條顯示）、語音轉文字、**Speak**、**Image**、**Video**，或視覺面板（送一張圖片，得到方框、遮罩或深度圖）。網址會記住選的模型（`/playground?model=<name>`）；1.3 的 Vision 分頁網址（`/playground?tab=vision`）會開出第一個就緒的視覺模型，沒有時就打開選單。沒有任何就緒的模型時，頁面會這樣說明，並指向 **Models → Catalog** 去部署一個。它的請求在 Usage 裡算作 `console`；它的雲端設定對管理員是 **Allowed**，對其他人則是他們能替自己金鑰設定的最大值。
 

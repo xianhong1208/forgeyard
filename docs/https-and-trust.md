@@ -12,6 +12,7 @@ secrets are encrypted.
 - [Programs: curl, Python and the OpenAI SDK](#programs-curl-python-and-the-openai-sdk)
 - [Your own certificate](#your-own-certificate)
 - [Behind a reverse proxy (nginx, Caddy)](#behind-a-reverse-proxy-nginx-caddy)
+- [Between the gateway and the replicas](#between-the-gateway-and-the-replicas)
 - [Secrets encrypted at rest](#secrets-encrypted-at-rest)
 - [What to back up](#what-to-back-up)
 - [Settings](#settings)
@@ -306,6 +307,45 @@ Caddy sets `X-Forwarded-For` and `X-Forwarded-Proto` itself. HSTS is the proxy's
 setup: add `add_header Strict-Transport-Security "max-age=31536000" always;` in nginx, or
 `header Strict-Transport-Security "max-age=31536000"` in Caddy, once everything works over HTTPS.
 
+## Between the gateway and the replicas
+
+From 1.4.5 the gateway reaches every model replica (and every app exposed at `/x/`) over TLS too, so the replica's
+internal key, the prompts and the answers never cross the network in clear between the server and a machine.
+Nothing has to be set or trusted for it, whatever `TLS`, `TLS_CERT_FILE` or the reverse proxy say:
+
+- **The agent's key never leaves its machine.** The agent makes an EC P-256 key, sends a certificate request over
+  its authenticated connection to the server, and serves its key guards with the certificate it gets back. Key and
+  certificate are kept in the agent's state directory (`replica-tls/key.pem`, mode 0600, and `chain.pem`), so a
+  restarted agent serves TLS at once.
+- **Forgeyard's CA signs it**: `data/tls/ca.key`, the CA browsers and agents already trust. With your own
+  certificate or `TLS=off` the server has no CA of its own until the first 1.4.5 agent joins; then it makes one in
+  `data/tls`, used only for the replicas (nothing needs to trust it).
+- **The certificate names the machine, not its address**: its only name is
+  `m<machine id>-<16 hex digits>.replica.forgeyard.invalid`, where the hex digits come from the machine's credential
+  (a machine joined again gets another name). The server chooses everything in it; nothing comes from the agent's
+  request but its public key. The replica's address is left out on purpose: the agent reports it, and a certificate
+  from the CA everyone trusts for the server must never name an address an agent chose.
+- **The gateway checks the machine**: it trusts only Forgeyard's CA (never the system's store) and checks the
+  machine's name as the host name, so machine A's certificate is refused when the gateway dials machine B, and an
+  expired one is refused. One connection pool per machine.
+- **Renewal:** a certificate is valid 30 days; the agent asks for a new one 10 days before it ends (it looks at every
+  connection and every hour), and when the server's CA or the machine's name changed. A new certificate is loaded
+  without a restart: new connections get it, open ones keep theirs.
+- **The key guard still checks the internal key**, now inside TLS, and still answers 503 with
+  `X-Forgeyard-Not-Taken` when its engine is down, so failover works as before.
+
+**Agents older than 1.4.5** keep serving over plain HTTP, so updating the server never stops a replica. **Setup
+health** and the machine's page say *Traffic to <machine> is not encrypted: update the agent*, with the update
+command. A 1.4.5 agent is never reached over plain HTTP, not even when its certificate is missing or expired: its
+replicas cannot be reached then (requests go to replicas elsewhere), and Setup health shows an error. To look at a
+replica's certificate yourself:
+
+```bash
+openssl s_client -connect <machine address>:<replica port> -servername <its name> -CAfile ca.crt -verify_hostname <its name> </dev/null
+```
+
+(the name is in the agent's log, *a certificate for m…*, and `ca.crt` is the one **Trust this server** offers).
+
 ## Secrets encrypted at rest
 
 Forgeyard encrypts the secrets it has to read back:
@@ -357,7 +397,7 @@ It refuses to run when the key is not actually lost.
 |---|---|
 | The database (`data/forgeyard.db`, or your PostgreSQL) | Everything Forgeyard knows |
 | `data/secret.key` (or your `FORGEYARD_SECRET_KEY`) | Without it, the encrypted secrets above are gone. Keep it **apart** from the database backup: together they reveal those secrets. |
-| `data/tls/` (above all `ca.key` and `ca.crt`) | Without them, a new CA is needed: every device and every agent has to trust it again (`agent trust` with the new fingerprint). The server refuses to make one silently while certificates are still there. |
+| `data/tls/` (above all `ca.key` and `ca.crt`) | Without them, a new CA is needed: every device and every agent has to trust it again (`agent trust` with the new fingerprint). The server refuses to make one silently while certificates are still there. The agents' replica certificates follow by themselves: each agent asks for a new one when the CA changed. |
 
 An admin can download the key and the CA's `ca.key` and `ca.crt` as one file from the console
 (**Get started → Setup health → Download a backup…**, or **Trust this server → For admins**): Argon2id

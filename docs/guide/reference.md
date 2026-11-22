@@ -44,6 +44,7 @@ are fine for almost everyone.
 |---|---|---|
 | `ALLOWED_HOSTS` | — | More host names to answer to, comma-separated. `localhost` and IP addresses always work; any other name gets 421 |
 | `TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed, comma-separated IPs |
+| `METRICS_TOKEN` | — | `GET /metrics` (Prometheus). Empty: only a direct request from the server's own host may read it (403 otherwise). Set: every scrape needs `Authorization: Bearer <token>`, from anywhere (401 otherwise). See [Metrics](#metrics) |
 
 ### HTTPS
 
@@ -52,6 +53,10 @@ are fine for almost everyone.
 | `TLS_EXTRA_NAMES` | — | More names or IP addresses for Forgeyard's own server certificate, comma-separated. Ignored with your own certificate |
 
 `TLS`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `TLS_CA_FILE` are under [Common settings](#common-settings).
+
+Traffic from the gateway to the replicas (1.4.5) is encrypted whatever these say: Forgeyard's CA in `data/tls`
+signs each agent's replica certificate (it is made there on first use with your own certificate or `TLS=off`).
+There is nothing to set; see [Deployments and the gateway](concepts.md#deployments-and-the-gateway).
 
 ### Data and secrets
 
@@ -77,6 +82,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | A machine with nothing heard for this long shows offline. Agents send a heartbeat every third of it (at least every 2 seconds) |
+| `AGENT_OFFLINE_MOVE_SECONDS` | `600` | A machine offline for this long (from its last heartbeat, or from the server's start when that is later) has the replicas of its unpinned deployments placed again on machines that fit; deployments pinned to it wait. `0`: replicas always wait for their machine ([details](how-to.md#when-a-machine-stays-offline)) |
 | `IMAGE_UPLOAD_MAX_GB` | `64` | The largest image file an admin may upload to a machine from its page (**Engine images** → **Upload an image**), in GiB. The file is streamed through the server to the agent, never stored |
 | `AGENT_IMAGE` | — | The agent image in **Add a machine** → **Docker**. Empty: the published `docker.io/tonyhuang1101/forgeyard-agent` at this server's version, or a local build while none is published. Set a mirror or a private registry (`registry.example.org/forgeyard/forgeyard-agent`; the tag is still the server's version), or add `:TAG` or `@sha256:DIGEST` to pin one. Only a plain image reference is accepted |
 
@@ -95,7 +101,7 @@ are fine for almost everyone.
 | Variable | Default | What it does |
 |---|---|---|
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | Seconds to connect to a replica before trying the next one |
-| `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for its answer's headers or the next piece of a stream |
+| `GATEWAY_READ_TIMEOUT` | `600` | Seconds a replica may take for a non-streamed answer's headers, or for each piece of a stream after its first (a stream's first bytes: the deployment's *Wait for the first answer*, 120 s by default, see [Retries and the wait for a first answer](#retries-and-the-wait-for-a-first-answer)) |
 | `GATEWAY_MAX_BODY_MB` | `32` | The largest request body (an audio file for transcription is the big one). A deployment whose recipe has the *Largest request* parameter (`max_body_mb`, 64 by default for vLLM and llama.cpp) takes up to that instead |
 | `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | Requests and tokens per minute for keys without their own limit (0: none). Admins change them on **API keys** |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | The most anyone may give their own key (0: no cap) |
@@ -307,6 +313,30 @@ What the gateway does with a request:
   (`max_body_mb`, 64 MB by default for vLLM and llama.cpp deployments).
 - If you close the connection, the gateway closes its request upstream at once, so the engine stops
   generating.
+
+### Retries and the wait for a first answer
+
+- **A request runs at most once.** The gateway tries another replica (or provider) only when the
+  request provably never reached the first one: the connection could not be made (nothing listens,
+  refused, `GATEWAY_CONNECT_TIMEOUT`), no connection was free, or the replica's key guard answered
+  that its engine is not running (503 with `X-Forgeyard-Not-Taken`, from agents of 1.4.5 on). A
+  connection that breaks once the request was sent, while it was being written or while the answer
+  was awaited, is 502 `upstream_error` (`provider_error` for a provider) and is not tried anywhere
+  else: the engine may have started on it, and a generation or a paid cloud request would run twice.
+  Retry it yourself if that is safe. An agent older than 1.4.5 closes the connection when its engine
+  is not running, which now reads as such a break: update agents to keep the failover in the few
+  seconds before an agent reports a dead engine.
+- **The first answer of a stream.** Once a streamed request (`stream: true`, or speech with a
+  `stream_format`) was written to a replica, the replica has the deployment's *Wait for the first
+  answer* (`first_answer_timeout`, **120 s** by default, 5 to 3,600) for the status line and the
+  stream's first bytes. After that the request is closed, so the engine stops, and the answer is 504
+  `first_answer_timeout`; it is never sent to another replica. Once a stream has started, each later
+  piece may take up to `GATEWAY_READ_TIMEOUT` (600 s); a wait set above that is honoured for the first
+  bytes. **A non-streamed answer is the whole answer, so the wait does not apply to it**: it keeps
+  `GATEWAY_READ_TIMEOUT` (504 `upstream_timeout`), and long non-streamed generations and long
+  transcriptions are not cut short. Image requests keep their deployment's own *Timeout*; video jobs
+  their own; `first_answer_timeout` is refused for those deployments. It is under **Advanced** in the
+  deploy and change forms; changing it restarts nothing.
 
 ### Images, audio and video in chat
 
@@ -619,8 +649,9 @@ The label names are on the catalog entry (`GET /api/models/<name>`, `classify.la
 | `X-Forgeyard-Replica` | answer | For a local answer: `<model>#<replica>` |
 | `X-Forgeyard-Spilled` | answer | Why the request left the first tier: `unavailable`, `busy`, `refused`, `too_long` or `budget`. Missing when the first tier answered |
 | `X-Forgeyard-Voice` | answer | Text to speech: the voice the gateway chose because the request named none, or an OpenAI voice the model does not have; `default` when the model has only its own voice |
+| `X-Forgeyard-Dropped-Params` | answer | The request parameters Forgeyard left out on the way to the provider that answered (engine-only ones such as `top_k`, `chat_template_kwargs`; a model's own drop list), comma-separated. Also on that provider's error. Missing when nothing was left out ([structured output](cloud-providers.md#when-a-request-spills) is never left out: such a request skips that provider) |
 | `X-Forgeyard-Budget-Exhausted` | answer | The budgets that kept the request from a cloud provider, comma-separated: `key`, `person` or `provider:<name>`. Also on a successful answer that another target served |
-| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, and on a replica's or provider's own 429 or 503 passed on as it was |
+| `Retry-After` | answer | Seconds to wait, on 429 `rate_limit_exceeded`, on 429 `provider_rate_limited` when the provider said, on 503 `local_busy` (1), and on a replica's or provider's own 429 or 503 passed on as it was |
 
 ### Errors
 
@@ -669,6 +700,7 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 400 | `input_reference_not_supported` | Videos: `input_reference` (or `image_reference`, `video_reference`, `audio_reference`): text to video only in 1.3 | Describe it in the prompt |
 | 400 | `variant_not_supported` | Videos: `variant=thumbnail` or `spritesheet`; the engine makes the video only | Ask for `variant=video` |
 | 4xx/5xx | `engine_error` | Images and videos: the engine refused or failed the request; its status and message are passed on | Read the message; an out-of-memory error means a smaller size or fewer images |
+| 400 | `structured_output_not_supported` | The request asks for structured output (`response_format` JSON, `structured_outputs`, `guided_*`, `grammar`, `json_schema`, a strict tool) and every provider that serves the model would drop or ignore it. The message names them and the parameter | Leave the parameter out, or use a target that takes it (an OpenAI-compatible server, a local deployment) |
 | 400 | `cloud_only_model` | Only a cloud provider serves the model, but the request has `X-Forgeyard-Local-Only` or the route is **Local only** | Drop the header, or use a local model |
 | 401 | `missing_api_key` | No `Authorization: Bearer` header | Send the key |
 | 401 | `invalid_api_key` | Not a Forgeyard key, or no such key | Check the key |
@@ -693,8 +725,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 429 | `provider_rate_limited` | Every cloud target that could serve it was rate limited | Wait `Retry-After` seconds, if given |
 | 429 | `queue_full` | Images: every replica is busy and the deployment's queue is full. Videos: the deployment holds *Jobs at once* | Wait `Retry-After` seconds |
 | 429 | `too_many_jobs` | Videos: this key (or person) already has *Jobs per key* videos waiting or being made on the deployment | Wait `Retry-After` seconds, or delete one |
-| 502 | `upstream_unreachable` | No replica could be connected to | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
-| 502 | `upstream_error` | The connection to the replica or provider broke while the answer was coming | Retry |
+| 502 | `upstream_unreachable` | No replica could be connected to, or every one's engine was not running | Usually its agent or engine restarted; it recovers by itself. Check the deployment |
+| 502 | `upstream_error` | The connection to the replica broke after the request was sent, or while the answer was coming. It is not sent to another replica, which could run it twice | Retry if that is safe |
 | 502 | `replica_refused_key` | The replica refused the gateway's internal key | Stop and start the deployment |
 | 502 | `provider_auth_failed` | The provider refused Forgeyard's key for it. Never passed on as 401, which would make you doubt your own key | An admin fixes the provider's key |
 | 502 | `provider_blocked` | The egress rules refused the provider's address before anything was sent | An admin checks the provider's base URL and `EGRESS_*` |
@@ -702,11 +734,12 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 502 | `provider_unreachable` | The provider could not be reached | Retry later |
 | 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
 | 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
-| 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it | Retry |
+| 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it. Carries `Retry-After: 1` | Retry after `Retry-After` seconds |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
 | 503 | `queue_timeout` | Images: the request waited longer than the deployment's *Timeout* for a free replica | Retry later, or add a replica |
-| 504 | `upstream_timeout` | The replica gave no answer (or no next piece of a stream) within `GATEWAY_READ_TIMEOUT`; for images, within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
+| 504 | `first_answer_timeout` | Streamed requests only: the replica took the request but sent no status line and first bytes within the deployment's *Wait for the first answer* (120 s by default). Stopped, never sent to another replica | Retry later, or raise the deployment's wait (a long prompt takes long before its first token) |
+| 504 | `upstream_timeout` | The replica gave no non-streamed answer, or no next piece of a stream, within `GATEWAY_READ_TIMEOUT`; for images, no answer within the deployment's *Timeout*; for a video, it did not take the job within 60 s | Lower `max_tokens`, or raise the setting; for images, a smaller size or fewer steps |
 | 504 | `provider_timeout` | The provider did not answer in time (`PROVIDER_READ_TIMEOUT`, or the provider's own timeout) | Retry later |
 
 Two more cases:
@@ -719,6 +752,50 @@ Two more cases:
 - **A stream that breaks off** after it started cannot change its status any more. The gateway ends
   it with one last event, an error with the code `upstream_stream_broken`:
   `data: {"error": {…, "code": "upstream_stream_broken"}}`.
+
+## Metrics
+
+`GET /metrics` answers in the Prometheus text format (`text/plain`), uncached. How to scrape it:
+[Scrape Forgeyard with Prometheus](how-to.md#scrape-forgeyard-with-prometheus).
+
+| Answer | When |
+|---|---|
+| 200 | `METRICS_TOKEN` is empty and the request comes straight from the server's host (a loopback address, and no `X-Forwarded-For`, `Forwarded` or `X-Real-IP` header); or `METRICS_TOKEN` is set and the request carries `Authorization: Bearer <METRICS_TOKEN>` |
+| 401 `metrics_token_required` | `METRICS_TOKEN` is set and the request has no Bearer token or another one (the same answer either way), with `WWW-Authenticate: Bearer realm="metrics"` |
+| 403 `metrics_local_only` | `METRICS_TOKEN` is empty and the request comes from another address or through a proxy |
+| 421 | the request's host name is not one the server answers to (`ALLOWED_HOSTS`), as for every path |
+
+The gateway's metrics count the requests that the usage counts (`/v1`, the Playground, `/x/` and video jobs), when
+they end:
+
+| Metric | Type | Labels | What it is |
+|---|---|---|---|
+| `forgeyard_gateway_requests_total` | counter | `endpoint`, `model`, `status`, `source`, `target` | Finished requests. `endpoint`: `chat/completions`, `embeddings`, `audio/speech`, `videos`, `x` (the passthrough), … `status`: the HTTP status (499: the client went away). `source`: `api` (an API key) or `console` (the Playground). `target`: `local` or `provider` |
+| `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`, `model` | From the request's arrival to its end; for a video job, from its creation to its end |
+| `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`, `model` | From the request's arrival to the first bytes of the answer from the replica or provider: a stream's first chunk, otherwise its status line. Only requests that got an answer |
+| `forgeyard_gateway_tokens_total` | counter | `model`, `direction` | Tokens the engine or provider reported: `in` the prompt, `out` the completion |
+| `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `refused`, `too_long`, `budget` |
+| `forgeyard_gateway_waiting` | gauge | `model` | Requests waiting in line for a free local slot now (all the route's tiers) |
+| `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
+
+Read from the database at each scrape:
+
+| Metric | Labels | What it is |
+|---|---|---|
+| `forgeyard_replicas` | `deployment`, `state` | Replicas of each model deployment by state: `pending`, `starting`, `running`, `healthy`, `unhealthy`, `backoff`, `exited`, `failed`, `stopping`, `stopped` |
+| `forgeyard_machines` | `status` | Machines `online`, `offline` and `revoked` |
+| `forgeyard_machine_up` | `machine` | 1 while the machine's agent is connected, else 0 |
+| `forgeyard_gpu_memory_total_bytes`, `forgeyard_gpu_memory_free_bytes` | `machine`, `gpu` | A card's memory and its free memory, as its agent last reported them (`gpu`: its index) |
+| `forgeyard_gpu_memory_reserved_bytes` | `machine`, `gpu` | What Forgeyard's replicas reserve on the card: what placement counts |
+| `forgeyard_machine_memory_total_bytes`, `forgeyard_machine_memory_free_bytes`, `forgeyard_machine_memory_reserved_bytes` | `machine` | The same for the machine's RAM (CPU replicas, and layers a GPU replica keeps on the CPU) |
+| `forgeyard_cloud_spend_usd` | `provider` | What each provider cost this UTC month, as the budgets count it |
+| `forgeyard_provider_budget_usd` | `provider` | A provider's monthly budget, when it has one |
+| `forgeyard_budgets_reached` | `scope`, `threshold` | How many `key`, `person` and `provider` budgets reached `80` or `100` percent this month (never which) |
+| `forgeyard_build_info` | `version` | Always 1: the server's version |
+
+Plus `process_*` (the server's CPU time, memory, open files). A `model` label is a served name the gateway has a
+route for: a request for a model nobody serves counts as `_unknown`, never under the name the client sent. No
+label holds an API key, a key's id or name, a person or a prompt. Counters start from 0 when the server restarts.
 
 ## Apps (deprecated)
 
@@ -898,7 +975,7 @@ value.
 
 | Field | Value |
 |---|---|
-| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`) and `extra_args` (a list). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list) and `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
 | `replicas` | 1 to 16 |
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
@@ -1200,9 +1277,9 @@ image}`. The answer is `{ok, bytes, images, source: {id, name}, saved}`, each im
 | 409 | `source_offline`, `source_cannot_save` | The source is not connected, or has no container engine or is older than 1.4.1 |
 | 409 | `source_busy` | The source is already sending an image |
 | 409 | `machine_offline`, `agent_cannot_load`, `upload_busy` | The target, as for an upload (429: two in all) |
-| 409 | `image_save_failed` | The source could not save it (its words): not one of its images, or its engine failed |
+| 409 | `image_save_failed` | The source could not save it (its words) before sending a byte: not one of its images, or its engine failed |
 | 504 | `source_no_send` | The source did not start sending within 2 minutes |
-| 400 | `upload_broken` | The source's save broke off; nothing was loaded |
+| 400 | `upload_broken` | The source stopped part way, or the server stopped a source that sent nothing for 2 minutes; nothing was loaded. When the source's own answer says why (`docker save failed: …`), the message has its words (the server waits up to 10 s for them, #215) |
 | 413 | `upload_too_large` | The image is larger than `IMAGE_UPLOAD_MAX_GB` |
 | 422 | `image_load_failed` | The target's engine could not load it (the agent's words) |
 
@@ -1270,6 +1347,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `certificate-expiring` | warning | Your own certificate expires within 30 days, or Forgeyard's CA within 90. An error within 14 days |
 | `registrations-pending` | note | People are waiting for approval |
 | `agent-outdated` | warning | A machine's agent is older than the server. An error when its protocol is older |
+| `replica-traffic-plain` | warning | Traffic to a machine is not encrypted: its agent is older than 1.4.5 and is reached over plain HTTP; the fix opens its update command ([more](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)) |
+| `replica-certificate` | error | A machine whose agent serves its replicas over TLS has no certificate from this server, or it expired or is not being renewed (fewer than 3 days left): its replicas cannot be reached ([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)) |
 | `gpus-shared-no-allowlist` | warning | Cards of a machine hold at least 1 GiB more than Forgeyard reserved there, and nobody chose its GPU access |
 | `machine-no-models` | note | An online agent has no model cache, so no model is placed there. A warning when it has GPUs |
 | `apps-deprecated` | warning | Apps (workloads that are not models) exist: they, their API and `/x/` are removed in 1.5 |
@@ -1277,6 +1356,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `model-cache-full` | warning | A machine's model cache disk has less than 10% free |
 | `machine-simulated` | warning | A machine reports simulated hardware |
 | `machine-offline-with-replicas` | warning | A machine has been offline for over 5 minutes with replicas placed on it |
+| `machine-loopback-address` | warning | A machine that is not the server's host publishes its replicas on a loopback address (through a tunnel or a proxy), and its port range is not forwarded to the server's host ([what to do](troubleshooting.md#a-machine-publishes-its-replicas-on-a-loopback-address)) |
+| `machine-gpu-access-lost` | error | New processes on an online machine cannot open its GPUs (the agent checks every 5 minutes as its workload account; an agent container started with `--gpus` alone loses that access when the host runs `systemctl daemon-reload`). Process workloads are not placed on those GPUs meanwhile; the fix opens the machine's update command ([what to do](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)) |
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
@@ -1377,6 +1458,13 @@ dependencies. It uses `uv` when it is installed, else a Python 3.13 or newer tha
 else it installs `uv` into `/opt/forgeyard/bin`, which brings its own Python. Without systemd it
 installs everything and prints how to start the agent.
 
+What it downloads is checked (1.4.5): the agent and the list of its dependencies come from the server,
+each checked against the SHA-256 the script names; the dependencies come from PyPI at the versions the
+server's release was tested with, each file checked against its published hash (`--require-hashes`,
+nothing else installed with them); and the `uv` it installs is a fixed release (0.9.24) downloaded from
+GitHub and checked against its SHA-256, not an install script. A machine that reaches PyPI through a
+mirror (`UV_INDEX_URL`, `PIP_INDEX_URL`) still gets the same files, or none.
+
 ## Built-in recipes
 
 A recipe's variants are tried in order; the first one whose `when` matches a card (or the CPU) and
@@ -1423,6 +1511,15 @@ The context of a deployment that names none starts at the model's own maximum wh
 the recipe's default (1.4.4): a 512-token BERT classifier gets `--max-model-len 512`, not 8192. RoBERTa and
 XLM-RoBERTa models count their positions after the padding index, so 514 position embeddings hold 512
 tokens (BGE-M3: 8192).
+
+`vllm` passes `--max-num-batched-tokens`, the tokens vLLM works on in one step (1.4.5, #201): 2,048, at most
+*Concurrent requests* x *Context length*, and 2,496 for Gemma 4 12B, 26B-A4B and 31B while the deployment takes
+images, audio or video (vLLM never splits one of their images or videos over two steps, and its longest, a
+32-frame video, is 2,496 tokens). That is what vLLM 0.32.0 chooses by itself on an A100 and on cards under 70 GB.
+Left to itself it would choose 8,192 on an H100 or H200 and 16,384 from 160 GB, and the estimate, made before a
+card is chosen, could not know which: a sliding-window layer (Gemma, gpt-oss) keeps its window plus two such steps
+per request, so Gemma 4 12B at 16,384 x 1 was estimated at 5.25 GiB of KV cache where vLLM used 2.09. Now the two
+agree on every card. On an H100 or H200 a long prompt is read in more, smaller steps than vLLM would choose there.
 
 `llama-cpp` serves text to speech too, with a TTS GGUF and its projector, on every variant above.
 
@@ -1505,7 +1602,7 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.4.4` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
+- **Tags**: `1.4.5` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with

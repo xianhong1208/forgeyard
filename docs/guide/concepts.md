@@ -27,6 +27,11 @@ A machine shows **online** while its agent is connected, and **offline** when no
 for 30 seconds (the agent sends a heartbeat every 10). The agent reconnects by itself. An admin can
 **revoke** a machine (its credential stops working at once) or **remove** it.
 
+While a machine is offline, requests no longer go to its replicas. When it stays offline for **10 minutes**
+(`AGENT_OFFLINE_MOVE_SECONDS`), the replicas of its deployments are placed again on machines that fit, by the
+deployment's own rules; a deployment **pinned** to that machine waits for it. When the machine comes back, its
+agent stops what moved away. See [When a machine stays offline](how-to.md#when-a-machine-stays-offline).
+
 Stopping or restarting the agent **leaves its models and apps running**: a restarted agent finds them and
 takes them over. That is why the installed service uses `KillMode=process`.
 
@@ -144,7 +149,13 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
 - The **estimate** is the memory one copy needs: the weights, the KV cache for the context and
   concurrency you choose, the engine's own overhead and the CUDA context, and, for a model that
   reads images, its vision encoder. The deploy page shows it,
-  part by part, and where it fits, before anything is downloaded.
+  part by part, and where it fits, before anything is downloaded. The KV cache counts what each layer
+  really keeps (1.4.5): a sliding-window layer (Gemma, gpt-oss, Mistral 7B) at most its window (on vLLM plus
+  two steps of 2,048 tokens it works on, 2,496 for Gemma 4, which the recipe passes so that every card agrees), an MLA
+  model (DeepSeek, Kimi) one compressed latent per token, and a hybrid model (Qwen3-Next, Granite 4,
+  Falcon-H1) the context on its attention layers only, plus a fixed *Recurrent state* per request.
+  A GGUF model with layers left on the CPU also reserves the machine's RAM for them, and a
+  deployment's estimate is made again from its engine as it is now each time a replica is placed.
 - The **model cache** on each machine (`/srv/forgeyard-models` by default, for an agent run as root)
   keeps the downloaded files, checked against their checksums, shared by every replica there.
   Containers get their model mounted read-only. The machine's page lists what is in it, with sizes,
@@ -202,6 +213,16 @@ started again, unless its route can send the request to a cloud provider your ke
 The gateway sends each request to the ready replica with the fewest requests in flight, and to the
 next one if a replica does not answer. Replicas cannot be used around it: each has an internal key
 that only the gateway knows, and the agent refuses every other request on the replica's port.
+
+From 1.4.5 the traffic between the gateway and the replicas is **encrypted**: the agent serves the replica's port
+with TLS, with a certificate Forgeyard's CA signs for that machine (the agent makes the key; it never leaves the
+machine), valid 30 days and renewed by the agent 10 days before it ends, without a restart. The gateway accepts
+only that machine's certificate when it dials that machine, so the internal key, the prompts and the answers never
+cross the network in clear. An agent older than 1.4.5 keeps serving over plain HTTP: **Setup health** and its
+machine's page say *Traffic to <machine> is not encrypted: update the agent*
+([more](troubleshooting.md#traffic-to-a-machine-is-not-encrypted)). A 1.4.5 agent is never reached over plain
+HTTP: without a valid certificate its replicas cannot be reached, and Setup health shows an error
+([what to do](troubleshooting.md#a-machine-has-no-certificate-for-its-replicas)).
 
 The **Playground** tries a model through the same gateway, as you, without an API key. One **Model**
 picker lists the models that are ready, grouped by kind with the labels and icons of **Serving** (Chat,

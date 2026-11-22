@@ -176,8 +176,9 @@ def addresses(host: str) -> list[str]:
 
 
 def reset() -> None:
-    global resolver
+    global resolver, listening
     resolver = _system_resolve
+    listening = _listening
     with _resolve_lock:
         _resolved.clear()
 
@@ -415,10 +416,14 @@ def agent_outdated(ctx: Context) -> Iterator[Finding]:
     update command."""
     from forgeyard.install.update import behind
 
+    from forgeyard.machines.protocol import FEATURE_GUARD_TLS
+
     for n in ctx.nodes:
         why = behind(n)
         if why is None:
             continue
+        if not why["older"] and not why["old_protocol"] and why["missing"] == [FEATURE_GUARD_TLS]:
+            continue  # 1.4.5: said better by replica-traffic-plain ("not encrypted: update the agent")
         old_protocol = why["old_protocol"]
         if why["older"] or old_protocol:
             title = f"{n.name} runs an older agent ({n.agent_version or 'unknown'})"
@@ -431,6 +436,47 @@ def agent_outdated(ctx: Context) -> Iterator[Finding]:
                       f"{', '.join(why['missing'])}: it was built from older code. Update it.")
         yield Finding("agent-outdated", "error" if old_protocol else "warning", title, detail,
                       f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
+
+
+@check
+def replica_traffic(ctx: Context) -> Iterator[Finding]:
+    """1.4.5 (#163): how the gateway reaches each machine's replicas (security/replica_tls.py `status`). An agent too
+    old for TLS keeps serving over plain HTTP (Tony's decision on #163): a warning that opens its update command. A
+    TLS agent whose certificate is missing, expired or not renewed: an error, since its replicas cannot be reached
+    (never over plain HTTP instead)."""
+    from forgeyard.security import replica_tls
+
+    for n in ctx.nodes:
+        st = replica_tls.status(n, now=ctx.now, settings=ctx.s)
+        if st is None or st["state"] in ("ok", "pending"):
+            continue
+        if st["state"] == "plain":
+            yield Finding("replica-traffic-plain", "warning", f"Traffic to {n.name} is not encrypted: update the agent",
+                          f"The gateway sends requests, answers and the replicas' internal keys to {n.name} over plain "
+                          f"HTTP: its agent ({n.agent_version or 'of an unknown version'}) cannot serve TLS. It keeps "
+                          "serving meanwhile; once its agent is updated, that traffic is encrypted.",
+                          f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
+            continue
+        why = f" ({st['reason']})" if st.get("reason") else ""
+        if st["state"] == "missing":
+            title = f"{n.name} has no certificate for its replicas"
+            detail = (f"{n.name}'s agent serves its replicas over TLS only, and it has no certificate from this "
+                      f"server{why}. The gateway cannot reach its replicas until it has one, and never falls back to "
+                      "plain HTTP: requests go to replicas on other machines. Look at the agent's log; restarting the "
+                      "agent asks again.")
+        else:
+            end = st["not_after"][:10] if st.get("not_after") else "?"
+            title = (f"{n.name}'s replica certificate has expired" if st["state"] == "expired"
+                     else f"{n.name}'s replica certificate is not being renewed")
+            detail = (f"The certificate {n.name}'s agent serves its replicas with is valid until {end}{why}. It is "
+                      f"renewed {replica_tls.RENEW_BEFORE_DAYS} days before that while the agent is connected; "
+                      + ("an expired one is refused, so its replicas cannot be reached (never over plain HTTP instead)."
+                         if st["state"] == "expired" else "that keeps failing, and once it expires its replicas cannot "
+                                                          "be reached.")
+                      + " Look at the agent's log, and whether it is connected.")
+        yield Finding("replica-certificate", "error", title, detail,
+                      "/guide/en/troubleshooting#a-machine-has-no-certificate-for-its-replicas", "What to do",
+                      scope=f"machine:{n.id}", pages=("machines", "serving"))
 
 
 def _settled_holds(ctx: Context, node: Node):
@@ -511,6 +557,88 @@ def machine_models_and_runtimes(ctx: Context) -> Iterator[Finding]:
                           "/guide/en/how-to#free-disk-space-on-a-machine", "How to free disk space",
                           scope=f"machine:{n.id}",
                           pages=("machines",))
+
+
+@check
+def machine_gpu_access(ctx: Context) -> Iterator[Finding]:
+    """1.4.5 (#202): the agent's GPU access check (agent/gpu_check.py) says a new process there cannot open the GPUs.
+    In a container that is the device access the NVIDIA runtime hook set up behind systemd's back, lost when the host
+    ran `systemctl daemon-reload`: restarting the container gives it back, and the machine page's update command passes
+    the devices with --device too, which keeps them. Meanwhile process workloads are not placed on those GPUs."""
+    from forgeyard.machines import gpu_access
+
+    for n in ctx.nodes:
+        c = gpu_access.check(n)
+        if n.status != "online" or c is None or c["ok"]:
+            continue
+        failing = gpu_access.failing_vendors(n)
+        label = " and ".join(gpu_access.VENDOR_LABEL[v] for v in sorted(failing))
+        why = f" ({c['reason']})" if c.get("reason") else ""
+        held = (f" Until then no process workload or process engine is placed on its {label} GPUs; containers are not "
+                "affected, and what already runs keeps running.")
+        if gpu_access.in_container(n):
+            detail = (f"New processes on {n.name} cannot open its GPUs{why}: the agent's container lost its device "
+                      "access, e.g. after the host ran systemctl daemon-reload. Restart the agent container, and "
+                      "update it with the command on the machine's page, which keeps the access (it passes the "
+                      "devices with --device as well)." + held)
+        else:
+            detail = (f"New processes on {n.name}, running as {c.get('user') or 'the workload account'}, cannot open "
+                      f"its GPUs{why}. Check the device permissions and that account's groups, then restart the "
+                      "agent." + held)
+        yield Finding("machine-gpu-access-lost", "error", f"New processes on {n.name} cannot open its GPUs", detail,
+                      f"/machines/{n.id}#update", "Update command", scope=f"machine:{n.id}", pages=("machines",))
+
+
+# 1.4.5 (#171): a loopback replica address works for a machine elsewhere only when its port range is forwarded to
+# the server's host (the SSH tunnel of the guide); the advisor looks for that on ranges up to this size.
+FORWARD_PROBE_MAX = 64
+
+
+def _listening(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+listening: Callable[[str, int], bool] = _listening   # tests replace it
+
+
+@check
+def machine_loopback_address(ctx: Context) -> Iterator[Finding]:
+    """1.4.5 (#171): a machine publishes its replicas on a loopback address (its connection to the server came
+    through an SSH tunnel or a proxy on its own host), but it is not this server's host: the gateway would dial
+    that address here, on the server's host. Which agent runs on the server's host is told by the connection itself
+    (messages.same_end: its own end is the peer the server sees, so nothing sits between them); agents before 1.4.5
+    do not report it and are not checked. Not raised when every port of a small range is forwarded here (something
+    listens on each on the server's loopback), as the guide's tunnel does."""
+    for n in ctx.nodes:
+        info = n.runtime_info or {}
+        address = info.get("address")
+        if not isinstance(address, str) or not is_loopback_host(address) or info.get("same_host") is not False:
+            continue
+        ports = info.get("ports") or {}
+        low, high = ports.get("low"), ports.get("high")
+        if not (isinstance(low, int) and isinstance(high, int) and low <= high):
+            low, high = 30000, 32767  # the agent's default range
+        if high - low < FORWARD_PROBE_MAX:
+            missing = [p for p in range(low, high + 1) if not listening(address, p)]
+            if not missing:
+                continue
+            shown = ", ".join(str(p) for p in missing[:4]) + (" …" if len(missing) > 4 else "")
+            forwarded = (f" Nothing listens on {_plural(len(missing), 'port')} of its range here ({shown}): forward "
+                         "every port of the range back through the tunnel.")
+        else:
+            forwarded = (f" Its port range ({low}-{high}) is too large to forward: choose a small one "
+                         "(FORGEYARD_PORT_RANGE) and forward each port back through the tunnel.")
+        yield Finding("machine-loopback-address", "warning", f"{n.name} publishes its replicas on {address}",
+                      f"{n.name}'s agent reached the server through a tunnel or a proxy, so it publishes its replicas "
+                      f"on {address}, and the gateway dials that address on the server's own host, not on "
+                      f"{n.name}." + forwarded + " Or give the agent an address the server can reach "
+                      "(FORGEYARD_BIND_ADDRESS, --bind-address). If the server does reach it, snooze this.",
+                      "/guide/en/troubleshooting#a-machine-publishes-its-replicas-on-a-loopback-address",
+                      "What to do", scope=f"machine:{n.id}", pages=("machines",))
 
 
 @check

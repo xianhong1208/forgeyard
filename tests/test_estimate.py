@@ -185,7 +185,14 @@ def test_fy_est_005_gguf_cpu_and_gpu_offload():
                     device="gpu", gpu_context=CTX)
     p = {x.label: x.bytes for x in part.parts}
     assert p["Weights"] == sum(g["layer_bytes"][18:]) and p["KV cache"] == 28 * 0 + 8 * 256 * 2 * 10 * 8192
-    assert part.notes == ["18 layers stay on the CPU (host memory)."]
+    # 1.4.5 (#166): the 18 layers left on the CPU, the output layer and their KV cache are in the machine's RAM.
+    host = {x.label: x.bytes for x in part.host_parts}
+    assert host == {"Weights on the CPU": sum(g["layer_bytes"][:18]) + g["output_bytes"],
+                    "KV cache on the CPU": 8 * 256 * 2 * 18 * 8192}
+    assert part.ram == sum(host.values()) and part.per_gpu == sum(p.values())
+    assert part.notes == [f"18 layers stay on the CPU: {part.ram / GIB:.2f} GiB of the machine's RAM is reserved for "
+                          "them as well."]
+    assert full.ram == 0 and full.host_parts == []
 
 
 def test_fy_est_006_files_fixed_and_declared():

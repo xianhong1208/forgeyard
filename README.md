@@ -33,7 +33,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   machines already have its image or program.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
-  replicas.
+  replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed
+  again on machines that fit.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
@@ -43,7 +44,8 @@ them where they fit, and every program calls them at `/v1` with an API key.
   (1.4.4) image classification at `/v1/vision/…`, deployed like any other model.
 - **HTTPS out of the box.** The server makes its own certificate authority, agents pin its
   fingerprint when they join, and stored secrets are encrypted. Admins download the key and the CA
-  as one passphrase-encrypted backup file from the console (1.4.2).
+  as one passphrase-encrypted backup file from the console (1.4.2). From 1.4.5 the gateway reaches every replica
+  over TLS too, with a certificate the CA signs for that machine (its key never leaves it).
 - **Machines without internet.** Engine images carried over as files run the built-in recipes as
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging
@@ -61,7 +63,13 @@ engine image from one machine to another, both still through the server. 1.4.2 s
 the exact command that updates its agent, lists its engine images and removes old ones, and counts free host
 ports when placing replicas. 1.4.3 gives every catalog model and every engine its own page: where it is,
 whether it fits each machine and what uses it. 1.4.4 adds zero-shot object detection (find the objects you
-name), text classification and image classification. Every change is in the [CHANGELOG](CHANGELOG.md).
+name), text classification and image classification. 1.4.5 fixes what an outside review found: TLS from the
+gateway to every replica, replicas that move off a machine left offline, Prometheus metrics, memory estimates and
+reservations that hold, and requests that never run twice (update the agents after the server). Every change is
+in the [CHANGELOG](CHANGELOG.md).
+
+**1.4 is a long-term support line until 2027-06-30:** security fixes and serious bug fixes
+([supported versions](SECURITY.md#supported-versions)).
 
 ## 🚀 Installation
 
@@ -74,7 +82,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker logs forgeyard
 ```
 
@@ -112,6 +120,7 @@ Or the agent image, from the **Docker** tab. On an NVIDIA machine it looks like 
 ```bash
 sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
+  $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -119,7 +128,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
@@ -195,10 +204,12 @@ Also:
   stored secrets, and
   [upgrading agents that joined 1.0 over plain HTTP](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http).
 - [Development](docs/development.md): build, test, and find your way around the code.
+- [Verified hardware](docs/verified-hardware.md): the machines each release is accepted on, and the results.
 
 ## Tested on
 
-Every release is checked on real machines, not only in CI. So far:
+Every release is checked on real machines, not only in CI; [Verified hardware](docs/verified-hardware.md)
+lists each release's acceptance runs and pass counts. So far:
 
 | Hardware | Software | What ran |
 |---|---|---|

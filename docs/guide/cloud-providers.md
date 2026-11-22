@@ -111,7 +111,9 @@ Every answer says who served it, in the header `X-Forgeyard-Target`: `local:<dep
 or `provider:<provider>/<model>`. When a request moved past the first tier, `X-Forgeyard-Spilled`
 says why: `unavailable`, `busy`, `refused`, `too_long`, or `budget` (a [budget](#budgets) kept it
 from the cloud tier before). The `model` in the answer's body is what
-the upstream wrote. The Playground shows the target under each answer.
+the upstream wrote. The Playground shows the target under each answer. When Forgeyard left request
+parameters out on the way to a provider (see [What each provider's endpoint cannot do](#what-each-providers-endpoint-cannot-do)),
+`X-Forgeyard-Dropped-Params` names them, comma-separated, on the answer and on the provider's error.
 
 ## When a request spills
 
@@ -121,7 +123,9 @@ when the tier is:
 - **unavailable**: no replica is ready, or none could be connected to;
 - **busy**: every ready replica already has as many requests in flight through this server as its
   deployment's *Concurrent requests* setting. With **Wait for a free local slot**, it waits up to
-  that many milliseconds first (at most 10,000; 0 by default);
+  that many milliseconds first (at most 10,000; 0 by default). Requests wait in line, first come
+  first served: a slot that frees up goes to the one that has waited longest, never to a newcomer.
+  At most 256 wait per tier; one more does not wait but moves on at once;
 - **refusing**: the engine answered 429 or 503;
 - **too small**, only when the route has **Spill a prompt that is too long**: the prompt's size
   (about 3 bytes a token, on the high side) plus `max_tokens` is more than the deployment's context.
@@ -137,6 +141,23 @@ It **never** moves on when:
 
 If the local tier was busy and the cloud cannot take the request either, the request goes to a local
 replica after all, past its *Concurrent requests*: the engine queues it.
+
+**Structured output is never lost on the way.** A request that asks for a shape of answer (a
+`response_format` of `json_object` or `json_schema`, vLLM's `structured_outputs` or `guided_json`,
+`guided_regex`, `guided_choice`, `guided_grammar`, llama.cpp's `grammar` or `json_schema`, or a tool
+with `strict: true`) skips every provider target that would drop or ignore that parameter, instead
+of getting an unconstrained answer back:
+
+- every cloud kind drops the engine-only ones (`structured_outputs`, `guided_*`, `grammar`,
+  `json_schema`) and a `response_format` type only engines know;
+- Anthropic also ignores `json_object`, a `json_schema` without `strict: true`, and `strict` on tools;
+- an *OpenAI-compatible server* keeps them all;
+- a provider model whose own drop list (`drop_params`, set through the API) names one is skipped for it too.
+
+With nothing else to take it, the request gets what it would have got without the cloud: busy, it
+goes to a local replica anyway; unavailable, 503 with the reason, which also names the providers
+skipped and the parameter. A cloud model that only such providers serve answers 400
+`structured_output_not_supported`.
 
 Within a cloud tier, a target that answers 429 or 5xx, or cannot be reached, is skipped and tried
 last for 30 seconds. Several targets in one tier share the requests by
@@ -234,7 +255,8 @@ On the newest Claude models, a `temperature` below 1 together with `top_p`, or a
 Only what is specific to one provider behind them. OpenRouter accepts `top_k`, `min_p` and
 `repetition_penalty` and passes them on; for the other cloud kinds Forgeyard drops those and other
 engine-only parameters (vLLM's `chat_template_kwargs`, `guided_*`, llama.cpp's sampler settings)
-when a request leaves for them.
+when a request leaves for them, and names them in `X-Forgeyard-Dropped-Params`. A request whose
+structured output would be dropped is not sent there at all ([When a request spills](#when-a-request-spills)).
 
 ## Cost and prices
 
@@ -395,7 +417,8 @@ There is no e-mail: check the audit log or the pages.
 
 The month's spend is the sum of the cost of its requests (see above), read from the usage counts when
 the server starts or a new month begins, and added to as requests finish. A cloud request that was
-answered but reported no tokens counts at its reservation until the server restarts. `GET
+answered but reported no tokens counts at its reservation; from 1.4.5 that amount is kept across restarts
+too (it is in no usage count, so the server keeps it apart, for the month). `GET
 /api/budgets` returns this month's spend per key, person and provider; admins add `?everyone=true`.
 
 ## Egress: what leaves your server

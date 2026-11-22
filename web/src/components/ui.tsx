@@ -32,8 +32,8 @@ export function Field({ label, hint, error, id, ...input }: FieldProps) {
   );
 }
 
-export function Notice({ tone = "info", children }: { tone?: "info" | "error" | "ok"; children: ReactNode }) {
-  const Icon = tone === "error" ? IconAlertTriangle : tone === "ok" ? IconCheck : IconInfoCircle;
+export function Notice({ tone = "info", children }: { tone?: "info" | "error" | "ok" | "warn"; children: ReactNode }) {
+  const Icon = tone === "error" || tone === "warn" ? IconAlertTriangle : tone === "ok" ? IconCheck : IconInfoCircle;
   return (
     <div className={`notice notice-${tone}`} role={tone === "error" ? "alert" : "status"}>
       <Icon size={18} stroke={1.8} aria-hidden="true" />

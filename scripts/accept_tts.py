@@ -61,6 +61,7 @@ sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import GIB, Client, Fail, log, machine  # noqa: E402
 from accept_m4 import ensure_sdk, raw_post, wait_all_ready  # noqa: E402
+import replica_port  # noqa: E402
 
 PREFIX = "accept-tts-"
 EN = "The quick brown fox jumps over the lazy dog near the river bank."
@@ -508,9 +509,13 @@ def exercise(c: Client, d: dict, model: str, spec: dict, recipe: dict, args, che
     if not spec.get("zh") and recipe.get("tts", {}).get("cjk") is False:
         refused("Chinese to an English-only engine is refused", {"input": ZH}, "language_not_supported")
 
-    # ---- the replica's own port without its internal key
+    # ---- the replica's own port without its internal key, reached as the gateway reaches it (1.4.5, #163:
+    # TLS with the machine's binding name when its agent serves TLS, plain HTTP for an older one)
+    rp = replica_port.Replicas.of(c, c.server, accept_m3.TLS)
     for e in d["endpoints"]:
-        s, text = raw_post(f"{e['url']}/v1/audio/speech", b'{"input":"hi"}', "application/json", timeout=20)
+        p = rp.endpoint(e)
+        replica_port.record(rp.transport_checks(p, f"{model}: replica {e['replica']} on {e['machine']}"), check)
+        s, text = rp.post(p, "/v1/audio/speech", b'{"input":"hi"}', "application/json", timeout=20)
         check(f"{model}: replica {e['replica']} on {e['machine']} without the key is refused", s in (401, 403),
               f"{s} {text[:80]}")
 

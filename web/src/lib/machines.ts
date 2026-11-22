@@ -70,3 +70,16 @@ export function archLabel(a: Accelerator): { main: string; sub?: string } {
 }
 
 export const VENDOR_NAME: Record<string, string> = { nvidia: "NVIDIA", amd: "AMD", cpu: "CPU" };
+
+export function isLoopback(address: string): boolean {
+  const a = address.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return a === "localhost" || a.endsWith(".localhost") || /^127\.\d+\.\d+\.\d+$/.test(a) || a === "::1";
+}
+
+// 1.4.5 (#171): said beside the address a machine publishes its replicas on, when that is a loopback address: fine
+// on the server's own host; elsewhere the gateway dials the server's host (the setup advisor says what to do).
+export function replicaAddressNote(m: Machine): string | null {
+  const info = m.runtime_info;
+  if (!info?.address || !isLoopback(info.address)) return null;
+  return info.same_host ? "loopback, on the server's host" : "loopback: the gateway dials it on the server's host";
+}

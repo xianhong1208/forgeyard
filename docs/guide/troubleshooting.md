@@ -59,6 +59,9 @@ Two agents with the same credential (a copied state directory) push each other o
 keeps only the newest connection, and closes the older one with *another agent connected with this
 credential*.
 
+Meanwhile its replicas get no requests, and after 10 minutes those of unpinned deployments move to other machines
+that fit ([When a machine stays offline](how-to.md#when-a-machine-stays-offline)).
+
 ## The installer refuses the fingerprint
 
 **You see:** `forgeyard-ca.der: FAILED` and `sha256sum: WARNING: 1 computed checksum did NOT match`,
@@ -398,6 +401,116 @@ outside Forgeyard holds ports of the range: the agent skips them, and tries agai
 sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 ```
 
+## A machine publishes its replicas on a loopback address
+
+**You see:** *gpu-02 publishes its replicas on 127.0.0.1* under **Get started → Setup health** and on the
+machine's page, and models deployed there may answer 502 or something unexpected.
+
+**Why:** an agent publishes replicas on its own address towards the server: the local end of its connection,
+unless `FORGEYARD_BIND_ADDRESS` names another. An agent that reaches the server through an SSH tunnel or a proxy
+on its own host connects to `127.0.0.1`, so that is the address it reports, and the gateway dials `127.0.0.1` on
+the **server's** host: the server's own ports, not the machine's. From 1.4.5 the agent also tells the server its
+end of the connection; when that is the peer the server sees, nothing sits between them, the agent runs on the
+server's own host and loopback is right. Only the other machines are checked, and only those with a 1.4.5 agent.
+The warning does not appear when every port of a range of up to 64 ports is forwarded to the server's host
+(something listens on each on the server's loopback), as in the guide's
+[SSH tunnel](how-to.md#run-a-machine-without-internet-access).
+
+**Do:** one of these.
+
+- Forward the machine's port range back through the tunnel too: choose a small range
+  (`FORGEYARD_PORT_RANGE=33000-33002`) and add one `-L` per port to the `ssh` command that carries the agent's
+  connection ([how](how-to.md#run-a-machine-without-internet-access)).
+- Or give the agent an address the server can reach (its LAN or VPN address) with `FORGEYARD_BIND_ADDRESS`
+  (`--bind-address`), and open the port range there.
+
+Then restart the agent. If the server does reach the machine at that address in a way Forgeyard cannot see (a
+proxy on the server's host, say), snooze the warning.
+
+## New processes on a machine cannot open its GPUs
+
+**You see:** an error under **Get started → Setup health** and on the machine's page: *New processes on gpu-01 cannot
+open its GPUs (/dev/nvidia0: Operation not permitted)*. A process engine or app there fails at once with
+`cuInit: CUDA_ERROR_NO_DEVICE` or `Failed to initialize NVML: Unknown Error`, while models in containers on the same
+machine keep answering and the machine's page still lists every GPU. Deployments that need a process on those GPUs
+wait, with the reason *new processes there cannot open its NVIDIA GPUs*.
+
+**Why:** the agent checks every 5 minutes, and when it starts, that a new process running as its workload account
+can open the GPU device nodes (`/dev/nvidiactl`, `/dev/nvidia-uvm` and each `/dev/nvidiaN`; on AMD `/dev/kfd` and
+the render nodes). With `docker run --gpus all` the NVIDIA runtime hook gives the agent's container its GPU devices
+behind Docker's and systemd's back. When the host runs `systemctl daemon-reload` (a package install, an unattended
+upgrade, any unit change: often, on a shared host), systemd applies the container's cgroup again from what it knows,
+and that device access is gone. What is already open keeps working (the agent's GPU readings, the engines that were
+running); every new open inside that container is refused. New containers get the access afresh, so models in
+containers are not affected. AMD agents are not affected either: their command passes `/dev/kfd` and `/dev/dri` with
+`--device`. While the check fails, Forgeyard places no process workload on those GPUs.
+
+**Do:**
+
+1. Restart the agent container: `sudo docker restart forgeyard-agent`. It gets its devices back and the error goes
+   away at its next check (it checks again when it connects). Models in containers keep running.
+2. Update it with the machine page's **Update the agent** command (the error's **Update command** opens it). From
+   1.4.5 that command passes the NVIDIA device nodes with `--device` next to `--gpus all`, which Docker records, so a
+   reload no longer takes them away:
+
+   ```bash
+     --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     …
+   ```
+
+   An agent before 1.4.5 does not report its device nodes; its command lists the host's with a short shell loop
+   instead (`$(for d in /dev/nvidiactl … /dev/nvidia[0-9]*; do … done)`), which skips a node the host does not have.
+   If `/dev/nvidia-uvm` is missing on the host, run `sudo nvidia-modprobe -u -c=0` first.
+
+If it still happens with the device flags: some `runc` versions with systemd's cgroup driver drop the rules anyway
+when the host has no `/dev/char` links for the NVIDIA devices. Create them with the NVIDIA Container Toolkit
+(`sudo nvidia-ctk system create-dev-char-symlinks --create-all`; NVIDIA's discussion #1133 of nvidia-container-toolkit
+has a udev rule that keeps them after a reboot), or start the agent with CDI instead of `--gpus all`
+(`--device nvidia.com/gpu=all`, after `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`). Changing Docker's
+cgroup driver to cgroupfs also avoids it, but restarts every container on the host: not on a shared host.
+
+Outside a container (install.sh or a checkout) the same error means the workload account itself may not open the
+devices: check their permissions and the account's groups (`video`, `render`), then restart the agent.
+
+## Traffic to a machine is not encrypted
+
+**You see:** *Traffic to gpu-02 is not encrypted: update the agent* under **Get started → Setup health** and on the
+machine's page.
+
+**Why:** from 1.4.5 the gateway reaches every replica over TLS, but gpu-02's agent is older and serves its replicas
+over plain HTTP only. So the replicas' internal keys, the prompts and the answers cross the network in clear
+between the server and gpu-02. It keeps serving: nothing stops until you update it.
+
+**Do:** update the agent (the warning's **Update command** opens the command for that machine;
+[Update an agent](how-to.md#update-an-agent)). Once the new agent connects it gets its certificate within a second,
+and the warning goes away. Models deployed there keep running across the update (the agent adopts them).
+
+## A machine has no certificate for its replicas
+
+**You see:** an error under **Get started → Setup health**: *gpu-02 has no certificate for its replicas*, *gpu-02's
+replica certificate has expired* or *… is not being renewed*; models deployed only there answer 503, the others
+answer from replicas on other machines.
+
+**Why:** a 1.4.5 agent serves its replicas over TLS only, with a certificate the server signs for that machine. It
+asks for one when it connects and renews it 10 days before it ends (it is valid 30 days). The gateway never falls
+back to plain HTTP for such a machine, so without a valid certificate its replicas cannot be reached. The error
+names the reason when the server refused the request (it is also in the server's log). Usual causes:
+
+- the agent has not been connected for a long time (an offline machine cannot renew);
+- the server cannot read or make its CA in `data/tls` (a `ca.crt` without its `ca.key`, or a read-only data
+  directory): the server's log says *no certificate can be made*;
+- the agent's state directory is not writable, or the agent cannot make a key: its log says *cannot be used*.
+
+**Do:** look at the agent's log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`) and the server's.
+Fix what they name, then restart the agent: it asks again at once. If `data/tls` lost its `ca.key`, restore it from a
+backup ([Back up and restore](how-to.md#back-up-and-restore)); a new CA also works for the replicas (every
+agent gets a new certificate by itself), but browsers and agents that trusted the old one for the server must trust
+the new one.
+
 ## Errors from /v1: 401, 403, 429, 503
 
 The gateway answers errors in the OpenAI format, `{"error": {"message", "type", "param", "code"}}`.
@@ -457,7 +570,9 @@ deployment's page; see also [A model is listed but answers 503](#a-model-is-list
 Others: `404 model_not_found` (no model by that name for this key: see `/v1/models` and
 [A model is missing from /v1/models](#a-model-is-missing-from-v1models)), `502` (a replica could not be
 reached or refused its internal key: usually its agent restarted; it recovers within seconds),
-`504` (no answer within `GATEWAY_READ_TIMEOUT`, 600 s by default). Every code is listed in the
+`504 upstream_timeout` (no answer within `GATEWAY_READ_TIMEOUT`, 600 s by default) and, for streamed
+requests only, `504 first_answer_timeout` (the stream did not start within the deployment's *Wait for
+the first answer*, 120 s by default: raise it under **Advanced**). Every code is listed in the
 [reference](reference.md#errors).
 
 ### Errors from cloud providers

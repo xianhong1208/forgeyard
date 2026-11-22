@@ -9,7 +9,18 @@ Say what an attacker can do, what they need first (an account? which role? netwo
 server, an agent or a replica?), and how to reproduce it. A first answer comes within a week. A
 fix is released as a patch version, and the advisory names you unless you ask otherwise.
 
-Only the latest minor release gets security fixes.
+## Supported versions
+
+| Version | Security fixes and serious bug fixes |
+|---|---|
+| The newest minor release | Yes |
+| 1.4.x (long-term support) | Yes, until 2027-06-30 |
+| Anything older | No: upgrade |
+
+1.4 is a long-term support line of the community edition: until 2027-06-30 it gets security fixes
+and fixes for serious bugs as 1.4.x patch releases, also after 1.5 and later are out. Other changes
+go only into the newest minor release. Longer support is the enterprise edition's extended support
+(see the [roadmap](ROADMAP.md#support)).
 
 ## What Forgeyard assumes
 

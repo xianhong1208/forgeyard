@@ -226,7 +226,7 @@ models:
     format: safetensors
     recipe: vllm
     download_gib: 12.8
-    memory_gib: 16.7
+    memory_gib: 16.3
     note: OpenAI's open-weight reasoning model (Apache 2.0); mixture of experts, quick for its size.
   - name: gemma-4-e2b-it
     title: Gemma 4 E2B
@@ -238,7 +238,7 @@ models:
     format: safetensors
     recipe: vllm
     download_gib: 9.6
-    memory_gib: 14.5
+    memory_gib: 13.8
     note: Google's smallest Gemma 4 (about 2B effective parameters; the download includes its vision and audio parts). No token needed.
   - name: gemma-4-e4b-it
     title: Gemma 4 E4B
@@ -250,7 +250,7 @@ models:
     format: safetensors
     recipe: vllm
     download_gib: 14.9
-    memory_gib: 21.4
+    memory_gib: 20.0
     note: Small Gemma 4 (about 4B effective parameters; reads images and audio too) for a 24 GB card. No token needed.
   - name: gemma-4-12b-it
     title: Gemma 4 12B
@@ -262,7 +262,7 @@ models:
     format: safetensors
     recipe: vllm
     download_gib: 22.3
-    memory_gib: 38.2
+    memory_gib: 34.0
     note: Mid-size Gemma 4 for a 40 GB or larger card. No token needed.
   - name: gemma-4-26b-a4b-it
     title: Gemma 4 26B-A4B
@@ -274,7 +274,7 @@ models:
     format: safetensors
     recipe: vllm
     download_gib: 48.1
-    memory_gib: 59.5
+    memory_gib: 57.2
     note: Mixture of experts (4B active), fast for its size; an 80 GB card. No token needed.
   - name: gemma-4-31b-it
     title: Gemma 4 31B
@@ -286,7 +286,7 @@ models:
     format: safetensors
     recipe: vllm
     download_gib: 58.3
-    memory_gib: 92.1
+    memory_gib: 83.1
     note: The largest Gemma 4. With the defaults it needs two 80 GB GPUs (set GPUs to 2 when deploying), or a shorter context.
   - name: gemma-3-4b-it
     title: Gemma 3 4B
@@ -299,7 +299,7 @@ models:
     recipe: vllm
     gated: true
     download_gib: 8.0
-    memory_gib: 14.7
+    memory_gib: 13.3
     note: Google's small Gemma 3. Accept the Gemma licence on Hugging Face first.
   - name: gemma-3-12b-it
     title: Gemma 3 12B
@@ -312,7 +312,7 @@ models:
     recipe: vllm
     gated: true
     download_gib: 22.7
-    memory_gib: 37.1
+    memory_gib: 33.4
     note: Mid-size Gemma 3 for a 40 GB or larger card. Accept the Gemma licence on Hugging Face first.
   - name: gemma-3-27b-it
     title: Gemma 3 27B
@@ -325,7 +325,7 @@ models:
     recipe: vllm
     gated: true
     download_gib: 51.1
-    memory_gib: 69.0
+    memory_gib: 64.1
     note: The largest Gemma 3, for an 80 GB card. Accept the Gemma licence on Hugging Face first.
   - name: llama-3.2-3b-instruct
     title: Llama 3.2 3B Instruct

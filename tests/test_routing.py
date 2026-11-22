@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from forgeyard.config import get_settings
-from forgeyard.gateway import proxy
+from forgeyard.gateway import cloud, proxy
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.usage import recorder
 from tests.cloud_helpers import (CLOUD_KEY, FakeCloud, add_provider, cloud_key, deployment_id, model_id, route_id,
@@ -87,11 +87,17 @@ def test_fy_rt_001_requests_stay_local_while_local_has_room(mixed):
 def test_fy_rt_002_busy_spills_the_second_request(mixed):
     """FY-RT-002: concurrency 1 and one request in flight: the second goes to the cloud tier at once
     (wait_ms 0), named in X-Forgeyard-Target, with X-Forgeyard-Spilled: busy."""
-    mixed.engine.hold = 1.0
-    t, first = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    r = chat(mixed.api)
+    # The engine keeps the first request until the test lets it go, not for a fixed second: on a busy
+    # runner the second request took longer than that second to reach the slots and found it free (#212).
+    mixed.engine.gate = threading.Event()
+    try:
+        t, first = background(lambda: chat(mixed.api))
+        in_flight_soon()
+        r = chat(mixed.api)
+    finally:
+        mixed.engine.gate.set()
     t.join()
+    assert first["r"].status_code == 200
     assert r.status_code == 200 and r.json()["choices"][0]["message"]["content"] == "hello from stub"
     assert r.headers["x-forgeyard-target"] == "provider:cloudy/gpt-mini" and r.headers["x-forgeyard-spilled"] == "busy"
     assert first["r"].headers["x-forgeyard-target"] == "local:chat#0"
@@ -193,7 +199,7 @@ class _Fixed:
 def test_fy_rt_008_the_cloud_tier_moves_on_and_cools_a_target_down(mixed, monkeypatch):
     """FY-RT-008: within the cloud tier a 429 (long Retry-After), a 5xx or a refused connection moves
     to the next target; the failed one is tried last for the cooldown."""
-    monkeypatch.setattr(proxy, "rng", _Fixed())
+    monkeypatch.setattr(cloud, "rng", _Fixed())
     other = FakeCloud("second")
     try:
         p2 = add_provider(mixed.owner, other, name="second")

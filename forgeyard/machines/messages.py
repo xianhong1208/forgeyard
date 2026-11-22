@@ -3,14 +3,19 @@ model name must never keep a machine from connecting."""
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import logging
 import re
+from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from forgeyard.machines.protocol import DOWNLOAD_STATES, MAX_LOG_CHARS, REPLICA_STATES, RUNTIMES, VENDORS
 from forgeyard.models.cache_keys import parse
+
+log = logging.getLogger("forgeyard.machines")
 
 
 def _short(limit: int):
@@ -210,9 +215,43 @@ class CollectorStatus(_Msg):
     reason: Annotated[Optional[str], _short(400)] = None
 
 
+# 1.4.5 (#170): the note a machine page shows (under "Detection notes") for cards of a vendor this server does not
+# know, which a newer agent may report. The cards are left out; the rest of the hello is kept.
+UNKNOWN_VENDOR = "unknown vendor"
+
+
 class InventoryIn(_Msg):
     accelerators: list[AcceleratorIn] = Field(default_factory=list, max_length=256)
     collectors: dict[Annotated[str, _short(32)], CollectorStatus] = Field(default_factory=dict, max_length=16)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _leave_out_unknown_vendors(cls, value: Any) -> Any:
+        """A newer agent may report a kind of card this server does not know (a `vendor` outside VENDORS). That
+        card is left out with a warning and a detection note, instead of refusing the whole hello: refused, the
+        agent would reconnect and be refused again forever (#170)."""
+        if not isinstance(value, dict) or not isinstance(value.get("accelerators"), list):
+            return value
+        kept, unknown = [], []
+        for card in value["accelerators"]:
+            vendor = card.get("vendor") if isinstance(card, dict) else None
+            if isinstance(vendor, str) and vendor not in VENDORS:
+                unknown.append(vendor.strip()[:32])
+            else:
+                kept.append(card)
+        if not unknown:
+            return value
+        names = ", ".join(sorted(set(unknown)))
+        log.warning("An agent reported %d card(s) of a vendor this server does not know (%s); left out. "
+                    "A newer agent? Update the server to use them.", len(unknown), names)
+        collectors = value.get("collectors") if isinstance(value.get("collectors"), dict) else {}
+        if len(collectors) < 16:
+            n = len(unknown)
+            collectors = {**collectors, UNKNOWN_VENDOR: {
+                "ok": False, "count": n, "source": "server",
+                "reason": f"{n} {'card' if n == 1 else 'cards'} of a vendor this server does not know ({names}) "
+                          f"left out; update the server to use {'it' if n == 1 else 'them'}"}}
+        return {**value, "accelerators": kept, "collectors": collectors}
 
 
 def _port_range(value: Any) -> Optional[dict]:
@@ -225,9 +264,33 @@ def _port_range(value: Any) -> Optional[dict]:
     return {"low": low, "high": high}
 
 
+def _ip(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        ip = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return str(ip)
+
+
+def _connection(value: Any) -> Optional[dict]:
+    """(1.4.5, #171) {"address", "port"}: the agent's own end of this connection."""
+    if not isinstance(value, dict):
+        return None
+    address, port = _ip(value.get("address")), value.get("port")
+    if address is None or type(port) is not int or not 1 <= port <= 65535:
+        return None
+    return {"address": address, "port": port}
+
+
 def _runtime_info(value: Any) -> dict:
     """{"process": {...}, "container": {...}}: small dicts of what each runtime can do; (1.4.2) "ports": the
-    agent's host port range (servers before 1.4.2 drop it, so it never reaches them)."""
+    agent's host port range (servers before 1.4.2 drop it, so it never reaches them); (1.4.5, #171) "address":
+    the address replicas are published on, which the gateway dials, and "connection": the agent's own end of the
+    connection, which the server compares with the peer it sees and does not keep."""
     if not isinstance(value, dict):
         return {}
     out = {}
@@ -238,7 +301,82 @@ def _runtime_info(value: Any) -> dict:
     ports = _port_range(value.get("ports"))
     if ports is not None:
         out["ports"] = ports
+    address = value.get("address")
+    if isinstance(address, str) and address.strip():
+        out["address"] = address.strip()[:64]
+    connection = _connection(value.get("connection"))
+    if connection is not None:
+        out["connection"] = connection
+    tls = _tls(value.get("tls"))
+    if tls is not None:
+        out["tls"] = tls
+    gpu = parse_gpu_check(value.get("gpu_check"))
+    if gpu is not None:
+        out["gpu_check"] = gpu
     return out
+
+
+# 1.4.5 (#202): what the agent's GPU access check found (agent/gpu_check.py). Only these fields, cut to size.
+GPU_CHECK_DEVICES = 64
+_DEVICE_PATH = re.compile(r"^/[A-Za-z0-9._/-]{1,255}$")
+
+
+def parse_gpu_check(value: Any) -> Optional[dict]:
+    """{ok, at, user, devices: [{path, vendor, ok, error}], reason}, or None (absent, `ok` null, or not of that shape)."""
+    if not isinstance(value, dict) or not isinstance(value.get("ok"), bool):
+        return None
+    devices = []
+    for d in value.get("devices") if isinstance(value.get("devices"), list) else []:
+        if not isinstance(d, dict) or not isinstance(d.get("ok"), bool):
+            continue
+        path, vendor = d.get("path"), d.get("vendor")
+        if not (isinstance(path, str) and _DEVICE_PATH.match(path) and vendor in ("nvidia", "amd")):
+            continue
+        item = {"path": path, "vendor": vendor, "ok": d["ok"]}
+        if not d["ok"] and isinstance(d.get("error"), str):
+            item["error"] = _plain(d["error"], 160)
+        devices.append(item)
+        if len(devices) >= GPU_CHECK_DEVICES:
+            break
+    out: dict = {"ok": value["ok"] and all(d["ok"] for d in devices), "devices": devices}
+    for key, limit in (("at", 40), ("user", 64), ("reason", 300)):
+        if isinstance(value.get(key), str) and value[key].strip():
+            out[key] = _plain(value[key], limit)
+    if not out["ok"] and "reason" not in out:
+        out["reason"] = "a new process could not open the GPUs"
+    return out
+
+
+def _plain(text: str, limit: int) -> str:
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", text).strip()[:limit]
+
+
+def _tls(value: Any) -> Optional[dict]:
+    """(1.4.5, #163) {serial, not_after, name, ca}: the certificate the agent's key guards serve (what the machine's
+    page shows; the gateway checks the certificate itself on every connection)."""
+    if not isinstance(value, dict):
+        return None
+    serial, name, ca, not_after = value.get("serial"), value.get("name"), value.get("ca"), value.get("not_after")
+    if not (isinstance(serial, str) and re.fullmatch(r"[0-9a-f]{1,64}", serial)):
+        return None
+    if not (isinstance(name, str) and len(name) <= 128 and isinstance(ca, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", ca)):
+        return None
+    if not isinstance(not_after, str) or len(not_after) > 40:
+        return None
+    try:
+        datetime.fromisoformat(not_after)
+    except ValueError:
+        return None
+    return {"serial": serial, "not_after": not_after, "name": name, "ca": ca}
+
+
+def same_end(connection: Optional[dict], peer: Optional[tuple]) -> bool:
+    """(1.4.5, #171) Whether the agent's own end of the connection is the peer the server sees: then nothing sits
+    between them (no tunnel, no proxy), so the agent runs on the server's own host and network, and a loopback
+    address it publishes replicas on is the server's loopback too."""
+    if not connection or not peer or len(peer) < 2:
+        return False
+    return connection.get("address") == _ip(peer[0]) and connection.get("port") == peer[1]
 
 
 # 1.4.2 (#121): how the agent runs (agent/how_it_runs.py). Kept as the agent sent it, within a size limit; the
@@ -276,6 +414,23 @@ class HelloIn(_Msg):
     model_cache: Annotated[Optional[dict], BeforeValidator(_model_cache)] = None
     # Added in 1.4.2: how the agent runs, for its update command (older agents do not send it).
     install: Annotated[Optional[dict], BeforeValidator(_install)] = None
+
+
+class GpuCheckIn(_Msg):
+    """1.4.5 ("gpu_check", #202): the agent's GPU access check changed. `gpu_check` None: nothing to check any more."""
+
+    v: int
+    type: Literal["gpu_check"]
+    gpu_check: Annotated[Optional[dict], BeforeValidator(parse_gpu_check)] = None
+
+
+class CertRequestIn(_Msg):
+    """1.4.5 ("guard_tls"): a CSR for the key the agent's replica guards serve TLS with."""
+
+    v: int
+    type: Literal["cert_request"]
+    request_id: Annotated[str, _short(64)]
+    csr: Annotated[str, _short(8192)]
 
 
 class MetricIn(_Msg):

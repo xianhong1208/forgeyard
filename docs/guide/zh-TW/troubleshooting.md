@@ -44,6 +44,8 @@ sudo forgeyard agent config
 
 兩個使用相同憑據的 agent（例如複製了狀態目錄）會互相把對方擠掉：伺服器只保留最新的連線，並以 *another agent connected with this credential* 關閉較舊的那條。
 
+這段期間它的副本不會收到請求；10 分鐘之後，沒有固定機器的部署，副本會搬到其他放得下的機器（[機器一直離線時](how-to.md#when-a-machine-stays-offline)）。
+
 ## 安裝程式拒絕指紋
 
 **你會看到：** `forgeyard-ca.der: FAILED` 和 `sha256sum: WARNING: 1 computed checksum did NOT match`，或安裝程式顯示 `Refused: the CA … sent has fingerprint sha256:…, not sha256:…`。
@@ -235,6 +237,67 @@ agent 給不出連接埠的副本（在伺服器開始計算連接埠之前就�
 sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 ```
 
+## 機器把副本公開在 loopback 位址上
+
+**你會看到：** **Get started → Setup health** 和機器的頁面出現 *gpu-02 publishes its replicas on 127.0.0.1*，部署在那台機器上的模型可能回應 502 或意料之外的內容。
+
+**原因：** agent 把副本公開在它朝向伺服器的位址上：也就是它連線的本機端，除非 `FORGEYARD_BIND_ADDRESS` 指定了別的位址。透過 SSH tunnel 或自己主機上的 proxy 連到伺服器的 agent，連的是 `127.0.0.1`，所以它回報的就是這個位址，閘道就會在**伺服器**的主機上連 `127.0.0.1`：連到的是伺服器自己的連接埠，而不是那台機器的。1.4.5 起 agent 也會告訴伺服器它那一端的連線；如果那一端就是伺服器看到的對方，代表中間沒有任何東西，agent 在伺服器自己的主機上，loopback 就是對的。只有其他機器會被檢查，而且只檢查 1.4.5 的 agent。如果範圍最多 64 個連接埠、而且每個連接埠都已轉送到伺服器的主機（伺服器的 loopback 上每個連接埠都有東西在聽），就像指南中的 [SSH tunnel](how-to.md#run-a-machine-without-internet-access)，就不會出現這個警告。
+
+**做法：** 以下擇一。
+
+- 也把機器的連接埠範圍透過 tunnel 轉送回來：選一個小範圍（`FORGEYARD_PORT_RANGE=33000-33002`），並在承載 agent 連線的 `ssh` 指令中，每個連接埠加一個 `-L`（[做法](how-to.md#run-a-machine-without-internet-access)）。
+- 或用 `FORGEYARD_BIND_ADDRESS`（`--bind-address`）給 agent 一個伺服器連得到的位址（它的 LAN 或 VPN 位址），並在那裡開放連接埠範圍。
+
+然後重新啟動 agent。如果伺服器其實能以 Forgeyard 看不到的方式連到那個位址（例如伺服器主機上的 proxy），就對這個警告按 **Snooze 30 days**。
+
+## 機器上的新程序打不開它的 GPU
+
+**你會看到：** **Get started → Setup health** 和機器的頁面出現錯誤 *New processes on gpu-01 cannot open its GPUs
+(/dev/nvidia0: Operation not permitted)*。那台機器上的程序引擎或應用程式一啟動就失敗，出現
+`cuInit: CUDA_ERROR_NO_DEVICE` 或 `Failed to initialize NVML: Unknown Error`，但同一台機器上容器裡的模型照常回應，機器的頁面也仍列出每張 GPU。需要在那些 GPU 上執行程序的部署會等待，原因是 *new processes there cannot open its NVIDIA GPUs*。
+
+**原因：** agent 每 5 分鐘（以及啟動時）檢查一次：以它的工作負載帳號執行的新程序，能不能打開 GPU 的裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm` 和每個 `/dev/nvidiaN`；AMD 是 `/dev/kfd` 和 render 節點）。用 `docker run --gpus all` 時，NVIDIA runtime hook 是在 Docker 和 systemd 不知道的情況下，把 GPU 裝置交給 agent 的容器。主機執行 `systemctl daemon-reload` 時（安裝套件、自動更新、任何 unit 變更：在共用主機上很常發生），systemd 會依它知道的內容重新套用容器的 cgroup，那份裝置存取權就沒了。已經打開的照常運作（agent 讀 GPU 的數值、原本在跑的引擎）；那個容器裡每一次新的開啟都會被拒絕。新的容器會重新拿到存取權，所以容器裡的模型不受影響。AMD 的 agent 也不受影響：它的指令以 `--device` 傳入 `/dev/kfd` 和 `/dev/dri`。檢查失敗期間，Forgeyard 不會把程序類工作負載放到那些 GPU 上。
+
+**做法：**
+
+1. 重新啟動 agent 容器：`sudo docker restart forgeyard-agent`。它會拿回裝置，錯誤會在下一次檢查時消失（連上伺服器時會再檢查一次）。容器裡的模型會繼續執行。
+2. 用機器頁面上 **Update the agent** 的指令更新它（錯誤上的 **Update command** 會開啟它）。從 1.4.5 起，這個指令會在 `--gpus all` 旁邊，再以 `--device` 傳入 NVIDIA 的裝置節點；Docker 會記下它們，所以 reload 不會再把它們拿走：
+
+   ```bash
+     --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     …
+   ```
+
+   1.4.5 以前的 agent 不會回報它的裝置節點；它的指令改用一小段 shell 迴圈列出主機的裝置節點（`$(for d in /dev/nvidiactl … /dev/nvidia[0-9]*; do … done)`），主機沒有的節點會跳過。如果主機上沒有 `/dev/nvidia-uvm`，先執行 `sudo nvidia-modprobe -u -c=0`。
+
+如果加了裝置參數還是發生：某些 `runc` 版本搭配 systemd 的 cgroup driver，在主機沒有 NVIDIA 裝置的 `/dev/char` 連結時，仍會丟掉這些規則。用 NVIDIA Container Toolkit 建立它們（`sudo nvidia-ctk system create-dev-char-symlinks --create-all`；NVIDIA 在 nvidia-container-toolkit 的 discussion #1133 有一條 udev 規則，讓它們在重開機後仍在），或改用 CDI 啟動 agent，取代 `--gpus all`（`--device nvidia.com/gpu=all`，先執行 `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）。把 Docker 的 cgroup driver 改成 cgroupfs 也能避免，但會重新啟動主機上的每個容器：共用主機上不要這樣做。
+
+不在容器裡（install.sh 或 checkout）時，同樣的錯誤代表工作負載帳號本身不能打開這些裝置：檢查它們的權限和那個帳號的群組（`video`、`render`），然後重新啟動 agent。
+
+## 送往機器的流量沒有加密
+
+**你會看到：** **Get started → Setup health** 和機器的頁面出現 *Traffic to gpu-02 is not encrypted: update the agent*。
+
+**原因：** 從 1.4.5 起，閘道以 TLS 連每個副本，但 gpu-02 的 agent 比較舊，只能以純 HTTP 提供副本。所以副本的內部金鑰、提示詞和回答，在伺服器和 gpu-02 之間都以明文經過網路。它會繼續服務：在你更新之前，什麼都不會停。
+
+**做法：** 更新 agent（警告上的 **Update command** 會開啟那台機器的指令；[更新 agent](how-to.md#update-an-agent)）。新的 agent 連上後一秒內就會拿到憑證，警告就會消失。部署在那裡的模型在更新期間會繼續執行（agent 會接手它們）。
+
+## 機器沒有副本的憑證
+
+**你會看到：** **Get started → Setup health** 出現錯誤：*gpu-02 has no certificate for its replicas*、*gpu-02's replica certificate has expired* 或 *… is not being renewed*；只部署在那台機器上的模型回應 503，其他模型則由其他機器上的副本回應。
+
+**原因：** 1.4.5 的 agent 只以 TLS 提供副本，用的是伺服器替那台機器簽發的憑證。它在連線時申請，並在到期前 10 天更新（有效 30 天）。對這樣的機器，閘道絕不會退回純 HTTP，所以沒有有效憑證時就連不到它的副本。如果伺服器拒絕了申請，錯誤會寫出原因（伺服器紀錄裡也有）。常見原因：
+
+- agent 已經很久沒有連線（離線的機器無法更新憑證）；
+- 伺服器無法讀取或建立 `data/tls` 裡的 CA（有 `ca.crt` 卻沒有 `ca.key`，或資料目錄是唯讀的）：伺服器紀錄會寫 *no certificate can be made*；
+- agent 的狀態目錄無法寫入，或 agent 無法產生金鑰：它的紀錄會寫 *cannot be used*。
+
+**做法：** 查看 agent 的紀錄（`journalctl -u forgeyard-agent` 或 `docker logs forgeyard-agent`）和伺服器的紀錄。修正它們指出的問題，然後重新啟動 agent：它會立刻重新申請。如果 `data/tls` 遺失了 `ca.key`，請從備份還原（[備份與還原](how-to.md#back-up-and-restore)）；新的 CA 對副本也行得通（每個 agent 會自己拿到新憑證），但先前為了伺服器信任舊 CA 的瀏覽器和 agent，必須改為信任新的。
+
 ## 來自 /v1 的錯誤：401、403、429、503
 
 閘道以 OpenAI 的格式回應錯誤：`{"error": {"message", "type", "param", "code"}}`。`code` 會說明發生了什麼事。
@@ -273,7 +336,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 `no_ready_replica`：模型存在，但它沒有任何一個副本處於就緒狀態：還在下載或啟動、已停止，或所在的機器離線。錯誤訊息會列出每個副本的狀態。請查看這個部署的頁面；另見[模型有列出，卻回應 503](#a-model-is-listed-but-answers-503)。
 
-其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒）。每個錯誤碼都列在[參考資料](reference.md#errors)。
+其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504 upstream_timeout`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒），以及只限串流請求的 `504 first_answer_timeout`（串流沒有在部署的 *Wait for the first answer* 內開始，預設 120 秒：在 **Advanced** 調高它）。每個錯誤碼都列在[參考資料](reference.md#errors)。
 
 ### 來自雲端供應商的錯誤
 

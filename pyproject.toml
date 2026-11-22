@@ -1,6 +1,6 @@
 [project]
 name = "forgeyard"
-version = "1.4.4"
+version = "1.4.5"
 description = "Forgeyard: one control plane for the GPUs (and CPUs) you own: run any workload, deploy models, serve them behind one API."
 readme = "README.md"
 license = "Apache-2.0"
@@ -25,6 +25,8 @@ dependencies = [
     "cryptography>=46",
     # The user guide at /guide: its Markdown rendered on the server (no raw HTML, works offline).
     "markdown-it-py>=4",
+    # GET /metrics in the Prometheus text format (1.4.5, #165). Apache-2.0, no dependencies of its own.
+    "prometheus-client>=0.21",
 ]
 
 [project.optional-dependencies]

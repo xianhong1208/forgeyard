@@ -36,10 +36,13 @@ class FakeEngine:
         # Set to a threading.Event: a non-streamed answer waits until the test sets it (at most 30 s),
         # so a test can hold a replica busy for exactly as long as it needs, not a guessed time.
         self.gate: Optional[threading.Event] = None
+        self.held: list[dict] = []  # the body of each non-streamed request held at its gate, once it waits there
         self.usage = usage or USAGE
         self.status: Optional[int] = None   # answer every request with this status instead
         self.retry_after: Optional[str] = None  # sent with `status`
         self.cut_after: Optional[int] = None  # a stream breaks off after this many chunks (1.2)
+        self.first_delay = 0.0      # a stream's headers go out at once, its first chunk after this (1.4.5)
+        self.gate_streams = False   # `gate` holds streams too, before their headers (1.4.5)
         self.seen: list[dict] = []
         self.refused = 0
         self.disconnects = 0
@@ -68,7 +71,7 @@ class FakeEngine:
             def do_POST(self):
                 raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 auth = self.headers.get("Authorization")
-                entry = {"path": self.path, "auth": auth, "headers": dict(self.headers), "raw": raw}
+                entry = {"path": self.path, "auth": auth, "headers": dict(self.headers), "raw": raw, "at": time.monotonic()}
                 try:
                     entry["body"] = json.loads(raw)
                 except ValueError:
@@ -83,9 +86,13 @@ class FakeEngine:
                                       {"Retry-After": engine.retry_after} if engine.retry_after else None)
                 body = entry["body"] or {}
                 if self.path == "/v1/chat/completions" and body.get("stream"):
+                    if engine.gate is not None and engine.gate_streams:
+                        engine.gate.wait(30)   # not even the headers until the test opens it (1.4.5)
                     return self._stream(body)
-                if engine.gate is not None:
-                    engine.gate.wait(30)
+                gate = engine.gate      # read once: a test may give later requests another gate
+                if gate is not None:
+                    engine.held.append(body)
+                    gate.wait(30)
                 if engine.hold:
                     time.sleep(engine.hold)
                 if self.path in ("/v1/chat/completions", "/v1/completions"):
@@ -126,6 +133,9 @@ class FakeEngine:
                 self.end_headers()
                 usage_asked = (body.get("stream_options") or {}).get("include_usage") is True
                 try:
+                    if engine.first_delay:
+                        self.wfile.flush()
+                        time.sleep(engine.first_delay)
                     for i in range(engine.chunks):
                         if engine.cut_after is not None and i == engine.cut_after:
                             self.wfile.flush()

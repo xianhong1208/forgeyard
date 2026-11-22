@@ -29,11 +29,18 @@ class Target:
 
     uid: str
     ordinal: int
-    url: str                         # http://address:port
+    url: str                         # http://address:port, or (1.4.5) https://address:port
     machine: Optional[str]
     secret: Optional[str]            # its internal key (never logged or returned)
     protected: bool                  # its agent gave the engine that key
     ready_since: float = 0.0         # when it last became ready (epoch seconds)
+    # 1.4.5 (#163): the machine's binding name its guard's certificate must carry (https:// only; None: plain HTTP).
+    tls_name: Optional[str] = None
+
+    @property
+    def ext(self) -> dict:
+        """The request extensions that make the gateway check this replica's machine (security/replica_tls.py)."""
+        return {"sni_hostname": self.tls_name} if self.tls_name else {}
 
 
 class Balancer:
@@ -46,6 +53,7 @@ class Balancer:
         self._turn: dict[str, int] = {}
         self._failed: dict[str, tuple[float, float]] = {}   # uid -> (penalty until, wall time of the failure)
         self._cool: dict[str, float] = {}                    # provider target -> cooled down until
+        self._listeners: list[Callable[[str], None]] = []    # told when a slot is released (1.4.5)
 
     def reset(self) -> None:
         with self._lock:
@@ -89,6 +97,12 @@ class Balancer:
             self.served[uid] = self.served.get(uid, 0) + 1
             return True
 
+    def listen(self, fn: Callable[[str], None]) -> None:
+        """Call fn(uid) whenever a slot is released (the gateway's waiting line, forgeyard/gateway/waiting.py)."""
+        with self._lock:
+            if fn not in self._listeners:
+                self._listeners.append(fn)
+
     def release(self, uid: str) -> None:
         with self._lock:
             left = self.inflight.get(uid, 0) - 1
@@ -96,11 +110,17 @@ class Balancer:
                 self.inflight[uid] = left
             else:
                 self.inflight.pop(uid, None)
+            listeners = list(self._listeners)
+        for fn in listeners:
+            fn(uid)
 
-    def failed(self, uid: str) -> None:
+    def failed(self, uid: str, reached: bool = False) -> None:
+        """Try the replica last for a while. `reached`: it got the request (and then broke off or went
+        silent), so it still counts as served."""
         with self._lock:
             self._failed[uid] = (self._clock() + PENALTY, self._wall())
-            self.served[uid] = max(0, self.served.get(uid, 0) - 1)  # it never got the request
+            if not reached:
+                self.served[uid] = max(0, self.served.get(uid, 0) - 1)  # it never got the request
 
     def cool_down(self, key: str, seconds: float) -> None:
         with self._lock:

@@ -31,6 +31,11 @@ Schema changes go through Alembic (`forgeyard/migrations`); startup runs `upgrad
 test fails when the models and migrations drift apart. Test IDs (`FY-…`) are unique across the
 project.
 
+After `uv lock` (or a Dependabot update of `uv.lock`), run `uv run --no-sync python -m
+forgeyard.install.requirements`: it rewrites the lists of the agent's dependencies, with their hashes, that
+install.sh installs from (`forgeyard/install/agent-requirements*.txt`), and FY-INST-020 fails while they
+differ from the lock.
+
 ## Pinned engine images
 
 Every container variant of a built-in recipe names its image as `repo:tag@sha256:<index digest>`, and
@@ -71,7 +76,15 @@ fixed time for something to happen, or read a page before the data it needed had
   and, in async tests, `await until(...)`: they return as soon as the state is reached and fail naming
   `what` after the deadline, so the deadline can be generous. To have one request in flight before the
   next, start it in a thread and wait until the fake engine or app has received it (FY-IGEN-007,
-  FY-X-014, FY-PGV-008), not `time.sleep(0.2)`.
+  FY-X-014, FY-PGV-008), not `time.sleep(0.2)`. Then have the fake keep it until the test lets it go
+  (a `threading.Event`), not for a fixed time: on a busy runner the next request can take longer than
+  that time to arrive, and finds the first one already done (FY-PGV-008 held it 1 s, #204; FY-RT-002 and
+  FY-X-014 too, #212).
+- **Do not time two things the code does at once.** Two requests the gateway sends together can reach
+  the fake in either order, and "within 0.5 s" fails on a slow runner. Hold them and check the state
+  instead: FY-FW-008 proves the second request got a slot while the first was in flight because both
+  are held at the fake engine at the same moment (`FakeEngine.held`), with the line's safety-net
+  recheck made longer than the test so only a real wake-up passes (#212).
 - **Set up the state before the step that could race past it.** A fake job that must still be at work:
   make the fake engines hang before asking for it, not after (FY-VID-005).
 - **Fixtures must look current.** The app's liveness sweep runs every 2 s during the tests, so
@@ -107,7 +120,10 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/api/routing.py` | routes and their tiers of targets |
 | `forgeyard/api/prices.py` | the price refresh from OpenRouter: preview and apply |
 | `forgeyard/api/budgets.py` | monthly budgets of people and providers, and this month's spend |
-| `forgeyard/gateway/proxy.py` | forwarding a request through a route's tiers: replicas, providers, spill, streaming |
+| `forgeyard/gateway/proxy.py` | forwarding a request through a route's tiers (`Job`, `forward`, `record`); the names of its parts below are importable from it too |
+| `forgeyard/gateway/route.py`, `body.py`, `fit.py` | a route and its targets, who may call it and the tiers a request may use; the request body read and parsed; the targets that can take it (media, size, speech, images) |
+| `forgeyard/gateway/upstream.py`, `replicas.py`, `cloud.py` | the HTTP client to the replicas, what may be retried, client disconnects; a tier's replicas (concurrency, the line, the first answer); its providers (order, budgets, quirks) |
+| `forgeyard/gateway/streaming.py`, `answer.py` | streamed answers (SSE, audio); the answer passed on and its usage counted |
 | `forgeyard/gateway/keys.py`, `limits.py`, `balancer.py` | API key checks and cloud settings; requests and tokens per minute; replica order and provider cooldowns |
 | `forgeyard/gateway/quirks.py` | what differs per provider kind: how the key is sent, parameters dropped or renamed, how usage is read back |
 | `forgeyard/gateway/where.py` | whether a new provider is outside your network, from its kind and its address |
@@ -129,6 +145,8 @@ fixed time for something to happen, or read a page before the data it needed had
 | `forgeyard/agent/config.py`, `setup.py` | the agent's settings (`agent.toml`, `FORGEYARD_*`, flags) and `agent init` |
 | `forgeyard/agent/models.py` | the agent's model cache: downloads, verification, engines |
 | `forgeyard/agent/workloads/` | the agent's reconciler, process and container runtimes, the replicas' key guard, logs, health checks, downloads ahead of a deployment (`prefetch.py`) |
+| `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | the reconciler: its loop, the desired list and the reports; its state in memory; the `Runtime` protocol every runtime implements (and `ContainerEngine`) |
+| `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | the reconciler's parts: a replica's start, end, stop and removal; model, engine and image before a start; health checks; the key guards; an admin's cache and image requests |
 | `forgeyard/install/` | the agent's wheel built from the running code, `install.sh`, the commands on the Machines page, an agent's update command and whether it is behind (`update.py`), the published images' names (`images.py`), the server image's health check |
 | `forgeyard/guide.py`, `docs/guide/` | the user guide (en, zh-TW), served at `/guide` |
 | `docs/design.md`, `docs/https-and-trust.md` | how each part works; HTTPS, trust and secrets |

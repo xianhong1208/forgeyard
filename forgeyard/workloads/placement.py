@@ -29,6 +29,15 @@ one without memory ("no free port: 3 of 3 in use"). A machine whose agent does n
 than 1.4.2) is not counted, as before. Ports something outside Forgeyard holds are not known here: the agent
 skips them when it picks one, and says so if none is left.
 
+1.4.5 (#166): memory is never promised twice.
+- A model replica on a GPU that also keeps part of itself in the machine's RAM (llama.cpp's layers left on the CPU:
+  its deployment's estimate says how much, `ram`) reserves that RAM too, like a CPU replica.
+- On an APU whose GPU memory is the machine's RAM (a unified-memory card that reports its GTT pool, `pool: gtt`:
+  the GPU takes it from system RAM, which the CPU row's numbers count as well), a reservation on the card is also
+  one on the RAM, and the other way round: what is not yet in the agent's numbers counts against both, and the card
+  never offers more than the RAM has free. A card that reports its BIOS carve-out (`pool: vram`) keeps memory the
+  operating system never sees (it is not in MemTotal), so the two stay apart.
+
 1.3.1: a replica that is restarted (started again, or restarted by an edit of its deployment) goes
 back to the machine it ran on when that machine still takes it, instead of the best fit elsewhere
 (`prefer`). And an edit restarts the replicas of a running workload one at a time (`roll`): the next
@@ -50,6 +59,7 @@ from datetime import timedelta
 
 from forgeyard.config import get_settings
 from forgeyard.db import Accelerator, Node, Replica, Workload, as_utc, utcnow
+from forgeyard.machines import gpu_access
 from forgeyard.machines.protocol import FEATURE_WORKLOADS
 from forgeyard.workloads import expose
 from forgeyard.workloads.spec import WorkloadSpec
@@ -62,6 +72,13 @@ VENDOR_LABEL = {"nvidia": "NVIDIA", "amd": "AMD"}
 
 def is_gpu(a: Accelerator) -> bool:
     return a.vendor != "cpu"
+
+
+def shares_ram(a: Accelerator) -> bool:
+    """Is this card's memory the machine's RAM (1.4.5, #166)? A unified-memory card (an APU) that reports its GTT
+    pool, or that does not say which pool it reports (an agent older than 1.1.1: assume the worst). A carve-out
+    (`pool: vram`) is set aside by the BIOS and is not in the RAM the CPU row reports."""
+    return bool(a.unified_memory) and a.vendor != "cpu" and (a.detail or {}).get("pool") != "vram"
 
 
 def is_allowed(node: Node, a: Accelerator) -> bool:
@@ -125,6 +142,22 @@ def _pending(r: Replica, reported_at) -> bool:
     return reported is None or reported < as_utc(r.ready_at) + SETTLE
 
 
+def host_ram(db: DbSession, replicas: list[Replica]) -> dict[int, int]:
+    """{workload id: bytes} of the RAM that GPU model replicas also keep (1.4.5, #166): their deployment's estimate
+    (`ram` of a GPU estimate: llama.cpp's layers left on the CPU)."""
+    from forgeyard.db import Deployment
+
+    ids = {r.workload_id for r in replicas if r.gpus and r.workload.runtime == "model"}
+    if not ids:
+        return {}
+    out = {}
+    for wid, est in db.execute(select(Deployment.workload_id, Deployment.estimate).where(Deployment.workload_id.in_(ids))):
+        est = est or {}
+        if est.get("device") == "gpu" and int(est.get("ram") or 0) > 0:
+            out[wid] = int(est["ram"])
+    return out
+
+
 def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Optional[Node] = None,
           release: Collection[int] = ()) -> Usage:
     """What the replicas on this machine hold. `release`: replicas about to restart (an edit of
@@ -133,13 +166,18 @@ def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Opti
     node = node or db.get(Node, node_id)
     seen = {a.key: a.updated_at for a in node.accelerators} if node is not None else {}
     cpu_key = next((a.key for a in node.accelerators if a.vendor == "cpu"), None) if node is not None else None
-    for r in holding(db, node_id):
+    rows = holding(db, node_id)
+    on_host = host_ram(db, rows)
+    for r in rows:
         if r.id == exclude:
             continue
+        host = on_host.get(r.workload_id, 0)
         if r.id in release:
             for key in [g["key"] for g in r.gpus or []] or ([cpu_key] if r.vram and cpu_key else []):
                 if r.vram and not _pending(r, seen.get(key)):
                     u.credit[key] = u.credit.get(key, 0) + r.vram
+            if host and cpu_key and not _pending(r, seen.get(cpu_key)):
+                u.credit[cpu_key] = u.credit.get(cpu_key, 0) + host
             continue
         spec = replica_spec(r)
         u.ports += ports_for(spec, guarded=bool(r.secret))
@@ -155,6 +193,8 @@ def usage(db: DbSession, node_id: int, exclude: Optional[int] = None, node: Opti
                 Hold(r.workload.name, share, vram, _pending(r, seen.get(g["key"]))))
         if not r.gpus and r.vram:
             u.ram.append(Hold(r.workload.name, "vram", r.vram, _pending(r, seen.get(cpu_key))))
+        elif r.gpus and host:
+            u.ram.append(Hold(r.workload.name, "vram", host, _pending(r, seen.get(cpu_key))))
     return u
 
 
@@ -221,22 +261,32 @@ def headroom() -> int:
     return max(0, get_settings().vram_headroom_mib) * 1024**2
 
 
-def available(a: Accelerator, holds: list[Hold], credit: int = 0) -> int:
+def pending_bytes(holds: list[Hold]) -> int:
+    return sum(h.vram or 0 for h in holds if h.pending)
+
+
+def available(a: Accelerator, holds: list[Hold], credit: int = 0, *, also: int = 0, cap: Optional[int] = None) -> int:
     """Memory Forgeyard may still promise on this card (or the RAM of the CPU row): what the agent
     reported free, minus reservations not yet in that number, minus the headroom (plus `credit`:
-    memory of replicas that are about to stop)."""
-    pending = sum(h.vram or 0 for h in holds if h.pending)
-    return int(a.vram_free or 0) + credit - pending - headroom()
+    memory of replicas that are about to stop). 1.4.5 (#166), for memory one pool shares with another (an APU's
+    card and the machine's RAM): `also`, what is reserved in the other pool and not yet in its numbers, and `cap`,
+    the other pool's own free memory, which this one can never exceed."""
+    free = int(a.vram_free or 0)
+    if cap is not None:
+        free = min(free, cap)
+    return free + credit - pending_bytes(holds) - also - headroom()
 
 
-def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[int], credit: int = 0) -> Optional[str]:
+def card_problem(a: Accelerator, holds: list[Hold], share: str, vram: Optional[int], credit: int = 0, *,
+                 also: int = 0, cap: Optional[int] = None) -> Optional[str]:
     """Why this card cannot take a replica wanting `vram` bytes with this sharing, or None."""
     if holds and (share == "exclusive" or any(h.share != "vram" for h in holds)):
         return f"GPU #{a.index} is in use by {holds[0].workload}"
     if vram:
-        free = available(a, holds, credit)
+        free = available(a, holds, credit, also=also, cap=cap)
         if free < vram:
-            return (f"GPU #{a.index} has {_size(max(0, free))} available, needs {_size(vram)} "
+            shared = " (the machine's RAM: an APU)" if cap is not None else ""
+            return (f"GPU #{a.index} has {_size(max(0, free))} available{shared}, needs {_size(vram)} "
                     f"({_size(vram - free)} short)")
     return None
 
@@ -261,10 +311,12 @@ def runtime_problem(node: Node, spec: WorkloadSpec, exposed: bool = False) -> Op
 
 
 def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
-                container_nvidia: bool = True, holds: Optional[dict[str, list[Hold]]] = None
+                container_nvidia: bool = True, holds: Optional[dict[str, list[Hold]]] = None,
+                skip_vendors: frozenset[str] = frozenset()
                 ) -> tuple[Optional[list[Accelerator]], Optional[str]]:
     """The cards for one replica, or the reason there are none. Only allowed, free cards (or, for
-    workloads sharing VRAM, cards shared only with such workloads and with enough memory left)."""
+    workloads sharing VRAM, cards shared only with such workloads and with enough memory left).
+    `skip_vendors` (1.4.5, #202): vendors whose cards a new process here cannot open; not chosen."""
     want = spec.resources.gpus
     if want.wanted == 0:
         return [], None
@@ -295,6 +347,7 @@ def choose_gpus(node: Node, spec: WorkloadSpec, taken: dict[str, str],
         free.sort(key=lambda a: available(a, holds.get(a.key, [])))
     if spec.runtime_type == "container" and not container_nvidia:
         free = [a for a in free if a.vendor != "nvidia"]
+    free = [a for a in free if a.vendor not in skip_vendors]
     by_vendor: dict[str, list[Accelerator]] = {}
     for a in (free if want.share == "vram" else sorted(free, key=lambda a: (a.vendor, a.index))):
         by_vendor.setdefault(a.vendor, []).append(a)
@@ -331,7 +384,15 @@ def fit(db: DbSession, node: Node, spec: WorkloadSpec, exclude: Optional[int] = 
     if problem:
         return None, problem
     container_nvidia = bool(((node.runtime_info or {}).get("container") or {}).get("nvidia"))
-    return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards)
+    skip: frozenset[str] = frozenset()
+    if spec.runtime_type == "process" and res.gpus.wanted:
+        # 1.4.5 (#202): new processes there cannot open these cards (the agent's GPU access check); containers can.
+        failing = gpu_access.failing_vendors(node)
+        gpu_vendors = {a.vendor for a in node.accelerators if is_gpu(a)}
+        if res.gpus.vendor in failing or (res.gpus.vendor is None and failing and gpu_vendors <= failing):
+            return None, gpu_access.process_problem(node, failing if res.gpus.vendor is None else {res.gpus.vendor})
+        skip = frozenset(failing)
+    return choose_gpus(node, spec, used.gpu_keys, container_nvidia, used.cards, skip)
 
 
 def gpu_ref(a: Accelerator, *, kfd: bool = True) -> dict:

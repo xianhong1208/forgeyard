@@ -16,12 +16,11 @@ from __future__ import annotations
 import base64
 import json
 import re
-import urllib.error
-import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -39,6 +38,7 @@ from forgeyard.models import catalog, modalities, routes, scheduler, textcls, vi
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
+from forgeyard.security import replica_tls
 from forgeyard.workloads import placement, state as wstate
 from forgeyard.workloads.spec import NAME_RE, WorkloadSpec, parse_bytes
 
@@ -73,9 +73,15 @@ def _model(db: DbSession, ref: str) -> CatalogModel:
     return m
 
 
+# 1.4.5: how long a replica has to start answering a request it was sent (the gateway's, not the engine's:
+# changing it restarts nothing). Unset: the gateway's default, 120 s (forgeyard/gateway/proxy.py).
+FIRST_ANSWER_MIN, FIRST_ANSWER_MAX = 5, 3600
+GATEWAY_PARAMS = ("first_answer_timeout",)
+
+
 def normalise_params(recipe: Recipe, raw: dict) -> dict:
     """The deployment's parameters, checked against the recipe: its own (context, concurrency…)
-    and the common ones (gpus, share, vram, extra_args). Unknown names are refused."""
+    and the common ones (gpus, share, vram, extra_args, first_answer_timeout). Unknown names are refused."""
     out: dict = {}
     has_gpu = any(v.gpu for v in recipe.variants)
     has_cpu = any(not v.gpu for v in recipe.variants)
@@ -112,7 +118,19 @@ def normalise_params(recipe: Recipe, raw: dict) -> dict:
         raise fail(422, "invalid_params", "extra_args: one line each, at most 1024 characters")
     if extra:
         out["extra_args"] = list(extra)
-    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args"})
+    wait = raw.get("first_answer_timeout")
+    if wait not in (None, ""):
+        if all(t in ("image", "video") for t in recipe.tasks):
+            raise fail(422, "invalid_params", "first_answer_timeout: image and video deployments use their own "
+                                              "timeout")
+        try:
+            wait = int(str(wait).strip())   # True, 1.5 and "soon" are not whole numbers of seconds
+        except ValueError:
+            raise fail(422, "invalid_params", "first_answer_timeout must be a whole number of seconds") from None
+        if not FIRST_ANSWER_MIN <= wait <= FIRST_ANSWER_MAX:
+            raise fail(422, "invalid_params", f"first_answer_timeout: {FIRST_ANSWER_MIN} to {FIRST_ANSWER_MAX} seconds")
+        out["first_answer_timeout"] = wait
+    unknown = sorted(set(raw) - set(out) - {"vram", "extra_args", "first_answer_timeout"})
     if unknown:
         raise fail(422, "invalid_params", f"{recipe.name} has no parameter {unknown[0]!r}")
     return out
@@ -251,12 +269,15 @@ def _endpoints(w: Workload) -> list[dict]:
 
     by_ordinal = {r.ordinal: r for r in w.replicas}
     out = []
-    for e in routes.endpoints(w):
+    for e in routes.endpoints(w, tls=True):
         r = by_ordinal.get(e["replica"])
         features = (r.node.features or []) if r and r.node else []
         protected = bool(r and r.secret and FEATURE_REPLICA_KEYS in features)
         guarded = protected and FEATURE_REPLICA_GUARD in features
-        out.append({**e, "protected": protected, "guarded": guarded, **(balancer.snapshot(r.uid) if r else {})})
+        # 1.4.5 (#163): whether the gateway reaches it over TLS (the binding name itself stays on the server).
+        shown = {k: v for k, v in e.items() if k != "tls_name"}
+        out.append({**shown, "protected": protected, "guarded": guarded, "encrypted": e.get("tls_name") is not None,
+                    **(balancer.snapshot(r.uid) if r else {})})
     return out
 
 
@@ -442,7 +463,7 @@ def start_deployment(dep_id: int, caller: Caller = Depends(require_operator), db
 
 
 # ------------------------------------------------------------------ change (1.3.1)
-COMMON_PARAMS = ("gpus", "share", "vram", "extra_args")
+COMMON_PARAMS = ("gpus", "share", "vram", "extra_args") + GATEWAY_PARAMS
 
 
 class DeploymentEdit(BaseModel):
@@ -504,8 +525,14 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     running = w.desired_state == "running"
     live = [r for r in w.replicas if not r.final]
     params_changed = ctx.params != (d.params or {})
+
+    def for_engine(p: dict) -> dict:
+        return {k: v for k, v in p.items() if k not in GATEWAY_PARAMS}
+
+    # Only the gateway reads first_answer_timeout: changing it alone restarts nothing (1.4.5).
+    engine_changed = for_engine(ctx.params) != for_engine(d.params or {})
     moved = machine_id is not None and any(r.node_id is not None and r.node_id != machine_id for r in live)
-    restart = running and (params_changed or moved)
+    restart = running and (engine_changed or moved)
     mode = _restart_mode(running, restart, replicas)
     changes: dict[str, dict] = {}
     for k in sorted(set(ctx.params) | set(d.params or {})):
@@ -527,7 +554,8 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     if not changes:
         return {**out, "deployment": deployment_out(db, d, caller)}
     nodes: set[int] = set()
-    if params_changed:
+    if params_changed or ctx.estimate.as_dict() != d.estimate:
+        # 1.4.5 (#166): the estimate from the recipe as it is now, even when no parameter changed (no restart for it).
         d.params = ctx.params
         d.estimate = ctx.estimate.as_dict()
     spec["replicas"], spec["machine_id"] = replicas, machine_id
@@ -592,21 +620,20 @@ class TryIn(BaseModel):
     stream: bool = False
 
 
-def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None) -> tuple[int, dict | str]:
+def _post(url: str, body: bytes, content_type: str, secret: Optional[str] = None,
+          tls_name: Optional[str] = None) -> tuple[int, dict | str]:
     speech = content_type == SPEECH_CTYPE
     plain = speech or content_type == IMAGE_CTYPE
-    headers = {"Content-Type": "application/json" if plain else content_type, "Accept": "*/*" if speech else "application/json"}
+    headers = {"Content-Type": "application/json" if plain else content_type, "Accept": "*/*" if speech else "application/json",
+               "Accept-Encoding": "identity", "User-Agent": "forgeyard-console"}
     if secret:
         headers["Authorization"] = f"Bearer {secret}"  # the replica's internal key (M4)
-    req = urllib.request.Request(url, data=body, method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=TRY_IMAGE_TIMEOUT if content_type == IMAGE_CTYPE else TRY_TIMEOUT) as resp:
-            raw = resp.read(2 * 1024**2)
-            status = resp.status
-    except urllib.error.HTTPError as e:
-        raw, status = e.read(64 * 1024), e.code
-    except (urllib.error.URLError, OSError) as e:
-        raise fail(502, "replica_unreachable", f"The replica did not answer: {getattr(e, 'reason', e)}") from None
+        # 1.4.5 (#163): the way the gateway reaches it: TLS with the machine's binding, or an older agent's plain HTTP.
+        status, raw = replica_tls.request_sync("POST", url, tls_name, headers=headers, content=body,
+                                               timeout=TRY_IMAGE_TIMEOUT if content_type == IMAGE_CTYPE else TRY_TIMEOUT)
+    except httpx.HTTPError as e:
+        raise fail(502, "replica_unreachable", f"The replica did not answer: {e or type(e).__name__}") from None
     if content_type == IMAGE_CTYPE and 200 <= status < 300:
         # Image generation (1.3): what came back, not the image itself.
         try:
@@ -697,17 +724,15 @@ def _try_videos(target: dict, replica) -> dict:
     import time
 
     url = target["url"].rstrip("/") + "/v1/videos"
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "Accept-Encoding": "identity", "User-Agent": "forgeyard-console"}
     if replica is not None and replica.secret:
         headers["Authorization"] = f"Bearer {replica.secret}"
     started = time.monotonic()
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TRY_TIMEOUT) as resp:
-            raw, status = resp.read(256 * 1024), resp.status
-    except urllib.error.HTTPError as e:
-        raw, status = e.read(64 * 1024), e.code
-    except (urllib.error.URLError, OSError) as e:
-        raise fail(502, "replica_unreachable", f"The replica did not answer: {getattr(e, 'reason', e)}") from None
+        status, raw = replica_tls.request_sync("GET", url, target.get("tls_name"), headers=headers, timeout=TRY_TIMEOUT,
+                                               limit=256 * 1024)
+    except httpx.HTTPError as e:
+        raise fail(502, "replica_unreachable", f"The replica did not answer: {e or type(e).__name__}") from None
     ms = int((time.monotonic() - started) * 1000)
     try:
         answer = json.loads(raw)
@@ -765,7 +790,7 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     route = routes.own_route(db, d.id)
     own = next((t for t in route.targets if t.kind == "local" and t.deployment_id == d.id), None) if route else None
     upstream = own.upstream_model if own and own.upstream_model else d.served_name
-    target = next(iter(routes.endpoints(d.workload, ready_only=True)), None)
+    target = next(iter(routes.endpoints(d.workload, ready_only=True, tls=True)), None)
     if route is None or target is None:
         raise fail(409, "not_ready", "No replica of this deployment is ready yet.")
     recipe = catalog.get_recipe(db, d.recipe)
@@ -778,7 +803,8 @@ def try_it(dep_id: int, body: TryIn, caller: Caller = Depends(current), db: DbSe
     zero_shot = d.model is not None and vision.is_zero_shot(d.model.meta or {})
     path, payload, ctype = try_request(route.api, upstream, body.input, voice, draws, zero_shot)
     started = time.monotonic()
-    status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None)
+    status, answer = _post(target["url"].rstrip("/") + path, payload, ctype, replica.secret if replica else None,
+                           target.get("tls_name"))
     ms = int((time.monotonic() - started) * 1000)
     request = json.loads(payload) if ctype in ("application/json", SPEECH_CTYPE, IMAGE_CTYPE) \
         else {"model": upstream, "file": CLIP.name}

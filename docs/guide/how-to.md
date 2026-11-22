@@ -40,7 +40,10 @@ What it shows for each card:
 - **ROCm version** (`rocm=` here, "ROCm" on the Machines page) where NVIDIA cards show their
   driver. The kernel driver's version is kept in the card's details.
 - **Memory:** for an APU, the larger of the VRAM carve-out (set in the BIOS) and GTT, which is
-  what `amd-smi monitor` shows too.
+  what `amd-smi monitor` shows too. GTT is the machine's own RAM, so when the card reports GTT,
+  Forgeyard counts the card and the RAM as one pool (1.4.5): what a model on the GPU reserves is
+  not promised again to a CPU model, and the card never offers more than the RAM has free. A
+  carve-out is memory Linux does not see, so with it the two are counted apart.
 - **Key:** the card's UUID when it has a serial number, else its PCI address (APUs have no
   serial, so their UUID is the same on every machine). A machine that joined with Forgeyard
   1.1.0 or older keeps its GPU allowlist when the key changes.
@@ -155,6 +158,7 @@ page's command looks like this (with your server's address, fingerprint and join
 ```bash
 sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
+  $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -162,8 +166,18 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
+
+The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
+`/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and every `/dev/nvidiaN`) with `--device` as well, skipping one the host
+does not have. Docker accepts them next to `--gpus all`, and it matters: the devices `--gpus` gives are set up behind
+Docker's and systemd's back, and the host's next `systemctl daemon-reload` takes them away from new processes in the
+container, while the ones given with `--device` stay
+([New processes on a machine cannot open its GPUs](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)).
+If `/dev/nvidia-uvm` is not there yet (no CUDA program has run on the host since it started), run
+`sudo nvidia-modprobe -u -c=0` first. With CDI set up (`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`)
+you can use `--device nvidia.com/gpu=all` instead of both: CDI declares the devices, so they stay too.
 
 Then:
 
@@ -194,7 +208,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -209,7 +223,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5 inventory
 ```
 
 ### CPU only
@@ -223,7 +237,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
 
 ### Why these options
@@ -256,8 +270,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.4 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.5 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -276,18 +290,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.4 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.5 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.4.4`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.4.5`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -296,11 +310,12 @@ A machine that already joined keeps its identity if the container gets its state
 
    ```bash
    sudo docker run -d --name forgeyard-agent --restart always --network host --gpus all \
+     $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.5
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -427,8 +442,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.4 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.5 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -1021,6 +1036,33 @@ the usual rules.
 
 From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
 
+## When a machine stays offline
+
+A machine is *offline* once nothing has been heard from it for 30 seconds (`AGENT_OFFLINE_SECONDS`). From then on:
+
+1. **At once:** the gateway no longer sends requests to its replicas. A deployment with replicas on other
+   machines keeps answering from those; one with no other ready replica answers 503 `no_ready_replica`, saying
+   *the machine is offline* (or spills to its cloud fallback). Only right after the server itself starts, when
+   every machine shows offline until its agent reconnects (seconds), a machine not heard from yet keeps its
+   replicas for those 30 seconds: their engines still answer meanwhile.
+2. **After 10 minutes** (`AGENT_OFFLINE_MOVE_SECONDS`, counted from the last heartbeat): each replica of a
+   deployment that is not pinned to that machine is placed again on a machine that fits, by the deployment's own
+   rules (spread over machines, enough memory, the estimate as it is now). Its page shows *Replica 0: moved:
+   gpu-01 offline for 10 minutes; placing it on another machine (gpu-02 fits)*, then where it was placed. It is the
+   same replica, never a second copy: the deployment keeps its number of replicas.
+   - A deployment **pinned** to the machine keeps its replicas there: they wait for it (*waiting for gpu-01 to
+     come online (the deployment is pinned to it)*).
+   - When **no other machine fits**, the replica stays and waits too, and moves on a later check once one does.
+3. **When the machine comes back**, its agent gets its work list without the replicas that moved, and stops their
+   engines. Replicas that waited start serving again. Nothing moves back by itself: to put a replica back, edit
+   the deployment's machine.
+
+A machine back within the 10 minutes (a reboot, an agent update, a short network drop) keeps everything; the time
+starts again from its next heartbeat. After the server itself restarts, every machine shows offline until its
+agent reconnects, so the 10 minutes count from the server's start. Set `AGENT_OFFLINE_MOVE_SECONDS=0` to never
+move replicas. Apps (deprecated) follow the same rules, except that a task stays where it is: it may still be
+running there, and running it again elsewhere could do its work twice.
+
 ## Restrict GPUs on a shared machine
 
 1. Open **Machines**, open the machine, choose **Change GPU access**.
@@ -1148,7 +1190,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker logs forgeyard
 ```
 
@@ -1182,7 +1224,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.4 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.4.5 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1191,7 +1233,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.4 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.4.5 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1200,23 +1242,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.4.5
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.5.0
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.5
+  docker.io/tonyhuang1101/forgeyard:1.5.0
 ```
 
-`1.4.5` is exactly that release, `1.4` follows its newest patch release and `latest` the newest
+`1.5.0` is exactly that release, `1.5` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.4
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.5
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1224,7 +1266,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.4 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.5 .`
 
 ## Run the server as a service
 
@@ -1297,6 +1339,11 @@ the journal: `journalctl -u forgeyard -f`.
 The **Machines** page shows each agent's version. Upgrade agents soon after the server: a much
 older agent may lack what a newer server asks for.
 
+From 1.4.5 on, a server and an agent of different versions keep working together while you upgrade, in either
+order: each side ignores a message it does not know (with a warning in its log), and a server leaves out a card
+of a kind it does not know yet instead of refusing the agent. The machine's page then lists it under
+**Detection notes** as *unknown vendor*; update the server to use that card.
+
 ## Update an agent
 
 Every machine's page has an **Update the agent** section. For admins it shows the complete command that brings
@@ -1309,13 +1356,18 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.4 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
      --restart always \
      --network host \
      --gpus all \
+     --device /dev/nvidiactl \
+     --device /dev/nvidia-uvm \
+     --device /dev/nvidia-uvm-tools \
+     --device /dev/nvidia0 \
+     --device /dev/nvidia1 \
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -1323,8 +1375,12 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+     docker.io/tonyhuang1101/forgeyard-agent:1.4.5
    ```
+
+   On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
+   the ones the agent reports; for an older agent the host's, listed by a short shell loop), so the agent keeps its
+   GPUs when the host runs `systemctl daemon-reload`.
 
    A machine that gets its files through the server (**Always through the server**) gets the image carried
    instead: `docker save` on a machine that can reach Docker Hub, piped over `ssh` into `docker load` there
@@ -1420,6 +1476,15 @@ What to know before you run it:
   caches, their fetch setting, and the images group's image and recipe. Usage rows and audit events
   of the run stay. Only on an agent older than 1.4.2, which cannot remove images, the tiny image
   `accept-<run>-image:1` stays, and the report says so.
+- **A card shared with other work** (1.4.5): a deployment or app the server cannot place, because no
+  card has the memory free, is skipped after `--place-timeout` seconds (5 minutes) with the server's
+  reason (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`), instead of waiting for
+  `--timeout` (40 minutes, which stays the limit for downloads and starts). Before each group that
+  deploys on the GPU machine (`tts`, `img`, `video`, `passthrough`, `vision`), the run stops what its
+  earlier groups left on a GPU and no later group needs, and removes it (the `models` group's
+  deployments are only stopped: the console group shows one; the speech-to-text model stays while
+  `tts` may use it), so each group has the run's share of the card to itself. The report's notes list
+  what was freed.
 - **One request reaches the cloud provider,** a fixed short prompt, so it costs a fraction of a
   cent. The provider's monthly budget is changed for a few seconds and put back; the other budget
   checks use the run's own keys and user.
@@ -1432,6 +1497,79 @@ What to know before you run it:
 - The console checks need Playwright for Python and Chrome (`--chrome`, default
   `/opt/google/chrome/chrome`); `--install-playwright` puts Playwright, like the OpenAI SDK, in a
   virtual environment of the script's own (`--venv`). Without it, the console group is skipped.
+- **Replica ports are called the way the gateway reaches them.** On a machine whose agent serves TLS (1.4.5), the
+  key guard checks (here and in `scripts/accept_*.py`) connect over TLS to the replica's address, with the
+  machine's binding name (`m<id>-<hash>.replica.forgeyard.invalid`, from **Machines**) as the name the certificate
+  must carry, trusting only Forgeyard's CA. Each such port also gets three checks: plain HTTP is refused, the
+  certificate verifies with that machine's name, and another machine's name (when two machines serve TLS) and a
+  name no machine has are refused. A machine with an older agent is called with plain HTTP as before, with an
+  information line that its traffic is not encrypted. The CA is the one given with `--ca`; when the server uses its
+  own certificate or `TLS=off`, point `FORGEYARD_REPLICA_CA` at the server's `data/tls/ca.crt`. Without any CA the
+  calls still run, and the certificate checks are skipped. Only a port that cannot be reached at all is skipped as
+  another network's; one that closes the connection or shows a wrong certificate fails.
+
+## Scrape Forgeyard with Prometheus
+
+The server answers `GET /metrics` in the Prometheus text format: the gateway's requests, latency and tokens per
+model, cloud spills, the waiting line, replicas by state, machines, GPU memory and cloud spend
+([every metric](reference.md#metrics)). Labels are model, machine and provider names, never keys, people or
+prompts.
+
+**Who may read it.** Without `METRICS_TOKEN`, only a request from the server's own host that came through no proxy
+(no `X-Forwarded-For`, `Forwarded` or `X-Real-IP`); anyone else gets 403. With `METRICS_TOKEN` set, every scrape
+needs `Authorization: Bearer <token>`, from anywhere, the server's host included; without it or with a wrong one
+it gets 401.
+
+**Prometheus on the server's own host**, no token. Save the server's CA from **Trust this server** as
+`/etc/prometheus/forgeyard-ca.pem`; the server's certificate always names `127.0.0.1`:
+
+```yaml
+scrape_configs:
+  - job_name: forgeyard
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/forgeyard-ca.pem
+    static_configs:
+      - targets: ["127.0.0.1:7860"]
+```
+
+**Prometheus anywhere else, or in Docker:** set a token on the server (a long random value, e.g.
+`openssl rand -hex 32`) in its `.env` or with `-e METRICS_TOKEN=…`, restart it, and give Prometheus the same value
+in a file:
+
+```yaml
+scrape_configs:
+  - job_name: forgeyard
+    scheme: https
+    authorization:
+      credentials_file: /etc/prometheus/forgeyard-metrics-token
+    tls_config:
+      ca_file: /etc/prometheus/forgeyard-ca.pem
+    static_configs:
+      - targets: ["192.168.1.20:7860"]
+```
+
+- **Docker needs the token.** A request into a container through a published port does not arrive from the
+  container's loopback, and a Prometheus container is another host: neither is "this host".
+- **The name in `targets`** must be one the server answers to and its certificate names: an IP address always
+  works. For a name, such as the server's container name on a Docker network (`forgeyard:7860`), add it to
+  `ALLOWED_HOSTS` and `TLS_EXTRA_NAMES` (otherwise 421, or a certificate error).
+- **Behind your own reverse proxy**, scrape through it with the token: a request it forwards is never treated as
+  local, even from `127.0.0.1`.
+
+Some queries to start from:
+
+| Query | What it shows |
+|---|---|
+| `sum by (model) (rate(forgeyard_gateway_requests_total[5m]))` | requests per second per model |
+| `sum by (model) (rate(forgeyard_gateway_requests_total{status=~"5.."}[5m]))` | server errors per second |
+| `histogram_quantile(0.95, sum by (le, model) (rate(forgeyard_gateway_time_to_first_byte_seconds_bucket[5m])))` | the 95th percentile of the time to the first byte |
+| `sum by (model, reason) (rate(forgeyard_gateway_spills_total[1h]))` | why requests leave the local tier |
+| `forgeyard_machine_up == 0` | machines that are offline (an alert) |
+| `forgeyard_gpu_memory_free_bytes / forgeyard_gpu_memory_total_bytes` | the free share of each card |
+
+Counters start again from 0 when the server restarts (Prometheus' `rate()` handles that). The state (replicas,
+machines, memory, spend) is read from the database at each scrape: scrape every 15 to 60 seconds, not faster.
 
 ## Back up and restore
 
@@ -1734,7 +1872,9 @@ What to know:
   machine has under that tag. Copy only from a machine you trust. A pinned image is still checked by its
   recorded ids before it runs.
 - A `docker save` stream has no size ahead and cannot resume: a copy that breaks off starts again from
-  the beginning, and the target loads nothing from a broken one.
+  the beginning, and the target loads nothing from a broken one. The dialog says so and what the other
+  machine says, for example *The copy broke off after 131072 bytes: gpu-host stopped sending, so nothing was
+  loaded on gpu-01. gpu-host says: docker save failed: …*: fix that on that machine, then copy again.
 - The limits are the upload's: one copy or upload at a time per target machine, two in all, at most
   `IMAGE_UPLOAD_MAX_GB`; and one copy at a time from each machine.
 - The machine copied from needs an agent of 1.4.1 or later with a container engine; the target, 1.4 or

@@ -9,7 +9,11 @@ agent -> server
              inventory is simulated, and the full inventory. (1.4.2) `runtime_info.ports` ({low, high}):
              the host port range replicas are published on, which placement counts; older servers drop it.
              (1.4.2) `install`: how the agent runs (agent/how_it_runs.py: its container's `docker run`
-             options, install.sh, or a checkout), for its update command; no secrets. Older servers ignore it
+             options, install.sh, or a checkout), for its update command; no secrets. Older servers ignore it.
+             (1.4.5) `runtime_info.address`: the address replicas are published on (what the gateway dials), and
+             `runtime_info.connection` ({address, port}): the agent's own end of this connection, which the
+             server compares with the peer it sees (same: the agent runs on the server's host) and does not
+             keep. Older servers drop both
   heartbeat  every 10 s: only the values that change (free/used memory, utilisation, temperature)
   inventory  the full inventory again, sent when the hardware changed
 
@@ -26,6 +30,9 @@ agent -> server
   image_listed (1.4.1) answer to image_list: the images in the agent's container engine
   image_saved (1.4.1) answer to image_save: how the send of an image ended, and which image it was
   image_removed (1.4.2) answer to image_remove: removed (the image, the bytes freed, the space after) or why not
+  cert_request (1.4.5, "guard_tls") a CSR for the key the agent's replica guards serve TLS with
+  gpu_check  (1.4.5, "gpu_check") whether a new process can still open the machine's GPUs, when that changed
+             (see FEATURE_GPU_CHECK); hello's `runtime_info.gpu_check` carries it too
   cache_removed (1.4) answer to cache_remove / cache_prune: ok, the bytes freed or why not, and the
              model cache as it is afterwards. (1.4) `model_cache` also lists each model with its size
              (`models`, `engines_detail`, `used_bytes`, `partial_bytes`); older servers ignore them
@@ -51,6 +58,7 @@ server -> agent
              `image_listed` / `image_saved`
   image_remove (1.4.2, "image_remove") remove one engine image by its id (an admin asked); answered by
              `image_removed`
+  certificate (1.4.5, "guard_tls") answer to cert_request: the signed certificate chain, or why not
   error      a refused message; the server closes the connection after it
 
 HTTP (1.4, "relay"): GET /agent/v1/relay/{replica|download}/{id}/model[/{file path}] and …/engine, with
@@ -91,6 +99,12 @@ agent in hello, the server in welcome), and `desired` / `status` / `logs` flow o
 "workloads". An M1 agent (no features) keeps working with this server and is never sent work; an
 M2 agent talking to an M1 server never sends status, which that server would refuse.
 
+Mixed versions (1.4.5, #170): each side ignores a message type it does not know (AGENT_MESSAGES on the server,
+SERVER_MESSAGES on the agent), with one warning per type and connection, and the server leaves out an accelerator
+whose `vendor` it does not know (warning, and an "unknown vendor" detection note on the machine) instead of refusing
+the hello. A known message that does not validate, or one sent without the feature it needs, is still refused
+(4003).
+
 Close codes the agent acts on (4000-4999 are application codes):
   4001 revoked or removed: the credential is dead, stop
   4002 protocol version not supported: upgrade the agent, stop
@@ -113,6 +127,14 @@ CLOSE_BAD_MESSAGE = 4003
 CLOSE_TIMEOUT = 4008
 CLOSE_REPLACED = 4009
 CLOSE_RESTART = 1012
+
+# 1.4.5 (#170): the message types each side knows. A side ignores a type it does not know, with a warning, so an
+# agent newer than its server (or older) keeps working: what it adds is gated by `features` anyway. The same holds
+# for a card of a `vendor` outside VENDORS: the server leaves that card out and keeps the rest of the hello.
+AGENT_MESSAGES = ("hello", "heartbeat", "inventory", "status", "logs", "cache_removed", "image_loaded", "relay_sent",
+                  "image_listed", "image_saved", "image_removed", "cert_request", "gpu_check")
+SERVER_MESSAGES = ("welcome", "error", "desired", "logs_request", "cache_remove", "cache_prune", "image_load",
+                   "relay_send", "image_list", "image_save", "image_remove", "certificate")
 
 # The agent stops on these instead of reconnecting.
 FATAL_CLOSE_CODES = {CLOSE_REVOKED, CLOSE_PROTOCOL, CLOSE_REPLACED}
@@ -218,9 +240,33 @@ IMAGE_SEND_PATH = "/agent/v1/image-send"
 # free_bytes, total_bytes}` (code not_found | agent_image | in_use | failed). The server offers only images a recipe
 # names. Listed by both sides; only an agent that lists it is asked.
 FEATURE_IMAGE_REMOVE = "image_remove"
+# 1.4.5 (issue #163): TLS from the gateway to every replica. An agent that lists it (it has the `cryptography`
+# package) serves its key guards with TLS once the server lists it too, with a certificate Forgeyard's CA signs:
+#   - the welcome carries `replica_tls: {name, ca}`: the machine's binding name (the only name in its certificate,
+#     security/replica_tls.py `binding_name`) and the SHA-256 fingerprint of the CA that signs it;
+#   - the agent makes a new EC P-256 key (it never leaves the machine) and sends `cert_request {request_id, csr}`
+#     when it has no certificate for that name and CA, or one with fewer than RENEW_BEFORE_DAYS left (checked at
+#     every welcome and every hour); the server answers `certificate {request_id, ok, chain, name, not_after, ca}`
+#     (the leaf, then the CA) or `{ok: false, code, reason}` (code too_often | refused | failed). The server takes
+#     only the CSR's public key: the name and everything else in the certificate are its own;
+#   - hello's `runtime_info.tls` ({serial, not_after, name, ca}) says which certificate the guards serve now.
+# The gateway then dials that machine's replicas at https:// and accepts only a chain to Forgeyard's CA naming
+# that machine's binding name. An agent without it (older than 1.4.5) is dialled over plain HTTP, and the setup
+# advisor says so ("traffic to this machine is not encrypted: update the agent"). A server without it gets plain
+# HTTP from every agent: the agent's guards serve TLS only when the server listed it in the welcome.
+FEATURE_GUARD_TLS = "guard_tls"
+# 1.4.5 (issue #202): an agent with process workloads and GPUs probes, at start and every 5 minutes, whether a new
+# process running as its workload account can still open the GPU device nodes (agent/gpu_check.py: after the host's
+# `systemctl daemon-reload` an agent container started with `--gpus all` alone keeps its open handles but loses new
+# opens). hello's `runtime_info.gpu_check` carries the result ({ok, at, user, devices: [{path, vendor, ok, error}],
+# reason}), and to a server that lists this feature the agent sends `gpu_check {gpu_check}` whenever the verdict or the
+# failing devices change (`{"ok": null}`: nothing to check any more). While it fails the server places no process
+# workload on that machine's GPUs (containers are not affected) and the setup advisor shows an error. Server only.
+FEATURE_GPU_CHECK = "gpu_check"
 SERVER_FEATURES = (FEATURE_WORKLOADS, FEATURE_MODELS, FEATURE_REPLICA_KEYS, FEATURE_PULL_PROGRESS,
                    FEATURE_CACHE_ADMIN, FEATURE_PREFETCH, FEATURE_RELAY, FEATURE_RELAY_IMAGES, FEATURE_IMAGE_LOAD,
-                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE)
+                   FEATURE_RELAY_SOURCE, FEATURE_IMAGE_SAVE, FEATURE_IMAGE_REMOVE, FEATURE_GUARD_TLS,
+                   FEATURE_GPU_CHECK)
 # How a machine fetches models and engines (nodes.fetch_via, 1.4): directly first and through the server after
 # a network failure; always through the server; never through the server.
 FETCH_VIA = ("auto", "server", "direct")

@@ -64,14 +64,14 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 自己取的名稱也可以只指向部署：好幾個部署共用一個名稱，或替一個部署取第二個名稱。建立方式相同。**Cloud models** 會把它們列在 *Other names for deployments* 底下，每個部署的頁面也會列出它另外回應的名稱。
 
-每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。
+每個回應都會在 `X-Forgeyard-Target` 標頭說明是誰回答的：`local:<deployment>#<replica>` 或 `provider:<provider>/<model>`。如果請求越過了第一層，`X-Forgeyard-Spilled` 會說明原因：`unavailable`、`busy`、`refused`、`too_long`，或 `budget`（[預算](#budgets)讓它沒有送到前一層的雲端）。回應本文裡的 `model` 是上游寫的值。Playground 會在每個回答下方顯示目標。Forgeyard 在送往供應商的路上拿掉了哪些請求參數（請見[各供應商端點做不到的事](#what-each-providers-endpoint-cannot-do)），會以逗號分隔寫在 `X-Forgeyard-Dropped-Params`，回答和供應商的錯誤上都有。
 
 ## 請求何時溢出
 
 只有在**還沒有任何東西回傳給用戶端之前**，而且這一層處於下列狀況時，請求才會移到下一層：
 
 - **無法使用（unavailable）**：沒有任何副本就緒，或連不上任何副本；
-- **忙碌（busy）**：每個就緒副本經由這台伺服器處理中的請求數，都已達到它所屬部署的 *Concurrent requests* 設定。如果設了 **Wait for a free local slot**，會先最多等待那麼多毫秒（上限 10,000；預設 0）；
+- **忙碌（busy）**：每個就緒副本經由這台伺服器處理中的請求數，都已達到它所屬部署的 *Concurrent requests* 設定。如果設了 **Wait for a free local slot**，會先最多等待那麼多毫秒（上限 10,000；預設 0）。請求會排隊，先到先處理：空出來的位置一定給等最久的那個，絕不會給剛到的。每一層最多 256 個在等；再多一個就不等，直接往下走；
 - **拒絕（refusing）**：引擎回應 429 或 503；
 - **太小（too small）**，只在路由勾選 **Spill a prompt that is too long** 時：提示的大小（以每個 token 約 3 bytes 偏高估算）加上 `max_tokens`，超過部署的 context。
 
@@ -84,6 +84,15 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 - 回答已經開始串流。
 
 如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會送到本機副本，不再受 *Concurrent requests* 限制：由引擎排隊處理。
+
+**結構化輸出不會在路上遺失。** 要求特定回答形狀的請求（`json_object` 或 `json_schema` 的 `response_format`、vLLM 的 `structured_outputs` 或 `guided_json`、`guided_regex`、`guided_choice`、`guided_grammar`、llama.cpp 的 `grammar` 或 `json_schema`，或帶 `strict: true` 的工具），會略過每個會拿掉或忽略該參數的供應商目標，而不是拿回一個沒有受限的回答：
+
+- 每種雲端都會拿掉只有引擎才有的那些（`structured_outputs`、`guided_*`、`grammar`、`json_schema`），以及只有引擎認得的 `response_format` 類型；
+- Anthropic 另外會忽略 `json_object`、沒有 `strict: true` 的 `json_schema`，以及工具上的 `strict`；
+- *OpenAI-compatible server* 全部保留；
+- 供應商模型自己的拿掉清單（`drop_params`，透過 API 設定）列到其中一個時，也會為它略過。
+
+如果沒有其他目標能接，請求會得到沒有雲端時本來會得到的結果：忙碌時照樣送到本機副本；無法使用時回 503 和原因，訊息也會列出被略過的供應商和參數。只有這類供應商提供的雲端模型會回 400 `structured_output_not_supported`。
 
 在雲端層內，回應 429 或 5xx、或連不上的目標會被略過，並在 30 秒內排到最後才嘗試。同一層的多個目標會依權重分攤請求。當沒有其他目標可試、而供應商要求等待不超過 2 秒時（`Retry-After`），請求會等一次再試。
 
@@ -151,7 +160,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 
 ### OpenRouter 和其他伺服器
 
-只有它們背後某個供應商特有的功能。OpenRouter 接受 `top_k`、`min_p` 和 `repetition_penalty` 並往下傳；對其他雲端種類，請求送出時 Forgeyard 會拿掉這些以及其他只有引擎才有的參數（vLLM 的 `chat_template_kwargs`、`guided_*`，llama.cpp 的取樣設定）。
+只有它們背後某個供應商特有的功能。OpenRouter 接受 `top_k`、`min_p` 和 `repetition_penalty` 並往下傳；對其他雲端種類，請求送出時 Forgeyard 會拿掉這些以及其他只有引擎才有的參數（vLLM 的 `chat_template_kwargs`、`guided_*`，llama.cpp 的取樣設定），並寫在 `X-Forgeyard-Dropped-Params`。結構化輸出會被拿掉的請求根本不會送到那裡（[請求何時溢出](#when-a-request-spills)）。
 
 ## 費用與價格
 
@@ -256,7 +265,7 @@ prompt size (about 3 bytes a token, on the high side) × input price
 
 ### 花費怎麼算
 
-一個月的花費是這個月請求費用的總和（見上文），在伺服器啟動或新的月份開始時從用量統計讀取，之後隨著請求完成累加。有回答但沒有回報任何 token 的雲端請求，在伺服器重新啟動前以它的預留金額計算。`GET /api/budgets` 會回傳本月每把金鑰、每個人和每個供應商的花費；管理員加上 `?everyone=true`。
+一個月的花費是這個月請求費用的總和（見上文），在伺服器啟動或新的月份開始時從用量統計讀取，之後隨著請求完成累加。有回答但沒有回報任何 token 的雲端請求，以它的預留金額計算；1.4.5 起這筆金額在伺服器重新啟動後也會保留（它不在任何用量統計裡，所以伺服器會另外保存當月的金額）。`GET /api/budgets` 會回傳本月每把金鑰、每個人和每個供應商的花費；管理員加上 `?everyone=true`。
 
 ## 對外連線：哪些東西會離開你的伺服器
 

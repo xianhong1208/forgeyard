@@ -25,6 +25,7 @@ from forgeyard.api import (
     install,
     keys,
     machines,
+    metrics as metrics_api,
     models,
     onboarding,
     passthrough,
@@ -105,6 +106,10 @@ async def lifespan(_app: FastAPI):
         except Exception:
             log.exception("Writing gateway usage on shutdown failed")
         try:
+            await asyncio.to_thread(gateway_budgets.ledger.write_estimated)  # spend counted at reservations (#172)
+        except Exception:
+            log.exception("Writing the spend counted at reservations on shutdown failed")
+        try:
             await asyncio.to_thread(gateway_budgets.ledger.write_alerts)
         except Exception:
             log.exception("Writing budget alerts on shutdown failed")
@@ -156,6 +161,7 @@ def create_app() -> FastAPI:
     app.include_router(imagecopy.router)
     app.include_router(install.router)
     app.include_router(guide.router)
+    app.include_router(metrics_api.router)  # GET /metrics (1.4.5, #165), before the web UI's catch-all
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], include_in_schema=False)
     def api_not_found(rest: str):

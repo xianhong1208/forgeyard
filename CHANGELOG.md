@@ -6,6 +6,252 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.4.5] — 2026-11-22
+
+Fixes from an outside review. Structured output is never silently lost on a cloud spill (#162). The gateway
+reaches every replica over TLS, with a certificate Forgeyard's CA signs for that machine (#163). Replicas move off
+a machine that stays offline for 10 minutes (#164). Prometheus metrics at `/metrics` (#165). Memory is never
+promised twice (#166). The KV cache is estimated from what each kind of layer keeps (#167), with the batch size
+the card gets (#201). No request runs twice, and a stream has a settable wait for its first answer (#168).
+Requests waiting for a busy local tier are served first come, first served (#169). A server and agents of
+different versions keep working together (#170). A machine that publishes its replicas on a loopback address is
+pointed out (#171). Cloud spend survives a restart, and the installer pins the uv it downloads and checks every
+dependency by hash (#172). The gateway's proxy and the agent's supervisor are split into smaller parts, with no
+change in behaviour (#173). NVIDIA agents keep their GPUs across the host's `systemctl daemon-reload`, and a lost
+GPU is reported (#202). Flaky tests were fixed (#161, #204, #212, #215; the last one also makes a copied image
+whose source stops part way report the same words every time), and the acceptance scripts reach TLS replicas.
+
+**Update the agents** after the server, with the machine page's **Update the agent** command. Only a 1.4.5
+agent serves its replicas over TLS (an older one keeps plain HTTP, and Setup health says its traffic is not
+encrypted), answers 503 `X-Forgeyard-Not-Taken` when its engine is not running (behind an older agent that case
+is a 502 until it reports the dead engine), is given the NVIDIA device nodes and checks its GPU access, and
+reports the address it publishes its replicas on. **No migration:** the new values live in tables that exist
+already (a new `server_settings` row, a deployment's parameters, a machine's runtime details).
+
+**1.4 is a long-term support line** of the community edition until 2027-06-30: security fixes and fixes for
+serious bugs, as 1.4.x patch releases ([SECURITY.md](SECURITY.md#supported-versions)).
+
+### Added
+
+- **Prometheus metrics at `/metrics`** (#165). The gateway's finished requests by endpoint, model, status, source and
+  target; their total time and time to first byte (histograms); tokens in and out; cloud spills by reason; the
+  waiting line for a local slot (length, and each request's wait); and, read at each scrape, replicas by state,
+  machines online and offline, each GPU's (and machine RAM's) total, free and reserved memory, each provider's spend
+  this month and budget, and how many budgets reached 80 and 100 percent. Labels are model, machine and provider
+  names only: a model nobody serves counts as `_unknown`, and no label holds a key, a person or a prompt. Access as
+  in Folio: without `METRICS_TOKEN` only a direct request from the server's host (a loopback address with no
+  forwarding header) may read it, 403 otherwise; with it every scrape needs `Authorization: Bearer`, 401 otherwise.
+  The guide has a how-to with a scrape configuration (also for Docker, which needs the token). New dependency
+  `prometheus-client` (Apache-2.0, no dependencies of its own). No migration.
+
+- **Replicas move off a machine that stays offline** (#164). A machine offline for 10 minutes
+  (`AGENT_OFFLINE_MOVE_SECONDS`, counted from its last heartbeat, or from the server's start when that is later; 0
+  turns it off) has each replica of its unpinned deployments placed again on a machine that fits, by the
+  deployment's own rules (spread, memory, the estimate as it is now). It is the same replica with a new id, never a
+  second copy; its page says *moved: <machine> offline*. A deployment pinned to the machine waits for it, and so does
+  a replica no other machine can take (it moves on a later sweep once one can); both say so once. When the machine
+  comes back, its agent no longer finds the moved replicas in its work list and stops their engines. Apps follow the
+  same rules, except tasks, which stay (running one again elsewhere could do its work twice). A machine back within
+  the grace keeps everything. No migration.
+
+### Security
+
+- **TLS from the gateway to every replica** (#163). The gateway used to reach a replica's key guard over plain
+  HTTP, so the replica's internal key, every prompt and every answer crossed the network in clear between the
+  server and the machine. A 1.4.5 agent now serves its key guards with TLS, and the gateway dials `https://`:
+  - the agent makes its own key (EC P-256; it never leaves the machine) and sends a certificate request over its
+    authenticated connection; the server signs it with Forgeyard's CA (made in `data/tls` on first use when the
+    server runs with its own certificate or `TLS=off`). The certificate names the machine and nothing else
+    (`m<id>-<16 hex>.replica.forgeyard.invalid`, from the machine's credential); it carries no address, which the
+    agent reports itself and which the CA's trust must not cover. Valid 30 days, renewed by the agent 10 days
+    before it ends (it checks at every connection and every hour), loaded without a restart. Key and certificate
+    are kept in the agent's state directory (`replica-tls/`, 0600);
+  - the gateway trusts only Forgeyard's CA and checks the machine's name as the host name, so another machine's
+    certificate is refused; one connection pool per machine. `/v1`, `/x/`, vision, video jobs and the console's
+    **Try it** all go this way; the internal key is still checked, now inside TLS, and the guard's
+    `X-Forgeyard-Not-Taken` failover works as before;
+  - an agent older than 1.4.5 keeps serving over plain HTTP (upgrading never interrupts serving), and **Setup
+    health** and its machine's page say *Traffic to <machine> is not encrypted: update the agent*, which opens its
+    update command. A 1.4.5 agent is never reached over plain HTTP: while its certificate is missing or expired its
+    replicas cannot be reached (requests go to other replicas) and Setup health shows an error;
+  - the agent's install (`install.sh`) now also installs `cryptography` (for the key and the request), pinned
+    by hash like its other dependencies.
+
+
+### Changed
+
+- **1.4 is a long-term support line of the community edition until 2027-06-30** (#197): security fixes and fixes
+  for serious bugs are released as 1.4.x patch releases while 1.5 and later go on; other changes go only into the
+  newest minor release. Longer support is the enterprise edition's extended support. SECURITY.md has a table of
+  the supported versions, and the roadmap a *Support* section.
+- **The gateway's proxy and the agent's supervisor in smaller parts** (#173), with no change in behaviour. `forgeyard/gateway/proxy.py` (1,949 lines) keeps the request's way through the tiers (`Job`, `forward`, `record`) and imports the rest from `route.py`, `body.py`, `fit.py`, `upstream.py`, `replicas.py`, `cloud.py`, `streaming.py` and `answer.py`; every name it had is still importable from it. The agent's `supervisor.py` (1,171 lines) keeps the loop, the desired list and the reports; a replica's life, its downloads and pulls, its health checks, the key guards and an admin's requests are in their own modules, and its 18 dictionaries, sets and flags in memory are five typed structures (`state.py`). The runtimes now implement an explicit protocol, `Runtime` (and `ContainerEngine` for the container runtime's images), checked by a test, which also checks that the supervisor calls nothing else on them.
+- **Routing skips an offline machine's replicas at once** (#164). The gateway no longer dials a replica whose machine
+  is offline (a connect error and a 15 s penalty on each replica until its agent said otherwise, which it cannot);
+  with no other ready replica the 503 says *the machine is offline*. The console counts such replicas as not ready.
+  Right after the server starts (every machine shows offline until its agent reconnects, while the engines still
+  answer), a machine not heard from since keeps its replicas in the routes for `AGENT_OFFLINE_SECONDS`.
+- The DCO check no longer runs on the release pull requests (`dev` → `main` and the `main` → `dev`
+  back-merge): every commit reached `dev` through its own checked pull request, and checking them again
+  failed on commits merged before the DCO was adopted (#160).
+
+### Fixed
+
+- **A copied image whose source stops part way is reported the same way every time** (#215). The server hears two
+  things when the source machine's `docker save` fails mid-copy: its send breaking off, and its agent saying why. It
+  used to answer with whichever came first, so the console showed either *The upload broke off after N bytes
+  (ConnectionError: …)* with no reason, or only the source's *docker save failed: …* with no word that the copy broke
+  off (also when the server had not read a byte of the send yet). Now it waits up to 10 s for the source's word and
+  says both: *The copy broke off after N bytes: <source> stopped sending, so nothing was loaded on <target>.
+  <source> says: docker save failed: …*, or that the source did not say why. The audit event records the same words.
+  A source that refuses before sending a byte is still *image_save_failed* with its reason.
+
+- **accept_all no longer waits 40 minutes for a card that has no room** (#203). A deployment or app the server
+  cannot place (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`) is skipped after `--place-timeout`
+  seconds (300 by default), naming that reason; `--timeout` (2,400) stays the limit for downloads and starts. Before
+  each group that deploys on the GPU machine (tts, img, video, passthrough, vision) the run stops what earlier groups
+  left on a GPU and no later group needs, waits for it to stop, and removes it (the models group's deployments are
+  only stopped; its speech-to-text deployment stays for the tts group); the report's notes say what was freed.
+  Everything the run makes is still removed at the end.
+
+- **The vLLM estimate and the engine agree on the tokens in flight** (#201). A sliding-window layer keeps its window
+  plus two steps of `max_num_batched_tokens`, which vLLM 0.32 chooses by card when it is not given: 2,048 on an A100
+  (raised to 2,496 for Gemma 4, its longest video), 8,192 on an H100. The estimate, made before a card is chosen,
+  counted 8,192, so on an A100 Gemma 4 12B at 16,384 x 1 was estimated at 5.25 GiB of KV cache where vLLM used
+  2.09. The `vllm` recipe now passes `--max-num-batched-tokens` itself, vLLM's own A100 value: 2,048, at most
+  concurrency x context, at least 2,496 for Gemma 4 12B, 26B-A4B and 31B while the deployment takes media (vLLM
+  refuses to start below it); the estimate counts the same, to within 0.1% of what vLLM reported for Gemma 4 12B.
+  Nothing changes on an A100 or a card under 70 GB; on an H100 or H200 a long prompt is read in smaller steps than
+  vLLM's 8,192. The flag in *Extra engine arguments* is counted too. Recommended memory for Gemma 3 and 4 and
+  gpt-oss moves with it (Gemma 4 12B 36.7 to 34.0 GiB, 31B 89.6 to 83.1). A Gemma 4 added before this is passed
+  2,496 whatever its kind (E2B and E4B need 2,048; adding them again reads it). No migration.
+
+- **NVIDIA agents keep their GPUs across the host's `systemctl daemon-reload`, and a lost GPU is reported** (#202).
+  With `docker run --gpus all` alone, the NVIDIA runtime hook gives the agent's container its devices behind Docker's
+  and systemd's back; the host's next `systemctl daemon-reload` took that access from new processes in the container
+  (open handles kept working), so a new process workload failed with `cuInit: CUDA_ERROR_NO_DEVICE` while containers
+  and the inventory looked fine. Now:
+  - every NVIDIA agent command Forgeyard gives (Add a machine → Docker, the machine page's update command, the guide
+    and the README) also passes the device nodes with `--device` (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
+    `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and each `/dev/nvidiaN`), which Docker records, so they stay. The
+    update command names the nodes a 1.4.5 agent reports; for an older agent, and in the Add-a-machine form (before
+    any inventory), a short shell loop lists the host's, skipping one the host does not have. The rest of the
+    update command is unchanged. CDI (`--device nvidia.com/gpu=all`) is documented as the alternative;
+  - the agent checks at start and every 5 minutes that a new process, run as its workload account the way a process
+    workload starts, can open its GPU device nodes (NVIDIA: `/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidiaN`;
+    AMD: `/dev/kfd` and the render nodes), and reports the result (`runtime_info.gpu_check`; a `gpu_check` message
+    when it changes, to a server that lists the feature `gpu_check`). While it fails, Setup health shows an error
+    (`machine-gpu-access-lost`: restart the agent container and update it with the machine page's command) and no
+    process workload or process engine is placed on those GPUs, with the reason on the waiting replica; containers
+    are not affected. Once the GPUs open again, what waited is placed.
+  The guide's troubleshooting page explains the cause and the fix. No migration.
+
+- **The acceptance scripts reach TLS replicas** (follow-up of #163). Since 1.4.5 an agent with `guard_tls` serves its
+  replica ports over TLS only, so the scripts' direct calls to a replica's own port (the key guard's 401 without the
+  internal key and with a client's key, vLLM's open paths) found the port closed and reported it unreachable or
+  failed. A shared helper, `scripts/replica_port.py`, now calls those ports the way the gateway does: over TLS to the
+  replica's address, with the machine's binding name for SNI and the host name check, trusting only Forgeyard's CA
+  (`--ca`, or `FORGEYARD_REPLICA_CA` for a server with its own certificate or `TLS=off`, else the server's
+  `/api/tls/ca.pem`); plain HTTP for an older agent's machine, as before. `accept_all`, `accept_x`, `accept_m4`,
+  `accept_mm`, `accept_img`, `accept_tts`, `accept_video` and `accept_vision` use it. New checks on each TLS port:
+  plain HTTP refused, the certificate verifies with the machine's name, another TLS machine's name (skipped with only
+  one) and a name no machine has refused (only a host name mismatch counts). A plain machine gets an information line
+  that its traffic is not encrypted. `accept_vision` no longer counts a port that does not answer as refused: only
+  the key guard's 401 passes. `accept_all` skips only a port it cannot reach at all as another network's; a closed
+  connection or a wrong certificate is a failure.
+
+- **Fair waiting for a busy local tier** (#169). Text requests that wait for a free slot (a route's *Wait for a free
+  local slot*) now wait in line, first come first served, and are woken when a slot is released, instead of
+  polling every 25 ms, where whoever looked first after a release took the slot (a newcomer could starve those
+  already waiting). At most 256 wait per route tier; one more does not wait and moves on at once (it spills, as
+  when the wait is over). A client that goes away leaves the line. `local_busy` answers carry `Retry-After: 1`.
+- **No request runs twice** (#168). A request moves to another replica (or provider) only when it provably never
+  reached the first one: a connection that could not be made, no free connection, or a replica's key guard saying
+  its engine is not running. A connection that breaks once the request was sent (`ReadError`,
+  `RemoteProtocolError`, `WriteError`: the engine may be generating) is 502 and is not tried elsewhere; before, it
+  was retried on the next replica, or the next cloud target, and could run twice. The same holds for video jobs
+  and `/x/`. The agent's key guard now answers 503 with `X-Forgeyard-Not-Taken: engine-unreachable` (after reading
+  the request) when its engine is not running, instead of closing without an answer, so failover to the next
+  replica keeps working; behind an agent older than 1.4.5 that case is now a 502 until the agent reports the dead
+  engine (seconds): update the agents.
+- **A shorter, settable wait for a stream to start** (#168). Once a streamed request (`stream: true`, or speech with
+  a `stream_format`) is written to a replica, the replica has the deployment's *Wait for the first answer*
+  (`first_answer_timeout`, 120 s by default, 5 to 3,600, under **Advanced** in the deploy and change forms) for the
+  status line and the stream's first bytes. Then the request is closed (the engine stops) with 504
+  `first_answer_timeout`, never sent elsewhere; it used to wait `GATEWAY_READ_TIMEOUT` (600 s), and a stream that
+  never started came back as a 200 that broke off. A non-streamed answer is the whole answer, so it keeps
+  `GATEWAY_READ_TIMEOUT` as before: long non-streamed generations and transcriptions are not cut short. Image
+  deployments keep their own *Timeout*, video jobs theirs. Changing only this parameter restarts nothing. No
+  migration: it lives in the deployment's parameters.
+- **Mixed server and agent versions keep working** (#170). A card of a vendor the server does not know (from a
+  newer agent) is left out of the machine, with a warning in the server's log and an *unknown vendor* line under
+  the machine page's **Detection notes**, instead of refusing the agent's hello. A message type either side does
+  not know is ignored, with one warning per connection, instead of closing the socket. Before, both closed the
+  connection with 4003, which an agent retries, so a newer agent reconnected forever. A known message that does
+  not validate is still refused.
+
+- **A machine that publishes its replicas on a loopback address is pointed out** (#171). An agent reached through
+  an SSH tunnel or a proxy on its own host connects to `127.0.0.1`, publishes its replicas there, and the gateway
+  then dials `127.0.0.1` on the server's host. A 1.4.5 agent reports that address and its own end of the
+  connection; when that end is the peer the server sees, nothing sits between them and the agent runs on the
+  server's own host. For any other machine on loopback the setup advisor warns (`machine-loopback-address`, a
+  snoozable warning, also on the machine's page), unless every port of a range of up to 64 ports is forwarded to
+  the server's host, as in the guide's tunnel. The machine page lists the address under **Agent → Replicas at**.
+  Older agents report neither and are not checked. No migration: both values live in the machine's runtime
+  details.
+
+- **Cloud spend of answers without token counts survives a restart** (#172). Such an answer counts against the
+  budgets at its reservation; that amount is in no usage row, so it lived only in memory and a restart forgot it.
+  The ledger now keeps this month's total of it in one `server_settings` row (`budget_estimated_spend`), written
+  every few seconds and on shutdown, and reads it back with the month. No migration.
+
+- **install.sh checks everything it installs** (#172). It no longer pipes astral.sh's uv installer: it downloads
+  uv 0.9.24's static release archive from GitHub and checks its SHA-256. The agent's dependencies are installed
+  from two lists the server serves (`/install/agent-requirements.txt`, and `-nvidia` for NVML), checked against
+  the SHA-256 the script names, with `--require-hashes`: the versions uv.lock pins, each file matching its PyPI
+  hash; the agent's wheel follows with `--no-deps`. `python -m forgeyard.install.requirements` writes the lists
+  from uv.lock; a test fails while they are out of date.
+
+- **Structured output is never lost silently on a cloud spill** (#162). A request with a JSON `response_format`,
+  vLLM's `structured_outputs` or `guided_*`, llama.cpp's `grammar` or `json_schema`, or a tool with `strict: true`
+  skips every provider target that would drop or ignore it (every cloud kind drops the engine-only ones; Anthropic
+  also ignores `json_object`, a schema without `strict` and strict tools; a model's `drop_params` counts too), where
+  it used to get 200 with an unconstrained answer. With nothing else to serve it, a busy local tier takes it anyway
+  and an unavailable one answers 503 naming the providers skipped; a cloud model only such providers serve answers
+  400 `structured_output_not_supported`. Parameters left out on the way to a provider are named in the new
+  `X-Forgeyard-Dropped-Params` header (also a `max_tokens` sent beside `max_completion_tokens`, which was dropped
+  without a word).
+- **The KV cache is estimated from what each kind of layer keeps** (#167), so models that fit are no longer
+  refused. Sliding-window layers (Gemma 2, 3 and 4, gpt-oss, Mistral 7B v0.1) keep at most their window: on vLLM
+  the window plus the tokens in flight (two batches of up to 8,192), on llama.cpp `window x sequences + 512` cells
+  for all sequences, padded to 256. MLA models (DeepSeek V2 and V3, Kimi K2) keep one latent of
+  `kv_lora_rank + qk_rope_head_dim` values per token and layer, with no separate V, on every GPU of a replica (a
+  llama.cpp file needs `attention.key_length_mla`, which conversions since 2025 have). Hybrid and linear-attention
+  models (Qwen3-Next, Granite 4 hybrids, Falcon-H1, Jamba, Nemotron-H) grow with the context on their attention
+  layers only, plus a fixed *Recurrent state* per sequence (two on vLLM, for prefix caching), now its own line.
+  Gemma 4's KV-shared layers keep nothing of their own, and its full-attention layers are counted with their own
+  head size and KV heads. With fewer KV heads than GPUs, each GPU holds a whole head. Examples: Gemma 3 27B at a
+  context of 131,072 on vLLM, 62 to 16.9 GiB of KV cache; DeepSeek-V3 at 8,192 x 4, 53.4 to 2.1 GiB; Gemma 4 12B
+  at the defaults, 12.0 to 10.5 GiB (the recommended list's memory figures for Gemma 4 move with it). At vLLM's
+  default context Gemma 3 and gpt-oss do not change: the window plus what is in flight covers it. Falcon-H1 goes up
+  a little: its recurrent state was not counted. Plain models (Qwen3, Llama and the like) are estimated as before.
+  No migration: the layout is read when a model is added, so a model added before this keeps its old estimate
+  until it is added again.
+- **Memory is never promised twice** (#166):
+  - A GGUF model with some layers left on the CPU (*Layers on the GPU* below the model's) reserves the machine's RAM
+    for them as well: those layers, the output layer and their KV cache (and recurrent state), listed in the
+    estimate as `host_parts` and added up in its `ram`. A machine without that much RAM free is skipped with the
+    reason ("needs 1.30 GiB of RAM for the layers left on the CPU, …"), and until the replica is in the agent's
+    numbers that RAM is not promised to anything else. The token embeddings stay memory-mapped, as before.
+  - On an APU whose GPU memory is the machine's RAM (a unified-memory card that reports its GTT pool; the agent
+    picks GTT when it is larger than the BIOS carve-out), a reservation on the card counts against the RAM and one
+    on the RAM against the card, and the card never offers more than the RAM has free. A card that reports its
+    carve-out (`pool: vram`, as a Strix Halo with 96 GiB set aside) keeps memory Linux does not count as RAM, so the
+    two stay apart. An agent that does not say which pool it reports is taken to share the RAM.
+  - A deployment's estimate is made again from its recipe as it is now whenever a replica is placed (and when the
+    deployment is edited, even if no parameter changed): a custom recipe whose overhead was edited, a built-in one
+    changed by an upgrade, or a changed `GPU_CONTEXT_MIB` reach new placements. The deployment's events say when the
+    amount changed; replicas that run keep what they reserved and are not restarted for it.
+
 ## [1.4.4] — 2026-11-21
 
 More kinds of models, part 1. Zero-shot object detectors find the objects a request names: `/v1/vision/detect`

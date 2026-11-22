@@ -21,12 +21,12 @@
   顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和引擎映像檔以及它們的大小，可刪除那台機器上沒有部署在用的項目。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。連不到 Hugging Face、GitHub 或映像檔 registry 的機器會經由伺服器取得檔案和有釘選的引擎映像檔，伺服器只轉送、不存檔，另一台機器的快取裡有模型檔時就從那台取得；管理員也可以把映像檔上傳到機器，或從另一台機器複製映像檔。比伺服器舊的 agent 會被標示出來，機器頁面上會顯示更新它的確切指令。
 - **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。
 - **每個模型、每個引擎都有自己的頁面。** 目錄模型的頁面列出哪些機器已經快取它、一份副本現在放得進哪裡、它的部署、引擎和檔案；引擎的頁面列出它的變體，以及哪些機器已經有它的映像檔或程式。
-- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。
+- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。`/metrics` 提供 Prometheus 指標。一直離線的機器，它的副本會重新放到放得下的機器上。
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、`/v1/classify` 的文字分類（1.4.4）、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
 - **視覺模型（1.4）。** 物件偵測（1.4.4 起也有找你說的東西的偵測模型）、影像分割、深度估計與（1.4.4）圖片分類在 `/v1/vision/…`，像其他模型一樣部署。
-- **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。
+- **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。1.4.5 起，閘道也以 TLS 連每個副本，憑證由這個 CA 替那台機器簽發（金鑰絕不離開那台機器）。
 - **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
 ## 1.4 的新功能
@@ -38,7 +38,10 @@ API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器
 兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的引擎映像檔並能刪除舊的，
 安排副本時也會計算還有多少空的主機連接埠。1.4.3 讓目錄裡的每個模型和每個引擎都有自己的頁面：
 它在哪些機器上、每台機器放不放得下、誰在使用它。1.4.4 加入零樣本物件偵測（找出你指定的東西）、
-文字分類和影像分類。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+文字分類和影像分類。1.4.5 修正外部審閱找到的問題：閘道以 TLS 連到每個副本、副本會移出一直離線的機器、Prometheus 指標、
+記憶體的估算與保留都站得住，請求也不會被執行兩次（伺服器升級後請更新 agent）。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+
+**1.4 是長期支援版本線，支援到 2027-06-30：** 提供安全性修正與嚴重錯誤的修正（[支援中的版本](SECURITY.md#supported-versions)，英文）。
 
 ## 🚀 安裝
 
@@ -51,7 +54,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.4
+  docker.io/tonyhuang1101/forgeyard:1.4.5
 sudo docker logs forgeyard
 ```
 
@@ -86,6 +89,7 @@ curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
 ```bash
 sudo docker run -d --name forgeyard-agent --restart always --network host \
   --gpus all \
+  $(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset /dev/nvidia[0-9]*; do [ -e "$d" ] && printf -- '--device %s ' "$d"; done) \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v forgeyard-agent:/var/lib/forgeyard-agent \
   -v /srv/forgeyard-models:/srv/forgeyard-models \
@@ -93,7 +97,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.4
+  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
@@ -164,10 +168,11 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 - [HTTPS 與信任](docs/https-and-trust.md)（英文）：憑證授權單位、agent 的指紋、加密儲存的機密，以及
   [從 1.0 升級：用一般 HTTP 加入的 agent](docs/https-and-trust.md#upgrading-from-10-agents-that-joined-over-plain-http)。
 - [開發](docs/development.zh-TW.md)：建置、測試，以及程式碼結構。
+- [驗證過的硬體](docs/verified-hardware.zh-TW.md)：每個版本在哪些機器上驗收，以及結果。
 
 ## 已驗證的硬體
 
-每個版本都在真實的機器上檢查過，不只是跑 CI。目前為止：
+每個版本都在真實的機器上檢查過，不只是跑 CI；[驗證過的硬體](docs/verified-hardware.zh-TW.md)列出每個版本的驗收執行與通過的項目數。目前為止：
 
 | 硬體 | 軟體 | 測過的內容 |
 |---|---|---|

@@ -18,11 +18,17 @@ from typing import Optional
 from forgeyard import __version__
 from forgeyard.agent import config as agent_config
 from forgeyard.config import get_settings
-from forgeyard.install import images, wheel
+from forgeyard.install import images, requirements, wheel
 
 TEMPLATE = Path(__file__).with_name("install.sh")
 MODEL_CACHE = "/srv/forgeyard-models"
 # What install.sh may be told about the server: a plain https URL, nothing a shell would expand.
+# 1.4.5 (#202): `--device` for each NVIDIA device node of the host, listed by the shell where the command runs (a node
+# the host does not have is skipped: Docker refuses a --device that does not exist). Next to --gpus all: the NVIDIA
+# runtime hook behind --gpus sets up the device access behind Docker's and systemd's back, and the host's next
+# `systemctl daemon-reload` takes it from new processes in the container; a --device Docker records, so it stays.
+NVIDIA_DEVICES_SHELL = ("$(for d in /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset "
+                        "/dev/nvidia[0-9]*; do [ -e \"$d\" ] && printf -- '--device %s ' \"$d\"; done)")
 _SAFE_URL = re.compile(r"^https://([A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?(/[A-Za-z0-9._~\-/]*)?$")
 
 
@@ -31,12 +37,16 @@ def safe_server(url: str) -> bool:
 
 
 def install_script(server: str) -> str:
-    """install.sh for this server: its address, version and the wheel's checksum filled in."""
+    """install.sh for this server: its address, version and the checksums of the wheel and of the lists of its
+    dependencies filled in."""
     if not safe_server(server):
         raise ValueError(f"not a plain https:// address: {server!r}")
     name, _, sha = wheel.cached()
     out = TEMPLATE.read_text()
-    for key, value in (("SERVER", server), ("VERSION", __version__), ("WHEEL", name), ("WHEEL_SHA256", sha)):
+    reqs = requirements.served("agent-requirements.txt")[1]
+    nvidia = requirements.served("agent-requirements-nvidia.txt")[1]
+    for key, value in (("SERVER", server), ("VERSION", __version__), ("WHEEL", name), ("WHEEL_SHA256", sha),
+                       ("REQS_SHA256", reqs), ("REQS_NVIDIA_SHA256", nvidia)):
         out = out.replace(f"@@{key}@@", value)
     return out
 
@@ -98,7 +108,7 @@ def docker_command(server: str, token: str, fingerprint: Optional[str], kind: st
     when it starts a model container."""
     lines = ["docker run -d --name forgeyard-agent --restart always --network host"]
     if kind == "nvidia":
-        lines.append("--gpus all")
+        lines += ["--gpus all", NVIDIA_DEVICES_SHELL]
     elif kind == "amd":
         # Numeric ids: Docker looks group names up in the image's /etc/group, which has no
         # "render" ("Unable to find group render"). getent asks the host.

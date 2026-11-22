@@ -28,13 +28,16 @@ from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
-from forgeyard.machines.messages import (CacheRemovedIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn, ImageRemovedIn,
-                                         ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn)
+from forgeyard.machines.messages import (CacheRemovedIn, CertRequestIn, GpuCheckIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn,
+                                         ImageRemovedIn, ImageSavedIn, InventoryMsgIn, LogsIn, RelaySentIn, StatusIn,
+                                         same_end)
 from forgeyard.machines.protocol import (
+    AGENT_MESSAGES,
     CLOSE_BAD_MESSAGE,
     CLOSE_PROTOCOL,
     CLOSE_REPLACED,
     CLOSE_REVOKED,
+    FEATURE_GUARD_TLS,
     FEATURE_WORKLOADS,
     JOIN_PATH,
     MAX_MESSAGE_BYTES,
@@ -43,6 +46,7 @@ from forgeyard.machines.protocol import (
     STREAM_PATH,
 )
 from forgeyard.workloads import placement, state as wstate
+from forgeyard.security import replica_tls
 from forgeyard.security.client import client_ip
 from forgeyard.security.ratelimit import limiter, retry_after
 
@@ -142,7 +146,35 @@ def _hello(db: DbSession, node_id: int, hello: HelloIn, ip: str) -> Optional[dic
     from forgeyard.models import prefetch
 
     prefetch.on_hello(db, node)
-    return {"node_id": node.id, "name": node.name}
+    out = {"node_id": node.id, "name": node.name}
+    if FEATURE_GUARD_TLS in hello.features and FEATURE_WORKLOADS in hello.features:
+        # 1.4.5 (#163): the name its guards' certificate must carry and the CA that signs it; the agent asks for a
+        # certificate when it has none for both (security/replica_tls.py).
+        try:
+            replica_tls.ensure_ca()
+            out["replica_tls"] = {"name": replica_tls.binding_name(node), "ca": replica_tls.ca_fingerprint()}
+        except replica_tls.IssueError as e:
+            log.error("Machine %r serves its replicas over TLS, but no certificate can be made for it: %s", node.name,
+                      e.reason)
+            replica_tls.record_error(node, e.reason)
+    return out
+
+
+def _issue(db: DbSession, node_id: int, csr: str) -> Optional[dict]:
+    """1.4.5 ("guard_tls"): sign the machine's key guards' certificate. None: the machine was revoked."""
+    node = _live_node(db, node_id)
+    if node is None:
+        return None
+    try:
+        chain, info = replica_tls.issue(node, csr)
+    except replica_tls.IssueError as e:
+        replica_tls.record_error(node, e.reason)
+        log.warning("Refused a replica certificate for machine %r: %s", node.name, e.reason)
+        return {"ok": False, "code": e.code, "reason": e.reason}
+    replica_tls.record(node, info)
+    log.info("Signed the replica certificate of machine %r (%s, serial %s, until %s).", node.name, info["name"],
+             info["serial"][:16], info["not_after"][:10])
+    return {"ok": True, "chain": chain, "name": info["name"], "not_after": info["not_after"], "ca": info["ca"]}
 
 
 def _images_kept(db: DbSession, node_id: int, said) -> None:
@@ -177,6 +209,29 @@ def _inventory(db: DbSession, node_id: int, msg: InventoryMsgIn, ip: str) -> boo
     node.last_heartbeat_at = store.utcnow()
     node.status = "online"
     store.apply_inventory(db, node, msg.inventory)
+    return True
+
+
+def _gpu_check(db: DbSession, node_id: int, msg: GpuCheckIn) -> bool:
+    """1.4.5 (#202): the agent's GPU access check changed; kept in runtime_info["gpu_check"] (None: nothing to check).
+    When new processes can open the GPUs again, what was waiting for them is placed."""
+    node = _live_node(db, node_id)
+    if node is None:
+        return False
+    info = dict(node.runtime_info or {})
+    was = (info.get("gpu_check") or {}).get("ok")
+    if msg.gpu_check is None:
+        info.pop("gpu_check", None)
+    else:
+        info["gpu_check"] = msg.gpu_check
+    node.runtime_info = info
+    now = (msg.gpu_check or {}).get("ok")
+    if was is False and now is not False:
+        log.info("New processes on machine %s can open its GPUs again.", node.name)
+        db.commit()
+        placement.place_and_poke(db)
+    elif now is False and was is not False:
+        log.warning("New processes on machine %s cannot open its GPUs: %s", node.name, msg.gpu_check.get("reason"))
     return True
 
 
@@ -269,6 +324,11 @@ async def stream(ws: WebSocket):
     except WebSocketDisconnect:
         return
 
+    connection = hello.runtime_info.pop("connection", None)
+    if "address" in hello.runtime_info:
+        # 1.4.5 (#171): whether the agent runs on this server's own host (see messages.same_end); kept with the
+        # address its replicas are published on, for the setup advisor's loopback check.
+        hello.runtime_info["same_host"] = same_end(connection, (ws.client.host, ws.client.port) if ws.client else None)
     features = set(hello.features) & set(SERVER_FEATURES)
     conn = Connection(node_id, features=features)
     replaced = hub.attach(conn)
@@ -309,6 +369,8 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
     # agents up to 1.2.0 keep the highest revision they saw across connections and drop any lower
     # list without a word, so they took no new work until the count caught up.
     revision = time.time_ns() // 1_000_000
+    ignored: set[str] = set()  # message types this server does not know, already warned about
+    certified = 0.0            # 1.4.5: when this connection last got a certificate (monotonic)
     try:
         while True:
             if recv is None:
@@ -357,6 +419,8 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     ok = changed is not None
                     if changed:
                         conn.dirty.set()
+                elif kind == "gpu_check" and workloads:
+                    ok = await run_in_threadpool(_db_call, _gpu_check, node_id, _parse(text, GpuCheckIn))
                 elif kind == "logs" and workloads:
                     answer = _parse(text, LogsIn)
                     conn.answer(answer.request_id, answer.model_dump())
@@ -377,6 +441,21 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     sent = _parse(text, RelaySentIn)
                     ok = True
                     conn.answer(sent.request_id, sent.model_dump())
+                elif kind == "cert_request" and workloads and FEATURE_GUARD_TLS in conn.features:
+                    asked = _parse(text, CertRequestIn)
+                    ok = True
+                    if certified and time.monotonic() - certified < replica_tls.ISSUE_EVERY:
+                        answer = {"ok": False, "code": "too_often",
+                                  "reason": f"one certificate per {replica_tls.ISSUE_EVERY:g} s on a connection"}
+                    else:
+                        answer = await run_in_threadpool(_db_call, _issue, node_id, asked.csr)
+                        if answer is None:
+                            ok = False
+                        elif answer["ok"]:
+                            certified = time.monotonic()
+                    if answer is not None:
+                        await ws.send_json({"v": PROTOCOL_VERSION, "type": "certificate",
+                                            "request_id": asked.request_id, **answer})
                 elif kind in ("image_listed", "image_saved", "image_removed") and workloads:
                     said = _parse(text, {"image_listed": ImageListedIn, "image_saved": ImageSavedIn,
                                          "image_removed": ImageRemovedIn}[kind])
@@ -384,8 +463,16 @@ async def _serve(ws: WebSocket, conn: Connection, node_id: int, ip: str) -> None
                     if kind != "image_saved" and said.ok:  # 1.4.3 (#140): the listing the server keeps
                         await run_in_threadpool(_db_call, _images_kept, node_id, said)
                     conn.answer(said.request_id, said.model_dump())
+                elif isinstance(kind, str) and kind not in AGENT_MESSAGES:
+                    # 1.4.5 (#170): a newer agent's message this server does not know. Ignored, with one warning
+                    # per kind and connection; refused, the agent would reconnect and send it again forever.
+                    if kind not in ignored and len(ignored) < 16:
+                        ignored.add(kind)
+                        log.warning("Machine %s sent a message this server does not know (%r); ignored. "
+                                    "A newer agent? Update the server.", node_id, kind[:40])
+                    ok = True
                 else:
-                    raise ValueError(f"unknown message type {kind!r}")
+                    raise ValueError(f"message type {kind!r} not expected here")
             except _ProtocolMismatch:
                 await _error_close(ws, CLOSE_PROTOCOL, "protocol_unsupported", "Protocol version changed mid-connection.")
                 return
