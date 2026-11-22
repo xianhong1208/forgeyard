@@ -160,14 +160,15 @@ def test_fy_slc_002_the_advisor_points_an_idle_gpu_deployment_at_sleep_when_idle
 
     used_on(d["id"], 2)                                    # Usage: a request two days ago
     assert found("deployment-idle-awake") == []
-    used_on(d["id"], 0, requests=0)                        # a row without requests (a key's limit only) is not use
-    assert found("deployment-idle-awake") == []
     db = new_session()
     try:
         db.query(UsageDaily).delete()
         db.commit()
     finally:
         db.close()
+    used_on(d["id"], 0, requests=0)                        # a row without requests today is not use
+    assert len(found("deployment-idle-awake")) == 1
+    age("chat", 10)
     used_on(d["id"], 5)                                    # five days ago: the end of that day counts, so four
     [f] = found("deployment-idle-awake")
     assert f.title.startswith("chat had no requests for 4 days")
@@ -186,6 +187,7 @@ def test_fy_slc_002_the_advisor_points_an_idle_gpu_deployment_at_sleep_when_idle
     assert c.post(f"/api/deployments/{d['id']}/stop").status_code == 200
     assert found("deployment-idle-awake") == []
     set_replica("chat", 0, state="healthy")                # its agent has not stopped it yet: still a person's Stop
+    age("chat", 10)
     assert found("deployment-idle-awake") == []
 
 
