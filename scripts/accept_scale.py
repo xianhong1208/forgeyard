@@ -679,14 +679,14 @@ def model_waking(sc: Scale, d: dict, key: str, label: str, last: Optional[float]
     r = sc.c.request("PATCH", f"/api/deployments/{d['id']}", {"params": {"wake_wait": ww}})
     shown = (((r.data or {}).get("deployment") or {}).get("sleep") or {}).get("wake_wait") if r.status == 200 else None
     shown = shown if shown is not None else (sc.dep(d["id"])["deployment"]["sleep"].get("wake_wait") if r.status == 200 else None)
-    sc.check(f"5 {label}: wake_wait {ww} s is saved, nothing restarts (sleep.wake_wait)", r.status == 200 and shown == ww,
+    sc.check(f"5 {label}: wake_wait {ww} s is saved (sleep.wake_wait)", r.status == 200 and shown == ww,
              f"{r.status} {r.code()} sleep.wake_wait {shown}, restart {(r.data or {}).get('restart')}")
     if r.status != 200:
         return
     call = sc.chat(key, d["served_name"], timeout=ww + 120)
     ok_ra, ra = retry_after_ok(call.retry_after, last)
     sc.check(name, call.status == 503 and call.code == "model_waking" and ok_ra and ww - 1 <= call.seconds <= ww + 20,
-             f"{call.brief()}; {ra}")
+             f"{ra}; {call.brief()}")
     sc.c.request("PATCH", f"/api/deployments/{d['id']}", {"params": {"wake_wait": None}})
     if sc.wait_ready(d, "ready after the 503 (the wake carries on)"):
         c2 = sc.chat(key, d["served_name"])
