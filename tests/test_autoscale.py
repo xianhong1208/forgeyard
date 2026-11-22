@@ -440,6 +440,8 @@ def test_fy_asc_010_down_needs_the_load_to_fit_one_fewer(cpus, run):
     two(c, run)
     run.load("chat", 1, 0)
     assert run.run(1300) == [] and len(rows("chat")) == 2
+    run.load("chat", 0, 1)   # the same on the newest one: the 10-minute average decides, not where it runs
+    assert run.run(1300) == [] and len(rows("chat")) == 2
     run.load("chat", 0, 0)
     done = run.run(600)
     assert any(x.startswith("Draining replica 1") for x in done), done
