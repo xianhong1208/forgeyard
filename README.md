@@ -39,6 +39,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
+- **GPUs used only while needed (1.5.0).** A deployment can sleep when nobody calls it and give its
+  memory back; the next request wakes it and waits for the answer (or goes to the cloud meanwhile, when
+  the key may), and a model that cannot wake says why at once.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, text classification at
   `/v1/classify` (1.4.4), speech to text, text to speech, image generation, video generation as jobs, and
   vision models: object detection (1.4.4: also detectors that find what you name), segmentation, depth and

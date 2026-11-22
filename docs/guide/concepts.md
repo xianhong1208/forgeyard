@@ -244,22 +244,46 @@ by default**, for deployments made before 1.5.0 and new ones alike; turned on, t
 unless you set another (1 to 1,440 minutes). Changing either restarts nothing.
 
 - **What counts as use:** every request the gateway takes for the model, from any key or the Playground (also one
-  that then went to a cloud tier, and while it waits in line or in the image queue), a video asked for, and *Try
-  it*. `/v1/models`, health checks, the console's pages and polls of a video job do not.
+  that then went to a cloud tier, and while it waits in line, in the image queue or for the model to wake), a video
+  asked for, and *Try it*. `/v1/models`, health checks, the console's pages and polls of a video job do not, and
+  neither does a request the gateway refused at once (the deployment was stopped, it cannot wake, nothing serves
+  that endpoint).
 - **When it sleeps:** once no request came for the idle time, counted from the last request, or from when the
   deployment was started, changed or became ready, whichever is later. Not while a request is in flight, a replica
   is starting, an edit is restarting its replicas, or (video) a job is waiting or being made, or a finished video
   can still be downloaded (it would be lost with the replica). The server checks every 30 seconds.
 - **After a server restart** every idle time counts from the restart: the server keeps the last request time in
   its memory, so a restart never puts a model to sleep early.
-- **Asleep is not stopped.** An asleep model stays in `/v1/models`. In 1.5.0's first steps a request to it
-  answers **503 `model_asleep`**; **Start** (on its page: **Wake**) wakes it, on the machine it ran on when that
-  still has room, or on its pinned machine. Waking on the next request comes later in 1.5.0. **Stop** on an asleep
-  deployment makes it stopped: then requests answer that it is stopped and it leaves `/v1/models`, as before.
+- **Asleep is not stopped.** An asleep model stays in `/v1/models`, and **the next request wakes it** (below);
+  so does **Start** (on its page: **Wake**). It wakes on the machine it ran on when that still has room, or on its
+  pinned machine. **Stop** on an asleep deployment makes it stopped: then requests answer that it is stopped, never
+  wake it, and it leaves `/v1/models`, as before.
 - **While it sleeps its memory is free**, and another deployment (or, on a shared card, something outside
   Forgeyard) may take it. Then it starts elsewhere if it fits there, or waits for room like any replica.
 - Going to sleep is recorded in the deployment's events (*Asleep: no requests for 30 min; frees 14.4 GiB on gpu-01
-  GPU #4*), not in the audit log: no person did it. Waking with Start is audited as a start.
+  GPU #4*), not in the audit log: no person did it. Waking with Start is audited as a start; a wake by a request is
+  the event *Woken by a request (key laptop)*.
+
+### Waking on a request
+
+A request to an asleep model wakes it, and the client gets its answer once the model is ready:
+
+- **One wake** however many requests arrive at the same time: the first wakes it, the others see the wake under way.
+- **Requests wait** for it, first come first served, up to the deployment's *wait while it wakes* (`wake_wait`,
+  **5 minutes** by default, 10 seconds to 30 minutes). Nothing is sent to the client while it waits: the answer
+  (a stream too) starts with the model's own status, so clients see a normal 200 or a real error, only later.
+- **A key that may use a cloud tier** (cloud `fallback` or `on`) on a route that has one is served by the cloud
+  meanwhile (`X-Forgeyard-Spilled: waking`), and comes back to the local model once it is ready. Structured output
+  a provider would lose is never spilled; it waits. A request whose cloud target fails, or whose budget is used up,
+  waits for the local model too.
+- **When it cannot wake** (no machine has room for it now, the machine it is pinned to is offline, its engine fails
+  to start) the request gets **503 `cannot_wake`** at once, with the reason, instead of waiting 5 minutes. It stays
+  woken and starts when room appears, or goes back to sleep after its idle time; the next request tries again.
+- **When the wait runs out**, 503 **`model_waking`** with `Retry-After`: the seconds its last start took, minus what
+  has passed (at least 5).
+- A client that gives up leaves the line; the wake carries on. Rate limits count the request once, when it arrives.
+- Choose `wake_wait` by the clients in front of it: one behind a proxy that cuts a request after 60 s needs a shorter
+  wait (it then gets `model_waking` and can retry), or a cloud tier, or sleep off.
 
 ## Images, audio and video in chat
 

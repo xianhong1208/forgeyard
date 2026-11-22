@@ -734,7 +734,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 502 | `provider_unreachable` | The provider could not be reached | Retry later |
 | 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
 | 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
-| 503 | `model_asleep` | 1.5.0: the model's deployment is asleep (*Sleep when idle*: nobody used it for its idle time). It stays in `/v1/models`. Like any tier without a ready replica, the request spills to a cloud tier the key may use | Wake it with **Start** on its page ([Sleep when idle](#sleep-when-idle)) |
+| 503 | `model_waking` | 1.5.0: the model's deployment was asleep (*Sleep when idle*) and the request woke it, but it was not ready within the deployment's `wake_wait` (5 minutes by default), or too many requests (256) wait for it already. `Retry-After`: its last start time minus what has passed | Retry after the time given; give clients a longer timeout, or the route a cloud tier ([Sleep when idle](#sleep-when-idle)) |
+| 503 | `cannot_wake` | 1.5.0: the model was asleep and cannot wake now; the message says why: *Cannot be placed: …* (no machine has room for it any more), *it is pinned to …, which is offline*, or its engine failing (*replica 0 on …: backoff …*). Answered at once, not after the wait | Free memory, bring the machine back, or look at the deployment's events; the deployment stays woken and starts when it can |
 | 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it. Carries `Retry-After: 1` | Retry after `Retry-After` seconds |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
@@ -775,9 +776,12 @@ they end:
 | `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`, `model` | From the request's arrival to its end; for a video job, from its creation to its end |
 | `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`, `model` | From the request's arrival to the first bytes of the answer from the replica or provider: a stream's first chunk, otherwise its status line. Only requests that got an answer |
 | `forgeyard_gateway_tokens_total` | counter | `model`, `direction` | Tokens the engine or provider reported: `in` the prompt, `out` the completion |
-| `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `refused`, `too_long`, `budget` |
+| `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `waking` (1.5.0), `refused`, `too_long`, `budget` |
 | `forgeyard_gateway_waiting` | gauge | `model` | Requests waiting in line for a free local slot now (all the route's tiers) |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
+| `forgeyard_gateway_waking` | gauge | `model` | 1.5.0: requests waiting for their asleep model to wake now |
+| `forgeyard_gateway_wake_wait_seconds` | histogram | `model` | 1.5.0: how long each of them waited (then served, or it gave up) |
+| `forgeyard_deployment_wakes_total` | counter | `deployment`, `by` | 1.5.0: asleep deployments woken, `by` `request` or `person` (Start, Wake) |
 
 When a replica of a model deployment becomes ready (1.5.0):
 
@@ -983,7 +987,7 @@ value.
 
 | Field | Value |
 |---|---|
-| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list), `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing), and (1.5.0) `sleep_when_idle` and `idle_minutes` ([Sleep when idle](#sleep-when-idle); changing them restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list), `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing), and (1.5.0) `sleep_when_idle`, `idle_minutes` and `wake_wait` ([Sleep when idle](#sleep-when-idle); changing them restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
 | `replicas` | 1 to 16 |
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
@@ -1031,15 +1035,16 @@ or `server` when the agent is older than 1.5.0 and the server measured the engin
 
 ### Sleep when idle
 
-1.5.0 ([concepts](concepts.md#sleep-when-idle)). Two parameters of every deployment, set on deploy
+1.5.0 ([concepts](concepts.md#sleep-when-idle)). Three parameters of every deployment, set on deploy
 (`POST /api/deployments`, in `params`) or with a change; the server reads them, so changing them restarts nothing:
 
 | Parameter | Value |
 |---|---|
 | `sleep_when_idle` | `true` turns it on; `false` (or `null`, or leaving it out) turns it off. Off by default, also for deployments made before 1.5.0. Kept in `params` only while on |
 | `idle_minutes` | Minutes without a request before it sleeps: 1 to 1,440, **30** when left out. Kept while sleep is off too, for when it is turned on |
+| `wake_wait` | Seconds a request waits for the asleep model to wake before 503 `model_waking`: 10 to 1,800, **300** when left out |
 
-Anything else is 422 `invalid_params` (`"yes"`, `1`, `0`, `1441`, `1.5`).
+Anything else is 422 `invalid_params` (`"yes"`, `1`, `0`, `1441`, `1.5`; `wake_wait` `9` or `1801`).
 
 An asleep deployment's workload has `desired_state` **`asleep`** and `status` `asleep` (`stopping` until its
 agents confirm), beside `running` and `stopped`; its replicas are `stopped`. Scripts that read `desired_state`
@@ -1048,18 +1053,21 @@ deployment a `sleep` object:
 
 | Field | What it is |
 |---|---|
-| `on`, `idle_minutes` | The setting (30 when not set) |
+| `on`, `idle_minutes`, `wake_wait` | The settings (30 minutes and 300 seconds when not set) |
 | `asleep` | It is asleep now |
 | `last_request_at` | The last request this server saw for it since it started, or `null` |
 | `since` | From when its idle time counts: the last request, its last start or change, a replica becoming ready, or the server's start, whichever is latest |
 | `sleeps_at` | When it goes to sleep if nothing uses it (only while it runs with sleep on), checked every 30 s |
 | `held_by` | Why it does not sleep right now although it may be idle long enough: *a request is in flight*, *a replica is starting*, *an edit is restarting its replicas*, *a video is waiting or being made*, *a finished video is kept until …*; `null` otherwise |
+| `waking` | While a request (or Wake) woke it and no replica is ready yet: `{since, by, waiting, expected_seconds}`: when the wake began, who woke it (*a request (key laptop)*, *a request from the Playground (owner)*, or the person's user name), how many requests wait for it, and how long its start is expected to take (its last start, 30 s when none was measured). `null` otherwise (this server's memory: `null` after a restart) |
 
 `POST /api/deployments/{id}/start` on an asleep deployment wakes it (event *Woken by …*, audited as
 `workload.started` with `woken: true` and `deployment.started`); `POST …/stop` makes it stopped (event *Stopped by
 … (it was asleep)*). Going to sleep is the event *Asleep: no requests for N min; frees …* and is not audited. `POST
-…/try` on an asleep deployment answers 409 `model_asleep`. A request through the gateway answers 503
-`model_asleep` ([Errors](#errors)).
+…/try` on an asleep deployment answers 409 `model_asleep`. A request through the gateway (also `POST /v1/videos`)
+wakes it: the event *Woken by a request (key …)* (not audited), then it waits for a ready replica, spills to a cloud
+tier the key may use (`X-Forgeyard-Spilled: waking`), or answers 503 `cannot_wake` / `model_waking`
+([Errors](#errors)). `/v1/models`, health checks and the console's pages never wake it, nor a stopped deployment.
 
 **Downgrade:** a server older than 1.5.0 reads `asleep` as stopped: the model is not listed, a request answers 503
 `no_ready_replica` *The deployment is stopped*, and Start starts it.

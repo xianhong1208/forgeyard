@@ -15,7 +15,7 @@ from typing import Optional, Union
 import httpx
 from starlette.responses import Response
 
-from forgeyard.gateway import imagegen, speech, waiting
+from forgeyard.gateway import imagegen, speech, waiting, waking
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.body import streams, upstream_body
 from forgeyard.gateway.errors import GatewayError
@@ -27,15 +27,6 @@ from forgeyard.gateway.upstream import (RETRYABLE, SENT_BROKE, ClientGone, Engin
 log = logging.getLogger("forgeyard.gateway")
 
 LOCAL_BUSY_RETRY_AFTER = 1   # seconds, on 503 local_busy: a slot of a text deployment frees up quickly (1.4.5)
-
-
-def asleep_error(served_name: str, groups: list[LocalGroup]) -> GatewayError:
-    """503 model_asleep (1.5.0, #37): the model's deployment is asleep because nobody used it. Until waking on a
-    request comes, an operator wakes it with Start on its page."""
-    names = ", ".join(dict.fromkeys(g.name for g in groups))
-    return GatewayError(503, "model_asleep", f"{served_name!r} is asleep: its deployment {names} had no requests for "
-                                             "a while and stopped to free its memory. Wake it with Start on its page "
-                                             "in the console (Serving).")
 
 
 class ReplicaSending:
@@ -115,11 +106,23 @@ class ReplicaSending:
     async def local(self, tier: Tier, *, can_move_on: bool) -> Union[Response, Failed]:
         route, parsed = self.route, self.parsed
         pairs = [(g, t) for g in tier.locals for t in g.replicas]
+        sleepy = waking.sleepy(tier.locals) if not pairs else []
+        if sleepy:
+            # 1.5.0 (#37): asleep because nobody used it, or being woken. This request wakes it (once for
+            # everyone), then spills while it wakes when it may move on, or else waits for a ready replica.
+            self.used = True
+            by = waking.by_of(self.caller)
+            await waking.ask(sleepy, by)
+            if can_move_on:
+                return Failed("waking", waking.waking_error(route.served_name, sleepy))
+            try:
+                fresh = await waking.until_awake(self.request.receive, f"{route.served_name}#{tier.index}",
+                                                 route.served_name, tier.locals, sleepy, by)
+            except ClientGone:
+                return self.gone()
+            tier = Tier(tier.index, fresh, list(tier.clouds))
+            pairs = [(g, t) for g in tier.locals for t in g.replicas]
         if not pairs:
-            asleep = [g for g in tier.locals if g.asleep]
-            if asleep:
-                # 1.5.0 (#37): asleep because nobody used it. It spills like any tier without a ready replica.
-                return Failed("unavailable", asleep_error(route.served_name, asleep))
             reason = "; ".join(g.reason for g in tier.locals if g.reason)
             return Failed("unavailable", GatewayError(503, "no_ready_replica",
                                                       f"{route.served_name!r} has no ready replica. {reason}".strip()))
@@ -178,6 +181,7 @@ class ReplicaSending:
                 if self._ticket is None:
                     limit = sum(g.draws.queue for g in tier.locals if g.draws is not None)
                     self._ticket = q.join(limit)
+                    self.used = True    # 1.5.0: waiting in the queue is use (also when it is full: demand)
                     if self._ticket is None:
                         slots = sum(caps.get(t.uid) or 1 for t in remaining)
                         raise GatewayError(429, "queue_full",
@@ -209,6 +213,7 @@ class ReplicaSending:
                 left = deadline - time.monotonic()
                 if left > 0 and line is not None and self._place is None:
                     self._place = line.join()   # None: the line is full, so it does not wait
+                    self.used = True            # 1.5.0: waiting for a slot is use
                     if self._place is not None:
                         continue    # in line: look once more, so a slot freed meanwhile is not missed
                 if left > 0 and self._place is not None:
@@ -269,6 +274,7 @@ class ReplicaSending:
                 req = http.build_request("POST", f"{pick.url}{path}", content=body, headers=headers,
                                          timeout=timeout, extensions=pick.ext)
                 self.sent_at = time.monotonic()
+                self.used = True    # 1.5.0: sent to a replica, so the deployment was used (sleep when idle)
                 sending = http.send(req, stream=True) if first is None else self.send_first(http, req, first)
                 response = await unless_gone(self.request.receive, sending)
             except ClientGone:

@@ -19,7 +19,7 @@ from forgeyard.gateway.keys import KeyCaller
 from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
 from forgeyard.models import modalities
 from forgeyard.security import replica_tls
-from forgeyard.workloads import offline
+from forgeyard.workloads import offline, sleep
 
 # /v1/<endpoint> -> (the route protocol it needs, the body it takes)
 ENDPOINTS: dict[str, tuple[str, str]] = {
@@ -70,6 +70,7 @@ class LocalGroup:
     draws: Optional[imagegen.Draws] = None          # image generation: caps, default size, queue (1.3)
     films: Optional[videogen.Films] = None          # video generation: caps, default size and length (1.3)
     first_answer: float = FIRST_ANSWER_DEFAULT      # seconds to start answering once sent (1.4.5)
+    wake_wait: int = 300                            # seconds a request waits for it to wake (1.5.0, its wake_wait)
 
 
 @dataclass
@@ -194,7 +195,8 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
                       # 1.5.0: an asleep model is still served (listed; a request may wake it), a stopped one not.
                       running=w.desired_state in ("running", "asleep"), asleep=w.desired_state == "asleep",
                       speaks=speaks, draws=draws, films=films,
-                      first_answer=float(_int(params.get("first_answer_timeout")) or FIRST_ANSWER_DEFAULT))
+                      first_answer=float(_int(params.get("first_answer_timeout")) or FIRST_ANSWER_DEFAULT),
+                      wake_wait=sleep.wake_wait_of(params))
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
