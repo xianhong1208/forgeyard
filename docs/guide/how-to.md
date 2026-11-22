@@ -1467,6 +1467,16 @@ What to know before you run it:
 - The console checks need Playwright for Python and Chrome (`--chrome`, default
   `/opt/google/chrome/chrome`); `--install-playwright` puts Playwright, like the OpenAI SDK, in a
   virtual environment of the script's own (`--venv`). Without it, the console group is skipped.
+- **Replica ports are called the way the gateway reaches them.** On a machine whose agent serves TLS (1.4.5), the
+  key guard checks (here and in `scripts/accept_*.py`) connect over TLS to the replica's address, with the
+  machine's binding name (`m<id>-<hash>.replica.forgeyard.invalid`, from **Machines**) as the name the certificate
+  must carry, trusting only Forgeyard's CA. Each such port also gets three checks: plain HTTP is refused, the
+  certificate verifies with that machine's name, and another machine's name (when two machines serve TLS) and a
+  name no machine has are refused. A machine with an older agent is called with plain HTTP as before, with an
+  information line that its traffic is not encrypted. The CA is the one given with `--ca`; when the server uses its
+  own certificate or `TLS=off`, point `FORGEYARD_REPLICA_CA` at the server's `data/tls/ca.crt`. Without any CA the
+  calls still run, and the certificate checks are skipped. Only a port that cannot be reached at all is skipped as
+  another network's; one that closes the connection or shows a wrong certificate fails.
 
 ## Scrape Forgeyard with Prometheus
 

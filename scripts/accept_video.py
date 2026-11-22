@@ -56,6 +56,7 @@ sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import GIB, Client, Fail, log, machine  # noqa: E402
 from accept_m4 import ensure_sdk, raw_post, wait_all_ready  # noqa: E402
+import replica_port  # noqa: E402
 
 PREFIX = "accept-video-"
 PROMPT = "A red kite flying over a green hill on a sunny day, slow camera pan"
@@ -411,8 +412,12 @@ def exercise(c: Client, d: dict, model: str, spec: dict, size: str, args, check,
             check(f"{model}: another key's video is not found ({label})", getattr(e, "code", None) == "video_not_found",
                   f"404 {getattr(e, 'code', None)}")
     check(f"{model}: another key lists none of it", v.id not in [x.id for x in other.videos.list()])
+    # the replica's own port without its internal key, reached as the gateway reaches it (1.4.5: TLS on a TLS machine)
+    rp = replica_port.Replicas.of(c, c.server, accept_m3.TLS)
     for e in d["endpoints"]:
-        s, text = raw_post(f"{e['url']}/v1/videos", b"prompt=hi", "application/x-www-form-urlencoded", timeout=20)
+        p = rp.endpoint(e)
+        replica_port.record(rp.transport_checks(p, f"{model}: replica {e['replica']} on {e['machine']}"), check)
+        s, text = rp.post(p, "/v1/videos", b"prompt=hi", "application/x-www-form-urlencoded", timeout=20)
         check(f"{model}: replica {e['replica']} on {e['machine']} without the key is refused", s in (401, 403),
               f"{s} {text[:80]}")
 

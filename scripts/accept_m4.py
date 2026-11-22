@@ -14,7 +14,9 @@ Through Forgeyard's API only (an admin session), it:
      revoked key getting 401 on the very next call;
   4. calls every replica's own port without its internal key (must be refused), also on the paths
      vLLM itself leaves open (/invocations, /rerank, /pooling): the agent's key guard must answer 401
-     there too;
+     there too. A machine whose agent serves TLS (1.4.5) is reached over TLS with its binding name, as the
+     gateway does, and must refuse plain HTTP and show a certificate from Forgeyard's CA for that machine
+     only (scripts/replica_port.py); an older agent's plain port gets an information line;
   5. checks model allowlists: a key limited to one deployment lists and reaches only that one (403
      model_not_allowed for the others); a key made before any of the deployments, with no list,
      sees and reaches every one of them;
@@ -60,6 +62,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import accept_m3  # noqa: E402
 from accept_m3 import CLIP, GIB, MODELS as M3_MODELS, Client, Fail, ensure_model, log, machine, the_card  # noqa: E402
+import replica_port  # noqa: E402
 
 SDK_SPEC = "openai>=2,<4"
 GPU_KEYS = ("chat", "embed", "rerank", "asr")
@@ -228,9 +231,9 @@ def main() -> int:
     report: dict = {"server": args.server, "machine": m["name"], "second_machine": m2["name"], "card": card["index"],
                     "sdk": f"openai {openai.__version__}", "checks": [], "deployments": {}}
 
-    def check(name: str, ok: bool, detail="", info: bool = False) -> None:
-        report["checks"].append({"check": name, "ok": bool(ok), "detail": detail, "info": info})
-        tag = "INFO" if info else ("PASS" if ok else "FAIL")
+    def check(name: str, ok: bool, detail="", info: bool = False, skip: bool = False) -> None:
+        report["checks"].append({"check": name, "ok": bool(ok), "detail": detail, "info": info or skip, "skip": skip})
+        tag = "SKIP" if skip else "INFO" if info else ("PASS" if ok else "FAIL")
         log(f"{tag}  {name}" + (f"  ({detail})" if detail else ""))
 
     try:
@@ -392,23 +395,26 @@ def main() -> int:
         except openai.AuthenticationError as e:
             check("a revoked key gets 401 on the very next call", True, str((e.body or {}).get("code")))
 
-        # ---- replicas cannot be used around the gateway
+        # ---- replicas cannot be used around the gateway, reached as the gateway reaches them (1.4.5, #163: TLS
+        # with the machine's binding name when its agent serves TLS, plain HTTP for an older one)
+        rp = replica_port.Replicas.of(c, args.server, accept_m3.TLS)
         probes = {"chat": ("/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
                   "cpu": ("/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}),
                   "embed": ("/v1/embeddings", {"input": "x"}),
                   "rerank": ("/v1/rerank", {"query": "q", "documents": ["a"]})}
         for key, d in deps.items():
             for e in d["endpoints"]:
-                base = e["url"].rstrip("/")
+                p = rp.endpoint(e)
+                replica_port.record(rp.transport_checks(p, f"{d['name']} #{e['replica']} on {e['machine']}"), check)
                 if key == "asr":
                     body, ctype = multipart({"model": d["route"]["upstream_model"]}, "file", CLIP)
-                    s, text = raw_post(base + "/v1/audio/transcriptions", body, ctype)
+                    s, text = rp.post(p, "/v1/audio/transcriptions", body, ctype, timeout=60)
                     # The guard answers 401; without it speaches itself answers 403 to a missing key.
                     ok = s == 401 if e.get("guarded") else s in (401, 403)
                 else:
                     path, payload = probes[key]
-                    s, text = raw_post(base + path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
-                                       "application/json")
+                    s, text = rp.post(p, path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
+                                      "application/json", timeout=60)
                     ok = s == 401
                 check(f"{d['name']} #{e['replica']} on {e['machine']}: direct call without the internal key is refused",
                       ok, f"{s} {text[:80]}")
@@ -417,13 +423,14 @@ def main() -> int:
                       ("/rerank", {"query": "q", "documents": ["a"]}), ("/pooling", {"input": "x"}))
         for key, d in deps.items():
             for e in d["endpoints"]:
-                base = e["url"].rstrip("/")
+                p = rp.endpoint(e)
                 for path, payload in open_paths:
-                    s, text = raw_post(base + path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
-                                       "application/json")
+                    s, text = rp.post(p, path, json.dumps({"model": d["route"]["upstream_model"], **payload}).encode(),
+                                      "application/json", timeout=60)
                     check(f"{d['name']} #{e['replica']} on {e['machine']}: {path} without the key is refused by the guard",
                           s == 401 and "replica_key_required" in text, f"{s} {text[:80]}")
-                s, text = raw_post(base + "/invocations", b"{}", "application/json", {"Authorization": f"Bearer {k['key']}"})
+                s, text = rp.post(p, "/invocations", b"{}", "application/json", {"Authorization": f"Bearer {k['key']}"},
+                                  timeout=60)
                 check(f"{d['name']} #{e['replica']}: a client's API key does not open the replica's port", s == 401,
                       f"{s} {text[:60]}")
 
