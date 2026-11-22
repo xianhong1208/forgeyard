@@ -36,6 +36,7 @@ class FakeEngine:
         # Set to a threading.Event: a non-streamed answer waits until the test sets it (at most 30 s),
         # so a test can hold a replica busy for exactly as long as it needs, not a guessed time.
         self.gate: Optional[threading.Event] = None
+        self.held: list[dict] = []  # the body of each non-streamed request held at its gate, once it waits there
         self.usage = usage or USAGE
         self.status: Optional[int] = None   # answer every request with this status instead
         self.retry_after: Optional[str] = None  # sent with `status`
@@ -88,8 +89,10 @@ class FakeEngine:
                     if engine.gate is not None and engine.gate_streams:
                         engine.gate.wait(30)   # not even the headers until the test opens it (1.4.5)
                     return self._stream(body)
-                if engine.gate is not None:
-                    engine.gate.wait(30)
+                gate = engine.gate      # read once: a test may give later requests another gate
+                if gate is not None:
+                    engine.held.append(body)
+                    gate.wait(30)
                 if engine.hold:
                     time.sleep(engine.hold)
                 if self.path in ("/v1/chat/completions", "/v1/completions"):
