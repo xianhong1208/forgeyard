@@ -242,3 +242,20 @@ def test_fy_slc_005_both_findings_are_documented_and_registered():
     names = {fn.__name__ for fn in advisor.CHECKS}
     assert {"deployment_idle_awake", "deployment_wakes_often"} <= names
     assert advisor.IDLE_HINT == timedelta(days=3) and advisor.WAKES_OFTEN == 10 and advisor.SLOW_START == 60.0
+
+
+def test_fy_slc_006_get_started_counts_an_asleep_deployment_as_deployed(cpu):
+    """FY-SLC-006: Get started's "Deploy it" stays done while the only deployment sleeps (it was ready; Wake now
+    starts it), and says it is asleep; a person's Stop still makes it not ready."""
+    c = cpu
+    d = deploy(c, "chat", **{**CPU_BODY, "params": {**CPU_BODY["params"], **ON, "idle_minutes": 1}})["deployment"]
+    ready("chat", 0)
+
+    def step():
+        return next(s for s in c.get("/api/onboarding").json()["steps"] if s["id"] == "deploy")
+
+    assert step()["done"] and step()["detail"] == "Ready: chat."
+    assert sleep.sweep_once(now=utcnow() + timedelta(minutes=10)) == ["chat"]
+    assert step()["done"] and step()["detail"] == "Ready: chat (asleep)."
+    assert c.post(f"/api/deployments/{d['id']}/stop").status_code == 200
+    assert not step()["done"]

@@ -40,7 +40,8 @@ version until 1.0.
   with what it holds when awake. Two setup-advisor notes: `deployment-idle-awake` (sleep off, no request for 3 days,
   holds GPU memory: let it sleep?) and `deployment-wakes-often` (woken more than 10 times in a day and its last
   start took over a minute: raise its idle time). The deployment API's `sleep` object gains `asleep_since`,
-  `waking`, `woken_at` and `wakes`.
+  `waking`, `woken_at` and `wakes`. Get started's *Deploy it* stays done while a deployment sleeps (*Ready: chat
+  (asleep).*).
 
 ## [1.4.5] — 2026-11-22
 

@@ -116,9 +116,11 @@ def deploy_step(db: DbSession, can_deploy: bool, has_model: bool) -> dict:
     ready, waiting = [], []
     for d in deps:
         s = wstate.summary(d.workload)
-        (ready if s["ready"] > 0 and d.workload.desired_state == "running" else waiting).append((d, s))
+        # 1.5.0 (#37): an asleep deployment was ready and wakes on Wake now: it is deployed.
+        done = (s["ready"] > 0 and d.workload.desired_state == "running") or d.workload.desired_state == "asleep"
+        (ready if done else waiting).append((d, s))
     if ready:
-        detail = f"Ready: {', '.join(d.name for d, _ in ready)}."
+        detail = f"Ready: {', '.join(d.name + (' (asleep)' if d.workload.desired_state == 'asleep' else '') for d, _ in ready)}."
     elif waiting:
         detail = "Not ready yet: " + ", ".join(f"{d.name} ({s['status']})" for d, s in waiting) + \
                  ". The first start downloads the model and the engine; that can take a while."
