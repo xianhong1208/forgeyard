@@ -10,11 +10,13 @@ import { FIRST_ANSWER_DEFAULT, editBody, editForm, takesFirstAnswer, type EditFo
 import type { CatalogModel, CatalogResponse, Deployment, DeploymentResponse, EditResponse, Machine, MachineVerdict, MachinesResponse, Recipe } from "../lib/types";
 import { canAutoscale, scaleEditParams, scaleForm, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
+import { SleepSetting, WakeWaitField } from "../components/Sleep";
 import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts, paramApplies } from "./ModelDeploy";
 
 // What a change shows next to each changed setting.
 const CHANGE_LABEL: Record<string, string> = { share: "GPU sharing", gpus: "GPUs per replica", vram: "Memory per device",
   extra_args: "Extra engine arguments", first_answer_timeout: "Wait for the first answer (s)", replicas: "Replicas", machine_id: "Machine",
+  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes", wake_wait: "Wake wait (s)",
   autoscale: "Automatic replicas", min_replicas: "Fewest replicas", max_replicas: "Most replicas", autoscale_target: "Target load per replica (%)",
   scale_up_seconds: "Busy for (s) before one more", scale_down_minutes: "Quiet for (min) before one fewer" };
 
@@ -118,7 +120,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
                 </>
               )}
               <ReplicasField id="e" count={f.replicas} onCount={(v) => set("replicas", v)} scale={scale} onScale={setScale}
-                allowAuto={canAutoscale(recipe)} sleepOn={d.params.sleep_when_idle === true} now={d.workload.replica_list.length} />
+                allowAuto={canAutoscale(recipe)} sleepOn={f.sleepOn} now={d.workload.replica_list.length} />
               <div className="field"><label htmlFor="e-machine">Machine</label>
                 <select id="e-machine" value={f.machine} onChange={(e) => set("machine", e.target.value)}>
                   <option value="">Automatic</option>
@@ -136,7 +138,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
               {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
             </div>
             <details className="spec-preview" style={{ marginTop: 14 }}>
-              <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}</summary>
+              <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}, wake wait</summary>
               <div className="grid-3">
                 {auto && <ScaleAdvancedFields id="e" scale={scale} onScale={setScale} />}
                 {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
@@ -150,9 +152,12 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
                     <input id="e-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
                     <p className="field-hint">Streamed answers only. Empty: {FIRST_ANSWER_DEFAULT}. A replica that has not started streaming by then gets the request stopped (504), never resent; non-streamed answers keep the read timeout. Changing it restarts nothing.</p></div>
                 )}
+                <WakeWaitField id="e-wake" value={f.wakeWait} onChange={(v) => set("wakeWait", v)} />
               </div>
             </details>
           </section>
+          <SleepSetting prefix="e" on={f.sleepOn} minutes={f.idleMinutes} last={d.last_start}
+            onChange={(on, minutes) => setF((cur) => ({ ...cur, sleepOn: on, idleMinutes: minutes }))} />
           <section className="panel" aria-labelledby="what-title">
             <h2 id="what-title">What saving does</h2>
             {planError ? <Notice tone="error">{planError}</Notice> : !plan ? <p className="muted small">Checking…</p> : changes.length === 0 ? (
@@ -193,7 +198,8 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
 
 function changeValue(k: string, v: unknown, machines: { id: number; name: string }[]): string {
   if (k === "autoscale") return v === true ? "on" : "off";
-  if (v === null || v === undefined) return k === "machine_id" ? "automatic" : k === "vram" ? "the estimate" : "—";
+  if (v === null || v === undefined) return k === "machine_id" ? "automatic" : k === "vram" ? "the estimate" : k === "sleep_when_idle" ? "off" : "—";
+  if (k === "sleep_when_idle") return v === true ? "on" : "off";
   if (k === "machine_id") return machines.find((m) => m.id === v)?.name ?? `machine ${String(v)}`;
   if (k === "vram" && typeof v === "number") return `${(v / 1024 ** 3).toFixed(2)} GiB`;
   if (k === "share") return v === "vram" ? "Share VRAM" : "Exclusive";

@@ -255,7 +255,7 @@ unless you set another (1 to 1,440 minutes). Changing either restarts nothing.
 - **After a server restart** every idle time counts from the restart: the server keeps the last request time in
   its memory, so a restart never puts a model to sleep early.
 - **Asleep is not stopped.** An asleep model stays in `/v1/models`, and **the next request wakes it** (below);
-  so does **Start** (on its page: **Wake**). It wakes on the machine it ran on when that still has room, or on its
+  so does **Start** (**Wake now** on its page or in the Playground). It wakes on the machine it ran on when that still has room, or on its
   pinned machine. **Stop** on an asleep deployment makes it stopped: then requests answer that it is stopped, never
   wake it, and it leaves `/v1/models`, as before.
 - **While it sleeps its memory is free**, and another deployment (or, on a shared card, something outside
@@ -284,6 +284,12 @@ A request to an asleep model wakes it, and the client gets its answer once the m
 - A client that gives up leaves the line; the wake carries on. Rate limits count the request once, when it arrives.
 - Choose `wake_wait` by the clients in front of it: one behind a proxy that cuts a request after 60 s needs a shorter
   wait (it then gets `model_waking` and can retry), or a cloud tier, or sleep off.
+- **In the console**: the deploy and edit forms have the setting under *When not in use* (the wait under Advanced),
+  with how long the last start took (about what the first request after a sleep waits); Serving shows **Asleep**
+  (a moon) and **Waking**; the deployment's page has a *When not in use* card and **Wake now**; the Playground keeps
+  an asleep model in its picker and says *Waking the model (about 74 s)…* while a request waits; Machines names an
+  asleep deployment under the machine it would run on; the setup advisor points out a deployment that holds GPU
+  memory nobody used for 3 days, and one that wakes more than 10 times a day while taking over a minute to start.
 
 ## Automatic replicas
 

@@ -21,6 +21,7 @@ import { tlsLine } from "../lib/replicaTls";
 import { useDocumentTitle } from "../lib/title";
 import type { Accelerator, Machine, MachinesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { AsleepHereLine } from "../components/Sleep";
 import { allowlistSummary, canRunWorkloads, gpuCards, runtimeLine } from "../lib/workloads";
 import { heartbeatText, POLL_MS } from "./Machines";
 
@@ -127,6 +128,7 @@ function MachineView({ m, machines, serverTime, p, canManage, message, onRevoke,
           {canPlace && <Link to={`/serving/deploy?machine=${m.id}${kind === "cpu" ? "&device=cpu" : ""}`} className="btn btn-small"><IconPlus size={14} aria-hidden="true" /> Deploy here</Link>}
         </div>
         {p.loaded ? <HolderChips list={models} empty="No model runs on this machine." /> : <p className="muted small">Loading…</p>}
+        {p.loaded && <AsleepHereLine list={p.asleep(m.id)} />}
       </section>
 
       <section className="panel mk-section" aria-labelledby="mk-map">

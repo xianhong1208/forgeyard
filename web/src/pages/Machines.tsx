@@ -17,6 +17,7 @@ import {
 import { ageSeconds, ago, bytes, toMs } from "../lib/machines";
 import type { JoinToken, Machine, MachinesResponse, NewJoinToken, TlsInfo } from "../lib/types";
 import { useApi } from "../lib/useApi";
+import { AsleepHereLine } from "../components/Sleep";
 
 // Machines change state on their own (heartbeats, a dropped network): poll so the page follows.
 export const POLL_MS = 5000;
@@ -322,6 +323,7 @@ function Tile({ m, serverTime, p }: { m: Machine; serverTime: string; p: Placeme
         {p.loaded && <span>{uniqueHolders(here).length} running</span>}
       </div>
       {p.loaded && <HolderChips list={here} max={5} />}
+      {p.loaded && <AsleepHereLine list={p.asleep(m.id)} compact />}
       <div className="tile-foot">
         <span title={exact(m.last_heartbeat_at)}>{heartbeatText(m, serverTime)}</span>
         {m.agent_behind ? <BehindChip m={m} /> : m.agent_version && <span>agent {m.agent_version}</span>}

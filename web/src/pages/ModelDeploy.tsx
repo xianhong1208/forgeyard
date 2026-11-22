@@ -9,9 +9,11 @@ import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
-import type { CatalogModel, CatalogResponse, ContextHint, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
+import { sameModelStart } from "../lib/sleep";
+import type { CatalogModel, CatalogResponse, ContextHint, DeploymentsResponse, Estimate, EstimateResponse, MachineVerdict, MachinesResponse, Placement, RecipeParam, ShareHint } from "../lib/types";
 import { canAutoscale, emptyScale, scaleDeployParams, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
+import { SleepSetting, WakeWaitField } from "../components/Sleep";
 
 export const ESTIMATE_DELAY_MS = 400;
 
@@ -21,6 +23,8 @@ export function ModelDeployPage() {
   const [search] = useSearchParams();
   const { data: cat } = useApi<CatalogResponse>("/models");
   const { data: machines } = useApi<MachinesResponse>("/machines");
+  // 1.5.0: another deployment of the same model and engine tells how long a start takes.
+  const { data: deps } = useApi<DeploymentsResponse>("/deployments");
   // ?model=…&recipe=…&device=… from "Deploy it" after adding a model (its suggested recipe and device).
   const [f, setF] = useState<DeployForm>(() => ({ ...emptyDeploy(), model: search.get("model") ?? "", recipe: search.get("recipe") ?? "",
     machine: search.get("machine") ?? "",
@@ -95,6 +99,7 @@ export function ModelDeployPage() {
   const shown = relevant.filter(([, p]) => !p.advanced);
   const advanced = relevant.filter(([, p]) => p.advanced);
   const usable = (machines?.machines ?? []).filter((m) => m.status !== "revoked");
+  const same = sameModelStart(deps?.deployments ?? [], view.model, view.recipe);
 
   return (
     <>
@@ -165,7 +170,7 @@ export function ModelDeployPage() {
                       ? <ContextHintLine hint={ctxHint.hint} value={view.params[k]} pinned={!!f.machine} onPick={(n) => setParam(k, String(n))} /> : null} />
                 ))}
                 <ReplicasField id="d" count={f.replicas} onCount={(v) => set("replicas", v)} scale={scale} onScale={setScale}
-                  allowAuto={canAutoscale(recipe)} />
+                  allowAuto={canAutoscale(recipe)} sleepOn={f.sleepOn} />
                 <div className="field"><label htmlFor="d-machine">Machine</label>
                   <select id="d-machine" value={f.machine} onChange={(e) => set("machine", e.target.value)}>
                     <option value="">Best fit (binpack)</option>
@@ -176,7 +181,7 @@ export function ModelDeployPage() {
                 <ShareHintNotice hint={est.placement.share_hint} onShare={() => set("share", "vram")} />
               )}
               <details className="spec-preview" style={{ marginTop: 14 }}>
-                <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}token</summary>
+                <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments, {takesFirstAnswer(recipe) ? "first-answer wait, " : ""}wake wait, token</summary>
                 <p className="field-hint">Every value here has a default that works; change it only when you need to.</p>
                 <div className="grid-3">
                   {auto && <ScaleAdvancedFields id="d" scale={scale} onScale={setScale} />}
@@ -191,6 +196,7 @@ export function ModelDeployPage() {
                       <input id="d-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
                       <p className="field-hint">Streamed answers only: how long a replica has to start streaming (5 to 3600). Then the request is stopped with 504 and never sent to another replica. A non-streamed answer keeps the gateway's read timeout.</p></div>
                   )}
+                  <WakeWaitField id="d-wake" value={f.wakeWait} onChange={(v) => set("wakeWait", v)} />
                   <div className="field"><label htmlFor="d-token">Hugging Face token</label>
                     <input id="d-token" type="password" autoComplete="off" value={f.token} onChange={(e) => set("token", e.target.value)}
                       placeholder={cat?.hf_token_set ? "the server's token" : undefined} />
@@ -200,6 +206,11 @@ export function ModelDeployPage() {
                 </div>
               </details>
             </section>
+          )}
+          {recipe && (
+            <SleepSetting prefix="d" on={f.sleepOn} minutes={f.idleMinutes}
+              onChange={(on, minutes) => setF((cur) => ({ ...cur, sleepOn: on, idleMinutes: minutes }))}
+              last={same?.last} other={same?.name} />
           )}
           {error && (
             <Notice tone="error">

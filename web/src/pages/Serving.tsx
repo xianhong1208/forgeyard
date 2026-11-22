@@ -12,6 +12,9 @@ import { FALLBACK_ANCHOR, fallbackProviders } from "../lib/routing";
 import type { CatalogResponse, Deployment, DeploymentsResponse, Machine, MachinesResponse, RouteInfo, RoutesResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATUS_TONE, stateLabel } from "../lib/workloads";
+import { sleepState } from "../lib/sleep";
+import { SleepBadge } from "../components/Sleep";
+import { when } from "../lib/format";
 import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
 
 const KINDS = [
@@ -65,6 +68,7 @@ export function ServingPage() {
         <HelpLink page="quick-start" anchor="5-add-a-recommended-model">How do I deploy my first model?</HelpLink>
         <HelpLink page="concepts" anchor="deployments-and-the-gateway">Deployments and the gateway</HelpLink>
         <HelpLink page="troubleshooting" anchor="a-deployment-does-not-fit">A deployment does not fit</HelpLink>
+        <HelpLink page="how-to" anchor="let-a-deployment-sleep-when-nobody-uses-it">Let a deployment sleep when idle</HelpLink>
       </HelpLinks>
       {deps.error && <Notice tone="error">{deps.error}</Notice>}
       {deps.data && deps.data.deployments.length === 0 && (
@@ -142,6 +146,7 @@ function ByKind({ list, machines, canDeploy, routes }: { list: Deployment[]; mac
 export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines: Machine[]; cloud: string[] }) {
   const w = d.workload;
   const tone = STATUS_TONE[w.status];
+  const sleeping = sleepState(d);   // 1.5.0: asleep, or woken with no replica ready yet
   const placed = w.replica_list.filter((r) => r.machine);
   // What needs saying about a replica: a download in progress, why it waits, why it is where it is.
   const notes = w.replica_list.flatMap((r) => {
@@ -149,13 +154,13 @@ export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines:
     const tag = w.replica_list.length > 1 ? `#${r.ordinal} ` : "";
     if (frac !== null) return [<span key={r.ordinal} className="deprow-note"><span className="bar bar-dl" aria-label={downloadText(r) ?? ""}><span style={{ width: `${Math.round(frac * 100)}%` }} /></span> {tag}{downloadText(r)}</span>];
     const text = r.not_picked_up ?? r.reason ?? r.placement_note;
-    return text && w.status !== "stopped" && w.status !== "asleep" ? [<span key={r.ordinal} className={`deprow-note${r.not_picked_up ? " rep-stuck" : ""}`}>{tag}{text}</span>] : [];
+    return text && w.status !== "stopped" && w.status !== "asleep" && sleeping !== "waking" ? [<span key={r.ordinal} className={`deprow-note${r.not_picked_up ? " rep-stuck" : ""}`}>{tag}{text}</span>] : [];
   });
   return (
     <div className="deprow" role="group" aria-label={`Deployment ${d.name}`}>
       <div className="deprow-main">
         <div className="deprow-name">
-          <span className={`dot dot-tone-${tone}`} aria-hidden="true" />
+          <span className={`dot ${sleeping ? `dot-${sleeping}` : `dot-tone-${tone}`}`} aria-hidden="true" />
           <Link to={`/serving/${d.id}`}>{d.name}</Link>
           {cloud.length > 0 && (
             <Link className="fallback-mark" to={`/serving/${d.id}#${FALLBACK_ANCHOR}`}
@@ -167,7 +172,7 @@ export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines:
         <div className="deprow-model">{VISION_TASKS.includes(d.model.task) && <><span className="deprow-task">{TASK_LABEL[d.model.task]}</span> at <code>/v1/vision/{d.model.task === "image-classify" ? "classify" : d.model.task}</code> · </>}<Link to={modelHref(d.model.name)}>{d.model.name}</Link> · <Link to={engineHref(d.recipe)}>{d.recipe}</Link>{d.served_name !== d.name ? <> · as “{d.served_name}”</> : null}</div>
       </div>
       <div className="where">
-        {placed.length ? placed.map((r) => {
+        {sleeping === "asleep" ? <AsleepWhere d={d} /> : placed.length ? placed.map((r) => {
           const m = machines.find((x) => x.id === r.machine!.id);
           return (
             <Link key={r.ordinal} to={`/machines/${r.machine!.id}`} className="where-chip" title={`Replica #${r.ordinal}: ${stateLabel(r)}`}>
@@ -179,8 +184,19 @@ export function DeploymentRow({ d, machines, cloud }: { d: Deployment; machines:
         }) : <span className="small muted">{w.status === "stopped" ? "stopped" : "waiting for a machine"}</span>}
       </div>
       <span className="deprow-mem">{d.estimate.device === "gpu" ? `${gib(d.estimate.per_gpu)} / GPU` : `${gib(d.estimate.ram)} RAM`}</span>
-      <span className={`chip chip-tone-${tone} deprow-state`}>{w.status === "running" ? `${w.ready}/${w.replicas} ready` : w.status}</span>
+      <SleepBadge d={d} fallback={<span className={`chip chip-tone-${tone} deprow-state`}>{w.status === "running" ? `${w.ready}/${w.replicas} ready` : w.status}</span>} />
       {notes.length > 0 && <div className="deprow-notes">{notes}</div>}
     </div>
+  );
+}
+
+// Where an asleep deployment is: nowhere (it holds nothing), and where it wakes.
+function AsleepWhere({ d }: { d: Deployment }) {
+  const names = [...new Set(d.workload.replica_list.map((r) => r.machine?.name).filter(Boolean))] as string[];
+  const on = d.pinned?.name ?? names.join(", ");
+  return (
+    <span className="small muted">
+      Holds nothing{d.sleep?.asleep_since ? `, asleep since ${when(d.sleep.asleep_since)}` : ""}{on ? <> · wakes on <span className="mono">{on}</span></> : null}
+    </span>
   );
 }

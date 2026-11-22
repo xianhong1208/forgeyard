@@ -50,6 +50,20 @@ version until 1.0.
   stopped, it cannot wake, no target serves the endpoint) is no longer counted as use, so a deployment that cannot
   wake goes back to sleep after its idle time and the next request tries a fresh wake; and a deployment made with
   the id of one just removed (SQLite reuses the highest id) no longer starts from the removed one's last request.
+- **Sleep when idle in the console** (#37, 1.5.0). The deploy and edit forms have a *When not in use* section:
+  **Sleep when idle** (off by default) and **Idle minutes** (30), with **Wake wait** (300 s) under Advanced, how long
+  the last start took (on the deploy form, the last start of another deployment of the same model and engine), which
+  is about how long the first request after a sleep waits, and a note that its memory may be used by others while it
+  sleeps. **Serving** shows **Asleep** (a moon; *holds nothing*, since when, and the machine it wakes on) and
+  **Waking** with the time since the wake. The deployment page has a *When not in use* card (the setting, *sleeps in
+  18 min* or what keeps it awake, the last request, the last start, wakes in the last 24 hours) and **Wake now**
+  (Start). The **Playground** keeps an asleep model in its picker with the moon, sends a request to it as to any
+  model and says *Waking the model (about 74 s)…* while the gateway holds it; operators and admins also get **Wake
+  now** there. **Machines** names an asleep deployment under the machine it would run on, with what it holds when
+  awake. Two setup-advisor notes: `deployment-idle-awake` (sleep off, no request for 3 days, holds GPU memory: let
+  it sleep?) and `deployment-wakes-often` (woken more than 10 times in a day and its last start took over a minute:
+  raise its idle time). The deployment API's `sleep` object gains `asleep_since` and `wakes`. Get started's *Deploy
+  it* stays done while a deployment sleeps (*Ready: chat (asleep).*).
 
 - **How long each start takes, and faster ones** (1.5.0, #37, ahead of waking on a request). Each time a
   replica of a deployment becomes ready, its events say how long the start took and where the time went (*ready in

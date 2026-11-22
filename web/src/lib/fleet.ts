@@ -2,6 +2,7 @@
 // this card" and "where does this model run". Pure functions; the icons are in components/Fleet.tsx.
 import { bytes } from "./machines";
 import { isVisionTask } from "./models";
+import { asleepOn, type AsleepHere } from "./sleep";
 import type { Accelerator, Deployment, Machine, Replica, Workload } from "./types";
 
 // ---------------------------------------------------------------- machine kinds
@@ -115,6 +116,8 @@ export type Placement = {
   holders: Holder[];
   onMachine: (machineId: number) => Holder[];
   onRow: (machineId: number, a: Accelerator) => Holder[];
+  // 1.5.0 (#37): asleep deployments that would run on the machine (they hold nothing there now).
+  asleep: (machineId: number) => AsleepHere[];
 };
 
 // Every replica that sits on a machine and is not over: a model's under its deployment, the rest as
@@ -144,7 +147,7 @@ export function placement(workloads: Workload[], deployments: Deployment[]): Pla
   const onMachine = (id: number) => holders.filter((h) => h.replica.machine?.id === id);
   const onRow = (id: number, a: Accelerator) =>
     onMachine(id).filter((h) => (a.vendor === "cpu" ? h.replica.gpus.length === 0 : h.replica.gpus.some((g) => g.key === a.key)));
-  return { holders, onMachine, onRow };
+  return { holders, onMachine, onRow, asleep: (id: number) => asleepOn(deployments, id) };
 }
 
 // 1.4 (#88): an app is named where it holds a card, so the card is never shown free, but not linked:

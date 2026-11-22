@@ -42,7 +42,7 @@ from typing import Iterable, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession, selectinload
 
-from forgeyard.db import Deployment, Replica, VideoJob, Workload, as_utc, new_session, utcnow
+from forgeyard.db import Deployment, Replica, VideoJob, Workload, WorkloadEvent, as_utc, new_session, utcnow
 
 log = logging.getLogger("forgeyard.workloads")
 
@@ -252,8 +252,28 @@ def hold(db: DbSession, d: Deployment, w: Workload, now: datetime) -> Optional[s
     return video_hold(db, d, now)
 
 
+# The events that change whether a deployment runs, and the one that says it was woken (by Start, Wake now or,
+# from 1.5.0's next step, a request).
+LIFECYCLE = ("asleep", "woken", "started", "stopped", "created")
+WOKEN = "woken"
+WAKES_WINDOW = timedelta(days=1)
+
+
+def _latest(db: DbSession, w: Workload) -> Optional[WorkloadEvent]:
+    return db.scalar(select(WorkloadEvent).where(WorkloadEvent.workload_id == w.id, WorkloadEvent.kind.in_(LIFECYCLE))
+                     .order_by(WorkloadEvent.id.desc()).limit(1))
+
+
+def wakes(db: DbSession, w: Workload, now: Optional[datetime] = None) -> int:
+    """How many times it was woken in the last day (its events)."""
+    since = (now or utcnow()) - WAKES_WINDOW
+    return len(db.scalars(select(WorkloadEvent.id).where(WorkloadEvent.workload_id == w.id, WorkloadEvent.kind == WOKEN,
+                                                         WorkloadEvent.at >= since)).all())
+
+
 def status(db: DbSession, d: Deployment, now: Optional[datetime] = None) -> dict:
-    """The deployment's sleep setting and where it stands, for the API (the console shows it)."""
+    """The deployment's sleep setting and where it stands, for the API (the console shows it): `waking` while a
+    request or Wake now wakes it, `asleep_since` while asleep, and `wakes` in the last day."""
     now = now or utcnow()
     w = d.workload
     s = setting(d.params)
@@ -263,7 +283,12 @@ def status(db: DbSession, d: Deployment, now: Optional[datetime] = None) -> dict
     out = {"on": s.on, "idle_minutes": s.idle_minutes, "wake_wait": s.wake_wait, "asleep": w.desired_state == ASLEEP,
            "last_request_at": last, "since": idle_since(d, w), "sleeps_at": None, "held_by": None,
            # 1.5.0 PR 3: while a request (or Wake now) wakes it: since when, by whom, how many requests wait.
-           "waking": waking.status(d, w)}
+           "waking": waking.status(d, w),
+           # 1.5.0 PR 4 (the console): since when it is asleep, and how often it was woken in the last day.
+           "asleep_since": None, "wakes": wakes(db, w, now)}
+    if w.desired_state == ASLEEP:
+        latest = _latest(db, w)
+        out["asleep_since"] = as_utc(latest.at if latest is not None and latest.kind == ASLEEP else w.updated_at)
     if s.on and w.desired_state == "running":
         out["sleeps_at"] = out["since"] + timedelta(minutes=s.idle_minutes)
         out["held_by"] = hold(db, d, w, now)

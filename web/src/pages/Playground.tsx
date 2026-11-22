@@ -1,5 +1,5 @@
-import { IconCheck, IconChevronDown, IconDownload, IconPhoto, IconPhotoAi, IconPlayerStop, IconPlus, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import { IconCheck, IconChevronDown, IconDownload, IconMoon, IconPhoto, IconPhotoAi, IconPlayerStop, IconPlus, IconSend, IconSpeakerphone, IconTrash, IconX } from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
@@ -9,9 +9,13 @@ import { notifyUnauthorized } from "../lib/api";
 import { IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
   type Attached, type ImageOptions, type Voice } from "../lib/gateway";
 import { MODEL_KIND, type ModelKind } from "../lib/fleet";
-import { firstVision, pickerDetail, pickerGroups, routeReady } from "../lib/playground";
+import { firstVision, pickerDetail, pickerGroups, routeReady, routeSleep } from "../lib/playground";
+import { api, errorText } from "../lib/api";
+import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
+import { usePoll } from "../lib/poll";
+import { when } from "../lib/format";
 import { targetHeader } from "../lib/routing";
-import type { ClassifyAnswer, DeploymentsResponse, RouteInfo, RoutesResponse, TextClassifier } from "../lib/types";
+import type { ClassifyAnswer, Deployment, DeploymentsResponse, RouteInfo, RoutesResponse, TextClassifier } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { Videos } from "./PlaygroundVideo";
 import { VisionModelPanel } from "./PlaygroundVision";
@@ -21,6 +25,7 @@ type Msg = { role: "user" | "assistant"; content: string; meta?: string; error?:
 // The playground talks to /api/playground/<endpoint>: the gateway's routing, as the signed-in
 // user (the session cookie and the CSRF header), counted as "console" in usage. No API key.
 async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?: FormData, localOnly = false): Promise<Response> {
+  window.dispatchEvent(new Event(SENT_EVENT));   // 1.5.0: an asleep model starts waking now; the page looks again soon
   const headers: Record<string, string> = { "X-Forgeyard": "1" };
   if (localOnly) headers["X-Forgeyard-Local-Only"] = "1";
   if (!form) headers["Content-Type"] = "application/json";
@@ -40,7 +45,7 @@ async function failure(res: Response): Promise<string> {
 }
 
 export function PlaygroundPage() {
-  const { data, error } = useApi<RoutesResponse>("/routes");
+  const { data, error, reload: reloadRoutes } = useApi<RoutesResponse>("/routes");
   // For the kind of a chat model (multimodal when its deployment reads images, audio or video).
   const deps = useApi<DeploymentsResponse>("/deployments");
   const { user } = useAuth();
@@ -49,11 +54,27 @@ export function PlaygroundPage() {
   const loaded = !!data && (!!deps.data || !!deps.error);
   // Cloud-only models need the cloud setting the signed-in person may give a key.
   const routes = useMemo(() => (data?.routes ?? []).filter((r) => r.usable !== false), [data]);
-  const groups = useMemo(() => (loaded ? pickerGroups(routes, deps.data?.deployments ?? []) : []), [loaded, routes, deps.data]);
+  // 1.5.0: the deployments seen asleep or waking here stay offered while they run (see pickerGroups).
+  const [woken, setWoken] = useState<ReadonlySet<number>>(() => new Set());
+  const groups = useMemo(() => (loaded ? pickerGroups(routes, deps.data?.deployments ?? [], woken) : []), [loaded, routes, deps.data, woken]);
   const offered = groups.flatMap(([, l]) => l);
   // The model in the address (?model=), else the first one offered: a chat model when there is one.
   const route = offered.find((r) => r.served_name === search.get("model")) ?? offered[0];
-  const waiting = routes.filter((r) => !routeReady(r) && r.deployment_id != null).length;
+  const waiting = routes.filter((r) => !routeReady(r) && r.deployment_id != null && !routeSleep(r, deps.data?.deployments ?? [])).length;
+  // 1.5.0 (#37): the chosen model's deployment while it is asleep or waking; followed until it is ready.
+  const dep = route?.deployment_id != null ? deps.data?.deployments.find((d) => d.id === route.deployment_id) : undefined;
+  const sleeping = dep ? sleepState(dep) : null;
+  if (dep && sleeping && !woken.has(dep.id)) setWoken(new Set(woken).add(dep.id));   // during render, guarded (React's pattern)
+  const { reload: reloadDeps } = deps;
+  const follow = useCallback(() => { if (sleeping) { reloadDeps(); reloadRoutes(); } }, [sleeping, reloadDeps, reloadRoutes]);
+  usePoll(follow, SLEEP_POLL_MS);
+  // A request to an asleep model wakes it: look again shortly after one is sent, not only at the next poll.
+  useEffect(() => {
+    const soon = () => window.setTimeout(follow, SENT_LOOK_MS);
+    window.addEventListener(SENT_EVENT, soon);
+    return () => window.removeEventListener(SENT_EVENT, soon);
+  }, [follow]);
+  const sleepOf = (r: RouteInfo) => routeSleep(r, deps.data?.deployments ?? []);
   const legacy = search.get("tab");
 
   // 1.3's Vision tab (?tab=vision) is part of the one picker now: its address opens the first ready vision
@@ -86,15 +107,17 @@ export function PlaygroundPage() {
       )}
       {route && (
         <div className="play-bar">
-          <ModelPicker groups={groups} value={route} onPick={pick} startOpen={legacy === "vision" && !vision} />
+          <ModelPicker groups={groups} value={route} onPick={pick} startOpen={legacy === "vision" && !vision} sleepOf={sleepOf} />
           <p className="muted small play-ready">
-            {route.kind === "cloud" ? "Served by a cloud provider." : `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}`}
+            {route.kind === "cloud" ? "Served by a cloud provider." : sleeping === "asleep" ? "Asleep: a request wakes it."
+              : sleeping === "waking" ? "Waking: no replica is ready yet." : `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}`}
             {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
             {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>Deployment</Link>
               : route.id ? <Link to={`/cloud/models/${route.id}`}>Details</Link> : null}
           </p>
         </div>
       )}
+      {dep && sleeping && <WakeNotice d={dep} canWake={canDeploy} onWoken={() => { reloadDeps(); reloadRoutes(); }} />}
       {route?.api === "openai-chat" && <Chat key={route.served_name} model={route.served_name} />}
       {route?.api === "openai-embeddings" && <Embeddings key={route.served_name} model={route.served_name} />}
       {route?.api === "rerank" && <Rerank key={route.served_name} model={route.served_name} />}
@@ -109,10 +132,68 @@ export function PlaygroundPage() {
   );
 }
 
+// 1.5.0 (#37): how often the Playground asks again while the chosen model is asleep or waking, and how soon after a
+// request is sent (the gateway starts the wake as it takes the request).
+const SLEEP_POLL_MS = 2000;
+const SENT_LOOK_MS = 400;
+const SENT_EVENT = "forgeyard:playground-sent";
+
+// 1.5.0 (#37): the chosen model is asleep (a message wakes it; operators may also Wake now) or waking (about how
+// long, from the wake under way or its last start). The request itself is sent as to any model: the gateway holds it.
+function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; onWoken: () => void }) {
+  const state = sleepState(d);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (state !== "waking") return;
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [state]);
+  const expect = wakeSeconds(d);
+  const about = expect ? ` (about ${seconds(expect)})` : "";
+  const wait = d.sleep?.wake_wait ?? 300;
+  const wake = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/deployments/${d.id}/start`, { method: "POST" });
+      onWoken();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (state === "waking") {
+    const waiting = d.sleep?.waking?.waiting ?? 0;
+    return (
+      <div className="play-wake" role="status" aria-live="polite">
+        <IconMoon size={16} aria-hidden="true" />
+        <span><strong>Waking the model{about}…</strong> <span className="mono">{elapsed(d.sleep?.waking?.since)}</span>. A request sent to it waits
+          until a replica is ready (up to {wait} s){waiting ? `; ${waiting} waiting now` : ""}.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="play-wake" role="status">
+      <IconMoon size={16} aria-hidden="true" />
+      <span>
+        <strong>{d.name} is asleep</strong>{d.sleep?.asleep_since ? ` since ${when(d.sleep.asleep_since)}` : ""}: nobody used it for {d.sleep?.idle_minutes ?? 30} min, so it holds no memory.{" "}
+        Send a request and it wakes: the request waits until it is ready{about}, up to {wait} s, or is answered by a cloud tier
+        meanwhile when you may use one.
+        {error && <span className="field-error"> {error}</span>}
+      </span>
+      {canWake && <button type="button" className="btn" disabled={busy} onClick={() => void wake()}>{busy ? "Waking…" : "Wake now"}</button>}
+    </div>
+  );
+}
+
 // One picker for every kind (1.4, #100): a button naming the model and its kind, opening a list grouped
 // by kind with Serving's labels and icons. A listbox: arrows move, Enter or Space picks, Escape closes.
-function ModelPicker({ groups, value, onPick, startOpen }: {
+function ModelPicker({ groups, value, onPick, startOpen, sleepOf }: {
   groups: [ModelKind, RouteInfo[]][]; value: RouteInfo; onPick: (name: string) => void; startOpen: boolean;
+  sleepOf: (r: RouteInfo) => string | null;   // 1.5.0: "asleep" / "waking" beside the name
 }) {
   const flat = groups.flatMap(([k, l]) => l.map((r) => ({ k, r })));
   const at = Math.max(0, flat.findIndex((x) => x.r.served_name === value.served_name));
@@ -188,6 +269,7 @@ function ModelPicker({ groups, value, onPick, startOpen }: {
                     className={`picker-option${n === active ? " active" : ""}`} onMouseMove={() => setActive(n)} onClick={() => choose(n)}>
                     <span className="mono picker-option-name">{r.served_name}</span>
                     {detail && <>{" "}<span className="picker-option-detail">{detail}</span></>}
+                    {sleepOf(r) && <>{" "}<span className="picker-option-detail picker-asleep"><IconMoon size={13} aria-hidden="true" /> {sleepOf(r)}</span></>}
                     {r.served_name === value.served_name && <IconCheck size={15} aria-hidden="true" className="picker-check" />}
                   </div>
                 );
