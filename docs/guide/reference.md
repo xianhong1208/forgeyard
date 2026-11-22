@@ -778,12 +778,15 @@ they end:
 | `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `refused`, `too_long`, `budget` |
 | `forgeyard_gateway_waiting` | gauge | `model` | Requests waiting in line for a free local slot now (all the route's tiers) |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
+| `forgeyard_autoscale_total` | counter | `deployment`, `direction` | 1.5.0: replicas the autoscaler added (`up`) and removed after draining them (`down`) |
 
 Read from the database at each scrape:
 
 | Metric | Labels | What it is |
 |---|---|---|
 | `forgeyard_replicas` | `deployment`, `state` | Replicas of each model deployment by state: `pending`, `starting`, `running`, `healthy`, `unhealthy`, `backoff`, `exited`, `failed`, `stopping`, `stopped` |
+| `forgeyard_deployment_replicas` | `deployment`, `kind` | 1.5.0: replicas of each deployment, `desired` (the replicas it should run now; 0 while stopped or asleep), `ready`, `draining` (being removed by the autoscaler) and, with automatic replicas, `wanted` (what its load asks for, within its bounds) |
+| `forgeyard_deployment_load` | `deployment` | 1.5.0: with automatic replicas, requests in flight on its replicas plus those waiting for a slot, as last sampled |
 | `forgeyard_machines` | `status` | Machines `online`, `offline` and `revoked` |
 | `forgeyard_machine_up` | `machine` | 1 while the machine's agent is connected, else 0 |
 | `forgeyard_gpu_memory_total_bytes`, `forgeyard_gpu_memory_free_bytes` | `machine`, `gpu` | A card's memory and its free memory, as its agent last reported them (`gpu`: its index) |
@@ -976,8 +979,8 @@ value.
 
 | Field | Value |
 |---|---|
-| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list), `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing), and (1.5.0) `sleep_when_idle` and `idle_minutes` ([Sleep when idle](#sleep-when-idle); changing them restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
-| `replicas` | 1 to 16 |
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list), `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing), (1.5.0) `sleep_when_idle` and `idle_minutes` ([Sleep when idle](#sleep-when-idle)), and the automatic replicas' `autoscale`, `min_replicas`, `max_replicas`, `autoscale_target`, `scale_up_seconds` and `scale_down_minutes` ([Automatic replicas](#automatic-replicas)); changing those restarts nothing. Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `replicas` | 1 to 16. With automatic replicas on (1.5.0), only the number it has now (else 422 `replicas_automatic`): change `min_replicas` and `max_replicas` instead ([Automatic replicas](#automatic-replicas)) |
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
 | `dry_run` | `true`: only check. The answer is the same, without `deployment`, and nothing is saved |
@@ -1049,6 +1052,56 @@ deployment a `sleep` object:
 
 **Downgrade:** a server older than 1.5.0 reads `asleep` as stopped: the model is not listed, a request answers 503
 `no_ready_replica` *The deployment is stopped*, and Start starts it.
+
+### Automatic replicas
+
+1.5.0 ([concepts](concepts.md#automatic-replicas)). Parameters of every deployment but video ones, set on deploy
+(`POST /api/deployments`, in `params`) or with a change; the server reads them, so changing them restarts nothing:
+
+| Parameter | Value |
+|---|---|
+| `autoscale` | `true` turns automatic replicas on; `false` (or `null`, or leaving it out) turns them off. Off by default, also for deployments made before 1.5.0. Kept in `params` only while on. A video deployment refuses it (422) |
+| `min_replicas` | The fewest replicas: 1 to 16, **1** when left out; 0 only with `sleep_when_idle` on (it then goes to 0 only by sleeping, and runs at least 1 while awake) |
+| `max_replicas` | The most: 1 to 16, **2** when left out; at least `min_replicas` |
+| `autoscale_target` | The load one replica takes, in percent of its `concurrency` (1 when the recipe has none): 20 to 100, **80** when left out |
+| `scale_up_seconds` | How long the load must be above the target before one more replica: 10 to 600, **60** when left out. At twice the target, 10 seconds |
+| `scale_down_minutes` | How long one replica fewer must have been enough before one is removed: 1 to 120, **10** when left out |
+
+`min_replicas`, `max_replicas` and the others are kept while `autoscale` is off too, for when it is turned on.
+Anything else is 422 `invalid_params`. A deploy with `autoscale` on starts `min_replicas` replicas (at least 1),
+whatever `replicas` says; a change that turns it on or changes the bounds brings the number into them at once. While
+it is on, a change may not set another `replicas` number (422 `replicas_automatic`).
+
+The load is the requests in flight on its replicas plus those waiting in the gateway's line for a slot of a route
+tier it is in (in equal parts when the tier has several deployments) and in its image queue, sampled every 2
+seconds by the server. One replica is added when the average over `scale_up_seconds` is above `ready replicas ×
+concurrency × autoscale_target %`, or the average over 10 s is at least twice that, never above `max_replicas`,
+only while no replica is starting, and only when one more fits on an online machine now (the pinned one when
+pinned). One is removed when, for `scale_down_minutes` after the last change, the average would have been at most
+what one replica fewer takes at the target; never below `min_replicas` (at least 1). The newest replica is removed:
+the gateway first stops sending it requests, waits until nothing is in flight on it (at most 30 minutes), then its
+row goes and its agent stops it. Nothing changes while an edit restarts the replicas, a replica's machine is
+offline, or within 2 minutes after a person started or changed the deployment.
+
+`GET /api/deployments` and `GET /api/deployments/{id}` give each deployment an `autoscale` object:
+
+| Field | What it is |
+|---|---|
+| `on`, `min`, `max`, `target`, `scale_up_seconds`, `scale_down_minutes` | The setting (the defaults when not set) |
+| `capacity` | Its `concurrency` (1 when it has none) |
+| `replicas`, `ready` | Its replicas now (not ended), and those ready |
+| `load`, `per_replica` | The average load over `scale_up_seconds`, and that per ready replica (not drained); `null` until sampled |
+| `wanted` | What the load asks for, within the bounds |
+| `draining` | The replica being drained: `{replica, since, in_flight}`, or `null` |
+| `room` | Why the one more it wants does not fit now (*Wants 3 replicas, room for 2: …*), or `null` |
+| `paused` | Why it does not scale right now (*an edit is restarting its replicas*, *a replica's machine is offline*, *it was started or changed less than 2 minutes ago*), or `null` |
+| `last` | The last decision `{at, text}` this server made, or `null` |
+
+Every decision is an event of the deployment (kind `scaled`): *Scaled up to N: …*, *Wants N replicas, room for
+M: …* (once while it does not fit), *Draining replica N: …*, *Kept replica N: …*, *Removed replica N after
+draining for … s*, *Asleep with N replicas (its minimum)*. They are not audited. The load samples, drains and
+decisions live in the server's memory: after a restart the windows start again and no replica is removed by a
+drain that was under way.
 
 ## A machine's model cache through the API
 

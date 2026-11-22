@@ -261,6 +261,41 @@ unless you set another (1 to 1,440 minutes). Changing either restarts nothing.
 - Going to sleep is recorded in the deployment's events (*Asleep: no requests for 30 min; frees 14.4 GiB on gpu-01
   GPU #4*), not in the audit log: no person did it. Waking with Start is audited as a start.
 
+## Automatic replicas
+
+From 1.5.0 a deployment's number of replicas can **follow its load**: set **Replicas** to **Automatic, by load**
+(deploy or edit form) with the fewest and the most. It is **off by default**, for deployments made before 1.5.0 and
+new ones alike; turned on, it goes from **1 to 2** unless you set other bounds (1 to 16). Changing the settings
+restarts nothing.
+
+- **The load** is what the gateway sees for the deployment: requests **in flight** on its replicas plus requests
+  **waiting** in the gateway's line for one of its slots (and, for images, in its queue). A line shared by several
+  deployments of one route tier counts for each in equal parts. One replica takes its *Concurrent requests* at the
+  **target**, 80 % by default: 0.8 requests for a replica with *Concurrent requests* 1, 3.2 for one with 4. A recipe
+  without that setting (speech to text, vision) counts one request per replica.
+- **One more replica** when the load over the last minute is above what the ready replicas take at the target, or
+  at once (within about 10 seconds) when it is **twice** that. Only **one replica starts at a time**: the next is
+  considered once it is ready. One is added **only when it fits somewhere now** (on an online machine with room, on
+  the pinned machine for a pinned deployment); Forgeyard never adds a replica that would wait for room. When it
+  does not fit, the deployment's page says so: *Wants 3 replicas, room for 2: …*, with each machine's reason.
+- **One fewer** after **10 minutes** in which one replica fewer would have served the load at the target (so a
+  deployment does not go back and forth between one and two). The newest replica is **drained first**: the gateway
+  sends it nothing new, the requests it runs finish (a long stream too), and only then it is removed and its agent
+  stops it. If the load rises again meanwhile, or the other replicas stop being ready, it is kept.
+- **It waits** while an edit restarts the replicas, while a replica's machine is offline (its replicas may move,
+  see [When a machine stays offline](how-to.md#when-a-machine-stays-offline)), and for 2 minutes after a person
+  started or changed the deployment.
+- **Never below 1 while it runs.** With [Sleep when idle](#sleep-when-idle) on, the fewest may be 0: the deployment
+  then goes to 0 replicas only by sleeping (all of it, after its idle time), and wakes with its minimum (at least 1).
+- **Video deployments are never scaled automatically:** a video job belongs to the replica that makes it.
+- While a new replica starts (a minute for a small vLLM model), requests wait in the gateway's line as before; a key
+  that may use a cloud tier still spills to it when every local replica is busy, as before. *Wait for the first
+  answer* starts once a request is sent to a replica, as always.
+- Every decision is an event of the deployment (*Scaled up to 2: load 1.9 per replica for 60 s*, *Draining replica
+  1: …*, *Removed replica 1 after draining for 74 s*), not an audit entry: no person did it. The target and the two
+  windows (60 seconds, 10 minutes) are under **Advanced**. `/metrics` has the replicas desired, ready and draining
+  and the load.
+
 ## Images, audio and video in chat
 
 Models that read images (Qwen3-VL, Gemma 3 and 4, and similar) take them in

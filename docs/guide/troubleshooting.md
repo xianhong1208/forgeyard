@@ -375,6 +375,24 @@ makes it take its work at once. When the agent already runs the server's version
 to restart it and look at its log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`). **Setup health** flags agents older than the server, and replicas
 that waited for a machine for more than 15 minutes.
 
+## Automatic replicas do not add a replica
+
+The deployment's page says why under **Replicas**:
+
+- *Wants 3 replicas, room for 2: …*: one more does not fit anywhere now; each machine's reason follows, as for a
+  deploy ([A deployment does not fit](#a-deployment-does-not-fit)). Free memory on a machine, raise *Most
+  replicas* only where there is room, or unpin the deployment. Forgeyard does not add a replica that would wait.
+- *Not scaling now: …*: an edit restarts its replicas, a replica's machine is offline, or a person started or
+  changed it less than 2 minutes ago. It goes on by itself.
+- Nothing said, and the load stays below the target: the load counts requests in flight and waiting in the
+  gateway's line against *Concurrent requests* × the target (80 %). With *Concurrent requests* 32 a replica takes
+  25.6 requests before one more is wanted; lower *Concurrent requests* or the target under **Advanced**.
+- A replica is still starting: only one starts at a time; the next one is considered once it is ready.
+- It is at *Most replicas*, or it is a video deployment (never scaled automatically).
+
+A replica that should go stays while it is **draining**: it finishes the requests it runs first (at most 30
+minutes). If the load rises again it is kept (*Kept replica 1: …* in the events).
+
 ## A replica waits: no free host port
 
 **You see:** a replica is not placed, and the deployment or app page says *Cannot be placed: gpu-02: no free

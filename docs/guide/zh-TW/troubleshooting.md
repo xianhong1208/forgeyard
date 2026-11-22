@@ -223,6 +223,18 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。agent 已經是伺服器的版本時，訊息會請你重新啟動它並查看它的紀錄（`journalctl -u forgeyard-agent`，或 `docker logs forgeyard-agent`）。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
 
+## 自動副本數沒有加副本
+
+部署頁面的 **Replicas** 底下會說明原因：
+
+- *Wants 3 replicas, room for 2: …*：現在哪裡都放不下多一個；後面是每台機器的原因，和部署時一樣（[部署放不下](#a-deployment-does-not-fit)）。騰出機器上的記憶體、只在有空間的地方提高 *Most replicas*，或取消固定機器。Forgeyard 不會加一個要等空間的副本。
+- *Not scaling now: …*：修改正在重新啟動它的副本、某個副本所在的機器離線，或有人在 2 分鐘內啟動或修改了它。之後會自己繼續。
+- 什麼都沒寫，而且負載一直低於目標：負載是處理中和在閘道隊伍裡等待的請求，和 *Concurrent requests* × 目標（80%）比較。*Concurrent requests* 為 32 時，一個副本要承擔 25.6 個請求才會想多一個；在 **Advanced** 裡調低 *Concurrent requests* 或目標。
+- 有副本還在啟動：一次只啟動一個；等它就緒才考慮下一個。
+- 已經到 *Most replicas*，或它是影片部署（永遠不會自動調整）。
+
+應該移除的副本在**排空**期間會留著：它先把正在處理的請求做完（最多 30 分鐘）。如果負載又升高，它會被留下（事件裡的 *Kept replica 1: …*）。
+
 ## 副本在等待：沒有空的主機連接埠
 
 **你會看到：** 副本沒有被放到任何機器上，部署或應用程式頁面顯示 *Cannot be placed: gpu-02: no free port: 3 of 3 in use (host ports 33000-33002)*，或 *not enough free ports: 2 of 3 in use, it needs 2*。部署預覽中那台機器也會顯示同樣的一行。
