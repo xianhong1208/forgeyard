@@ -63,6 +63,10 @@ WAITED = Histogram("forgeyard_gateway_wait_seconds", "How long a request waited 
                    "(the route's Wait for a free local slot), per model; it then got a slot or moved on",
                    ("model",), buckets=WAIT_BUCKETS, registry=REGISTRY)
 
+# 1.5.0 (#37): automatic replicas (forgeyard/workloads/autoscale.py).
+AUTOSCALED = Counter("forgeyard_autoscale", "Replicas the autoscaler added (direction up) or removed after draining "
+                     "them (down), per deployment", ("deployment", "direction"), registry=REGISTRY)
+
 SPILL_REASONS = frozenset({"unavailable", "busy", "refused", "too_long", "budget"})
 SOURCES = frozenset({"api", "console"})
 
@@ -123,6 +127,14 @@ def waited(line_key: str, seconds: float) -> None:
         log.exception("Counting a wait for /metrics failed")
 
 
+def scaled(deployment: str, direction: str) -> None:
+    """The autoscaler added (up) or removed (down) one replica of `deployment`."""
+    try:
+        AUTOSCALED.labels(bounded("deployment", deployment), bounded("direction", direction, ("up", "down"))).inc()
+    except Exception:
+        log.exception("Counting an autoscaling change for /metrics failed")
+
+
 # ------------------------------------------------------------------ the state, read at scrape time
 REPLICA_STATES = ("pending", "starting", "running", "healthy", "unhealthy", "backoff", "exited", "failed",
                   "stopping", "stopped")
@@ -140,7 +152,7 @@ class _State(Collector):
         families = []
         db = new_session()
         try:
-            for part in (_build, _replicas, _machines, _memory, _budgets):
+            for part in (_build, _replicas, _deployment_replicas, _machines, _memory, _budgets):
                 try:
                     families.extend(part(db))
                 except Exception:  # one part failing (a locked database) leaves the others
@@ -176,6 +188,44 @@ def _replicas(db):
     for name, state, n in rows:
         g.add_metric((name, state if state in REPLICA_STATES else OTHER), n)
     return [g]
+
+
+def _deployment_replicas(db):
+    """1.5.0 (#37): per deployment, its replicas desired (rows not ended), ready and draining, and (automatic
+    replicas) what the load asks for and the load itself."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from forgeyard.db import Deployment, Replica, Workload
+    from forgeyard.workloads import autoscale
+
+    g = GaugeMetricFamily("forgeyard_deployment_replicas", "Replicas of each model deployment: desired (the "
+                          "replicas it should run now), ready (taking requests), draining (being removed by the "
+                          "autoscaler) and wanted (what its load asks for, within its bounds; automatic replicas "
+                          "only)", labels=("deployment", "kind"))
+    load = GaugeMetricFamily("forgeyard_deployment_load", "Requests in flight on a deployment's replicas plus those "
+                             "waiting for a slot, as the autoscaler last sampled them (automatic replicas only)",
+                             labels=("deployment",))
+    draining = autoscale.autoscaler.draining()
+    loads = autoscale.autoscaler.loads()
+    rows = db.scalars(select(Deployment).options(selectinload(Deployment.workload).selectinload(Workload.replicas)
+                                                 .selectinload(Replica.node)).order_by(Deployment.name)).all()
+    for d in rows:
+        w = d.workload
+        if w is None:
+            continue
+        live = [r for r in w.replicas if not r.final]
+        desired = len(live) if w.desired_state == "running" else 0
+        g.add_metric((d.name, "desired"), desired)
+        g.add_metric((d.name, "ready"), sum(1 for r in live if autoscale._ready(r, w)))
+        g.add_metric((d.name, "draining"), 1 if d.id in draining else 0)
+        if autoscale.setting(d.params).on:
+            st = autoscale.autoscaler.status(d)
+            if st["wanted"] is not None:
+                g.add_metric((d.name, "wanted"), st["wanted"])
+            if d.id in loads:
+                load.add_metric((d.name,), loads[d.id])
+    return [g, load]
 
 
 def _machines(db):
