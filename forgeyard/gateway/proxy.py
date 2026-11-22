@@ -114,7 +114,7 @@ from forgeyard.gateway.fit import (BYTES_PER_TOKEN, KIND_WORDS, MEDIA_ENDPOINTS,
                                    fit_images, fit_route, fit_speech, prompt_estimate, scan_media)
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Admission, Refusal, key_limiter
-from forgeyard.gateway.replicas import LOCAL_BUSY_RETRY_AFTER, ReplicaSending
+from forgeyard.gateway.replicas import LOCAL_BUSY_RETRY_AFTER, ReplicaSending, asleep_error
 from forgeyard.gateway.route import (CLOUD_APIS, CLOUD_ENDPOINTS, ENDPOINTS, FIRST_ANSWER_DEFAULT, LOCAL_ONLY_HEADER,
                                      MAX_WAIT_MS, UPSTREAM_PATHS, CloudTarget, LocalGroup, Route, Tier, _int, _ready,
                                      _route_query, allowed_tiers, build_route, check_access, cloud_target,
@@ -126,6 +126,7 @@ from forgeyard.gateway.upstream import (CLIENT_CLOSED, NOT_TAKEN_HEADER, RETRYAB
                                         EngineUnreachable, Failed, _clients, _empty, _until_disconnect, client,
                                         close_client, not_taken, unless_gone, upstream_retry_after)
 from forgeyard.gateway.usage import recorder
+from forgeyard.workloads.sleep import idle, route_deployments
 
 __all__ = [
     # route.py
@@ -149,7 +150,7 @@ __all__ = [
     "DROPPED_HEADER", "RETRY_AFTER_CAP", "CloudSending", "_SECRETISH", "order_clouds", "provider_error",
     "retry_after", "rng",
     # replicas.py, answer.py
-    "LOCAL_BUSY_RETRY_AFTER", "ReplicaSending", "Answering",
+    "LOCAL_BUSY_RETRY_AFTER", "ReplicaSending", "Answering", "asleep_error",
     # here
     "Job", "forward", "record",
 ]
@@ -203,6 +204,7 @@ class Job(ReplicaSending, CloudSending, Answering):
         if self.settled:
             return
         self.settled = True
+        idle.used(route_deployments(self.route))   # 1.5.0: its deployments were used until now (sleep when idle)
         u = quirks.read_usage(usage)
         if self.admission is not None:
             tts = self.parsed.tts
@@ -362,6 +364,9 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
                                f"{verdict.retry_after} s.", retry_after=verdict.retry_after)
         admission = verdict
     job = Job(request, caller, route, endpoint, parsed, started, admission)
+    # 1.5.0 (#37): use of every deployment the route serves, in flight while the gateway holds it (waiting in line
+    # or in the image queue too; a stream being passed on is in flight on its replica, in the balancer).
+    using = idle.begin(route_deployments(route))
     try:
         local_only = wants_local_only(request)
         tiers = allowed_tiers(route, caller.cloud, local_only, endpoint)
@@ -396,6 +401,8 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
     except BaseException:
         job.release()
         raise
+    finally:
+        idle.end(using)
 
 
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,

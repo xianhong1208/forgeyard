@@ -8,7 +8,7 @@ export const STATE_TONE: Record<ReplicaState, "ok" | "run" | "wait" | "bad" | "o
 
 export const STATUS_TONE: Record<WorkloadStatus, "ok" | "run" | "wait" | "bad" | "off"> = {
   running: "ok", starting: "wait", pending: "wait", degraded: "bad", failed: "bad", succeeded: "ok",
-  stopping: "wait", stopped: "off",
+  stopping: "wait", stopped: "off", asleep: "off",
 };
 
 export function stateLabel(r: Replica): string {

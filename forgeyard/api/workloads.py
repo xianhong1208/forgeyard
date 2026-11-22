@@ -293,10 +293,13 @@ def stop_workload_route(workload_id: int, request: Request, caller: Caller = Dep
 def stop_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
     """Stop it (also for its deployment: /api/deployments/{id}/stop)."""
     w = _get(db, workload_id)
-    if w.desired_state != "running":
+    if w.desired_state == "stopped":
         raise fail(409, "already_stopped", "This workload is already stopped.")
+    was_asleep = w.desired_state == "asleep"
+    # 1.5.0: an asleep deployment can be stopped too (its replicas are stopped already): a person's Stop stays
+    # stopped, while an asleep one is woken by Start (and, later, by a request).
     nodes = wstate.stop(db, w, hub.connected)
-    wstate.event(db, w, "stopped", f"Stopped by {caller.user.username}.")
+    wstate.event(db, w, "stopped", f"Stopped by {caller.user.username}" + (" (it was asleep)." if was_asleep else "."))
     audit.record(db, "workload.stopped", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id)
     db.commit()
     _poke(nodes)
@@ -318,15 +321,19 @@ def start_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
         raise fail(409, "already_running", "This workload is already running.")
     if any(r.state == "stopping" for r in w.replicas):
         raise fail(409, "still_stopping", "Some replicas are still stopping. Start it again once they have stopped.")
+    woken = w.desired_state == "asleep"   # 1.5.0: Start on an asleep deployment wakes it
     w.desired_state = "running"
     w.generation += 1
     w.updated_at = utcnow()
     for r in w.replicas:
         placement.remember(r)  # 1.3.1: back to the machine it ran on, when that machine still takes it
         wstate.reset_replica(r, w.generation)
-    wstate.event(db, w, "started", f"Started again by {caller.user.username} (generation {w.generation}).")
+    if woken:
+        wstate.event(db, w, "woken", f"Woken by {caller.user.username} (generation {w.generation}).")
+    else:
+        wstate.event(db, w, "started", f"Started again by {caller.user.username} (generation {w.generation}).")
     audit.record(db, "workload.started", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id,
-                 generation=w.generation)
+                 generation=w.generation, **({"woken": True} if woken else {}))
     db.commit()
     placement.place_and_poke(db)
     db.expire_all()

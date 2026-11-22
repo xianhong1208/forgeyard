@@ -29,6 +29,15 @@ log = logging.getLogger("forgeyard.gateway")
 LOCAL_BUSY_RETRY_AFTER = 1   # seconds, on 503 local_busy: a slot of a text deployment frees up quickly (1.4.5)
 
 
+def asleep_error(served_name: str, groups: list[LocalGroup]) -> GatewayError:
+    """503 model_asleep (1.5.0, #37): the model's deployment is asleep because nobody used it. Until waking on a
+    request comes, an operator wakes it with Start on its page."""
+    names = ", ".join(dict.fromkeys(g.name for g in groups))
+    return GatewayError(503, "model_asleep", f"{served_name!r} is asleep: its deployment {names} had no requests for "
+                                             "a while and stopped to free its memory. Wake it with Start on its page "
+                                             "in the console (Serving).")
+
+
 class ReplicaSending:
     """`proxy.Job`'s local half: a tier's ready replicas tried in turn, and a stream's first answer awaited. Uses
     the job's request, route, parsed body, settings and bookkeeping (`gone`, `pause`, `headers`, `serve`)."""
@@ -107,6 +116,10 @@ class ReplicaSending:
         route, parsed = self.route, self.parsed
         pairs = [(g, t) for g in tier.locals for t in g.replicas]
         if not pairs:
+            asleep = [g for g in tier.locals if g.asleep]
+            if asleep:
+                # 1.5.0 (#37): asleep because nobody used it. It spills like any tier without a ready replica.
+                return Failed("unavailable", asleep_error(route.served_name, asleep))
             reason = "; ".join(g.reason for g in tier.locals if g.reason)
             return Failed("unavailable", GatewayError(503, "no_ready_replica",
                                                       f"{route.served_name!r} has no ready replica. {reason}".strip()))

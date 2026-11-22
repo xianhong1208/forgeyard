@@ -1036,6 +1036,29 @@ the usual rules.
 
 From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
 
+## Let a deployment sleep when nobody uses it
+
+A model that is used now and then (one you try in the evening, a big model for a weekly job) can give its GPU
+memory back while nobody calls it ([Sleep when idle](concepts.md#sleep-when-idle)). It is off unless you turn it
+on, per deployment.
+
+1. Turn it on with a change of the deployment's parameters: `PATCH /api/deployments/{id}` with
+   `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins and operators; leave `idle_minutes` out for
+   30 minutes). A deploy takes the same two parameters. Nothing restarts. The deploy and edit forms get the
+   setting later in 1.5.0.
+2. After the idle time without a request its replicas stop. Its page shows **asleep**, says why, and its events
+   say *Asleep: no requests for 30 min; frees …*. The model stays in `/v1/models`; the machine keeps the model
+   files and the engine image.
+3. Wake it with **Wake** on its page (`POST /api/deployments/{id}/start`). Until waking on a request arrives later
+   in 1.5.0, a request to the asleep model answers 503 `model_asleep`, or goes to the route's cloud tier when the
+   key may use one.
+4. **Stop** on an asleep deployment stops it for good: it leaves `/v1/models` until someone starts it.
+
+Choose the idle time by how long the model takes to start: a llama.cpp model is ready in seconds, a large vLLM
+model can take minutes, so give that one an idle time well above its start (the default 30 minutes is). While it
+sleeps its memory is free for others: on a shared card something else may take it, and the model then starts on
+another machine that has room, or waits.
+
 ## When a machine stays offline
 
 A machine is *offline* once nothing has been heard from it for 30 seconds (`AGENT_OFFLINE_SECONDS`). From then on:
