@@ -4,6 +4,7 @@ METRICS_TOKEN only a direct request from this host, with it a Bearer token on ev
 GPU memory, budgets), and that no label carries a key, a user or a prompt."""
 
 import asyncio
+import threading
 import time
 
 import pytest
@@ -129,11 +130,17 @@ def test_fy_met_004_a_spill_counts_its_reason_and_the_provider_target(mixed):  #
     """FY-MET-004: a request that finds local busy and spills to the cloud counts as target provider, and as a spill
     with reason busy; the local one as local."""
     before = scrape(mixed.owner)
-    mixed.engine.hold = 1.0
-    t, _ = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    r = chat(mixed.api)
+    # The engine keeps the first request until the test lets it go, not for a fixed second: on a busy runner the
+    # second request could take longer than that to reach the slots and find them free (#226, as FY-RT-002).
+    mixed.engine.gate = threading.Event()
+    try:
+        t, first = background(lambda: chat(mixed.api))
+        in_flight_soon()
+        r = chat(mixed.api)
+    finally:
+        mixed.engine.gate.set()
     t.join()
+    assert first["r"].status_code == 200 and first["r"].headers["x-forgeyard-target"] == "local:chat#0"
     assert r.headers["x-forgeyard-spilled"] == "busy"
     after = scrape(mixed.owner)
     assert value(after, "forgeyard_gateway_spills_total", model="chat", reason="busy") - \

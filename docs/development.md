@@ -93,7 +93,13 @@ fixed time for something to happen, or read a page before the data it needed had
 - **Stopping a process is not instant.** End process groups with `tests/leaks.py`'s `kill_group()`,
   which waits until every member is gone; the per-test leak check otherwise sees one still dying.
 - **A sleep is fine when time is what the test is about**: a timeout, a stall, "nothing happens
-  within 0.5 s".
+  within 0.5 s". Even then, hold what must not come in time with a `threading.Event`, not with a sleep a
+  little longer than the timeout, so the timeout is the only thing that can end the request: a starved
+  gateway that looks late finds a slept-for answer already there and passes it on (FY-RT-006, FY-FA-006,
+  FY-FA-010, FY-X-009). Assert a lower bound the code guarantees ("waited at least `wait_ms`"); an upper
+  bound only to tell the timeout from "never", generous, with the reason in a comment. FY-RT-003's
+  `< 1.5 s` failed at 1.63 s; it now checks that the first request was still held when the spill came back
+  (#226).
 - **UI tests: everything from the API arrives later, and in any order.** Use `await screen.findBy…` or
   `waitFor` for anything that comes from a fetch (a form shown once its data is there, a select's
   options from another endpoint, a value set when an answer arrives), and `getBy…` only for what is
