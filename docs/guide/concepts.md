@@ -133,7 +133,9 @@ from 1.3 (`/models/deployments/<id>`, `/models/deploy`, `/models?tab=routes`, `/
   call it a **recipe** (`/api/recipes`, `forgeyard/recipes/*.yaml`); an admin adds a custom one on the
   **Engines** tab. Built in: `vllm` (chat on
   NVIDIA and AMD), `vllm-pooling` (embeddings, rerank and text classification), `llama-cpp` (GGUF on NVIDIA, on AMD with ROCm or Vulkan, or on the CPU) and
-  `faster-whisper` (speech to text).
+  `faster-whisper` (speech to text). The image an engine runs (or, for a process variant, its program) is shown
+  beside its name: on its card, on its page, in the deploy form and on a deployment's page (the image its replicas
+  run); with several, the first one and "+N", every one in the tooltip (1.5.2).
 - Each catalog model has **its own page** (1.4.3), opened from its name: `/models/<name>`. It shows
   what the model is (source and revision, licence, task, architecture), **which machines have it** in
   their model cache and **whether it fits** each one now with an engine's defaults, its deployments, the

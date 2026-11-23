@@ -29,13 +29,13 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 
 執行 `uv lock`（或 Dependabot 更新 `uv.lock`）之後，請執行 `uv run --no-sync python -m forgeyard.install.requirements`：它會重寫 install.sh 安裝 agent 相依套件時使用的清單（含雜湊值，`forgeyard/install/agent-requirements*.txt`）；清單和 lock 不一致時 FY-INST-020 會失敗。
 
-## 以 digest 固定的引擎映像檔
+## 以 digest 固定的推論引擎映像檔
 
 內建配方的每個容器 variant 都以 `repo:tag@sha256:<index digest>` 指定映像檔，`forgeyard/recipes/images.lock.json`
 記下正確副本會有的 id（每個平台的 manifest、config 與 content id）。agent 靠它檢查 `docker load` 載入的副本，伺服器也靠它把映像檔轉送給連不到 registry 的機器。
 `scripts/pin_images.py` 對照 registry 檢查這兩者（有任何不同就以 1 結束）；`--write` 重新解析 tag，改寫配方與 lock。
 
-- **升級引擎：**改配方裡的 tag，執行 `pin_images.py --write`，檢查 diff，跑測試。
+- **升級推論引擎：**改配方裡的 tag，執行 `pin_images.py --write`，檢查 diff，跑測試。
 - **Forgeyard 自己的視覺映像檔**（`images/vision`，配方 `vision`）也一樣固定（1.4.1）。release 會用該版的程式碼發布
   `forgeyard-vision:X.Y.Z` 與 `X.Y.Z-cuda`，所以 digest 要在打 tag 之後才知道：**改過 `images/vision` 的 release 之後**，
   另開一個小 PR 進 `dev`，把 `forgeyard/recipes/vision.yaml` 的兩個 tag 改成新版本，再執行 `pin_images.py --write`
@@ -111,22 +111,22 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/gateway/pricing.py` | 依用量與價格計算請求的費用；OpenRouter 的清單與價格對應 |
 | `forgeyard/gateway/budgets.py` | 預算帳本：預留、結算、釋放、80% 與 100% 警示、402 |
 | `forgeyard/gateway/media.py` | 對話中的圖片、音訊與影片：重建內容區塊、依 egress 規則下載媒體網址 |
-| `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種引擎拿到什麼、音訊長度 |
-| `forgeyard/gateway/imagegen.py` | 圖片生成：檢查請求、每個部署的上限、每種引擎拿到什麼、佇列、回應與圖片尺寸 |
+| `forgeyard/gateway/speech.py` | 文字轉語音：檢查請求、拒絕聲音複製、每種推論引擎拿到什麼、音訊長度 |
+| `forgeyard/gateway/imagegen.py` | 圖片生成：檢查請求、每個部署的上限、每種推論引擎拿到什麼、佇列、回應與圖片尺寸 |
 | `forgeyard/gateway/videogen.py`、`videojobs.py` | 影片生成：檢查請求、每個部署的上限、工作物件；工作留在它的副本上、清掃器、過期、內容與用量 |
 | `forgeyard/gateway/passthrough.py` | `/x/<name>` 的通用直通：拒絕哪些路徑、拿掉與強制哪些標頭、以原始位元組轉送回應、限制與用量 |
 | `forgeyard/gateway/usage.py`, `errors.py` | 在記憶體計數再寫入資料庫的用量；OpenAI 格式的錯誤 |
 | `forgeyard/machines/` | agent 協定、加入與串流端點、即時連線、離線偵測 |
 | `forgeyard/workloads/` | 工作負載的規格、放置與 GPU 允許清單、期望狀態與目前狀態 |
 | `forgeyard/models/` | 模型來源、有 SSRF 防護的下載器、檢查（safetensors、GGUF、文字以外能接受什麼、授權）、估算、recipe、排程器、路由、推薦清單、伺服器的 Hugging Face 權杖 |
-| `forgeyard/recipes/` | 內建的引擎 recipe（YAML），映像檔以 digest 固定 |
+| `forgeyard/recipes/` | 內建的推論引擎 recipe（YAML），映像檔以 digest 固定 |
 | `forgeyard/security/` | 密碼、工作階段、速率限制、host／CSRF middleware、HTTPS 與 CA、靜態加密的機密、`secrets reset` |
 | `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`）、它的執行方式（`how_it_runs.py`，用於更新指令） |
 | `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
-| `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
+| `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、推論引擎 |
 | `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門員、紀錄、健康檢查 |
 | `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | 協調迴圈：迴圈本身、期望清單與回報；它在記憶體裡的狀態；每種執行環境都實作的 `Runtime` 協定（以及 `ContainerEngine`） |
-| `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | 協調迴圈的各部分：副本的啟動、結束、停止與移除；啟動前的模型、引擎與映像檔；健康檢查；金鑰守門；管理員的快取與映像檔請求 |
+| `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | 協調迴圈的各部分：副本的啟動、結束、停止與移除；啟動前的模型、推論引擎與映像檔；健康檢查；金鑰守門；管理員的快取與映像檔請求 |
 | `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、agent 的更新指令與是否落後（`update.py`）、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |
 | `forgeyard/guide.py`, `docs/guide/` | 使用指南（en、zh-TW），在 `/guide` 提供 |
 | `docs/design.md`, `docs/https-and-trust.md` | 每個部分如何運作；HTTPS、信任與機密 |

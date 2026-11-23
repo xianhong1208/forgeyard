@@ -4,6 +4,7 @@ import { Link, Navigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
 import { DownloadDialog, DownloadList } from "../components/DownloadTo";
+import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBlock, CopyBox, Notice, PageHeader } from "../components/ui";
 import { useT } from "../i18n/react";
@@ -13,7 +14,7 @@ import { isActive, recentDownloads } from "../lib/downloads";
 import { engineCarry } from "../lib/engineImages";
 import { imageTag, when } from "../lib/format";
 import { bytes } from "../lib/machines";
-import { HARDWARE_LABEL, engineDescription, engineHardware, freeName, renameRecipe } from "../lib/engines";
+import { HARDWARE_LABEL, engineDescription, engineHardware, engineRuns, freeName, renameRecipe } from "../lib/engines";
 import { engineHref, modelHref } from "../lib/pages";
 import { TASK_LABEL, mediaText, params, shortSource, taskLabel } from "../lib/models";
 import type { CatalogModel, CatalogResponse, DownloadsResponse, ModelDownload, ModelSources, Recipe, RecipeVariant } from "../lib/types";
@@ -257,6 +258,8 @@ function EngineCard({ r, canManage, onEdit, onDeleted }: { r: Recipe; canManage:
         <span className="chip engine-version" title={`${r.engine} ${r.version}`}>{r.engine} {r.version}</span>
         {!r.builtin && <span className="chip chip-tone-run engine-custom">{t("library.custom")}</span>}
       </header>
+      {/* 1.5.2 (#189): the image it runs (or its program), one line on every card so they keep one height. */}
+      <p className="engine-image-line"><EngineImage runs={engineRuns(r.variants)} /></p>
       <p className="small engine-desc" title={desc}>{desc}</p>
       <div className="engine-facts" aria-label={t("library.runsOn", { list: engineHardware(r).map((h) => HARDWARE_LABEL[h]).join(", ") })}>
         {engineHardware(r).map((h) => (

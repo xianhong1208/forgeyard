@@ -113,7 +113,7 @@ export default {
   "machines.offline.build": "或在新機器上，從版本 {version} 的 Forgeyard 原始碼建置：",
   "machines.offline.useTag": "然後在上面指令的最後一行用 {tag} 取代 {reference}：載入或建置的映像檔只有標籤，沒有 digest。",
   "machines.offline.runAbove": "然後執行上面的指令：Docker 會在本機找到映像檔，不會去拉取。",
-  "machines.offline.engines": "模型的引擎映像檔也用同樣的方式搬運：「模型」底下的每個引擎（<em>引擎</em>分頁）都列出它的映像檔指令，agent 使用載入的映像檔之前會先檢查它。",
+  "machines.offline.engines": "推論引擎的映像檔也用同樣的方式搬運：「模型」頁的<em>推論引擎</em>分頁裡，每個推論引擎都列出搬運它映像檔的指令，agent 使用載入的映像檔之前會先檢查它。",
   "machines.offline.help": "離線機器",
   "machines.form.legend": "指令的設定",
   "machines.form.modelDir": "那台機器上的模型目錄",

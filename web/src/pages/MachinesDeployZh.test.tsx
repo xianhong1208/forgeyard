@@ -92,7 +92,7 @@ describe("a machine's page in zh-TW", () => {
     expect(await screen.findByRole("heading", { name: "記憶體配置圖" })).toBeTruthy();
     for (const name of ["模型", "在這裡執行 · 0", "GPU 存取和執行環境", "agent 資訊"]) expect(screen.getByRole("heading", { name })).toBeTruthy();
     expect(await screen.findByRole("heading", { name: /^快取中的模型/ })).toBeTruthy();
-    expect(await screen.findByRole("heading", { name: /^引擎映像檔/ })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /^推論引擎的映像檔/ })).toBeTruthy();
     expect(screen.getByText("線上")).toBeTruthy();
     expect(screen.getByText("心跳 4 秒前")).toBeTruthy();
     expect(screen.getByRole("button", { name: "撤銷" })).toBeTruthy();
@@ -149,7 +149,7 @@ describe("a machine's page in zh-TW", () => {
     const dlg = await screen.findByRole("dialog", { name: "下載模型到…" });
     expect(within(dlg).getByText(/^模型會現在就放進每台機器的模型快取/)).toBeTruthy();
     expect(await within(dlg).findByText("放得下")).toBeTruthy();
-    expect(within(dlg).getByText("要下載 1.2 GiB · 可用 48 GiB · 引擎：llama.cpp-1.0.0 封存檔 · cpu-process")).toBeTruthy();
+    expect(within(dlg).getByText("要下載 1.2 GiB · 可用 48 GiB · 推論引擎：llama.cpp-1.0.0 封存檔 · cpu-process")).toBeTruthy();
     expect((within(dlg).getByRole("checkbox", { name: /a100-box/ }) as HTMLInputElement).checked).toBe(true);
     expect(within(dlg).getByRole("button", { name: "下載到 1 台機器" })).toBeTruthy();
     fireEvent.click(within(dlg).getByRole("button", { name: "取消" }));
@@ -280,12 +280,12 @@ describe("the deploy and edit forms in zh-TW", () => {
     deploymentServer();
     mount("/serving/deploy?model=qwen3-4b");
     expect(await screen.findByRole("heading", { name: "部署模型" })).toBeTruthy();
-    for (const name of ["模型和引擎", "參數", "沒有使用時"]) expect(await screen.findByRole("heading", { name })).toBeTruthy();
+    for (const name of ["模型和推論引擎", "參數", "沒有使用時"]) expect(await screen.findByRole("heading", { name })).toBeTruthy();
     expect(screen.getByLabelText("部署名稱")).toBeTruthy();
     expect(screen.getByLabelText("對外的模型名稱")).toBeTruthy();
     expect(screen.getByLabelText("GPU 共用")).toBeTruthy();
     expect(screen.getByLabelText("閒置時休眠")).toBeTruthy();
-    expect(screen.getByText(/^進階：記憶體覆寫、引擎參數、首次回應等待、喚醒等待、權杖$/)).toBeTruthy();
+    expect(screen.getByText(/^進階：記憶體覆寫、推論引擎參數、首次回應等待、喚醒等待、權杖$/)).toBeTruthy();
     expect(screen.getByText(/^只適用閒置時休眠：喚醒時，送給它的請求最多等多久（10 到 1,800）/)).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "估算" })).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "會放在哪裡" }, { timeout: 3000 })).toBeTruthy();

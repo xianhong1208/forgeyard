@@ -53,6 +53,8 @@ version until 1.0.
 
 - The console's fonts fall back to a Traditional Chinese system font (PingFang TC, Noto Sans TC, Microsoft
   JhengHei…) for Chinese text: Schibsted Grotesk and Martian Mono have no CJK glyphs.
+- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it
+  runs is shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#189).
 
 ### Fixed
 
