@@ -193,7 +193,7 @@ describe("the Playground in Traditional Chinese", () => {
     expect(within(vid).getByText("81 幀，每秒 16 幀")).toBeTruthy();
     expect(within(vid).getByRole("heading", { name: "你用這個模型做的影片" })).toBeTruthy();
     const item = within(vid).getByText("已完成").closest("li") as HTMLElement;
-    expect(within(item).getByText(/ · 832x480 · 5 秒$/).textContent).toMatch(/^\d+月\d+日 /);   // the date in Chinese
+    expect(within(item).getByText(/ · 832x480 · 5 秒$/).textContent).toMatch(/^\d+月\d+日/);   // the date in Chinese
     expect(within(item).getByRole("button", { name: "顯示" })).toBeTruthy();
     expect(within(item).getByRole("button", { name: /^刪除 .+ 的影片$/ })).toBeTruthy();
     fireEvent.click(within(item).getByRole("button", { name: "顯示" }));

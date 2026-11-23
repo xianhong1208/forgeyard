@@ -108,7 +108,7 @@ describe("Usage's charts", () => {
     expect(periodTitle(week, "week", "en")).toBe("Dec 28 – Jan 3, 2027");
     expect([periodLabel(month, "month", "en"), periodTitle(month, "month", "en")]).toEqual(["Nov 2026", "November 2026 (so far)"]);
     expect(periodLabel(day, "day", "zh-TW")).toBe("11月12日");
-    expect(periodTitle(day, "day", "zh-TW")).toBe("2026年11月12日 週四");
+    expect(periodTitle(day, "day", "zh-TW")).toMatch(/^2026年11月12日 ?週四$/);   // ICU versions differ on the space
     expect(periodTitle({ start: "2026-11-09", end: "2026-11-15", partial: true }, "week", "zh-TW")).toBe("2026年11月9日至11月15日（至今）");
     expect(periodTitle(week, "week", "zh-TW")).toBe("2026年12月28日至2027年1月3日");   // across a year: the year twice
     expect(periodLabel(month, "month", "zh-TW")).toBe("2026年11月");

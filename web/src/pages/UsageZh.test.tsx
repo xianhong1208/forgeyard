@@ -150,7 +150,7 @@ describe("Usage in Traditional Chinese", () => {
     const legend = screen.getByRole("list", { name: "每天的請求，依金鑰：各條線及其總計" });
     expect(within(legend).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["laptop (fyk_ab…)10", "主控台試用區2", "其他（2）2"]);
     act(() => chart.focus());
-    await waitFor(() => expect(chart.textContent).toContain("2026年11月23日 週一（至今）：laptop (fyk_ab…) 2、主控台試用區 0、其他（2） 0；總計 2"));
+    await waitFor(() => expect(chart.textContent).toMatch(/2026年11月23日 ?週一（至今）：laptop \(fyk_ab…\) 2、主控台試用區 0、其他（2） 0；總計 2/));   // ICU versions differ on the space
     expect(chart.querySelectorAll("text.lc-tick")[chart.querySelectorAll("text.lc-tick").length - 1].textContent).toBe("11月23日");
     fireEvent.click(screen.getByText("顯示數字"));
     const table = screen.getByRole("table", { name: "每天的請求，依金鑰" });
