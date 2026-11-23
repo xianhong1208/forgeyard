@@ -39,6 +39,8 @@
 
 1.5.1 讓整個主控台的每個頁面除了英文也有**繁體中文**：第一次開啟時跟著瀏覽器的語言，之後可以在帳號選單切換（[作法](docs/guide/zh-TW/how-to.md#use-the-console-in-traditional-chinese)）。只需要升級伺服器，agent 不必更新。
 
+1.5.2 帶來**推論引擎更新**。管理員可以檢查內建推論引擎在上游有沒有較新的穩定版本，**試用這個版本** 會建立一個以 digest 釘選的複本，專案有提供簽章時（llama.cpp）會先驗證；內建推論引擎本身維持原樣。**試跑** 會用複本暫時執行一個模型幾分鐘，和金鑰、用量隔離，並把它的啟動、記憶體和回應拿來和內建推論引擎比較。之後就能在部署的 **編輯** 頁面把部署換到複本、也能換回來，名稱、金鑰和路由都不變（[作法](docs/guide/zh-TW/how-to.md#try-a-newer-version-of-an-engine)）。伺服器的資料庫會變更，升級前請先備份。從原始碼執行伺服器時改用 `uv sync --extra server` 安裝；agent 不必更新。
+
 ## 1.4 的新功能
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
@@ -64,7 +66,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.1
+  docker.io/tonyhuang1101/forgeyard:1.5.2
 sudo docker logs forgeyard
 ```
 
@@ -107,7 +109,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

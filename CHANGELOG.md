@@ -6,103 +6,133 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.2] — 2026-11-23
+
+Engine updates (#95): Forgeyard pins each built-in engine to one version and moves it only in its own releases, and
+1.5.2 lets an admin see the newer versions upstream and try one without waiting for that. **Check for newer
+versions** on **Models → Engines** lists the stable releases each built-in engine's own image repository has
+published since (#251). **Try this version** makes a custom copy of the built-in engine with a newer version's
+images, pinned by digest and, where the project signs its releases (llama.cpp), with the signatures verified on the
+server (#253). **Try it out** deploys a catalog model with an engine on one machine for a few minutes, isolated
+from API keys and usage, and checks that it starts, how much memory it really takes and how it answers next to the
+built-in engine (#256). A deployment's **Edit** page then switches it to the copy and back, keeping its name, keys
+and routes, and says beforehand about how long a model with only one running replica will not answer;
+**Download to…** on an engine's page puts the engine alone on machines ahead of time (#255). The built-in engines
+themselves do not change. In the Traditional Chinese console an engine is now 推論引擎, with its image beside its
+name (#249), and CI audits the dependencies on every pull request (#254).
+
+**A server run from source now installs with `uv sync --extra server`.** Signature verification uses `sigstore`
+(Apache-2.0), a new dependency in the server's own extra; the server image has it, and the agent's wheel and image
+do not need it.
+
+**Three migrations run on start**, all additive: `0016_image_pins` and `0018_engine_trials` add a table each, and
+`0017_engine_downloads` lets a download have no model (an engine alone). Existing rows do not change. **Back up
+before upgrading** ([how](docs/guide/how-to.md#back-up-and-restore)): a 1.5.1 server does not start on a database
+that 1.5.2 has migrated (it stops with *Can't locate revision identified by '0018_engine_trials'*), so going back
+to 1.5.1 means restoring that backup.
+
+**The agents need no update.** The only agent change since 1.5.1 is a log line: a 1.5.2 agent names the engine
+when it downloads an engine alone. A 1.5.1 agent (and a 1.5.0 one, the same agent code) works with a 1.5.2 server
+as it is, engine-only downloads included, since every agent with `prefetch` takes them. Setup health lists such an
+agent as older than the server; its **Update the agent** command can wait.
+
 ### Added
 
-- **A dependency audit on every pull request** (`.github/workflows/dependency-audit.yml`): pip-audit on uv.lock's
-  runtime set (every extra, no dev group) and `npm audit --omit=dev` for the web UI. Information, not a required
-  check.
+- **Engine updates (#95).** Forgeyard pins each built-in engine to one version and moves it only in its own releases.
+  Admins can now see the newer versions upstream and try one as a pinned copy beside the built-in, which stays as it
+  is.
+  - **Check for newer versions (#251).** An admin's **Check for newer versions** on **Models → Engines** asks, now and
+    only then, each built-in variant's own image repository (Docker Hub, GHCR) and GitHub, through the server's
+    model-source rules. A newer version is a stable release published as an image in the built-in tag's own form
+    (`v0.34.0-cu129` for `v0.32.0-cu129`): release candidates, nightlies and model-specific tags never count, a GitHub
+    release without images is only mentioned, and every newer version is listed. stable-diffusion.cpp, published only
+    under moving tags, shows a newer build when its tag points at a later image. The engine cards get a badge (*0.34.0
+    available*, *Newer build*, *Up to date*, *Could not check*), and a built-in engine's page a **Newer versions**
+    section: per version, the variants with an image (tag and digest now) and why the others have none, a process
+    variant only when the release has the same archive with a SHA-256, the release notes link, and the flags and
+    settings this engine passes that the notes mention. A registry or GitHub that cannot be reached is "could not
+    check" for its engines only. The last result is kept in one `server_settings` row (no migration), shown with when
+    and by whom, read by everyone signed in, and each check is audited (`recipe.updates_checked`). API: `POST
+    /api/engine-updates/check`, `GET /api/engine-updates`. Nothing on a timer, and the built-in engines do not change.
+    On 2026-11-23 it found vLLM 0.33.0 and 0.34.0 (without the CUDA 12.9 variant) and a newer stable-diffusion.cpp
+    build (without its process variant).
+  - **Try this version (#253).** On a built-in engine's page each newer version has **Try this version** (admins): a
+    custom engine, `<engine>-x-y-z` (`vllm-0-34-0`), copied from the built-in with that version's images. It takes a
+    version from the last check, never an image; only the built-in variant's own repository is asked. Each image's
+    digest is resolved again (a tag that moved since the check refuses the copy) and pinned, and its recorded ids are
+    kept in a new `image_pins` table (migration `0016_image_pins`, additive), computed as `scripts/pin_images.py` does
+    for the built-in ones (`forgeyard/workloads/pinning.py`, now shared): a copy's image comes through the server,
+    runs after `docker load` offline, and is listed and removable on machine pages like a built-in's. Variants without
+    the new version are left out with the reason; a process variant follows when the release has the same archive (its
+    SHA-256 read again). **Signatures** are verified on the server where the project publishes them (llama.cpp's
+    GitHub artifact attestations, for its images and archives, with sigstore-python and a trust root refreshed from
+    Sigstore's TUF repository through the server's network rules): a signature that fails or is missing refuses the
+    copy. When signatures cannot be checked at all (no network to GitHub or Sigstore, or no sigstore on the server),
+    the copy is refused too, but an admin may make it anyway on purpose (**Create it without verification**,
+    `allow_unverified`): it is then marked *Not verified* everywhere and the override is audited. The others are
+    recorded as unsigned upstream. The copy keeps the built-in's arguments, records `based_on` and what was done
+    (`copy`), and is audited (`recipe.created`). A catalog model's engine arguments for the built-in (Qwen3-Reranker's
+    `--hf-overrides` for `vllm-pooling`) apply to its copies. The copy's page shows where it came from, each pinned
+    digest and what was verified, and what was left out. API: `POST /api/recipes/{name}/try`. New dependency:
+    `sigstore` (Apache-2.0), as the server's own extra: a server run from source now installs with `uv sync --extra
+    server` (the server image has it; the agent's wheel and image do not carry it).
+  - **Another version of the engine for a deployment, and Download to… for an engine alone (#255).** A deployment's
+    **Edit** page has an **Engine version** select: its built-in engine and the copies of it made with Try this
+    version that serve its model the same way (`PATCH /api/deployments/{id}` takes `recipe`; another engine, a copy of
+    another built-in, or one that would change the route is 422 `engine_not_related`, `incompatible` or
+    `engine_not_compatible`). The name, served name, keys and routes stay; the estimate is made again with the new
+    version (a change that no longer fits is refused as other changes are, and `dry_run` answers the same), parameters
+    the new version does not take are dropped and listed (`dropped`), the catalog's engine arguments follow through
+    `based_on`, and the replicas restart as for any change (one at a time with several). Going back is choosing the
+    built-in. Audited as `deployment.changed` with `recipe` from/to and both versions; the deployment's page says when
+    it runs a copy. **Before a change restarts the only running replica**, the form and the dry run say about how long
+    the model will not answer (`outage`: its last start, else the other deployments of the engine, else a typical
+    start), that a new version can take longer on its first start, which machines still lack its image, and how to
+    avoid the gap (a second replica, automatic replicas, and the cloud tier for keys allowed to use it); it changes
+    nothing else. **Download to…** on an engine's page (built-in or copy; admins and operators) fetches only the image
+    of the variant each machine would run, by its pinned digest and through the server where the machine is set so (a
+    copy's by the ids Try recorded), or its process program with its SHA-256; a machine no variant runs on is refused
+    with why; progress and Cancel as for models; audited (`engine.download_requested`, `engine.download_cancelled`).
+    Migration `0017_engine_downloads`: `model_downloads.model_id` becomes nullable (going down deletes only
+    engine-only rows). Agents with `prefetch` already take a download without a model (a 1.5.2 agent also names the
+    engine in its log line). A copy's page says when its built-in engine has caught up (the same version or a newer
+    one), so its deployments can switch back; nothing moves by itself. The edit page also shows what restarts in the
+    reader's language (it was always English).
+  - **Try it out: a trial run of an engine before switching (#256; community edition).** On an engine's page (usually
+    a copy made with Try this version) admins and operators click **Try it out**, pick a catalog model the engine
+    serves and a machine, and Forgeyard deploys it there for a few minutes, **isolated**: no gateway route, so it is
+    not in `/v1/models`, no API key or Playground can call it, and no usage or cost is counted; it never sleeps, is
+    never scaled, and is left out of the deployment lists, route targets, the first-run checklist, the advisor and
+    `/metrics` (Serving and a machine's page name it as a trial in progress). The parameters are those of a deployment
+    of the model on the built-in engine when there is one, else the engine's defaults; it is placed like a deployment
+    (estimate, the usual refusal when it does not fit, Share VRAM). Checks, straight against the replica with its
+    internal key: it starts (time and phases, against the built-in's last start), its **measured memory** on its card
+    or the machine's RAM (readings before the engine starts and after it is ready, a few each, against the
+    reservation; approximate on a card other work shares; when other work released memory meanwhile or no readings
+    came, it is *not measured* and said so in words, never as a number), it answers a warm-up and five short requests
+    of its kind (chat at temperature 0, embeddings, rerank with the right document first, classification, speech to
+    text, text to speech, an image, vision; video only starts), their p50/p95, and the same request to a ready
+    built-in deployment of the model to compare the answers. Then the deployment is removed: also when a check fails,
+    when it is cancelled, when it runs out of time (the start is bounded, 30 minutes by default, and what follows by
+    15 minutes), and when the server restarts during it. Results are kept in a new table `engine_trials` (migration
+    `0018_engine_trials`, additive), shown under **Trials** on the engine's page (history, each trial's checks, the
+    comparison with the built-in engine's deployment and its own last trial), as a chip on the engine's card, and in
+    **Edit** when a deployment is switched to that version ("last tried on …: passed"), never as a gate; one function
+    (`trials.switch_policy`) is the seam for a later enterprise policy and allows every switch. At most four trials at
+    once, one per engine; the engine and the model cannot be deleted while a trial runs. API: `POST
+    /api/recipes/{name}/trials` (with `dry_run`), `GET /api/recipes/{name}/trials`, `GET /api/engine-trials/{id}`,
+    `POST /api/engine-trials/{id}/cancel`; audited as `engine_trial.started`, `engine_trial.finished` and
+    `engine_trial.cancelled`.
 
-- **Newer versions of the built-in engines (1.5.2, #95, part 1).** An admin's **Check for newer versions** on
-  **Models → Engines** asks, now and only then, each built-in variant's own image repository (Docker Hub, GHCR) and
-  GitHub, through the server's model-source rules. A newer version is a stable release published as an image in the
-  built-in tag's own form (`v0.34.0-cu129` for `v0.32.0-cu129`): release candidates, nightlies and model-specific
-  tags never count, a GitHub release without images is only mentioned, and every newer version is listed.
-  stable-diffusion.cpp, published only under moving tags, shows a newer build when its tag points at a later image.
-  The engine cards get a badge (*0.34.0 available*, *Newer build*, *Up to date*, *Could not check*), and a built-in
-  engine's page a **Newer versions** section: per version, the variants with an image (tag and digest now) and why
-  the others have none, a process variant only when the release has the same archive with a SHA-256, the release
-  notes link, and the flags and settings this engine passes that the notes mention. A registry or GitHub that cannot
-  be reached is "could not check" for its engines only. The last result is kept in one `server_settings` row (no
-  migration), shown with when and by whom, read by everyone signed in, and each check is audited
-  (`recipe.updates_checked`). API: `POST /api/engine-updates/check`, `GET /api/engine-updates`. Nothing on a timer,
-  and the built-in engines do not change. On 2026-11-23 it found vLLM 0.33.0 and
-  0.34.0 (without the CUDA 12.9 variant) and a newer stable-diffusion.cpp build (without its process variant).
-
-- **Try this version (1.5.2, #95, part 2).** On a built-in engine's page each newer version has **Try this version**
-  (admins): a custom engine, `<engine>-x-y-z` (`vllm-0-34-0`), copied from the built-in with that version's images.
-  It takes a version from the last check, never an image; only the built-in variant's own repository is asked. Each
-  image's digest is resolved again (a tag that moved since the check refuses the copy) and pinned, and its recorded
-  ids are kept in a new `image_pins` table (migration `0016_image_pins`, additive), computed as
-  `scripts/pin_images.py` does for the built-in ones (`forgeyard/workloads/pinning.py`, now shared): a copy's image
-  comes through the server, runs after `docker load` offline, and is listed and removable on machine pages like a
-  built-in's. Variants without the new version are left out with the reason; a process variant follows when the
-  release has the same archive (its SHA-256 read again). **Signatures** are verified on the server where the project
-  publishes them (llama.cpp's GitHub artifact attestations, for its images and archives, with sigstore-python and a
-  trust root refreshed from Sigstore's TUF repository through the server's network rules): a signature that fails
-  or is missing refuses the copy. When signatures cannot be checked at all (no network to GitHub or Sigstore, or no
-  sigstore on the server), the copy is refused too, but an admin may make it anyway on purpose (**Create it without
-  verification**, `allow_unverified`): it is then marked *Not verified* everywhere and the override is audited. The
-  others are recorded as unsigned upstream. The copy keeps the
-  built-in's arguments, records `based_on` and what was done (`copy`), and is audited (`recipe.created`). A catalog
-  model's engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its
-  copies. The copy's page shows where it came from, each pinned digest and what was verified, and what was left out.
-  API: `POST /api/recipes/{name}/try`. New dependency: `sigstore` (Apache-2.0), as the server's own extra: a server
-  run from source now installs with `uv sync --extra server` (the server image has it; the agent's wheel and image do
-  not carry it).
-
-- **Another version of the engine for a deployment, and Download to… for an engine alone (1.5.2, #95, part 3).**
-  A deployment's **Edit** page has an **Engine version** select: its built-in engine and the copies of it made with
-  Try this version that serve its model the same way (`PATCH /api/deployments/{id}` takes `recipe`; another engine,
-  a copy of another built-in, or one that would change the route is 422 `engine_not_related`, `incompatible` or
-  `engine_not_compatible`). The name, served name, keys and routes stay; the estimate is made again with the new
-  version (a change that no longer fits is refused as other changes are, and `dry_run` answers the same), parameters
-  the new version does not take are dropped and listed (`dropped`), the catalog's engine arguments follow through
-  `based_on`, and the replicas restart as for any change (one at a time with several). Going back is choosing the
-  built-in. Audited as `deployment.changed` with `recipe` from/to and both versions; the deployment's page says when
-  it runs a copy. **Before a change restarts the only running replica**, the form and the dry run say about how long
-  the model will not answer (`outage`: its last start, else the other deployments of the engine, else a typical
-  start), that a new version can take longer on its first start, which machines still lack its image, and how to
-  avoid the gap (a second replica, automatic replicas, and the cloud tier for keys allowed to use it); it changes
-  nothing else. **Download to…** on an engine's page (built-in or copy; admins and operators) fetches only the image
-  of the variant each machine would run, by its pinned digest and through the server where the machine is set so
-  (a copy's by the ids Try recorded), or its process program with its SHA-256; a machine no variant runs on is
-  refused with why; progress and Cancel as for models; audited (`engine.download_requested`,
-  `engine.download_cancelled`). Migration `0017_engine_downloads`: `model_downloads.model_id` becomes nullable (going
-  down deletes only engine-only rows). Agents with `prefetch` already take a download without a model (a 1.5.2 agent
-  also names the engine in its log line). A copy's page says when its built-in engine has caught up (the same version or a newer one), so its
-  deployments can switch back; nothing moves by itself. The edit page also shows what restarts in the reader's
-  language (it was always English).
-
-- **Try it out: a trial run of an engine before switching (1.5.2, #95, part 4; community edition).** On an engine's
-  page (usually a copy made with Try this version) admins and operators click **Try it out**, pick a catalog model the
-  engine serves and a machine, and Forgeyard deploys it there for a few minutes, **isolated**: no gateway route, so
-  it is not in `/v1/models`, no API key or Playground can call it, and no usage or cost is counted; it never sleeps,
-  is never scaled, and is left out of the deployment lists, route targets, the first-run checklist, the advisor and
-  `/metrics` (Serving and a machine's page name it as a trial in progress). The parameters are those of a deployment
-  of the model on the built-in engine when there is one, else the engine's defaults; it is placed like a deployment
-  (estimate, the usual refusal when it does not fit, Share VRAM). Checks, straight against the replica with its
-  internal key: it starts (time and phases, against the built-in's last start), its **measured memory** on its card
-  or the machine's RAM (readings before the engine starts and after it is ready, a few each, against the reservation;
-  approximate on a card other work shares; when other work released memory meanwhile or no readings came, it is
-  *not measured* and said so in words, never as a number), it answers a warm-up and five short requests of its kind (chat at
-  temperature 0, embeddings, rerank with the right document first, classification, speech to text, text to speech,
-  an image, vision; video only starts), their p50/p95, and the same request to a ready built-in deployment of the
-  model to compare the answers. Then the deployment is removed: also when a check fails, when it is cancelled, when
-  it runs out of time (the start is bounded, 30 minutes by default, and what follows by 15 minutes), and when the
-  server restarts during it. Results are kept in a new table `engine_trials` (migration `0018_engine_trials`,
-  additive), shown under **Trials** on the engine's page (history, each trial's checks, the comparison with the
-  built-in engine's deployment and its own last trial), as a chip on the engine's card, and in **Edit** when a
-  deployment is switched to that version ("last tried on …: passed"), never as a gate; one function
-  (`trials.switch_policy`) is the seam for a later enterprise policy and allows every switch. At most four trials at
-  once, one per engine; the engine and the model cannot be deleted while a trial runs. API: `POST
-  /api/recipes/{name}/trials` (with `dry_run`), `GET /api/recipes/{name}/trials`, `GET /api/engine-trials/{id}`,
-  `POST /api/engine-trials/{id}/cancel`; audited as `engine_trial.started`, `engine_trial.finished` and
-  `engine_trial.cancelled`.
+- **A dependency audit on every pull request (#254)** (`.github/workflows/dependency-audit.yml`): pip-audit on
+  uv.lock's runtime set (every extra, no dev group) and `npm audit --omit=dev` for the web UI. Information, not a
+  required check.
 
 ### Changed
 
-- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it
-  runs is shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#189).
+- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it runs is
+  shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#249, for
+  #189).
 
 ## [1.5.1] — 2026-11-23
 

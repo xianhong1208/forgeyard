@@ -402,6 +402,31 @@ engine's part of a start itself. No migration.
 
 No agent or server code changed since 1.5.0: update the server only, the agents need no update. No migration.
 
+## Shipped: 1.5.2 (2026-11-23), engine updates
+
+1. ✅ **Check for newer versions** (#251, for #95): an admin asks each built-in engine's own image repository and
+   GitHub, now and only then, for the stable releases published since its pinned version; the engine cards get a
+   badge, and an engine's page lists each newer version's variants, its release notes and the flags they mention.
+2. ✅ **Try this version** (#253, for #95): a custom copy of the built-in engine with a newer version's images,
+   pinned by digest, with the ids each image is recognised by (a new `image_pins` table), so a copy's image comes
+   through the server and runs offline like a built-in's. Signatures are verified where the project publishes them
+   (llama.cpp); when they cannot be checked at all, an admin may still make the copy on purpose, marked *Not
+   verified* and audited.
+3. ✅ **Another version of the engine for a deployment** (#255, for #95): a deployment's **Edit** page switches it to
+   a copy and back, keeping its name, keys and routes; before the only running replica restarts, the page says
+   about how long the model will not answer and how to avoid it. **Download to…** on an engine's page puts the
+   engine alone on machines ahead of time.
+4. ✅ **Try it out** (#256, for #95): a catalog model deployed with an engine on one machine for a few minutes,
+   isolated from keys and usage, checked (start, measured memory, answers and their latency, next to the built-in
+   engine) and removed; the results are kept under **Trials** on the engine's page.
+5. ✅ **推論引擎** (#249, for #189): the Traditional Chinese console calls an engine 推論引擎, and shows the image it
+   runs beside its name.
+6. ✅ **A dependency audit on every pull request** (#254): pip-audit and `npm audit`, for information.
+
+A server run from source installs with `uv sync --extra server` (signature verification needs `sigstore`).
+Migrations 0016–0018 run on start, all additive; going back to 1.5.1 means restoring the backup made before the
+upgrade. The agents need no update: the only agent change is a log line.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -431,7 +456,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.5.2: engine updates** | A newer version of an engine is pointed out, and can be tried as a pinned copy (#95). |
 | **1.5.3: apps removed** | The apps API, the templates and `/x/`, deprecated in 1.4, are removed, with a migration for the apps that are left (#89). |
 | **1.5.4: more kinds of models, part 2** | Image embeddings (#141), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
 | **1.5.5: image-to-image and image-to-video** | Edit an image or make variations of it from a prompt, and turn an image into a short video (#143). |

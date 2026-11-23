@@ -81,6 +81,14 @@ browser's language the first time, and the account menu switches it
 ([how](docs/guide/how-to.md#use-the-console-in-traditional-chinese)). Only the server changes: the agents need
 no update.
 
+1.5.2 brings **engine updates**. An admin can check whether the built-in engines have newer stable versions
+upstream, and **Try this version** makes a copy of one pinned by digest, with its signatures verified where the
+project signs them (llama.cpp); the built-in engine stays as it is. **Try it out** runs a model on the copy for a
+few minutes, apart from keys and usage, and compares its start, memory and answers with the built-in engine's. A
+deployment's **Edit** page then moves it to the copy and back, keeping its name, keys and routes
+([how](docs/guide/how-to.md#try-a-newer-version-of-an-engine)). Back up before upgrading: the server's database
+changes. A server run from source installs with `uv sync --extra server`; the agents need no update.
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
@@ -112,7 +120,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.1
+  docker.io/tonyhuang1101/forgeyard:1.5.2
 sudo docker logs forgeyard
 ```
 
@@ -158,7 +166,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.2
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:
