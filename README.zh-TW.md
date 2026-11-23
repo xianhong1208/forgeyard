@@ -30,6 +30,13 @@
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。1.4.5 起，閘道也以 TLS 連每個副本，憑證由這個 CA 替那台機器簽發（金鑰絕不離開那台機器）。
 - **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
+## 1.5 的新功能
+
+1.5.0 只在需要時使用 GPU。部署可以**閒置時休眠**，把記憶體還回來；下一個請求會喚醒它，不論同時來了多少個請求都只喚醒一次，
+並等它好（金鑰允許使用雲端時，等待期間改由雲端服務）。**自動調整副本數**會跟著閘道看到的負載增減，要移除的副本會先排空。
+每次啟動都會計時，vLLM 也會在啟動之間保留編譯快取，所以重新啟動或喚醒大約只要一半的時間。休眠與自動調整副本數要你開啟才會生效；
+伺服器升級後請更新 agent。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
+
 ## 1.4 的新功能
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
@@ -55,7 +62,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.5
+  docker.io/tonyhuang1101/forgeyard:1.5.0
 sudo docker logs forgeyard
 ```
 
@@ -98,7 +105,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：

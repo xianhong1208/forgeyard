@@ -6,6 +6,31 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-11-23
+
+Scale to zero and autoscaling (#37): GPUs are used only while they are needed. A deployment can sleep when nobody
+calls it and give its memory back (#223). Each start is timed, with where the time went, and a starting replica's
+health is checked every second (#224). The next request wakes an asleep model, once however many arrive, and
+waits for it; a key that may use the cloud is served there meanwhile, a model that cannot wake answers
+`cannot_wake` at once, and a wait that runs out answers `model_waking` with `Retry-After` (#228). The number of
+replicas can follow the load the gateway sees, and a replica that goes is drained first, so the requests it runs
+finish (#229). The console has all of it: the deploy and edit forms, *Asleep* and *Waking* on Serving, **Wake
+now**, the Playground, the Machines page and two setup-advisor notes (#227). `scripts/accept_scale.py`, also the
+new `scale` group of `accept_all.py`, checks it on real machines (#230). vLLM keeps its compile cache between
+starts, so only a replica's first start compiles: on an A100 a restart of Qwen3-0.6B took 57 s instead of 114 s,
+and of a text classifier on `vllm-pooling` 53 s instead of 78 s (#232).
+
+**Sleep when idle and automatic replicas are off by default**, for deployments made before and after the upgrade:
+turn them on per deployment. **The compile cache is on** for the built-in `vllm` and `vllm-pooling` recipes; a
+custom copy can turn it off.
+
+**Update the agents** after the server, with the machine page's **Update the agent** command. Only a 1.5.0 agent
+reports the phases of a start (model, image, engine), checks a starting replica's health every second, and keeps
+the engine's compile cache directory. An older agent keeps working: the server then measures the engine's part of
+a start itself and says so, and its replicas start as before. **No migration:** the sleep and automatic-replica
+settings are deployment parameters, *asleep* is a new desired state of a workload, and the last request, the
+load samples and the drains live in the server's memory.
+
 ### Added
 
 - **Sleep when idle** (#37, 1.5.0, first step). A deployment can stop its replicas when nobody uses it and give their
@@ -25,7 +50,7 @@ version until 1.0.
   audited as a start (`woken: true`). The deployment API gives a `sleep` object (`on`, `idle_minutes`, `asleep`,
   `last_request_at`, `since`, `sleeps_at`, `held_by`), an edit while asleep answers `restart: on_wake`, and the
   deployment page shows *asleep* with **Wake** and **Stop**. Waking on a request, and the settings in the deploy and
-  edit forms, come in the next 1.5.0 steps. No migration: the settings are deployment parameters and the last use
+  edit forms, are below. No migration: the settings are deployment parameters and the last use
   is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
   the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
 - **Waking on a request** (#37, 1.5.0, as decided on the issue). A request to an asleep model wakes it, replacing the 503
