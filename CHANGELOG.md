@@ -83,7 +83,8 @@ version until 1.0.
   (estimate, the usual refusal when it does not fit, Share VRAM). Checks, straight against the replica with its
   internal key: it starts (time and phases, against the built-in's last start), its **measured memory** on its card
   or the machine's RAM (readings before the engine starts and after it is ready, a few each, against the reservation;
-  approximate on a card other work shares), it answers a warm-up and five short requests of its kind (chat at
+  approximate on a card other work shares; when other work released memory meanwhile or no readings came, it is
+  *not measured* and said so in words, never as a number), it answers a warm-up and five short requests of its kind (chat at
   temperature 0, embeddings, rerank with the right document first, classification, speech to text, text to speech,
   an image, vision; video only starts), their p50/p95, and the same request to a ready built-in deployment of the
   model to compare the answers. Then the deployment is removed: also when a check fails, when it is cancelled, when

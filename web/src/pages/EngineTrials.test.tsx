@@ -274,4 +274,49 @@ describe("Try it out (1.5.2, #95 PR 4)", () => {
     const b = render(<MemoryRouter><LastTrialLine name="vllm" builtin last={null} /></MemoryRouter>);
     expect(b.container.textContent).toBe("");
   });
+
+  it("FY-WEB-896 memory that could not be measured is said in words, never as a number, in both languages", () => {
+    const en = makeTranslator("en");
+    const zh = makeTranslator("zh-TW");
+    const tr = trial({ measured: null, memory_unmeasured: "went_down", summary: null,
+      checks: [CHECKS[0], { id: "memory", label: "Memory", value: null, expected: "x", ok: null, note: "n", codes: [{ code: "went_down" }] }, CHECKS[2]],
+      comparison: { builtin: "vllm", deployment: null, trial: { id: 2, machine: "gpu-01", finished_at: null, start_seconds: 105, measured: null,
+        memory_unmeasured: "went_down", reserved: 5 * GIB, p50_ms: 30, p95_ms: 40 } } });
+    expect(trialSummary(en, tr)).toBe("Passed: ready in 95 s, 6/6 answers, p50 120 ms, memory not measured: other work on the card changed during the trial.");
+    expect(trialSummary(zh, tr)).toBe("通過：95 秒就緒，回應 6/6，p50 120 毫秒，記憶體未量測：試跑期間這張卡上其他工作的用量有變化。");
+    const ram = trial({ measured: null, memory_unmeasured: "no_readings", summary: null, checks: [] });
+    expect(trialSummary(zh, ram)).toBe("通過：95 秒就緒，p50 120 毫秒，記憶體未量測：機器沒有及時傳來讀數。");
+    for (const s of [trialSummary(en, tr), trialSummary(zh, tr)]) expect(s).not.toMatch(/\+-|GiB/);
+  });
+
+  it("FY-WEB-897 the checks table and the comparison show no number for memory that was not measured", async () => {
+    localStorage.setItem(LANG_KEY, "zh-TW");
+    const detail = trial({ measured: null, memory_unmeasured: "went_down",
+      checks: [CHECKS[0], { id: "memory", label: "Memory", value: null, expected: "x", ok: null, note: "Not measured: …", codes: [{ code: "went_down" }] }],
+      comparison: { builtin: "vllm", deployment: null, trial: { id: 2, machine: "gpu-01", finished_at: "2026-11-23T15:00:00+00:00", start_seconds: 105,
+        measured: null, memory_unmeasured: "went_down", reserved: 5 * GIB, p50_ms: 30, p95_ms: 40 } } });
+    engineServer({ trials: [detail], detail });
+    mount("/models/engines/vllm-0-34-0");
+    const row = (await screen.findByText(/記憶體未量測/)).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /檢查項目/ }));
+    const note = await screen.findByText("無法量測：試跑期間，這張卡上其他工作的用量有變化（反而下降），所以這個差值無法反映這個推論引擎的用量。");
+    const memRow = note.closest("tr")!;
+    expect(memRow.textContent).not.toMatch(/\+-|-0\.|GiB預留|^\+/);
+    expect(within(memRow).getByText("未檢查")).toBeTruthy();
+    expect(screen.getByText(/它在 gpu-01 上的試跑（.+）：105 秒就緒，記憶體未量測，p50 30 毫秒。/)).toBeTruthy();
+  });
+
+  it("FY-WEB-898 a trial recorded before this rule (a negative difference stored as measured) still shows no number", async () => {
+    const zh = makeTranslator("zh-TW");
+    const old = trial({ measured: -27262976, summary: "Passed: ready in 92 s, 6/6 answers, p50 120 ms, +-0.03 GiB of 5.54 GiB reserved.",
+      checks: [CHECKS[0], { id: "memory", label: "Memory", value: -27262976, expected: "x", ok: null, note: "n", codes: [{ code: "went_down" }] }] });
+    expect(trialSummary(zh, old)).toBe("通過：95 秒就緒，p50 120 毫秒。");
+    localStorage.setItem(LANG_KEY, "zh-TW");
+    engineServer({ trials: [old], detail: old });
+    mount("/models/engines/vllm-0-34-0");
+    const row = (await screen.findByText("通過：95 秒就緒，p50 120 毫秒。")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /檢查項目/ }));
+    const memRow = (await screen.findByText("記憶體")).closest("tr")!;
+    expect(memRow.textContent).not.toMatch(/-26|-0\.0|MiB/);
+  });
 });

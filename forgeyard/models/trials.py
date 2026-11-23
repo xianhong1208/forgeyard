@@ -436,6 +436,7 @@ def comparison(db: DbSession, t: EngineTrial) -> Optional[dict]:
         out["trial"] = {"id": p.id, "machine": p.machine_name,
                         "finished_at": as_utc(p.finished_at).isoformat() if p.finished_at else None,
                         "start_seconds": (m.get("start") or {}).get("seconds"), "measured": m.get("measured"),
+                        "memory_unmeasured": m.get("memory_unmeasured"),
                         "reserved": p.reserved, "p50_ms": m.get("p50_ms"), "p95_ms": m.get("p95_ms")}
     return out if out["deployment"] or out["trial"] else {"builtin": t.builtin, "deployment": None, "trial": None}
 
@@ -724,7 +725,11 @@ def memory_check(db: DbSession, t: EngineTrial, keys: list[str]) -> None:
     if reserved is None:
         reserved = int((t.estimate or {}).get("amount") or 0) or None
     shared = any((v["before"] or 0) > SHARED_NOTE_BYTES for v in per.values()) or _others_on(db, t, keys)
+    ram = _is_cpu_keys(db, t.node_id, keys)
     if not deltas or len(deltas) < len(keys):
+        # No number at all: the check, the summary and `memory_unmeasured` say why, never a value.
+        m["measured"] = m["measured_peak"] = None
+        m["memory_unmeasured"] = "no_readings"
         _set_check(t, _check("memory", "Memory", None, f"at most {_gib(reserved)} (reserved)", None,
                              "Not measured: the machine sent no reading before the engine started or after it was "
                              "ready.", [{"code": "not_measured"}]))
@@ -732,17 +737,26 @@ def memory_check(db: DbSession, t: EngineTrial, keys: list[str]) -> None:
         return
     worst = max(deltas)
     peak = max((v["peak"] - v["before"]) for v in per.values() if v["peak"] is not None and v["before"] is not None)
-    m["measured"], m["measured_peak"] = int(worst), int(peak)
-    t.measurements = m
     if worst < 0:
-        _set_check(t, _check("memory", "Memory", int(worst), f"at most {_gib(reserved)} (reserved)", None,
-                             "Not measured: the card's use went down meanwhile (other work ended), so the difference "
-                             "says nothing.", [{"code": "went_down"}]))
+        # Other work released memory meanwhile (lab, 2026-11-23: -26 MiB on a shared A100): the difference says nothing
+        # about this engine, so no number is shown or summed up; the raw difference stays in `memory` for whoever digs.
+        m["measured"] = m["measured_peak"] = None
+        m["memory_unmeasured"] = "went_down_ram" if ram else "went_down"
+        t.measurements = m
+        text = ("Not measured: other programs' use of the machine's RAM changed during the trial (it went down), so the "
+                "difference says nothing about this engine." if ram else
+                "Not measured: other work on the card changed its use during the trial (it went down), so the "
+                "difference says nothing about this engine.")
+        _set_check(t, _check("memory", "Memory", None, f"at most {_gib(reserved)} (reserved)", None, text,
+                             [{"code": m["memory_unmeasured"]}]))
         return
+    m["measured"], m["measured_peak"] = int(worst), int(peak)
+    m.pop("memory_unmeasured", None)
+    t.measurements = m
     limit = reserved * (1 + MEMORY_TOLERANCE) if reserved else None
     ok = None if limit is None else peak <= limit
     notes, codes = [], []
-    if shared and _is_cpu_keys(db, t.node_id, keys):
+    if shared and ram:
         notes.append("Approximate: other programs use the machine's RAM too, and their use changes the readings.")
         codes.append({"code": "approximate_ram"})
     elif shared:
@@ -869,6 +883,12 @@ def ask(db: DbSession, t: EngineTrial, d: Deployment, r: Replica) -> None:
     t.measurements = m
 
 
+# Why the memory has no number, in the summary (`memory_unmeasured`; the console words it from the code).
+UNMEASURED = {"went_down": "other work on the card changed during the trial",
+              "went_down_ram": "other programs' use of the machine's RAM changed during the trial",
+              "no_readings": "the machine sent no readings in time"}
+
+
 def summary_of(t: EngineTrial, state: str) -> str:
     m = t.measurements or {}
     parts = []
@@ -881,6 +901,8 @@ def summary_of(t: EngineTrial, state: str) -> str:
         parts.append(f"p50 {m['p50_ms']} ms")
     if m.get("measured") is not None:
         parts.append(f"+{_gib(m['measured'])} of {_gib(t.reserved)} reserved")
+    elif m.get("memory_unmeasured") in UNMEASURED:
+        parts.append(f"memory not measured: {UNMEASURED[m['memory_unmeasured']]}")
     failed = [c["label"] for c in t.checks if c.get("ok") is False]
     head = "Passed" if state == PASSED else f"Failed ({', '.join(failed)})"
     return f"{head}: {', '.join(parts)}." if parts else f"{head}."
@@ -1014,6 +1036,7 @@ def trial_out(t: EngineTrial, *, detail: bool = True) -> dict:
            "finished_at": t.finished_at, "deadline_at": t.deadline_at, "state": t.state, "phase": t.phase,
            "summary": t.summary, "why": m.get("why"), "params_from": m.get("params_from"),
            "start": m.get("start"), "measured": m.get("measured"), "measured_peak": m.get("measured_peak"),
+           "memory_unmeasured": m.get("memory_unmeasured"),
            "p50_ms": m.get("p50_ms"), "p95_ms": m.get("p95_ms"), "first_answer": m.get("first_answer"),
            "checks": t.checks or [], "comparison": t.comparison}
     if detail:

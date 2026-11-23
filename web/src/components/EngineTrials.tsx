@@ -237,7 +237,7 @@ function noteOf(t: Translator, c: TrialCheck): string {
 function valueOf(t: Translator, tr: EngineTrial, c: TrialCheck): string {
   if (c.value === null || c.value === undefined) return t("enginetrial.unknown");
   if (c.id === "started") return t("enginetrial.value.seconds", { seconds: secs(c.value) });
-  if (c.id === "memory") return t("enginetrial.value.memory", { amount: bytes(Number(c.value)) });
+  if (c.id === "memory") return Number(c.value) >= 0 ? t("enginetrial.value.memory", { amount: bytes(Number(c.value)) }) : t("enginetrial.unknown");
   if (c.id === "latency" && typeof c.value === "object") {
     const v = c.value as { p50_ms: number | null; p95_ms: number | null; warmup_ms: number | null };
     if (v.p50_ms === null) return t("enginetrial.unknown");
@@ -280,7 +280,12 @@ export function trialSummary(t: Translator, tr: EngineTrial | TrialBrief): strin
   const ans = tr.checks.find((c) => c.id === "answers");
   if (ans?.value) parts.push(t("enginetrial.sum.answers", { value: str(ans.value) }));
   if (tr.p50_ms !== null && tr.p50_ms !== undefined) parts.push(t("enginetrial.sum.p50", { ms: String(tr.p50_ms) }));
-  if (tr.measured !== null && tr.measured !== undefined) parts.push(t("enginetrial.sum.memory", { measured: bytes(tr.measured), reserved: bytes(tr.reserved ?? tr.estimate ?? 0) }));
+  if (tr.measured !== null && tr.measured !== undefined && tr.measured >= 0) {
+    parts.push(t("enginetrial.sum.memory", { measured: bytes(tr.measured), reserved: bytes(tr.reserved ?? tr.estimate ?? 0) }));
+  } else if (tr.memory_unmeasured) {
+    // No number at all (never a negative one): why, in the reader's language.
+    parts.push(t("enginetrial.sum.unmeasured", { why: t.maybe(`enginetrial.unmeasured.${tr.memory_unmeasured}`, tr.memory_unmeasured) }));
+  }
   const p = punct(t);
   const failed = tr.checks.filter((c) => c.ok === false).map((c) => t.maybe(`enginetrial.check.${c.id}`, c.label));
   const head = failed.length ? `${state}${p.open}${t("enginetrial.why.checks", { checks: failed.join(p.list) })}${p.close}` : state;
@@ -329,7 +334,10 @@ function Comparison({ tr }: { tr: EngineTrial }) {
       {d && <p className="small">{t("enginetrial.compareDeployment", { name: d.name, where: d.same_machine ? t("enginetrial.compareSameMachine") : "",
         start: d.start_seconds ? t("enginetrial.value.seconds", { seconds: secs(d.start_seconds) }) : t("enginetrial.unknown"),
         reserved: d.reserved ? bytes(d.reserved) : t("enginetrial.unknown") })}</p>}
-      {p && <p className="small">{t("enginetrial.compareTrial", { machine: p.machine, date: p.finished_at ? t.date(p.finished_at) : "—",
+      {p && (p.measured === null || p.measured < 0) && <p className="small">{t("enginetrial.compareTrialNoMemory", { machine: p.machine,
+        date: p.finished_at ? t.date(p.finished_at) : "—", start: p.start_seconds ? t("enginetrial.value.seconds", { seconds: secs(p.start_seconds) }) : t("enginetrial.unknown"),
+        p50: p.p50_ms !== null ? String(p.p50_ms) : "—" })}</p>}
+      {p && p.measured !== null && p.measured >= 0 && <p className="small">{t("enginetrial.compareTrial", { machine: p.machine, date: p.finished_at ? t.date(p.finished_at) : "—",
         start: p.start_seconds ? t("enginetrial.value.seconds", { seconds: secs(p.start_seconds) }) : t("enginetrial.unknown"),
         measured: p.measured !== null ? bytes(p.measured) : t("enginetrial.unknown"), reserved: p.reserved ? bytes(p.reserved) : t("enginetrial.unknown"),
         p50: p.p50_ms !== null ? String(p.p50_ms) : "—" })}</p>}

@@ -503,6 +503,7 @@ export type TrialComparison = {
   builtin: string;
   deployment: { id: number; name: string; reserved: number | null; start_seconds: number | null; same_machine: boolean } | null;
   trial: { id: number; machine: string; finished_at: string | null; start_seconds: number | null; measured: number | null;
+    memory_unmeasured?: string | null;
     reserved: number | null; p50_ms: number | null; p95_ms: number | null } | null;
 };
 export type EngineTrial = {
@@ -514,6 +515,8 @@ export type EngineTrial = {
   state: TrialState; phase: TrialPhase | null; summary: string | null; why?: TrialCode | null; params_from: string | null;
   start: { seconds: number; phases: Record<string, number>; source: string } | null;
   measured: number | null; measured_peak: number | null; p50_ms: number | null; p95_ms: number | null;
+  // Why the memory has no number (other work changed its use, no readings): never a negative or made-up figure.
+  memory_unmeasured?: "went_down" | "went_down_ram" | "no_readings" | null;
   first_answer: string | null; checks: TrialCheck[]; comparison: TrialComparison | null;
   events?: { at: string | null; kind: string; message: string }[]; log_tail?: string | null;
 };

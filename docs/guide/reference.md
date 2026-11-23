@@ -1873,7 +1873,8 @@ its model answers 409 `trial_running`.
 | `state` | `running`, `passed` (no check failed), `failed`, `cancelled` |
 | `phase` | while running: `starting`, `measuring` (memory readings after it is ready), `asking`, `settling` (one reading after the answers) |
 | `checks[].id` | `started`, `memory`, `answers`, `latency`, `same_answer`; `ok` is `true`, `false` or `null` (not checked, the note says why) |
-| `checks[].codes` | what the note says, for the console's translation: `slower`, `log`, `timeout_reason`, `not_run`, `approximate`, `approximate_ram`, `cards`, `after_answers`, `over`, `not_measured`, `went_down`, `first_answer`, `error`, `not_asked` (`why`: `video`, `none`), `no_address`, `no_answer`, `same`, `different` |
+| `checks[].codes` | what the note says, for the console's translation: `slower`, `log`, `timeout_reason`, `not_run`, `approximate`, `approximate_ram`, `cards`, `after_answers`, `over`, `not_measured`, `went_down`, `went_down_ram`, `first_answer`, `error`, `not_asked` (`why`: `video`, `none`), `no_address`, `no_answer`, `same`, `different` |
+| `memory_unmeasured` | why the memory has no number: `went_down` (other work on the card released memory during the trial, so the difference would be negative), `went_down_ram` (the same for the machine's RAM), `no_readings`; then `measured` is null and the summary says it in words, never as a number |
 | `why` | why it failed or ended early: `start_failed`, `unplaced`, `timeout` (`phase`, `minutes`), `gone`, `error`, `restarted`, `stopped`, `not_ready`, `checks` (`checks`: the failed ids), `cancelled` (`who`) |
 
 The memory check takes the machine's readings of the replica's card (or of its RAM) before the engine was launched

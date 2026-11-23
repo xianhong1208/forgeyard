@@ -1335,7 +1335,8 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `state` | `running`、`passed`（沒有檢查未通過）、`failed`、`cancelled` |
 | `phase` | 進行中時：`starting`、`measuring`（就緒後讀取記憶體用量）、`asking`、`settling`（回應之後再讀一次） |
 | `checks[].id` | `started`、`memory`、`answers`、`latency`、`same_answer`；`ok` 是 `true`、`false` 或 `null`（未檢查，說明會寫原因） |
-| `checks[].codes` | 說明的內容代碼，供主控台翻譯：`slower`、`log`、`timeout_reason`、`not_run`、`approximate`、`approximate_ram`、`cards`、`after_answers`、`over`、`not_measured`、`went_down`、`first_answer`、`error`、`not_asked`（`why`：`video`、`none`）、`no_address`、`no_answer`、`same`、`different` |
+| `checks[].codes` | 說明的內容代碼，供主控台翻譯：`slower`、`log`、`timeout_reason`、`not_run`、`approximate`、`approximate_ram`、`cards`、`after_answers`、`over`、`not_measured`、`went_down`、`went_down_ram`、`first_answer`、`error`、`not_asked`（`why`：`video`、`none`）、`no_address`、`no_answer`、`same`、`different` |
+| `memory_unmeasured` | 記憶體沒有數值的原因：`went_down`（試跑期間卡上其他工作釋放了記憶體，差值會是負的）、`went_down_ram`（機器 RAM 的同樣情況）、`no_readings`；這時 `measured` 是 null，摘要會用文字說明，不會顯示數字 |
 | `why` | 未通過或提早結束的原因：`start_failed`、`unplaced`、`timeout`（`phase`、`minutes`）、`gone`、`error`、`restarted`、`stopped`、`not_ready`、`checks`（`checks`：未通過的檢查）、`cancelled`（`who`） |
 
 記憶體檢查會取機器對副本那張卡（或 RAM）的讀數：推論引擎啟動前和就緒後，來得及的話各取三次（agent 會隨心跳送出讀數）。如果最大的差值（包含回應之後的那一次讀數）比副本預留的量多出 5% 以上，就算未通過。如果那張卡也有其他工作在使用（啟動前已經用了超過 512 MiB，或上面還有其他 Forgeyard 副本），量測結果只能當作參考。

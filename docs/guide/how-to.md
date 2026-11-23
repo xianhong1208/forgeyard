@@ -2001,7 +2001,8 @@ Forgeyard then checks, straight against the replica with its internal key (as **
 | **Same answer** | When a deployment of the same model on the built-in engine is ready, the same request once to it, and whether the answers match | — (a new version may answer differently: read both) |
 
 Video is not asked (a video takes minutes): only its start and memory are checked. On a card other work shares, the
-memory is approximate, and the check says so. The trial **passes** when no check fails; then, or when a check fails,
+memory is approximate, and the check says so. When other work released memory meanwhile, or the machine sent no
+readings in time, the memory is **not measured**: the check and the result say why in words, never with a number. The trial **passes** when no check fails; then, or when a check fails,
 when you **Cancel the trial**, when it runs out of time, or when the server restarts during it, its deployment is
 removed. A trial is in the audit log as `engine_trial.started`, then `engine_trial.finished` or
 `engine_trial.cancelled`.

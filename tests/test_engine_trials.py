@@ -426,6 +426,9 @@ def test_fy_trial_011_memory_within_the_tolerance_passes_and_missing_readings_ar
         or row(c2["id"]).state == "passed"
     mem = check(row(c2["id"]), "memory")
     assert mem["ok"] is None and mem["note"].startswith("Not measured")
+    got = c.get(f"/api/engine-trials/{c2['id']}").json()["trial"]
+    assert got["measured"] is None and got["memory_unmeasured"] == "no_readings" and mem["value"] is None
+    assert "memory not measured: the machine sent no readings in time" in got["summary"]
 
 
 def test_fy_trial_012_a_start_that_fails_ends_the_trial_and_removes_the_deployment(lab, replies):
@@ -897,3 +900,31 @@ def test_fy_trial_034_a_failed_start_asks_the_agent_for_its_output_when_none_was
     started = next(x for x in got["checks"] if x["id"] == "started")
     assert started["note"] == "main: loading / error: invalid argument: --no-such-flag"
     assert got["summary"] == "Failed: it did not start: exited with code 1"
+
+
+def test_fy_trial_035_memory_that_went_down_is_said_in_words_never_as_a_negative_number(lab, replies):
+    """FY-TRIAL-035 (lab, 2026-11-23): other work on a shared card released memory during the trial, so the difference
+    was negative: the check has no value, nothing is called measured, and the summary says why instead of "+-0.03 GiB"."""
+    c, node = lab
+    cpu_row(node, vram_used=22 * GIB, updated_at=utcnow() - timedelta(seconds=120))
+    t = start(c, node)["trial"]
+    bring_up(t["id"], node, before=22 * GIB, after=22 * GIB - 26 * 1024**2)
+    assert finish(t["id"], node, after=22 * GIB - 26 * 1024**2) == "passed"
+    got = c.get(f"/api/engine-trials/{t['id']}").json()["trial"]
+    mem = next(x for x in got["checks"] if x["id"] == "memory")
+    assert mem["ok"] is None and mem["value"] is None and mem["codes"] == [{"code": "went_down_ram"}]
+    assert mem["note"].startswith("Not measured: other programs' use of the machine's RAM changed during the trial")
+    assert got["measured"] is None and got["measured_peak"] is None and got["memory_unmeasured"] == "went_down_ram"
+    assert "+-" not in got["summary"] and "GiB" not in got["summary"]
+    assert got["summary"].endswith("memory not measured: other programs' use of the machine's RAM changed during the "
+                                   "trial.")
+    assert got["memory"]["cpu:0"]["delta"] == -26 * 1024**2      # the raw difference stays for whoever digs
+    # On a GPU the same is said of the card.
+    db = new_session()
+    try:
+        row_ = db.get(EngineTrial, t["id"])
+        row_.measurements = {**row_.measurements, "memory_unmeasured": "went_down", "measured": None}
+        assert trials.summary_of(row_, "passed").endswith("memory not measured: other work on the card changed during "
+                                                          "the trial.")
+    finally:
+        db.close()
