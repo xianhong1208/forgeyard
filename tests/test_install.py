@@ -645,3 +645,20 @@ def test_fy_inst_022_a_damaged_download_is_refused_and_uv_comes_pinned(live, tmp
         assert oct((box.root / "opt" / "bin" / "uv").stat().st_mode & 0o777) == "0o755"
     finally:
         httpd.shutdown()
+
+
+def test_fy_inst_023_sigstore_is_the_servers_alone():
+    """FY-INST-023 (1.5.2, #95): sigstore, which verifies upstream signatures on the server, is the `server` extra, not
+    a requirement of everything: the agent's wheel does not require it, no module the agent can reach is the one that
+    imports it, Dockerfile.agent installs no server extra and Dockerfile.server does."""
+    import tomllib
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert not any(d.startswith("sigstore") for d in project["dependencies"])
+    assert any(d.startswith("sigstore") for d in project["optional-dependencies"]["server"])
+    assert not any("sigstore" in r for r in wheel.REQUIRES)
+    reach = _agent_reachable()
+    assert "forgeyard.models.signatures" not in reach and "forgeyard.models.enginetry" not in reach
+    assert "--extra server" in (ROOT / "Dockerfile.server").read_text()
+    assert "server" not in (ROOT / "Dockerfile.agent").read_text().split("[nvidia]")[0].split("pip install")[-1]
+    assert "[nvidia]" in (ROOT / "Dockerfile.agent").read_text() and "sigstore" not in (ROOT / "Dockerfile.agent").read_text()

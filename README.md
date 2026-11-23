@@ -119,7 +119,7 @@ to build the web UI:
 git clone https://github.com/xianhong1208/forgeyard.git
 cd forgeyard
 cd web && npm ci && npm run build && cd ..
-uv sync
+uv sync --extra server
 HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 ```
 

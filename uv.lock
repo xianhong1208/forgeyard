@@ -323,7 +323,6 @@ dependencies = [
     { name = "prometheus-client" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
-    { name = "sigstore" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
@@ -335,6 +334,9 @@ nvidia = [
 ]
 postgres = [
     { name = "psycopg", extra = ["binary"] },
+]
+server = [
+    { name = "sigstore" },
 ]
 
 [package.dev-dependencies]
@@ -359,12 +361,12 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.10" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "sigstore", specifier = ">=4.6,<5" },
+    { name = "sigstore", marker = "extra == 'server'", specifier = ">=4.6,<5" },
     { name = "sqlalchemy", specifier = ">=2.0.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
     { name = "websockets", specifier = ">=15" },
 ]
-provides-extras = ["postgres", "nvidia"]
+provides-extras = ["postgres", "server", "nvidia"]
 
 [package.metadata.requires-dev]
 dev = [

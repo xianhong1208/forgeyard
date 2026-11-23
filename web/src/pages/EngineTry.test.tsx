@@ -3,7 +3,7 @@
 // variants included and left out and why, what the project signs, the warning and the release notes' mentions), the
 // copy it makes and the link to its page, the server's refusals in both languages (a 502 says what failed), and a
 // copy's page (where it came from, each variant's pinned digest and what was verified, what was left out).
-// FY-WEB-873 to 878.
+// FY-WEB-873 to 880 (879, 880: Tony 2026-11-23, signatures that cannot be checked and the admin's override).
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
@@ -14,7 +14,7 @@ import { copyName, tryError } from "../components/EngineTry";
 import { makeTranslator } from "../i18n/react";
 import { LANG_KEY } from "../i18n/lang";
 import { ApiError } from "../lib/api";
-import type { CatalogResponse, EnginePage, EngineUpdatesResponse, EngineUpdatesResult, Recipe } from "../lib/types";
+import type { CatalogResponse, EnginePage, EnginePin, EngineUpdatesResponse, EngineUpdatesResult, Recipe } from "../lib/types";
 
 const OWNER = { id: 1, username: "owner", email: null, role: "admin", status: "active", is_owner: true, has_password: true, created_at: "2026-11-09T00:00:00Z", last_login_at: null };
 const OPERATOR = { ...OWNER, id: 2, username: "olga", role: "operator", is_owner: false };
@@ -70,16 +70,23 @@ const RESULT: EngineUpdatesResult = {
 const SIGNED = { vllm: { signed: false as const, text: "vLLM publishes no signatures or attestations for its images." },
   "llama-cpp": { signed: true as const, kind: "github-attestation", repository: "ggml-org/llama.cpp" } };
 
+const NOT_VERIFIED = { status: "not_verified" as const, reason: "Could not fetch the attestations from GitHub: api.github.com: timed out",
+  overridden_by: "owner", at: "2026-11-23T10:00:00+00:00" };
+const LLAMA_COPY: Recipe = { ...LLAMA, name: "llama-cpp-1-0-0", title: "llama.cpp 1.0.0", version: "1.0.0", builtin: false, based_on: "llama-cpp",
+  variants: [variant("vulkan", "amd", `ghcr.io/ggml-org/llama.cpp:server-vulkan-v1.0.0-b12359-b1b770d@${D2}`)],
+  copy: { from_version: "0.5.0", kind: "release", made_at: "2026-11-23T10:00:00+00:00", made_by: "owner", left_out: [], archives: [] } } as Recipe;
+
 function page(r: Recipe): EnginePage {
-  return { recipe: { ...r, yaml: `name: ${r.name}\n` }, can_manage: true, machines: [], deployments: [], models: [],
-    pins: r.based_on ? { cuda: { recorded_at: "2026-11-23T10:00:00+00:00", recorded_by: "owner",
-      signature: { status: "unsigned", note: "vLLM publishes no signatures or attestations for its images." } } } : {} };
+  const pins: Record<string, EnginePin> = r.name === "llama-cpp-1-0-0" ? { vulkan: { recorded_at: "2026-11-23T10:00:00+00:00", recorded_by: "owner", signature: NOT_VERIFIED } }
+    : r.based_on ? { cuda: { recorded_at: "2026-11-23T10:00:00+00:00", recorded_by: "owner",
+      signature: { status: "unsigned" as const, note: "vLLM publishes no signatures or attestations for its images." } } } : {};
+  return { recipe: { ...r, yaml: `name: ${r.name}\n` }, can_manage: true, machines: [], deployments: [], models: [], pins };
 }
 
 function serve(opts: { admin?: boolean; onTry?: (url: string, body: unknown) => Reply } = {}) {
   const admin = opts.admin ?? true;
   const updates: EngineUpdatesResponse = { result: RESULT, can_check: admin, signatures: SIGNED };
-  const recipes = [VLLM, LLAMA, COPY];
+  const recipes = [VLLM, LLAMA, COPY, LLAMA_COPY];
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
     let r: Reply | undefined;
     if (url === "/api/auth/state") r = { status: 200, body: { needs_setup: false, registration: "off", user: admin ? OWNER : OPERATOR } };
@@ -232,5 +239,62 @@ describe("Try this version (1.5.2, #95 PR 2)", () => {
     expect(copyName("sd-cpp", "master-1117-0d71f96")).toBe("sd-cpp-master-1117-0d71f96");
     expect(copyName("x".repeat(38), "1.2.3").length).toBeLessThanOrEqual(40);
     expect(copyName("x".repeat(38), "1.2.3").endsWith("-")).toBe(false);
+  });
+
+  it("FY-WEB-879 signatures that cannot be checked: the reason, then a separate, deliberate Create it without verification", async () => {
+    const bodies: unknown[] = [];
+    serve({ onTry: (_url, body) => {
+      bodies.push(body);
+      if (!(body as { allow_unverified?: boolean }).allow_unverified) {
+        return { status: 502, body: { detail: { code: "cannot_verify", variant: "vulkan", can_override: true,
+          message: "Could not fetch the attestations from GitHub: api.github.com: timed out" } } };
+      }
+      return { status: 201, body: { recipe: LLAMA_COPY, left_out: [], signatures: { vulkan: NOT_VERIFIED } } };
+    } });
+    mount("/models/engines/llama-cpp");
+    const dlg = await openDialog("llama.cpp 1.0.0");
+    expect(within(dlg).queryByRole("button", { name: "Create it without verification" })).toBeNull();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Make the copy" }));
+    const alert = await within(dlg).findByText("The signatures could not be checked");
+    const box = alert.closest(".et-unverifiable") as HTMLElement;
+    expect(within(box).getByText("Could not fetch the attestations from GitHub: api.github.com: timed out")).toBeTruthy();
+    expect(within(box).getByText(/marked Not verified wherever its signatures are shown, and the audit log records that you chose this/)).toBeTruthy();
+    expect(bodies).toEqual([{ version: "1.0.0", name: "llama-cpp-1-0-0" }]);
+    fireEvent.click(within(box).getByRole("button", { name: "Create it without verification" }));
+    expect(await within(dlg).findByText(/Made llama-cpp-1-0-0/)).toBeTruthy();
+    expect(bodies[1]).toEqual({ version: "1.0.0", name: "llama-cpp-1-0-0", allow_unverified: true });
+    // A policy that forbids the override (can_override false), or a signature that failed: no such button.
+    cleanup();
+    serve({ onTry: () => ({ status: 502, body: { detail: { code: "cannot_verify", can_override: false, message: "No network." } } }) });
+    mount("/models/engines/llama-cpp");
+    const d2 = await openDialog("llama.cpp 1.0.0");
+    fireEvent.click(within(d2).getByRole("button", { name: "Make the copy" }));
+    expect(await within(d2).findByText("No network.")).toBeTruthy();
+    expect(within(d2).queryByRole("button", { name: "Create it without verification" })).toBeNull();
+    cleanup();
+    serve({ onTry: () => ({ status: 422, body: { detail: { code: "signature_failed", message: "The signature did not verify." } } }) });
+    mount("/models/engines/llama-cpp");
+    const d3 = await openDialog("llama.cpp 1.0.0");
+    fireEvent.click(within(d3).getByRole("button", { name: "Make the copy" }));
+    expect(await within(d3).findByText("The signature did not verify.")).toBeTruthy();
+    expect(within(d3).queryByRole("button", { name: "Create it without verification" })).toBeNull();
+  });
+
+  it("FY-WEB-880 a copy made without verification says Not verified, in both languages", async () => {
+    serve();
+    mount("/models/engines/llama-cpp-1-0-0");
+    const sec = (await screen.findByRole("heading", { name: "Copy of llama-cpp" })).closest("section")!;
+    expect(within(sec).getByText("Its signatures were not verified: they could not be checked when the copy was made, and owner made it anyway.")).toBeTruthy();
+    const chip = within(sec).getByText("Not verified").closest(".chip")!;
+    expect(chip.getAttribute("title")).toBe("Not verified: Could not fetch the attestations from GitHub: api.github.com: timed out (made anyway by owner)");
+    cleanup();
+    localStorage.setItem(LANG_KEY, "zh-TW");
+    serve();
+    mount("/models/engines/llama-cpp-1-0-0");
+    const zh = (await screen.findByRole("heading", { name: "llama-cpp 的複本" })).closest("section")!;
+    expect(within(zh).getByText("這個複本的簽章沒有經過驗證：建立時無法檢查簽章，owner 選擇照樣建立。")).toBeTruthy();
+    expect(within(zh).getByText("未驗證")).toBeTruthy();
+    const t = makeTranslator("zh-TW");
+    expect(t("enginetry.makeUnverified")).toBe("不驗證，照樣建立");
   });
 });

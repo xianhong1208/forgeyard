@@ -721,3 +721,69 @@ def test_fy_etry_020_one_try_at_a_time(owner, up):
     finally:
         engine_updates._trying.release()
     assert try_(owner, "vllm", "0.34.0").status_code == 201
+
+
+# ------------------------------------------------------------------ cannot verify: the admin's override (Tony 2026-11-23)
+@pytest.mark.parametrize("case", ["github_down", "trust_root_down", "no_sigstore"])
+def test_fy_etry_021_signatures_that_cannot_be_checked_may_be_overridden_on_purpose(owner, up, monkeypatch, case):
+    """FY-ETRY-021: when signatures cannot be checked (GitHub or Sigstore's trust root unreachable, or no sigstore on
+    this server) the copy is refused (502 cannot_verify, can_override); asked again with allow_unverified it is made:
+    each signed image and archive records not_verified (the reason, who, when), the YAML says so, and the audit event
+    carries unverified_override and the variants."""
+    check(owner)
+    if case == "github_down":
+        up.fail[f"/repos/{LLAMA}/attestations/"] = 503
+    elif case == "trust_root_down":
+        def down(_policy, _data_dir):
+            raise signatures.SignatureError("cannot_verify", "Could not refresh Sigstore's trust root: no network.")
+        monkeypatch.setattr(signatures, "trusted_root", down)
+    else:
+        monkeypatch.setattr(signatures, "installed", lambda: False)
+    r = try_(owner, "llama-cpp", "1.0.0")
+    assert r.status_code == 502 and r.json()["detail"]["code"] == "cannot_verify", r.text
+    assert r.json()["detail"]["can_override"] is True and custom_names() == []
+    if case == "no_sigstore":
+        assert "uv sync --extra server" in r.json()["detail"]["message"]
+    r = try_(owner, "llama-cpp", "1.0.0", allow_unverified=True)
+    assert r.status_code == 201, r.text
+    rec = r.json()["recipe"]
+    vulkan = rec["variants"][0]["image"]
+    sig = pin_rows()[vulkan].signature
+    assert sig["status"] == "not_verified" and sig["overridden_by"] == "owner" and sig["at"] and sig["reason"]
+    assert rec["copy"]["archives"][0]["signature"]["status"] == "not_verified"
+    assert r.json()["signatures"] == {"vulkan": sig, "cpu-process": rec["copy"]["archives"][0]["signature"]}
+    assert "# Signatures NOT verified for vulkan, cpu-process" in rec["yaml"]
+    assert "signature NOT verified (could not be checked; made anyway by owner)" in rec["yaml"]
+    audit = created_audits()[-1]
+    assert audit["unverified_override"] is True and audit["not_verified"] == ["vulkan", "cpu-process"]
+    assert audit["signatures"] == {"vulkan": "not_verified", "cpu-process": "not_verified"}
+    # A copy made with everything verified carries no override.
+    up.fail.clear()
+    monkeypatch.setattr(signatures, "trusted_root", offline_root)
+    monkeypatch.setattr(signatures, "installed", lambda: True)
+    assert try_(owner, "llama-cpp", "1.0.0", name="llama-ok", allow_unverified=True).status_code == 201
+    last = created_audits()[-1]
+    assert "unverified_override" not in last and last["signatures"] == {"vulkan": "verified", "cpu-process": "verified"}
+
+
+@pytest.mark.parametrize("case", ["other_subject", "missing"])
+def test_fy_etry_022_a_failed_signature_is_never_overridden_and_the_policy_can_forbid_it(owner, up, monkeypatch, case):
+    """FY-ETRY-022: allow_unverified never makes a copy whose signature failed (another artifact's statement) or is
+    missing for a project that signs; and when the policy (signatures.override_allowed, the seam for an "only verified
+    images" policy) says no, a signature that cannot be checked is refused even with allow_unverified, without
+    can_override."""
+    check(owner)
+    key = (LLAMA, VULKAN_1)
+    if case == "other_subject":
+        up.attestations[key] = up.attestations[(LLAMA, f"sha256:{ARCHIVE_1}")]
+    else:
+        del up.attestations[key]
+    r = try_(owner, "llama-cpp", "1.0.0", allow_unverified=True)
+    assert r.status_code == 422 and r.json()["detail"]["code"] in ("signature_failed", "signature_missing")
+    assert "can_override" not in r.json()["detail"] and custom_names() == []
+    up.attestations[key] = real_attestations()[VULKAN_1]
+    up.fail[f"/repos/{LLAMA}/attestations/"] = 503
+    monkeypatch.setattr(signatures, "override_allowed", lambda engine: False)
+    r = try_(owner, "llama-cpp", "1.0.0", allow_unverified=True)
+    assert r.status_code == 502 and r.json()["detail"]["can_override"] is False and custom_names() == []
+    assert pin_rows() == {} and created_audits() == []

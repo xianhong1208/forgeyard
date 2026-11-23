@@ -33,6 +33,13 @@ export default {
   "enginetry.open": "前往 {name}",
   "enginetry.close": "關閉",
   "enginetry.help": "試用推論引擎的新版本",
+  "enginetry.unverifiableTitle": "無法檢查簽章",
+  "enginetry.unverifiableWarn":
+    "你仍然可以建立複本，但 Forgeyard 不會確認它的映像檔是誰建置的：在所有顯示簽章的地方都會標示為「未驗證」，稽核紀錄也會記下這是你的選擇。",
+  "enginetry.makeUnverified": "不驗證，照樣建立",
+  "enginetry.notVerifiedChip": "未驗證",
+  "enginetry.notVerifiedTitle": "未驗證：{reason}（由 {who} 選擇照樣建立）",
+  "enginetry.notVerifiedNote": "這個複本的簽章沒有經過驗證：建立時無法檢查簽章，{who} 選擇照樣建立。",
 
   "enginetry.copyTitle": "{name} 的複本",
   "enginetry.copyLead":

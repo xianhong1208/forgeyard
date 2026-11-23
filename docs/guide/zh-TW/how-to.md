@@ -957,7 +957,7 @@ sudo systemctl enable --now forgeyard
    ```bash
    git pull
    cd web && npm ci && npm run build && cd ..
-   uv sync
+   uv sync --extra server
    ```
 
    然後重新啟動它（`sudo systemctl restart forgeyard`）。資料庫的變更會在啟動時自動執行。請閱讀 CHANGELOG，看看有沒有需要額外處理的步驟。用 Docker 的話：拉取新的 tag，再用它執行同一個 `docker run`（[做法](#run-the-server-in-docker)）。
@@ -1245,7 +1245,7 @@ Forgeyard 把每個內建推論引擎釘選在一個版本（vLLM 0.32.0、llama
 建立之前，對話框會先說明：
 
 - **複本包含哪些變體**：有新版本映像檔的變體。沒有映像檔的變體不會包含，並附上原因（vLLM 0.34.0 沒有 CUDA 12.9 的映像檔）；需要那個變體的機器會繼續使用內建推論引擎。行程變體（`cpu-process`）只有在發布版本提供同一種壓縮檔和它的 SHA-256 時才會包含。
-- **簽章**：llama.cpp 會為它的映像檔和發布壓縮檔簽章（GitHub 建置證明，artifact attestation）。Forgeyard 建立複本時會逐一檢查簽章；只要有一個驗證不過、找不到，或是無法檢查，就不會建立複本。vLLM、vLLM-Omni 和 speaches 沒有提供簽章，stable-diffusion.cpp 只附上沒有簽章的建置紀錄：它們的複本只以 digest 釘選，對話框和頁面都會清楚說明。
+- **簽章**：llama.cpp 會為它的映像檔和發布壓縮檔簽章（GitHub 建置證明，artifact attestation）。Forgeyard 建立複本時會逐一檢查簽章；只要有一個驗證不過或找不到，就不會建立複本。如果完全無法檢查簽章（伺服器連不到 GitHub 或 Sigstore），對話框會說明原因，並提供 **不驗證，照樣建立**：這樣建立的複本，在所有顯示簽章的地方都會標示為 *未驗證*，稽核紀錄也會記下是誰做的選擇。vLLM、vLLM-Omni 和 speaches 沒有提供簽章，stable-diffusion.cpp 只附上沒有簽章的建置紀錄：它們的複本只以 digest 釘選，對話框和頁面都會清楚說明。
 - **要先讀什麼**：新版本可能改變參數、預設值和記憶體用量。複本會沿用內建推論引擎原本的參數，而 Forgeyard 的估算是以內建的版本量測的。對話框會再列一次版本說明提到的參數，並附上版本說明的連結。
 
 按 **建立複本** 時，Forgeyard 會重新查詢每個映像檔標籤指向的內容。只要有標籤指向的映像檔和你檢查時不同，就什麼都不會建立：請再檢查一次，然後再試用。每個映像檔都以 digest 釘選，並記下 Forgeyard 辨認它所需要的 ID（和內建映像檔記錄的 ID 相同）。所以複本的映像檔可以**經由伺服器**送到連不到 registry 的機器、用 `docker load` 載入後可以**離線執行**，也會出現在機器頁面上、可以用 **移除** 刪掉，和內建的映像檔一樣。建立複本會以 `recipe.created` 記進稽核紀錄，並寫明它的來源。

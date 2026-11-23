@@ -30,7 +30,7 @@ are fine for almost everyone.
 | `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
 | `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate. Empty: the address each browser opened Forgeyard with, which other machines cannot use when that was `127.0.0.1` |
 | `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token. A relative path is relative to the folder the server starts in |
-| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
+| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra server --extra postgres`) |
 | `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key: both or neither (one alone stops the start). Checked every 12 hours and reloaded when they changed. Ignored with `TLS=off` |
 | `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it. Ignored without your own certificate |
@@ -1768,7 +1768,13 @@ A process archive's SHA-256 is read again from GitHub.
 | 409 | `check_again` | no check result for that version, the built-in changed since the check, or the stored answer is not one Forgeyard can use |
 | 409 | `name_taken`, `builtin_name`, `not_builtin`, `try_running`, `digest_moved` | as named (`digest_moved` names the `variant`) |
 | 422 | `invalid_name`, `nothing_to_pin`, `signature_failed`, `signature_missing` | a signature that does not verify, or a signing project with no attestation for that digest |
-| 502 | `cannot_verify`, `registry_error`, `github_error` | GitHub, Sigstore's trust root or a registry could not be reached: nothing is made, and an unverified copy is never made instead |
+| 502 | `cannot_verify`, `registry_error`, `github_error` | GitHub, Sigstore's trust root or a registry could not be reached, or (`cannot_verify`) this server has no sigstore: nothing is made. `cannot_verify` carries `can_override` |
+
+`"allow_unverified": true` makes the copy although its signatures could not be checked (`cannot_verify` only, and only
+while `can_override` is true): each signed image and archive records `{"status": "not_verified", "reason",
+"overridden_by", "at"}`, the console shows it as *Not verified*, and `recipe.created` carries `"unverified_override":
+true` and the variants (`not_verified`). A signature that fails, or is missing for a project that signs, is never
+overridden.
 
 The copy is the built-in's YAML text with a header comment, `name`, `title` (`vLLM 0.34.0`), `version`, the new
 images (`repo:tag@sha256:…`) and archives, the left-out variants removed, and two fields (custom recipes only):
@@ -1792,7 +1798,9 @@ change); a row that no custom recipe names any more is removed when a recipe is 
 variant, the row's `signature`, `recorded_at` and `recorded_by`.
 
 **Signatures.** Verified on the server only (agents run the digest the server pinned), with
-[sigstore-python](https://github.com/sigstore/sigstore-python) (Apache-2.0):
+[sigstore-python](https://github.com/sigstore/sigstore-python) (Apache-2.0). It is the server's own extra
+(`uv sync --extra server`; the server image has it): the agent's wheel and image do not carry it, and a server
+without it cannot check signatures (`cannot_verify`).
 
 | Engine | Published | Checked |
 |---|---|---|
@@ -1805,8 +1813,8 @@ A verified image or archive records `{"status": "verified", "repository", "workf
 keys) comes from Sigstore's TUF repository, `https://tuf-repo-cdn.sigstore.dev`, refreshed through the same network
 rules (kept for 5 minutes, metadata in `DATA_DIR/sigstore/`); the first refresh starts from the root shipped with
 sigstore-python. A refresh that fails is `cannot_verify`. A server that reaches only its registries (an
-air-gapped site with a mirror) cannot try a signed engine's version: add such an engine by hand (**Add a
-custom engine**): nothing is verified for an engine added that way.
+air-gapped site with a mirror) cannot verify a signed engine's version: an admin may make the copy anyway, and it
+stays marked *Not verified*.
 
 ## Container images
 

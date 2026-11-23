@@ -58,6 +58,9 @@ export function TryDialog({ recipe, candidate, signed, onClose }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [made, setMade] = useState<EngineTryResponse | null>(null);
+  // Tony 2026-11-23: the server could not check the signatures (cannot_verify) and lets an admin override: its reason,
+  // and a separate, deliberate "Create it without verification".
+  const [unverifiable, setUnverifiable] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     box.current?.querySelector<HTMLElement>("input, button")?.focus();
@@ -71,13 +74,21 @@ export function TryDialog({ recipe, candidate, signed, onClose }: {
   // Between two sentences: a space in English, none after Chinese full-width punctuation.
   const gap = t.lang === "en" ? " " : "";
 
-  const make = async () => {
+  const make = async (allowUnverified = false) => {
     setBusy(true);
     setError(null);
     try {
       setMade(await api<EngineTryResponse>(`/recipes/${encodeURIComponent(recipe.name)}/try`, { method: "POST",
-        body: { version: candidate.version, name: name.trim() } }));
-    } catch (e) { setError(tryError(t, e)); }
+        body: { version: candidate.version, name: name.trim(), ...(allowUnverified ? { allow_unverified: true } : {}) } }));
+      setUnverifiable(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "cannot_verify" && e.detail.can_override === true) {
+        setUnverifiable(tryError(t, e));
+      } else {
+        setUnverifiable(null);
+        setError(tryError(t, e));
+      }
+    }
     setBusy(false);
   };
 
@@ -136,6 +147,16 @@ export function TryDialog({ recipe, candidate, signed, onClose }: {
               {candidate.release?.url && <>{gap}<a href={candidate.release.url} target="_blank" rel="noreferrer noopener">{t("enginetry.notes")} <IconExternalLink size={12} aria-hidden="true" /></a></>}
             </Notice>
             {error && <Notice tone="error">{error}</Notice>}
+            {unverifiable && (
+              <div className="et-unverifiable" role="alert">
+                <p className="et-unv-title"><IconShieldOff size={16} aria-hidden="true" /> <strong>{t("enginetry.unverifiableTitle")}</strong></p>
+                <p className="small">{unverifiable}</p>
+                <p className="small">{t("enginetry.unverifiableWarn")}</p>
+                <button type="button" className="btn btn-danger btn-small" onClick={() => void make(true)} disabled={busy || !name.trim()}>
+                  {t("enginetry.makeUnverified")}
+                </button>
+              </div>
+            )}
             <div className="dlg-foot">
               <button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
               <button type="button" className="btn btn-primary" onClick={() => void make()} disabled={busy || !name.trim() || included.length === 0} aria-busy={busy}>
@@ -162,6 +183,10 @@ function SignatureCell({ sig }: { sig: EngineSignature | null | undefined }) {
       </div>
     );
   }
+  if (sig.status === "not_verified") {
+    return <span className="chip chip-tone-bad et-not-verified" title={t("enginetry.notVerifiedTitle", { reason: sig.reason ?? "", who: sig.overridden_by ?? "" })}>
+      <IconShieldOff size={12} aria-hidden="true" /> {t("enginetry.notVerifiedChip")}</span>;
+  }
   return <span className="chip chip-tone-wait" title={sig.note ?? undefined}>{t("enginetry.unsignedChip")}</span>;
 }
 
@@ -171,8 +196,11 @@ export function CopySection({ r, pins }: { r: Recipe; pins: Record<string, Engin
   const link = <Link to={engineHref(r.based_on)} className="mono">{r.based_on}</Link>;
   const c = r.copy;
   const archives = Object.fromEntries((c?.archives ?? []).map((a) => [a.variant, a]));
+  const unverified = [...Object.values(pins ?? {}).map((p) => p.signature), ...(c?.archives ?? []).map((a) => a.signature as EngineSignature)]
+    .find((s) => s?.status === "not_verified");
   return (
     <>
+      {unverified && <Notice tone="warn">{t("enginetry.notVerifiedNote", { who: unverified.overridden_by ?? "" })}</Notice>}
       <p className="lp-desc">{c
         ? t.rich("enginetry.copyLead", { link, from: c.from_version, version: r.version, date: t.date(c.made_at), who: c.made_by, name: r.based_on })
         : t.rich("enginetry.copyLeadManual", { link, name: r.based_on })}</p>

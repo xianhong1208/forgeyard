@@ -335,7 +335,9 @@ export type Recipe = {
 
 // 1.5.2 (#95): what the server verified about an image or archive of a copy (forgeyard/models/signatures.py).
 export type EngineSignature = {
-  status: "verified" | "unsigned"; note?: string | null; source?: string; repository?: string; workflow?: string;
+  status: "verified" | "unsigned" | "not_verified"; note?: string | null; source?: string; repository?: string; workflow?: string;
+  // not_verified (an admin's override when signatures could not be checked): why, who, when.
+  reason?: string; overridden_by?: string; at?: string;
   ref?: string | null; commit?: string | null; run?: string | null; predicate?: string; issuer?: string;
   log_index?: number | null; signed_at?: string | null;
 };

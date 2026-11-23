@@ -34,6 +34,14 @@ export default {
   "enginetry.open": "Go to {name}",
   "enginetry.close": "Close",
   "enginetry.help": "Try a newer version of an engine",
+  "enginetry.unverifiableTitle": "The signatures could not be checked",
+  "enginetry.unverifiableWarn":
+    "You can still make the copy, but Forgeyard will not have checked who built its images: it is marked Not verified wherever its signatures are shown, and the audit log records that you chose this.",
+  "enginetry.makeUnverified": "Create it without verification",
+  "enginetry.notVerifiedChip": "Not verified",
+  "enginetry.notVerifiedTitle": "Not verified: {reason} (made anyway by {who})",
+  "enginetry.notVerifiedNote":
+    "Its signatures were not verified: they could not be checked when the copy was made, and {who} made it anyway.",
 
   // A copy's page
   "enginetry.copyTitle": "Copy of {name}",

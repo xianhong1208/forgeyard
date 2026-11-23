@@ -1451,7 +1451,7 @@ the journal: `journalctl -u forgeyard -f`.
    ```bash
    git pull
    cd web && npm ci && npm run build && cd ..
-   uv sync
+   uv sync --extra server
    ```
 
    Then restart it (`sudo systemctl restart forgeyard`). Database changes run by themselves on
@@ -1936,8 +1936,10 @@ The dialog says, before anything is made:
   the reason (vLLM 0.34.0 has no CUDA 12.9 image); machines that need it keep using the built-in. A process
   variant (`cpu-process`) is included when the release publishes the same archive with its SHA-256.
 - **signatures**: llama.cpp signs its images and release archives (GitHub artifact attestations). Forgeyard checks
-  each signature while it makes the copy, and makes no copy when one does not verify, is missing, or cannot be
-  checked. vLLM, vLLM-Omni and speaches publish no signatures, and stable-diffusion.cpp only an unsigned build
+  each signature while it makes the copy, and makes no copy when one does not verify or is missing. When the
+  signatures cannot be checked at all (GitHub or Sigstore cannot be reached from the server), the dialog says why
+  and offers **Create it without verification**: the copy is then marked *Not verified* wherever its signatures are
+  shown, and the audit log says who chose it. vLLM, vLLM-Omni and speaches publish no signatures, and stable-diffusion.cpp only an unsigned build
   record: their copies are pinned by digest only, and the dialog and the page say so.
 - **what to read first**: a new version can change flags, defaults and memory use. The copy keeps the built-in's
   arguments as they are, and Forgeyard's estimates were measured on the built-in's version. The flags its release

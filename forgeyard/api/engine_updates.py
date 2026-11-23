@@ -81,6 +81,9 @@ def check_now(request: Request):
 class TryIn(BaseModel):
     version: str = Field(min_length=1, max_length=40)
     name: Optional[str] = Field(default=None, max_length=64)
+    # Make the copy although its signatures could not be checked (502 cannot_verify): recorded as not_verified and
+    # audited. Never for a signature that failed.
+    allow_unverified: bool = False
 
 
 def _name_problem(db, name: str) -> Optional[tuple[int, str, str]]:
@@ -127,11 +130,12 @@ def try_version(name: str, body: TryIn, request: Request):
         def policy() -> fetch.Policy:
             return fetch.Policy(allow_private=allow_private, timeout=engineversions.REQUEST_TIMEOUT)
 
+        made_at = utcnow().replace(microsecond=0).isoformat()
         try:
             plan = enginetry.plan_copy(builtin, builtin_text, cand, new_name, client=oci.Registry(policy),
                                        gh=engineversions.Checker(allow_private=allow_private), policy=policy(),
-                                       data_dir=get_settings().data_dir)
-            made_at = utcnow().replace(microsecond=0).isoformat()
+                                       data_dir=get_settings().data_dir, allow_unverified=body.allow_unverified,
+                                       made_by=username, made_at=made_at)
             text, recipe = enginetry.build(plan, made_by=username, made_at=made_at)
         except enginetry.TryError as e:
             raise fail(e.status, e.code, e.text, **e.extra) from None
@@ -149,7 +153,9 @@ def try_version(name: str, body: TryIn, request: Request):
                          left_out=[x["variant"] for x in plan.left_out] or None,
                          signatures={n: (plan.image_signatures[ref].get("status") if ref in plan.image_signatures else None)
                                      for n, ref in plan.images.items()}
-                         | {n: a["signature"].get("status") for n, a in plan.archives.items()})
+                         | {n: a["signature"].get("status") for n, a in plan.archives.items()},
+                         # Tony 2026-11-23: made although its signatures could not be checked, on the admin's say-so.
+                         unverified_override=bool(plan.overridden) or None, not_verified=plan.overridden or None)
             try:
                 db.commit()
             except IntegrityError:

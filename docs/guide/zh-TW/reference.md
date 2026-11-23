@@ -21,7 +21,7 @@
 | `PORT` | `7860` | 連接埠，網頁介面、API、`/v1` 和 agent 都用這個 |
 | `PUBLIC_URL` | — | 使用者和 agent 使用的位址，例如 `https://192.168.1.20:7860`。加入指令、設定密碼的連結和閘道位址都會用到它；它的主機一律會被接受，也會包含在憑證裡。留空：使用每個瀏覽器開啟 Forgeyard 時的位址；如果那是 `127.0.0.1`，其他機器就無法使用 |
 | `DATA_DIR` | `data` | 資料庫（SQLite）、`secret.key`、`tls/` 和設定權杖（setup token）的位置。相對路徑是相對於伺服器啟動時所在的資料夾 |
-| `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra postgres`） |
+| `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra server --extra postgres`） |
 | `TLS` | `on` | `on`：以 Forgeyard 自己的 CA（建立在 `data/tls/`）或你的憑證提供 HTTPS。`off`：純 HTTP，只能用在處理 HTTPS 的代理後面 |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰：兩個都設或都不設（只設一個會停止啟動）。每 12 小時檢查一次，有變更就重新載入。`TLS=off` 時會被忽略 |
 | `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**信任這台伺服器** 也會提供它。沒有自己的憑證時會被忽略 |
@@ -1267,7 +1267,9 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | 409 | `check_again` | 沒有那個版本的檢查結果、檢查之後內建配方變了，或儲存的結果無法使用 |
 | 409 | `name_taken`、`builtin_name`、`not_builtin`、`try_running`、`digest_moved` | 代碼本身就說明了原因（`digest_moved` 會附上 `variant`） |
 | 422 | `invalid_name`、`nothing_to_pin`、`signature_failed`、`signature_missing` | 簽章驗證不過，或是會簽章的專案沒有那個 digest 的建置證明 |
-| 502 | `cannot_verify`、`registry_error`、`github_error` | 連不到 GitHub、Sigstore 的信任根或 registry：什麼都不會建立，也絕不會改成建立未驗證的複本 |
+| 502 | `cannot_verify`、`registry_error`、`github_error` | 連不到 GitHub、Sigstore 的信任根或 registry，或（`cannot_verify`）這台伺服器沒有安裝 sigstore：什麼都不會建立。`cannot_verify` 會附上 `can_override` |
+
+加上 `"allow_unverified": true` 時，即使簽章無法檢查也會建立複本（只限 `cannot_verify`，而且 `can_override` 為 true 時）：每個有簽章的映像檔和壓縮檔都會記下 `{"status": "not_verified", "reason", "overridden_by", "at"}`，主控台會標示為 *未驗證*，`recipe.created` 也會附上 `"unverified_override": true` 和那些變體（`not_verified`）。簽章驗證不過，或是會簽章的專案找不到簽章時，一律不能略過。
 
 複本就是內建配方的 YAML 文字，加上開頭的註解，換掉 `name`、`title`（`vLLM 0.34.0`）、`version`、新的映像檔（`repo:tag@sha256:…`）和壓縮檔，刪掉未包含的變體，再加上兩個欄位（只用於自訂配方）：
 
@@ -1280,7 +1282,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 
 **`image_pins`**（資料庫遷移 `0016_image_pins`，只新增）：每個釘選的映像檔參照一筆（`ref` 是主鍵），指名同一個映像檔的複本共用：`entry`（`{"index", "platforms": {"linux/amd64": {"manifest", "config", "content"}}}`，和 `forgeyard/recipes/images.lock.json` 的格式相同）、`signature`、`recorded_by`、`recorded_at`。所有讀取記錄 ID 的地方都會先讀 lock 檔案，再讀這個資料表（`images.entry_for`）：經由伺服器轉送、隨副本或下載送出的 ID（給用 `docker load` 載入的映像檔用）、機器的推論引擎映像檔和移除、推論引擎頁面上的「已在機器上」。伺服器把這些資料列放在記憶體裡（啟動時載入，每次變更後重新載入）；配方修改或刪除時，沒有任何自訂配方再指名的資料列會被移除。降回 0015 會刪掉這個資料表：之後複本會直接以 digest 拉取映像檔。`GET /api/recipes/{name}` 會多回傳 `pins`：每個變體對應資料列的 `signature`、`recorded_at` 和 `recorded_by`。
 
-**簽章。** 只在伺服器上驗證（agent 執行的是伺服器釘選的 digest），使用 [sigstore-python](https://github.com/sigstore/sigstore-python)（Apache-2.0）：
+**簽章。** 只在伺服器上驗證（agent 執行的是伺服器釘選的 digest），使用 [sigstore-python](https://github.com/sigstore/sigstore-python)（Apache-2.0）。它是伺服器專用的 extra（`uv sync --extra server`；伺服器映像檔已包含）：agent 的 wheel 和映像檔都不帶它，沒有安裝它的伺服器無法檢查簽章（`cannot_verify`）。
 
 | 推論引擎 | 提供的內容 | 檢查的方式 |
 |---|---|---|
@@ -1288,7 +1290,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | vLLM、vLLM-Omni、speaches | 沒有 | 記成 `{"status": "unsigned", "note": …}` |
 | stable-diffusion.cpp | 沒有簽章的 BuildKit provenance | 記成未簽章 |
 
-驗證通過的映像檔或壓縮檔會記下 `{"status": "verified", "repository", "workflow", "ref", "commit", "run", "predicate", "issuer", "log_index", "signed_at"}`。信任根（Fulcio 的憑證、Rekor 和 CT log 的公鑰）來自 Sigstore 的 TUF 儲存庫 `https://tuf-repo-cdn.sigstore.dev`，經由同樣的網路規則更新（保留 5 分鐘，metadata 存在 `DATA_DIR/sigstore/`）；第一次更新從 sigstore-python 內附的根開始。更新失敗就是 `cannot_verify`。只連得到自己 registry 的伺服器（使用鏡像站的隔離環境）無法試用有簽章的推論引擎的新版本：這種情況請手動加入推論引擎（**加入自訂推論引擎**），這樣加入的推論引擎不會經過任何驗證。
+驗證通過的映像檔或壓縮檔會記下 `{"status": "verified", "repository", "workflow", "ref", "commit", "run", "predicate", "issuer", "log_index", "signed_at"}`。信任根（Fulcio 的憑證、Rekor 和 CT log 的公鑰）來自 Sigstore 的 TUF 儲存庫 `https://tuf-repo-cdn.sigstore.dev`，經由同樣的網路規則更新（保留 5 分鐘，metadata 存在 `DATA_DIR/sigstore/`）；第一次更新從 sigstore-python 內附的根開始。更新失敗就是 `cannot_verify`。只連得到自己 registry 的伺服器（使用鏡像站的隔離環境）無法驗證有簽章的推論引擎的新版本：管理員仍可以選擇照樣建立複本，它會一直標示為 *未驗證*。
 
 ## 容器映像檔
 

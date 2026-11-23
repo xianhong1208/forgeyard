@@ -34,12 +34,17 @@ version until 1.0.
   built-in's. Variants without the new version are left out with the reason; a process variant follows when the
   release has the same archive (its SHA-256 read again). **Signatures** are verified on the server where the project
   publishes them (llama.cpp's GitHub artifact attestations, for its images and archives, with sigstore-python and a
-  trust root refreshed from Sigstore's TUF repository through the server's network rules): a signature that fails,
-  is missing or cannot be checked refuses the copy; the others are recorded as unsigned upstream. The copy keeps the
+  trust root refreshed from Sigstore's TUF repository through the server's network rules): a signature that fails
+  or is missing refuses the copy. When signatures cannot be checked at all (no network to GitHub or Sigstore, or no
+  sigstore on the server), the copy is refused too, but an admin may make it anyway on purpose (**Create it without
+  verification**, `allow_unverified`): it is then marked *Not verified* everywhere and the override is audited. The
+  others are recorded as unsigned upstream. The copy keeps the
   built-in's arguments, records `based_on` and what was done (`copy`), and is audited (`recipe.created`). A catalog
   model's engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its
   copies. The copy's page shows where it came from, each pinned digest and what was verified, and what was left out.
-  API: `POST /api/recipes/{name}/try`. New dependency: `sigstore` (Apache-2.0; server only).
+  API: `POST /api/recipes/{name}/try`. New dependency: `sigstore` (Apache-2.0), as the server's own extra: a server
+  run from source now installs with `uv sync --extra server` (the server image has it; the agent's wheel and image do
+  not carry it).
 
 ### Changed
 

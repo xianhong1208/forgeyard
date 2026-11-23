@@ -18,9 +18,12 @@ repository and the workflow's own path all checked), and the statement's subject
 recorded (repository, workflow, ref, commit, the run) and shown on the copy's page.
 
 - No attestation for the digest, or none that verifies: the copy is refused (the reason says which check failed).
-- GitHub or Sigstore's trust root cannot be reached: "cannot verify", the copy is refused as well. Not verifying would
-  make a signed engine's copy look like an unsigned one's; an air-gapped site adds such an engine by hand (Add a
-  custom engine), and nothing is verified for it.
+- GitHub or Sigstore's trust root cannot be reached, or this server has no sigstore (the `server` extra): "cannot
+  verify", the copy is refused by default. An admin may then make it anyway, on purpose (Try's `allow_unverified`,
+  Tony 2026-11-23): its images and archives record {"status": "not_verified", "reason", "overridden_by", "at"}, the
+  console says *Not verified* wherever the signature is shown, and the audit event carries the override. Whether that
+  override is allowed is decided in one place, `override_allowed` (today always; an "only verified images" policy
+  would answer no there). A signature that *fails* (or is missing for a project that signs) is never overridden.
 - An engine that publishes nothing: recorded as "unsigned upstream", said plainly in the dialog and on the page. Trust
   then rests on the repository being the built-in's own and the digest being fixed at Try.
 
@@ -86,6 +89,24 @@ class SignatureError(Exception):
 
 def source_for(engine: str) -> Optional[dict]:
     return SOURCES.get(engine)
+
+
+def installed() -> bool:
+    """Whether this server has sigstore (the `server` extra; never in an agent)."""
+    import importlib.util
+
+    return importlib.util.find_spec("sigstore") is not None
+
+
+def override_allowed(engine: str) -> bool:
+    """Whether an admin may make a copy whose signatures could not be checked (cannot_verify). The one place a future
+    policy ("only verified images") would refuse it; today always allowed. A failed signature is never overridden."""
+    return True
+
+
+def not_verified(reason: str, by: str, at: str) -> dict:
+    """The record of an image or archive whose project signs, made without checking (an admin's override)."""
+    return {"status": "not_verified", "reason": reason[:400], "overridden_by": by, "at": at}
 
 
 def about(engine: str) -> dict:
@@ -269,6 +290,10 @@ def _attestations(repository: str, digest: str, policy: fetch.Policy) -> list[di
 def verify(engine: str, digest: str, *, what: str, policy: fetch.Policy, data_dir: Path) -> dict:
     """What was verified about one digest ("sha256:<hex>": an image index, or an archive's SHA-256) of a signed
     engine's project: {"status": "verified", …identity}. Raises SignatureError. `what` names it in messages."""
+    if not installed():
+        raise SignatureError("cannot_verify", "Signature support is not installed on this server (the server extra: "
+                                              "uv sync --extra server, or the server image), so signatures cannot be "
+                                              "checked.")
     from sigstore.models import Bundle
     from sigstore.verify import Verifier
 

@@ -10,7 +10,7 @@
 ## 建置與測試
 
 ```bash
-uv sync
+uv sync --extra server
 uv run --no-sync python -m pytest -q          # 後端測試（SQLite）；卡住的測試 5 分鐘後失敗，
                                                # 並印出每個執行緒的 stack（pytest-timeout）
 uv run --no-sync ruff check .

@@ -16,7 +16,7 @@
 git clone https://github.com/xianhong1208/forgeyard.git
 cd forgeyard
 cd web && npm ci && npm run build && cd ..
-uv sync
+uv sync --extra server
 ```
 
 啟動它，對網路開放，並指定其他機器要用的位址：

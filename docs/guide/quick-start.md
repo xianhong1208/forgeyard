@@ -21,7 +21,7 @@ On the server:
 git clone https://github.com/xianhong1208/forgeyard.git
 cd forgeyard
 cd web && npm ci && npm run build && cd ..
-uv sync
+uv sync --extra server
 ```
 
 Start it, open to the network, with the address the other machines will use:

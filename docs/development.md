@@ -12,7 +12,7 @@ build the container images.
 ## Build and test
 
 ```bash
-uv sync
+uv sync --extra server
 uv run --no-sync python -m pytest -q          # backend tests (SQLite); a test that hangs fails after 5 min
                                                # with every thread's stack (pytest-timeout)
 uv run --no-sync ruff check .

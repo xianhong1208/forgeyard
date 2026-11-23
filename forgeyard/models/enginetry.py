@@ -61,6 +61,11 @@ class Plan:
     image_signatures: dict[str, dict] = field(default_factory=dict)  # image ref -> signature record
     archives: dict[str, dict] = field(default_factory=dict)          # variant -> {url, sha256, release, signature}
     left_out: list[dict] = field(default_factory=list)               # [{variant, code, text, params}]
+    # Tony 2026-11-23: an admin may make the copy although its signatures could not be checked (cannot_verify).
+    allow_unverified: bool = False
+    made_by: str = ""
+    made_at: str = ""
+    overridden: list[str] = field(default_factory=list)              # variants recorded as not_verified
 
 
 def slug(text: str) -> str:
@@ -100,9 +105,11 @@ def _left_out(plan: Plan, variant: str, why: dict) -> None:
 
 
 def plan_copy(builtin: Recipe, builtin_text: str, cand: dict, name: str, *, client: oci.Registry,
-              gh: ev.Checker, policy: fetch.Policy, data_dir: Path) -> Plan:
+              gh: ev.Checker, policy: fetch.Policy, data_dir: Path, allow_unverified: bool = False,
+              made_by: str = "", made_at: str = "") -> Plan:
     """Resolve, pin, verify: every network step of a Try (no database)."""
-    plan = Plan(builtin, builtin_text, cand["version"], "build" if cand.get("kind") == "build" else "release", name)
+    plan = Plan(builtin, builtin_text, cand["version"], "build" if cand.get("kind") == "build" else "release", name,
+                allow_unverified=allow_unverified, made_by=made_by, made_at=made_at)
     reader = pinning.RegistryReader(client)
     by_name = {v.get("name"): v for v in cand.get("variants") or [] if isinstance(v, dict)}
     signed = signatures.source_for(builtin.engine)
@@ -125,6 +132,19 @@ def plan_copy(builtin: Recipe, builtin_text: str, cand: dict, name: str, *, clie
         raise TryError(422, "nothing_to_pin", f"No variant of {builtin.name} has {plan.version}: there is nothing to "
                                               "copy.")
     return plan
+
+
+def _signature(plan: Plan, variant: str, digest: str, what: str, policy, data_dir) -> dict:
+    """What is recorded about one image or archive of a signed project: verified; or, when it could not be checked and
+    the admin asked for it (and the policy lets them), not_verified. A failed or missing signature always refuses."""
+    try:
+        return signatures.verify(plan.builtin.engine, digest, what=what, policy=policy, data_dir=data_dir)
+    except signatures.SignatureError as e:
+        if e.code == "cannot_verify" and plan.allow_unverified and signatures.override_allowed(plan.builtin.engine):
+            plan.overridden.append(variant)
+            return signatures.not_verified(e.text, plan.made_by, plan.made_at)
+        extra = {"can_override": signatures.override_allowed(plan.builtin.engine)} if e.code == "cannot_verify" else {}
+        raise TryError(502 if e.code == "cannot_verify" else 422, e.code, e.text, variant=variant, **extra) from None
 
 
 def _expected_tag(builtin: Recipe, v, tag: str, kind: str, version: str) -> bool:
@@ -164,11 +184,7 @@ def _pin_image(plan: Plan, v, got: dict, reader, client: oci.Registry, signed: O
                                  "tag": tag, "platforms": missing})
         return
     if signed is not None and signed.get("images"):
-        try:
-            sig = signatures.verify(plan.builtin.engine, now, what=f"the image {tag}", policy=policy,
-                                    data_dir=data_dir)
-        except signatures.SignatureError as e:
-            raise TryError(502 if e.code == "cannot_verify" else 422, e.code, e.text, variant=v.name) from None
+        sig = _signature(plan, v.name, now, f"the image {tag}", policy, data_dir)
     else:
         sig = signatures.unsigned(plan.builtin.engine)
     plan.images[v.name] = ref
@@ -195,11 +211,7 @@ def _pin_archive(plan: Plan, v, got: dict, gh: ev.Checker, signed: Optional[dict
                                             "SHA-256 changed or it is gone). Check for newer versions again, then "
                                             "try.", variant=v.name)
     if signed is not None and signed.get("archives"):
-        try:
-            sig = signatures.verify(plan.builtin.engine, f"sha256:{sha}", what=f"the archive {archive}",
-                                    policy=policy, data_dir=data_dir)
-        except signatures.SignatureError as e:
-            raise TryError(502 if e.code == "cannot_verify" else 422, e.code, e.text, variant=v.name) from None
+        sig = _signature(plan, v.name, f"sha256:{sha}", f"the archive {archive}", policy, data_dir)
     else:
         sig = signatures.unsigned(plan.builtin.engine)
     plan.archives[v.name] = {"url": url, "sha256": sha, "release": release, "archive": archive, "signature": sig}
@@ -230,6 +242,8 @@ def _variant_blocks(lines: list[str], start: int) -> list[tuple[str, int, int]]:
 def _sig_comment(sig: dict) -> str:
     if sig.get("status") == "verified":
         return f"signature verified: {sig.get('repository')} {sig.get('workflow')}"
+    if sig.get("status") == "not_verified":
+        return f"signature NOT verified (could not be checked; made anyway by {sig.get('overridden_by')})"
     return "upstream publishes no signature"
 
 
@@ -241,6 +255,9 @@ def copy_yaml(plan: Plan, *, made_by: str, made_at: str) -> str:
             f"version\" on {made_at[:10]} by {made_by}.",
             "# Not tested by Forgeyard: the built-in recipe's arguments, with this version's images pinned by digest. "
             f"The built-in {b.name} stays as it is."]
+    if plan.overridden:
+        head.append(f"# Signatures NOT verified for {', '.join(plan.overridden)}: they could not be checked, and "
+                    f"{made_by} made the copy anyway.")
     for lo in plan.left_out:
         head.append(f"# Left out: {lo['variant']} ({' '.join(lo['text'].split())})")
     head.append("#")
