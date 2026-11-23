@@ -36,6 +36,17 @@ forgeyard.install.requirements`: it rewrites the lists of the agent's dependenci
 install.sh installs from (`forgeyard/install/agent-requirements*.txt`), and FY-INST-020 fails while they
 differ from the lock.
 
+The **Dependency audit** workflow (`.github/workflows/dependency-audit.yml`) runs on every pull request and push
+to dev and main: pip-audit on uv.lock's runtime set (every extra, no dev group) and `npm audit --omit=dev` for the
+web UI. It is not a required check: a new advisory against a package nobody touched must not block other work, but
+a red result means a dependency to update in its own pull request. The same locally:
+
+```bash
+uv export --locked --no-dev --all-extras --format requirements-txt -o /tmp/requirements-audit.txt
+uvx --from pip-audit==2.10.1 pip-audit -r /tmp/requirements-audit.txt --disable-pip
+cd web && npm audit --omit=dev
+```
+
 ## Pinned engine images
 
 Every container variant of a built-in recipe names its image as `repo:tag@sha256:<index digest>`, and

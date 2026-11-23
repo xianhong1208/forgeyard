@@ -1,0 +1,47 @@
+name: Dependency audit
+
+# Known vulnerabilities in what Forgeyard ships: the Python packages of uv.lock that a server or an agent installs
+# (every extra, no dev group) with pip-audit, and the web UI's runtime packages with npm audit. On every pull request
+# and push to dev and main, as information: it is not a required check, because a new advisory against a package
+# nobody touched would otherwise block unrelated work. Its result says which package to update.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+env:
+  UV_PYTHON_DOWNLOADS: never
+  UV_PYTHON_PREFERENCE: only-system
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - run: python -m pip install uv
+      - name: The locked runtime set (every extra, no dev group), with hashes
+        run: uv export --locked --no-dev --all-extras --format requirements-txt -o requirements-audit.txt
+      - name: pip-audit
+        run: uvx --from pip-audit==2.10.1 pip-audit -r requirements-audit.txt --disable-pip --progress-spinner off
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: npm audit (runtime packages)
+        run: npm audit --omit=dev
