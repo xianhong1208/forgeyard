@@ -52,3 +52,19 @@ describe("the 1.5.1 wording pass", () => {
     expect([formatTick(0, "usd"), formatTick(60_000_000, "usd")]).toEqual(["US$0", "US$60"]);
   });
 });
+
+describe("Chinese numbers with 萬 and 億", () => {
+  it("FY-WEB-841 a space between the digits and 萬/億, none between 萬/億 and the next word; English unchanged", async () => {
+    const { spaceCjkNumbers } = await import("../i18n/format");
+    const { translate } = await import("../i18n/core");
+    expect(spaceCjkNumbers("10萬")).toBe("10 萬");
+    expect(spaceCjkNumbers("每分鐘 10萬 個 token")).toBe("每分鐘 10 萬個 token");
+    expect(spaceCjkNumbers("20.3億 參數")).toBe("20.3 億參數");
+    expect(spaceCjkNumbers("每 100 萬個 token")).toBe("每 100 萬個 token");
+    expect(spaceCjkNumbers("7 億時")).toBe("7 億時");
+    expect(spaceCjkNumbers("10 萬 tokens")).toBe("10 萬 tokens");
+    expect(translate("zh-TW", "keys.tokensPerMin.other", { n: "10萬" })).toBe("每分鐘 10 萬個 token");
+    expect(translate("zh-TW", "keys.tokensPerMin.other", { n: "600" })).toBe("每分鐘 600 個 token");
+    expect(translate("en", "keys.tokensPerMin.other", { n: "10k" })).toBe("10k tokens/min");
+  });
+});

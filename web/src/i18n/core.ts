@@ -1,7 +1,7 @@
 // t(): one string of the console in the reader's language. The keys are the English dictionary's, so
 // TypeScript refuses a key that does not exist, a missing {placeholder} value and an unknown one.
 import { en, zhTW, type Key } from "./dictionaries";
-import { formatNumber, pluralForm } from "./format";
+import { formatNumber, pluralForm, spaceCjkNumbers } from "./format";
 import { getLang, type Lang } from "./lang";
 
 type En = typeof en;
@@ -31,11 +31,12 @@ export function hasKey(key: string): key is Key {
 // shows on screen instead of an empty gap.
 export function interpolate(s: string, vars: Record<string, unknown> | undefined, lang: Lang): string {
   if (!vars) return s;
-  return s.replace(/\{(\w+)\}/g, (whole, name: string) => {
+  const out = s.replace(/\{(\w+)\}/g, (whole, name: string) => {
     const v = vars[name];
     if (v === undefined || v === null) return whole;
     return typeof v === "number" ? formatNumber(v, lang) : String(v);
   });
+  return lang === "zh-TW" ? spaceCjkNumbers(out) : out;
 }
 
 // The raw string for a key: the language's, else the English one (never expected: the parity test and the

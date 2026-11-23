@@ -4,7 +4,7 @@ export default {
   "modelpage.doc": "模型",
   "modelpage.eyebrow": "模型 · {task}",
   "modelpage.displayName": "顯示名稱",
-  "modelpage.params": "{params} 參數",
+  "modelpage.params": "{params}參數",
   "modelpage.noLicence": "沒有記錄授權",
   "modelpage.gated": "受限",
   "modelpage.needs": "用 {recipe} 的預設值需要{amount}",
