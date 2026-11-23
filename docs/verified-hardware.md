@@ -40,8 +40,8 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
-| 1.5.1 | full regression (`accept_all.py`; <<ALL_SKIPS>> checks skipped) | A100 host, x86-64 CPU machine, Gemini | <<ALL_COUNTS>> |
-| 1.5.1 | sleep when idle, waking and automatic replicas (`accept_scale.py`), the automatic replicas on two CPU machines; <<SCALE_SKIPS>> checks skipped | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | <<SCALE_COUNTS>> |
+| 1.5.1 | full regression (`accept_all.py`; 15 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 488 | 0 |
+| 1.5.1 | sleep when idle, waking and automatic replicas (`accept_scale.py`), the automatic replicas on two CPU machines; 1 check skipped | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
 | 1.5.0 | full regression of 1.5.0rc1 (`accept_all.py`, with its new `scale` group; 15 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 488 | 0 |
 | 1.5.0 | sleep when idle, waking and automatic replicas on 1.5.0rc1 (`accept_scale.py`), the automatic replicas on two CPU machines; 1 check skipped | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
 | 1.5.0 | during development: the same (`accept_scale.py`; 1 check skipped: a wait for a wake that runs out, on the CPU model, which starts in 3 s, sooner than the shortest wait; the vLLM model covers it) | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
