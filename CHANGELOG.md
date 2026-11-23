@@ -41,6 +41,12 @@ version until 1.0.
   browser's `Intl` ("11月12日", "1.5萬"); the names the server gives a few groups (*Console playground*, *Other (3)*)
   are translated by their id. The model's answers, your prompts and the sample texts in the boxes are not
   translated. The zh-TW guide names these pages' labels in Chinese.
+- **The console in Traditional Chinese (#189, model library).** **Models** (Catalog, Engines, Sources and the server's
+  Hugging Face token), **Add a model** (the recommended list, Hugging Face search, a typed source and the review
+  with its estimate), a model's page and an engine's page. Parameter and download counts use 萬 and 億. The
+  recommended list's groups and the built-in engines' descriptions are translated while the server sends the
+  English they were made from (a changed text is shown as sent); a model's note, an engine's parameter help and the
+  estimate's parts stay as the server sends them. The zh-TW guide names these pages' buttons and tabs in Chinese.
 
 ### Changed
 
