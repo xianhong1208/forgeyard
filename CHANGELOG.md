@@ -20,7 +20,15 @@ version until 1.0.
   Under the hood: a hand-written `t()` with typed keys and one dictionary module per area of the console
   (`web/src/i18n/`), a test that fails when a key, a placeholder or a translation is missing, and a glossary of
   the guide's terms (`web/src/i18n/GLOSSARY.md`). No new dependency.
-- The console in Traditional Chinese (#189, model library): **Models** (Catalog, Engines, Sources and the server's
+- **The console in Traditional Chinese (#189, machines and deployments).** A machine's page (memory map, what
+  runs there, the model cache and downloads, engine images with upload and copy, GPU access, the agent and its
+  update), a deployment's page (state, sleep when idle, the gateway, replicas, memory, Try it, output and events) and
+  the deploy and edit forms (with automatic replicas, sleep when idle and the estimate) are now in Traditional
+  Chinese too. A deployment's events name their kind in Chinese before the server's own message; English shows the
+  message alone, as before. Fixed on the way: an offline machine's page showed its status twice in Chinese (the
+  heartbeat line only dropped an English prefix). The zh-TW guide names these pages' buttons and fields by their
+  Chinese labels.
+- **The console in Traditional Chinese (#189, model library).** **Models** (Catalog, Engines, Sources and the server's
   Hugging Face token), **Add a model** (the recommended list, Hugging Face search, a typed source and the review
   with its estimate), a model's page and an engine's page. Parameter and download counts use 萬 and 億. The
   recommended list's groups and the built-in engines' descriptions are translated while the server sends the

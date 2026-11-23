@@ -11,16 +11,20 @@ import type { CatalogModel, CatalogResponse, Deployment, DeploymentResponse, Edi
 import { canAutoscale, scaleEditParams, scaleForm, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
 import { SleepSetting, WakeWaitField } from "../components/Sleep";
+import { labels, t as tNow } from "../i18n/core";
+import { useT } from "../i18n/react";
 import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts, paramApplies } from "./ModelDeploy";
 
 // What a change shows next to each changed setting.
-const CHANGE_LABEL: Record<string, string> = { share: "GPU sharing", gpus: "GPUs per replica", vram: "Memory per device",
-  extra_args: "Extra engine arguments", first_answer_timeout: "Wait for the first answer (s)", replicas: "Replicas", machine_id: "Machine",
-  sleep_when_idle: "Sleep when idle", idle_minutes: "Idle minutes", wake_wait: "Wake wait (s)",
-  autoscale: "Automatic replicas", min_replicas: "Fewest replicas", max_replicas: "Most replicas", autoscale_target: "Target load per replica (%)",
-  scale_up_seconds: "Busy for (s) before one more", scale_down_minutes: "Quiet for (min) before one fewer" };
+const CHANGE_LABEL: Record<string, string> = labels({ share: "deploy.change.share", gpus: "deploy.change.gpus", vram: "deploy.change.vram",
+  extra_args: "deploy.change.extra_args", first_answer_timeout: "deploy.change.first_answer_timeout", replicas: "deployment.replicas",
+  machine_id: "deployment.col.machine", sleep_when_idle: "deployment.sleep.label", idle_minutes: "deploy.change.idle_minutes",
+  wake_wait: "deploy.change.wake_wait", autoscale: "deploy.change.autoscale", min_replicas: "deploy.change.min_replicas",
+  max_replicas: "deploy.change.max_replicas", autoscale_target: "deploy.change.autoscale_target",
+  scale_up_seconds: "deploy.change.scale_up_seconds", scale_down_minutes: "deploy.change.scale_down_minutes" });
 
 export function DeploymentEditPage() {
+  const t = useT();
   const { id } = useParams();
   const { user } = useAuth();
   const { data } = useApi<DeploymentResponse>(`/deployments/${id}`);
@@ -29,15 +33,16 @@ export function DeploymentEditPage() {
   const d = data?.deployment;
   const recipe = cat?.recipes.find((r) => r.name === d?.recipe);
   if (user && user.role === "user") {
-    return (<><PageHeader index="02 · Serving" title="Change a deployment" /><Notice>Only admins and operators change deployments: it restarts code on a machine.</Notice></>);
+    return (<><PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.title")} /><Notice>{t("deploy.edit.notAllowed")}</Notice></>);
   }
-  if (!d || !recipe || !cat) return <><PageHeader index="02 · Serving" title="Change a deployment" /><p className="muted">Loading…</p></>;
+  if (!d || !recipe || !cat) return <><PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.title")} /><p className="muted">{t("common.loading")}</p></>;
   return <EditView key={d.id} d={d} recipe={recipe} model={cat.models.find((m) => m.id === d.model.id)}
     machines={(machines?.machines ?? []).filter((m) => m.status !== "revoked")} />;
 }
 
 // The form starts from what the deployment runs with now, once (a reload does not undo edits).
 function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recipe: Recipe; model: CatalogModel | undefined; machines: Machine[] }) {
+  const t = useT();
   const navigate = useNavigate();
   const [f, setF] = useState<EditForm>(() => editForm(d, recipe));
   const [plan, setPlan] = useState<EditResponse | null>(null);
@@ -94,63 +99,64 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
   return (
     <>
       <p className="crumb"><Link to={`/serving/${d.id}`}><IconArrowLeft size={14} aria-hidden="true" /> {d.name}</Link></p>
-      <PageHeader index="02 · Serving" title={`Change ${d.name}`}
-        lead={`${d.model.name} with ${d.recipe}, served as “${d.served_name}”. The model, recipe and names stay; deploy a new one to change them.`} />
-      <form className="wl-form deploy-layout" onSubmit={submit} aria-label="Change the deployment">
+      <PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.titleName", { name: d.name })}
+        lead={t("deploy.edit.lead", { model: d.model.name, recipe: d.recipe, served: d.served_name })} />
+      <form className="wl-form deploy-layout" onSubmit={submit} aria-label={t("deploy.edit.formLabel")}>
         <div>
           <section className="panel">
-            <h2>GPU sharing and machine</h2>
+            <h2>{t("deploy.edit.sharing")}</h2>
             <div className="grid-3">
               {recipe.devices.length > 1 && (
-                <div className="field"><label htmlFor="e-device">Runs on</label>
+                <div className="field"><label htmlFor="e-device">{t("deploy.runsOn")}</label>
                   <select id="e-device" value={f.device} onChange={(e) => set("device", e.target.value as EditForm["device"])}>
-                    <option value="gpu">GPU</option><option value="cpu">CPU only</option>
+                    <option value="gpu">GPU</option><option value="cpu">{t("deploy.cpuOnly")}</option>
                   </select></div>
               )}
               {f.device === "gpu" && (
                 <>
-                  <div className="field"><label htmlFor="e-share">GPU sharing</label>
+                  <div className="field"><label htmlFor="e-share">{t("deploy.change.share")}</label>
                     <select id="e-share" value={f.share} onChange={(e) => set("share", e.target.value as EditForm["share"])}>
-                      <option value="exclusive">Exclusive</option>
-                      <option value="vram">Share VRAM</option>
+                      <option value="exclusive">{t("deploy.exclusive")}</option>
+                      <option value="vram">{t("deploy.shareVram")}</option>
                     </select>
-                    <p className="field-hint">Shared cards hold several replicas, each held to its own reservation; they share compute.</p></div>
-                  <div className="field"><label htmlFor="e-gpus">GPUs per replica</label>
+                    <p className="field-hint">{t("deploy.edit.shareHint")}</p></div>
+                  <div className="field"><label htmlFor="e-gpus">{t("deploy.change.gpus")}</label>
                     <input id="e-gpus" inputMode="numeric" value={f.gpus} onChange={(e) => set("gpus", e.target.value)} /></div>
                 </>
               )}
               <ReplicasField id="e" count={f.replicas} onCount={(v) => set("replicas", v)} scale={scale} onScale={setScale}
                 allowAuto={canAutoscale(recipe)} sleepOn={f.sleepOn} now={d.workload.replica_list.length} />
-              <div className="field"><label htmlFor="e-machine">Machine</label>
+              <div className="field"><label htmlFor="e-machine">{t("deployment.col.machine")}</label>
                 <select id="e-machine" value={f.machine} onChange={(e) => set("machine", e.target.value)}>
-                  <option value="">Automatic</option>
-                  {usable.map((m) => <option key={m.id} value={m.id}>Pinned to {m.name} · {m.status}</option>)}
+                  <option value="">{t("deploy.edit.automatic")}</option>
+                  {usable.map((m) => <option key={m.id} value={m.id}>{t("deploy.edit.pinnedOption", { name: m.name, status: t.maybe(`common.status.${m.status}`, m.status) })}</option>)}
                 </select>
-                <p className="field-hint">{f.machine ? "Its replicas run on this machine only; a replica elsewhere moves there." : "Forgeyard chooses; a restart goes back to the machine a replica ran on when it still fits."}</p></div>
+                <p className="field-hint">{f.machine ? t("deploy.edit.pinnedHint") : t("deploy.edit.autoHint")}</p></div>
             </div>
             {f.device === "gpu" && f.share === "exclusive" && plan?.placement.share_hint && (
               <ShareHintNotice hint={plan.placement.share_hint} onShare={() => set("share", "vram")} />
             )}
           </section>
           <section className="panel">
-            <h2>Parameters</h2>
+            <h2>{t("deploy.parameters")}</h2>
             <div className="grid-3">
               {shown.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
             </div>
             <details className="spec-preview" style={{ marginTop: 14 }}>
-              <summary>Advanced: {auto ? "scaling, " : ""}{advanced.length ? "request limits, " : ""}memory override, engine arguments{takesFirstAnswer(recipe) ? ", first-answer wait" : ""}, wake wait</summary>
+              <summary>{t("deploy.edit.advanced", { scaling: auto ? t("deploy.adv.scaling") : "", limits: advanced.length ? t("deploy.adv.limits") : "",
+                first: takesFirstAnswer(recipe) ? t("deploy.adv.firstEdit") : "" })}</summary>
               <div className="grid-3">
                 {auto && <ScaleAdvancedFields id="e" scale={scale} onScale={setScale} />}
                 {advanced.map(([k, p]) => <ParamField key={k} name={k} p={p} value={f.params[k]} onChange={setParam} />)}
-                <div className="field"><label htmlFor="e-vram">Memory per device (override)</label>
-                  <input id="e-vram" value={f.vram} onChange={(e) => set("vram", e.target.value)} placeholder="the estimate" />
-                  <p className="field-hint">Empty: the estimate.</p></div>
-                <div className="field"><label htmlFor="e-extra">Extra engine arguments</label>
-                  <textarea id="e-extra" className="mono" rows={3} value={f.extraArgs} onChange={(e) => set("extraArgs", e.target.value)} placeholder="one per line" /></div>
+                <div className="field"><label htmlFor="e-vram">{t("deploy.vramOverride")}</label>
+                  <input id="e-vram" value={f.vram} onChange={(e) => set("vram", e.target.value)} placeholder={t("deploy.theEstimate")} />
+                  <p className="field-hint">{t("deploy.edit.vramHint")}</p></div>
+                <div className="field"><label htmlFor="e-extra">{t("deploy.change.extra_args")}</label>
+                  <textarea id="e-extra" className="mono" rows={3} value={f.extraArgs} onChange={(e) => set("extraArgs", e.target.value)} placeholder={t("deploy.onePerLine")} /></div>
                 {takesFirstAnswer(recipe) && (
-                  <div className="field"><label htmlFor="e-first">Wait for the first answer (seconds)</label>
+                  <div className="field"><label htmlFor="e-first">{t("deploy.firstAnswer")}</label>
                     <input id="e-first" inputMode="numeric" value={f.firstAnswer} onChange={(e) => set("firstAnswer", e.target.value)} placeholder={String(FIRST_ANSWER_DEFAULT)} />
-                    <p className="field-hint">Streamed answers only. Empty: {FIRST_ANSWER_DEFAULT}. A replica that has not started streaming by then gets the request stopped (504), never resent; non-streamed answers keep the read timeout. Changing it restarts nothing.</p></div>
+                    <p className="field-hint">{t("deploy.edit.firstHint", { def: String(FIRST_ANSWER_DEFAULT) })}</p></div>
                 )}
                 <WakeWaitField id="e-wake" value={f.wakeWait} onChange={(v) => set("wakeWait", v)} />
               </div>
@@ -159,36 +165,37 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
           <SleepSetting prefix="e" on={f.sleepOn} minutes={f.idleMinutes} last={d.last_start}
             onChange={(on, minutes) => setF((cur) => ({ ...cur, sleepOn: on, idleMinutes: minutes }))} />
           <section className="panel" aria-labelledby="what-title">
-            <h2 id="what-title">What saving does</h2>
-            {planError ? <Notice tone="error">{planError}</Notice> : !plan ? <p className="muted small">Checking…</p> : changes.length === 0 ? (
-              <p className="muted small">Nothing has changed yet.</p>
+            <h2 id="what-title">{t("deploy.edit.what")}</h2>
+            {planError ? <Notice tone="error">{planError}</Notice> : !plan ? <p className="muted small">{t("deploy.edit.checking")}</p> : changes.length === 0 ? (
+              <p className="muted small">{t("deploy.edit.nothing")}</p>
             ) : (
               <>
-                <ul className="edit-changes" aria-label="Changes">
+                <ul className="edit-changes" aria-label={t("deploy.edit.changes")}>
                   {changes.map(([k, v]) => (
-                    <li key={k}><span className="strong">{CHANGE_LABEL[k] ?? recipe.params[k]?.label ?? k}</span>: <span className="mono">{changeValue(k, v.before, usable)}</span> → <span className="mono">{changeValue(k, v.after, usable)}</span></li>
+                    <li key={k}>{t.rich("deploy.edit.changeLine", { label: <span className="strong">{CHANGE_LABEL[k] ?? recipe.params[k]?.label ?? k}</span>,
+                      before: <span className="mono">{changeValue(k, v.before, usable)}</span>, after: <span className="mono">{changeValue(k, v.after, usable)}</span> })}</li>
                   ))}
                 </ul>
                 <p className="edit-plan">{plan.restart_text}</p>
-                {blocked && <Notice tone="error">It does not fit with these settings right now, so nothing would restart: see where it would go.</Notice>}
+                {blocked && <Notice tone="error">{t("deploy.edit.blocked")}</Notice>}
               </>
             )}
           </section>
           {error && (
             <Notice tone="error">
-              <strong>{error.machines ? "It does not fit anywhere right now." : error.text}</strong>
+              <strong>{error.machines ? t("deploy.noFit") : error.text}</strong>
               {error.machines && <Verdicts list={error.machines} />}
             </Notice>
           )}
           <div className="form-foot">
             <span />
             <div className="row-gap">
-              <button className="btn btn-primary" disabled={busy || !plan || changes.length === 0 || blocked}>{busy ? "Saving…" : running && plan?.restart !== "none" ? "Save and restart" : "Save"}</button>
-              <Link to={`/serving/${d.id}`} className="btn btn-quiet">Cancel</Link>
+              <button className="btn btn-primary" disabled={busy || !plan || changes.length === 0 || blocked}>{busy ? t("deploy.edit.saving") : running && plan?.restart !== "none" ? t("deploy.edit.saveRestart") : t("machine.save")}</button>
+              <Link to={`/serving/${d.id}`} className="btn btn-quiet">{t("common.cancel")}</Link>
             </div>
           </div>
         </div>
-        <aside className="estimate-side" aria-label="Estimate">
+        <aside className="estimate-side" aria-label={t("deploy.estimate")}>
           <EstimatePanel est={plan} error={planError} pending={!plan && !planError} />
         </aside>
       </form>
@@ -197,12 +204,14 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
 }
 
 function changeValue(k: string, v: unknown, machines: { id: number; name: string }[]): string {
-  if (k === "autoscale") return v === true ? "on" : "off";
-  if (v === null || v === undefined) return k === "machine_id" ? "automatic" : k === "vram" ? "the estimate" : k === "sleep_when_idle" ? "off" : "—";
-  if (k === "sleep_when_idle") return v === true ? "on" : "off";
-  if (k === "machine_id") return machines.find((m) => m.id === v)?.name ?? `machine ${String(v)}`;
+  const on = tNow("deploy.value.on");
+  const off = tNow("deploy.value.off");
+  if (k === "autoscale") return v === true ? on : off;
+  if (v === null || v === undefined) return k === "machine_id" ? tNow("deploy.value.automatic") : k === "vram" ? tNow("deploy.theEstimate") : k === "sleep_when_idle" ? off : "—";
+  if (k === "sleep_when_idle") return v === true ? on : off;
+  if (k === "machine_id") return machines.find((m) => m.id === v)?.name ?? tNow("deployment.machineN", { id: String(v) });
   if (k === "vram" && typeof v === "number") return `${(v / 1024 ** 3).toFixed(2)} GiB`;
-  if (k === "share") return v === "vram" ? "Share VRAM" : "Exclusive";
-  if (Array.isArray(v)) return v.join(" ") || "none";
+  if (k === "share") return v === "vram" ? tNow("deploy.shareVram") : tNow("deploy.exclusive");
+  if (Array.isArray(v)) return v.join(" ") || tNow("deploy.value.none");
   return String(v);
 }

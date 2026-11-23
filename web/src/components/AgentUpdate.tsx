@@ -28,29 +28,31 @@ export function BehindChip({ m }: { m: Machine }) {
 // 1.4.5 (#163): on the machine's facts line, how the gateway reaches its replicas when that needs attention: an agent
 // too old for TLS (a link to its update command) or a TLS agent without a valid certificate.
 export function TlsChip({ m }: { m: Machine }) {
+  const t = useT();
   const c = tlsChip(m);
   if (!c) return null;
   if (c.update) {
     return (
-      <Link to={`/machines/${m.id}#update`} className="chip chip-update chip-plain" title="Traffic to this machine is not encrypted: open the command that updates its agent">
+      <Link to={`/machines/${m.id}#update`} className="chip chip-update chip-plain" title={t("machine.tls.chipPlainTitle")}>
         <IconLockOpen size={13} aria-hidden="true" /> {c.text}
       </Link>
     );
   }
   return (
-    <span className="chip chip-tone-bad chip-tls" title="Its agent serves its replicas over TLS only, and has no valid certificate: they cannot be reached">
+    <span className="chip chip-tone-bad chip-tls" title={t("machine.tls.chipBadTitle")}>
       <IconShieldX size={13} aria-hidden="true" /> {c.text}
     </span>
   );
 }
 
 function Steps({ steps }: { steps: UpdateStep[] }) {
+  const t = useT();
   return (
     <ol className="update-steps">
       {steps.map((s, i) => (
         <li key={i}>
           <p className="update-step-title">{s.title}</p>
-          <CopyBlock value={s.command} label={`Update command: ${s.title}`} />
+          <CopyBlock value={s.command} label={t("machine.update.commandLabel", { title: s.title })} />
         </li>
       ))}
     </ol>
@@ -58,6 +60,7 @@ function Steps({ steps }: { steps: UpdateStep[] }) {
 }
 
 export function AgentUpdateSection({ m, canManage }: { m: Machine; canManage: boolean }) {
+  const t = useT();
   const path = canManage && m.status !== "revoked" ? `/machines/${m.id}/agent-update` : null;
   const { data, error, reload } = useApi<AgentUpdate>(path);
   const location = useLocation();
@@ -83,25 +86,26 @@ export function AgentUpdateSection({ m, canManage }: { m: Machine; canManage: bo
   return (
     <section className="panel mk-section agent-update" id="update" ref={ref} aria-labelledby="mk-update">
       <div className="panel-head">
-        <h2 id="mk-update">Update the agent</h2>
+        <h2 id="mk-update">{t("machine.update.title")}</h2>
         {behind && <span className="chip chip-update">{behindText(m)}</span>}
       </div>
       {m.replica_tls?.state === "plain" && (
-        <Notice tone="warn">Traffic to this machine is not encrypted: update the agent. Until then the gateway reaches its replicas over plain HTTP; they keep serving.</Notice>
+        <Notice tone="warn">{t("machine.update.plain")}</Notice>
       )}
       {behind ? (
         <p className="update-why">{behindDetail(behind)}</p>
       ) : (
         <p className="muted small">
-          Agent {m.agent_version ?? "of an unknown version"} matches the server{m.server_version ? ` (${m.server_version})` : ""}.
-          {data?.known && data.steps.length > 0 ? " The command below starts it again on the server's version, should you need to." : ""}
+          {t("machine.update.matches", { version: m.agent_version ?? t("machine.behind.ofUnknownVersion"),
+            server: m.server_version ? ` (${m.server_version})` : "" })}
+          {data?.known && data.steps.length > 0 ? t("machine.update.again") : ""}
         </p>
       )}
-      {!canManage && <p className="muted small">An admin sees the command that updates it here.</p>}
+      {!canManage && <p className="muted small">{t("machine.update.adminSees")}</p>}
       {canManage && error && <Notice tone="error">{error}</Notice>}
-      {canManage && !data && !error && <p className="muted small">Loading…</p>}
+      {canManage && !data && !error && <p className="muted small">{t("common.loading")}</p>}
       {data && !data.known && (
-        <Notice>{data.reason ?? "How this agent runs is not known."}</Notice>
+        <Notice>{data.reason ?? t("machine.methodLine.unknown")}</Notice>
       )}
       {data && data.known && (
         <>
@@ -118,7 +122,7 @@ export function AgentUpdateSection({ m, canManage }: { m: Machine; canManage: bo
       {data && data.notes.length > 0 && (
         <ul className="update-notes">{data.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
       )}
-      {canManage && <HelpLink page="how-to" anchor="update-an-agent">Update an agent</HelpLink>}
+      {canManage && <HelpLink page="how-to" anchor="update-an-agent">{t("machine.help.update")}</HelpLink>}
     </section>
   );
 }

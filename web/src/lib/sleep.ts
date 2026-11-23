@@ -1,6 +1,7 @@
 // Sleep when idle in the console (1.5.0, #37): the state a deployment is in, what its last start says about a
 // wake, and where an asleep one would run. The server decides everything; this only words it.
 
+import { t } from "../i18n/core";
 import type { Deployment, StartTime } from "./types";
 
 export const IDLE_DEFAULT = 30;
@@ -35,19 +36,18 @@ export function elapsed(from: string | null | undefined, now: number = Date.now(
 // "74 s", "3 min 20 s": a start time as people read it.
 export function seconds(n: number): string {
   const s = Math.max(1, Math.round(n));
-  if (s < 90) return `${s} s`;
+  if (s < 90) return t("deployment.time.s", { s });
   const m = Math.floor(s / 60);
-  return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+  return s % 60 ? t("deployment.time.minS", { m, s: s % 60 }) : t("deployment.time.min", { m });
 }
 
 // Next to the setting on the deploy and edit forms: what the first request after a sleep waits. On the deploy form
 // `other` names the deployment of the same model and engine whose start it is.
 export function startHint(last: StartTime | null | undefined, other?: string): string {
   if (!last) {
-    return "The first request after a sleep waits while the model starts: seconds for a small llama.cpp model, a minute or more for vLLM.";
+    return t("deploy.sleep.startUnknown");
   }
-  const took = other ? `${other} (the same model and engine) last started in ${seconds(last.seconds)}` : `The last start took ${seconds(last.seconds)}`;
-  return `${took}: the first request after a sleep waits about that long.`;
+  return other ? t("deploy.sleep.startOther", { other, took: seconds(last.seconds) }) : t("deploy.sleep.startOwn", { took: seconds(last.seconds) });
 }
 
 // On the deploy form there is no deployment yet: the last start of another deployment of the same model with
@@ -69,12 +69,13 @@ export function wakeWaitProblem(text: string): string | null {
   return wholeProblem(text, WAKE_WAIT_MIN, WAKE_WAIT_MAX, "seconds");
 }
 
-function wholeProblem(text: string, min: number, max: number, unit: string): string | null {
-  const t = text.trim();
-  if (!t) return null;
-  if (!/^\d+$/.test(t)) return `A whole number of ${unit}.`;
-  const n = Number(t);
-  return n < min || n > max ? `${min} to ${max.toLocaleString("en")} ${unit}.` : null;
+function wholeProblem(text: string, min: number, max: number, unit: "minutes" | "seconds"): string | null {
+  const v = text.trim();
+  if (!v) return null;
+  if (!/^\d+$/.test(v)) return unit === "minutes" ? t("deploy.problem.wholeMinutes") : t("deploy.problem.wholeSeconds");
+  const n = Number(v);
+  if (n >= min && n <= max) return null;
+  return unit === "minutes" ? t("deploy.problem.rangeMinutes", { min, max }) : t("deploy.problem.rangeSeconds", { min, max });
 }
 
 // About how long a wake takes: what the server expects for the wake under way, else the last start.
