@@ -43,6 +43,9 @@ class FakeEngine:
         self.cut_after: Optional[int] = None  # a stream breaks off after this many chunks (1.2)
         self.first_delay = 0.0      # a stream's headers go out at once, its first chunk after this (1.4.5)
         self.gate_streams = False   # `gate` holds streams too, before their headers (1.4.5)
+        # Set to a threading.Event: a stream's headers go out at once and its first chunk waits until the test sets it
+        # (at most 30 s), so "no first chunk in time" does not depend on how fast the machine is (#226).
+        self.first_gate: Optional[threading.Event] = None
         self.seen: list[dict] = []
         self.refused = 0
         self.disconnects = 0
@@ -136,6 +139,9 @@ class FakeEngine:
                     if engine.first_delay:
                         self.wfile.flush()
                         time.sleep(engine.first_delay)
+                    if engine.first_gate is not None:
+                        self.wfile.flush()
+                        engine.first_gate.wait(30)
                     for i in range(engine.chunks):
                         if engine.cut_after is not None and i == engine.cut_after:
                             self.wfile.flush()
