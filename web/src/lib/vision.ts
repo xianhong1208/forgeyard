@@ -3,6 +3,8 @@
 // person. The exposed vision apps of 1.3 (workload templates) are not offered: apps left the console in 1.4
 // (#88; deprecated, they keep running at /x/ until 1.5), and the options no longer list them.
 
+import { labels, t } from "../i18n/core";
+
 // 1.4.4 (#141): image-classify, answered at /v1/vision/classify.
 export type VisionTask = "detect" | "segment" | "depth" | "image-classify";
 
@@ -46,18 +48,18 @@ export const MAX_LABEL_CHARS = 64;
 // sent (none, too many, one too long).
 export function parseLabels(text: string): { labels: string[]; error: string | null } {
   const seen = new Set<string>();
-  const labels: string[] = [];
+  const names: string[] = [];
   for (const raw of text.split(",")) {
     const x = raw.split(/\s+/).filter(Boolean).join(" ");
     if (!x || seen.has(x.toLowerCase())) continue;
     seen.add(x.toLowerCase());
-    labels.push(x);
+    names.push(x);
   }
-  if (!labels.length) return { labels, error: "Name at least one thing to find, e.g. cat, remote control." };
-  if (labels.length > MAX_LABELS) return { labels, error: `At most ${MAX_LABELS} things at once.` };
-  const long = labels.find((x) => x.length > MAX_LABEL_CHARS);
-  if (long) return { labels, error: `"${long.slice(0, 20)}…" is longer than ${MAX_LABEL_CHARS} characters.` };
-  return { labels, error: null };
+  if (!names.length) return { labels: names, error: t("playground.vision.nameOne") };
+  if (names.length > MAX_LABELS) return { labels: names, error: t("playground.vision.tooMany", { max: String(MAX_LABELS) }) };
+  const long = names.find((x) => x.length > MAX_LABEL_CHARS);
+  if (long) return { labels: names, error: t("playground.vision.tooLong", { start: long.slice(0, 20), max: String(MAX_LABEL_CHARS) }) };
+  return { labels: names, error: null };
 }
 
 export function imageLimitMb(w: { max_body_mb?: number } | undefined): number {
@@ -84,16 +86,18 @@ export function targets(o: VisionOptions | null | undefined): VisionTarget[] {
     licence: m.licence, ready: m.ready, reason: m.reason,
     zero_shot: Boolean(m.zero_shot && (m.task === "detect" || m.task === "image-classify")),
     url: `/api/playground/${visionPath(m.task)}`,
-    call: `POST /v1/${visionPath(m.task)} with model=${m.name}`,
-    link: m.deployment_id ? { to: `/serving/${m.deployment_id}`, label: "Deployment" } : null,
+    call: t("playground.vision.call", { path: visionPath(m.task), name: m.name }),
+    link: m.deployment_id ? { to: `/serving/${m.deployment_id}`, label: t("playground.bar.deployment") } : null,
   }));
   return models;
 }
 
 // Why this file cannot be sent (null: it can). The limit leaves room for the form around the image.
 export function checkImage(file: File, limitMb: number): string | null {
-  if (!VISION_TYPES.includes(file.type)) return `${file.name || "This file"} is not a PNG, JPEG or WebP image.`;
-  if (file.size > limitMb * 1024 * 1024 - 64 * 1024) return `${file.name || "The image"} is ${mib(file.size)}: the most it takes is ${limitMb} MiB.`;
+  if (!VISION_TYPES.includes(file.type)) return t("playground.vision.notType", { name: file.name || t("playground.vision.thisFile") });
+  if (file.size > limitMb * 1024 * 1024 - 64 * 1024) {
+    return t("playground.vision.tooBig", { name: file.name || t("playground.vision.theImage"), size: mib(file.size), mb: String(limitMb) });
+  }
   return null;
 }
 
@@ -158,16 +162,16 @@ export function pngUri(b64: string): string {
   return `data:image/png;base64,${b64}`;
 }
 
-export const ZERO_SHOT_HELP: Partial<Record<VisionTask, string>> = {
-  detect: "Finds what you name and draws a box, label and score for each.",
-  "image-classify": "Scores the picture against the labels you give and lists them, best first.",
-};
-export const TASK_HELP: Record<VisionTask, string> = {
-  detect: "Finds objects and draws a box, label and score for each.",
-  segment: "Click a point on the image, or drag a box around something: the model outlines it.",
-  depth: "Estimates how near each pixel is and shows it as a depth map beside the photo.",
-  "image-classify": "Says what the picture shows: the classes the model knows, best first, with their scores.",
-};
+export const ZERO_SHOT_HELP: Partial<Record<VisionTask, string>> = labels({
+  detect: "playground.vision.zeroShot.detect",
+  "image-classify": "playground.vision.zeroShot.image-classify",
+});
+export const TASK_HELP: Record<VisionTask, string> = labels({
+  detect: "playground.vision.help.detect",
+  segment: "playground.vision.help.segment",
+  depth: "playground.vision.help.depth",
+  "image-classify": "playground.vision.help.image-classify",
+});
 
 // How many labels a classification answer shows (the server's top_k: all of a zero-shot classifier's labels).
 export const CLASSIFY_TOP_K = 5;

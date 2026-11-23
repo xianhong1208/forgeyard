@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
-import { formatTick, formatValue, keepApart, labelIndexes, niceTicks, periodLabel, periodTitle, type Period, type SeriesLine, type Step } from "../lib/charts";
+import { useT } from "../i18n/react";
+import { STEP_HEAD, STEP_WORD, formatTick, formatValue, keepApart, labelIndexes, niceTicks, periodLabel, periodTitle, textUnits, type Period, type SeriesLine,
+  type Step } from "../lib/charts";
 
 type Kind = Parameters<typeof formatValue>[1];
 
@@ -40,6 +42,7 @@ export function LineChart({ title, periods, step, lines, total, kind, legend }: 
   title: string; periods: Period[]; step: Step; lines: ChartLine[]; total: number[]; kind: Kind;
   legend?: boolean;   // name the lines under the chart; by default when there are several
 }) {
+  const t = useT();
   const [box, width] = useWidth();
   const [active, setActive] = useState<number | null>(null);
   const id = useId();
@@ -50,7 +53,7 @@ export function LineChart({ title, periods, step, lines, total, kind, legend }: 
   const ticks = niceTicks(max, narrow ? 3 : 4);
   const top = ticks[ticks.length - 1];
   const tickText = ticks.map((t) => formatTick(t, kind));
-  const left = Math.max(28, 10 + 7 * Math.max(...tickText.map((t) => t.length)));
+  const left = Math.max(28, 10 + 7 * Math.max(...tickText.map(textUnits)));
   const plotW = Math.max(40, width - left - PAD.right);
   const plotH = height - PAD.top - PAD.bottom;
   const x = (i: number) => left + (n <= 1 ? plotW / 2 : (i * plotW) / (n - 1));
@@ -59,7 +62,7 @@ export function LineChart({ title, periods, step, lines, total, kind, legend }: 
   const anchor = (i: number) => (n > 1 && i === 0 ? "start" : n > 1 && i === n - 1 ? "end" : "middle");
   const spaced = labelIndexes(n, Math.floor(plotW / (step === "month" ? 82 : 64)));
   const spans = spaced.map((i): [number, number] => {
-    const w = periodLabel(periods[i], step).length * 7.4;
+    const w = textUnits(periodLabel(periods[i], step)) * 7.4;
     const a = anchor(i);
     return a === "start" ? [x(i), x(i) + w] : a === "end" ? [x(i) - w, x(i)] : [x(i) - w / 2, x(i) + w / 2];
   });
@@ -86,13 +89,15 @@ export function LineChart({ title, periods, step, lines, total, kind, legend }: 
     setActive(Math.max(0, Math.min(n - 1, next)));
   };
   const a = active !== null && active < n ? active : null;
-  const readout = a === null ? "" : `${periodTitle(periods[a], step)}: ${lines.map((l) => `${l.name} ${formatValue(l.values[a], kind)}`).join(", ")}${multi ? `; total ${formatValue(total[a], kind)}` : ""}`;
+  const values = a === null ? "" : lines.map((l) => `${l.name} ${formatValue(l.values[a], kind)}`).join(t("usage.chart.join"));
+  const readout = a === null ? "" : multi ? t("usage.chart.readoutTotal", { period: periodTitle(periods[a], step), values, total: formatValue(total[a], kind) })
+    : t("usage.chart.readout", { period: periodTitle(periods[a], step), values });
   const tipLeft = a === null ? 0 : Math.min(Math.max(x(a), 112), width - 112);
 
   return (
     <div className="lc">
-      <div ref={box} className="lc-plot" tabIndex={0} role="group" aria-roledescription="line chart"
-        aria-label={`${title}. Use the left and right arrow keys to read each ${step}.`} aria-describedby={`${id}-read`}
+      <div ref={box} className="lc-plot" tabIndex={0} role="group" aria-roledescription={t("usage.chart.roledescription")}
+        aria-label={t("usage.chart.keys", { title, step: STEP_WORD[step] })} aria-describedby={`${id}-read`}
         onKeyDown={keys} onFocus={() => setActive((v) => v ?? n - 1)} onBlur={() => setActive(null)}>
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" focusable="false">
           {ticks.map((t, i) => (
@@ -124,32 +129,32 @@ export function LineChart({ title, periods, step, lines, total, kind, legend }: 
             {lines.map((l) => (
               <div key={l.id} className="lc-tip-row"><span className="lc-swatch" style={{ background: colour(l) }} /><span className="lc-tip-name">{l.name}</span><span className="lc-tip-value">{formatValue(l.values[a], kind)}</span></div>
             ))}
-            {multi && <div className="lc-tip-row lc-tip-total"><span className="lc-tip-name">Total</span><span className="lc-tip-value">{formatValue(total[a], kind)}</span></div>}
+            {multi && <div className="lc-tip-row lc-tip-total"><span className="lc-tip-name">{t("usage.chart.total")}</span><span className="lc-tip-value">{formatValue(total[a], kind)}</span></div>}
           </div>
         )}
         <p id={`${id}-read`} className="sr-only" aria-live="polite">{readout}</p>
       </div>
       {(legend ?? multi) && (
-        <ul className="lc-legend" aria-label={`${title}: series and their totals`}>
+        <ul className="lc-legend" aria-label={t("usage.chart.legend", { title })}>
           {lines.map((l) => (
             <li key={l.id}><span className={`lc-key${l.other ? " lc-key-other" : ""}`} style={{ borderColor: colour(l) }} aria-hidden="true" />
-              <span className="lc-legend-name">{l.name}</span>{l.cloud !== undefined && <span className={`chip ${l.cloud ? "chip-tone-wait" : "chip-tone-ok"}`}>{l.cloud ? "cloud" : "local"}</span>}
+              <span className="lc-legend-name">{l.name}</span>{l.cloud !== undefined && <span className={`chip ${l.cloud ? "chip-tone-wait" : "chip-tone-ok"}`}>{l.cloud ? t("usage.chip.cloud") : t("usage.chip.local")}</span>}
               <span className="lc-legend-value">{formatValue(l.total, kind)}</span></li>
           ))}
         </ul>
       )}
       <details className="lc-numbers">
-        <summary>Show the numbers</summary>
+        <summary>{t("usage.chart.numbers")}</summary>
         <div className="table-wrap">
           <table className="table lc-table">
             <caption className="sr-only">{title}</caption>
-            <thead><tr><th scope="col">{step === "day" ? "Day" : step === "week" ? "Week" : "Month"}</th>{lines.map((l) => <th key={l.id} scope="col">{l.name}</th>)}{multi && <th scope="col">Total</th>}</tr></thead>
+            <thead><tr><th scope="col">{STEP_HEAD[step]}</th>{lines.map((l) => <th key={l.id} scope="col">{l.name}</th>)}{multi && <th scope="col">{t("usage.chart.total")}</th>}</tr></thead>
             <tbody>
               {periods.map((p, i) => (
                 <tr key={p.start}>
-                  <th scope="row" data-label={step}>{periodTitle(p, step)}</th>
+                  <th scope="row" data-label={STEP_WORD[step]}>{periodTitle(p, step)}</th>
                   {lines.map((l) => <td key={l.id} data-label={l.name} className="num">{formatValue(l.values[i], kind)}</td>)}
-                  {multi && <td data-label="Total" className="num strong">{formatValue(total[i], kind)}</td>}
+                  {multi && <td data-label={t("usage.chart.total")} className="num strong">{formatValue(total[i], kind)}</td>}
                 </tr>
               )).reverse()}
             </tbody>

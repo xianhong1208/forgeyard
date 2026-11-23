@@ -1,11 +1,18 @@
 // The Playground's one model picker (1.4, #100): the ready models, grouped by kind the way Serving groups
 // deployments (the same kinds, labels and icons), each kind opening its own panel.
 
-import { API_KIND } from "./gateway";
+import { labels, t, translate } from "../i18n/core";
+import { getLang } from "../i18n/lang";
+import { serverMessage } from "../i18n/server";
+import { API_KIND, MAX_IMAGE_BYTES } from "./gateway";
 import { MODEL_KIND_ORDER, modelKind, type ModelKind } from "./fleet";
-import { ROUTE_KIND_LABEL } from "./routing";
 import { sleepState, type SleepState } from "./sleep";
-import type { Deployment, RouteInfo } from "./types";
+import type { Deployment, RouteInfo, RouteKind } from "./types";
+
+// Where a route's answers come from, in the picker's small print (the same words as routing's ROUTE_KIND_LABEL).
+const ROUTE_KIND_TEXT: Record<RouteKind, string> = labels({
+  local: "playground.routeKind.local", mixed: "playground.routeKind.mixed", cloud: "playground.routeKind.cloud",
+});
 
 // The kind of a route's protocol. A chat model whose deployment takes images, audio or video is
 // multimodal chat, as on Serving; a cloud-only model has no deployment, so it is plain chat.
@@ -60,7 +67,7 @@ export function pickerGroups(routes: RouteInfo[], deployments: Deployment[], wok
 export function pickerDetail(r: RouteInfo): string {
   const parts: string[] = [];
   if (r.api.startsWith("vision-")) parts.push(API_KIND[r.api] ?? r.api);
-  if (r.kind && r.kind !== "local") parts.push(ROUTE_KIND_LABEL[r.kind]);
+  if (r.kind && r.kind !== "local") parts.push(ROUTE_KIND_TEXT[r.kind]);
   return parts.join(" · ");
 }
 
@@ -68,4 +75,30 @@ export function pickerDetail(r: RouteInfo): string {
 // null when there is none (the picker opens instead).
 export function firstVision(groups: [ModelKind, RouteInfo[]][]): string | null {
   return groups.find(([k]) => k === "vision")?.[1][0]?.served_name ?? null;
+}
+
+// What went wrong with a request, in plain words (#189): the status and the gateway's message, as sent in English;
+// in Chinese a known error code in its translation (the server's specifics kept), else the message as sent.
+export function playError(status: number, body: unknown, lang = getLang()): string {
+  const b = body as { error?: { message?: string; code?: string }; detail?: { message?: string; code?: string } } | null;
+  const message = b?.error?.message ?? b?.detail?.message;
+  if (message) {
+    const code = b?.error?.message !== undefined ? b?.error?.code : b?.detail?.code;
+    return translate(lang, "playground.error.status", { status: String(status), message: lang === "en" ? message : serverMessage(code, message, lang) });
+  }
+  return translate(lang, status >= 500 ? "playground.error.server" : "playground.error.failed", { status: String(status) });
+}
+
+// Why an image cannot be attached to a chat message (null: it can), before it is read (gateway's readImage rules).
+export function imageProblem(file: File): string | null {
+  if (!file.type.startsWith("image/")) return t("playground.image.notImage", { name: file.name });
+  if (file.size > MAX_IMAGE_BYTES) return t("playground.image.tooLarge", { name: file.name, mb: String(MAX_IMAGE_BYTES / 1024 / 1024) });
+  return null;
+}
+
+// "45 s", "1 min 05 s": a video job's elapsed time (gateway's elapsed, in the reader's words).
+export function clock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return s < 60 ? t("playground.elapsed.s", { s: String(s) })
+    : t("playground.elapsed.m", { m: String(Math.floor(s / 60)), s: String(s % 60).padStart(2, "0") });
 }
