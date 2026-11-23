@@ -1197,7 +1197,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda`（torch +cu130） |
 | | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.4rc1`（linux/amd64 與 arm64） |
 
-`vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`：vLLM 的編譯快取可以在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，但在量測之前保持關閉（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts-experimental)）。自訂配方用 `enabled: true` 開啟它（只限容器 variant）。
+`vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`：vLLM 的編譯快取會在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，所以重新啟動或被喚醒時會載入第一次啟動編譯好的結果（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts)）。自訂配方可以用 `enabled: false` 關閉它，或用 `enabled: true` 為其他引擎開啟它（只限容器 variant）。
 
 `vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型（任務 `classify`，1.4.4）：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤。語言模型型的 reranker（Qwen3-Reranker）不受影響。
 

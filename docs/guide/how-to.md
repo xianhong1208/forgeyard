@@ -1060,18 +1060,21 @@ It does so only during the recipe's start period, where failed checks do not cou
 the first healthy answer; afterwards the checks run at the recipe's interval, as before, so a replica
 is never called unhealthy sooner than before.
 
-### Keep vLLM's compile cache between starts (experimental)
+### Keep vLLM's compile cache between starts
 
 At every start vLLM compiles the model (torch.compile, and Inductor and Triton compile its kernels)
-into a directory inside its container, which goes with the container. The `vllm` and `vllm-pooling`
-recipes name that directory (`engine_cache: {env: VLLM_CACHE_ROOT, enabled: false}`) but keep it off
-until it has been measured on real hardware. To try it:
+into a directory inside its container, which would go with the container. Since 1.5.0 the `vllm` and
+`vllm-pooling` recipes keep that directory on the machine (`engine_cache: {env: VLLM_CACHE_ROOT,
+enabled: true}`), so only a replica's first start compiles; its next starts, a wake after
+[sleeping](#let-a-deployment-sleep-when-nobody-uses-it) among them, load what it compiled. Measured on
+an A100 with Qwen3-0.6B: the first start took 118 s either way, and a restart 114 s without the cache
+and 57 s with it, the same answers both ways; the directory held 44 MiB. You see it in a deployment's
+events: the `engine` part of *ready in …* after a restart.
 
-1. In **Models → Engines**, choose **Add an engine**, start from the built-in `vllm`, name it (for
-   example `vllm-cache`) and change its `engine_cache` line to `enabled: true`.
-2. Deploy the model with `vllm-cache`, with the same parameters as your `vllm` deployment.
-3. **Stop** and **Start** it once: the first start compiles and fills the cache, the next one uses it.
-   Compare the `engine` part of the two starts in its events.
+Nothing needs to be done to use it. To start without it (to rule it out while chasing a problem, say),
+add an engine in **Models → Engines** → **Add an engine**, start from the built-in `vllm`, name it (for
+example `vllm-nocache`), change its `engine_cache` line to `enabled: false` and deploy with it. Turning
+it on or off never restarts a running replica: it applies from the replica's next start.
 
 Each replica gets a directory of its own on its machine, `<model cache>/engine-cache/<key>`, mounted
 writable at `/forgeyard/engine-cache` with `VLLM_CACHE_ROOT` pointing at it; no other deployment or

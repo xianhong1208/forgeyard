@@ -76,9 +76,9 @@ version until 1.0.
   (the agent's hello stays at the 16 features servers up to 1.4.0 accept): an older agent keeps its cadence (the
   server then measures the engine's part only and says so), and a 1.5.0 agent talking to an older server behaves
   as before. Recipes can keep an engine's compile cache between starts (`engine_cache`, sent beside the spec, which
-  older agents ignore): `vllm` and `vllm-pooling` name vLLM's `VLLM_CACHE_ROOT` but keep it
-  **off** until a real start on an A100 has measured it; a custom recipe can turn it on (a directory per replica
-  under the model cache, mounted writable, removed with the deployment). No migration.
+  older agents ignore): `vllm` and `vllm-pooling` keep vLLM's `VLLM_CACHE_ROOT` (a directory per replica under
+  the model cache, mounted writable, removed with the deployment), so only a replica's first start compiles:
+  measured on an A100 with Qwen3-0.6B, a restart took 57 s instead of 114 s; a custom recipe can turn it off. No migration.
 - **Automatic replicas** (#37, 1.5.0). A deployment's number of replicas can follow the load the gateway sees.
   New parameters of every deployment but video ones, read by the server (changing them restarts nothing):
   `autoscale` (**off by default**, for deployments made before and after this change), `min_replicas` and
