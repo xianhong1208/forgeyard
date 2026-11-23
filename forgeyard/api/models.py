@@ -544,7 +544,9 @@ def _recipe_page(request: Request, name: str, listing: bool) -> dict | list:
                 # 1.5.2 (#95): per variant, what the server recorded for its pinned image (a copy's: Try this version).
                 "pins": {v.name: got for v in found[0].variants
                          if (got := pins.signatures(db, [v.image or ""]).get(v.image or "")) is not None},
-                "can_manage": caller.user.role == "admin"}
+                "can_manage": caller.user.role == "admin",
+                # 1.5.2 (#95): Download to… for the engine alone (operators and admins, as for models).
+                "can_download": can_run_workloads(caller.user)}
     finally:
         db.close()
 
@@ -628,10 +630,17 @@ def remove_recipe(name: str, caller: Caller = Depends(require_admin), db: DbSess
         raise fail(409, "recipe_in_use", f"{name} is used by {', '.join(used)}. Delete those deployments first.")
     db.delete(row)
     audit.record(db, "recipe.deleted", actor=caller.user, target=name, ip=caller.ip)
+    # 1.5.2: a download of this engine alone that is under way ends with it (its agent is told at once).
+    from forgeyard.machines.hub import hub
+    from forgeyard.models import prefetch
+
+    told = prefetch.end_engine(db, name, f"the engine {name} was deleted")
     db.flush()
     pins.prune(db)   # 1.5.2: a copy's images lose their recorded ids once no other copy names them
     db.commit()
     pins.refresh(db)
+    for node_id in set(told):
+        hub.poke(node_id)
     return {"ok": True}
 
 

@@ -148,4 +148,5 @@ export default {
   "deployment.scale.drainFinish.other": "{count} 個進行中的請求完成後",
   "deployment.scale.paused": "目前不調整：{reason}。",
   "deployment.scale.last": "上次：{text}",
+  "deployment.runsCopy": "執行的是複本：{engine}（以 {builtin} 為基礎）。",
 } satisfies Record<keyof typeof en, string>;

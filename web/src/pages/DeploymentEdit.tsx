@@ -6,8 +6,10 @@ import { useAuth } from "../auth";
 import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
-import { FIRST_ANSWER_DEFAULT, editBody, editForm, takesFirstAnswer, type EditForm } from "../lib/models";
-import type { CatalogModel, CatalogResponse, Deployment, DeploymentResponse, EditResponse, Machine, MachineVerdict, MachinesResponse, Recipe } from "../lib/types";
+import { FIRST_ANSWER_DEFAULT, editBody, editForm, recipeDefaults, takesFirstAnswer, type EditForm } from "../lib/models";
+import { engineHref } from "../lib/pages";
+import type { CatalogModel, CatalogResponse, Deployment, DeploymentEngine, DeploymentResponse, EditOutage, EditResponse, Machine, MachineVerdict, MachinesResponse,
+  Recipe } from "../lib/types";
 import { canAutoscale, scaleEditParams, scaleForm, type ScaleForm } from "../lib/scale";
 import { useApi } from "../lib/useApi";
 import { SleepSetting, WakeWaitField } from "../components/Sleep";
@@ -16,7 +18,7 @@ import { useT } from "../i18n/react";
 import { ESTIMATE_DELAY_MS, EstimatePanel, ParamField, ShareHintNotice, Verdicts, paramApplies } from "./ModelDeploy";
 
 // What a change shows next to each changed setting.
-const CHANGE_LABEL: Record<string, string> = labels({ share: "deploy.change.share", gpus: "deploy.change.gpus", vram: "deploy.change.vram",
+const CHANGE_LABEL: Record<string, string> = labels({ recipe: "deploy.change.recipe", share: "deploy.change.share", gpus: "deploy.change.gpus", vram: "deploy.change.vram",
   extra_args: "deploy.change.extra_args", first_answer_timeout: "deploy.change.first_answer_timeout", replicas: "deployment.replicas",
   machine_id: "deployment.col.machine", sleep_when_idle: "deployment.sleep.label", idle_minutes: "deploy.change.idle_minutes",
   wake_wait: "deploy.change.wake_wait", autoscale: "deploy.change.autoscale", min_replicas: "deploy.change.min_replicas",
@@ -36,15 +38,20 @@ export function DeploymentEditPage() {
     return (<><PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.title")} /><Notice>{t("deploy.edit.notAllowed")}</Notice></>);
   }
   if (!d || !recipe || !cat) return <><PageHeader index={t("deploy.eyebrow")} title={t("deploy.edit.title")} /><p className="muted">{t("common.loading")}</p></>;
-  return <EditView key={d.id} d={d} recipe={recipe} model={cat.models.find((m) => m.id === d.model.id)}
+  return <EditView key={d.id} d={d} recipe={recipe} recipes={cat.recipes} model={cat.models.find((m) => m.id === d.model.id)}
     machines={(machines?.machines ?? []).filter((m) => m.status !== "revoked")} />;
 }
 
 // The form starts from what the deployment runs with now, once (a reload does not undo edits).
-function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recipe: Recipe; model: CatalogModel | undefined; machines: Machine[] }) {
+function EditView({ d, recipe: current, recipes, model, machines: usable }: {
+  d: Deployment; recipe: Recipe; recipes: Recipe[]; model: CatalogModel | undefined; machines: Machine[];
+}) {
   const t = useT();
   const navigate = useNavigate();
-  const [f, setF] = useState<EditForm>(() => editForm(d, recipe));
+  const [f, setF] = useState<EditForm>(() => editForm(d, current));
+  // 1.5.2 (#95): the engine version it would run (the built-in one or a copy); its parameters are the form's.
+  const [engine, setEngine] = useState(d.recipe);
+  const recipe = recipes.find((r) => r.name === engine) ?? current;
   const [plan, setPlan] = useState<EditResponse | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,6 +59,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
   const [scale, setScale] = useState<ScaleForm>(() => scaleForm(d.params));   // 1.5.0: fixed or automatic replicas
 
   const body = editBody(f, recipe);
+  if (engine !== d.recipe) body.recipe = engine;
   const auto = canAutoscale(recipe) && scale.mode === "auto";
   body.params = { ...(body.params as Record<string, unknown>), ...scaleEditParams(scale) };
   if (auto) delete body.replicas;   // the autoscaler sets the number; the bounds keep it within them
@@ -69,6 +77,12 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
   }, [bodyKey, d.id]);
 
   const set = <K extends keyof EditForm>(k: K, v: EditForm[K]) => setF((cur) => ({ ...cur, [k]: v }));
+  // Another version's parameters start from what the deployment set; one it did not have starts at its default.
+  const chooseEngine = (name: string) => {
+    const next = recipes.find((r) => r.name === name);
+    setEngine(name);
+    if (next) setF((cur) => ({ ...cur, params: { ...recipeDefaults(next), ...cur.params } }));
+  };
   const setParam = (k: string, v: string) => setF((cur) => ({ ...cur, params: { ...cur.params, [k]: v } }));
   const running = d.workload.desired_state === "running";
   const changes = Object.entries(plan?.changes ?? {});
@@ -103,6 +117,7 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
         lead={t("deploy.edit.lead", { model: d.model.name, recipe: d.recipe, served: d.served_name })} />
       <form className="wl-form deploy-layout" onSubmit={submit} aria-label={t("deploy.edit.formLabel")}>
         <div>
+          <EngineChoice d={d} engine={engine} onChange={chooseEngine} />
           <section className="panel">
             <h2>{t("deploy.edit.sharing")}</h2>
             <div className="grid-3">
@@ -176,7 +191,11 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
                       before: <span className="mono">{changeValue(k, v.before, usable)}</span>, after: <span className="mono">{changeValue(k, v.after, usable)}</span> })}</li>
                   ))}
                 </ul>
-                <p className="edit-plan">{plan.restart_text}</p>
+                {(plan.dropped ?? []).length > 0 && (
+                  <p className="small muted">{t("deploy.edit.dropped", { recipe: plan.recipe ?? engine, names: (plan.dropped ?? []).join(", ") })}</p>
+                )}
+                <p className="edit-plan">{t.maybe(`deploy.restart.${plan.restart}`, plan.restart_text)}</p>
+                {plan.outage && <OutageNotice o={plan.outage} engine={plan.recipe ?? engine} />}
                 {blocked && <Notice tone="error">{t("deploy.edit.blocked")}</Notice>}
               </>
             )}
@@ -200,6 +219,57 @@ function EditView({ d, recipe, model, machines: usable }: { d: Deployment; recip
         </aside>
       </form>
     </>
+  );
+}
+
+// 1.5.2 (#95): the engine versions it can run: its built-in engine and the copies of it ("Try this version").
+function EngineChoice({ d, engine, onChange }: { d: Deployment; engine: string; onChange: (name: string) => void }) {
+  const t = useT();
+  const list = d.engines ?? [];
+  if (list.length === 0) return null;
+  const chosen = list.find((e) => e.name === engine);
+  const builtin = list.find((e) => e.builtin);
+  return (
+    <section className="panel" aria-labelledby="engine-title">
+      <h2 id="engine-title">{t("deploy.edit.engine")}</h2>
+      <div className="grid-2">
+        <div className="field"><label htmlFor="e-engine">{t("deploy.edit.engineVersion")}</label>
+          <select id="e-engine" value={engine} disabled={list.length < 2} onChange={(e) => onChange(e.target.value)}>
+            {list.map((e) => <option key={e.name} value={e.name}>{engineOption(e)}</option>)}
+          </select>
+          <p className="field-hint">{list.length < 2
+            ? t.rich("deploy.edit.engineOnlyOne", { link: (x) => <Link to={engineHref(builtin?.name ?? d.recipe)}>{x}</Link> })
+            : chosen && !chosen.builtin
+              ? t("deploy.edit.engineCopyHint", { builtin: chosen.based_on ?? builtin?.name ?? "" })
+              : t("deploy.edit.engineBuiltinHint")}</p></div>
+      </div>
+    </section>
+  );
+}
+
+function engineOption(e: DeploymentEngine): string {
+  const title = e.title.endsWith(` ${e.version}`) ? e.title : `${e.title} ${e.version}`;
+  return `${e.name} · ${title} · ${e.builtin ? tNow("deploy.edit.engineBuiltin") : tNow("deploy.edit.engineCopy")}`;
+}
+
+// 1.5.2 (#95): before a change that restarts the only running replica: about how long the model does not answer, and
+// how to avoid it. It only says so; saving does what it always did.
+function OutageNotice({ o, engine }: { o: EditOutage; engine: string }) {
+  const t = useT();
+  return (
+    <Notice tone="warn">
+      <div className="edit-outage" aria-label={t("deploy.outage.label")}>
+        <p><strong>{t("deploy.outage.lead", { seconds: String(o.seconds) })}</strong> {t(`deploy.outage.source.${o.source}`)}</p>
+        {o.first_start && <p>{t("deploy.outage.firstStart")}</p>}
+        {o.image_missing.length > 0 && (
+          <p>{t.rich("deploy.outage.image", { machines: o.image_missing.join(", "), link: (x) => <Link to={engineHref(engine)}>{x}</Link> })}</p>
+        )}
+        <p>{t("deploy.outage.avoid")}</p>
+        <ul>
+          {o.avoid.map((a) => <li key={a}>{t(`deploy.outage.avoid.${a}`)}</li>)}
+        </ul>
+      </div>
+    </Notice>
   );
 }
 

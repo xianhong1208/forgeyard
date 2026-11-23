@@ -671,7 +671,9 @@ class ModelDownload(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # What the agent knows it by. Random, like replicas.uid.
     uid: Mapped[str] = mapped_column(String(32), unique=True, default=lambda: uuid.uuid4().hex)
-    model_id: Mapped[int] = mapped_column(ForeignKey("models.id", ondelete="CASCADE"), index=True)
+    # NULL (1.5.2, #95, migration 0017): an engine alone, the image or program of `recipe`'s variant for the machine.
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("models.id", ondelete="CASCADE"), nullable=True,
+                                                    index=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id", ondelete="CASCADE"), index=True)
     # The GGUF file of the commit, when the catalog model is one GGUF file (its cache key includes it).
     file: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
@@ -689,7 +691,7 @@ class ModelDownload(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    model: Mapped[CatalogModel] = relationship()
+    model: Mapped[Optional[CatalogModel]] = relationship()
     node: Mapped[Node] = relationship(foreign_keys=[node_id])
     source_node: Mapped[Optional[Node]] = relationship(foreign_keys=[source_node_id])
 

@@ -320,13 +320,14 @@ def _blocks(db: DbSession, node: Node, kind: str, uid: str) -> Wanted:
         image = runtime.get("image") if runtime.get("type") == "container" else None
         return Wanted(r.model, r.engine, image)
     row = _wanted_download(db, node, uid)
-    if row is None or row.model is None:
+    # 1.5.2 (#95): a download of an engine alone has no model, only its recipe.
+    if row is None or (row.model is None and (row.model_id is not None or not row.recipe)):
         raise Refused(404, "relay_not_wanted", "No download to this machine with that id is under way (any more).")
     from forgeyard.models import prefetch
     from forgeyard.models.catalog import get_recipe, model_block
 
     eng = prefetch.engine_of(node, get_recipe(db, row.recipe)) if row.recipe else {}
-    return Wanted(model_block(row.model), eng.get("engine"), eng.get("image"))
+    return Wanted(model_block(row.model) if row.model is not None else None, eng.get("engine"), eng.get("image"))
 
 
 def _token(db: DbSession, kind: str, uid: str, node: Node) -> Optional[str]:

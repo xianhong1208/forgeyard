@@ -92,4 +92,13 @@ export default {
   "enginepage.col.range": "範圍",
   "enginepage.col.does": "作用",
   "enginepage.advancedTag": " · 進階",
+  "enginepage.dl.button": "下載到…",
+  "enginepage.dl.buttonTitle": "預先把這個推論引擎的映像檔或程式下載到機器上，不含模型",
+  "enginepage.dl.title": "把 {what} 下載到…",
+  "enginepage.dl.lead": "只會下載推論引擎：也就是每台機器會執行的變體的映像檔或程式（複本的映像檔會用釘選時記下的 ID 核對，所以也能經由伺服器取得）。不會啟動任何東西。",
+  "enginepage.dl.started": "正在把 {recipe} 下載到 {names}。{skipped}",
+  "enginepage.dl.listTitle": "這個推論引擎的下載",
+  "enginepage.dl.under": "下載中",
+  "enginepage.caughtUp.same": "內建的 {builtin} 現在已經是 {version}，和這個複本同一版：用這個複本的部署可以在「編輯」裡改回內建版本，之後就能刪除這個複本。",
+  "enginepage.caughtUp.newer": "內建的 {builtin} 現在已經是 {version}，比這個複本還新：用這個複本的部署可以在「編輯」裡改回內建版本。",
 } satisfies Record<keyof typeof en, string>;

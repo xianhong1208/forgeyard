@@ -50,6 +50,29 @@ version until 1.0.
   run from source now installs with `uv sync --extra server` (the server image has it; the agent's wheel and image do
   not carry it).
 
+- **Another version of the engine for a deployment, and Download to… for an engine alone (1.5.2, #95, part 3).**
+  A deployment's **Edit** page has an **Engine version** select: its built-in engine and the copies of it made with
+  Try this version that serve its model the same way (`PATCH /api/deployments/{id}` takes `recipe`; another engine,
+  a copy of another built-in, or one that would change the route is 422 `engine_not_related`, `incompatible` or
+  `engine_not_compatible`). The name, served name, keys and routes stay; the estimate is made again with the new
+  version (a change that no longer fits is refused as other changes are, and `dry_run` answers the same), parameters
+  the new version does not take are dropped and listed (`dropped`), the catalog's engine arguments follow through
+  `based_on`, and the replicas restart as for any change (one at a time with several). Going back is choosing the
+  built-in. Audited as `deployment.changed` with `recipe` from/to and both versions; the deployment's page says when
+  it runs a copy. **Before a change restarts the only running replica**, the form and the dry run say about how long
+  the model will not answer (`outage`: its last start, else the other deployments of the engine, else a typical
+  start), that a new version can take longer on its first start, which machines still lack its image, and how to
+  avoid the gap (a second replica, automatic replicas, and the cloud tier for keys allowed to use it); it changes
+  nothing else. **Download to…** on an engine's page (built-in or copy; admins and operators) fetches only the image
+  of the variant each machine would run, by its pinned digest and through the server where the machine is set so
+  (a copy's by the ids Try recorded), or its process program with its SHA-256; a machine no variant runs on is
+  refused with why; progress and Cancel as for models; audited (`engine.download_requested`,
+  `engine.download_cancelled`). Migration `0017_engine_downloads`: `model_downloads.model_id` becomes nullable (going
+  down deletes only engine-only rows). Agents with `prefetch` already take a download without a model (a 1.5.2 agent
+  also names the engine in its log line). A copy's page says when its built-in engine has caught up (the same version or a newer one), so its
+  deployments can switch back; nothing moves by itself. The edit page also shows what restarts in the reader's
+  language (it was always English).
+
 ### Changed
 
 - **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it

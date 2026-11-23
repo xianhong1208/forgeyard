@@ -297,4 +297,7 @@ export default {
   "machine.img.copiedSize": " · {size}，來自 {source}",
   "machine.img.copyingShort": "複製中…",
   "machine.img.copy": "複製",
+  "machine.target.no_engine": "沒有適用的變體",
+  "machine.target.noVariant": "這個推論引擎沒有能在這裡執行的變體：{note}",
+  "machine.dl.engineOnly": "推論引擎 {recipe}",
 } satisfies Record<keyof typeof en, string>;

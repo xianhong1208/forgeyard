@@ -95,6 +95,11 @@ export function DeploymentDetailPage() {
           </>
         )}
       />
+      {d?.engine?.based_on && (
+        <p className="small muted dep-copy-line">{t.rich("deployment.runsCopy", {
+          engine: <Link to={engineHref(d.engine.name)}>{d.engine.title.endsWith(` ${d.engine.version}`) ? d.engine.title : `${d.engine.title} ${d.engine.version}`}</Link>,
+          builtin: <Link to={engineHref(d.engine.based_on)} className="mono">{d.engine.based_on}</Link> })}</p>
+      )}
       <AdvisorBanner pages={[`deployment:${id}`]} />
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
