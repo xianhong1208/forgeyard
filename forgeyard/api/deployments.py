@@ -39,7 +39,7 @@ from forgeyard.db import (Accelerator, CatalogModel, Deployment, GatewayRoute, N
 from forgeyard.gateway import imagegen, proxy, waking
 from forgeyard.gateway.speech import wav_ms
 from forgeyard.machines.hub import hub
-from forgeyard.models import catalog, modalities, routes, scheduler, textcls, vision
+from forgeyard.models import catalog, modalities, routes, scheduler, textcls, trials, vision
 from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -381,7 +381,8 @@ def live_cards(db: DbSession, w: Workload) -> list[dict]:
 def _get(db: DbSession, dep_id: int) -> Deployment:
     d = db.scalar(select(Deployment).where(Deployment.id == dep_id)
                   .options(selectinload(Deployment.workload).selectinload(Workload.replicas).selectinload(Replica.node)))
-    if d is None:
+    if d is None or trials.is_trial(db, d.id):
+        # 1.5.2 (#95): a trial's temporary deployment is managed by its trial only (the engine page), never here.
         raise fail(404, "not_found", "No such deployment.")
     return d
 
@@ -454,11 +455,14 @@ def create_deployment(body: DeploymentIn, caller: Caller = Depends(require_opera
 
 @router.get("/deployments")
 def list_deployments(caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
-    rows = db.scalars(select(Deployment).options(selectinload(Deployment.workload).selectinload(Workload.replicas)
-                                                 .selectinload(Replica.node))
+    rows = db.scalars(select(Deployment).where(trials.not_trial())
+                      .options(selectinload(Deployment.workload).selectinload(Workload.replicas)
+                               .selectinload(Replica.node))
                       .order_by(Deployment.created_at.desc(), Deployment.id.desc())).all()
+    # 1.5.2 (#95): trials of engines that run now are not deployments; Serving and the machine pages name them.
     return {"deployments": [deployment_out(db, d, caller) for d in rows], "server_time": utcnow(),
-            "can_manage": can_run_workloads(caller.user)}
+            "can_manage": can_run_workloads(caller.user),
+            "trials": [trials.brief_out(t) for t in trials.running(db)]}
 
 
 @router.get("/deployments/{dep_id}")
@@ -549,7 +553,9 @@ def engine_choices(db: DbSession, d: Deployment) -> list[dict]:
     out = []
     for r, _ in catalog.all_recipes(db).values():
         if r.name == recipe.name or switch_problem(recipe, r, d.model) is None:
-            out.append({**engine_out(r), "current": r.name == recipe.name})
+            # 1.5.2 (#95, PR 4): its latest trial (with this model first), so Edit can say how it went. Never a gate.
+            out.append({**engine_out(r), "current": r.name == recipe.name,
+                        "last_trial": trials.last_for(db, r.name, d.model_id)})
     out.sort(key=lambda e: (not e["builtin"], _version_key(e["version"]), e["name"]))
     return out
 
@@ -672,6 +678,9 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
             raise fail(404, "recipe_not_found", f"No engine {body.recipe!r}.")
         if why := switch_problem(current, recipe, d.model):
             raise fail(422, *why)
+        if why := trials.switch_policy(db, d, recipe):
+            # 1.5.2 (#95, PR 4): the seam for a policy on trials (enterprise later); it allows every switch today.
+            raise fail(409, *why)
     switched = recipe.name != d.recipe
     known = set(recipe.params) | set(COMMON_PARAMS)
     params = {k: v for k, v in (d.params or {}).items() if k in known}  # names an updated recipe dropped

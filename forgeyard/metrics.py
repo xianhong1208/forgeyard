@@ -218,6 +218,7 @@ def _replicas(db):
     from sqlalchemy import func, select
 
     from forgeyard.db import Deployment, Replica, Workload
+    from forgeyard.models import trials
 
     g = GaugeMetricFamily("forgeyard_replicas", "Replicas of each model deployment, by state (pending, starting, "
                           "running, healthy, unhealthy, backoff, exited, failed, stopping, stopped)",
@@ -225,6 +226,7 @@ def _replicas(db):
     rows = db.execute(select(Deployment.name, Replica.state, func.count())
                       .join(Workload, Workload.id == Deployment.workload_id)
                       .join(Replica, Replica.workload_id == Workload.id)
+                      .where(trials.not_trial())   # 1.5.2 (#95): an engine trial's deployment is not one
                       .group_by(Deployment.name, Replica.state).order_by(Deployment.name, Replica.state)).all()
     for name, state, n in rows:
         g.add_metric((name, state if state in REPLICA_STATES else OTHER), n)
@@ -249,8 +251,11 @@ def _deployment_replicas(db):
                              labels=("deployment",))
     draining = autoscale.autoscaler.draining()
     loads = autoscale.autoscaler.loads()
-    rows = db.scalars(select(Deployment).options(selectinload(Deployment.workload).selectinload(Workload.replicas)
-                                                 .selectinload(Replica.node)).order_by(Deployment.name)).all()
+    from forgeyard.models import trials
+
+    rows = db.scalars(select(Deployment).where(trials.not_trial())
+                      .options(selectinload(Deployment.workload).selectinload(Workload.replicas)
+                               .selectinload(Replica.node)).order_by(Deployment.name)).all()
     for d in rows:
         w = d.workload
         if w is None:

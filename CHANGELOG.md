@@ -73,6 +73,32 @@ version until 1.0.
   deployments can switch back; nothing moves by itself. The edit page also shows what restarts in the reader's
   language (it was always English).
 
+- **Try it out: a trial run of an engine before switching (1.5.2, #95, part 4; community edition).** On an engine's
+  page (usually a copy made with Try this version) admins and operators click **Try it out**, pick a catalog model the
+  engine serves and a machine, and Forgeyard deploys it there for a few minutes, **isolated**: no gateway route, so
+  it is not in `/v1/models`, no API key or Playground can call it, and no usage or cost is counted; it never sleeps,
+  is never scaled, and is left out of the deployment lists, route targets, the first-run checklist, the advisor and
+  `/metrics` (Serving and a machine's page name it as a trial in progress). The parameters are those of a deployment
+  of the model on the built-in engine when there is one, else the engine's defaults; it is placed like a deployment
+  (estimate, the usual refusal when it does not fit, Share VRAM). Checks, straight against the replica with its
+  internal key: it starts (time and phases, against the built-in's last start), its **measured memory** on its card
+  or the machine's RAM (readings before the engine starts and after it is ready, a few each, against the reservation;
+  approximate on a card other work shares; when other work released memory meanwhile or no readings came, it is
+  *not measured* and said so in words, never as a number), it answers a warm-up and five short requests of its kind (chat at
+  temperature 0, embeddings, rerank with the right document first, classification, speech to text, text to speech,
+  an image, vision; video only starts), their p50/p95, and the same request to a ready built-in deployment of the
+  model to compare the answers. Then the deployment is removed: also when a check fails, when it is cancelled, when
+  it runs out of time (the start is bounded, 30 minutes by default, and what follows by 15 minutes), and when the
+  server restarts during it. Results are kept in a new table `engine_trials` (migration `0018_engine_trials`,
+  additive), shown under **Trials** on the engine's page (history, each trial's checks, the comparison with the
+  built-in engine's deployment and its own last trial), as a chip on the engine's card, and in **Edit** when a
+  deployment is switched to that version ("last tried on …: passed"), never as a gate; one function
+  (`trials.switch_policy`) is the seam for a later enterprise policy and allows every switch. At most four trials at
+  once, one per engine; the engine and the model cannot be deleted while a trial runs. API: `POST
+  /api/recipes/{name}/trials` (with `dry_run`), `GET /api/recipes/{name}/trials`, `GET /api/engine-trials/{id}`,
+  `POST /api/engine-trials/{id}/cancel`; audited as `engine_trial.started`, `engine_trial.finished` and
+  `engine_trial.cancelled`.
+
 ### Changed
 
 - **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it

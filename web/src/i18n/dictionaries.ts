@@ -13,6 +13,7 @@ import enDeployment from "./en/deployment";
 import enEnginepage from "./en/enginepage";
 import enEngineupdates from "./en/engineupdates";
 import enEnginetry from "./en/enginetry";
+import enEnginetrial from "./en/enginetrial";
 import enFleet from "./en/fleet";
 import enGuide from "./en/guide";
 import enLibrary from "./en/library";
@@ -37,6 +38,7 @@ import zhDeployment from "./zh-TW/deployment";
 import zhEnginepage from "./zh-TW/enginepage";
 import zhEngineupdates from "./zh-TW/engineupdates";
 import zhEnginetry from "./zh-TW/enginetry";
+import zhEnginetrial from "./zh-TW/enginetrial";
 import zhFleet from "./zh-TW/fleet";
 import zhGuide from "./zh-TW/guide";
 import zhLibrary from "./zh-TW/library";
@@ -53,7 +55,7 @@ import zhUsage from "./zh-TW/usage";
 
 export const EN_MODULES = {
   admin: enAdmin, cloud: enCloud, keys: enKeys,
-  addmodel: enAddmodel, advisor: enAdvisor, auth: enAuth, common: enCommon, enginepage: enEnginepage, engineupdates: enEngineupdates, enginetry: enEnginetry, fleet: enFleet, guide: enGuide, library: enLibrary, machines: enMachines, modelpage: enModelpage, server: enServer,
+  addmodel: enAddmodel, advisor: enAdvisor, auth: enAuth, common: enCommon, enginepage: enEnginepage, engineupdates: enEngineupdates, enginetry: enEnginetry, enginetrial: enEnginetrial, fleet: enFleet, guide: enGuide, library: enLibrary, machines: enMachines, modelpage: enModelpage, server: enServer,
   serving: enServing, shell: enShell, start: enStart,
   // Machines and deployments (#189, group 1)
   deploy: enDeploy, deployment: enDeployment, machine: enMachine,
@@ -61,7 +63,7 @@ export const EN_MODULES = {
 };
 export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, string>> = {
   admin: zhAdmin, cloud: zhCloud, keys: zhKeys,
-  addmodel: zhAddmodel, advisor: zhAdvisor, auth: zhAuth, common: zhCommon, enginepage: zhEnginepage, engineupdates: zhEngineupdates, enginetry: zhEnginetry, fleet: zhFleet, guide: zhGuide, library: zhLibrary, machines: zhMachines, modelpage: zhModelpage, server: zhServer,
+  addmodel: zhAddmodel, advisor: zhAdvisor, auth: zhAuth, common: zhCommon, enginepage: zhEnginepage, engineupdates: zhEngineupdates, enginetry: zhEnginetry, enginetrial: zhEnginetrial, fleet: zhFleet, guide: zhGuide, library: zhLibrary, machines: zhMachines, modelpage: zhModelpage, server: zhServer,
   serving: zhServing, shell: zhShell, start: zhStart,
   deploy: zhDeploy, deployment: zhDeployment, machine: zhMachine,
   playground: zhPlayground, usage: zhUsage,
@@ -69,7 +71,7 @@ export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, strin
 
 export const en = {
   ...enAdmin, ...enCloud, ...enKeys,
-  ...enAddmodel, ...enAdvisor, ...enAuth, ...enCommon, ...enEnginepage, ...enEngineupdates, ...enEnginetry, ...enFleet, ...enGuide, ...enLibrary, ...enMachines, ...enModelpage, ...enServer, ...enServing, ...enShell, ...enStart,
+  ...enAddmodel, ...enAdvisor, ...enAuth, ...enCommon, ...enEnginepage, ...enEngineupdates, ...enEnginetry, ...enEnginetrial, ...enFleet, ...enGuide, ...enLibrary, ...enMachines, ...enModelpage, ...enServer, ...enServing, ...enShell, ...enStart,
   ...enDeploy, ...enDeployment, ...enMachine,
   ...enPlayground, ...enUsage,
 };
@@ -78,7 +80,7 @@ export type Key = keyof typeof en;
 // TypeScript already holds each zh-TW module to its English one (`satisfies`); this keeps the merge complete.
 export const zhTW: Record<Key, string> = {
   ...zhAdmin, ...zhCloud, ...zhKeys,
-  ...zhAddmodel, ...zhAdvisor, ...zhAuth, ...zhCommon, ...zhEnginepage, ...zhEngineupdates, ...zhEnginetry, ...zhFleet, ...zhGuide, ...zhLibrary, ...zhMachines, ...zhModelpage, ...zhServer, ...zhServing, ...zhShell, ...zhStart,
+  ...zhAddmodel, ...zhAdvisor, ...zhAuth, ...zhCommon, ...zhEnginepage, ...zhEngineupdates, ...zhEnginetry, ...zhEnginetrial, ...zhFleet, ...zhGuide, ...zhLibrary, ...zhMachines, ...zhModelpage, ...zhServer, ...zhServing, ...zhShell, ...zhStart,
   ...zhDeploy, ...zhDeployment, ...zhMachine,
   ...zhPlayground, ...zhUsage,
 };

@@ -332,8 +332,11 @@ def sweep_once(now: Optional[datetime] = None) -> list[str]:
     nodes: set[int] = set()
     db = new_session()
     try:
+        from forgeyard.models import trials
+
+        # 1.5.2 (#95): a trial's temporary deployment never sleeps (its trial removes it).
         ids = db.scalars(select(Deployment.id).join(Workload, Deployment.workload_id == Workload.id)
-                         .where(Workload.desired_state == "running")).all()
+                         .where(Workload.desired_state == "running", trials.not_trial())).all()
         for dep_id in ids:
             with placement._lock:   # not while a placement pass places its replicas
                 db.expire_all()

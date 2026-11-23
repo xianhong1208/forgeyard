@@ -26,7 +26,7 @@ from forgeyard.db import CatalogModel, Deployment, Node
 from forgeyard.machines import cache, engineimages
 from forgeyard.machines.hub import hub
 from forgeyard.machines.protocol import FEATURE_IMAGE_SAVE
-from forgeyard.models import cache_keys, prefetch, reach, render, scheduler, sources
+from forgeyard.models import cache_keys, prefetch, reach, render, scheduler, sources, trials
 from forgeyard.models.catalog import Context, model_block
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe
@@ -173,7 +173,8 @@ def model_page(db: DbSession, m: CatalogModel, all_recipes: dict) -> dict:
         rows.append({**node_out(node), "cache": cache_entry(db, node, m, key),
                      "download": prefetch.row_out(active[node.id]) if node.id in active else None,
                      "engines": {n: engine_on(node, all_recipes[n][0]) for n in names}})
-    deps = db.scalars(select(Deployment).where(Deployment.model_id == m.id).order_by(Deployment.name)).all()
+    deps = db.scalars(select(Deployment).where(Deployment.model_id == m.id, trials.not_trial())
+                      .order_by(Deployment.name)).all()
     return {"files": files_of(m), "machines": rows,
             "fits": {n: fits(db, m, all_recipes[n][0]) for n in names},
             "deployments": [{"id": d.id, "name": d.name, "recipe": d.recipe} for d in deps]}
@@ -196,12 +197,16 @@ def engine_page(db: DbSession, recipe: Recipe) -> dict:
     recent = db.scalars(select(ModelDownload).where(ModelDownload.model_id.is_(None), ModelDownload.recipe == recipe.name)
                         .order_by(ModelDownload.id.desc()).limit(ENGINE_DOWNLOADS)).all()
     downloads = sorted(recent, key=lambda r: (r.state not in prefetch.ACTIVE, -r.id))
-    deps = db.scalars(select(Deployment).where(Deployment.recipe == recipe.name).order_by(Deployment.name)).all()
+    deps = db.scalars(select(Deployment).where(Deployment.recipe == recipe.name, trials.not_trial())
+                      .order_by(Deployment.name)).all()
     models = [m for m in db.scalars(select(CatalogModel).order_by(CatalogModel.name)).all()
               if m.format in recipe.formats and m.task in recipe.tasks]
     return {"machines": rows, "deployments": [{"id": d.id, "name": d.name, "model_id": d.model_id} for d in deps],
             "models": [{"id": m.id, "name": m.name, "title": m.title} for m in models],
-            "downloads": [prefetch.row_out(r) for r in downloads], "caught_up": caught_up(recipe)}
+            "downloads": [prefetch.row_out(r) for r in downloads], "caught_up": caught_up(recipe),
+            # 1.5.2 (#95, PR 4): its trial running now, and its latest finished one (the history: /trials).
+            "trial_running": next((trials.brief_out(t) for t in trials.running(db) if t.recipe == recipe.name), None),
+            "last_trial": trials.last_for(db, recipe.name)}
 
 
 def caught_up(recipe: Recipe) -> Optional[dict]:

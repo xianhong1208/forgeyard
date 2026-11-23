@@ -235,7 +235,10 @@ class Context:
 
     @cached_property
     def deployments(self) -> list[Deployment]:
-        return list(self.db.scalars(select(Deployment).options(
+        from forgeyard.models import trials
+
+        # 1.5.2 (#95): an engine trial's temporary deployment is not one to give advice about.
+        return list(self.db.scalars(select(Deployment).where(trials.not_trial()).options(
             selectinload(Deployment.workload).selectinload(Workload.replicas).selectinload(Replica.node))
             .order_by(Deployment.name)).all())
 

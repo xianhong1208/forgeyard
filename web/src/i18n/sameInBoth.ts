@@ -12,4 +12,5 @@ export const SAME_IN_BOTH: readonly string[] = [
   "machines.agent",
   "serving.perGpu",
   "serving.ram",
+  "enginetrial.gpu",
 ];

@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { LastTrialLine } from "../components/EngineTrials";
 import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
@@ -241,7 +242,10 @@ function EngineChoice({ d, engine, onChange }: { d: Deployment; engine: string; 
             ? t.rich("deploy.edit.engineOnlyOne", { link: (x) => <Link to={engineHref(builtin?.name ?? d.recipe)}>{x}</Link> })
             : chosen && !chosen.builtin
               ? t("deploy.edit.engineCopyHint", { builtin: chosen.based_on ?? builtin?.name ?? "" })
-              : t("deploy.edit.engineBuiltinHint")}</p></div>
+              : t("deploy.edit.engineBuiltinHint")}</p>
+          {/* 1.5.2 (#95, PR 4): how its last trial went, when switching to it. Never a gate (community edition). */}
+          {chosen && engine !== d.recipe && <LastTrialLine name={chosen.name} builtin={chosen.builtin} last={chosen.last_trial} />}
+        </div>
       </div>
     </section>
   );

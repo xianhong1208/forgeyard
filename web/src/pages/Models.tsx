@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { TrialCardChip } from "../components/EngineTrials";
 import { DownloadDialog, DownloadList } from "../components/DownloadTo";
 import { CheckBar, UpdateBadge } from "../components/EngineUpdates";
 import { EngineImage } from "../components/EngineImage";
@@ -298,6 +299,7 @@ function EngineCard({ r, canManage, update, onEdit, onDeleted }: {
           <OfflineImages name={r.name} variants={r.variants} />
         </details>
         <UpdateBadge u={update} />
+        <TrialCardChip last={r.last_trial} running={r.trial_running} recipe={r.name} />
         {canManage && !r.builtin && (
           <div className="engine-actions">
             <button type="button" className="btn btn-quiet btn-small" onClick={onEdit}>{t("library.edit")}</button>

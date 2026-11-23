@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { DownloadList, EngineDownloadDialog } from "../components/DownloadTo";
 import { isActive } from "../lib/downloads";
 import { CopySection, TryButton } from "../components/EngineTry";
+import { TrialButton, TrialsSection } from "../components/EngineTrials";
 import { CheckBar, EngineUpdates } from "../components/EngineUpdates";
 import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
@@ -84,6 +85,10 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
   const upd = checked ?? updates.data;
   // A card's badge links here (#updates): once the result is in, the section is where it should be.
   const scrolled = useRef(false);
+  // 1.5.2 (#95, PR 4): a link to its trials (Serving, a card's chip, Edit) lands on them.
+  useEffect(() => {
+    if (window.location.hash === "#trials") document.getElementById("trials")?.scrollIntoView?.({ block: "start" });
+  }, []);
   useEffect(() => {
     if (!upd || scrolled.current || window.location.hash !== "#updates") return;
     scrolled.current = true;
@@ -129,6 +134,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         </div>
         {(p.can_manage || p.can_download) && (
           <div className="page-actions">
+            {p.can_download && <TrialButton r={r} page={p} onStarted={(text) => { setNote({ tone: "ok", text }); reload(); }} />}
             {p.can_download && p.machines.length > 0 && (
               <button type="button" className="btn" onClick={() => { setNote(null); setDownloading(true); }} title={t("enginepage.dl.buttonTitle")}>
                 <IconDownload size={15} aria-hidden="true" /> {t("enginepage.dl.button")}</button>
@@ -165,6 +171,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
       </p>
       <Jump links={[["overview", t("enginepage.jump.overview")],
         ...(r.based_on ? [["copy", t("enginetry.copyTitle", { name: r.based_on })] as [string, string]] : []),
+        ["trials", t("enginetrial.title")],
         ["variants", t("enginepage.jump.variants")],
         ...(r.builtin ? [["updates", t("engineupdates.title")] as [string, string]] : []), ["machines", t("enginepage.jump.machines")],
         ["params", t("enginepage.jump.params")], ["deployments", t("enginepage.jump.deployments")]]} />
@@ -180,6 +187,11 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
           <CopySection r={r} pins={p.pins} />
         </Section>
       )}
+
+      {/* 1.5.2 (#95, PR 4): trial runs of this engine: the one running now, and the history with each trial's checks. */}
+      <Section id="trials" title={t("enginetrial.title")} note={t("enginetrial.note")}>
+        <TrialsSection r={r} page={p} canRun={Boolean(p.can_download)} onChanged={reload} />
+      </Section>
 
       <Section id="variants" title={t("enginepage.jump.variants")} count={r.variants.length} note={t("enginepage.variantsNote")}>
         <EngineVariants r={r} />
@@ -230,6 +242,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         <HelpLink page="how-to" anchor="offline-machines">{t("library.help.offline")}</HelpLink>
         {r.builtin && <HelpLink page="how-to" anchor="see-whether-an-engine-has-a-newer-version">{t("engineupdates.help")}</HelpLink>}
         {(r.builtin || r.based_on) && <HelpLink page="how-to" anchor="try-a-newer-version-of-an-engine">{t("enginetry.help")}</HelpLink>}
+        <HelpLink page="how-to" anchor="try-out-a-new-engine-version-before-switching">{t("enginetrial.help")}</HelpLink>
       </HelpLinks>
     </>
   );

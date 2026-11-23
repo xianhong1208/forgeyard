@@ -1959,12 +1959,63 @@ The copy's page says where it came from, when it was made and by whom, each vari
 verified about it (the signing workflow and the build, or *unsigned upstream*), and what was left out. The catalog's
 engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its copies too.
 
-To use the copy, move a deployment to it on the deployment's **Edit** page ([next section](#move-a-deployment-to-another-engine-version)),
+To use the copy, [try it out](#try-out-a-new-engine-version-before-switching) first, then move a deployment to it on the
+deployment's **Edit** page ([Move a deployment to another engine version](#move-a-deployment-to-another-engine-version)),
 or deploy a model with it (pick it as the engine on the deploy page), and compare it with the built-in before you move
 other deployments. **Download to…** on the copy's page fetches its image to the machines first
 ([Download an engine ahead of time](#download-an-engine-ahead-of-time)). Delete the copy when you are done with it: it cannot be deleted while a
 deployment uses it. Remove its image from the machines first (their pages, **Engine images**): once the copy is
 deleted, Forgeyard no longer counts that image as one of its own.
+
+## Try out a new engine version before switching
+
+Before you move deployments to a new version of an engine, **try it out**: Forgeyard deploys one model with it on one
+machine for a few minutes, checks it and removes it again. It is usually done on a copy made with
+[Try this version](#try-a-newer-version-of-an-engine), but works on any engine; a trial of the built-in engine gives
+the numbers its copies are compared with. Admins and operators can start and cancel trials; everyone signed in sees
+the results.
+
+1. Open the engine's page (**Models**, the **Engines** tab, then the engine) and click **Try it out**.
+2. Pick a **model** this engine serves and a **machine** (the machines a variant of the engine runs on; an offline one
+   cannot be picked). The **parameters** are those of a deployment of that model on the built-in engine when there is
+   one, so the trial runs it as it is served now; else the engine's defaults. Change them in the dialog if you like
+   (context, concurrency, **Exclusive** or **Share VRAM** on a GPU). The advanced ones keep their values.
+3. The dialog shows the estimate and whether it fits on that machine now, refused with the usual reasons when it does
+   not, and says when the engine's image is not on the machine yet: the trial then pulls it first, which can take many
+   minutes (a vLLM image is about 9 GiB); **Download to…** on the same page fetches it ahead.
+4. **Time to start** bounds the start, downloads included (30 minutes by default, 5 to 180). Click **Start the trial**.
+
+The trial's deployment is **isolated**: it has no route, so it is not in `/v1/models`, no API key and no Playground
+can call it, and the gateway counts no usage or cost for it. It never sleeps and is never scaled, Serving names it
+only as a trial in progress, and a machine's page shows the card it holds as *Trial of* the engine. While it runs,
+neither the engine nor the model can be deleted. At most four trials run on a server at once, and one per engine.
+
+Forgeyard then checks, straight against the replica with its internal key (as **Try it** does):
+
+| Check | What it is | Fails when |
+|---|---|---|
+| **Starts** | How long it took to become ready, part by part (model, image, engine), against the built-in engine's last start of the same model | It cannot be placed, its start fails (its last output is kept), or it is not ready within the time limit |
+| **Memory** | What it uses on its GPU (or of the machine's RAM): the machine's readings after it was ready minus those before the engine started, a few each, against what the replica reserved | It uses more than it reserved (5% allowed for readings on a busy card) |
+| **Answers** | One request to warm it up, then five more of its model's kind: chat (a fixed question, temperature 0, at most 128 tokens), embeddings, rerank (the Paris sentence must come first), text classification, speech to text (the test clip's words), text to speech, images (one), vision | An answer is not one of that kind, or is an error |
+| **Latency** | p50 and p95 of those five, and the first one | — (it is shown, not judged) |
+| **Same answer** | When a deployment of the same model on the built-in engine is ready, the same request once to it, and whether the answers match | — (a new version may answer differently: read both) |
+
+Video is not asked (a video takes minutes): only its start and memory are checked. On a card other work shares, the
+memory is approximate, and the check says so. When other work released memory meanwhile, or the machine sent no
+readings in time, the memory is **not measured**: the check and the result say why in words, never with a number. The trial **passes** when no check fails; then, or when a check fails,
+when you **Cancel the trial**, when it runs out of time, or when the server restarts during it, its deployment is
+removed. A trial is in the audit log as `engine_trial.started`, then `engine_trial.finished` or
+`engine_trial.cancelled`.
+
+The engine's page keeps every trial under **Trials**, newest first: the model, the machine, who ran it and the
+result. **Checks** opens a trial's table (measured, against what, a note) with how it compares with the built-in
+engine: a deployment of the same model there (its last start and what it reserves) and the built-in's own latest
+passed trial (its start, its memory and its latency). An engine's card in **Engines** shows its last result, and
+**Edit** on a deployment says how the chosen version's last trial went (*Last tried out on gpu-01 with qwen3-0.6b:
+Passed*) or that it was never tried. That is information only: you can move a deployment to a version that was never
+tried.
+
+From a script: `POST /api/recipes/{name}/trials` ([reference](reference.md#trial-runs-through-the-api)).
 
 ## Move a deployment to another engine version
 

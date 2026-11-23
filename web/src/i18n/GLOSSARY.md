@@ -74,6 +74,7 @@ reader plainly with 你, never 您.
 | sign in / sign out | 登入 / 登出 | |
 | image (container) | 映像檔 | pull = 拉取, layer = 層. |
 | relay (through the server) | 經由伺服器 | |
+| try out (an engine: a trial run) / trial | 試跑 / 試跑紀錄 | 1.5.2: a temporary deployment that is checked, then removed. Not 試用 (*Try this version* = 試用這個版本, which makes a copy) and not 試試看 (a deployment's *Try it*, one request). |
 
 ## Engine, image, program
 

@@ -132,7 +132,9 @@ def list_routes(caller: Caller = Depends(current), db: DbSession = Depends(get_d
 def route_options(_: Caller = Depends(require_admin), db: DbSession = Depends(get_db)):
     """What a route may point at: deployments (with the protocol they serve) and provider models."""
     deps = []
-    for d in db.scalars(select(Deployment).order_by(Deployment.name)).all():
+    from forgeyard.models import trials
+
+    for d in db.scalars(select(Deployment).where(trials.not_trial()).order_by(Deployment.name)).all():
         deps.append({"id": d.id, "name": d.name, "served_name": d.served_name, "api": deployment_api(db, d)})
     models = []
     for pm in db.scalars(select(ProviderModel).options(selectinload(ProviderModel.provider))

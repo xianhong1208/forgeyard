@@ -714,6 +714,49 @@ class ImagePin(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class EngineTrial(Base):
+    """A trial run of an engine (1.5.2, issue #95, PR 4; forgeyard/models/trials.py): a temporary, isolated deployment of
+    one catalog model with that engine on one machine, a few checks against its replica, then the deployment is
+    removed. Usually of a copy "Try this version" made, compared with its built-in engine. The row is the record: kept
+    after the copy, the model or the machine is gone (their names are kept here), for the engine page's history.
+
+    `checks`: [{id, label, value, expected, ok (true | false | null: not checked), note}]; `comparison`: the built-in
+    engine's numbers for the same model, when known; `measurements`: what the trial measured while it ran (memory
+    readings, start time, latencies). `deployment_id`: the temporary deployment while it exists (never in /v1/models,
+    never callable with a key, never counted in usage, sleep or automatic replicas)."""
+
+    __tablename__ = "engine_trials"
+    __table_args__ = (Index("ix_engine_trials_recipe", "recipe", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recipe: Mapped[str] = mapped_column(String(40))                       # the engine tried (a copy, or a built-in)
+    builtin: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)   # its built-in engine (based_on)
+    engine: Mapped[str] = mapped_column(String(40))                       # vllm, llama.cpp…
+    engine_version: Mapped[str] = mapped_column(String(64))
+    model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("models.id", ondelete="SET NULL"), nullable=True)
+    model_name: Mapped[str] = mapped_column(String(64))
+    task: Mapped[str] = mapped_column(String(16))
+    node_id: Mapped[Optional[int]] = mapped_column(ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True)
+    machine_name: Mapped[str] = mapped_column(String(128))
+    gpus: Mapped[list] = mapped_column(JSON, default=list)                # [{key, index, model}] once placed
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimate: Mapped[dict] = mapped_column(JSON, default=dict)
+    reserved: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)   # per GPU, or of RAM
+    deployment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("deployments.id", ondelete="SET NULL"),
+                                                         nullable=True, index=True)
+    requested_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(String(16), default="running", index=True)  # running | passed | failed | cancelled
+    phase: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)        # starting | measuring | asking
+    checks: Mapped[list] = mapped_column(JSON, default=list)
+    comparison: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    measurements: Mapped[dict] = mapped_column(JSON, default=dict)
+    summary: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+
 _engine = None
 _SessionLocal = None
 

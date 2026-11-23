@@ -89,7 +89,9 @@ def ready(db: DbSession, r: Replica, node: Node, start: Optional[dict], now: dat
     start, by_server = found
     event(db, r.workload, READY_KIND, message(r.ordinal, node.name, start, by_server=by_server), r.ordinal)
     dep = db.scalar(select(Deployment).where(Deployment.workload_id == r.workload_id))
-    if dep is not None:
+    from forgeyard.models import trials
+
+    if dep is not None and not trials.is_trial(db, dep.id):   # 1.5.2 (#95): a trial's start is on the trial
         from forgeyard import metrics
 
         metrics.replica_started(dep.recipe, dep.served_name, float(start["seconds"]))
