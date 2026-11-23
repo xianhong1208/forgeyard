@@ -118,7 +118,10 @@ def test_fy_fa_004_a_silent_replica_gets_504_after_the_first_answer_wait(gw, mon
         gw.e2.gate.set()
     assert r.status_code == 504 and r.json()["error"]["code"] == "first_answer_timeout", r.text
     assert "within 0.5 s" in r.json()["error"]["message"] and "not sent to another replica" in r.json()["error"]["message"]
-    assert 0.45 <= took < 3.0
+    # Not before the wait (the gateway's own deadline). The upper bound only shows it was not GATEWAY_READ_TIMEOUT's
+    # 600 s (or the engine's 30 s gate), so it is generous: with the gateway held up 2.7 s after writing the request,
+    # it took 3.3 s (#226).
+    assert 0.45 <= took < 10.0
     assert len(gw.e1.posts()) + len(gw.e2.posts()) == 1
     assert sum(balancer.inflight.values()) == 0
 
@@ -149,18 +152,30 @@ def test_fy_fa_006_streams_wait_for_their_first_bytes(gw, monkeypatch):  # noqa:
     """FY-FA-006: a stream whose headers come at once but whose first chunk does not come within the wait
     is 504 first_answer_timeout (not a 200 that breaks off); one whose first chunk comes in time streams
     whole even when later chunks are further apart than the wait."""
+    # The first chunk is held until the test lets it go, not sent after a fixed 1.5 s: a gateway starved past that
+    # found it already there and streamed it (200, #226).
     monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 0.5)
-    for e in (gw.e1, gw.e2):
-        e.first_delay = 1.5
-    r = chat(gw.api, stream=True)
+    gates = []
+    try:
+        for e in (gw.e1, gw.e2):
+            e.first_gate = threading.Event()
+            gates.append(e.first_gate)
+        r = chat(gw.api, stream=True)
+    finally:
+        for gate in gates:
+            gate.set()
     assert r.status_code == 504 and r.json()["error"]["code"] == "first_answer_timeout"
     assert len(gw.e1.posts()) + len(gw.e2.posts()) == 1
+    # The first chunk comes at once and must be seen within the wait, so the wait is generous: with a 0.5 s wait, a
+    # gateway held up 0.7 s before reading the answer gave 504 (#226). The gap after it is a sleep longer than the
+    # wait, which a slow machine can only make longer.
+    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 2.0)
     for e in (gw.e1, gw.e2):
-        e.first_delay, e.delay = 0.0, 0.7
+        e.first_gate, e.chunks, e.delay = None, 2, 2.1
     r = chat(gw.api, stream=True)
     evs = events(r.text)
-    assert r.status_code == 200 and evs[-1] == "[DONE]"
-    assert [e["choices"][0]["delta"].get("content") for e in evs[:3]] == ["t0 ", "t1 ", "t2 "]
+    assert r.status_code == 200 and evs[-1] == "[DONE]", r.text
+    assert [e["choices"][0]["delta"].get("content") for e in evs[:2]] == ["t0 ", "t1 "]
 
 
 def test_fy_fa_007_a_long_wait_also_lifts_the_read_timeout(gw, monkeypatch):  # noqa: F811
@@ -171,7 +186,9 @@ def test_fy_fa_007_a_long_wait_also_lifts_the_read_timeout(gw, monkeypatch):  # 
     monkeypatch.setenv("GATEWAY_READ_TIMEOUT", "0.3")
     get_settings.cache_clear()
     proxy._clients.clear()
-    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 3.0)
+    # The first chunk comes after the read timeout (a sleep, which a slow machine only makes longer) and well within
+    # the wait, which is generous: a passing run does not wait for it, and a starved gateway looks late (#226).
+    monkeypatch.setattr(groute, "FIRST_ANSWER_DEFAULT", 10.0)
     for e in (gw.e1, gw.e2):
         e.first_delay = 1.0
     r = chat(gw.api, stream=True)
@@ -195,7 +212,15 @@ def test_fy_fa_010_a_non_streamed_answer_keeps_the_read_timeout(gw, monkeypatch)
     get_settings.cache_clear()
     proxy._clients.clear()
     sent = len(gw.e1.posts()) + len(gw.e2.posts())
-    r = chat(gw.api)
+    # The engines do not answer until the test lets them go, so only the read timeout can end it: with the 1 s hold a
+    # starved gateway looked for the answer after it had come, and passed it on (#226).
+    gate = threading.Event()
+    try:
+        for e in (gw.e1, gw.e2):
+            e.hold, e.gate = 0.0, gate
+        r = chat(gw.api)
+    finally:
+        gate.set()
     assert r.status_code == 504 and r.json()["error"]["code"] == "upstream_timeout", r.text
     assert len(gw.e1.posts()) + len(gw.e2.posts()) == sent + 1
     proxy._clients.clear()

@@ -354,10 +354,20 @@ def test_fy_x_009_read_timeout_and_unreachable_replicas(xw):
     """FY-X-009: a workload slower than its read_timeout is 504 upstream_timeout; a replica that cannot
     be reached is skipped for the next one; with none reachable, 502 upstream_unreachable."""
     set_gateway(xw.owner, "web", expose=True, read_timeout=1)
-    started = time.monotonic()
-    r = xw.api.get("/x/web/slow")
+    # The app keeps /slow until the test lets it go, not for a fixed 3 s, so only the read timeout can end it: a
+    # gateway held up 2.5 s after sending the request found the answer there and passed it on (#226).
+    xw.app.hold = threading.Event()
+    try:
+        started = time.monotonic()
+        r = xw.api.get("/x/web/slow")
+        took = time.monotonic() - started
+    finally:
+        xw.app.hold.set()
+    xw.app.hold = None
     assert r.status_code == 504 and err(r)["code"] == "upstream_timeout"
-    assert time.monotonic() - started < 2.9
+    # Not before the read timeout; the upper bound only shows it did not wait for the app (30 s here), so it is
+    # generous: a slow runner only adds time.
+    assert 0.9 <= took < 10
     dead = GuardThread(free_port(), strip_auth=True)  # a guard whose program is down: closes without an answer
     try:
         db = new_session()
