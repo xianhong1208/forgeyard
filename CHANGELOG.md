@@ -34,6 +34,12 @@ version until 1.0.
 - The console's fonts fall back to a Traditional Chinese system font (PingFang TC, Noto Sans TC, Microsoft
   JhengHei…) for Chinese text: Schibsted Grotesk and Martian Mono have no CJK glyphs.
 
+### Fixed
+
+- **Tests that held a fake engine busy for a fixed time** (FY-RT-003 failed on CI at 1.63 s against a 1.5 s bound) now
+  hold it until the test lets it go, and check where a request went rather than how long the round took (#226).
+
+
 ## [1.5.0] — 2026-11-23
 
 Scale to zero and autoscaling (#37): GPUs are used only while they are needed. A deployment can sleep when nobody

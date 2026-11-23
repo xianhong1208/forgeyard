@@ -74,12 +74,14 @@ def png_decodes(data: bytes) -> tuple[int, int]:
 class FakeImages:
     """An image engine at http://127.0.0.1:<port>: POST /v1/images/generations answers `n` PNGs of the
     size asked (its default when none), in vLLM-Omni's shape (`style` fields: url and revised_prompt,
-    stage timings) or sd-server's (generation_info per image). `hold` seconds per request; counts how
-    many it works on at once. Every path needs the replica key."""
+    stage timings) or sd-server's (generation_info per image). `hold` seconds per request, or, with `gate` (a
+    threading.Event), until the test sets it; counts how many it works on at once. Every path needs the replica
+    key."""
 
     def __init__(self, secret: str = "img-secret", *, style: str = "fields", default: tuple = (512, 512),
                  hold: float = 0.0):
         self.secret, self.style, self.default, self.hold = secret, style, default, hold
+        self.gate: Optional[threading.Event] = None
         self.status: Optional[int] = None
         self.error_body: Optional[bytes] = None
         self.empty = False                  # answer 200 with no images
@@ -118,6 +120,9 @@ class FakeImages:
                     engine.inflight += 1
                     engine.most = max(engine.most, engine.inflight)
                 try:
+                    gate = engine.gate      # read once: a test may give later requests another gate
+                    if gate is not None:
+                        gate.wait(30)
                     if engine.hold:
                         time.sleep(engine.hold)
                     if engine.status:
@@ -149,6 +154,8 @@ class FakeImages:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def close(self):
+        if self.gate is not None:
+            self.gate.set()        # never leave a request waiting for a test that has ended
         self.server.shutdown()
         self.server.server_close()
 
@@ -405,7 +412,7 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
     live = LiveServer()
     try:
         h = {"Authorization": f"Bearer {img.key}"}
-        img.engines["sd"].hold = 0.8
+        sd = img.engines["sd"]
         results: dict = {}
 
         def call(name: str, timeout: float = 30, **extra):
@@ -421,16 +428,26 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
             # a busy CI machine, where the second request sometimes got to the replica first).
             t = threading.Thread(target=call, args=(name,))
             t.start()
-            wait_until(lambda: name in [b["prompt"] for b in img.engines["sd"].bodies()], f"{name} on the engine")
+            wait_until(lambda: name in [b["prompt"] for b in sd.bodies()], f"{name} on the engine")
             return t
 
-        t0 = time.monotonic()
-        threads = [at_the_engine("p0"), threading.Thread(target=call, args=("p1",))]
-        threads[1].start()
+        def queued() -> int:
+            return sum(len(q.waiting) for q in imagegen._queues.values())
+
+        # The engine keeps each first request until the test lets it go, not for a fixed 0.8 s (or 2 s): on a busy
+        # runner the next request could arrive after the first was done and find the replica free (#226).
+        sd.gate = threading.Event()
+        try:
+            threads = [at_the_engine("p0"), threading.Thread(target=call, args=("p1",))]
+            threads[1].start()
+            wait_until(lambda: queued() == 1, "p1 waiting in the gateway's queue")
+            assert [b["prompt"] for b in sd.bodies()] == ["p0"]      # not at the engine while p0 is
+        finally:
+            sd.gate.set()
         for t in threads:
             t.join()
         assert results["p0"][0] == 200 and results["p1"][0] == 200
-        assert img.engines["sd"].most == 1 and results["p1"][3] - t0 >= 1.5
+        assert sd.most == 1 and [b["prompt"] for b in sd.bodies()] == ["p0", "p1"]
         # The queue holds no one now; with queue 0 the second request is turned away at once.
         db = new_session()
         try:
@@ -439,11 +456,15 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
             db.commit()
         finally:
             db.close()
-        threads = [at_the_engine("q0"), threading.Thread(target=call, args=("q1",))]
-        threads[1].start()
-        for t in threads:
-            t.join()
-        assert results["q0"][0] == 200
+        sd.gate = threading.Event()
+        try:
+            first = at_the_engine("q0")
+            call("q1")
+            q0_still_there = first.is_alive()
+        finally:
+            sd.gate.set()
+        first.join()
+        assert results["q0"][0] == 200 and q0_still_there
         status, body, headers, _ = results["q1"]
         assert status == 429 and body["error"]["code"] == "queue_full" and int(headers["retry-after"]) >= 1
         # Waiting and giving up: the request leaves the queue and never reaches the engine.
@@ -454,23 +475,24 @@ def test_fy_igen_007_a_busy_replica_queues_then_429(img):
             db.commit()
         finally:
             db.close()
-        seen = len(img.engines["sd"].bodies())
-        img.engines["sd"].hold = 2.0      # r1 gives up (0.3 s) and leaves well before r0 is done
-        first = at_the_engine("r0")
-        img.engines["sd"].hold = 0.8
-        call("r1", timeout=0.3)
+        seen = len(sd.bodies())
+        sd.gate = threading.Event()
+        try:
+            first = at_the_engine("r0")
+            call("r1", timeout=0.3)     # gives up (0.3 s) while r0 is still at the engine
+            r0_still_there = first.is_alive()
+        finally:
+            sd.gate.set()
         first.join()
-        assert results["r1"][0] == "gave up" and results["r0"][0] == 200
-        deadline = time.monotonic() + 5
-        while any(q.waiting for q in imagegen._queues.values()) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert not any(q.waiting for q in imagegen._queues.values())
+        assert results["r1"][0] == "gave up" and results["r0"][0] == 200 and r0_still_there
+        wait_until(lambda: queued() == 0, "the queue empty after r1 gave up")
         call("r2")
         assert results["r2"][0] == 200
-        prompts = [b["prompt"] for b in img.engines["sd"].bodies()[seen:]]
+        prompts = [b["prompt"] for b in sd.bodies()[seen:]]
         assert prompts == ["r0", "r2"]
     finally:
-        img.engines["sd"].hold = 0
+        if img.engines["sd"].gate is not None:
+            img.engines["sd"].gate.set()
         live.close()
 
 
