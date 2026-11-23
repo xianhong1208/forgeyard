@@ -6,6 +6,26 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it
+  runs is shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#189).
+
+## [1.5.1] — 2026-11-23
+
+The console in Traditional Chinese (#189): every page of it now speaks English and Traditional Chinese. The
+browser's language decides the first time, and **Language** in the account menu switches it at once; the choice is
+kept in the browser, and the guide follows it. The server and its API keep writing English: the console translates
+what it can name (the common error codes, the setup-health findings, the audit log's actions…) and shows the rest
+as the server sent it, such as an error's details, the names you choose and the models' answers. The Chinese of
+the console and of the guide had a wording pass for natural Taiwan usage, with one term for each thing. Flaky
+tests were fixed (#226, #239).
+
+**Update the server only.** No agent or server code changed since 1.5.0: only the console, the guide and the
+tests did, so **the agents need no update** and a 1.5.0 agent works with a 1.5.1 server as it is. Setup health
+still lists a 1.5.0 agent as older than the server; its **Update the agent** command brings the same agent code
+under the 1.5.1 version, so it can wait. **No migration.**
+
 ### Added
 
 - **The console in Traditional Chinese (#189).** The whole console now speaks English and Traditional Chinese.
@@ -53,8 +73,6 @@ version until 1.0.
 
 - The console's fonts fall back to a Traditional Chinese system font (PingFang TC, Noto Sans TC, Microsoft
   JhengHei…) for Chinese text: Schibsted Grotesk and Martian Mono have no CJK glyphs.
-- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it
-  runs is shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#189).
 
 ### Fixed
 

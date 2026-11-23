@@ -37,7 +37,7 @@
 每次啟動都會計時，vLLM 也會在啟動之間保留編譯快取，所以重新啟動或喚醒大約只要一半的時間。休眠與自動調整副本數要你開啟才會生效；
 伺服器升級後請更新 agent。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
 
-1.5.1（進行中）讓整個主控台的每個頁面除了英文也有**繁體中文**：第一次開啟時跟著瀏覽器的語言，之後可以在帳號選單切換（[作法](docs/guide/zh-TW/how-to.md#use-the-console-in-traditional-chinese)）。
+1.5.1 讓整個主控台的每個頁面除了英文也有**繁體中文**：第一次開啟時跟著瀏覽器的語言，之後可以在帳號選單切換（[作法](docs/guide/zh-TW/how-to.md#use-the-console-in-traditional-chinese)）。只需要升級伺服器，agent 不必更新。
 
 ## 1.4 的新功能
 
@@ -64,7 +64,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.0
+  docker.io/tonyhuang1101/forgeyard:1.5.1
 sudo docker logs forgeyard
 ```
 
@@ -107,7 +107,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
 ```
 
 加入權杖只能用一次，而且 15 分鐘內有效。AMD 與純 CPU 機器：
