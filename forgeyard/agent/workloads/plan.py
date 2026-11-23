@@ -141,11 +141,12 @@ def process_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *
 
 def container_env(spec_env: dict[str, str], gpus: list[dict], ports: list[dict], *, replica_id: str,
                   workload: str, ordinal: int, extra: Optional[dict[str, str]] = None,
-                  secret: Optional[dict[str, str]] = None) -> dict[str, str]:
+                  secret: Optional[dict[str, str]] = None, cache: Optional[dict[str, str]] = None) -> dict[str, str]:
     """`secret` goes into the 0600 env file the engine CLI reads (--env-file), never into `-e`
-    arguments of the `docker run` command line."""
+    arguments of the `docker run` command line. `cache` (1.5.0): the engine cache's variable and its mount."""
     ports_env = port_env(ports, "container")
     env = _filled(spec_env, {**ports_env, **extra} if extra else None)
+    env.update(cache or {})
     env.update(secret or {})
     env.update(gpu_env(gpus, "container"))
     env.update(ports_env)
@@ -220,11 +221,13 @@ def container_run_argv(engine: str, *, name: str, image: str, command: Optional[
                        env_file: str, labels: dict[str, str], ports: list[dict], bind: str,
                        cpu: Optional[float], memory: Optional[int], gpus: list[dict], gpu_mode: Optional[str],
                        render_devices: list[str], render_gids: list[int], log_max_bytes: int,
-                       mounts: Optional[list[tuple[str, str]]] = None) -> list[str]:
+                       mounts: Optional[list[tuple[str, str]]] = None,
+                       cache_mount: Optional[tuple[str, str]] = None) -> list[str]:
     """`docker run` / `podman run`. No --privileged, ever; no new privileges; only the assigned
     cards; host ports bound to one address (the agent's own on the network to the server), or, for
     a guarded replica, to loopback on its internal port (the agent's guard holds the published one).
-    The only volume ever mounted is a model's cache entry, read-only (M3)."""
+    The volumes mounted are a model's cache entry, read-only (M3), and (1.5.0) at most one writable
+    directory, the replica's own engine cache (`cache_mount`, agent/workloads/enginecache.py)."""
     argv = [engine, "run", "-d", "--name", name, "--security-opt", "no-new-privileges", "--restart", "no",
             "--env-file", env_file]
     for key, value in sorted(labels.items()):
@@ -241,6 +244,8 @@ def container_run_argv(engine: str, *, name: str, image: str, command: Optional[
             argv += ["-p", f"{bind}:{p['host_port']}:{p['port']}/tcp"]
     for host, inside in mounts or []:
         argv += ["--mount", f"type=bind,source={host},target={inside},ro=true"]
+    if cache_mount is not None:
+        argv += ["--mount", f"type=bind,source={cache_mount[0]},target={cache_mount[1]}"]
     if cpu:
         argv += ["--cpus", f"{cpu:g}"]
     if memory:

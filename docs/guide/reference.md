@@ -734,6 +734,8 @@ Errors have OpenAI's shape, so every OpenAI client library reads them:
 | 502 | `provider_unreachable` | The provider could not be reached | Retry later |
 | 502 | `provider_error` | The provider answered 5xx, or the request to it failed | Retry later |
 | 503 | `no_ready_replica` | The model exists, but no replica is ready: downloading, starting, stopped, or its machine is offline. The message gives each replica's state | Wait, or start the deployment |
+| 503 | `model_waking` | 1.5.0: the model's deployment was asleep (*Sleep when idle*) and the request woke it, but it was not ready within the deployment's `wake_wait` (5 minutes by default), or too many requests (256) wait for it already. `Retry-After`: its last start time minus what has passed | Retry after the time given; give clients a longer timeout, or the route a cloud tier ([Sleep when idle](#sleep-when-idle)) |
+| 503 | `cannot_wake` | 1.5.0: the model was asleep and cannot wake now; the message says why: *Cannot be placed: …* (no machine has room for it any more), *it is pinned to …, which is offline*, or its engine failing (*replica 0 on …: backoff …*). Answered at once, not after the wait | Free memory, bring the machine back, or look at the deployment's events; the deployment stays woken and starts when it can |
 | 503 | `local_busy` | Every replica was at its *Concurrent requests* and nothing else could take the request. The gateway then sends it to a local replica anyway, where the engine queues it, so you should not normally see it. Carries `Retry-After: 1` | Retry after `Retry-After` seconds |
 | 503 | `no_target` | Every target of the route is disabled, or none serves this endpoint | An admin checks the route |
 | 503 | `budget_unavailable` | This month's spend could not be read, so no cloud request is sent under a budget | Retry shortly |
@@ -774,15 +776,27 @@ they end:
 | `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`, `model` | From the request's arrival to its end; for a video job, from its creation to its end |
 | `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`, `model` | From the request's arrival to the first bytes of the answer from the replica or provider: a stream's first chunk, otherwise its status line. Only requests that got an answer |
 | `forgeyard_gateway_tokens_total` | counter | `model`, `direction` | Tokens the engine or provider reported: `in` the prompt, `out` the completion |
-| `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `refused`, `too_long`, `budget` |
+| `forgeyard_gateway_spills_total` | counter | `model`, `reason` | Requests that left their route's first tier, with why: `unavailable`, `busy`, `waking` (1.5.0), `refused`, `too_long`, `budget` |
 | `forgeyard_gateway_waiting` | gauge | `model` | Requests waiting in line for a free local slot now (all the route's tiers) |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | How long each request waited in that line before it got a slot or moved on |
+| `forgeyard_gateway_waking` | gauge | `model` | 1.5.0: requests waiting for their asleep model to wake now |
+| `forgeyard_gateway_wake_wait_seconds` | histogram | `model` | 1.5.0: how long each of them waited (then served, or it gave up) |
+| `forgeyard_deployment_wakes_total` | counter | `deployment`, `by` | 1.5.0: asleep deployments woken, `by` `request` or `person` (Start, Wake now) |
+| `forgeyard_autoscale_total` | counter | `deployment`, `direction` | 1.5.0: replicas the autoscaler added (`up`) and removed after draining them (`down`) |
+
+When a replica of a model deployment becomes ready (1.5.0):
+
+| Metric | Type | Labels | What it is |
+|---|---|---|---|
+| `forgeyard_replica_start_seconds` | histogram | `recipe`, `model` | How long the start took: from its agent beginning it (the model's files, the image, the engine) to its first healthy answer. From an agent older than 1.5.0, the engine's part only ([See how long a model takes to start](how-to.md#see-how-long-a-model-takes-to-start)) |
 
 Read from the database at each scrape:
 
 | Metric | Labels | What it is |
 |---|---|---|
 | `forgeyard_replicas` | `deployment`, `state` | Replicas of each model deployment by state: `pending`, `starting`, `running`, `healthy`, `unhealthy`, `backoff`, `exited`, `failed`, `stopping`, `stopped` |
+| `forgeyard_deployment_replicas` | `deployment`, `kind` | 1.5.0: replicas of each deployment, `desired` (the replicas it should run now; 0 while stopped or asleep), `ready`, `draining` (being removed by the autoscaler) and, with automatic replicas, `wanted` (what its load asks for, within its bounds) |
+| `forgeyard_deployment_load` | `deployment` | 1.5.0: with automatic replicas, requests in flight on its replicas plus those waiting for a slot, as last sampled |
 | `forgeyard_machines` | `status` | Machines `online`, `offline` and `revoked` |
 | `forgeyard_machine_up` | `machine` | 1 while the machine's agent is connected, else 0 |
 | `forgeyard_gpu_memory_total_bytes`, `forgeyard_gpu_memory_free_bytes` | `machine`, `gpu` | A card's memory and its free memory, as its agent last reported them (`gpu`: its index) |
@@ -794,7 +808,8 @@ Read from the database at each scrape:
 | `forgeyard_build_info` | `version` | Always 1: the server's version |
 
 Plus `process_*` (the server's CPU time, memory, open files). A `model` label is a served name the gateway has a
-route for: a request for a model nobody serves counts as `_unknown`, never under the name the client sent. No
+route for: a request for a model nobody serves counts as `_unknown`, never under the name the client sent; a
+`recipe` label is a recipe's name. No
 label holds an API key, a key's id or name, a person or a prompt. Counters start from 0 when the server restarts.
 
 ## Apps (deprecated)
@@ -975,8 +990,8 @@ value.
 
 | Field | Value |
 |---|---|
-| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list) and `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing). Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
-| `replicas` | 1 to 16 |
+| `params` | The parameters to change: the recipe's own (`context`, `concurrency`…), `gpus`, `share` (`exclusive` or `vram`), `vram` (memory per device, e.g. `"20Gi"`), `extra_args` (a list), `first_answer_timeout` (seconds, 5 to 3,600; not for image and video deployments; changing only it restarts nothing), (1.5.0) `sleep_when_idle`, `idle_minutes` and `wake_wait` ([Sleep when idle](#sleep-when-idle)), and the automatic replicas' `autoscale`, `min_replicas`, `max_replicas`, `autoscale_target`, `scale_up_seconds` and `scale_down_minutes` ([Automatic replicas](#automatic-replicas)); changing those restarts nothing. Only the names sent change; a name sent as `null` goes back to the recipe's default (`vram`: back to the estimate) |
+| `replicas` | 1 to 16. With automatic replicas on (1.5.0), only the number it has now (else 422 `replicas_automatic`): change `min_replicas` and `max_replicas` instead ([Automatic replicas](#automatic-replicas)) |
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
 | `dry_run` | `true`: only check. The answer is the same, without `deployment`, and nothing is saved |
@@ -988,7 +1003,7 @@ The model, the recipe, the name and the served name cannot be changed (422). The
 | `estimate` | The new estimate |
 | `placement` | Where each replica would go, as for a deploy; `previous` marks a replica that stays on its machine, and `share_hint` is set when an exclusive model needs half its card or less |
 | `changes` | `{name: {before, after}}` for each parameter, `replicas` and `machine_id` that changes; `{}` when nothing does |
-| `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, or `on_start` (stopped: the settings apply when it starts) |
+| `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, `on_start` (stopped: the settings apply when it starts), or (1.5.0) `on_wake` (asleep: the settings apply when it wakes) |
 | `restart_text` | The same in a sentence |
 | `deployment` | The deployment after saving (not on a dry run) |
 
@@ -1013,6 +1028,106 @@ deployment's `workload` (as in `GET /api/workloads/{id}`) names it back: `deploy
 `placement`, each machine and each placed replica lists `needs` (what it would download there:
 `model`, `engine`, `image`) and, when that machine could not reach one of those sources in the last
 hour, `unreachable`.
+
+(1.5.0) Every deployment, in the list and alone, also has `last_start`: how long its latest start
+took, `{seconds, phases, source, at, replica}`, from its events. `phases` holds the parts an agent
+tells apart, `model`, `waiting`, `image` and `engine`, which add up to `seconds`; `source` is `agent`,
+or `server` when the agent is older than 1.5.0 and the server measured the engine's part only. It is
+`null` until a replica has become ready since 1.5.0
+([See how long a model takes to start](how-to.md#see-how-long-a-model-takes-to-start)).
+
+### Sleep when idle
+
+1.5.0 ([concepts](concepts.md#sleep-when-idle)). Three parameters of every deployment, set on deploy
+(`POST /api/deployments`, in `params`) or with a change; the server reads them, so changing them restarts nothing:
+
+| Parameter | Value |
+|---|---|
+| `sleep_when_idle` | `true` turns it on; `false` (or `null`, or leaving it out) turns it off. Off by default, also for deployments made before 1.5.0. Kept in `params` only while on |
+| `idle_minutes` | Minutes without a request before it sleeps: 1 to 1,440, **30** when left out. Kept while sleep is off too, for when it is turned on |
+| `wake_wait` | Seconds a request waits for the asleep model to wake before 503 `model_waking`: 10 to 1,800, **300** when left out |
+
+Anything else is 422 `invalid_params` (`"yes"`, `1`, `0`, `1441`, `1.5`; `wake_wait` `9` or `1801`).
+
+An asleep deployment's workload has `desired_state` **`asleep`** and `status` `asleep` (`stopping` until its
+agents confirm), beside `running` and `stopped`; its replicas are `stopped`. Scripts that read `desired_state`
+should treat an unknown value as not running. `GET /api/deployments` and `GET /api/deployments/{id}` give each
+deployment a `sleep` object:
+
+| Field | What it is |
+|---|---|
+| `on`, `idle_minutes`, `wake_wait` | The settings (30 minutes and 300 seconds when not set) |
+| `asleep` | It is asleep now |
+| `last_request_at` | The last request this server saw for it since it started, or `null` |
+| `since` | From when its idle time counts: the last request, its last start or change, a replica becoming ready, or the server's start, whichever is latest |
+| `sleeps_at` | When it goes to sleep if nothing uses it (only while it runs with sleep on), checked every 30 s |
+| `held_by` | Why it does not sleep right now although it may be idle long enough: *a request is in flight*, *a replica is starting*, *an edit is restarting its replicas*, *a video is waiting or being made*, *a finished video is kept until …*; `null` otherwise |
+| `waking` | While a request (or Wake now) woke it and no replica is ready yet: `{since, by, waiting, expected_seconds}`: when the wake began, who woke it (*a request (key laptop)*, *a request from the Playground (owner)*, or the person's user name), how many requests wait for it, and how long its start is expected to take (its last start, 30 s when none was measured). `null` otherwise (this server's memory: `null` after a restart) |
+| `asleep_since` | Since when it is asleep (its *Asleep* event), or `null` |
+| `wakes` | How many times it was woken in the last 24 hours (its events) |
+
+`POST /api/deployments/{id}/start` on an asleep deployment wakes it (event *Woken by …*, audited as
+`workload.started` with `woken: true` and `deployment.started`); `POST …/stop` makes it stopped (event *Stopped by
+… (it was asleep)*). Going to sleep is the event *Asleep: no requests for N min; frees …* and is not audited. `POST
+…/try` on an asleep deployment answers 409 `model_asleep`. A request through the gateway (also `POST /v1/videos`)
+wakes it: the event *Woken by a request (key …)* (not audited), then it waits for a ready replica, spills to a cloud
+tier the key may use (`X-Forgeyard-Spilled: waking`), or answers 503 `cannot_wake` / `model_waking`
+([Errors](#errors)). `/v1/models`, health checks and the console's pages never wake it, nor a stopped deployment.
+
+**Downgrade:** a server older than 1.5.0 reads `asleep` as stopped: the model is not listed, a request answers 503
+`no_ready_replica` *The deployment is stopped*, and Start starts it.
+
+### Automatic replicas
+
+1.5.0 ([concepts](concepts.md#automatic-replicas)). Parameters of every deployment but video ones, set on deploy
+(`POST /api/deployments`, in `params`) or with a change; the server reads them, so changing them restarts nothing:
+
+| Parameter | Value |
+|---|---|
+| `autoscale` | `true` turns automatic replicas on; `false` (or `null`, or leaving it out) turns them off. Off by default, also for deployments made before 1.5.0. Kept in `params` only while on. A video deployment refuses it (422) |
+| `min_replicas` | The fewest replicas: 1 to 16, **1** when left out; 0 only with `sleep_when_idle` on (it then goes to 0 only by sleeping, and runs at least 1 while awake) |
+| `max_replicas` | The most: 1 to 16, **2** when left out; at least `min_replicas` |
+| `autoscale_target` | The load one replica takes, in percent of its `concurrency` (1 when the recipe has none): 20 to 100, **80** when left out |
+| `scale_up_seconds` | How long the load must be above the target before one more replica: 10 to 600, **60** when left out. At twice the target, 10 seconds |
+| `scale_down_minutes` | How long one replica fewer must have been enough before one is removed: 1 to 120, **10** when left out |
+
+`min_replicas`, `max_replicas` and the others are kept while `autoscale` is off too, for when it is turned on.
+Anything else is 422 `invalid_params`. A deploy with `autoscale` on starts `min_replicas` replicas (at least 1),
+whatever `replicas` says; a change that turns it on or changes the bounds brings the number into them at once. While
+it is on, a change may not set another `replicas` number (422 `replicas_automatic`).
+
+The load is the requests in flight on its replicas (not on a replica being drained) plus those waiting in the gateway's line for a slot of a route
+tier it is in (in equal parts when the tier has several deployments) and in its image queue, sampled every 2
+seconds by the server. One replica is added when the average over `scale_up_seconds` is above `ready replicas ×
+concurrency × autoscale_target %`, or the average over 10 s is at least twice that, never above `max_replicas`,
+only while no replica is starting, and only when one more fits on an online machine now (the pinned one when
+pinned). One is removed when, for `scale_down_minutes` after the last change, the average would have been at most
+what one replica fewer takes at the target, and that one fewer would not want one more at once; never below `min_replicas` (at least 1). The newest replica is removed:
+the gateway first stops sending it requests, waits until nothing is in flight on it (at most 30 minutes), then its
+row goes and its agent stops it. Nothing changes while an edit restarts the replicas, a replica's machine is
+offline, or within 2 minutes after the deployment was started, woken or changed. Requests in an asleep
+deployment's wake line are not part of the load: the wake starts its replicas already, and once one is ready they
+move on to the normal path, where they count.
+
+`GET /api/deployments` and `GET /api/deployments/{id}` give each deployment an `autoscale` object:
+
+| Field | What it is |
+|---|---|
+| `on`, `min`, `max`, `target`, `scale_up_seconds`, `scale_down_minutes` | The setting (the defaults when not set) |
+| `capacity` | Its `concurrency` (1 when it has none) |
+| `replicas`, `ready` | Its replicas now (not ended), and those ready |
+| `load`, `per_replica` | The average load over `scale_up_seconds`, and that per ready replica (not drained); `null` until sampled |
+| `wanted` | What the load asks for, within the bounds |
+| `draining` | The replica being drained: `{replica, since, in_flight}`, or `null` |
+| `room` | Why the one more it wants does not fit now (*Wants 3 replicas, room for 2: …*), or `null` |
+| `paused` | Why it does not scale right now (*an edit is restarting its replicas*, *a replica's machine is offline*, *it was started, woken or changed less than 2 minutes ago*), or `null` |
+| `last` | The last decision `{at, text}` this server made, or `null` |
+
+Every decision is an event of the deployment (kind `scaled`): *Scaled up to N: …*, *Wants N replicas, room for
+M: …* (once while it does not fit), *Draining replica N: …*, *Kept replica N: …*, *Removed replica N after
+draining for … s*, *Asleep with N replicas (its minimum)*. They are not audited. The load samples, drains and
+decisions live in the server's memory: after a restart the windows start again and no replica is removed by a
+drain that was under way.
 
 ## A machine's model cache through the API
 
@@ -1361,6 +1476,8 @@ to use it: [Check the setup health](how-to.md#check-the-setup-health).
 | `replica-margin-low` | warning | A card with a running replica has less free than `VRAM_HEADROOM_MIB` (at least 256 MiB) |
 | `deployment-waiting` | warning | A replica has waited for a machine for over 15 minutes |
 | `deployment-could-share` | note | A running exclusive replica reserves less than half of a card of 24 GiB or more: with Share VRAM the rest could hold other models |
+| `deployment-idle-awake` | note | 1.5.0: a running deployment with *Sleep when idle* off had no request for 3 days (Usage's last day, what the server saw since it started, or since it was deployed, started or changed) and holds GPU memory: let it sleep when idle? |
+| `deployment-wakes-often` | note | 1.5.0: a deployment with *Sleep when idle* on was woken more than 10 times in the last 24 hours and its last start took over a minute: raise its idle time |
 | `extra-args-override` | warning | A deployment's extra engine arguments repeat a flag Forgeyard sets (memory, context, address, key) |
 | `gated-model-no-token` | note | A deployment of a gated Hugging Face model has no token of its own, and the server has none. An error once its download was refused |
 | `key-cloud-without-budget` | warning | A key may use the cloud (also through the server's default) and reaches a provider, but no budget applies: none on the key, its person or the provider |
@@ -1489,6 +1606,12 @@ recipe with only the variants you want can.
 | `vision` (1.4) | `cuda` | NVIDIA, compute capability 7.5+, driver 580+ (one GPU, shared by memory) | Forgeyard's own `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda` (torch +cu130) |
 | | `cpu` | x86_64 and aarch64 in a container, on any machine (also AMD ones: there is no ROCm build yet) | `…/forgeyard-vision:1.4.4rc1` (linux/amd64 and arm64) |
 
+`vllm` and `vllm-pooling` (1.5.0) declare `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`: vLLM's
+compile cache is kept between starts, in a directory per replica on its machine, so a restart or a wake loads
+what the first start compiled ([Keep vLLM's compile cache between starts](how-to.md#keep-vllms-compile-cache-between-starts)).
+A custom recipe can turn it off with `enabled: false`, or on for another engine with `enabled: true` (container
+variants only).
+
 `vllm-pooling` serves a sequence-classification model (`…ForSequenceClassification`) as a reranker only
 when it has one output, as vLLM decides: `id2label` in its `config.json` has one entry, or `num_labels` is 1
 (1.4.3, #147). One with two labels or more is a text classifier (task `classify`, 1.4.4): inspecting or adding
@@ -1602,7 +1725,7 @@ pins by digest):
 | `docker.io/tonyhuang1101/forgeyard` | The server (`Dockerfile.server`) | linux/amd64, linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | The agent (`Dockerfile.agent`) | linux/amd64, linux/arm64 (AMD GPUs: amd64 only) |
 
-- **Tags**: `1.4.5` (exactly that release), `1.4` (its newest patch release), `latest` (the newest
+- **Tags**: `1.5.0` (exactly that release), `1.5` (its newest patch release), `latest` (the newest
   release). A pre-release only gets its own version. Each image carries OCI labels (source,
   licence, version, revision), its build provenance and an SBOM.
 - **The server image** runs `python main.py` as the account `forgeyard` (uid 10001), with
@@ -1636,7 +1759,7 @@ On a machine installed with the one-line install:
 | `/etc/forgeyard/agent.toml` | The agent's settings |
 | `/var/lib/forgeyard-agent/` | The credential (`credential.json`, 0600), the pinned CA (`server-ca.pem`), the replicas' records and logs |
 | `/var/lib/forgeyard-agent-work/` | One working directory per process replica |
-| `/srv/forgeyard-models/` | The model cache |
+| `/srv/forgeyard-models/` | The model cache; (1.5.0) its `engine-cache/` holds the engines' compile caches of recipes that keep them |
 | `/opt/forgeyard/` | The agent program: its Python environment and the downloaded wheel |
 | `/usr/local/bin/forgeyard` | The `forgeyard` command |
 | `/etc/systemd/system/forgeyard-agent.service` | The service (`KillMode=process`, `Restart=always`) |

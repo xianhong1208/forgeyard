@@ -98,7 +98,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 `$(for d in …)` 那一行會再用 `--device` 傳入主機上每個 NVIDIA 裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm`、`/dev/nvidia-uvm-tools`、`/dev/nvidia-modeset` 和每個 `/dev/nvidiaN`），主機沒有的會跳過。Docker 可以同時接受它們和 `--gpus all`，而且這很重要：`--gpus` 給的裝置是在 Docker 和 systemd 不知道的情況下設定的，主機下一次執行 `systemctl daemon-reload` 時，容器裡的新程序就會失去它們；用 `--device` 給的則會留著（[機器上的新程序打不開它的 GPU](troubleshooting.md#new-processes-on-a-machine-cannot-open-its-gpus)）。如果還沒有 `/dev/nvidia-uvm`（主機開機後還沒跑過 CUDA 程式），先執行 `sudo nvidia-modprobe -u -c=0`。設定好 CDI（`sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）的話，可以改用 `--device nvidia.com/gpu=all` 取代這兩者：CDI 會宣告這些裝置，所以它們也會留著。
@@ -132,7 +132,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 主機的 ROCm 以唯讀方式掛載，讓 agent 可以用 `amdsmi`、`amd-smi` 和 `rocm-smi` 讀取顯示卡資訊。群組要用主機上的**編號**指定：Docker 會到映像檔裡查群組*名稱*，而映像檔裡沒有 `render` 群組（`Unable to find group render`）。如果是沒有 `render` 群組的舊系統（`getent group render` 什麼都沒印），就把那個 `--group-add` 拿掉。
@@ -143,7 +143,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0 inventory
 ```
 
 ### 純 CPU
@@ -157,7 +157,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 ### 為什麼要用這些選項
@@ -175,8 +175,8 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 頁面把這些放在 **Advanced / offline** 底下。連不到 Docker Hub 的機器（沒有網路，或被 DNS 過濾），可以用檔案取得映像檔。在連得到的機器上拉取並存成檔案：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.5 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip > forgeyard-agent.tar.gz
 ```
 
 把 `forgeyard-agent.tar.gz` 複製到新機器（`scp` 或 USB 隨身碟），在那裡載入：
@@ -190,16 +190,16 @@ gunzip -c forgeyard-agent.tar.gz | sudo docker load
 或者在那台機器上，用和伺服器同版本的 Forgeyard 原始碼，以相同名稱建置映像檔：
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.5 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.0 .
 ```
 
-沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.4.5`，頁面的第一步就是這個 `docker build`。
+沒有指定已發布映像檔的伺服器（見[容器映像檔](reference.md#container-images)）會在指令裡使用本機建置的 `forgeyard-agent:1.5.0`，頁面的第一步就是這個 `docker build`。
 
 ### 把已安裝的 agent 搬到 Docker
 
 已經加入的機器，只要容器拿到它的狀態目錄，就能保留原本的身分：
 
-1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5`（或像上面那樣用檔案帶過去）。
+1. 拉取映像檔：`sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0`（或像上面那樣用檔案帶過去）。
 2. 停止舊的 agent：`sudo systemctl disable --now forgeyard-agent`（安裝版），或停止你自己啟動的行程。它的容器類應用程式和模型會繼續執行。
 3. 用舊的狀態目錄和同一個模型快取啟動容器，而且**不要**帶加入用的變數：
 
@@ -210,7 +210,7 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` 會為每個正在執行的模型顯示 `Adopted replica …`：新的 agent 會接手舊 agent 啟動的容器（容器上帶有 agent 的 id，而這個 id 存在狀態目錄裡）。
@@ -279,8 +279,8 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 伺服器升級後，機器的頁面會在 **Update the agent** 顯示完整的指令（[更新 agent](#update-an-agent)）。設成 **Always through the server** 的機器，指令會改為搬運 agent 映像檔，而不是拉取。在連得到 Docker Hub 的機器上執行第一步（把 `USER` 換掉；如果你用別的名稱連到那台機器，主機名稱也要換）：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.5 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 再到 `amd-01` 上執行第二步：`docker rm -f`，然後用載入的映像檔執行同樣的 `docker run`。沒有 `ssh` 連得到那台機器？把映像檔存成檔案帶過去（[離線機器，或自己建置映像檔](#offline-machines-or-build-it-yourself)）。1.4.2 之前的 agent 不會回報它的執行方式：請先用這種方式手動更新一次，之後它的頁面就會顯示指令。
@@ -680,6 +680,43 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 用程式修改：`PATCH /api/deployments/{id}`（[參考](reference.md#change-a-deployment-through-the-api)）。
 
+## 查看模型啟動花了多久
+
+部署的副本每次就緒時，部署的事件都會寫出這次啟動花了多久、時間花在哪裡，例如 *Replica 0 on gpu-01: ready in 74.2 s (model 0.3 s, image 0.1 s, engine 73.8 s)*：
+
+- `model`：在機器的模型快取裡檢查模型檔案，或下載它們（以及行程引擎的封存檔）；
+- `waiting`：等共用同一張 GPU 的另一個副本載入完成；
+- `image`：檢查引擎的映像檔，或拉取它；
+- `engine`：從啟動引擎到它第一次健康檢查通過。
+
+各部分加起來就是總時間。同一次啟動也是 `GET /api/deployments/{id}` 和列表裡的 `last_start`（[參考](reference.md#change-a-deployment-through-the-api)），以及 `/metrics` 裡的 `forgeyard_replica_start_seconds`（[指標](reference.md#metrics)）。agent 比 1.5.0 舊時，伺服器只能量到引擎的部分，事件會寫 *measured by the server*：[更新 agent](#update-an-agent) 就能看到其他部分。
+
+副本啟動期間，1.5.0 的 agent 每秒檢查一次它的健康狀態，而不是照配方的 *interval*（vLLM 是 10 秒），所以模型一就緒，一秒內就會開始使用，而不是最多晚 10 秒。只在配方的 start period 內這樣做（這段時間裡檢查失敗不算數），而且只到第一次通過為止；之後照配方的 interval 檢查，和以前一樣，所以副本絕不會比以前更早被判定為 unhealthy。
+
+### 在兩次啟動之間保留 vLLM 的編譯快取
+
+vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton 編譯它的 kernel），寫到容器裡的一個目錄，容器沒了它就會跟著沒了。從 1.5.0 起，`vllm` 和 `vllm-pooling` 配方會把這個目錄保留在機器上（`engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`），所以只有副本的第一次啟動需要編譯；之後的啟動（包括[休眠](#let-a-deployment-sleep-when-nobody-uses-it)後被喚醒）都會載入編譯好的結果。在 A100 上用 Qwen3-0.6B 量過：第一次啟動兩者都是 118 秒；重新啟動沒有快取要 114 秒，有快取只要 57 秒，兩者的回答相同；目錄大小 44 MiB。在部署的事件裡可以看到：重新啟動後 *ready in …* 的 `engine` 部分。
+
+使用它不需要做任何事。如果要不用它啟動（例如追查問題時想先排除它），在 **Models → Engines** 選 **Add an engine**，從內建的 `vllm` 開始，取個名字（例如 `vllm-nocache`），把它的 `engine_cache` 那一行改成 `enabled: false`，再用它部署。開啟或關閉都不會重新啟動正在執行的副本：從副本的下一次啟動開始生效。
+
+每個副本在它的機器上都有自己的目錄 `<model cache>/engine-cache/<key>`，以可寫入的方式掛載在 `/forgeyard/engine-cache`，`VLLM_CACHE_ROOT` 指向它；其他部署或副本都不會用到。vLLM 依模型、會改變計算圖的設定、它自己的程式碼和編譯器的雜湊值保存編譯結果，所以改了參數就會重新編譯，不會載入錯的計算圖。刪除部署（或它的配方不再保留快取）時目錄會被移除；副本以新的映像檔（新的配方版本）啟動時，它較舊的目錄也會被移除。需要有模型快取和容器引擎的 1.5.0 agent；行程 variant，以及較舊 agent 上的副本，啟動方式和以前一樣。不以 root 執行的映像檔無法寫入這個目錄。
+
+## 讓沒人使用的部署休眠
+
+偶爾才用的模型（晚上才試一下的、每週跑一次工作的大模型），可以在沒人呼叫時把 GPU 記憶體還回來（[閒置時休眠](concepts.md#sleep-when-idle)）。除非你開啟它，否則它是關閉的，每個部署分開設定。
+
+1. 在表單裡開啟它：**Serving → Deploy a model**，或部署頁面上的 **Edit**。在 *When not in use* 底下勾選 **Sleep when idle**，保留或修改 **Idle minutes**（預設 30，1 到 1,440）；**Advanced** 裡的 **Wake wait** 是請求等它醒來的最長時間（預設 300 秒，10 到 1,800）。設定旁邊會寫上次啟動花了多久（在部署表單上是同一個模型和引擎的另一個部署上次啟動的時間），休眠後的第一個請求大約就要等這麼久。只改這些設定不會重新啟動任何東西。用腳本：對 `PATCH /api/deployments/{id}` 送 `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}`（管理員和操作員；不送 `idle_minutes` 就是 30 分鐘；加上 `"wake_wait": 120`，請求最多等 2 分鐘而不是 5 分鐘）；部署時也接受這些參數。
+2. 部署頁面上有 *When not in use* 卡片：設定、它現在的狀況（*sleeps in 18 min unless a request comes*，或讓它保持清醒的原因：有請求正在處理、有副本正在啟動……）、最後一個請求、上次啟動的時間，以及過去 24 小時被喚醒了幾次。
+3. 在閒置時間內沒有請求，它的副本就會停止。**Serving** 會顯示 **Asleep**（月亮圖示），寫著 *holds nothing* 和它會在哪台機器上醒來；它的頁面會寫從什麼時候開始休眠，事件裡會有 *Asleep: no requests for 30 min; frees …*。**Machines** 會在它會執行的那台機器底下列出它（*qwen3-4b asleep here (14.4 GiB on GPU #4 when awake)*）：這段期間那些記憶體可以給別人用。模型仍然列在 `/v1/models` 裡；機器保留模型檔案和引擎映像檔。
+4. 下一個請求會喚醒它：請求最多等到 wake wait，模型就緒後就得到回應（可以使用路由雲端分層的金鑰，等待期間由雲端服務）。事件裡會有 *Woken by a request (key …)*。也可以在它的頁面或 **Playground** 按 **Wake now** 自己喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在 Playground 的選單裡，它啟動期間到達的請求會等它。在就緒之前 Serving 會顯示 **Waking** 和喚醒後經過的時間；Playground 直接送出你的訊息，等待時會顯示 *Waking the model (about 74 s)…*。如果無法喚醒（沒有空間、機器離線、引擎失敗），請求會得到 503 `cannot_wake` 和原因。
+5. 對休眠中的部署按 **Stop** 會真正停止它：在有人啟動它之前，它不會出現在 `/v1/models`。
+
+設定顧問兩個方向都會提醒：佔著沒人用的 GPU 記憶體的部署會出現 *had no requests for 3 days: let it sleep when idle?*；在收到的請求之間一直休眠、而且啟動要超過一分鐘的部署會出現 *woke 11 times in a day: raise its idle time*（[Setup health](reference.md#setup-health-checks)）。
+
+閒置時間要依模型啟動需要多久來選：llama.cpp 的模型幾秒就就緒，大的 vLLM 模型可能要好幾分鐘，所以要給它一個遠比啟動時間長的閒置時間（預設的 30 分鐘就是）。休眠時它的記憶體可以給別人用：在共用的卡上可能被其他程式用掉，這時模型會在其他有空間的機器上啟動，或等待。
+
+要在你自己的機器上檢查休眠和喚醒，執行 `scripts/accept_scale.py`（[檢查休眠、喚醒和自動副本數](#check-sleep-waking-and-automatic-replicas)）。
+
 ## 機器一直離線時
 
 超過 30 秒（`AGENT_OFFLINE_SECONDS`）沒有收到機器的任何訊息，它就是 *offline*。從這時起：
@@ -691,6 +728,24 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 3. **機器回來時**，它的 agent 收到的工作清單裡已經沒有搬走的副本，就會停掉它們的引擎。留下來等的副本會重新開始服務。搬走的副本不會自己搬回來：要放回去，請修改部署的機器。
 
 在 10 分鐘內回來的機器（重新開機、更新 agent、短暫斷線）什麼都不會被搬走；時間會從它下一次心跳重新起算。伺服器自己重新啟動後，每台機器在 agent 重新連線之前都會顯示離線，所以這 10 分鐘從伺服器啟動時才開始算。設定 `AGENT_OFFLINE_MOVE_SECONDS=0` 就永遠不搬移副本。應用程式（已淘汰）遵守同樣的規則，只有工作（task）會留在原地：它可能還在那裡執行，在別處再跑一次可能會把它的工作做兩次。
+
+## 讓副本數跟著負載變化
+
+有些時段很忙、有些時段很閒的部署，可以只在需要時多跑幾個副本（[自動副本數](concepts.md#automatic-replicas)）。除非你開啟它，否則它是關閉的，每個部署分開設定。
+
+1. 在 **Serving** 打開部署，選 **Edit**（或部署一個新的），把 **Replicas** 設為 **Automatic, by load**。設定最少和最多（沒改時是 1 和 2；最多 16）。按 **Save**：不會重新啟動任何東西。目前的副本數如果超出新的範圍，會立刻調整進範圍內（多一個或少幾個）。
+   - 用腳本：`PATCH /api/deployments/{id}`，內容 `{"params": {"autoscale": true, "min_replicas": 1, "max_replicas": 4}}`（[參考](reference.md#automatic-replicas)）。
+2. 把 *Concurrent requests* 設成一個副本同時應該處理的數量（recipe 的預設值是不錯的起點）：負載是拿它來比，沒改 **Advanced** 裡的 *Target load per replica* 時是 80%。
+3. 看部署頁面：**Replicas** 底下會寫 *Automatic, 1 to 4 · 2 now*、負載和目標的比較、正在排空的副本，以及為什麼放不下多一個；它的事件會列出每個決定。
+
+開始依賴它之前：
+
+- **空間：**只會在現在放得下的地方加副本。在共用的卡上要留足夠的記憶體，或把部署固定在有空間的機器上。同一個部署的兩個副本能分開時會放在不同機器。
+- **啟動需要時間：**新副本要就緒後才幫得上忙（llama.cpp 幾秒，vLLM 一分鐘以上）。這段時間請求在隊伍裡等，有雲端分層的金鑰也可能和以前一樣轉到雲端。
+- **移除會等串流做完：**被移除的副本不再接新請求，正在處理的請求不管多長都會做完，最多 30 分鐘；之後還是會移除。
+- 要回到固定數量，把 **Replicas** 設為 **Fixed number**（用腳本：`{"params": {"autoscale": null}}` 加上 `replicas` 數字）；在你改數字之前，部署保留它現有的副本。
+
+要在你自己的機器上看到負載增加副本、再排空移除，執行 `scripts/accept_scale.py`（[檢查休眠、喚醒和自動副本數](#check-sleep-waking-and-automatic-replicas)）。
 
 ## 在共用機器上限制 GPU
 
@@ -801,7 +856,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.5
+  docker.io/tonyhuang1101/forgeyard:1.5.0
 sudo docker logs forgeyard
 ```
 
@@ -819,7 +874,7 @@ sudo docker logs forgeyard
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.5 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -827,7 +882,7 @@ sudo docker start forgeyard
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.5 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 和所有備份一樣，`secret.key` 要和資料庫分開保存（[原因](#back-up-and-restore)）。
@@ -835,26 +890,26 @@ sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
 **升級**靠 tag。先備份，再拉取新版本，用它執行同一個指令；volume 會保留所有資料，資料庫的變更會在啟動時執行：
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.5.0
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.6.0
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.0
+  docker.io/tonyhuang1101/forgeyard:1.6.0
 ```
 
-`1.5.0` 就是那個版本；`1.5` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
+`1.6.0` 就是那個版本；`1.6` 會跟著它最新的修補版本；`latest` 則是最新的正式版本。建議指定完整版本：agent 的指令使用伺服器的版本，所以升級伺服器後要接著升級 agent（[做法](#upgrade-the-server-and-the-agents)）。
 
 **釘選 digest**：當某個 tag 絕對不能在你不知情時改變。先查出 digest：
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.5
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.0
 ```
 
 輸出裡有一行 `Digest: sha256:…`：改用 `docker.io/tonyhuang1101/forgeyard@sha256:…` 取代 tag。agent 的部分，在伺服器上設定 `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`：**Machines** 就會在每台 agent 的指令裡使用這個 digest。每個映像檔也附有建置來源證明（provenance）和 SBOM（`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`）。
 
-**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.4.5 .`
+**自己建置**，從原始碼：`sudo docker build -f Dockerfile.server -t forgeyard:1.5.0 .`
 
 ## 把伺服器當成服務執行
 
@@ -924,7 +979,7 @@ sudo systemctl enable --now forgeyard
 - **在 Docker 裡執行**：agent 透過它本來就在用的容器引擎讀取自己的容器：名稱、映像檔、網路、重新啟動政策、GPU（`--gpus`）、裝置與群組 ID（AMD 的 `/dev/kfd`、`/dev/dri` 與數字形式的 `--group-add`）、掛載，以及用 `-e` 給它的變數。指令會拉取伺服器版本的 agent 映像檔，移除舊容器，再用新映像檔啟動同樣的容器：
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -943,7 +998,7 @@ sudo systemctl enable --now forgeyard
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.0
    ```
 
    在 NVIDIA 機器上，指令還會在 `--gpus` 旁邊用 `--device` 傳入 GPU 的裝置節點（1.4.5 起是 agent 回報的那些；較舊的 agent 則用一小段 shell 迴圈列出主機上的），所以主機執行 `systemctl daemon-reload` 時，agent 不會失去它的 GPU。
@@ -1001,6 +1056,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
 | `relay` | 經由伺服器取得模型：把 CPU 機器的 **Internet access for downloads** 設為 **Always through the server**，用 **Download to…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
 | `images` | 在有 Docker 或 Podman 的機器上（`--engine-machine`，預設是 GPU 機器）：它的引擎映像清單；腳本自己做出一個只有幾 KB 的映像檔，上傳、複製到第二台可以接收映像的機器（`--second-engine-machine`），再用 **Remove engine image** 移除（因為只有 recipe 指名的映像才能移除，會有一個 recipe 暫時指名它幾秒鐘） |
+| `scale` | 閒置時休眠、喚醒（由請求、**Wake now**、Playground）、喚醒期間轉到雲端、`model_waking`、`cannot_wake`、**Stop**、自動副本數與排空、啟動時間，以及它們的指標（[見下方](#check-sleep-waking-and-automatic-replicas)） |
 | `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
 
 用 `--only gateway,cloud` 或 `--skip console` 選擇要跑的組別；即使沒選 `models`，`gateway` 和 `cloud` 也會部署它們需要的模型。全部沒有失敗時結束代碼是 0，有檢查失敗時是 1，無法開始執行時是 2。
@@ -1008,13 +1064,43 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 執行前要知道的事：
 
 - **它會自己清理。**它建立的所有東西都命名為 `accept-<run>-…`：部署、應用程式、路由、API 金鑰、一個一次性使用者，以及它必須新增的模型目錄項目。結束時會全部移除，失敗或按下 **Ctrl-C** 也一樣；relay 這組放進機器快取的模型、機器的取得設定，以及 images 這組的映像和 recipe 也會一併復原。這次執行留下的用量紀錄和稽核事件會保留。只有在 1.4.2 以前、無法移除映像的 agent 上，那個很小的映像 `accept-<run>-image:1` 會留下來，報告裡會說明。
-- **和別人共用的卡**（1.4.5）：伺服器因為沒有任何一張卡有足夠的可用記憶體而放不下的部署或應用程式，等了 `--place-timeout` 秒（5 分鐘）之後就會跳過，並附上伺服器給的原因（`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`），不會一直等到 `--timeout`（40 分鐘；下載和啟動仍然以它為上限）。每個會在 GPU 機器上部署的組別（`tts`、`img`、`video`、`passthrough`、`vision`）開始之前，這次執行會先停止前面組別留在 GPU 上、後面組別也用不到的東西，再把它移除（`models` 組的部署只會停止，因為 console 組要顯示其中一個；`tts` 還可能用到的語音轉文字模型會保留），讓每一組都能用到這次執行在那張卡上的空間。報告的備註會列出釋放了哪些東西。
+- **和別人共用的卡**（1.4.5）：伺服器因為沒有任何一張卡有足夠的可用記憶體而放不下的部署或應用程式，等了 `--place-timeout` 秒（5 分鐘）之後就會跳過，並附上伺服器給的原因（`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`），不會一直等到 `--timeout`（40 分鐘；下載和啟動仍然以它為上限）。每個會在 GPU 機器上部署的組別（`tts`、`img`、`video`、`passthrough`、`vision`、`scale`）開始之前，這次執行會先停止前面組別留在 GPU 上、後面組別也用不到的東西，再把它移除（`models` 組的部署只會停止，因為 console 組要顯示其中一個；`tts` 還可能用到的語音轉文字模型會保留），讓每一組都能用到這次執行在那張卡上的空間。報告的備註會列出釋放了哪些東西。
 - **只有一個請求會送到雲端供應商**，內容是固定的一小段提示，費用不到一美分。供應商的每月預算會被改動幾秒鐘再改回原值；其他預算檢查只用這次執行自己的金鑰和使用者。
 - **一次性使用者會有五次登入失敗**：伺服器允許每個位址在 15 分鐘內失敗 30 次，所以連續執行很多次時，中間要等一下。
 - **時間：**機器上已經有模型時大約 15 到 20 分鐘（沒有 GPU 機器時約 3 分鐘）；需要下載的話另外加上下載時間。
 - 加上 `--kill-local` 還會檢查容錯移轉：它會強制結束在執行這支腳本的電腦（兩台 CPU 機器之一）上那個 CPU 副本的引擎。
 - 主控台的檢查需要 Playwright for Python 和 Chrome（`--chrome`，預設 `/opt/google/chrome/chrome`）；`--install-playwright` 會把 Playwright 和 OpenAI SDK 一起裝進腳本自己的虛擬環境（`--venv`）。沒有的話，console 這組會跳過。
 - **副本連接埠的呼叫方式和閘道一樣。**agent 以 TLS 提供服務的機器（1.4.5）上，金鑰守門員的檢查（這裡和 `scripts/accept_*.py` 都一樣）會用 TLS 連到副本的位址，並要求憑證上帶有該機器的綁定名稱（`m<id>-<hash>.replica.forgeyard.invalid`，在 **Machines** 可以看到），而且只信任 Forgeyard 的 CA。每個這樣的連接埠還會多三項檢查：純 HTTP 會被拒絕、憑證能以這台機器的名稱驗證通過，以及另一台機器的名稱（有兩台機器用 TLS 時）和不屬於任何機器的名稱都會被拒絕。agent 較舊的機器照舊用純 HTTP 呼叫，並多一行說明它的流量沒有加密。CA 就是 `--ca` 給的那一個；伺服器使用自己的憑證或 `TLS=off` 時，把 `FORGEYARD_REPLICA_CA` 指向伺服器的 `data/tls/ca.crt`。完全沒有 CA 時呼叫照樣進行，只有憑證檢查會跳過。只有完全連不到的連接埠會當成在別的網路而跳過；連上後被關閉連線或憑證不對，都算失敗。
+
+### 檢查休眠、喚醒和自動副本數
+
+`scripts/accept_scale.py` 會在你自己的伺服器和機器上檢查 1.5 的[閒置時休眠](concepts.md#sleep-when-idle)和[自動副本數](concepts.md#automatic-replicas)。它也是 `accept_all.py` 的 `scale` 組，選項和報告都一樣：
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_scale.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --cpu-machine cpu-01 --second-cpu-machine cpu-02 --gpu-machine gpu-01 \
+  --cloud-provider openai --out accept-scale.json
+```
+
+它在 CPU 機器上用 llama.cpp 部署 Qwen3-1.7B GGUF，開啟 **Sleep when idle**，閒置時間 1 分鐘（`--scale-idle-minutes`），然後依報告裡的編號檢查：
+
+1. **它會休眠：**副本停止、它們的連接埠不再回應，它在機器上的保留量被釋放（`/metrics`，扣掉機器上其他副本占用的部分來比對），`/v1/models` 仍然列出它而且不會因此喚醒它，模型也留在機器的快取裡。
+2. **請求會喚醒它，而且只喚醒一次：**同時送出 20 個請求（`--scale-parallel`）只會喚醒一次（一個 *Woken by a request* 事件，`forgeyard_deployment_wakes_total{by="request"}` 多 1），而且全部都得到回應。
+3. **Wake now**（Start）和 Playground 的請求也會喚醒它，事件會寫出是誰喚醒的。
+4. **喚醒期間轉到雲端**，只有給了 `--cloud-provider` 才會執行：供應商成為模型路由的第 1 層；可以外溢的金鑰立刻由雲端回應（`X-Forgeyard-Spilled: waking`，這是唯一會送到供應商的請求），同一把金鑰的結構化輸出請求會等待並由本地回應，模型就緒後這把金鑰又回到本地服務。
+5. **很短的等待：***Wait while it wakes* 設為 10 秒（`--scale-wake-wait`）時，請求會得到 503 `model_waking`，`Retry-After` 至少 5 秒、最多是上次啟動的時間，而喚醒會繼續進行。只有啟動比這更慢的模型才看得出來：CPU 上的 llama.cpp 模型幾秒就就緒，所以這一步在那裡會跳過並說明原因。給了 `--gpu-machine` 時，這次執行也會在那台機器上用 vLLM 部署 Qwen3-0.6B，並對它檢查第 1、2、5 步。
+6. **無法喚醒**，只有在你指定一台允許這次執行停止 agent 的機器時才會執行：`--stoppable-agent cpu-01` 加上 `--agent-stop` 和 `--agent-start`，這兩個 shell 指令在執行腳本的電腦上執行（啟動指令必須立刻返回，讓 agent 繼續執行）。模型休眠時，把它固定在那台機器上，再停止 agent；請求會立刻得到 503 `cannot_wake`，並指出那台機器；agent 回來後，模型會啟動並回應。沒有這些選項時這一步會跳過：腳本絕不會停止沒有被告知可以停止的機器。
+7. **Stop 不會被喚醒：**對休眠中的部署按 **Stop**；請求會得到 503 `no_ready_replica`，沒有任何東西會喚醒它，`/v1/models` 也不再列出它。
+8. **自動副本數**，在兩台 CPU 機器上：一個副本設為 *Automatic, by load*、從 1 到 2、*Concurrent requests* 為 2、縮減時間窗為 2 分鐘（`--scale-down-minutes`）的部署。過了它的 2 分鐘暫停後，4 個用戶端（`--scale-clients`）會在大約一分鐘內增加第二個副本，放在另一台機器上；每個請求都得到回應，沒有一個被執行兩次（每個副本的服務次數等於送給它的請求數）。接著在新副本上跑一個很長的串流：串流進行中縮減會排空它，這段時間的短請求都送到另一個副本，串流完整結束，副本要等串流最後一個位元組送出之後才會被移除。之後一分鐘內不會再加回副本。沒有第二台 CPU 機器，或放不下兩個副本時，這一步會跳過。
+9. **自動副本數加上休眠：**同一個部署開啟 *Sleep when idle*、最少為 0，會以 1 個副本休眠，請求會以 1 個副本喚醒它。
+10. **啟動時間和指標：**每個部署上次啟動的時間（`last_start`），以及 `/metrics` 上的啟動時間、喚醒次數、等待喚醒的請求、部署的副本數和負載、自動調整的決定，以及喚醒期間轉到雲端的請求。
+
+執行前要知道的事：
+
+- **時間：**休眠的模型、自動副本數和 vLLM 模型會同時進行，機器上已經有模型時大約 15 分鐘；第 6 步和第 7 步在它們之後，每一步都要再等一次休眠。
+- **指標：**伺服器沒有設定 `METRICS_TOKEN` 時，`/metrics` 只回應來自伺服器本機的直接請求。請在那台主機上執行腳本，或給 `--metrics-token`（或 `FORGEYARD_METRICS_TOKEN`）；否則指標的檢查會跳過並說明原因。
+- **它會自己清理，**和 `accept_all.py` 一樣：所有東西都命名為 `accept-<run>-scale-…`（部署、它們的路由、API 金鑰、它必須新增的模型目錄項目），結束時全部移除，失敗或按下 **Ctrl-C** 也一樣；它停止過的 agent 會再啟動。伺服器放不下的部署，等了 `--place-timeout` 秒之後會跳過，並附上伺服器給的原因。
 
 ## 用 Prometheus 收集 Forgeyard 的指標
 

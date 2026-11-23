@@ -134,6 +134,9 @@ def desired_message(db: DbSession, node_id: int, revision: int) -> dict:
         # it fetches only through the server carries no token (the server adds its own).
         replicas = [relay.attach(d, node, "replica", r.uid) for d, r in zip(replicas, reps)]
     out = {"v": PROTOCOL_VERSION, "type": "desired", "revision": revision, "replicas": replicas}
+    from forgeyard.models import enginecache
+
+    out = enginecache.attach(db, node, out, reps)  # 1.5.0: engine compile caches kept between starts
     if node is not None and FEATURE_PREFETCH in features:
         from forgeyard.models import prefetch
 
@@ -204,8 +207,10 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
             r.download = label(r.download, "replica", r.uid)
         health = (r.spec or r.workload.spec or {}).get("health")
         ready = state == "healthy" or (state == "running" and not health)
-        if ready and r.ready_at is None:
+        became_ready = ready and r.ready_at is None
+        if became_ready:
             r.ready_at = now
+            db.info.setdefault("ready_workloads", set()).add(r.workload_id)   # 1.5.0: a wake waiting for it is over
         elif state not in ("healthy", "running", "unhealthy"):
             r.ready_at = None  # its memory is not in use (any more): the reservation counts again
         r.updated_at = now
@@ -214,13 +219,17 @@ def apply_status(db: DbSession, node: Node, msg: StatusIn) -> bool:
             desired_changed = True
         progress_only = (before[0] == r.state and st.download is not None
                          and (before[1] or "").startswith(("downloading", "pulling the image")))
-        if (r.workload.desired_state == "stopped" and r.reason
+        if (r.workload.desired_state in ("stopped", "asleep") and r.reason
                 and r.reason.startswith("cancelled: the ") and r.reason.endswith(" was removed")):
             # The agent only sees that the replica is no longer wanted; here it was stopped, not removed.
             r.reason = r.reason.removesuffix(" was removed") + " was stopped"
         if before != (r.state, r.reason, r.exit_code) and not progress_only:
             event(db, r.workload, "state", f"Replica {r.ordinal} on {node.name}: "
                   f"{describe(r.state, r.reason, r.exit_code, r.pid)}", r.ordinal)
+        if became_ready and r.workload.runtime == "model":
+            from forgeyard.workloads import starts
+
+            starts.ready(db, r, node, st.start, now)  # 1.5.0: how long the start took (events, /metrics)
         if r.workload.runtime == "model":  # (a replica being stopped is "stopping": neither branch)
             from forgeyard.models import reach, scheduler
 
@@ -281,9 +290,10 @@ def reset_replica(r: Replica, generation: int) -> None:
     r.updated_at = utcnow()
 
 
-def stop(db: DbSession, w: Workload, connected) -> set[int]:
-    """Ask every replica to stop. Returns the machines to poke."""
-    w.desired_state = "stopped"
+def stop(db: DbSession, w: Workload, connected, to: str = "stopped") -> set[int]:
+    """Ask every replica to stop: stopped by a person, or (1.5.0, `to="asleep"`) asleep because nobody used it
+    (forgeyard/workloads/sleep.py). Returns the machines to poke."""
+    w.desired_state = to
     w.updated_at = utcnow()
     nodes: set[int] = set()
     for r in w.replicas:
@@ -360,13 +370,14 @@ def not_picked_up(r: Replica, now: datetime, connected: Callable[[int], bool]) -
 
 
 def summary(w: Workload) -> dict:
-    """One status for the list: running / starting / degraded / succeeded / failed / stopped…"""
+    """One status for the list: running / starting / degraded / succeeded / failed / stopped / asleep…"""
     reps = w.replicas
     states = [r.state for r in reps]
     health = (w.spec or {}).get("health")
     ready = sum(1 for r in reps if r.state == "healthy" or (r.state == "running" and not health))
     if w.desired_state != "running":
-        status = "stopping" if "stopping" in states else "stopped"
+        # 1.5.0: asleep (stopped because nobody used it; Start wakes it). Anything else not running is stopped.
+        status = "stopping" if "stopping" in states else ("asleep" if w.desired_state == "asleep" else "stopped")
     elif w.kind == "task":
         if reps and all(r.final for r in reps):
             status = "succeeded" if all(r.state == "exited" and r.exit_code == 0 for r in reps) else "failed"

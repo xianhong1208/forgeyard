@@ -1,4 +1,4 @@
-import { IconAdjustments, IconArrowLeft, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
+import { IconAdjustments, IconArrowLeft, IconMoon, IconPlayerPlay, IconPlayerStop, IconSend, IconTrash } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 
@@ -19,7 +19,10 @@ import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel } from "../lib/workloads";
 import { RoutingEditor } from "./RouteDetail";
 import { NotPickedUpNotice, Output } from "../components/ReplicaOutput";
+import { AutoscaleLine } from "../components/Replicas";
 import { usePoll, WORKLOADS_POLL_MS } from "../lib/poll";
+import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
+import { SleepBadge } from "../components/Sleep";
 
 export function DeploymentDetailPage() {
   const { id } = useParams();
@@ -35,7 +38,9 @@ export function DeploymentDetailPage() {
     if (!d) return;
     const text = {
       stop: `Stop ${d.name}? Its replicas are stopped and their memory freed; the model stays in the machines' caches.`,
-      start: `Start ${d.name} again? Its replicas are placed again.`,
+      start: d.workload.desired_state === "asleep"
+        ? `Wake ${d.name}? Its replicas start again, on the machines they ran on when those still have room.`
+        : `Start ${d.name} again? Its replicas are placed again.`,
       delete: `Delete ${d.name}? Its replicas are stopped and its route removed. The cached model files stay on the machines.`,
     }[what];
     if (!window.confirm(text)) return;
@@ -48,7 +53,8 @@ export function DeploymentDetailPage() {
         return;
       }
       await api(`/deployments/${d.id}/${what}`, { method: "POST" });
-      setMessage({ tone: "ok", text: what === "stop" ? `Stopping ${d.name}.` : `Starting ${d.name} again.` });
+      const waking = d.workload.desired_state === "asleep";
+      setMessage({ tone: "ok", text: what === "stop" ? `Stopping ${d.name}.` : waking ? `Waking ${d.name}.` : `Starting ${d.name} again.` });
       reload();
     } catch (e) {
       setMessage({ tone: "error", text: errorText(e) });
@@ -66,7 +72,12 @@ export function DeploymentDetailPage() {
         actions={d && w && canManage && (
           <>
             <Link to={`/serving/${d.id}/edit`} className="btn"><IconAdjustments size={16} aria-hidden="true" /> Edit</Link>
-            {w.desired_state === "running" ? (
+            {w.desired_state === "asleep" ? (
+              <>
+                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> Wake now</button>
+                <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
+              </>
+            ) : w.desired_state === "running" ? (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("stop")}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
             ) : (
               <button type="button" className="btn" disabled={busy} onClick={() => void act("start")}><IconPlayerPlay size={16} aria-hidden="true" /> Start</button>
@@ -79,10 +90,23 @@ export function DeploymentDetailPage() {
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       {w && <NotPickedUpNotice w={w} />}
+      {d?.sleep?.asleep && (
+        <Notice tone="info">
+          Asleep{d.sleep.asleep_since ? ` since ${when(d.sleep.asleep_since)}` : ""}: nobody used it for {d.sleep.idle_minutes} min, so its replicas
+          stopped and their memory is free. The model files stay on the machines. The next request wakes it{canManage ? ", or Wake now" : ""}
+          {d.last_start ? `; the last start took ${seconds(d.last_start.seconds)}.` : "."}
+        </Notice>
+      )}
+      {d && sleepState(d) === "waking" && (
+        <Notice tone="info">
+          Waking: woken by {d.sleep?.waking?.by} {elapsed(d.sleep?.waking?.since)} ago; it should be ready in about {seconds(wakeSeconds(d) ?? 30)}.
+          Requests to it wait until a replica is ready (up to {d.sleep?.wake_wait ?? 300} s){d.sleep?.waking?.waiting ? `: ${d.sleep.waking.waiting} waiting now` : ""}.
+        </Notice>
+      )}
       {d && w && (
         <>
           <div className="wl-status">
-            <span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>
+            <SleepBadge d={d} big fallback={<span className={`chip chip-big chip-tone-${STATUS_TONE[w.status]}`}>{w.status}</span>} />
             <span>{w.ready} of {w.replicas} ready</span>
             {d.rollout && <span className="chip chip-tone-wait" title="An edit restarts the replicas one at a time: the next one once the one before it is ready.">
               updating: {d.rollout.updated} of {d.rollout.total} on the new settings</span>}
@@ -91,8 +115,10 @@ export function DeploymentDetailPage() {
             {d.route && <span className="muted small">{API_LABEL[d.route.api] ?? d.route.api}</span>}
           </div>
           <Gateway d={d} />
+          <WhenNotInUse d={d} canManage={canManage} />
           <section className="panel" aria-labelledby="replicas-title">
             <h2 id="replicas-title">Replicas</h2>
+            <AutoscaleLine d={d} />
             <div className="table-wrap">
               <table className="table reps-table">
                 <thead><tr><th>#</th><th>State</th><th>Machine</th><th>Device</th><th>Runs</th><th>Reserved</th><th>Since</th></tr></thead>
@@ -104,6 +130,7 @@ export function DeploymentDetailPage() {
                         <td data-label="Replica" className="mono">#{r.ordinal}</td>
                         <td data-label="State">
                           <span className={`chip chip-tone-${STATE_TONE[r.state]}`}>{stateLabel(r)}</span>
+                          {d.autoscale?.draining?.replica === r.ordinal && <span className="chip chip-tone-wait chip-draining" title="The autoscaler removes it: it takes no new requests and finishes the ones it runs.">draining</span>}
                           {frac !== null ? (
                             <div className="dl" aria-label="Download progress">
                               <span className="bar bar-dl"><span style={{ width: `${Math.round(frac * 100)}%` }} /></span>
@@ -142,6 +169,38 @@ export function DeploymentDetailPage() {
         </>
       )}
     </>
+  );
+}
+
+// 1.5.0 (#37): sleep when idle, where it stands, and the start a wake waits for.
+function WhenNotInUse({ d, canManage }: { d: Deployment; canManage: boolean }) {
+  const s = d.sleep;
+  if (!s) return null;
+  const state = sleepState(d);
+  return (
+    <section className="panel sleep-panel" aria-labelledby="sleep-title">
+      <div className="panel-head">
+        <h2 id="sleep-title"><IconMoon size={16} aria-hidden="true" /> When not in use</h2>
+        {canManage && <Link to={`/serving/${d.id}/edit`} className="small">Change</Link>}
+      </div>
+      <dl className="facts">
+        <dt>Sleep when idle</dt>
+        <dd>{s.on ? `On: after ${s.idle_minutes} min without a request; a request waits up to ${s.wake_wait ?? 300} s for it to wake` : <span className="muted">Off: it keeps its memory while nobody uses it</span>}</dd>
+        <dt>Now</dt>
+        <dd>{state === "asleep" ? <>Asleep{s.asleep_since ? <> since <span title={exact(s.asleep_since)}>{when(s.asleep_since)}</span></> : null}; it holds no memory</>
+          : state === "waking" ? <>Waking, for {elapsed(s.waking?.since)} (by {s.waking?.by})</>
+            : d.workload.desired_state !== "running" ? <span className="muted">Stopped by a person: it does not wake by itself</span>
+              : s.on && s.held_by ? <>Awake, kept awake: {s.held_by}</>
+                : s.on && s.sleeps_at ? <>Awake; sleeps <span title={exact(s.sleeps_at)}>{when(s.sleeps_at)}</span> unless a request comes</>
+                  : "Awake"}</dd>
+        <dt>Last request</dt>
+        <dd>{s.last_request_at ? <span title={exact(s.last_request_at)}>{when(s.last_request_at)}</span> : <span className="muted">none since the server started</span>}</dd>
+        <dt>Last start</dt>
+        <dd>{d.last_start ? <>{seconds(d.last_start.seconds)} <span className="muted small">({when(d.last_start.at)}; a wake waits about that long)</span></>
+          : <span className="muted">not measured yet</span>}</dd>
+        {(s.on || (s.wakes ?? 0) > 0) && <><dt>Woken, last 24 h</dt><dd>{s.wakes ?? 0}</dd></>}
+      </dl>
+    </section>
   );
 }
 

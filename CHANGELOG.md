@@ -6,6 +6,137 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-11-23
+
+Scale to zero and autoscaling (#37): GPUs are used only while they are needed. A deployment can sleep when nobody
+calls it and give its memory back (#223). Each start is timed, with where the time went, and a starting replica's
+health is checked every second (#224). The next request wakes an asleep model, once however many arrive, and
+waits for it; a key that may use the cloud is served there meanwhile, a model that cannot wake answers
+`cannot_wake` at once, and a wait that runs out answers `model_waking` with `Retry-After` (#228). The number of
+replicas can follow the load the gateway sees, and a replica that goes is drained first, so the requests it runs
+finish (#229). The console has all of it: the deploy and edit forms, *Asleep* and *Waking* on Serving, **Wake
+now**, the Playground, the Machines page and two setup-advisor notes (#227). `scripts/accept_scale.py`, also the
+new `scale` group of `accept_all.py`, checks it on real machines (#230). vLLM keeps its compile cache between
+starts, so only a replica's first start compiles: on an A100 a restart of Qwen3-0.6B took 57 s instead of 114 s,
+and of a text classifier on `vllm-pooling` 53 s instead of 78 s (#232).
+
+**Sleep when idle and automatic replicas are off by default**, for deployments made before and after the upgrade:
+turn them on per deployment. **The compile cache is on** for the built-in `vllm` and `vllm-pooling` recipes; a
+custom copy can turn it off.
+
+**Update the agents** after the server, with the machine page's **Update the agent** command. Only a 1.5.0 agent
+reports the phases of a start (model, image, engine), checks a starting replica's health every second, and keeps
+the engine's compile cache directory. An older agent keeps working: the server then measures the engine's part of
+a start itself and says so, and its replicas start as before. **No migration:** the sleep and automatic-replica
+settings are deployment parameters, *asleep* is a new desired state of a workload, and the last request, the
+load samples and the drains live in the server's memory.
+
+### Added
+
+- **Sleep when idle** (#37, 1.5.0, first step). A deployment can stop its replicas when nobody uses it and give their
+  GPU memory (or RAM) back; the model files stay in the machine's cache and the engine image in its store. Two new
+  parameters of every deployment, read by the server (changing them restarts nothing): `sleep_when_idle` (**off by
+  default**, for deployments made before and after this change) and `idle_minutes` (**30** by default, 1 to 1,440).
+  Use is every request the gateway takes for the model (any key or the Playground, also one that went to a cloud
+  tier, also while it waits), a video asked for and *Try it*; `/v1/models`, health checks, the console's polling
+  and polls of a video job are not. A sweeper (every 30 s) puts a deployment to sleep after its idle time, counted
+  from the last use or its last start, change or readiness, or the server's start (a restart never puts anything to
+  sleep early); never while a request is in flight or waiting, a replica is starting, an edit restarts its
+  replicas, or (video) a job is waiting or being made or a finished video can still be downloaded. Asleep is a new
+  desired state `asleep` (and `status` `asleep`): the model **stays in `/v1/models`**, a request to it answers
+  **503 `model_asleep`** (it spills to a cloud tier the key may use, like any tier without a ready replica),
+  **Start** (on the page: **Wake**) wakes it on the machine it ran on or its pinned machine, and **Stop** makes it
+  stopped. Going to sleep is an event (*Asleep: no requests for 30 min; frees …*), not audited; waking with Start is
+  audited as a start (`woken: true`). The deployment API gives a `sleep` object (`on`, `idle_minutes`, `asleep`,
+  `last_request_at`, `since`, `sleeps_at`, `held_by`), an edit while asleep answers `restart: on_wake`, and the
+  deployment page shows *asleep* with **Wake** and **Stop**. Waking on a request, and the settings in the deploy and
+  edit forms, are below. No migration: the settings are deployment parameters and the last use
+  is kept in the server's memory. **Upgrade note:** scripts that read a workload's `desired_state` or `status` see
+  the new value `asleep`; a server older than this reads it as stopped (downgrading is safe: Start starts it there).
+- **Waking on a request** (#37, 1.5.0, as decided on the issue). A request to an asleep model wakes it, replacing the 503
+  `model_asleep` above: **one wake per deployment** however many requests arrive (the event *Woken by a request (key
+  …)*, not audited), and the requests **wait**, first come first served, up to the deployment's new parameter
+  `wake_wait` (**300** seconds by default, 10 to 1,800; changing it restarts nothing), then go on to the replicas.
+  Nothing is sent to the client while it waits (a stream starts with a normal 200 or a real error), and
+  `first_answer_timeout` counts only once the request reaches a replica. A key that may use the route's cloud tier
+  (`fallback` or `on`) **spills meanwhile** (`X-Forgeyard-Spilled: waking`, `reason="waking"` in
+  `forgeyard_gateway_spills_total`) and is local again once a replica is ready; structured output a provider would
+  lose is never spilled, and a request whose cloud target fails or whose budget is used up waits after all. When it
+  **cannot wake** (no machine has room, the machine it is pinned to is offline, its engine fails) the request gets
+  **503 `cannot_wake`** at once with the reason; when the wait runs out (or 256 already wait), **503
+  `model_waking`** with `Retry-After` from its last start time. A client that goes away leaves the line (the wake
+  carries on); rate limits count the request once, when it arrives. A person's **Stop** stays stopped: requests never
+  wake it. *Start* (Wake now) on an asleep deployment lets requests that arrive while it starts wait too.
+  `POST /v1/videos` wakes an asleep video model the same way. `/v1/models`, health checks and the console's polling
+  never wake anything. The deployment API's `sleep` object gains `wake_wait` and `waking` (`since`, `by`, `waiting`,
+  `expected_seconds`); `/metrics` gains `forgeyard_gateway_waking`, `forgeyard_gateway_wake_wait_seconds` and
+  `forgeyard_deployment_wakes_total{deployment, by}`. No migration.
+- Sleep when idle, two fixes found in its first real run: a request the gateway refused at once (its deployment
+  stopped, it cannot wake, no target serves the endpoint) is no longer counted as use, so a deployment that cannot
+  wake goes back to sleep after its idle time and the next request tries a fresh wake; and a deployment made with
+  the id of one just removed (SQLite reuses the highest id) no longer starts from the removed one's last request.
+- **Sleep when idle in the console** (#37, 1.5.0). The deploy and edit forms have a *When not in use* section:
+  **Sleep when idle** (off by default) and **Idle minutes** (30), with **Wake wait** (300 s) under Advanced, how long
+  the last start took (on the deploy form, the last start of another deployment of the same model and engine), which
+  is about how long the first request after a sleep waits, and a note that its memory may be used by others while it
+  sleeps. **Serving** shows **Asleep** (a moon; *holds nothing*, since when, and the machine it wakes on) and
+  **Waking** with the time since the wake. The deployment page has a *When not in use* card (the setting, *sleeps in
+  18 min* or what keeps it awake, the last request, the last start, wakes in the last 24 hours) and **Wake now**
+  (Start). The **Playground** keeps an asleep model in its picker with the moon, sends a request to it as to any
+  model and says *Waking the model (about 74 s)…* while the gateway holds it; operators and admins also get **Wake
+  now** there. **Machines** names an asleep deployment under the machine it would run on, with what it holds when
+  awake. Two setup-advisor notes: `deployment-idle-awake` (sleep off, no request for 3 days, holds GPU memory: let
+  it sleep?) and `deployment-wakes-often` (woken more than 10 times in a day and its last start took over a minute:
+  raise its idle time). The deployment API's `sleep` object gains `asleep_since` and `wakes`. Get started's *Deploy
+  it* stays done while a deployment sleeps (*Ready: chat (asleep).*).
+
+- **How long each start takes, and faster ones** (1.5.0, #37, ahead of waking on a request). Each time a
+  replica of a deployment becomes ready, its events say how long the start took and where the time went (*ready in
+  74.2 s (model 0.3 s, image 0.1 s, engine 73.8 s)*: the model's files, waiting for another replica on a shared
+  GPU, the image, and the engine from launch to its first healthy answer); the deployment API gives the latest one
+  as `last_start`, and `/metrics` has the histogram `forgeyard_replica_start_seconds{recipe, model}`. A 1.5.0 agent
+  checks a starting replica's health every second instead of every *interval* (10 s for vLLM) until its first
+  healthy answer, and only within the recipe's start period, so a ready model is used up to 9 s sooner and a
+  replica is never called unhealthy sooner than before. The server lists the new protocol feature `start_times`
+  (the agent's hello stays at the 16 features servers up to 1.4.0 accept): an older agent keeps its cadence (the
+  server then measures the engine's part only and says so), and a 1.5.0 agent talking to an older server behaves
+  as before. Recipes can keep an engine's compile cache between starts (`engine_cache`, sent beside the spec, which
+  older agents ignore): `vllm` and `vllm-pooling` keep vLLM's `VLLM_CACHE_ROOT` (a directory per replica under
+  the model cache, mounted writable, removed with the deployment), so only a replica's first start compiles:
+  measured on an A100 with Qwen3-0.6B, a restart took 57 s instead of 114 s; a custom recipe can turn it off. No migration.
+- **Automatic replicas** (#37, 1.5.0). A deployment's number of replicas can follow the load the gateway sees.
+  New parameters of every deployment but video ones, read by the server (changing them restarts nothing):
+  `autoscale` (**off by default**, for deployments made before and after this change), `min_replicas` and
+  `max_replicas` (**1 to 2** by default, 1 to 16; `min_replicas` 0 only with `sleep_when_idle` on), and, under
+  Advanced, `autoscale_target` (**80 %** of a replica's *Concurrent requests*), `scale_up_seconds` (**60**) and
+  `scale_down_minutes` (**10**). The load is the requests in flight on its replicas plus those waiting in the
+  gateway's line for its slots (and its image queue), sampled every 2 s. One replica more when the last minute's
+  load is above the target, or within about 10 s at twice it; **one at a time**, and **only when it fits now** (an
+  online machine with room; the pinned one when pinned): no pending replica is left waiting for room, the page says
+  *Wants 3 replicas, room for 2: …* instead. One fewer after 10 minutes in which one replica fewer would have served
+  the load at the target; the newest is **drained first** (the gateway sends it nothing new, the requests it runs
+  finish, at most 30 minutes), then removed, and kept when the load returns or the others stop being ready. Nothing
+  changes while an edit restarts the replicas, a replica's machine is offline, or within 2 minutes of the deployment's
+  start, wake or change (requests waiting for a wake are not load: the wake starts its replicas already); an asleep deployment keeps its minimum of replicas and wakes with them. Every decision is an event
+  (kind `scaled`), not audited. The deploy and edit forms set **Replicas** to a fixed number or **Automatic, by
+  load**; the deployment page shows *Automatic, 1 to 4 · 2 now*, the load against the target and the replica being
+  drained. The deployment API gives an `autoscale` object; while it is on a change may not set another `replicas`
+  number (422 `replicas_automatic`). `/metrics`: `forgeyard_deployment_replicas{deployment,kind}` (desired, ready,
+  draining, wanted), `forgeyard_deployment_load{deployment}` and `forgeyard_autoscale_total{deployment,direction}`.
+  No migration: the settings are deployment parameters, the load samples and drains live in the server's memory.
+- **The scale acceptance** (#37, 1.5.0): `scripts/accept_scale.py`, also the new `scale` group of
+  `scripts/accept_all.py` (before `console`), checks sleep when idle, waking and automatic replicas on real machines
+  with a CPU model (Qwen3-1.7B GGUF on llama.cpp) so it runs anywhere: it goes asleep (replicas stopped, their port
+  closed, the reservation freed on `/metrics`, still listed, files kept), many requests at once wake it exactly once,
+  Wake now and the Playground wake it, a key that may spill is served by the cloud while it wakes and structured
+  output waits (with `--cloud-provider`), a short `wake_wait` gives 503 `model_waking` with `Retry-After` (on a model
+  that starts slower than that: `--gpu-machine` adds the same on vLLM), `cannot_wake` while its pinned machine is
+  offline (opt-in: `--stoppable-agent` with `--agent-stop` and `--agent-start`; it never stops a machine it was not
+  told it may), Stop is not woken, automatic replicas on two CPU machines (a load adds one within about a minute; a
+  stream on it finishes while it is drained; no request fails or runs twice) and with sleep and a minimum of 0, and
+  the start times and metrics. Its parts run side by side (about 15 minutes); everything it creates is removed.
+  Guide: *Check sleep, waking and automatic replicas*.
+
 ## [1.4.5] — 2026-11-22
 
 Fixes from an outside review. Structured output is never silently lost on a cloud spill (#162). The gateway

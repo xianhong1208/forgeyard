@@ -49,6 +49,7 @@ from forgeyard.machines.protocol import CLOSE_RESTART
 from forgeyard.migrate import upgrade
 from forgeyard.security import crypto, tls
 from forgeyard.security.middleware import GuardMiddleware, WebSocketHostGuard
+from forgeyard.workloads import autoscale, sleep
 
 STATIC = Path(__file__).with_name("static")
 log = logging.getLogger("forgeyard")
@@ -91,11 +92,14 @@ async def lifespan(_app: FastAPI):
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS
     alerts = asyncio.create_task(gateway_budgets.ledger.run_forever(USAGE_FLUSH_SECONDS))
     videos = asyncio.create_task(videojobs.run_forever())  # follows /v1/videos jobs, expires their results (1.3)
+    sleep.idle.server_started()  # 1.5.0 (#37): idle times count from this start at the earliest
+    sleeper = asyncio.create_task(sleep.run_forever())  # puts deployments nobody uses to sleep, when asked to
+    scaler = asyncio.create_task(autoscale.run_forever())  # 1.5.0: automatic replicas follow the gateway's load
     try:
         yield
     finally:
         hub.close_all(CLOSE_RESTART, "server restarting")  # agents reconnect on their own
-        for task in (sweeper, usage_writer, renewer, alerts, videos):
+        for task in (sweeper, usage_writer, renewer, alerts, videos, sleeper, scaler):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

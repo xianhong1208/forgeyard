@@ -54,13 +54,14 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from forgeyard import metrics
 from forgeyard.config import get_settings
 from forgeyard.db import Replica, VideoJob, as_utc, new_session, utcnow
-from forgeyard.gateway import imagegen, proxy, videogen
+from forgeyard.gateway import imagegen, proxy, videogen, waking
 from forgeyard.gateway.balancer import Target, balancer
 from forgeyard.gateway.errors import GatewayError
 from forgeyard.gateway.keys import KeyCaller
 from forgeyard.gateway.limits import Refusal, key_limiter
 from forgeyard.gateway.usage import recorder
 from forgeyard.security import replica_tls
+from forgeyard.workloads.sleep import idle, route_deployments
 
 log = logging.getLogger("forgeyard.gateway")
 
@@ -328,6 +329,7 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
         model = raw.strip()
         route = proxy.check_access(caller, await run_in_threadpool(_route, model), model, videogen.ENDPOINT)
         deployment_id = route.deployment_id
+        idle.used(route_deployments(route))   # 1.5.0: a video asked for is use (its job then holds it awake)
         ask = videogen.check(obj)
         groups = [g for tier in route.tiers for g in tier.locals if g.films is not None]
         if not groups:
@@ -345,6 +347,12 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
                                                                f"minute; try again in {verdict.retry_after} s.",
                                    retry_after=verdict.retry_after)
             key_limiter.settle(verdict, 0)
+        if not any(g.replicas for g in fits) and (sleepy := waking.sleepy(fits)):
+            # 1.5.0 (#37): asleep, or being woken. The request wakes it and waits for it (not in the job lock).
+            by = waking.by_of(caller)
+            await waking.ask(sleepy, by)
+            fits = await waking.until_awake(request.receive, f"{route.served_name}#video", route.served_name, fits,
+                                            sleepy, by)
         job, target = await _place(caller, route, fits, ask)
     except Answer as a:
         proxy.record(caller, model or "", deployment_id, a.response.status_code, started, endpoint=videogen.ENDPOINT,
@@ -355,6 +363,9 @@ async def submit(request: Request, caller: KeyCaller) -> Response:
             proxy.record(caller, model, deployment_id, e.status, started, limited=limited, endpoint=videogen.ENDPOINT,
                          known=deployment_id is not None)
         return e.response()
+    except proxy.ClientGone:   # it went away while the model woke (the wake carries on)
+        proxy.record(caller, model or "", deployment_id, proxy.CLIENT_CLOSED, started, endpoint=videogen.ENDPOINT)
+        return Response(status_code=proxy.CLIENT_CLOSED)
     return JSONResponse(videogen.video_object(job), headers={"X-Forgeyard-Target": target})
 
 

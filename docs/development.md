@@ -161,5 +161,6 @@ fixed time for something to happen, or read a page before the data it needed had
 | `scripts/accept_img.py` | the real-hardware acceptance of image generation (also the `img` group of `accept_all.py`) |
 | `images/vision/` | the vision server behind the app templates (detection, segmentation, depth): its Dockerfile, pinned models and dependencies, smoke test |
 | `scripts/accept_x.py` | the real-hardware acceptance of the passthrough at `/x/` (also the `passthrough` group of `accept_all.py`) |
+| `scripts/accept_scale.py` | the real-hardware acceptance of sleep when idle, waking and automatic replicas (also the `scale` group of `accept_all.py`; [how](guide/how-to.md#check-sleep-waking-and-automatic-replicas)) |
 | `scripts/check_recommended.py`, `pin_images.py` | check the recommended models against Hugging Face; pin the recipes' images by digest |
 | `web/` | React + TypeScript + Vite UI, built into `forgeyard/static` |

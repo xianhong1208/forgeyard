@@ -19,7 +19,7 @@ from forgeyard.gateway.keys import KeyCaller
 from forgeyard.machines.protocol import FEATURE_REPLICA_KEYS
 from forgeyard.models import modalities
 from forgeyard.security import replica_tls
-from forgeyard.workloads import offline
+from forgeyard.workloads import offline, sleep
 
 # /v1/<endpoint> -> (the route protocol it needs, the body it takes)
 ENDPOINTS: dict[str, tuple[str, str]] = {
@@ -63,12 +63,14 @@ class LocalGroup:
     reason: Optional[str] = None          # why none is ready
     concurrency: Optional[int] = None     # requests one replica takes at once (its `concurrency`)
     context: Optional[int] = None         # tokens per request (its `context`)
-    running: bool = True                  # False once someone stopped the deployment
+    running: bool = True                  # False once someone stopped the deployment (not when it is asleep)
+    asleep: bool = False                  # 1.5.0: stopped because nobody used it; Start wakes it
     accepts: Optional[modalities.Accepts] = None   # media and body size it takes (1.3)
     speaks: Optional[speech.Speaks] = None          # text to speech: formats, voices, input cap (1.3)
     draws: Optional[imagegen.Draws] = None          # image generation: caps, default size, queue (1.3)
     films: Optional[videogen.Films] = None          # video generation: caps, default size and length (1.3)
     first_answer: float = FIRST_ANSWER_DEFAULT      # seconds to start answering once sent (1.4.5)
+    wake_wait: int = 300                            # seconds a request waits for it to wake (1.5.0, its wake_wait)
 
 
 @dataclass
@@ -140,6 +142,8 @@ def _ready(r: Replica, w: Workload) -> bool:
 
 
 def not_ready_reason(w: Workload) -> str:
+    if w.desired_state == "asleep":
+        return "The deployment is asleep: nobody used it for a while."
     if w.desired_state != "running":
         return "The deployment is stopped."
     parts = []
@@ -187,9 +191,12 @@ def local_group(t: RouteTarget, d: Deployment, recipes: Optional[dict] = None) -
     return LocalGroup(target_id=t.id, deployment_id=d.id, name=d.name, upstream_model=t.upstream_model or d.served_name,
                       replicas=replicas, reason=None if replicas else not_ready_reason(w),
                       concurrency=draws.concurrency if draws else _int(params.get("concurrency")),
-                      context=_int(params.get("context")), running=w.desired_state == "running", accepts=accepts,
+                      context=_int(params.get("context")), accepts=accepts,
+                      # 1.5.0: an asleep model is still served (listed; a request may wake it), a stopped one not.
+                      running=w.desired_state in ("running", "asleep"), asleep=w.desired_state == "asleep",
                       speaks=speaks, draws=draws, films=films,
-                      first_answer=float(_int(params.get("first_answer_timeout")) or FIRST_ANSWER_DEFAULT))
+                      first_answer=float(_int(params.get("first_answer_timeout")) or FIRST_ANSWER_DEFAULT),
+                      wake_wait=sleep.wake_wait_of(params))
 
 
 def cloud_target(t: RouteTarget, pm: ProviderModel) -> CloudTarget:
@@ -268,7 +275,8 @@ def serving(route: Route, cloud: str) -> bool:
 
     Not when every deployment in it was stopped and nothing else in it is open to the caller: such a
     model is left out of /v1/models, so clients do not offer it. A deployment that is starting or
-    restarting still counts. Calling a stopped model still answers 503 with the reason.
+    restarting still counts, and so (1.5.0) does an asleep one. Calling a stopped model still answers 503
+    with the reason.
     """
     endpoint = {"openai-chat": "chat/completions", "openai-embeddings": "embeddings"}.get(route.api, "")
     # The same tiers a request with this cloud setting may use (a `fallback` key reaches the cloud only

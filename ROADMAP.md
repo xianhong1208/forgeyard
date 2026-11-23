@@ -355,6 +355,31 @@ accepted on are published in [docs/verified-hardware.md](docs/verified-hardware.
 became a long-term support line (#197, see [Support](#support)). Update the agents after the server: TLS, the
 guard's answer when its engine is not running, the NVIDIA device nodes and the replica address need a 1.4.5 agent.
 
+## Shipped: 1.5.0 (2026-11-23), scale to zero and autoscaling
+
+1. ✅ **Sleep when idle** (#223, for #37): a deployment nobody calls for its *Idle minutes* (30 by default) stops
+   its replicas and gives their GPU memory back; it stays in `/v1/models`, keeps its files in the machine's cache,
+   and **Start** wakes it. Off by default.
+2. ✅ **Faster starts, and how long each one took** (#224, for #37): a starting replica's health is checked every
+   second, each start is recorded with where its time went (model, image, engine), and `/metrics` has their
+   histogram.
+3. ✅ **Waking on a request** (#228, for #37): the next request wakes an asleep model, once however many arrive,
+   and waits for it (*Wake wait*, 300 s); a key that may use the cloud is served there meanwhile, and a model that
+   cannot wake answers `cannot_wake` at once.
+4. ✅ **Automatic replicas** (#229, for #37): the number of replicas follows the load the gateway sees, between a
+   minimum and a maximum, one at a time and only when it fits; a replica that goes is drained first, so the
+   requests it runs finish. Off by default.
+5. ✅ **In the console** (#227, for #37): the deploy and edit forms, *Asleep* and *Waking* on Serving, **Wake now**,
+   the Playground, the Machines page and two setup-advisor notes.
+6. ✅ **The scale acceptance** (#230, for #37): `scripts/accept_scale.py`, also the `scale` group of
+   `accept_all.py`, checks all of this on real machines.
+7. ✅ **vLLM's compile cache is kept between starts** (#232, for #37): only a replica's first start compiles. On
+   an A100 with Qwen3-0.6B a restart took 57 s instead of 114 s, so a wake after sleeping halves too.
+
+Update the agents after the server: the start-time phases, the health check every second while starting and the
+compile cache directory need a 1.5.0 agent; an older one keeps working, and the server then measures the
+engine's part of a start itself. No migration.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -384,7 +409,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.5.0: use GPUs only while needed** | **Scale to zero:** a deployment nobody calls stops and frees its GPU. The next request waits in a queue while it starts again. **Autoscaling:** replicas are added and removed by queue length or requests in flight (#37). |
 | **1.5.1: the console in Traditional Chinese** | The web console in Traditional Chinese as well as English. Today the console is in English only; the guide already has both (#189). |
 | **1.5.2: engine updates** | A newer version of an engine is pointed out, and can be tried as a pinned copy (#95). |
 | **1.5.3: apps removed** | The apps API, the templates and `/x/`, deprecated in 1.4, are removed, with a migration for the apps that are left (#89). |

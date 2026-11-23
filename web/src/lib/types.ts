@@ -255,14 +255,15 @@ export type WorkloadSpec = {
   machine_id: number | null;
 };
 
-export type WorkloadStatus = "running" | "starting" | "degraded" | "pending" | "succeeded" | "failed" | "stopping" | "stopped";
+// 1.5.0: "asleep": a deployment stopped because nobody used it (sleep when idle); Start wakes it.
+export type WorkloadStatus = "running" | "starting" | "degraded" | "pending" | "succeeded" | "failed" | "stopping" | "stopped" | "asleep";
 
 export type Workload = {
   id: number;
   name: string;
   kind: WorkloadKind;
   runtime: "container" | "process" | "model";
-  desired_state: "running" | "stopped";
+  desired_state: "running" | "stopped" | "asleep";
   generation: number;
   created_by: string | null;
   created_at: string;
@@ -444,9 +445,44 @@ export type Deployment = {
   // 1.3.1: the machine a person chose (null: Forgeyard chooses), and an edit's restarts in progress.
   pinned?: { id: number; name: string | null } | null;
   rollout?: { generation: number; updated: number; total: number; next: number } | null;
+  // 1.5.0 (#37): sleep when idle, the last request the server saw, and when it would go to sleep.
+  sleep?: DeploymentSleep;
+  // 1.5.0 (#37): how long its latest start took (source "server": measured by the server for an older agent).
+  last_start?: StartTime | null;
+  // 1.5.0 (#37): automatic replicas: the bounds, the load and the last decision.
+  autoscale?: DeploymentAutoscale;
 };
 
-export type RestartMode = "none" | "on_start" | "rolling" | "all";
+export type StartTime = {
+  seconds: number;
+  phases: Partial<Record<"model" | "waiting" | "image" | "engine", number>>;
+  source: "agent" | "server";
+  at: string;
+  replica: number | null;
+};
+
+export type DeploymentAutoscale = {
+  on: boolean; min: number; max: number; target: number; scale_up_seconds: number; scale_down_minutes: number;
+  capacity: number; replicas: number; ready: number; load: number | null; per_replica: number | null;
+  wanted: number | null; draining: { replica: number; since: string; in_flight: number } | null;
+  room: string | null; paused: string | null; last: { at: string; text: string } | null;
+};
+
+export type DeploymentSleep = {
+  on: boolean; idle_minutes: number; asleep: boolean; last_request_at: string | null; since: string;
+  sleeps_at: string | null; held_by: string | null;
+  // 1.5.0 PR 3: how long a request waits for a wake (seconds), and the wake under way (a request's or Wake now's).
+  wake_wait?: number; waking?: Waking | null;
+  // 1.5.0 PR 4 (the console): since when it is asleep, and how often it was woken in the last day.
+  asleep_since?: string | null; wakes?: number;
+};
+
+export type Waking = {
+  since: string; by: string; waiting: number;
+  expected_seconds: number;   // its last start, or 30 when none was measured
+};
+
+export type RestartMode = "none" | "on_start" | "on_wake" | "rolling" | "all";
 
 // PATCH /api/deployments/{id} (1.3.1); dry_run answers the same without `deployment`.
 export type EditResponse = {

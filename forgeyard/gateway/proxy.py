@@ -13,6 +13,8 @@ cloud provider.
    - *busy*: every ready replica already has as many requests in flight through this server as its
      deployment's `concurrency` (after waiting up to the route's `wait_ms` for a slot, in line, first
      come first served: forgeyard/gateway/waiting.py, 1.4.5);
+   - *waking* (1.5.0, #37): its deployment was asleep because nobody used it; the request wakes it
+     (forgeyard/gateway/waking.py) and, when nothing after the tier can take it either, waits for it to wake;
    - *refusing*: the replica answered 429 or 503;
    - *too small* (only when the route opts in): the prompt, estimated from its size, plus
      `max_tokens` does not fit the deployment's `context`.
@@ -126,6 +128,7 @@ from forgeyard.gateway.upstream import (CLIENT_CLOSED, NOT_TAKEN_HEADER, RETRYAB
                                         EngineUnreachable, Failed, _clients, _empty, _until_disconnect, client,
                                         close_client, not_taken, unless_gone, upstream_retry_after)
 from forgeyard.gateway.usage import recorder
+from forgeyard.workloads.sleep import idle, route_deployments
 
 __all__ = [
     # route.py
@@ -155,6 +158,9 @@ __all__ = [
 ]
 
 log = logging.getLogger("forgeyard.gateway")
+# A tier that failed for these reasons may still serve the request: it waits there after all when nothing after it
+# could (busy: for a slot, 1.4.5; waking: for the model to wake, 1.5.0).
+WAIT_LOCAL = ("busy", "waking")
 balancer.listen(waiting.slot_freed)   # a freed slot wakes the first request waiting in line (1.4.5)
 
 
@@ -197,12 +203,17 @@ class Job(ReplicaSending, CloudSending, Answering):
         self.answering: Optional[tuple] = None      # (group, replica) that is answering
         self.kept_from: list[str] = []              # providers skipped: they would lose the structured output
         self.first_byte_at: Optional[float] = None  # when the answer's first bytes came (monotonic; /metrics, 1.4.5)
+        # 1.5.0: something was done for it (sent to a replica or provider, waited, woke the model), so it counts as
+        # use of its deployments; a request the gateway refused at once (stopped, cannot wake, no target) does not.
+        self.used = False
 
     # -------------------------------------------------------------- bookkeeping
     def finish(self, status: int, usage) -> None:
         if self.settled:
             return
         self.settled = True
+        if self.used:
+            idle.used(route_deployments(self.route))   # 1.5.0: its deployments were used until now (sleep when idle)
         u = quirks.read_usage(usage)
         if self.admission is not None:
             tts = self.parsed.tts
@@ -309,11 +320,12 @@ class Job(ReplicaSending, CloudSending, Answering):
             result = await self.tier(tier, more)
             if isinstance(result, Response):
                 return result
-            if result.reason == "busy" and busy is None:
+            if result.reason in WAIT_LOCAL and busy is None:
                 busy = tier
             failure = result
         if busy is not None:
-            # Nothing after the busy tier could take it either: it waits for a local slot after all.
+            # Nothing after the busy (or waking, 1.5.0) tier could take it either: it waits for a local slot, or for
+            # the model to wake, after all.
             self.spilled = None
             result = await self.local(busy, can_move_on=False)
             if isinstance(result, Response):
@@ -338,10 +350,10 @@ class Job(ReplicaSending, CloudSending, Answering):
             result = await self.cloud(tier, more)
             if isinstance(result, Response):
                 return result
-            if failed is None or failed.reason != "busy":
+            if failed is None or failed.reason not in WAIT_LOCAL:
                 failed = result
             elif result.error is not None:
-                failed = Failed("busy", error=result.error)
+                failed = Failed(failed.reason, error=result.error)
             if more and self.spilled is None:
                 self.spilled = result.reason
         assert failed is not None
@@ -362,6 +374,9 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
                                f"{verdict.retry_after} s.", retry_after=verdict.retry_after)
         admission = verdict
     job = Job(request, caller, route, endpoint, parsed, started, admission)
+    # 1.5.0 (#37): use of every deployment the route serves, in flight while the gateway holds it (waiting in line
+    # or in the image queue too; a stream being passed on is in flight on its replica, in the balancer).
+    using = idle.begin(route_deployments(route))
     try:
         local_only = wants_local_only(request)
         tiers = allowed_tiers(route, caller.cloud, local_only, endpoint)
@@ -396,6 +411,8 @@ async def forward(request: Request, *, caller: KeyCaller, route: Route, endpoint
     except BaseException:
         job.release()
         raise
+    finally:
+        idle.end(using, used=job.used)
 
 
 def record(caller: KeyCaller, model: str, deployment_id: Optional[int], status: int, started: float,

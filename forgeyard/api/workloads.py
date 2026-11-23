@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit, deprecation
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, public_base, require_operator
 from forgeyard.db import Node, Replica, Workload, WorkloadEvent, get_db, utcnow
+from forgeyard.gateway import waking
 from forgeyard.machines.hub import hub
 from forgeyard.models import reach
 from forgeyard.machines.protocol import FEATURE_WORKLOADS, PROTOCOL_VERSION
@@ -293,12 +294,16 @@ def stop_workload_route(workload_id: int, request: Request, caller: Caller = Dep
 def stop_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
     """Stop it (also for its deployment: /api/deployments/{id}/stop)."""
     w = _get(db, workload_id)
-    if w.desired_state != "running":
+    if w.desired_state == "stopped":
         raise fail(409, "already_stopped", "This workload is already stopped.")
+    was_asleep = w.desired_state == "asleep"
+    # 1.5.0: an asleep deployment can be stopped too (its replicas are stopped already): a person's Stop stays
+    # stopped, while an asleep one is woken by Start and by a request.
     nodes = wstate.stop(db, w, hub.connected)
-    wstate.event(db, w, "stopped", f"Stopped by {caller.user.username}.")
+    wstate.event(db, w, "stopped", f"Stopped by {caller.user.username}" + (" (it was asleep)." if was_asleep else "."))
     audit.record(db, "workload.stopped", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id)
     db.commit()
+    waking.forget_workload(w.id)   # 1.5.0: requests waiting for its wake answer that it was stopped
     _poke(nodes)
     placement.place_and_poke(db)  # its cards are free once confirmed; anything waiting gets a try
     return {"workload": workload_out(_get(db, workload_id), caller)}
@@ -318,16 +323,22 @@ def start_workload(workload_id: int, caller: Caller, db: DbSession) -> dict:
         raise fail(409, "already_running", "This workload is already running.")
     if any(r.state == "stopping" for r in w.replicas):
         raise fail(409, "still_stopping", "Some replicas are still stopping. Start it again once they have stopped.")
+    woken = w.desired_state == "asleep"   # 1.5.0: Start on an asleep deployment wakes it
     w.desired_state = "running"
     w.generation += 1
     w.updated_at = utcnow()
     for r in w.replicas:
         placement.remember(r)  # 1.3.1: back to the machine it ran on, when that machine still takes it
         wstate.reset_replica(r, w.generation)
-    wstate.event(db, w, "started", f"Started again by {caller.user.username} (generation {w.generation}).")
+    if woken:
+        wstate.event(db, w, "woken", f"Woken by {caller.user.username} (generation {w.generation}).")
+    else:
+        wstate.event(db, w, "started", f"Started again by {caller.user.username} (generation {w.generation}).")
     audit.record(db, "workload.started", actor=caller.user, target=w.name, ip=caller.ip, workload_id=w.id,
-                 generation=w.generation)
+                 generation=w.generation, **({"woken": True} if woken else {}))
     db.commit()
+    if woken:
+        waking.woken_by_person(db, w, caller.user.username)   # 1.5.0: requests arriving meanwhile wait for it
     placement.place_and_poke(db)
     db.expire_all()
     return {"workload": workload_out(_get(db, workload_id), caller)}

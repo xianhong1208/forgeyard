@@ -1538,7 +1538,7 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 .kindsec-head .muted { font-size: 12.5px; }
 .kindsec-api { font-size: 11px; color: var(--muted); }
 .kindicon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: var(--radius); background: var(--steel); color: #fff; box-shadow: inset 0 -2px 0 var(--heat); }
-.deprow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) 120px 96px; gap: 6px 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.deprow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr) 120px minmax(96px, max-content); gap: 6px 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .deprow:last-child { border-bottom: 0; }
 .deprow-main { min-width: 0; }
 .deprow-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1735,3 +1735,42 @@ a.chip-update:hover { border-color: var(--heat-ink); }
   .lp-jump::-webkit-scrollbar { display: none; }
 }
 .lp-variant { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+
+/* 1.5.0 (#37): sleep when idle. A night tone (the chart's violet, darkened for text) for Asleep; Waking shares
+   the "wait" tone of anything starting. */
+:root { --night: #4a3bb0; --night-soft: #efedfb; --night-line: #d4cff3; }
+.chip-asleep, .chip-waking { gap: 4px; }
+.chip-asleep { background: var(--night-soft); border-color: var(--night-line); color: var(--night); }
+.chip-waking { background: var(--info-soft); border-color: #c7d9eb; color: var(--info); font-variant-numeric: tabular-nums; }
+.dot-asleep { background: transparent; box-shadow: inset 0 0 0 2px var(--night); }
+.dot-waking { background: var(--info); box-shadow: 0 0 0 3px var(--info-soft); }
+.sleep-set { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 28px; margin-top: 6px; }
+.sleep-set .check-line { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; min-height: 36px; }
+.sleep-set .check-line input { width: 16px; height: 16px; accent-color: var(--night); }
+.sleep-set .check-line span { display: inline-flex; align-items: center; gap: 6px; }
+.sleep-minutes { width: 150px; max-width: 100%; margin: 0; }
+.sleep-hint { display: grid; gap: 4px; margin-top: 10px; }
+.sleep-hint p { margin: 0; }
+.sleep-panel h2 { display: inline-flex; align-items: center; gap: 7px; }
+.sleep-panel h2 svg { color: var(--night); }
+.play-wake { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: -6px 0 18px; padding: 11px 14px;
+  background: var(--night-soft); border: 1px solid var(--night-line); border-radius: var(--radius); color: var(--ink-2); font-size: 13.5px; }
+.play-wake > svg { color: var(--night); flex: none; }
+.play-wake > span { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.picker-asleep { display: inline-flex; align-items: center; gap: 3px; color: var(--night); }
+.asleep-here { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.asleep-here > svg { color: var(--night); flex: none; margin-top: 2px; }
+.asleep-here a { color: var(--ink); }
+.asleep-here-compact { margin: 6px 0 0; }
+
+/* 1.5.0 (#37): automatic replicas on the deploy and edit forms, and the deployment page's line. */
+.label-like { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.scale-bounds .row-gap { align-items: center; flex-wrap: nowrap; }
+.scale-bounds .row-gap input { width: 5.5em; min-width: 0; flex: 1 1 0; }
+.scale-advanced { grid-column: 1 / -1; }
+.scale-advanced .grid-3 { margin-top: 10px; }
+.scale-line { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.scale-line p { margin: 0; }
+.scale-line p + p { margin-top: 4px; }
+.warn-text { color: var(--heat-ink); }
+.chip-draining { margin-left: 6px; }

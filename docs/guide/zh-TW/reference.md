@@ -574,6 +574,8 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | 502 | `provider_unreachable` | 連不上供應商 | 稍後重試 |
 | 502 | `provider_error` | 供應商回應 5xx，或送往它的請求失敗 | 稍後重試 |
 | 503 | `no_ready_replica` | 模型存在，但沒有就緒的副本：下載中、啟動中、已停止，或它的機器離線。訊息會列出每個副本的狀態 | 等待，或啟動部署 |
+| 503 | `model_waking` | 1.5.0：模型的部署原本在休眠（*Sleep when idle*），請求喚醒了它，但它沒有在部署的 `wake_wait`（預設 5 分鐘）內就緒，或已經有太多請求（256 個）在等它。`Retry-After`：它上次啟動的時間減掉已經過去的時間 | 照給的時間後重試；給客戶端更長的逾時，或給路由一個雲端分層（[閒置時休眠](#sleep-when-idle)） |
+| 503 | `cannot_wake` | 1.5.0：模型原本在休眠，現在無法喚醒；訊息會說明原因：*Cannot be placed: …*（沒有機器還有空間）、*it is pinned to …, which is offline*，或引擎失敗（*replica 0 on …: backoff …*）。立刻回應，不會等完等待時間 | 釋出記憶體、讓機器恢復上線，或查看部署的事件；部署保持喚醒，能啟動時就會啟動 |
 | 503 | `local_busy` | 每個副本都達到它的 *Concurrent requests*，也沒有其他目標能接手。閘道接著還是會把它送到本機副本，由引擎排隊處理，所以通常不會看到它。帶 `Retry-After: 1` | 等 `Retry-After` 秒後重試 |
 | 503 | `no_target` | 路由的每個目標都停用了，或沒有目標提供這個端點 | 由管理員檢查路由 |
 | 503 | `budget_unavailable` | 無法讀取本月的花費，所以在預算下不送出任何雲端請求 | 稍後重試 |
@@ -606,15 +608,27 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `forgeyard_gateway_request_duration_seconds` | histogram | `endpoint`、`model` | 從請求到達到結束；影片工作是從建立到結束 |
 | `forgeyard_gateway_time_to_first_byte_seconds` | histogram | `endpoint`、`model` | 從請求到達，到收到副本或供應商回應的第一批位元組：串流是第一個區塊，其他是它的狀態列。只計有收到回應的請求 |
 | `forgeyard_gateway_tokens_total` | counter | `model`、`direction` | 引擎或供應商回報的 token：`in` 是提示，`out` 是產生的內容 |
-| `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`refused`、`too_long`、`budget` |
+| `forgeyard_gateway_spills_total` | counter | `model`、`reason` | 離開路由第一層的請求，以及原因：`unavailable`、`busy`、`waking`（1.5.0）、`refused`、`too_long`、`budget` |
 | `forgeyard_gateway_waiting` | gauge | `model` | 現在正在排隊等本地空位的請求（路由所有層加總） |
 | `forgeyard_gateway_wait_seconds` | histogram | `model` | 每個請求在隊伍裡等了多久，才拿到空位或繼續往下走 |
+| `forgeyard_gateway_waking` | gauge | `model` | 1.5.0：現在正在等休眠中的模型喚醒的請求 |
+| `forgeyard_gateway_wake_wait_seconds` | histogram | `model` | 1.5.0：它們每個等了多久（之後被服務，或放棄） |
+| `forgeyard_deployment_wakes_total` | counter | `deployment`、`by` | 1.5.0：被喚醒的休眠部署，`by` 是 `request` 或 `person`（Start、Wake） |
+| `forgeyard_autoscale_total` | counter | `deployment`、`direction` | 1.5.0：自動調整加上（`up`）和排空後移除（`down`）的副本數 |
+
+模型部署的副本就緒時（1.5.0）：
+
+| 指標 | 類型 | 標籤 | 是什麼 |
+|---|---|---|---|
+| `forgeyard_replica_start_seconds` | histogram | `recipe`、`model` | 啟動花了多久：從 agent 開始啟動它（模型檔案、映像檔、引擎）到第一次健康檢查通過。agent 比 1.5.0 舊時只有引擎的部分（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)） |
 
 每次收集時從資料庫讀取：
 
 | 指標 | 標籤 | 是什麼 |
 |---|---|---|
 | `forgeyard_replicas` | `deployment`、`state` | 每個模型部署各狀態的副本數：`pending`、`starting`、`running`、`healthy`、`unhealthy`、`backoff`、`exited`、`failed`、`stopping`、`stopped` |
+| `forgeyard_deployment_replicas` | `deployment`、`kind` | 1.5.0：每個部署的副本數，`desired`（現在應該執行的副本數；停止或休眠時是 0）、`ready`、`draining`（自動調整正在移除的），以及開啟自動副本數時的 `wanted`（負載要求的數量，在範圍內） |
+| `forgeyard_deployment_load` | `deployment` | 1.5.0：開啟自動副本數時，最後一次取樣的處理中加上等待空位的請求數 |
 | `forgeyard_machines` | `status` | `online`、`offline` 和 `revoked` 的機器數 |
 | `forgeyard_machine_up` | `machine` | 機器的 agent 連線中時是 1，否則是 0 |
 | `forgeyard_gpu_memory_total_bytes`、`forgeyard_gpu_memory_free_bytes` | `machine`、`gpu` | 一張卡的記憶體和可用記憶體，依 agent 最近一次回報（`gpu`：它的編號） |
@@ -625,7 +639,7 @@ Playground 的 **Video** 面板使用 `/api/playground/videos`（`POST`、`GET`�
 | `forgeyard_budgets_reached` | `scope`、`threshold` | 這個月有幾個 `key`、`person` 和 `provider` 預算達到 `80` 或 `100` 百分比（絕不列出是哪些） |
 | `forgeyard_build_info` | `version` | 永遠是 1：伺服器的版本 |
 
-另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
+另外還有 `process_*`（伺服器的 CPU 時間、記憶體、開啟的檔案）。`model` 標籤是閘道有路由的服務名稱：請求一個沒有人提供的模型，會計為 `_unknown`，絕不會用用戶端送來的名稱；`recipe` 標籤是配方的名稱。沒有任何標籤包含 API 金鑰、金鑰的 id 或名稱、使用者或提示內容。伺服器重新啟動時計數器會從 0 開始。
 
 ## 應用程式（已淘汰）
 
@@ -767,8 +781,8 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 | 欄位 | 值 |
 |---|---|
-| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）和 `first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西）。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
-| `replicas` | 1 到 16 |
+| `params` | 要修改的參數：recipe 自己的（`context`、`concurrency`…）、`gpus`、`share`（`exclusive` 或 `vram`）、`vram`（每個裝置的記憶體，例如 `"20Gi"`）、`extra_args`（清單）、`first_answer_timeout`（秒，5 到 3,600；圖片和影片部署不適用；只改它不會重新啟動任何東西），（1.5.0）`sleep_when_idle`、`idle_minutes` 和 `wake_wait`（[閒置時休眠](#sleep-when-idle)），以及自動副本數的 `autoscale`、`min_replicas`、`max_replicas`、`autoscale_target`、`scale_up_seconds` 和 `scale_down_minutes`（[自動副本數](#automatic-replicas)）；修改這些不會重新啟動任何東西。只有送出的名稱會改變；送 `null` 的名稱會回到 recipe 的預設值（`vram`：回到估算值） |
+| `replicas` | 1 到 16。開啟自動副本數時（1.5.0），只能是它現在的數量（否則 422 `replicas_automatic`）：改 `min_replicas` 和 `max_replicas`（[自動副本數](#automatic-replicas)） |
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
 | `dry_run` | `true`：只檢查。回應內容相同，但沒有 `deployment`，也不會儲存任何東西 |
@@ -780,7 +794,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `estimate` | 新的估算 |
 | `placement` | 每個副本會放在哪裡，和部署時一樣；`previous` 標示留在原機器上的副本；獨占的模型只需要它那張卡一半以下的記憶體時，會有 `share_hint` |
 | `changes` | 每個會改變的參數、`replicas` 和 `machine_id`：`{name: {before, after}}`；沒有任何改變時是 `{}` |
-| `restart` | `rolling`（一次一個副本）、`all`（唯一的副本重新啟動）、`none`，或 `on_start`（已停止：啟動時才套用） |
+| `restart` | `rolling`（一次一個副本）、`all`（唯一的副本重新啟動）、`none`、`on_start`（已停止：啟動時才套用），或（1.5.0）`on_wake`（休眠中：喚醒時才套用） |
 | `restart_text` | 用一句話說明同一件事 |
 | `deployment` | 儲存後的部署（dry run 時沒有） |
 
@@ -794,6 +808,71 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 403 | | 不是管理員或操作員 |
 
 每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
+
+（1.5.0）每個部署（列表裡和單獨查詢時）還有 `last_start`：最近一次啟動花了多久，`{seconds, phases, source, at, replica}`，取自它的事件。`phases` 是 agent 分得出來的各部分：`model`、`waiting`、`image` 和 `engine`，加起來就是 `seconds`；`source` 是 `agent`，或是 `server`（agent 比 1.5.0 舊，由伺服器只量了引擎的部分）。1.5.0 之後還沒有副本就緒過時是 `null`（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)）。
+
+### 閒置時休眠
+
+1.5.0（[概念](concepts.md#sleep-when-idle)）。每個部署都有的三個參數，在部署時（`POST /api/deployments` 的 `params`）或修改時設定；它們由伺服器讀取，所以修改它們不會重新啟動任何東西：
+
+| 參數 | 值 |
+|---|---|
+| `sleep_when_idle` | `true` 開啟；`false`（或 `null`，或不送）關閉。預設關閉，1.5.0 之前建立的部署也一樣。只有開啟時才會留在 `params` 裡 |
+| `idle_minutes` | 沒有請求多少分鐘後休眠：1 到 1,440，不送時是 **30**。休眠關閉時也會保留，等開啟時使用 |
+| `wake_wait` | 請求等休眠中的模型喚醒多少秒，之後回應 503 `model_waking`：10 到 1,800，不送時是 **300** |
+
+其他值都是 422 `invalid_params`（`"yes"`、`1`、`0`、`1441`、`1.5`；`wake_wait` 的 `9` 或 `1801`）。
+
+休眠中的部署，它的 workload 的 `desired_state` 是 **`asleep`**，`status` 是 `asleep`（在 agent 確認之前是 `stopping`），和 `running`、`stopped` 並列；它的副本是 `stopped`。讀取 `desired_state` 的腳本應該把不認得的值當作沒有在執行。`GET /api/deployments` 和 `GET /api/deployments/{id}` 會給每個部署一個 `sleep` 物件：
+
+| 欄位 | 內容 |
+|---|---|
+| `on`、`idle_minutes`、`wake_wait` | 設定（沒有設定時是 30 分鐘和 300 秒） |
+| `asleep` | 它現在是否在休眠 |
+| `last_request_at` | 這台伺服器啟動以來看到的最後一個送給它的請求，或 `null` |
+| `since` | 它的閒置時間從什麼時候起算：最後一個請求、最後一次啟動或修改、副本變成就緒，或伺服器啟動的時間，取最晚的那個 |
+| `sleeps_at` | 如果沒人使用，它什麼時候會休眠（只在開啟休眠且正在執行時），每 30 秒檢查一次 |
+| `held_by` | 雖然可能已經閒置夠久，它現在為什麼不休眠：*a request is in flight*、*a replica is starting*、*an edit is restarting its replicas*、*a video is waiting or being made*、*a finished video is kept until …*；其他時候是 `null` |
+| `waking` | 請求（或 Wake now）喚醒了它、還沒有副本就緒時：`{since, by, waiting, expected_seconds}`：喚醒開始的時間、誰喚醒它（*a request (key laptop)*、*a request from the Playground (owner)*，或那個人的使用者名稱）、有多少請求在等它，以及預計啟動要多久（上次啟動的時間，沒有量過時是 30 秒）。其他時候是 `null`（記在這台伺服器的記憶體裡：重新啟動後是 `null`） |
+| `asleep_since` | 從什麼時候開始休眠（它的 *Asleep* 事件），或 `null` |
+| `wakes` | 過去 24 小時被喚醒的次數（依它的事件） |
+
+對休眠中的部署送 `POST /api/deployments/{id}/start` 會喚醒它（事件 *Woken by …*，以 `workload.started`（帶 `woken: true`）和 `deployment.started` 記入稽核紀錄）；`POST …/stop` 會讓它變成停止（事件 *Stopped by … (it was asleep)*）。進入休眠的事件是 *Asleep: no requests for N min; frees …*，不記入稽核紀錄。對休眠中的部署送 `POST …/try` 會回應 409 `model_asleep`。經過閘道的請求（包括 `POST /v1/videos`）會喚醒它：事件 *Woken by a request (key …)*（不記入稽核紀錄），然後等待就緒的副本、轉到金鑰可以用的雲端分層（`X-Forgeyard-Spilled: waking`），或回應 503 `cannot_wake` / `model_waking`（[錯誤](#errors)）。`/v1/models`、健康檢查和主控台的頁面不會喚醒它，已停止的部署也不會被喚醒。
+
+**降版：**比 1.5.0 舊的伺服器會把 `asleep` 當作停止：模型不會列出，請求回應 503 `no_ready_replica` *The deployment is stopped*，按 Start 會啟動它。
+
+### 自動副本數
+
+1.5.0（[概念](concepts.md#automatic-replicas)）。除了影片部署以外每個部署都有的參數，在部署時（`POST /api/deployments` 的 `params`）或修改時設定；它們由伺服器讀取，所以修改它們不會重新啟動任何東西：
+
+| 參數 | 值 |
+|---|---|
+| `autoscale` | `true` 開啟自動副本數；`false`（或 `null`，或不送）關閉。預設關閉，1.5.0 之前建立的部署也一樣。只有開啟時才會留在 `params` 裡。影片部署會拒絕它（422） |
+| `min_replicas` | 最少幾個副本：1 到 16，不送時是 **1**；只有 `sleep_when_idle` 開啟時可以是 0（這時只會透過休眠降到 0，醒著時至少 1 個） |
+| `max_replicas` | 最多幾個：1 到 16，不送時是 **2**；至少是 `min_replicas` |
+| `autoscale_target` | 一個副本承擔的負載，是它 `concurrency`（recipe 沒有時算 1）的百分比：20 到 100，不送時是 **80** |
+| `scale_up_seconds` | 負載要高於目標多久才多一個副本：10 到 600，不送時是 **60**。達到目標兩倍時是 10 秒 |
+| `scale_down_minutes` | 少一個副本也夠用要持續多久才移除一個：1 到 120，不送時是 **10** |
+
+`autoscale` 關閉時，`min_replicas`、`max_replicas` 和其他參數也會保留，等開啟時使用。其他值都是 422 `invalid_params`。開啟 `autoscale` 的部署會啟動 `min_replicas` 個副本（至少 1 個），不管 `replicas` 寫多少；開啟它或修改範圍的修改，會立刻把副本數調整進範圍內。開啟時，修改不能設定另一個 `replicas` 數字（422 `replicas_automatic`）。
+
+負載是正在它的副本上處理的請求（不含正在排空的副本），加上在閘道隊伍裡等它所在路由分層空位的請求（分層有好幾個部署時平分）和它的圖片佇列，由伺服器每 2 秒取樣一次。`scale_up_seconds` 內的平均值高於 `就緒副本數 × concurrency × autoscale_target %`，或 10 秒內的平均值至少是它的兩倍時，加一個副本；不會超過 `max_replicas`，只在沒有副本正在啟動時，而且只在現在有線上機器（固定機器時是那台）放得下時。上一次變動之後的 `scale_down_minutes` 內，平均值都不超過少一個副本在目標下能承擔的量、而且少一個也不會馬上又要多加一個時，移除一個；不會低於 `min_replicas`（至少 1）。移除的是最新的副本：閘道先停止送請求給它，等到它上面沒有處理中的請求（最多 30 分鐘），然後刪掉它那一列，由它的 agent 停止它。修改正在重新啟動副本、某個副本所在的機器離線，或部署啟動、被喚醒或修改後的 2 分鐘內，都不會變動。在休眠部署的喚醒隊伍裡等的請求不算進負載：喚醒本來就會啟動它的副本，等有副本就緒，它們會進到一般流程，在那裡計入。
+
+`GET /api/deployments` 和 `GET /api/deployments/{id}` 會給每個部署一個 `autoscale` 物件：
+
+| 欄位 | 內容 |
+|---|---|
+| `on`、`min`、`max`、`target`、`scale_up_seconds`、`scale_down_minutes` | 設定（沒有設定時是預設值） |
+| `capacity` | 它的 `concurrency`（沒有時是 1） |
+| `replicas`、`ready` | 它現在的副本數（沒有結束的）和就緒的副本數 |
+| `load`、`per_replica` | `scale_up_seconds` 內的平均負載，以及每個就緒（沒在排空）副本的負載；取樣前是 `null` |
+| `wanted` | 負載要求的副本數（在範圍內） |
+| `draining` | 正在排空的副本：`{replica, since, in_flight}`，或 `null` |
+| `room` | 想多加的那一個為什麼現在放不下（*Wants 3 replicas, room for 2: …*），或 `null` |
+| `paused` | 它現在為什麼不調整（*an edit is restarting its replicas*、*a replica's machine is offline*、*it was started, woken or changed less than 2 minutes ago*），或 `null` |
+| `last` | 這台伺服器做的最後一個決定 `{at, text}`，或 `null` |
+
+每個決定都是部署的一個事件（kind `scaled`）：*Scaled up to N: …*、*Wants N replicas, room for M: …*（放不下期間只記一次）、*Draining replica N: …*、*Kept replica N: …*、*Removed replica N after draining for … s*、*Asleep with N replicas (its minimum)*。它們不記入稽核紀錄。負載樣本、排空和決定都記在伺服器的記憶體裡：重新啟動後時間窗重新開始，進行中的排空不會移除任何副本。
 
 ## 透過 API 查看機器的模型快取
 
@@ -1015,6 +1094,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `replica-margin-low` | 警告 | 某張有副本在執行的顯示卡，剩餘空間少於 `VRAM_HEADROOM_MIB`（至少 256 MiB） |
 | `deployment-waiting` | 警告 | 某個副本等待機器已超過 15 分鐘 |
 | `deployment-could-share` | 說明 | 正在執行的獨占副本保留的記憶體不到 24 GiB 以上卡片的一半：改用 Share VRAM，其餘空間就能放其他模型 |
+| `deployment-idle-awake` | 說明 | 1.5.0：關閉 *Sleep when idle* 的執行中部署 3 天沒有請求（Usage 的最後一天、伺服器啟動後看到的請求，或從部署、啟動或修改起算），而且佔著 GPU 記憶體：要讓它閒置時休眠嗎？ |
+| `deployment-wakes-often` | 說明 | 1.5.0：開啟 *Sleep when idle* 的部署在過去 24 小時被喚醒超過 10 次，而且上次啟動超過一分鐘：把閒置時間調長 |
 | `extra-args-override` | 警告 | 部署的額外引擎參數重複了 Forgeyard 會設定的旗標（記憶體、上下文、位址、金鑰） |
 | `gated-model-no-token` | 提示 | 某個受限（gated）Hugging Face 模型的部署沒有自己的權杖，伺服器也沒有。下載被拒絕後會變成錯誤 |
 | `key-cloud-without-budget` | 警告 | 某把金鑰可以使用雲端（也包括透過伺服器的預設值），而且會用到某個供應商，卻沒有任何預算適用：金鑰、它的所屬個人和供應商都沒有預算 |
@@ -1116,6 +1197,8 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `vision`（1.4） | `cuda` | NVIDIA，compute capability 7.5 以上、驅動程式 580 以上（單張 GPU，依記憶體共用） | Forgeyard 自己的 `docker.io/tonyhuang1101/forgeyard-vision:1.4.4rc1-cuda`（torch +cu130） |
 | | `cpu` | x86_64 與 aarch64，在容器中，任何機器都行（AMD 機器也是：還沒有 ROCm 版） | `…/forgeyard-vision:1.4.4rc1`（linux/amd64 與 arm64） |
 
+`vllm` 和 `vllm-pooling`（1.5.0）宣告了 `engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`：vLLM 的編譯快取會在兩次啟動之間保留，放在副本所在機器上每個副本各自的目錄裡，所以重新啟動或被喚醒時會載入第一次啟動編譯好的結果（[在兩次啟動之間保留 vLLM 的編譯快取](how-to.md#keep-vllms-compile-cache-between-starts)）。自訂配方可以用 `enabled: false` 關閉它，或用 `enabled: true` 為其他引擎開啟它（只限容器 variant）。
+
 `vllm-pooling` 只有在序列分類模型（`…ForSequenceClassification`）只有一個輸出時才把它當 reranker 服務，和 vLLM 的判斷一樣：`config.json` 的 `id2label` 只有一項，或 `num_labels` 為 1（1.4.3，#147）。兩個以上標籤的是文字分類模型（任務 `classify`，1.4.4）：用 reranker 檢查或加入它會回 422 `cannot_inspect`，訊息列出它的標籤。語言模型型的 reranker（Qwen3-Reranker）不受影響。
 
 當作文字分類模型時（1.4.4，#144），`vllm-pooling` 接受 vLLM 0.32.0 原生支援、附分類頭的架構：`BertForSequenceClassification`、`RobertaForSequenceClassification`、`XLMRobertaForSequenceClassification`、`ModernBertForSequenceClassification`、`GteNewForSequenceClassification`、`GPT2ForSequenceClassification`、`JambaForSequenceClassification`、`LlamaBidirectionalForSequenceClassification`。vLLM 的 pooling runner 會自己為它們選 classify 任務（不需要參數）。加入時會被拒絕並說明原因（422 `cannot_inspect`）的有：只有一個輸出（reranker）、迴歸頭、零樣本（NLI）模型（標籤像 entailment、contradiction），以及其他架構（DeBERTa、DistilBERT、BART：1.5 的 transformers 引擎）。沒有 `config.json` 可讀的儲存庫（GGUF、ONNX）回 422 `not_a_text_classifier`。以其他種類加入的模型不能改成文字分類模型（它的標籤沒有被讀取：請重新加入），文字分類模型也不能改成 reranker。
@@ -1155,7 +1238,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `docker.io/tonyhuang1101/forgeyard` | 伺服器（`Dockerfile.server`） | linux/amd64、linux/arm64 |
 | `docker.io/tonyhuang1101/forgeyard-agent` | agent（`Dockerfile.agent`） | linux/amd64、linux/arm64（AMD 顯示卡只支援 amd64） |
 
-- **tag**：`1.4.5`（就是那個版本）、`1.4`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
+- **tag**：`1.5.0`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
 - **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。
@@ -1180,7 +1263,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 | `/etc/forgeyard/agent.toml` | agent 的設定 |
 | `/var/lib/forgeyard-agent/` | 憑據（`credential.json`，0600）、釘選的 CA（`server-ca.pem`）、副本的資料與紀錄 |
 | `/var/lib/forgeyard-agent-work/` | 每個行程副本各一個工作目錄 |
-| `/srv/forgeyard-models/` | 模型快取 |
+| `/srv/forgeyard-models/` | 模型快取；（1.5.0）其中的 `engine-cache/` 存放保留編譯快取的配方的引擎編譯快取 |
 | `/opt/forgeyard/` | agent 程式：它的 Python 環境和下載下來的 wheel |
 | `/usr/local/bin/forgeyard` | `forgeyard` 指令 |
 | `/etc/systemd/system/forgeyard-agent.service` | 服務（`KillMode=process`、`Restart=always`） |

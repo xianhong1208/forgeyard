@@ -5,7 +5,8 @@ process collector, never a library's.
 
 **Labels are bounded on purpose.** A model label is a served name the gateway has a route for (a request for a
 model nobody serves counts under `_unknown`, since the name comes from the client), an endpoint label one of the
-gateway's endpoints, a status the HTTP status code, a machine label the machine's name and a GPU label its index.
+gateway's endpoints, a status the HTTP status code, a machine label the machine's name, a GPU label its index and a
+recipe label a recipe's name.
 No metric carries an API key, a key id, a user name, a prompt or a provider's model id. As a last guard, a label
 that has seen MAX_VALUES different values already takes `_other`.
 
@@ -57,13 +58,33 @@ FIRST_BYTE = Histogram("forgeyard_gateway_time_to_first_byte_seconds", "Time fro
 TOKENS = Counter("forgeyard_gateway_tokens", "Tokens the engines and providers reported, per model; direction in: "
                  "the prompt, out: the completion", ("model", "direction"), registry=REGISTRY)
 SPILLS = Counter("forgeyard_gateway_spills", "Requests that left their route's first tier (spilled to the cloud or "
-                 "another tier), per model and reason: unavailable, busy, refused, too_long, budget",
+                 "another tier), per model and reason: unavailable, busy, waking, refused, too_long, budget",
                  ("model", "reason"), registry=REGISTRY)
 WAITED = Histogram("forgeyard_gateway_wait_seconds", "How long a request waited in line for a free local slot "
                    "(the route's Wait for a free local slot), per model; it then got a slot or moved on",
                    ("model",), buckets=WAIT_BUCKETS, registry=REGISTRY)
 
-SPILL_REASONS = frozenset({"unavailable", "busy", "refused", "too_long", "budget"})
+# Seconds a replica takes from the agent beginning its start to its first healthy answer (1.5.0, #37): seconds for
+# llama.cpp, about a minute for a small vLLM model, many minutes with a download or a large model.
+START_BUCKETS = (1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 45.0, 60.0, 90.0, 120.0, 180.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0)
+STARTS = Histogram("forgeyard_replica_start_seconds", "How long a model replica took to start: from its agent beginning "
+                   "the start (model files, image, engine) to its first healthy answer; per recipe and model (the "
+                   "deployment's served name). From an agent older than 1.5.0, only the engine's part",
+                   ("recipe", "model"), buckets=START_BUCKETS, registry=REGISTRY)
+
+WAKE_BUCKETS = (1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 180.0, 300.0, 600.0, 1800.0)   # a wake waits up to wake_wait
+WAKE_WAITED = Histogram("forgeyard_gateway_wake_wait_seconds", "How long a request waited for its model to wake "
+                        "(1.5.0: the deployment was asleep), per model; it was then served, or gave up",
+                        ("model",), buckets=WAKE_BUCKETS, registry=REGISTRY)
+WAKES = Counter("forgeyard_deployment_wakes", "Asleep deployments woken, per deployment and by whom (request: a "
+                "request to it; person: Start, Wake now)", ("deployment", "by"), registry=REGISTRY)
+
+# 1.5.0 (#37): automatic replicas (forgeyard/workloads/autoscale.py).
+AUTOSCALED = Counter("forgeyard_autoscale", "Replicas the autoscaler added (direction up) or removed after draining "
+                     "them (down), per deployment", ("deployment", "direction"), registry=REGISTRY)
+
+SPILL_REASONS = frozenset({"unavailable", "busy", "waking", "refused", "too_long", "budget"})
+WOKEN_BY = frozenset({"request", "person"})
 SOURCES = frozenset({"api", "console"})
 
 _seen: dict[str, set[str]] = {}
@@ -123,6 +144,38 @@ def waited(line_key: str, seconds: float) -> None:
         log.exception("Counting a wait for /metrics failed")
 
 
+def replica_started(recipe: Optional[str], model: Optional[str], seconds: float) -> None:
+    """A replica of the deployment serving `model` with `recipe` became ready after `seconds` (1.5.0)."""
+    try:
+        STARTS.labels(bounded("recipe", recipe), bounded("model", model)).observe(max(0.0, seconds))
+    except Exception:
+        log.exception("Counting a replica start for /metrics failed")
+
+
+def wake_waited(line_key: str, seconds: float) -> None:
+    """A request left the wake line `line_key` ("<served name>#<tier>") after `seconds` (1.5.0)."""
+    try:
+        WAKE_WAITED.labels(bounded("model", line_key.rsplit("#", 1)[0])).observe(max(0.0, seconds))
+    except Exception:
+        log.exception("Counting a wake wait for /metrics failed")
+
+
+def woken(deployment: str, by: str) -> None:
+    """An asleep deployment was woken (1.5.0), by a request or a person."""
+    try:
+        WAKES.labels(bounded("deployment", deployment), bounded("by", by, WOKEN_BY)).inc()
+    except Exception:
+        log.exception("Counting a wake for /metrics failed")
+
+
+def scaled(deployment: str, direction: str) -> None:
+    """The autoscaler added (up) or removed (down) one replica of `deployment`."""
+    try:
+        AUTOSCALED.labels(bounded("deployment", deployment), bounded("direction", direction, ("up", "down"))).inc()
+    except Exception:
+        log.exception("Counting an autoscaling change for /metrics failed")
+
+
 # ------------------------------------------------------------------ the state, read at scrape time
 REPLICA_STATES = ("pending", "starting", "running", "healthy", "unhealthy", "backoff", "exited", "failed",
                   "stopping", "stopped")
@@ -140,7 +193,7 @@ class _State(Collector):
         families = []
         db = new_session()
         try:
-            for part in (_build, _replicas, _machines, _memory, _budgets):
+            for part in (_build, _replicas, _deployment_replicas, _machines, _memory, _budgets):
                 try:
                     families.extend(part(db))
                 except Exception:  # one part failing (a locked database) leaves the others
@@ -176,6 +229,43 @@ def _replicas(db):
     for name, state, n in rows:
         g.add_metric((name, state if state in REPLICA_STATES else OTHER), n)
     return [g]
+
+
+def _deployment_replicas(db):
+    """1.5.0 (#37): per deployment, its replicas desired (rows not ended), ready and draining, and (automatic
+    replicas) what the load asks for and the load itself."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from forgeyard.db import Deployment, Replica, Workload
+    from forgeyard.workloads import autoscale
+
+    g = GaugeMetricFamily("forgeyard_deployment_replicas", "Replicas of each model deployment: desired (the "
+                          "replicas it should run now), ready (taking requests), draining (being removed by the "
+                          "autoscaler) and wanted (what its load asks for, within its bounds; automatic replicas "
+                          "only)", labels=("deployment", "kind"))
+    load = GaugeMetricFamily("forgeyard_deployment_load", "Requests in flight on a deployment's replicas plus those "
+                             "waiting for a slot, as the autoscaler last sampled them (automatic replicas only)",
+                             labels=("deployment",))
+    draining = autoscale.autoscaler.draining()
+    loads = autoscale.autoscaler.loads()
+    rows = db.scalars(select(Deployment).options(selectinload(Deployment.workload).selectinload(Workload.replicas)
+                                                 .selectinload(Replica.node)).order_by(Deployment.name)).all()
+    for d in rows:
+        w = d.workload
+        if w is None:
+            continue
+        live = [r for r in w.replicas if not r.final]
+        desired = len(live) if w.desired_state == "running" else 0
+        g.add_metric((d.name, "desired"), desired)
+        g.add_metric((d.name, "ready"), sum(1 for r in live if autoscale._ready(r, w)))
+        g.add_metric((d.name, "draining"), 1 if d.id in draining else 0)
+        wanted = autoscale.autoscaler.status(d)["wanted"]   # None unless automatic replicas are on
+        if wanted is not None:
+            g.add_metric((d.name, "wanted"), wanted)
+        if d.id in loads:
+            load.add_metric((d.name,), loads[d.id])
+    return [g, load]
 
 
 def _machines(db):
@@ -283,17 +373,23 @@ def _budget_limits(db) -> list[tuple[str, int, int]]:
 
 
 def _waiting():
-    from forgeyard.gateway import waiting
+    from forgeyard.gateway import waiting, waking
 
-    g = GaugeMetricFamily("forgeyard_gateway_waiting", "Requests waiting in line for a free local slot now, per "
-                          "model", labels=("model",))
-    per: dict[str, int] = {}
-    for key, n in waiting.lengths().items():
-        name = bounded("model", key.rsplit("#", 1)[0])
-        per[name] = per.get(name, 0) + n
-    for name, n in sorted(per.items()):
-        g.add_metric((name,), n)
-    return [g]
+    out = []
+    for metric, text, lengths in (
+            ("forgeyard_gateway_waiting", "Requests waiting in line for a free local slot now, per model",
+             waiting.lengths()),
+            ("forgeyard_gateway_waking", "Requests waiting for their model to wake now (1.5.0), per model",
+             waking.lengths())):
+        g = GaugeMetricFamily(metric, text, labels=("model",))
+        per: dict[str, int] = {}
+        for key, n in lengths.items():
+            name = bounded("model", key.rsplit("#", 1)[0])
+            per[name] = per.get(name, 0) + n
+        for name, n in sorted(per.items()):
+            g.add_metric((name,), n)
+        out.append(g)
+    return out
 
 
 REGISTRY.register(_State())

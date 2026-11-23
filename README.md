@@ -27,17 +27,24 @@ them where they fit, and every program calls them at `/v1` with an API key.
   them; admins can also upload an image file to a machine, or copy an image from another machine.
   An agent older than the server says so, and its machine's page shows the exact command that updates it.
 - **Memory estimates before you deploy.** Forgeyard reads a model's details without downloading it,
-  shows the memory one copy needs and where it fits, and lets small models share a GPU.
+  shows the memory one copy needs and where it fits, and lets small models share a GPU. A model used now
+  and then can sleep when idle and give its memory back (1.5.0): the next request wakes it and waits for it.
 - **A page per model and per engine.** A catalog model's page shows which machines have it cached and
   where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
   machines already have its image or program.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed
-  again on machines that fit.
+  again on machines that fit. Each start of a model is timed, part by part (model files, image,
+  engine), and a starting replica is checked every second, so it serves as soon as it is ready.
+  With automatic replicas (1.5.0) a deployment adds a replica when the gateway sees it busy, where
+  one fits, and drains one after quiet minutes.
 - **Local first, cloud when needed.** A request spills to OpenAI, Anthropic, Gemini, Azure or
   OpenRouter only when local replicas are busy or down, only for keys allowed to, within monthly
   budgets.
+- **GPUs used only while needed (1.5.0).** A deployment can sleep when nobody calls it and give its
+  memory back; the next request wakes it and waits for the answer (or goes to the cloud meanwhile, when
+  the key may), and a model that cannot wake says why at once.
 - **More than chat.** Images, audio and video in chat, embeddings and rerank, text classification at
   `/v1/classify` (1.4.4), speech to text, text to speech, image generation, video generation as jobs, and
   vision models: object detection (1.4.4: also detectors that find what you name), segmentation, depth and
@@ -50,6 +57,15 @@ them where they fit, and every program calls them at `/v1` with an API key.
   they are; the agent checks a loaded image against the pinned one before it runs it. Placement
   prefers machines that already have the model and engine, avoids one that could not reach Hugging
   Face, GitHub or a registry, and moves a replica stuck on such a download to a machine that can.
+
+## What's new in 1.5
+
+1.5.0 uses GPUs only while they are needed. A deployment can **sleep when idle** and give its memory back; the
+next request wakes it, once however many arrive, and waits for it (a key that may use the cloud is served there
+meanwhile). **Automatic replicas** follow the load the gateway sees, and a replica that goes is drained first.
+Each start is timed, and vLLM keeps its compile cache between starts, so a restart or a wake takes about half as
+long. Sleep and automatic replicas are off until you turn them on; update the agents after the server. Every
+change is in the [CHANGELOG](CHANGELOG.md).
 
 ## What's new in 1.4
 
@@ -82,7 +98,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.5
+  docker.io/tonyhuang1101/forgeyard:1.5.0
 sudo docker logs forgeyard
 ```
 
@@ -128,7 +144,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:

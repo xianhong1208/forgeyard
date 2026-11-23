@@ -375,6 +375,24 @@ makes it take its work at once. When the agent already runs the server's version
 to restart it and look at its log (`journalctl -u forgeyard-agent`, or `docker logs forgeyard-agent`). **Setup health** flags agents older than the server, and replicas
 that waited for a machine for more than 15 minutes.
 
+## Automatic replicas do not add a replica
+
+The deployment's page says why under **Replicas**:
+
+- *Wants 3 replicas, room for 2: …*: one more does not fit anywhere now; each machine's reason follows, as for a
+  deploy ([A deployment does not fit](#a-deployment-does-not-fit)). Free memory on a machine, raise *Most
+  replicas* only where there is room, or unpin the deployment. Forgeyard does not add a replica that would wait.
+- *Not scaling now: …*: an edit restarts its replicas, a replica's machine is offline, or it was started, woken
+  or changed less than 2 minutes ago. It goes on by itself.
+- Nothing said, and the load stays below the target: the load counts requests in flight and waiting in the
+  gateway's line against *Concurrent requests* × the target (80 %). With *Concurrent requests* 32 a replica takes
+  25.6 requests before one more is wanted; lower *Concurrent requests* or the target under **Advanced**.
+- A replica is still starting: only one starts at a time; the next one is considered once it is ready.
+- It is at *Most replicas*, or it is a video deployment (never scaled automatically).
+
+A replica that should go stays while it is **draining**: it finishes the requests it runs first (at most 30
+minutes). If the load rises again it is kept (*Kept replica 1: …* in the events).
+
 ## A replica waits: no free host port
 
 **You see:** a replica is not placed, and the deployment or app page says *Cannot be placed: gpu-02: no free
@@ -566,6 +584,12 @@ locked; ask an admin to change them.
 `no_ready_replica`: the model exists, but none of its replicas is ready: still downloading or
 starting, stopped, or its machine is offline. The message lists each replica's state. Look at the
 deployment's page; see also [A model is listed but answers 503](#a-model-is-listed-but-answers-503).
+
+`model_waking` (1.5.0): the deployment sleeps when idle; the request woke it, but it was not ready within its
+`wake_wait`. Retry after `Retry-After`; if it keeps happening, raise `wake_wait` (and the client's timeout), give
+the route a cloud tier, or turn *Sleep when idle* off. `cannot_wake`: it cannot start now, for the reason given (no
+room on any machine, its pinned machine offline, its engine failing): see the deployment's events
+([Sleep when idle](concepts.md#sleep-when-idle)).
 
 Others: `404 model_not_found` (no model by that name for this key: see `/v1/models` and
 [A model is missing from /v1/models](#a-model-is-missing-from-v1models)), `502` (a replica could not be

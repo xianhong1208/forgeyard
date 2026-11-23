@@ -26,6 +26,7 @@ from forgeyard import __version__, audit
 from forgeyard.api.deps import fail
 from forgeyard.config import get_settings
 from forgeyard.db import Node, get_db, new_session
+from forgeyard.gateway import waking
 from forgeyard.machines import store
 from forgeyard.machines.hub import Connection, hub
 from forgeyard.machines.messages import (CacheRemovedIn, CertRequestIn, GpuCheckIn, HeartbeatIn, HelloIn, ImageListedIn, ImageLoadedIn,
@@ -248,6 +249,7 @@ def _status(db: DbSession, node_id: int, msg: StatusIn) -> Optional[bool]:
         return None
     changed = wstate.apply_status(db, node, msg)
     db.commit()
+    waking.changed(db.info.pop("ready_workloads", ()))  # 1.5.0: requests waiting for a wake look at once
     if changed:  # a replica finished (its resources are free for what is waiting) or moves elsewhere
         placement.place_and_poke(db)
         hub.poke(node_id)  # its agent drops a replica that was taken off this machine

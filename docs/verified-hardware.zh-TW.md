@@ -12,6 +12,8 @@
   在那裡無法執行的檢查（例如共用的顯示卡上可用記憶體不夠）會被跳過，絕不算成通過。執行完會移除它建立的東西。
 - **[`scripts/accept_vision.py`](../scripts/accept_vision.py)**，視覺模型：每個模型都以內建的 `vision` 配方部署，用一張已知的照片呼叫
   `/v1/vision/*`，再檢查各種拒絕情況與它記錄的用量。
+- **[`scripts/accept_scale.py`](../scripts/accept_scale.py)**（1.5.0），閒置時休眠、喚醒和自動副本數：模型休眠並釋放記憶體，請求只會喚醒它一次，
+  允許外溢的金鑰在這段時間由雲端服務，負載會增加一個副本，而在它上面的串流會在排空時完整結束。它也是 `accept_all.py` 的 `scale` 群組。
 - 其他 `scripts/accept_*.py` 腳本更深入地檢查單一功能（對話中的圖片、音訊與影片；文字轉語音；圖片與影片生成）；
   [docs/development.zh-TW.md](development.zh-TW.md) 列出了它們。
 
@@ -31,6 +33,10 @@
 
 | 版本 | 執行內容 | 機器 | 通過 | 失敗 |
 |---|---|---|---|---|
+| 1.5.0 | 1.5.0rc1 的完整回歸測試（`accept_all.py`，包括新的 `scale` 群組；15 項略過） | A100 主機、x86-64 CPU 機器、Gemini | 488 | 0 |
+| 1.5.0 | 1.5.0rc1 上的閒置休眠、喚醒與自動調整副本數（`accept_scale.py`），自動調整副本數在兩台 CPU 機器上；1 項略過 | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | 73 | 0 |
+| 1.5.0 | 開發期間：同上（`accept_scale.py`；1 項略過：等待喚醒逾時的檢查，CPU 模型 3 秒就啟動好，比最短的等待時間還快；vLLM 模型涵蓋了這一項） | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | 73 | 0 |
+| 1.5.0 | 開發期間：vLLM 0.32 在啟動之間保留編譯快取（#232），重新啟動時引擎的啟動時間，各取 3 或 4 次的平均：`vllm` 上的 Qwen3-0.6B 沒有快取 114 秒、有快取 57 秒；`vllm-pooling` 上的文字分類模型（xlm-roberta-language-detection）為 78 秒與 53 秒 | A100 | 2 | 0 |
 | 1.4.5 | 1.4.5rc1 的完整回歸測試（`accept_all.py`，13 項略過），兩台機器都用 rc 版 agent，所以閘道以 TLS 連到每個副本 | A100 主機、x86-64 CPU 機器、Gemini | 432 | 0 |
 | 1.4.5 | 開發期間：閘道與 agent supervisor 拆成較小的部分後的完整回歸測試（#173；29 項略過） | A100 主機、x86-64 CPU 機器、Gemini | 380 | 0 |
 | 1.4.5 | 開發期間：vLLM 0.32 上 16k context 的 Gemma 4 12B，KV cache 估算對照引擎自己的數字（#201）：估算 2.091 GiB，vLLM 2.09 GiB | A100 | 1 | 0 |
@@ -41,6 +47,6 @@
 | 1.4.3 | 完整回歸測試（`accept_all.py`） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 303 | 0 |
 | 1.4.3 | 網頁主控台（`accept_all.py` 的 console 群組） | 同上 | 31 | 0 |
 
-Ryzen AI MAX+ 395 那台機器沒有參加 1.4.5 的這些執行。
+Ryzen AI MAX+ 395 那台機器沒有參加 1.4.5 與 1.5.0 的這些執行。
 
 歡迎回報在其他機器上的結果：見 [CONTRIBUTING.md](../CONTRIBUTING.md)（英文）。

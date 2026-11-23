@@ -87,9 +87,13 @@ class Line:
             except ValueError:
                 return
             nxt = self.waiting[0] if was_first and self.waiting else None
-        metrics.waited(self.key, time.monotonic() - w.since)
+        self.waited(time.monotonic() - w.since)
         if nxt is not None:
             nxt.wake()
+
+    def waited(self, seconds: float) -> None:
+        """/metrics: a request left this line after `seconds` (the wake line, 1.5.0, counts its own)."""
+        metrics.waited(self.key, seconds)
 
     def wake_first(self) -> None:
         with self._lock:

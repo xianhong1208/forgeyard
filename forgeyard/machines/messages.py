@@ -99,6 +99,30 @@ def _download(value: Any) -> Optional[dict]:
     return out
 
 
+START_PHASES = ("model", "waiting", "image", "engine")
+MAX_START_SECONDS = 7 * 86400
+
+
+def _seconds(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return round(value, 1) if 0 <= value <= MAX_START_SECONDS else None
+
+
+def _start(value: Any) -> Optional[dict]:
+    """1.5.0 ("start_times"): {"seconds": total, "phases": {model|waiting|image|engine: seconds}}, each between 0 and
+    a week; anything else is dropped (a start the server then measures itself)."""
+    if not isinstance(value, dict):
+        return None
+    total = _seconds(value.get("seconds"))
+    if total is None:
+        return None
+    raw = value.get("phases") if isinstance(value.get("phases"), dict) else {}
+    phases = {k: v for k in START_PHASES if (v := _seconds(raw.get(k))) is not None}
+    return {"seconds": total, "phases": phases}
+
+
 _ENGINE_ID = re.compile(r"^[0-9a-f]{16}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -478,6 +502,8 @@ class ReplicaStatusIn(_Msg):
     log_tail: Annotated[Optional[str], BeforeValidator(_last(16384))] = None
     # M3: a model or engine being downloaded before the replica starts.
     download: Annotated[Optional[dict], BeforeValidator(_download)] = None
+    # 1.5.0 ("start_times"): how long the start that made it ready took, once it is.
+    start: Annotated[Optional[dict], BeforeValidator(_start)] = None
 
 
 class DownloadStatusIn(_Msg):

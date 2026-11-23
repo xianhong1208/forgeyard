@@ -166,7 +166,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -208,7 +208,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -223,7 +223,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0 inventory
 ```
 
 ### CPU only
@@ -237,7 +237,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 ### Why these options
@@ -270,8 +270,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.5 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -290,18 +290,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.4.5 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.0 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.4.5`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.5.0`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -315,7 +315,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.0
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -442,8 +442,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.4.5 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -1036,6 +1036,99 @@ the usual rules.
 
 From a script: `PATCH /api/deployments/{id}` ([reference](reference.md#change-a-deployment-through-the-api)).
 
+## See how long a model takes to start
+
+Each time a replica of a deployment becomes ready, the deployment's events say how long that start
+took and where the time went, such as *Replica 0 on gpu-01: ready in 74.2 s (model 0.3 s, image
+0.1 s, engine 73.8 s)*:
+
+- `model`: checking the model's files in the machine's model cache, or downloading them (and a
+  process engine's archive);
+- `waiting`: waiting for another replica to finish loading on a GPU they share;
+- `image`: checking the engine's image, or pulling it;
+- `engine`: from launching the engine to its first healthy answer.
+
+The parts add up to the total. The same start is `last_start` in `GET /api/deployments/{id}` and in
+the list ([reference](reference.md#change-a-deployment-through-the-api)), and
+`forgeyard_replica_start_seconds` in `/metrics` ([Metrics](reference.md#metrics)). With an agent older
+than 1.5.0 the server can only measure the engine's part, and the event says *measured by the
+server*: [update the agent](#update-an-agent) to see the rest.
+
+While a replica starts, a 1.5.0 agent checks its health every second instead of every *interval* of
+its recipe (10 s for vLLM), so a model that is ready is used within a second, not up to 10 s later.
+It does so only during the recipe's start period, where failed checks do not count, and only until
+the first healthy answer; afterwards the checks run at the recipe's interval, as before, so a replica
+is never called unhealthy sooner than before.
+
+### Keep vLLM's compile cache between starts
+
+At every start vLLM compiles the model (torch.compile, and Inductor and Triton compile its kernels)
+into a directory inside its container, which would go with the container. Since 1.5.0 the `vllm` and
+`vllm-pooling` recipes keep that directory on the machine (`engine_cache: {env: VLLM_CACHE_ROOT,
+enabled: true}`), so only a replica's first start compiles; its next starts, a wake after
+[sleeping](#let-a-deployment-sleep-when-nobody-uses-it) among them, load what it compiled. Measured on
+an A100 with Qwen3-0.6B: the first start took 118 s either way, and a restart 114 s without the cache
+and 57 s with it, the same answers both ways; the directory held 44 MiB. You see it in a deployment's
+events: the `engine` part of *ready in …* after a restart.
+
+Nothing needs to be done to use it. To start without it (to rule it out while chasing a problem, say),
+add an engine in **Models → Engines** → **Add an engine**, start from the built-in `vllm`, name it (for
+example `vllm-nocache`), change its `engine_cache` line to `enabled: false` and deploy with it. Turning
+it on or off never restarts a running replica: it applies from the replica's next start.
+
+Each replica gets a directory of its own on its machine, `<model cache>/engine-cache/<key>`, mounted
+writable at `/forgeyard/engine-cache` with `VLLM_CACHE_ROOT` pointing at it; no other deployment or
+replica uses it. vLLM keeps what it compiles under a hash of the model, the settings that change the
+graph, its own code and the compiler, so a changed parameter compiles anew instead of loading a wrong
+graph. The directory goes when the deployment is deleted (or its recipe stops keeping one), and a
+replica that starts with a new image (a new recipe version) loses its older directory. It needs a
+1.5.0 agent with a model cache and a container engine; process variants, and replicas on older agents,
+start as before. An image that does not run as root cannot write to the directory.
+
+## Let a deployment sleep when nobody uses it
+
+A model that is used now and then (one you try in the evening, a big model for a weekly job) can give its GPU
+memory back while nobody calls it ([Sleep when idle](concepts.md#sleep-when-idle)). It is off unless you turn it
+on, per deployment.
+
+1. Turn it on in the form: **Serving → Deploy a model**, or **Edit** on a deployment's page. Under *When not in use*
+   tick **Sleep when idle** and keep or change **Idle minutes** (30 by default, 1 to 1,440); under **Advanced**,
+   **Wake wait** is how long a request waits for it to wake (300 seconds by default, 10 to 1,800). Beside the
+   setting the form says how long the last start took (on the deploy form: the last start of another deployment of
+   the same model and engine), which is about how long the first request after a sleep waits. Saving only these
+   restarts nothing. From a script: `PATCH /api/deployments/{id}` with
+   `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}` (admins and operators; leave `idle_minutes` out for
+   30 minutes; add `"wake_wait": 120` for requests to wait at most 2 minutes for it to wake instead of 5); a deploy
+   takes the same parameters.
+2. The deployment's page has a *When not in use* card: the setting, what it is doing now (*sleeps in 18 min unless a
+   request comes*, or what keeps it awake: a request in flight, a replica starting…), the last request, the last
+   start time and how often it was woken in the last 24 hours.
+3. After the idle time without a request its replicas stop. **Serving** shows it **Asleep** (a moon), with *holds
+   nothing* and the machine it wakes on; its page says since when, and its events say *Asleep: no requests for 30
+   min; frees …*. **Machines** names it under the machine it would run on (*qwen3-4b asleep here (14.4 GiB on GPU
+   #4 when awake)*): that memory is free for others meanwhile. The model stays in `/v1/models`; the machine keeps
+   the model files and the engine image.
+4. The next request wakes it: it waits until the model is ready, up to the wake wait, and is answered then (a key
+   that may use the route's cloud tier is served there meanwhile). Its events say *Woken by a request (key …)*. Or
+   wake it yourself with **Wake now** on its page or in the **Playground**, where an asleep model stays in the
+   picker with the moon (`POST /api/deployments/{id}/start`); requests that arrive while it starts wait for it.
+   Until it is ready Serving shows **Waking** with the time since the wake, and the Playground, which simply sends
+   your message, says *Waking the model (about 74 s)…* while it waits. If it cannot wake (no room, its machine
+   offline, its engine failing) requests get 503 `cannot_wake` with the reason.
+5. **Stop** on an asleep deployment stops it for good: it leaves `/v1/models` until someone starts it.
+
+The setup advisor helps with both directions: *had no requests for 3 days: let it sleep when idle?* for a
+deployment that holds GPU memory nobody uses, and *woke 11 times in a day: raise its idle time* for one that
+sleeps between the requests it gets and takes over a minute to start ([Setup health](reference.md#setup-health-checks)).
+
+Choose the idle time by how long the model takes to start: a llama.cpp model is ready in seconds, a large vLLM
+model can take minutes, so give that one an idle time well above its start (the default 30 minutes is). While it
+sleeps its memory is free for others: on a shared card something else may take it, and the model then starts on
+another machine that has room, or waits.
+
+To check sleeping and waking on your own machines, run `scripts/accept_scale.py`
+([Check sleep, waking and automatic replicas](#check-sleep-waking-and-automatic-replicas)).
+
 ## When a machine stays offline
 
 A machine is *offline* once nothing has been heard from it for 30 seconds (`AGENT_OFFLINE_SECONDS`). From then on:
@@ -1062,6 +1155,36 @@ starts again from its next heartbeat. After the server itself restarts, every ma
 agent reconnects, so the 10 minutes count from the server's start. Set `AGENT_OFFLINE_MOVE_SECONDS=0` to never
 move replicas. Apps (deprecated) follow the same rules, except that a task stays where it is: it may still be
 running there, and running it again elsewhere could do its work twice.
+
+## Let the number of replicas follow the load
+
+A deployment that is busy at some hours and quiet at others can run more replicas only while it needs them
+([Automatic replicas](concepts.md#automatic-replicas)). It is off unless you turn it on, per deployment.
+
+1. Open the deployment on **Serving**, choose **Edit** (or deploy a new one), and set **Replicas** to **Automatic,
+   by load**. Set the fewest and the most (1 and 2 unless you change them; up to 16). Choose **Save**: nothing
+   restarts. A number outside the new bounds is brought into them at once (a replica more, or fewer).
+   - From a script: `PATCH /api/deployments/{id}` with
+     `{"params": {"autoscale": true, "min_replicas": 1, "max_replicas": 4}}`
+     ([reference](reference.md#automatic-replicas)).
+2. Set *Concurrent requests* to what one replica should take at once (the recipe's default is a good start): the
+   load is counted against it, at 80 % unless you change *Target load per replica* under **Advanced**.
+3. Watch the deployment's page: under **Replicas** it says *Automatic, 1 to 4 · 2 now*, the load against the target,
+   a replica being drained and why one more does not fit; its events list every decision.
+
+Before you rely on it:
+
+- **Room:** a replica is added only where it fits now. On a shared card, keep enough memory free, or pin the
+  deployment to a machine that has it. Two replicas of one deployment go on different machines when they can.
+- **Starting takes time:** the new replica helps only once it is ready (seconds for llama.cpp, a minute or more for
+  vLLM). Meanwhile requests wait in the line, and a key with a cloud tier may spill to it, as before.
+- **Removing waits for streams:** the replica removed takes no new requests and finishes the ones it runs, however
+  long, for up to 30 minutes; then it is removed anyway.
+- To go back to a fixed number, set **Replicas** to **Fixed number** (`{"params": {"autoscale": null}}` and a
+  `replicas` number from a script); the deployment keeps the replicas it has until you change the number.
+
+To see a replica added under load and drained on your own machines, run `scripts/accept_scale.py`
+([Check sleep, waking and automatic replicas](#check-sleep-waking-and-automatic-replicas)).
 
 ## Restrict GPUs on a shared machine
 
@@ -1190,7 +1313,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.5
+  docker.io/tonyhuang1101/forgeyard:1.5.0
 sudo docker logs forgeyard
 ```
 
@@ -1224,7 +1347,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.5 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1233,7 +1356,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.4.5 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1242,23 +1365,23 @@ As with any backup, keep `secret.key` apart from the database ([why](#back-up-an
 volume keeps everything, and database changes run on start:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard:1.5.0
+sudo docker pull docker.io/tonyhuang1101/forgeyard:1.6.0
 sudo docker rm -f forgeyard
 sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.0
+  docker.io/tonyhuang1101/forgeyard:1.6.0
 ```
 
-`1.5.0` is exactly that release, `1.5` follows its newest patch release and `latest` the newest
+`1.6.0` is exactly that release, `1.6` follows its newest patch release and `latest` the newest
 release. Prefer an exact version: the agents' commands use the server's version, so upgrade them
 right after it ([how](#upgrade-the-server-and-the-agents)).
 
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.4.5
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.0
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1266,7 +1389,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.4.5 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.0 .`
 
 ## Run the server as a service
 
@@ -1356,7 +1479,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.4.5 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1375,7 +1498,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.0
    ```
 
    On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,
@@ -1462,6 +1585,7 @@ saying so. The groups, in the order they run:
 | `vision` | detection, segmentation and depth models with the vision recipe: the results, refusals, keys and usage |
 | `relay` | models through the server: with the CPU machine's **Internet access for downloads** set to **Always through the server**, **Download to…** of a small GGUF (26 MB) arrives through the server; then a second machine (`--relay-second-machine`, default the second CPU machine, else the GPU machine) gets it from the first machine's cache. Both machines' setting goes back, and the model leaves their caches |
 | `images` | on a machine with Docker or Podman (`--engine-machine`, default the GPU machine): its engine images; an image file of a few KB that the script builds is uploaded, copied to a second machine that takes images (`--second-engine-machine`), and removed with **Remove engine image** (a recipe names it for a few seconds, since only images a recipe names may be removed) |
+| `scale` | sleep when idle, waking (by a request, **Wake now**, the Playground), spill while waking, `model_waking`, `cannot_wake`, **Stop**, automatic replicas with draining, start times and their metrics ([below](#check-sleep-waking-and-automatic-replicas)) |
 | `console` | every main page as an admin and as a plain user, at 1440 and 390 px: it loads, names itself in the tab, has no errors and no sideways scroll |
 
 `--only gateway,cloud` or `--skip console` choose groups; `gateway` and `cloud` deploy the models
@@ -1480,7 +1604,7 @@ What to know before you run it:
   card has the memory free, is skipped after `--place-timeout` seconds (5 minutes) with the server's
   reason (`Cannot be placed: GPU #4 has 1.8 GiB available, needs 3 GiB`), instead of waiting for
   `--timeout` (40 minutes, which stays the limit for downloads and starts). Before each group that
-  deploys on the GPU machine (`tts`, `img`, `video`, `passthrough`, `vision`), the run stops what its
+  deploys on the GPU machine (`tts`, `img`, `video`, `passthrough`, `vision`, `scale`), the run stops what its
   earlier groups left on a GPU and no later group needs, and removes it (the `models` group's
   deployments are only stopped: the console group shows one; the speech-to-text model stays while
   `tts` may use it), so each group has the run's share of the card to itself. The report's notes list
@@ -1507,6 +1631,69 @@ What to know before you run it:
   own certificate or `TLS=off`, point `FORGEYARD_REPLICA_CA` at the server's `data/tls/ca.crt`. Without any CA the
   calls still run, and the certificate checks are skipped. Only a port that cannot be reached at all is skipped as
   another network's; one that closes the connection or shows a wrong certificate fails.
+
+### Check sleep, waking and automatic replicas
+
+`scripts/accept_scale.py` checks 1.5's [Sleep when idle](concepts.md#sleep-when-idle) and
+[Automatic replicas](concepts.md#automatic-replicas) on your own server and machines. It is also the `scale` group
+of `accept_all.py`, with the same options and the same report:
+
+```bash
+FORGEYARD_PASSWORD='…' python3 scripts/accept_scale.py --server https://192.168.1.20:7860 \
+  --ca forgeyard-ca.pem --user admin \
+  --cpu-machine cpu-01 --second-cpu-machine cpu-02 --gpu-machine gpu-01 \
+  --cloud-provider openai --out accept-scale.json
+```
+
+It deploys Qwen3-1.7B GGUF on llama.cpp on the CPU machine, with **Sleep when idle** and an idle time of 1 minute
+(`--scale-idle-minutes`), and checks, numbered as in its report:
+
+1. **It goes asleep:** its replicas stop and their port no longer answers, its reservation on the machine is freed
+   (`/metrics`, against what the machine's other replicas hold), `/v1/models` still lists it without waking it, and
+   the model stays in the machine's cache.
+2. **A request wakes it, once:** 20 requests at once (`--scale-parallel`) give one wake (one *Woken by a request*
+   event, `forgeyard_deployment_wakes_total{by="request"}` one more) and are all answered.
+3. **Wake now** (Start) and a Playground request wake it too, and the events say who did.
+4. **Spill while waking**, with `--cloud-provider` only: the provider becomes tier 1 of the model's route; a key
+   that may spill is answered by the cloud at once (`X-Forgeyard-Spilled: waking`, the one request that reaches the
+   provider), a structured-output request with the same key waits and is answered locally, and once the model is
+   ready the key is served locally again.
+5. **A short wait:** with *Wait while it wakes* at 10 s (`--scale-wake-wait`), a request gets 503 `model_waking`
+   with a `Retry-After` of at least 5 s and at most the last start, and the wake carries on. Only a model that starts
+   slower than that can show it: a llama.cpp model on a CPU is ready in seconds, so there the step is skipped, saying
+   so. With `--gpu-machine` the run also deploys Qwen3-0.6B on vLLM there and checks steps 1, 2 and 5 on it.
+6. **Cannot wake**, only when you name a machine whose agent the run may stop: `--stoppable-agent cpu-01` with
+   `--agent-stop` and `--agent-start`, two shell commands run on the computer where the script runs (the start
+   command must return at once, leaving the agent running). While the model sleeps, pinned to that machine, the
+   agent is stopped; a request gets 503 `cannot_wake` at once, naming the machine; once the agent is back the model
+   starts and answers. Without these options the step is skipped: the script never stops a machine it was not told
+   it may.
+7. **Stop is not woken:** **Stop** on the asleep deployment; a request gets 503 `no_ready_replica`, nothing wakes it,
+   and `/v1/models` no longer lists it.
+8. **Automatic replicas**, on the two CPU machines: a deployment with replicas *Automatic, by load* from 1 to 2,
+   *Concurrent requests* 2 and a scale-down window of 2 minutes (`--scale-down-minutes`). After its 2-minute pause,
+   4 clients (`--scale-clients`) add a second replica within about a minute, on the other machine; every request is
+   answered, and none twice (each replica's served count equals the requests sent to it). Then a long stream on the
+   new replica: the scale-down drains it while the stream runs, short requests meanwhile go to the other replica, the
+   stream ends complete, and the replica is removed only after its last byte. Nothing is added back for a minute.
+   Without a second CPU machine, or without room for two replicas, the step is skipped.
+9. **Automatic replicas with sleep:** the same deployment with *Sleep when idle* and a minimum of 0 goes asleep with
+   1 replica and a request wakes it with 1.
+10. **Start times and metrics:** each deployment's last start (`last_start`) and, on `/metrics`, the start times,
+    the wakes, the requests that waited for a wake, the deployments' replicas and load, the autoscaler's decisions
+    and the spills while waking.
+
+What to know before you run it:
+
+- **Time:** the sleepy model, automatic replicas and the vLLM model run side by side, about 15 minutes when the
+  machines already have the models; step 6 and step 7 come after them, each waiting for one more sleep.
+- **Metrics:** `/metrics` answers only a direct request from the server's own host unless the server has
+  `METRICS_TOKEN`. Run the script there, or pass `--metrics-token` (or `FORGEYARD_METRICS_TOKEN`); otherwise the
+  metric checks are skipped, saying so.
+- **It cleans up after itself,** as `accept_all.py` does: everything is named `accept-<run>-scale-…` (deployments,
+  their routes, API keys, a catalog entry it had to add) and removed at the end, also after a failure or **Ctrl-C**;
+  an agent it stopped is started again. A deployment the server cannot place is skipped after `--place-timeout`
+  seconds with the server's reason.
 
 ## Scrape Forgeyard with Prometheus
 
