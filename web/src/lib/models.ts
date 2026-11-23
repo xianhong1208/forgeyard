@@ -1,5 +1,5 @@
 import { hasKey, labels, lookup, t, tMaybe } from "../i18n/core";
-import { formatNumber } from "../i18n/format";
+import { formatNumber, spaceCjkNumbers } from "../i18n/format";
 import { getLang } from "../i18n/lang";
 import { IDLE_DEFAULT } from "./sleep";
 import { bytes } from "./machines";
@@ -56,11 +56,11 @@ export function gib(n: number | null | undefined): string {
   return `${(n / 1024 ** 3).toFixed(2)} GiB`;
 }
 
-// A parameter count: "4.02 B", "596 M"; in Chinese the 萬/億 of Intl's compact notation ("40.2億").
+// A parameter count: "4.02 B", "596 M"; in Chinese the 萬/億 of Intl's compact notation ("40.2 億").
 export function params(n: number | undefined): string {
   if (!n) return "—";
   const lang = getLang();
-  if (lang !== "en") return formatNumber(n, lang, { notation: "compact", maximumSignificantDigits: 3 });
+  if (lang !== "en") return spaceCjkNumbers(formatNumber(n, lang, { notation: "compact", maximumSignificantDigits: 3 }));
   return n >= 1e9 ? `${(n / 1e9).toFixed(2)} B` : `${Math.round(n / 1e6)} M`;
 }
 

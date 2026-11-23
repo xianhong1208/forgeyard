@@ -130,7 +130,7 @@ describe("API keys in zh-TW", () => {
     const row = within(table).getByText("laptop").closest("tr") as HTMLElement;
     expect(within(row).getByText("所有部署")).toBeTruthy();
     expect(within(row).getByText("每分鐘 60 次請求")).toBeTruthy();
-    expect(within(row).getByText("每分鐘 1.5萬 個 token")).toBeTruthy();
+    expect(within(row).getByText("每分鐘 1.5 萬個 token")).toBeTruthy();
     expect(within(row).getByText("永不").getAttribute("title")).toBe("請求永遠不會離開你的網路。對這把金鑰來說，只在雲端的模型不存在。");
     expect(within(row).getByText("啟用中")).toBeTruthy();
     expect(within(row).getAllByText("從未").length).toBe(2);
@@ -219,8 +219,8 @@ describe("API keys in zh-TW", () => {
     expect(foldLabel(revoked, true)).toBe("Hide revoked or expired keys");
     zh();
     expect(perMinute(3, "request")).toBe("每分鐘 3 次請求");
-    expect(perMinute(10_000, "token")).toBe("每分鐘 1萬 個 token");
-    expect(keyLimits(k).map((l) => l.text)).toEqual(["每分鐘 1 次請求", "每分鐘 150萬 個 token"]);
+    expect(perMinute(10_000, "token")).toBe("每分鐘 1 萬個 token");
+    expect(keyLimits(k).map((l) => l.text)).toEqual(["每分鐘 1 次請求", "每分鐘 150 萬個 token"]);
     expect(keyLimits(key({ effective_rpm: null, effective_tpm: null }))[0].text).toBe("無限制");
     expect(keyModels(key())).toBe("所有部署");
     expect(keyModels(k)).toBe("chat, embed");

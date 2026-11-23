@@ -2,7 +2,7 @@
 // inspection with its suggestion (recipe, estimate, where it fits).
 
 import { t } from "../i18n/core";
-import { formatNumber } from "../i18n/format";
+import { formatNumber, spaceCjkNumbers } from "../i18n/format";
 import { getLang } from "../i18n/lang";
 import { PERMISSIVE, TASK_LABEL, VISION_TASKS } from "./models";
 import type { CatalogModel, Estimate, Medium, Task } from "./types";
@@ -88,10 +88,10 @@ export function pickFromSearch(r: SearchResult): Pick {
   return { ...emptyPick(), source: r.source, name: nameFor(r.source), task: r.task ?? "", gated: r.gated, from: "search" };
 }
 
-// 1234567 -> "1.2 M"; in Chinese Intl's compact form with 萬 and 億 ("123.5萬").
+// 1234567 -> "1.2 M"; in Chinese Intl's compact form with 萬 and 億 ("123.5 萬").
 export function compact(n: number): string {
   const lang = getLang();
-  if (lang !== "en") return formatNumber(n, lang, { notation: "compact", maximumFractionDigits: 1 });
+  if (lang !== "en") return spaceCjkNumbers(formatNumber(n, lang, { notation: "compact", maximumFractionDigits: 1 }));
   if (n >= 1e9) return `${(n / 1e9).toFixed(1)} B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)} M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)} k`;

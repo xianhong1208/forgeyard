@@ -17,6 +17,12 @@ function nf(lang: Lang, opts: Intl.NumberFormatOptions = {}): Intl.NumberFormat 
   return f;
 }
 
+// Chinese numbers the Taiwan way: a space between the digits and 萬/億/兆 ("10 萬", Intl writes "10萬"), and none
+// between 萬/億/兆 and the word after it ("10 萬個 token", not "10萬 個 token").
+export function spaceCjkNumbers(s: string): string {
+  return s.replace(/(\d)([萬億兆])/g, "$1 $2").replace(/([萬億兆]) (?=[\u4e00-\u9fff])/g, "$1");
+}
+
 export function formatNumber(n: number, lang: Lang = getLang(), opts: Intl.NumberFormatOptions = {}): string {
   return nf(lang, opts).format(n);
 }
