@@ -1836,6 +1836,62 @@ sigstore-python. A refresh that fails is `cannot_verify`. A server that reaches 
 air-gapped site with a mirror) cannot verify a signed engine's version: an admin may make the copy anyway, and it
 stays marked *Not verified*.
 
+### Trial runs through the API
+
+1.5.2 (#95). A trial deploys one catalog model with an engine on one machine for a few minutes, checks it and removes
+it ([how-to](how-to.md#try-out-a-new-engine-version-before-switching)).
+
+| Request | Who | What |
+|---|---|---|
+| `POST /api/recipes/{name}/trials {"model", "machine_id", "params"?, "timeout_minutes"?, "dry_run"?}` | admins, operators | 201 `{"trial": …}`. `params` left out: those of a deployment of the model on the built-in engine (`params_from`), else the engine's defaults; `gpus` follows the machine's variant. Sleep, automatic replicas and `first_answer_timeout` are dropped. `timeout_minutes` bounds the start (30 by default, 5 to 180); measuring and asking have 15 minutes of their own. `dry_run`: 200 with `estimate`, `placement`, `params`, `params_from`, `engine_on` (whether its image is on the machine), `running` and `limit`; nothing is made |
+| `GET /api/recipes/{name}/trials` | everyone signed in | the latest 50, newest first, and `can_run`; still answers after the recipe is deleted |
+| `GET /api/engine-trials/{id}` | everyone signed in | one trial, with its `events` (the temporary deployment's last 15), `log_tail` (the replica's last output), `requests` and `memory` (each reading) |
+| `POST /api/engine-trials/{id}/cancel` | admins, operators | removes its deployment; 409 `not_running` once it has ended |
+
+Refusals: 404 `not_found`, `model_not_found`, `machine_not_found`; 422 `incompatible` (the engine does not serve the
+model), `invalid_params`; 409 `machine_offline`, `does_not_fit` (with `machines` and `estimate`, as a deploy),
+`trial_running` (one per engine), `too_many_trials` (four on a server). While a trial runs, `DELETE` of its recipe or
+its model answers 409 `trial_running`.
+
+```json
+{"trial": {"id": 7, "recipe": "vllm-0-34-0", "builtin": "vllm", "engine_version": "0.34.0",
+  "model": {"id": 1, "name": "qwen3-0.6b", "task": "chat"}, "machine": {"id": 2, "name": "gpu-01"},
+  "gpus": [{"key": "nvidia:GPU-…", "index": 4, "model": "NVIDIA A100 80GB PCIe"}],
+  "params": {"context": 4096, "concurrency": 4, "gpus": 1, "share": "vram"}, "params_from": "chat",
+  "estimate": 5948108800, "reserved": 5948108800, "state": "passed", "phase": null,
+  "start": {"seconds": 95.2, "phases": {"image": 2.1, "engine": 93.1}, "source": "agent"},
+  "measured": 5551245721, "p50_ms": 120, "p95_ms": 180, "first_answer": "A GPU is a processor …",
+  "checks": [{"id": "memory", "label": "Memory", "value": 5551245721, "expected": "at most 5.54 GiB (reserved; estimate 5.54 GiB)",
+              "ok": true, "note": "Approximate: …", "codes": [{"code": "approximate"}]}],
+  "why": null, "summary": "Passed: ready in 95 s, 6/6 answers, p50 120 ms, +5.17 GiB of 5.54 GiB reserved.",
+  "comparison": {"builtin": "vllm", "deployment": {"id": 3, "name": "chat", "reserved": 5948108800, "start_seconds": 112.0,
+                                                    "same_machine": true}, "trial": null}}}
+```
+
+| Field | Values |
+|---|---|
+| `state` | `running`, `passed` (no check failed), `failed`, `cancelled` |
+| `phase` | while running: `starting`, `measuring` (memory readings after it is ready), `asking`, `settling` (one reading after the answers) |
+| `checks[].id` | `started`, `memory`, `answers`, `latency`, `same_answer`; `ok` is `true`, `false` or `null` (not checked, the note says why) |
+| `checks[].codes` | what the note says, for the console's translation: `slower`, `log`, `timeout_reason`, `not_run`, `approximate`, `approximate_ram`, `cards`, `after_answers`, `over`, `not_measured`, `went_down`, `first_answer`, `error`, `not_asked` (`why`: `video`, `none`), `no_address`, `no_answer`, `same`, `different` |
+| `why` | why it failed or ended early: `start_failed`, `unplaced`, `timeout` (`phase`, `minutes`), `gone`, `error`, `restarted`, `stopped`, `not_ready`, `checks` (`checks`: the failed ids), `cancelled` (`who`) |
+
+The memory check takes the machine's readings of the replica's card (or of its RAM) before the engine was launched
+and after it was ready, three each when they come in time (the agent sends them with its heartbeat), and fails when
+the largest difference, including one reading after the answers, exceeds what the replica reserved by more than 5%.
+It is approximate on a card other work uses (more than 512 MiB in use before, or another Forgeyard replica there).
+
+**Data.** Table `engine_trials` (migration `0018_engine_trials`, additive: going down drops it, so finish or cancel
+trials first): one row per trial with the recipe and its built-in (`builtin`), `engine`, `engine_version`, `model_id`
+and `model_name`, `task`, `node_id` and `machine_name` (the names outlive the model and the machine), `gpus`, `params`,
+`estimate`, `reserved`, `deployment_id` (the temporary deployment while it exists), `requested_by`, `created_at`,
+`ready_at`, `finished_at`, `deadline_at`, `state`, `phase`, `checks`, `comparison`, `measurements` and `summary`. The
+temporary deployment is an ordinary `deployments` row without a gateway route, named `trial-<id>-<4 hex>` and pinned
+to the machine; every list, loop and check that should not see it leaves out the deployments `engine_trials`
+names. A server that starts with a trial still `running` ends it as `failed` (`why.code` `restarted`) and removes
+its deployment. Audited as `engine_trial.started`, `engine_trial.finished` (`state`, `failed` checks) and
+`engine_trial.cancelled`.
+
 ## Container images
 
 Each release publishes two images on Docker Hub, built by CI from the release's tag (and the vision

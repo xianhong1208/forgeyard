@@ -491,6 +491,45 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .et-unv-title { display: flex; align-items: center; gap: 6px; color: var(--bad); }
 .et-unverifiable .btn-danger { border-color: #f2c4c0; background: var(--surface, #fff); }
 .et-not-verified svg { vertical-align: -2px; }
+/* 1.5.2 (#95, PR 4): trying out an engine (components/EngineTrials.tsx). */
+.tr-dlg fieldset.tr-params { margin: 0; padding: 10px 12px 4px; border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: 6px; min-width: 0; }
+.tr-params legend { padding: 0 4px; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.tr-params p { margin: 0; }
+.tr-param-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.tr-param-grid .field { margin: 0; min-width: 0; }
+.tr-param-grid input, .tr-param-grid select { width: 100%; }
+.tr-verdict { display: grid; gap: 6px; min-height: 22px; }
+.tr-verdict p { margin: 0; }
+.tr-fits { color: var(--ok); }
+.tr-dlg .notice { margin: 0; }
+.tr-running { display: grid; gap: 10px; justify-items: start; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--line); border-left: 3px solid var(--heat); border-radius: var(--radius); background: var(--heat-soft); }
+.tr-running > .table-wrap { width: 100%; }
+.tr-running-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; overflow-wrap: anywhere; }
+.tr-checks td { vertical-align: top; }
+.tr-checks td:first-child { white-space: nowrap; }
+.tr-note { max-width: 46ch; overflow-wrap: anywhere; }
+.tr-history td { vertical-align: top; }
+.tr-sum { overflow-wrap: anywhere; }
+.tr-open > td { background: var(--surface-2); }
+.tr-detail { display: grid; gap: 10px; padding: 4px 0; min-width: 0; }
+.tr-detail p { margin: 0; }
+.tr-compare h4 { margin: 0; font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.tr-compare p { margin: 0; }
+.tr-more summary { cursor: pointer; }
+.tr-log { margin: 6px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius); }
+.tr-events { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.tr-chip { flex: none; align-self: center; text-decoration: none; white-space: nowrap; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.tr-chip svg { vertical-align: -2px; }
+.tr-last { margin: 6px 0 0; }
+.tr-serving { display: grid; gap: 6px; padding: 12px 14px; margin-bottom: 16px; border-left: 3px solid var(--heat); }
+.tr-serving h2 { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.tr-serving p { margin: 0; }
+.tr-serving-list { margin: 0; padding-left: 18px; display: grid; gap: 2px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .tr-checks td:first-child { white-space: normal; }
+  .tr-note { max-width: none; }
+  .tr-open > td { padding: 8px 10px !important; }
+}
 .lp-sec .notice + .lp-desc { margin-top: 10px; }
 .spin { animation: eu-spin 1s linear infinite; }
 @keyframes eu-spin { to { transform: rotate(360deg); } }

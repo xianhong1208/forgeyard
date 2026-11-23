@@ -308,8 +308,11 @@ class Autoscaler:
         place = False
         db = new_session()
         try:
+            from forgeyard.models import trials
+
+            # 1.5.2 (#95): never a trial's temporary deployment (one replica, removed by its trial).
             rows = db.execute(select(Deployment.id, Deployment.params).join(Workload, Deployment.workload_id == Workload.id)
-                              .where(Workload.desired_state.in_(("running", "asleep")))).all()
+                              .where(Workload.desired_state.in_(("running", "asleep")), trials.not_trial())).all()
             # Only those with automatic replicas on (a watch of one turned off, stopped or deleted ends below).
             ids = [dep_id for dep_id, params in rows if setting(params).on]
             shares = self._shares(db, self.signals.waiting()) if ids else {}

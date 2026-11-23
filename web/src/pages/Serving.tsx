@@ -1,6 +1,7 @@
 import { IconBrain, IconCloud, IconMicrophone, IconMovie, IconPhotoAi, IconPlus, IconScan, IconSortDescending, IconSpeakerphone, IconVectorBezier2 } from "@tabler/icons-react";
 import { Link, Navigate, useLocation, useParams } from "react-router";
 
+import { ServingTrials } from "../components/EngineTrials";
 import { AdvisorBanner } from "../components/Advisor";
 import { useT } from "../i18n/react";
 import { KindMark, ModelKindIcon } from "../components/Fleet";
@@ -74,6 +75,8 @@ export function ServingPage() {
         <HelpLink page="how-to" anchor="let-a-deployment-sleep-when-nobody-uses-it">{t("serving.help.sleep")}</HelpLink>
       </HelpLinks>
       {deps.error && <Notice tone="error">{deps.error}</Notice>}
+      {/* 1.5.2 (#95, PR 4): engine trials that run now hold a card or RAM, but are not served. */}
+      <ServingTrials list={deps.data?.trials} />
       {deps.data && deps.data.deployments.length === 0 && (
         <section className="empty">
           <div className="empty-art empty-art-lanes" aria-hidden="true">

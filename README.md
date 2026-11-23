@@ -38,7 +38,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
   as llama.cpp's), whose images come through the server and run offline like the built-in's; the built-in
   engine itself does not change. A deployment moves to the copy, and back, from its Edit page, keeping its name,
   keys and routes; **Download to…** on an engine's page fetches only its image or program to chosen machines
-  first.
+  first. **Try it out** deploys a model with a version for a few minutes, isolated from keys and usage, checks that
+  it starts, its measured memory against the estimate, its answers and latency against the built-in engine, and
+  removes it again; the results stay on the engine's page.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed

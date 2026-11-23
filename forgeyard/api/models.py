@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session as DbSession, selectinload
 from forgeyard import audit
 from forgeyard.api.deps import Caller, can_run_workloads, current, fail, require_admin
 from forgeyard.config import get_settings
-from forgeyard.db import CatalogModel, CustomRecipe, Deployment, Node, get_db, new_session, utcnow
+from forgeyard.db import CatalogModel, CustomRecipe, Deployment, EngineTrial, Node, get_db, new_session, utcnow
 from forgeyard.models import (catalog, hf_token, hub as hf_hub, inspect as inspector, modalities, recipes,
                               recommended as rec, scheduler, sources, textcls, vision)
 from forgeyard.models.catalog import Context
@@ -170,7 +170,10 @@ def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
 
 
 def _counts(db: DbSession) -> dict[int, int]:
-    return dict(db.execute(select(Deployment.model_id, func.count()).group_by(Deployment.model_id)).all())
+    from forgeyard.models import trials
+
+    return dict(db.execute(select(Deployment.model_id, func.count()).where(trials.not_trial())
+                           .group_by(Deployment.model_id)).all())
 
 
 @router.get("/models")
@@ -178,8 +181,13 @@ def list_models(caller: Caller = Depends(current), db: DbSession = Depends(get_d
     all_r = catalog.all_recipes(db)
     counts = _counts(db)
     rows = db.scalars(select(CatalogModel).order_by(CatalogModel.name)).all()
+    from forgeyard.models import trials
+
+    # 1.5.2 (#95, PR 4): each engine's latest finished trial and whether one runs now (its card shows them).
+    last, running = trials.last_per_recipe(db), {t.recipe for t in trials.running(db)}
     out = {"models": [model_out(m, all_r, counts.get(m.id, 0)) for m in rows],
-           "recipes": [recipe_out(r) for r, _ in all_r.values()],
+           "recipes": [{**recipe_out(r), "last_trial": last.get(r.name), "trial_running": r.name in running}
+                       for r, _ in all_r.values()],
            "can_manage": caller.user.role == "admin", "can_deploy": can_run_workloads(caller.user),
            # Whether the server has a Hugging Face token (the deploy form says its own field is an override).
            "hf_token_set": hf_token.info(db)["set"]}
@@ -502,6 +510,11 @@ def remove_model(model_id: int, caller: Caller = Depends(require_admin), db: DbS
     m = db.get(CatalogModel, model_id)
     if m is None:
         raise fail(404, "not_found", "No such model.")
+    from forgeyard.models import trials
+
+    if db.scalar(select(EngineTrial.id).where(EngineTrial.model_id == m.id, EngineTrial.state == trials.RUNNING)):
+        raise fail(409, "trial_running", f"A trial of an engine with {m.name} is running. Wait for it, or cancel it on "
+                                         "the engine's page.")
     used = db.scalars(select(Deployment.name).where(Deployment.model_id == m.id)).all()
     if used:
         raise fail(409, "model_in_use", f"{m.name} is deployed as {', '.join(used)}. Delete those deployments first.")
@@ -625,7 +638,11 @@ def remove_recipe(name: str, caller: Caller = Depends(require_admin), db: DbSess
         if name in recipes.builtin_recipes():
             raise fail(409, "builtin", "Built-in recipes cannot be removed.")
         raise fail(404, "not_found", "No such recipe.")
-    used = db.scalars(select(Deployment.name).where(Deployment.recipe == name)).all()
+    from forgeyard.models import trials
+
+    if db.scalar(select(EngineTrial.id).where(EngineTrial.recipe == name, EngineTrial.state == trials.RUNNING)):
+        raise fail(409, "trial_running", f"A trial of {name} is running. Cancel it on the engine's page first.")
+    used = db.scalars(select(Deployment.name).where(Deployment.recipe == name, trials.not_trial())).all()
     if used:
         raise fail(409, "recipe_in_use", f"{name} is used by {', '.join(used)}. Delete those deployments first.")
     db.delete(row)

@@ -99,7 +99,7 @@ export function HolderChips({ list, max, empty, link = true }: { list: Holder[];
   return (
     <div className="holder-chips">
       {shown.map((h) => {
-        const title = h.kind === "workload" ? appTitle(h.name) : `${h.deployment?.model.name ?? h.name}`;
+        const title = h.trial ? `${h.name} · ${h.trial.model}` : h.kind === "workload" ? appTitle(h.name) : `${h.deployment?.model.name ?? h.name}`;
         return link && h.href ? (
           <Link key={h.key} to={h.href} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></Link>
         ) : (
@@ -127,6 +127,6 @@ export function usePlacement(pollMs: number): Placement & { loaded: boolean; can
     }, pollMs);
     return () => window.clearInterval(id);
   }, [rw, rd, pollMs]);
-  const p = useMemo(() => placement(w.data?.workloads ?? [], d.data?.deployments ?? []), [w.data, d.data]);
+  const p = useMemo(() => placement(w.data?.workloads ?? [], d.data?.deployments ?? [], d.data?.trials ?? []), [w.data, d.data]);
   return { ...p, loaded: Boolean(w.data && d.data), canRun: w.data?.can_manage ?? false };
 }

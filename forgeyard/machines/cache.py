@@ -67,6 +67,13 @@ def _holders(db: DbSession, node_id: int) -> list[tuple[Replica, Optional[Deploy
 
 def _who(r: Replica, dep: Optional[Deployment]) -> dict:
     if dep is not None:
+        from forgeyard.models import trials
+        from sqlalchemy.orm import object_session
+
+        db = object_session(dep)
+        t = trials.trial_of_deployment(db, dep.id) if db is not None else None
+        if t is not None:   # 1.5.2 (#95): a trial's temporary deployment, named by its engine (its page)
+            return {"name": f"trial of {t.recipe}", "kind": "trial", "id": t.id, "recipe": t.recipe}
         return {"name": dep.name, "kind": "deployment", "id": dep.id}
     return {"name": r.workload.name, "kind": "workload", "id": r.workload_id}
 

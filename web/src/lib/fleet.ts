@@ -4,7 +4,7 @@ import { labels, t, tPlural } from "../i18n/core";
 import { bytes } from "./machines";
 import { isVisionTask } from "./models";
 import { asleepOn, type AsleepHere } from "./sleep";
-import type { Accelerator, Deployment, Machine, Replica, Workload } from "./types";
+import type { Accelerator, Deployment, Machine, Replica, TrialBrief, Workload } from "./types";
 
 // ---------------------------------------------------------------- machine kinds
 
@@ -120,6 +120,8 @@ export type Holder = {
   replica: Replica;
   // Bytes it holds on each of its cards (or of RAM on the CPU); null: not declared (a plain workload's card).
   reserved: number | null;
+  // 1.5.2 (#95, PR 4): the engine trial whose temporary deployment this is.
+  trial?: TrialBrief;
 };
 
 export type Placement = {
@@ -132,13 +134,23 @@ export type Placement = {
 
 // Every replica that sits on a machine and is not over: a model's under its deployment, the rest as
 // workloads. A deployment's workload counts once, under the deployment.
-export function placement(workloads: Workload[], deployments: Deployment[]): Placement {
+export function placement(workloads: Workload[], deployments: Deployment[], trials: TrialBrief[] = []): Placement {
   const byWorkload = new Map(deployments.map((d) => [d.workload.id, d]));
+  // 1.5.2 (#95, PR 4): an engine trial's temporary deployment holds a card too: named as the trial, linked to the
+  // engine's page (it has no deployment page).
+  const byTrial = new Map(trials.filter((x) => x.workload).map((x) => [x.workload as string, x]));
   const holders: Holder[] = [];
   for (const w of workloads) {
     const dep = byWorkload.get(w.id);
+    const trial = dep ? undefined : byTrial.get(w.name);
     for (const r of w.replica_list) {
       if (!r.machine || r.final || r.state === "stopped") continue;
+      if (trial) {
+        holders.push({ name: t("enginetrial.holder", { recipe: trial.recipe }), key: `trial:${trial.id}`,
+          href: `/models/engines/${encodeURIComponent(trial.recipe)}#trials`, kind: "workload", workload: w, replica: r,
+          reserved: r.vram ?? null, trial });
+        continue;
+      }
       let reserved: number | null = r.vram ?? null;
       if (reserved === null && dep) reserved = (dep.estimate.device === "gpu" ? dep.estimate.per_gpu : dep.estimate.ram) ?? null;
       if (reserved === null && !dep && r.gpus.length === 0) reserved = w.spec.resources.memory ?? null;

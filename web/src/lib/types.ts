@@ -321,6 +321,8 @@ export type Recipe = {
   name: string; title: string; description: string; engine: string; version: string; tasks: Task[]; formats: string[];
   api: Record<string, string>; share: "exclusive" | "vram"; builtin: boolean; estimate: string;
   params: Record<string, RecipeParam>; devices: ("gpu" | "cpu")[]; variants: RecipeVariant[]; yaml?: string;
+  // 1.5.2 (#95, PR 4): in the catalog's list (GET /api/models), its latest finished trial and whether one runs now.
+  last_trial?: TrialBrief | null; trial_running?: boolean;
   media?: { inputs: Medium[]; files: boolean } | null;
   // 1.3, text to speech: the formats the engine makes, how it streams, its default voice.
   tts?: { formats: string[]; default_format: string; stream_formats: string[]; voices: string | null; default_voice: string | null; cjk: boolean } | null;
@@ -479,7 +481,47 @@ export type Deployment = {
   engines?: (DeploymentEngine & { current: boolean })[];
 };
 
-export type DeploymentEngine = { name: string; title: string; version: string; builtin: boolean; based_on: string | null };
+export type DeploymentEngine = {
+  name: string; title: string; version: string; builtin: boolean; based_on: string | null;
+  // 1.5.2 (#95, PR 4): its latest finished trial run (with the deployment's model first), never a gate.
+  last_trial?: TrialBrief | null;
+};
+
+// 1.5.2 (#95, PR 4): a trial run of an engine (POST /api/recipes/{name}/trials): a temporary, isolated deployment,
+// a few checks, then removed. ok: true passed, false failed, null not checked (the note says why).
+export type TrialState = "running" | "passed" | "failed" | "cancelled";
+export type TrialPhase = "starting" | "measuring" | "asking" | "settling";
+// codes / why: what a note or a result says, as {code, …specifics}, for the console's own sentence in each language.
+export type TrialCode = { code: string } & Record<string, unknown>;
+export type TrialCheck = { id: string; label: string; value: unknown; expected: unknown; ok: boolean | null; note: string | null; codes?: TrialCode[] };
+export type TrialBrief = {
+  id: number; recipe: string; model: string; machine: string; machine_id: number | null; state: TrialState;
+  phase: TrialPhase | null; created_at: string; finished_at: string | null; summary: string | null; why?: TrialCode | null;
+  deployment_id: number | null; task: string; workload: string | null;
+};
+export type TrialComparison = {
+  builtin: string;
+  deployment: { id: number; name: string; reserved: number | null; start_seconds: number | null; same_machine: boolean } | null;
+  trial: { id: number; machine: string; finished_at: string | null; start_seconds: number | null; measured: number | null;
+    reserved: number | null; p50_ms: number | null; p95_ms: number | null } | null;
+};
+export type EngineTrial = {
+  id: number; recipe: string; builtin: string | null; engine: string; engine_version: string;
+  model: { id: number | null; name: string; task: string }; machine: { id: number | null; name: string };
+  gpus: { key: string; index: number; model: string }[]; params: Record<string, unknown>;
+  estimate: number | null; device: "gpu" | "cpu" | null; reserved: number | null; requested_by: string;
+  created_at: string; ready_at: string | null; finished_at: string | null; deadline_at: string;
+  state: TrialState; phase: TrialPhase | null; summary: string | null; why?: TrialCode | null; params_from: string | null;
+  start: { seconds: number; phases: Record<string, number>; source: string } | null;
+  measured: number | null; measured_peak: number | null; p50_ms: number | null; p95_ms: number | null;
+  first_answer: string | null; checks: TrialCheck[]; comparison: TrialComparison | null;
+  events?: { at: string | null; kind: string; message: string }[]; log_tail?: string | null;
+};
+export type TrialsResponse = { trials: EngineTrial[]; can_run: boolean; limit: number };
+export type TrialDryRun = {
+  estimate: Estimate; placement: { fits: boolean; summary?: string; machines?: MachineVerdict[]; placed?: { gpus: number[]; variant: string }[] };
+  params: Record<string, unknown>; params_from: string | null; engine_on: EngineOn; online: boolean; running: number; limit: number;
+};
 
 // 1.5.2 (#95): a change that restarts the only running replica: about how long the model does not answer, and how
 // to avoid it. source: its own last start, the other deployments of the engine, or a typical figure.
@@ -528,7 +570,11 @@ export type EditResponse = {
   deployment?: Deployment;
 };
 
-export type DeploymentsResponse = { deployments: Deployment[]; server_time: string; can_manage: boolean };
+export type DeploymentsResponse = {
+  deployments: Deployment[]; server_time: string; can_manage: boolean;
+  // 1.5.2 (#95, PR 4): engine trials that run now (their temporary deployments are not listed as deployments).
+  trials?: TrialBrief[];
+};
 
 export type DeploymentResponse = { deployment: Deployment; events: WorkloadEvent[]; server_time: string; can_manage: boolean };
 
@@ -790,6 +836,9 @@ export type EnginePage = {
   can_download?: boolean;
   downloads?: ModelDownload[];
   caught_up?: { builtin: string; title: string; version: string; same: boolean } | null;
+  // 1.5.2 (#95, PR 4): its trial running now, and its latest finished one.
+  trial_running?: TrialBrief | null;
+  last_trial?: TrialBrief | null;
 };
 
 // 1.5.2 (#95): newer versions of the built-in engines, as the last check found them (GET /api/engine-updates).

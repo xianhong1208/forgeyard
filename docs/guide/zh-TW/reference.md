@@ -1302,6 +1302,46 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 
 驗證通過的映像檔或壓縮檔會記下 `{"status": "verified", "repository", "workflow", "ref", "commit", "run", "predicate", "issuer", "log_index", "signed_at"}`。信任根（Fulcio 的憑證、Rekor 和 CT log 的公鑰）來自 Sigstore 的 TUF 儲存庫 `https://tuf-repo-cdn.sigstore.dev`，經由同樣的網路規則更新（保留 5 分鐘，metadata 存在 `DATA_DIR/sigstore/`）；第一次更新從 sigstore-python 內附的根開始。更新失敗就是 `cannot_verify`。只連得到自己 registry 的伺服器（使用鏡像站的隔離環境）無法驗證有簽章的推論引擎的新版本：管理員仍可以選擇照樣建立複本，它會一直標示為 *未驗證*。
 
+### 透過 API 試跑
+
+1.5.2（#95）。試跑會在一台機器上用一個推論引擎暫時部署一個目錄中的模型，大約幾分鐘，檢查完再移除（[操作指南](how-to.md#try-out-a-new-engine-version-before-switching)）。
+
+| 請求 | 誰可以 | 內容 |
+|---|---|---|
+| `POST /api/recipes/{name}/trials {"model", "machine_id", "params"?, "timeout_minutes"?, "dry_run"?}` | 管理員、操作員 | 回傳 201 `{"trial": …}`。沒有給 `params` 時，沿用這個模型在內建推論引擎上的部署的參數（`params_from`），沒有的話用推論引擎的預設值；`gpus` 依機器上的變體決定。休眠、自動調整副本數和 `first_answer_timeout` 會被拿掉。`timeout_minutes` 是啟動的時限（預設 30，可以設 5 到 180）；量測和送出請求另外有 15 分鐘。`dry_run`：回傳 200，內容是 `estimate`、`placement`、`params`、`params_from`、`engine_on`（機器上有沒有它的映像檔）、`running` 和 `limit`，不會建立任何東西 |
+| `GET /api/recipes/{name}/trials` | 所有登入的人 | 最近 50 次，最新的在前面，以及 `can_run`；配方刪除之後也還查得到 |
+| `GET /api/engine-trials/{id}` | 所有登入的人 | 單一次試跑，包含 `events`（暫時部署最後 15 筆事件）、`log_tail`（副本最後的輸出）、`requests` 和 `memory`（每一次讀數） |
+| `POST /api/engine-trials/{id}/cancel` | 管理員、操作員 | 移除它的部署；試跑結束後回傳 409 `not_running` |
+
+拒絕的情況：404 `not_found`、`model_not_found`、`machine_not_found`；422 `incompatible`（推論引擎無法提供這個模型）、`invalid_params`；409 `machine_offline`、`does_not_fit`（附上 `machines` 和 `estimate`，和部署時一樣）、`trial_running`（每個推論引擎一個）、`too_many_trials`（一台伺服器四個）。試跑進行期間，`DELETE` 它的配方或模型會回傳 409 `trial_running`。
+
+```json
+{"trial": {"id": 7, "recipe": "vllm-0-34-0", "builtin": "vllm", "engine_version": "0.34.0",
+  "model": {"id": 1, "name": "qwen3-0.6b", "task": "chat"}, "machine": {"id": 2, "name": "gpu-01"},
+  "gpus": [{"key": "nvidia:GPU-…", "index": 4, "model": "NVIDIA A100 80GB PCIe"}],
+  "params": {"context": 4096, "concurrency": 4, "gpus": 1, "share": "vram"}, "params_from": "chat",
+  "estimate": 5948108800, "reserved": 5948108800, "state": "passed", "phase": null,
+  "start": {"seconds": 95.2, "phases": {"image": 2.1, "engine": 93.1}, "source": "agent"},
+  "measured": 5551245721, "p50_ms": 120, "p95_ms": 180, "first_answer": "A GPU is a processor …",
+  "checks": [{"id": "memory", "label": "Memory", "value": 5551245721, "expected": "at most 5.54 GiB (reserved; estimate 5.54 GiB)",
+              "ok": true, "note": "Approximate: …", "codes": [{"code": "approximate"}]}],
+  "why": null, "summary": "Passed: ready in 95 s, 6/6 answers, p50 120 ms, +5.17 GiB of 5.54 GiB reserved.",
+  "comparison": {"builtin": "vllm", "deployment": {"id": 3, "name": "chat", "reserved": 5948108800, "start_seconds": 112.0,
+                                                    "same_machine": true}, "trial": null}}}
+```
+
+| 欄位 | 值 |
+|---|---|
+| `state` | `running`、`passed`（沒有檢查未通過）、`failed`、`cancelled` |
+| `phase` | 進行中時：`starting`、`measuring`（就緒後讀取記憶體用量）、`asking`、`settling`（回應之後再讀一次） |
+| `checks[].id` | `started`、`memory`、`answers`、`latency`、`same_answer`；`ok` 是 `true`、`false` 或 `null`（未檢查，說明會寫原因） |
+| `checks[].codes` | 說明的內容代碼，供主控台翻譯：`slower`、`log`、`timeout_reason`、`not_run`、`approximate`、`approximate_ram`、`cards`、`after_answers`、`over`、`not_measured`、`went_down`、`first_answer`、`error`、`not_asked`（`why`：`video`、`none`）、`no_address`、`no_answer`、`same`、`different` |
+| `why` | 未通過或提早結束的原因：`start_failed`、`unplaced`、`timeout`（`phase`、`minutes`）、`gone`、`error`、`restarted`、`stopped`、`not_ready`、`checks`（`checks`：未通過的檢查）、`cancelled`（`who`） |
+
+記憶體檢查會取機器對副本那張卡（或 RAM）的讀數：推論引擎啟動前和就緒後，來得及的話各取三次（agent 會隨心跳送出讀數）。如果最大的差值（包含回應之後的那一次讀數）比副本預留的量多出 5% 以上，就算未通過。如果那張卡也有其他工作在使用（啟動前已經用了超過 512 MiB，或上面還有其他 Forgeyard 副本），量測結果只能當作參考。
+
+**資料。** 資料表 `engine_trials`（migration `0018_engine_trials`，只有新增：降版時會刪除這個資料表，所以請先讓試跑結束或取消）：每次試跑一列，包含配方和它的內建推論引擎（`builtin`）、`engine`、`engine_version`、`model_id` 和 `model_name`、`task`、`node_id` 和 `machine_name`（模型和機器刪除後名稱仍會保留）、`gpus`、`params`、`estimate`、`reserved`、`deployment_id`（暫時部署存在期間）、`requested_by`、`created_at`、`ready_at`、`finished_at`、`deadline_at`、`state`、`phase`、`checks`、`comparison`、`measurements` 和 `summary`。暫時部署是一般的 `deployments` 資料列，只是沒有閘道路由，名稱是 `trial-<id>-<4 個十六進位字元>`，並固定在那台機器上；所有不該看到它的清單、背景迴圈和檢查，都會排除 `engine_trials` 指到的部署。伺服器啟動時如果還有 `running` 的試跑，會把它標示為 `failed`（`why.code` 是 `restarted`）並移除它的部署。稽核紀錄的動作是 `engine_trial.started`、`engine_trial.finished`（`state`、未通過的 `failed` 檢查）和 `engine_trial.cancelled`。
+
 ## 容器映像檔
 
 每個版本都會在 Docker Hub 發布兩個映像檔，由 CI 從該版本的 tag 建置（還有視覺伺服器的 `docker.io/tonyhuang1101/forgeyard-vision`，`X.Y.Z` 與 `X.Y.Z-cuda`，由 `vision` 配方以 digest 固定）：
