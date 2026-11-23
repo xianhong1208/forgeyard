@@ -58,6 +58,15 @@ them where they fit, and every program calls them at `/v1` with an API key.
   prefers machines that already have the model and engine, avoids one that could not reach Hugging
   Face, GitHub or a registry, and moves a replica stuck on such a download to a machine that can.
 
+## What's new in 1.5
+
+1.5.0 uses GPUs only while they are needed. A deployment can **sleep when idle** and give its memory back; the
+next request wakes it, once however many arrive, and waits for it (a key that may use the cloud is served there
+meanwhile). **Automatic replicas** follow the load the gateway sees, and a replica that goes is drained first.
+Each start is timed, and vLLM keeps its compile cache between starts, so a restart or a wake takes about half as
+long. Sleep and automatic replicas are off until you turn them on; update the agents after the server. Every
+change is in the [CHANGELOG](CHANGELOG.md).
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
@@ -89,7 +98,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.4.5
+  docker.io/tonyhuang1101/forgeyard:1.5.0
 sudo docker logs forgeyard
 ```
 
@@ -135,7 +144,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.4.5
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:

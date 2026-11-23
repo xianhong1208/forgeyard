@@ -40,6 +40,10 @@ name machines and networks. Only the hardware models and the counts are.
 
 | Release | Run | Machines | Passed | Failed |
 |---|---|---|---|---|
+| 1.5.0 | full regression of 1.5.0rc1 (`accept_all.py`, with its new `scale` group) | A100 host, x86-64 CPU machine, Gemini | <<ALL_COUNTS>> |
+| 1.5.0 | sleep when idle, waking and automatic replicas on 1.5.0rc1 (`accept_scale.py`), the automatic replicas on two CPU machines | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | <<SCALE_COUNTS>> |
+| 1.5.0 | during development: the same (`accept_scale.py`; 1 check skipped: a wait for a wake that runs out, on the CPU model, which starts in 3 s, sooner than the shortest wait; the vLLM model covers it) | A100 host, x86-64 CPU machine, the A100 host's CPU as the second CPU machine, Gemini | 73 | 0 |
+| 1.5.0 | during development: vLLM 0.32's compile cache kept between starts (#232), the engine's part of a restart, mean of 3 or 4 each: Qwen3-0.6B on `vllm` 114 s without it, 57 s with it; a text classifier (xlm-roberta-language-detection) on `vllm-pooling` 78 s and 53 s | A100 | 2 | 0 |
 | 1.4.5 | full regression of 1.4.5rc1 (`accept_all.py`, 13 checks skipped), with both machines on the rc agent, so the gateway reached every replica over TLS | A100 host, x86-64 CPU machine, Gemini | 432 | 0 |
 | 1.4.5 | during development: full regression after the gateway and agent supervisor were split into smaller parts (#173; 29 checks skipped) | A100 host, x86-64 CPU machine, Gemini | 380 | 0 |
 | 1.4.5 | during development: Gemma 4 12B at a 16k context on vLLM 0.32, the KV cache estimate against the engine's own figure (#201): 2.091 GiB estimated, 2.09 GiB in vLLM | A100 | 1 | 0 |
@@ -50,6 +54,6 @@ name machines and networks. Only the hardware models and the counts are.
 | 1.4.3 | full regression (`accept_all.py`) | A100 host, x86-64 CPU machine, Ryzen AI MAX+ 395, Gemini | 303 | 0 |
 | 1.4.3 | the web console (`accept_all.py` console group) | the same | 31 | 0 |
 
-The Ryzen AI MAX+ 395 machine was not part of the 1.4.5 runs.
+The Ryzen AI MAX+ 395 machine was not part of the 1.4.5 and 1.5.0 runs.
 
 Reports from other machines are welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
