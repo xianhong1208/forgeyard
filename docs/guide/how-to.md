@@ -1891,6 +1891,38 @@ minutes; **List again** asks now. An offline machine shows its last listing. An 
 **deletes** a custom engine there, and **copies** a built-in one as a custom engine (for example to try a
 newer image).
 
+## See whether an engine has a newer version
+
+Forgeyard pins each built-in engine to one version (vLLM 0.32.0, llama.cpp 1.0.0, …) and moves it only with
+its own releases, after testing. To see whether upstream has published something newer meanwhile, an admin
+opens **Models → Engines** and clicks **Check for newer versions**. Nothing runs on a timer and nothing
+changes: the check only reads.
+
+The server asks, through its own [network rules](reference.md#models) (https and public addresses only;
+`MODEL_ALLOW_PRIVATE_HOSTS` for a mirror on your network), each built-in variant's **own** image repository
+on Docker Hub or GHCR for its tags, and GitHub for the release notes of what it finds. It takes about half a
+minute (at most a minute and a half). The result is kept until the next check, with when it ran and who ran
+it, and everyone signed in sees it; the check is in the audit log.
+
+- **The cards** get a badge: *0.34.0 available*, *Newer build*, *Up to date* or *Could not check* (when a
+  registry or GitHub could not be reached; the badge's tooltip says why, and the other engines are still
+  checked). The badge opens the engine's page.
+- **An engine's page** has a **Newer versions** section, one block per newer version, newest first:
+  - which variants have an image of that version, with its tag and the digest it has now, and why the others
+    do not (for example *No v0.34.0-cu129 image in docker.io/vllm/vllm-openai; this variant's images stop at
+    0.32.0*: vLLM stopped publishing CUDA 12.9 images). A process variant (`cpu-process`) is included only
+    when the release publishes the same archive with its SHA-256;
+  - a link to the release notes, and the flags and settings this engine passes that the notes mention (for
+    vLLM 0.34.0: `--gpu-memory-utilization`, whose default and meaning changed). Read those first: a newer
+    version can change defaults and memory use, and Forgeyard's estimates were measured on the pinned one.
+
+What counts as newer: a **stable** release published as an image, in the same form as the built-in's tag
+(`v0.34.0-cu129` for a `v0.32.0-cu129` variant). Release candidates, nightly builds and model-specific images
+are never offered, and a GitHub release whose images are not out yet is only mentioned. Every newer version
+is listed, so you can take the smaller step. An engine published only under moving tags (stable-diffusion.cpp's
+`master-cuda`) shows a **newer build** when its tag points at a later image. Forgeyard's own vision image is
+not checked: it moves with Forgeyard.
+
 ## Download a model before deploying it
 
 **Download to…** puts a model, and by default its engine, into the model cache of the machines you

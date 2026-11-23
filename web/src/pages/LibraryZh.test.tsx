@@ -352,7 +352,7 @@ describe("the model library in Traditional Chinese", () => {
     const params = screen.getAllByRole("table")[2];
     expect(within(params).getAllByRole("columnheader").map((x) => x.textContent)).toEqual(["參數", "預設值", "範圍", "作用"]);
     expect(params.textContent).toContain("kv_cache · 進階");
-    expect(headings()).toEqual(["llama-cpp", "概覽", "變體 · 2", "機器 · 1 台已有", "參數", "部署 · 0", "它能執行的目錄模型 · 1"]);
+    expect(headings()).toEqual(["llama-cpp", "概覽", "變體 · 2", "新版本", "機器 · 1 台已有", "參數", "部署 · 0", "它能執行的目錄模型 · 1"]);
     expect(englishIn([...page().querySelectorAll("h1, h2, th, dt, nav a")], /llama-cpp|GPU/g)).toEqual([]);
   });
 

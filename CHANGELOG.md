@@ -6,6 +6,24 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **Newer versions of the built-in engines (1.5.2, #95, part 1).** An admin's **Check for newer versions** on
+  **Models → Engines** asks, now and only then, each built-in variant's own image repository (Docker Hub, GHCR) and
+  GitHub, through the server's model-source rules. A newer version is a stable release published as an image in the
+  built-in tag's own form (`v0.34.0-cu129` for `v0.32.0-cu129`): release candidates, nightlies and model-specific
+  tags never count, a GitHub release without images is only mentioned, and every newer version is listed.
+  stable-diffusion.cpp, published only under moving tags, shows a newer build when its tag points at a later image.
+  The engine cards get a badge (*0.34.0 available*, *Newer build*, *Up to date*, *Could not check*), and a built-in
+  engine's page a **Newer versions** section: per version, the variants with an image (tag and digest now) and why
+  the others have none, a process variant only when the release has the same archive with a SHA-256, the release
+  notes link, and the flags and settings this engine passes that the notes mention. A registry or GitHub that cannot
+  be reached is "could not check" for its engines only. The last result is kept in one `server_settings` row (no
+  migration), shown with when and by whom, read by everyone signed in, and each check is audited
+  (`recipe.updates_checked`). API: `POST /api/engine-updates/check`, `GET /api/engine-updates`. Nothing on a timer,
+  and the built-in engines do not change; trying a version comes next. On 2026-11-23 it found vLLM 0.33.0 and
+  0.34.0 (without the CUDA 12.9 variant) and a newer stable-diffusion.cpp build (without its process variant).
+
 ### Changed
 
 - **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it

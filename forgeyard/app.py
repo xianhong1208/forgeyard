@@ -20,6 +20,7 @@ from forgeyard.api import (
     budgets,
     deployments,
     downloads,
+    engine_updates,
     gateway,
     guide,
     install,
@@ -144,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(machines.router)
     app.include_router(workloads.router)
     app.include_router(models.router)
+    app.include_router(engine_updates.router)
     app.include_router(deployments.router)
     app.include_router(downloads.router)
     app.include_router(keys.router)

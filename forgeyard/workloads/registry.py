@@ -1,5 +1,6 @@
 """Anonymous reads from an image registry (the OCI distribution API), for the server's image relay (1.4,
-issue #35 PR 4, D4) and scripts/pin_images.py's naming of references.
+issue #35 PR 4, D4), scripts/pin_images.py's naming of references, and the check for newer engine versions (1.5.2,
+#95: a repository's tags, page by page, and the digest a tag points at now).
 
 Only what a relay of a *pinned* image needs: a pull token per repository (the anonymous Bearer flow that
 Docker Hub, GHCR and quay.io all answer: `GET /v2/` -> 401 `WWW-Authenticate: Bearer realm=…,service=…` ->
@@ -20,7 +21,7 @@ import re
 import threading
 import time
 from typing import Optional
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urljoin, urlsplit
 
 from forgeyard.models import fetch
 
@@ -35,6 +36,13 @@ TOKEN_MAX = 64 * 1024
 TOKEN_TTL = 60.0          # what a token lives when the registry does not say (the spec's default)
 TOKEN_MARGIN = 20.0       # renewed this long before it expires
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+# Tag listings (1.5.2): GHCR answers at most 1,000 tags a page (ggml-org/llama.cpp had 13,683 = 14 pages in 2026-11),
+# Docker Hub all of a repository's at once. A listing stops, as an error, past this many pages.
+TAGS_PAGE = 1000
+TAGS_MAX_PAGES = 30
+TAGS_PAGE_MAX = 4 * 1024 * 1024
+_NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="?next"?')
 _CHALLENGE = re.compile(r'(\w+)="([^"]*)"')
 
 # Tests (only) point a registry name at a fake one: {"ghcr.io": "http://127.0.0.1:<port>"}.
@@ -194,6 +202,83 @@ class Registry:
         except ValueError:
             raise RegistryError(f"{registry}: the manifest {digest[:19]}… is not JSON") from None
         return data, (body.get("mediaType") if isinstance(body, dict) and body.get("mediaType") else media)
+
+    # ------------------------------------------------------------------ tags (1.5.2, #95)
+    def tags(self, registry: str, repo: str, *, page_size: Optional[int] = None, max_pages: Optional[int] = None,
+             check=None) -> list[str]:
+        """Every tag of the repository (GET /v2/<repo>/tags/list, following `Link: rel="next"` on the same
+        registry). `check()` runs before each page (the caller's deadline). More than `max_pages` pages is an
+        error, never a cut list: a version could hide on the page not read."""
+        page_size = page_size or TAGS_PAGE
+        max_pages = max_pages or TAGS_MAX_PAGES
+        base = base_url(registry)
+        url: Optional[str] = f"{base}/v2/{repo}/tags/list?n={page_size}"
+        out: list[str] = []
+        pages = 0
+        while url:
+            if pages >= max_pages:
+                raise RegistryError(f"{registry}/{repo} lists more than {max_pages} pages of tags; stopped there")
+            if check is not None:
+                check()
+            data, link = self._get(registry, repo, url, f"the tags of {repo}", TAGS_PAGE_MAX)
+            pages += 1
+            try:
+                body = json.loads(data)
+            except ValueError:
+                raise RegistryError(f"{registry}: the tag list of {repo} is not JSON") from None
+            tags = body.get("tags") if isinstance(body, dict) else None
+            if tags is None:
+                tags = []
+            if not isinstance(tags, list):
+                raise RegistryError(f"{registry}: the tag list of {repo} is not a list")
+            out.extend(t for t in tags if isinstance(t, str))
+            url = None
+            m = _NEXT.search(link or "")
+            if m:
+                nxt = urljoin(f"{base}/v2/", m.group(1))
+                if urlsplit(nxt)[:2] != urlsplit(base)[:2]:
+                    raise RegistryError(f"{registry}'s next page of tags points at another host")
+                url = nxt
+        return out
+
+    def resolve(self, registry: str, repo: str, tag: str) -> str:
+        """The digest a tag points at now: a HEAD of the manifest (Docker Hub does not count a HEAD as a pull),
+        its Docker-Content-Digest; a registry that sends none gets a GET, and the bytes are hashed."""
+        if not TAG_RE.match(tag):
+            raise RegistryError(f"not a tag: {tag[:80]}")
+        url = f"{base_url(registry)}/v2/{repo}/manifests/{tag}"
+        for renew in (False, True):
+            with fetch.open_url(url, self.policy(), method="HEAD",
+                                headers={**self._headers(registry, repo, renew=renew), "Accept": ACCEPT}) as resp:
+                if resp.status == 401 and not renew:
+                    continue
+                if resp.status >= 400:
+                    raise RegistryError(f"{registry} answered HTTP {resp.status} for {repo}:{tag}", resp.status)
+                found = (resp.headers.get("Docker-Content-Digest") or "").strip()
+            break
+        if DIGEST_RE.match(found):
+            return found
+        data, _ = self._get(registry, repo, url, f"{repo}:{tag}", MANIFEST_MAX, accept=ACCEPT)
+        return sha256_digest(data)
+
+    def _get(self, registry: str, repo: str, url: str, what: str, limit: int, *, accept: Optional[str] = None
+             ) -> tuple[bytes, str]:
+        """(body, Link header) of a GET with the pull token (a 401 tried once more with a new one)."""
+        extra = {"Accept": accept} if accept else {}
+        for renew in (False, True):
+            with fetch.open_url(url, self.policy(), headers={**self._headers(registry, repo, renew=renew),
+                                                             **extra}) as resp:
+                if resp.status == 401 and not renew:
+                    resp.read(TOKEN_MAX)
+                    continue
+                if resp.status >= 400:
+                    raise RegistryError(f"{registry} answered HTTP {resp.status} for {what}", resp.status)
+                data = resp.read(limit + 1)
+                link = resp.headers.get("Link") or ""
+            break
+        if len(data) > limit:
+            raise RegistryError(f"{registry}: {what} is larger than {limit} bytes")
+        return data, link
 
     def blob_url(self, registry: str, repo: str, digest: str) -> str:
         if not DIGEST_RE.match(digest):
