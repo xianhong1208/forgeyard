@@ -23,7 +23,7 @@ export default {
   "shell.menu.signOut": "登出",
   "shell.menu.language": "語言",
   "shell.plainHttp":
-    "<strong>Forgeyard 目前沒有使用 HTTPS。</strong>它以 {off} 啟動，而這個頁面經由一般 HTTP 傳來，所以密碼、工作階段 cookie 和 API 金鑰都以未加密的方式在網路上傳送。拿掉 {off} 就會改用 Forgeyard 自己的憑證授權單位，或在它前面放一個終止 TLS 的代理伺服器。<link>該怎麼做</link>",
+    "<strong>Forgeyard 目前沒有使用 HTTPS。</strong>它以 {off} 啟動，這個頁面也是經由一般 HTTP 傳來的，所以密碼、工作階段 cookie 和 API 金鑰都以未加密的方式在網路上傳送。拿掉 {off}，改用 Forgeyard 自己的憑證授權單位；或在它前面放一台負責 TLS 的代理伺服器。<link>該怎麼做</link>",
   "shell.notFound.title": "這裡沒有東西",
   "shell.notFound.lead": "這個頁面不存在。",
   "shell.adminsOnly.title": "限管理員",

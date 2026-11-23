@@ -3,7 +3,10 @@
 The console's Traditional Chinese follows the zh-TW guide (`docs/guide/zh-TW/`). Use these words in every
 dictionary module so pages translated in different pull requests read as one product. Taiwan usage:
 伺服器 (not 服务器), 程式 (not 程序 for a program), 資料, 檔案, 預設, 設定, 網路, 連線, 記憶體, 硬碟/磁碟,
-影片, 介面. Full-width punctuation in Chinese sentences (，。：；（）「」), half-width inside code and numbers.
+影片, 介面, 用戶端 (not 客戶端), 本機 (not 本地), 重新啟動 (not 重啟). Full-width punctuation in Chinese sentences
+(，。：；（）「」), half-width inside code and numbers and between two numbers (`3/4 就緒`, `{done}/{total}`). A space
+between Chinese and Latin letters or digits (`3 個副本`, `API 金鑰`), none before full-width punctuation. Speak to the
+reader plainly with 你, never 您.
 
 ## Product terms
 
@@ -20,8 +23,12 @@ dictionary module so pages translated in different pull requests read as one pro
 | online / offline / revoked | 線上 / 離線 / 已撤銷 | |
 | revoke / remove | 撤銷 / 移除 | |
 | pinned (to a machine) | 固定 | 釘選 is for an image or a model *pinned to a version or digest*. |
+| placed / placement | 放置 / 放在哪裡 | Where the scheduler puts a replica (配置 only for memory: 記憶體配置圖). |
+| digest | digest | Kept in English, as in `@sha256:…`. |
+| registry (container images) | registry | Kept in English (映像檔 registry). |
+| export / load an image (docker save / load) | 匯出 / 載入 | |
 | deployment / deploy | 部署 | |
-| replica | 副本 | |
+| replica | 副本 | Only a replica. A copy of something else is 複本 (a cloned provider, a copied engine). |
 | workload | workload | Kept in English (the guide does). |
 | app (deprecated) | 應用程式 | |
 | process (runtime) | 行程 | 程式 for a program. |
@@ -32,6 +39,11 @@ dictionary module so pages translated in different pull requests read as one pro
 | gated (model) | 受限 | |
 | Hugging Face token | Hugging Face 權杖 | |
 | gateway | 閘道 | |
+| key guard (the agent's, in front of a replica) | 金鑰守門員 | |
+| client (an OpenAI client, an HTTP client) | 用戶端 | |
+| loopback address | 迴路位址 | |
+| private address | 私有位址 | |
+| local (not cloud) | 本機 | |
 | route / tier | 路由 / 層 | |
 | cloud provider | 雲端供應商 | |
 | cloud fallback / spill | 雲端備援 / 溢出 | |
@@ -40,9 +52,12 @@ dictionary module so pages translated in different pull requests read as one pro
 | usage | 用量 | |
 | audit log | 稽核紀錄 | |
 | setup health | 設定健康檢查 | The advisor's panel. |
+| console | 主控台 | |
 | Get started | 開始使用 | |
 | guide | 使用指南 | |
 | Playground | 試用區 | |
+| Open *a page* (a button that goes to a page) | 前往「頁面」 | 開啟 for a dialog, a menu or one item (開啟部署). |
+| Actions (a table column) | 操作 | |
 | Serving (page) | 服務中 | What runs now. |
 | Machines / Models / Cloud / Users (pages) | 機器 / 模型 / 雲端 / 使用者 | |
 | sleep when idle / asleep / waking / wake | 閒置時休眠 / 休眠中 / 喚醒中 / 喚醒 | |
@@ -71,6 +86,7 @@ dictionary module so pages translated in different pull requests read as one pro
 | Text to speech | 文字轉語音 |
 | Images | 圖片 |
 | Video | 影片 |
+| frame (video) | 影格；每秒 N 格 |
 | Vision: object detection, segmentation, depth estimation, image classification | 視覺：物件偵測、影像分割、深度估計、圖片分類 |
 
 ## Left in English

@@ -1,7 +1,7 @@
 import type en from "../en/common";
 
 export default {
-  "common.appTagline": "用一個控制台管理你自己的 GPU 和 CPU。",
+  "common.appTagline": "用一個控制平面管理你自己的 GPU 和 CPU。",
   "common.loading": "載入中…",
   "common.tryAgain": "再試一次",
   "common.copy": "複製",

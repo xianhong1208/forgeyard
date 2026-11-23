@@ -1238,8 +1238,10 @@ same switch is at the end of the menu. The page changes at once, without reloadi
   example `model_waking`, `cannot_wake`, `budget_exhausted`) and names each **Setup health** finding's kind in
   Chinese, with the server's own words (which name the machines and models) under it. A message without a
   translation is shown as the server sent it.
-- In 1.5.1 the frame (menus, sign-in, Get started and Setup health) and the **Machines** and **Serving** lists are
-  translated; the other pages follow in the next releases and are English until then.
+- Every page is translated: the frame (menus, sign-in, Get started and Setup health), **Machines**, **Serving**,
+  **Models**, **Cloud**, **Playground**, **API keys**, **Usage**, **Users**, the **Audit log**, your account and
+  **Trust this server**. Names you choose (machines, models, keys), what engines and agents print, and the API
+  itself stay as they are.
 
 ## Use your own certificate or a reverse proxy
 

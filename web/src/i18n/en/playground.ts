@@ -4,7 +4,7 @@ export default {
   "playground.index": "05 · Playground",
   "playground.title": "Playground",
   "playground.lead":
-    "Try a deployed model through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “console” in Usage.",
+    "Try a deployed model through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “Console playground” in Usage.",
   "playground.unreachable": "Cannot reach the Forgeyard server.",
 
   // Nothing to try

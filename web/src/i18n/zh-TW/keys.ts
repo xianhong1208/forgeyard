@@ -17,8 +17,8 @@ export default {
 
   "keys.gateway.title": "閘道位址",
   "keys.gateway.copyLabel": "閘道的 base URL",
-  "keys.gateway.useNames": "在任何 OpenAI 用戶端把它設為 {baseUrl}，並帶上 {auth}。{model} 是它的其中一個模型名稱：",
-  "keys.gateway.useNone": "在任何 OpenAI 用戶端把它設為 {baseUrl}，並帶上 {auth}。{model} 是它的其中一個模型名稱（目前還沒有：請先部署模型）。",
+  "keys.gateway.useNames": "在任何 OpenAI 用戶端把它設為 {baseUrl}，並帶上 {auth}；{model} 填下面其中一個模型名稱：",
+  "keys.gateway.useNone": "在任何 OpenAI 用戶端把它設為 {baseUrl}，並帶上 {auth}；{model} 填一個模型名稱（目前還沒有：請先部署模型）。",
 
   "keys.list.everyone": "所有人的金鑰",
   "keys.list.yours": "你的金鑰",
@@ -41,7 +41,7 @@ export default {
   "keys.col.lastUsed": "上次使用",
   "keys.col.expires": "到期",
   "keys.col.status": "狀態",
-  "keys.col.actions": "動作",
+  "keys.col.actions": "操作",
 
   "keys.fold.hideRevoked": "隱藏已撤銷的金鑰",
   "keys.fold.hideExpired": "隱藏已過期的金鑰",
@@ -67,10 +67,10 @@ export default {
   "keys.lock.title": "由管理員 {by} 設定；只有管理員能變更。",
   "keys.lock.chip": "由 {by} 設定",
   "keys.lock.byAdmin": "由管理員 <strong>{by}</strong> 設定；只有管理員能變更。",
-  "keys.lock.lockedClear": "已為 {owner} 鎖定（由 {by} 設定）。清空它即可解除鎖定。",
-  "keys.lock.locked": "已為 {owner} 鎖定（由 {by} 設定）。",
-  "keys.lock.savingValue": "{base}儲存一個值會為 {owner} 鎖定它。",
-  "keys.lock.savingIt": "{base}儲存後會為 {owner} 鎖定它。",
+  "keys.lock.lockedClear": "已對 {owner} 鎖定（由 {by} 設定）。清空即可解除鎖定。",
+  "keys.lock.locked": "已對 {owner} 鎖定（由 {by} 設定）。",
+  "keys.lock.savingValue": "{base}儲存後，這個值會對 {owner} 鎖定。",
+  "keys.lock.savingIt": "{base}儲存後會對 {owner} 鎖定。",
   "keys.theOwner": "擁有者",
   "keys.now": "目前：{requests} 次請求 · {tokens} 個 token",
   "keys.effectiveTitle": "伺服器目前允許個人金鑰的上限比較低；在上限調高之前，這把金鑰都按上限運作。",
@@ -94,7 +94,7 @@ export default {
   "keys.form.cloud": "雲端供應商",
   "keys.form.budget": "每月預算（美元）",
   "keys.form.noBudget": "無預算",
-  "keys.form.budgetAdmin": "每個日曆月（UTC）的雲端花費。儲存後會為 {owner} 鎖定它。",
+  "keys.form.budgetAdmin": "每個日曆月（UTC）的雲端花費。儲存後會對 {owner} 鎖定。",
   "keys.form.budgetHint": "每個日曆月（UTC）的雲端花費。用完後，這把金鑰只走本機。設為 $0 會擋下所有雲端花費；留空表示沒有預算。",
   "keys.form.badBudget": "每月預算：以美元填寫，例如 25 或 2.50（留空：沒有預算）。",
   "keys.form.save": "儲存限制",
@@ -140,7 +140,7 @@ export default {
 
   "keys.budget.mine": "你的每月預算",
   "keys.budget.mineNote": "本月你所有金鑰和試用區合計的雲端花費。它會在 {reset} 重新計算。",
-  "keys.budget.mineExhausted": "你本月的雲端預算已用完：在 {reset} 之前，用你的金鑰送出的請求只走本機，只有雲端提供的模型會被拒絕。",
+  "keys.budget.mineExhausted": "你本月的雲端預算已用完：在 {reset} 之前，用你的金鑰送出的請求只走本機，只在雲端的模型會被拒絕。",
   "keys.budget.mineWarning": "你本月的雲端預算已用掉超過 80%。",
   "keys.budget.keyName": "{name}（{prefix}…）",
   "keys.budget.keyNameOf": "{owner} 的 {name}（{prefix}…）",
@@ -178,7 +178,7 @@ export default {
 
   "keys.limits.title": "金鑰的限制",
   "keys.limits.lead":
-    "沒有自己限制的金鑰會套用預設值。個人可以為自己的金鑰設定較低的限制，但不能超過上限；管理員可以把任何金鑰設成任何值。留空表示無限制。在這台伺服器上，每把金鑰以滑動的一分鐘計算。",
+    "沒有自己限制的金鑰會套用預設值。個人可以為自己的金鑰設定較低的限制，但不能超過上限；管理員可以把任何金鑰設成任何值。留空表示無限制。這台伺服器以每把金鑰、滑動一分鐘的時間窗計算。",
   "keys.limits.defaultRpm": "預設每分鐘請求數",
   "keys.limits.defaultTpm": "預設每分鐘 token 數",
   "keys.limits.capRpm": "每分鐘請求數上限",

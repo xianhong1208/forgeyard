@@ -26,7 +26,7 @@ export default {
   "library.col.architecture": "架構",
   "library.col.licence": "授權",
   "library.col.engines": "引擎",
-  "library.removeConfirm": "要把 {name} 從目錄移除嗎？機器上已快取的副本會保留。",
+  "library.removeConfirm": "要把 {name} 從目錄移除嗎？機器上已快取的檔案會保留。",
   "library.projector": " + 投影器",
   "library.takesTitle": "對話時除了文字之外還能讀什麼",
   "library.paramsSuffix": " · {params} 參數",
@@ -36,7 +36,7 @@ export default {
   "library.layers": "{count} 層",
   "library.kvHeads": "、{count} 個 KV 頭",
   "library.ctx": "、上下文 {count}",
-  "library.licenceFrom": "{source} 的授權，這個模型是從它轉換來的",
+  "library.licenceFrom": "沿用 {source} 的授權（這個模型由它轉換而來）",
   "library.gated": "受限",
   "library.noneFits": "沒有適用的引擎",
   "library.actionsFor": "{name} 的操作",
@@ -66,14 +66,14 @@ export default {
   "library.edit": "編輯",
   "library.delete": "刪除",
 
-  "library.offline.summary": "無法連到映像檔登錄的機器：載入映像檔",
+  "library.offline.summary": "無法連到映像檔 registry 的機器：載入映像檔",
   "library.offline.lead":
-    "在一台連得到登錄的機器上，把你需要的變體的映像檔存成檔案。把檔案複製過去、載入，再照常部署。<link>離線的機器</link>",
+    "在一台連得到 registry 的機器上，把你需要的變體的映像檔匯出成檔案。把檔案複製過去、載入，再照常部署。<link>離線的機器</link>",
   "library.offline.variant": "變體",
   "library.offline.save": "{what} 的儲存指令",
   "library.offline.load": "{what} 的載入指令",
   "library.offline.checked": "Forgeyard 會用記錄下來的 ID 核對載入的映像檔，所以這個引擎可以直接離線使用。",
-  "library.offline.unchecked": "這個映像檔沒有記錄 ID，Forgeyard 無法核對載入的副本：請在配方裡只用它的標籤（不加 {digest}）指名它。",
+  "library.offline.unchecked": "這個映像檔沒有記錄 ID，Forgeyard 無法核對載入的映像檔：請在配方裡只用它的標籤（不加 {digest}）指定它。",
 
   "library.form.change": "變更 {name}",
   "library.form.lead": "用你自己的映像檔和參數定義引擎，例如從內建引擎複製出來、改用較新的版本。內建引擎會隨 Forgeyard 的版本更新。",
@@ -123,19 +123,19 @@ export default {
   "library.listSep": "、",
 
   "library.engineDesc.faster-whisper":
-    "以 faster-whisper 模型（CTranslate2）做語音辨識，提供 OpenAI 相容的 /v1/audio/transcriptions。很小；預設和別人共用 GPU。",
+    "以 faster-whisper 模型（CTranslate2）做語音辨識，提供 OpenAI 相容的 /v1/audio/transcriptions。很小；預設和其他部署共用 GPU。",
   "library.engineDesc.llama-cpp":
     "用 llama-server 執行 GGUF（量化）模型：在容器裡跑在 NVIDIA GPU、AMD GPU（ROCm，或 APU 和其他顯示卡用 Vulkan）上，或在 CPU 上以容器或一般行程執行。提供 OpenAI 相容 API，用於對話，也用於文字轉語音（Qwen3-TTS、Chatterbox 和其他附投影器的 TTS GGUF）。",
   "library.engineDesc.sd-cpp":
     "用 stable-diffusion.cpp 文字生成圖片：在容器裡跑在 AMD GPU 和 APU（Vulkan）以及 NVIDIA GPU 上，或在 CPU 上以一般行程執行。支援 GGUF 和單一檔案模型（Stable Diffusion 1.5 / XL、Z-Image、FLUX.1），提供 OpenAI 的 /v1/images/generations。",
   "library.engineDesc.speaches-tts":
-    "小型英文語音（Kokoro-82M、Piper），提供 OpenAI 相容的 /v1/audio/speech；CPU 上就夠快，預設和別人共用 GPU。只能念英文（和其他拉丁字母）文字。",
+    "小型英文語音（Kokoro-82M、Piper），提供 OpenAI 相容的 /v1/audio/speech；CPU 上就夠快，預設和其他部署共用 GPU。只能唸英文（和其他拉丁字母）文字。",
   "library.engineDesc.vision":
-    "用 transformers 模型做物件偵測、影像分割（SAM 2）、深度估計與圖片分類，提供 /v1/vision/detect、/v1/vision/segment、/v1/vision/depth 和 /v1/vision/classify。很小：預設和別人共用 GPU，在 CPU 上也跑得很好。",
+    "用 transformers 模型做物件偵測、影像分割（SAM 2）、深度估計與圖片分類，提供 /v1/vision/detect、/v1/vision/segment、/v1/vision/depth 和 /v1/vision/classify。很小：預設和其他部署共用 GPU，在 CPU 上也跑得很好。",
   "library.engineDesc.vllm-omni-image":
     "用 vLLM-Omni 在 NVIDIA GPU 上文字生成圖片：Z-Image-Turbo、Stable Diffusion XL、FLUX.1-schnell 等 diffusers pipeline，提供 OpenAI 的 /v1/images/generations（base64 圖片）。",
   "library.engineDesc.vllm-omni-tts":
-    "用 vLLM-Omni 在 NVIDIA GPU 上執行 Qwen3-TTS：內建語音會說中文（普通話和方言）、英文和另外八種語言，可下風格指示。提供 OpenAI 相容的 /v1/audio/speech，支援串流。",
+    "用 vLLM-Omni 在 NVIDIA GPU 上執行 Qwen3-TTS：內建語音會說中文（普通話和方言）、英文和另外八種語言，也可以用指示調整說話風格。提供 OpenAI 相容的 /v1/audio/speech，支援串流。",
   "library.engineDesc.vllm-omni-video":
     "用 vLLM-Omni 在 NVIDIA GPU 上文字生成影片：Wan2.1-T2V-1.3B、Wan2.2-TI2V-5B 等 diffusers pipeline，提供 OpenAI 的 /v1/videos（非同步工作、MP4 檔案）。",
   "library.engineDesc.vllm-pooling":

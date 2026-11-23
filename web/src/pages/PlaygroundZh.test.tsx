@@ -69,7 +69,7 @@ describe("the Playground in Traditional Chinese", () => {
     server([], [], undefined, USER);
     mount();
     expect((await screen.findByRole("heading", { name: "還沒有可以試用的模型" })).closest("section")!.textContent)
-      .toContain("還沒有部署任何模型。 管理員和操作員才能部署模型；請請他們部署你需要的模型。");
+      .toContain("還沒有部署任何模型。 只有管理員和操作員能部署模型；需要什麼模型，請找他們部署。");
   });
 
   it("FY-WEB-791 chat: the panel in Chinese; the answer streams in as the model wrote it, the meta line in Chinese words", async () => {
@@ -87,7 +87,7 @@ describe("the Playground in Traditional Chinese", () => {
     fireEvent.change(within(panel).getByPlaceholderText("輸入訊息…"), { target: { value: "hi" } });
     fireEvent.click(within(panel).getByRole("button", { name: "送出" }));
     const meta = await within(panel).findByText(/副本 0/);
-    expect(meta.textContent).toMatch(/^副本 0 · 第一個 token \d+ ms · \d+ ms · 輸入 3 · 輸出 2/);
+    expect(meta.textContent).toMatch(/^副本 0 · 第一個 token \d+ 毫秒 · \d+ 毫秒 · 輸入 3 · 輸出 2/);
     expect(within(panel).getByText("Hello there")).toBeTruthy();         // the model's own words, untouched
     expect(within(panel).getByText("你")).toBeTruthy();
     noEnglish(panel);
@@ -134,7 +134,7 @@ describe("the Playground in Traditional Chinese", () => {
     mount("/playground?model=bge-m3");
     const emb = (await screen.findByRole("heading", { name: "嵌入" })).closest("section") as HTMLElement;
     fireEvent.click(within(emb).getByRole("button", { name: "產生嵌入" }));
-    expect((await within(emb).findByLabelText("回答")).textContent).toMatch(/^3 維，耗時 \d+ ms · 9 個 token\n\[0\.1000, 0\.2000, 0\.3000, …\]$/);
+    expect((await within(emb).findByLabelText("回答")).textContent).toMatch(/^3 維，耗時 \d+ 毫秒 · 9 個 token\n\[0\.1000, 0\.2000, 0\.3000, …\]$/);
     noEnglish(emb);
     cleanup();
     server([route(2, "reranker", "rerank")], [dep(2, "rerank")]);
@@ -190,7 +190,7 @@ describe("the Playground in Traditional Chinese", () => {
     await waitFor(() => expect((within(vid).getByLabelText("尺寸") as HTMLSelectElement).value).toBe("832x480"));
     expect(within(vid).getByText(/^影片是一個工作/)).toBeTruthy();
     expect([...(within(vid).getByLabelText("長度") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["1 秒", "2 秒", "3 秒", "4 秒", "5 秒"]);
-    expect(within(vid).getByText("81 幀，每秒 16 幀")).toBeTruthy();
+    expect(within(vid).getByText("81 個影格，每秒 16 格")).toBeTruthy();
     expect(within(vid).getByRole("heading", { name: "你用這個模型做的影片" })).toBeTruthy();
     const item = within(vid).getByText("已完成").closest("li") as HTMLElement;
     expect(within(item).getByText(/ · 832x480 · 5 秒$/).textContent).toMatch(/^\d+月\d+日/);   // the date in Chinese

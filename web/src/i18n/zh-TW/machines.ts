@@ -20,11 +20,11 @@ export default {
   "machines.loopback":
     "{url} 只在這台電腦上有效。要給其他機器用，請以 {host} 啟動伺服器，並把 {public} 設成它們連得到的位址（區域網路 IP 或 Tailscale 名稱），或替換指令裡的位址（Docker 分頁有欄位可以填）。",
   "machines.pinned":
-    "agent 透過 {wss} 連線，而且只信任指紋和指令裡一致的憑證授權單位（{fingerprint}）：中間如果有拿著其他憑證的機器，會被拒絕。",
+    "agent 透過 {wss} 連線，而且只信任指紋和指令裡一致的憑證授權單位（{fingerprint}）：如果中間有機器拿出別的憑證，連線會被拒絕。",
   "machines.plain":
-    "這台伺服器使用一般 HTTP（{off}）：agent 的連線沒有加密。只能在位址寫在 {public} 的 TLS 代理伺服器後面，或在信任的網路上使用。",
+    "這台伺服器使用一般 HTTP（{off}）：agent 的連線沒有加密。只適合放在 TLS 代理伺服器後面（它的位址設在 {public}），或在信任的網路上使用。",
   "machines.joinedBefore": "有機器是在這台伺服器使用 HTTPS 之前加入的？",
-  "machines.joinedBeforeDetail": "在它上面執行一次這個指令並重新啟動 agent 之前，它的 agent 會一直離線。它會保留原本的憑據。",
+  "machines.joinedBeforeDetail": "在那台機器上執行一次這個指令並重新啟動 agent 之前，它會一直顯示離線。它會保留原本的憑據。",
   "machines.trustCommand": "信任指令",
   "machines.joined": "{names} 已加入。",
   "machines.waiting": "正在等機器加入…",
@@ -89,7 +89,7 @@ export default {
   "machines.docker.fix": "修正上面標出的欄位，就會產生指令。",
   "machines.docker.volume": "這台機器的憑據保存在 {volume} volume 裡，所以重新開機或升級後執行同一個指令，會保留這台機器；加入權杖只用一次。",
   "machines.docker.why":
-    "<strong>為什麼用主機網路：</strong>模型副本在主機的 127.0.0.1 上監聽，前面有 agent 的金鑰守衛，守衛必須連得到它們。<strong>為什麼用相同路徑：</strong>agent 會請主機的 Docker 依照模型在主機上的路徑掛載它們。",
+    "<strong>為什麼用主機網路：</strong>模型副本在主機的 127.0.0.1 上監聽，前面有 agent 的金鑰守門員，守門員必須連得到它們。<strong>為什麼用相同路徑：</strong>agent 會請主機的 Docker 依照模型在主機上的路徑掛載它們。",
   "machines.docker.whyNvidia":
     "需要 NVIDIA Container Toolkit。$(for d in …) 那一行也會用 --device 傳入主機的每個 NVIDIA 裝置（/dev/nvidia*），所以主機執行 systemctl daemon-reload 時，agent 仍保有它的 GPU。",
   "machines.docker.whyAmd": "使用主機的 ROCm 工具，以唯讀方式掛載。video 和 render 群組以它們在主機上的編號指定：映像檔裡沒有 render 群組。",

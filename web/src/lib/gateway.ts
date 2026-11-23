@@ -1,4 +1,5 @@
 import { labels, t, tPlural } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
 import { getLang, locale } from "../i18n/lang";
 // The gateway (M4): snippets for a new key, numbers for usage, and reading a streamed answer.
 
@@ -116,9 +117,12 @@ export function num(n: number | null | undefined): string {
   return n.toLocaleString("en-US");
 }
 
+// "350 ms", "1.2 s"; in Chinese Intl's units ("350 毫秒", "1.2 秒").
 export function ms(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)} s` : `${Math.round(n)} ms`;
+  const [v, unit] = n >= 1000 ? [Number((n / 1000).toFixed(n >= 10000 ? 0 : 1)), "second"] : [Math.round(n), "millisecond"];
+  if (getLang() === "en") return `${v} ${unit === "second" ? "s" : "ms"}`;
+  return formatNumber(v, getLang(), { style: "unit", unit, unitDisplay: "short", maximumFractionDigits: 1 });
 }
 
 export function keyModels(k: ApiKey): string {

@@ -36,7 +36,7 @@ describe("a machine's page in zh-TW", () => {
     expect(tlsLine({ state: "ok", not_after: null } as Machine["replica_tls"])).toBe("Encrypted (TLS)");
     expect(tlsChip({ status: "online", replica_tls: { state: "plain" } as Machine["replica_tls"] })?.text).toBe("not encrypted: update the agent");
     setLang("zh-TW");
-    expect(tlsLine(expiring)).toBe("TLS，憑證有效至 2026-12-01，而且沒有在更新（renewal refused）");
+    expect(tlsLine(expiring)).toBe("TLS，憑證有效至 2026-12-01，但一直沒有更新（renewal refused）");
     expect(tlsLine({ state: "expired", not_after: "2026-11-01T00:00:00Z" } as Machine["replica_tls"])).toBe("TLS，憑證已在 2026-11-01 過期：連不到它的副本");
     expect(tlsChip({ status: "online", replica_tls: { state: "missing" } as Machine["replica_tls"] })?.text).toBe("沒有副本憑證");
   });
@@ -98,7 +98,7 @@ describe("a machine's page in zh-TW", () => {
       matches: [{ recipe: "llama-cpp", variant: "cpu", image: "ghcr.io/ggml-org/llama.cpp:server@sha256:1", how: "checked" as const }] };
     setLang("zh-TW");
     expect(uploadBlocked(machine({ status: "offline" }))).toBe("gpu-01 離線中：它的 agent 連線後才能上傳映像檔。");
-    expect(uploadLine("sending", 512 * 1024 ** 2, GIB, "gpu-01")).toBe("已傳送 512 MiB／1 GiB（50%）");
+    expect(uploadLine("sending", 512 * 1024 ** 2, GIB, "gpu-01")).toBe("已傳送 512 MiB/1 GiB（50%）");
     expect(matchLine(loaded)).toBe("llama-cpp (cpu) 釘選的映像檔，已用記錄的 ID 核對。它的標籤不是配方用的標籤：在機器上執行 docker tag aaaaaaaaaaaa ghcr.io/ggml-org/llama.cpp:server 就能使用。");
     expect(removedLine("gpu-01", { ok: true, image: { ...loaded, size: null, created: null }, freed_bytes: GIB, free_bytes: 40 * GIB, total_bytes: 100 * GIB }))
       .toBe("已從 gpu-01 移除 x:1：釋出最多 1 GiB（和其他映像檔共用的層會保留）；現在可用 40 GiB，共 100 GiB。");
@@ -110,11 +110,11 @@ describe("a machine's page in zh-TW", () => {
     expect(allowlistSummary(m)).toBe("#1, #2 of 3");
     expect(runtimeLine({ ok: true, user: "forgeyard-run", limits: "systemd" } as never, "process")).toBe("process as forgeyard-run (systemd limits)");
     setLang("zh-TW");
-    expect(allowlistSummary(m)).toBe("3 張中的 #1, #2");
+    expect(allowlistSummary(m)).toBe("#1, #2（共 3 張）");
     expect(allowlistSummary(machine())).toBe("全部 3 張 GPU");
     expect(runtimeLine({ ok: true, engine: "docker", version: "27.1", nvidia: true } as never, "container")).toBe("容器：docker 27.1，可用 NVIDIA GPU");
     expect(runtimeLine(undefined, "process")).toBe("行程：不明");
-    expect(replicaAddressNote(machine({ runtime_info: { address: "127.0.0.1", same_host: false } } as never))).toBe("迴路位址：閘道會在伺服器的主機上連它");
+    expect(replicaAddressNote(machine({ runtime_info: { address: "127.0.0.1", same_host: false } } as never))).toBe("迴路位址：閘道會連到伺服器主機上的這個位址");
   });
 });
 
@@ -149,6 +149,6 @@ describe("the deploy forms in zh-TW", () => {
     expect(loadText(d(4))).toBe("Load 3.5 over the last 60 s, 1.75 per ready replica (target 3.2 of 4 concurrent requests each)");
     setLang("zh-TW");
     expect(scaleSummary(d(4))).toBe("自動，0（休眠）～4 個 · 目前 2 個");
-    expect(loadText(d(4))).toBe("最近 60 秒的負載為 3.5，每個就緒副本 1.75（目標：每個副本 4 個同時請求中的 3.2 個）");
+    expect(loadText(d(4))).toBe("最近 60 秒的負載為 3.5，每個就緒副本 1.75（目標：每個副本 3.2 個，上限 4 個同時請求）");
   });
 });

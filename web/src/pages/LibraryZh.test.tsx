@@ -187,7 +187,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(within(card).getByText("提供對話、文字轉語音")).toBeTruthy();
     expect(within(card).getByText("詳細資訊")).toBeTruthy();
     expect(within(card).getByText("運算能力 7.0")).toBeTruthy();
-    expect(within(card).getByText("無法連到映像檔登錄的機器：載入映像檔")).toBeTruthy();
+    expect(within(card).getByText("無法連到映像檔 registry 的機器：載入映像檔")).toBeTruthy();
     // A custom engine's description is its author's, shown as written.
     const mine = screen.getByRole("article", { name: "引擎 llama-cpp-mine" });
     expect(within(mine).getByText("My own build of llama.cpp.")).toBeTruthy();
@@ -238,7 +238,7 @@ describe("the model library in Traditional Chinese", () => {
     const gemma = screen.getByText("Gemma 3 4B").closest("li")!;
     expect(within(gemma).getByText("圖片、影片")).toBeTruthy();
     expect(within(gemma).getByText("中文、英文 +1")).toBeTruthy();
-    expect(within(gemma).getByText(/^Gemma 條款：在 Google 的禁止用途政策下允許商業使用/)).toBeTruthy();
+    expect(within(gemma).getByText(/^Gemma 條款：允許商業使用，但須遵守 Google 的禁止用途政策/)).toBeTruthy();
     expect(within(gemma).getByRole("link", { name: "授權條款" })).toBeTruthy();
     expect(within(gemma).getByText("需要 Hugging Face 權杖，並在 Hugging Face 上接受授權。")).toBeTruthy();
     expect(within(gemma).getByText("已在目錄中，名稱 gemma")).toBeTruthy();
@@ -305,7 +305,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(facts.textContent).toContain("尚未部署");
     const jump = screen.getByRole("navigation", { name: "本頁內容" });
     expect(within(jump).getAllByRole("link").map((a) => a.textContent)).toEqual(["概覽", "機器", "部署", "引擎", "檔案"]);
-    expect(headings()).toEqual([MODEL.name, "概覽", "機器 · 在 1 台的快取中", "部署 · 0", "可以執行它的引擎 · 2", "檔案"]);
+    expect(headings()).toEqual([MODEL.name, "概覽", "機器 · 1 台的快取中有它", "部署 · 0", "可以執行它的引擎 · 2", "檔案"]);
     expect(screen.getByText("加入時間").nextElementSibling!.textContent).toBe("由 owner 加入 · 2026年11月10日");
     expect(screen.getByText("結構").nextElementSibling!.textContent).toBe("28 層 · 上下文 40,960 個 token");
     const table = await screen.findByRole("table");
@@ -314,7 +314,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(within(gpu).getByText("放得下")).toBeTruthy();
     expect(gpu.textContent).toContain("GPU #4 上剩 40.00 GiB");
     expect(within(gpu).getByText("映像檔在這裡")).toBeTruthy();
-    expect(within(gpu).getByText("被 chat-small 使用")).toBeTruthy();
+    expect(within(gpu).getByText("chat-small 正在使用")).toBeTruthy();
     expect(within(gpu).getByText("線上")).toBeTruthy();
     expect(within(cpu).getByText("沒有回報")).toBeTruthy();
     expect(within(cpu).getByText("離線")).toBeTruthy();
@@ -333,10 +333,10 @@ describe("the model library in Traditional Chinese", () => {
     expect(screen.getByRole("button", { name: /複製成自訂引擎/ })).toBeTruthy();
     expect(document.querySelector(".mk-facts")!.textContent).toContain("2 個變體");
     expect(screen.getByText(lookup("zh-TW", "library.engineDesc.llama-cpp"))).toBeTruthy();
-    expect(screen.getByText("GPU 用法").nextElementSibling!.textContent).toBe("獨占一張卡（獨占），除非部署設定共用 · 也能在 CPU 上執行");
+    expect(screen.getByText("GPU 用法").nextElementSibling!.textContent).toBe("獨占一張卡，除非部署設定為共用 · 也能在 CPU 上執行");
     const [variants, machines] = screen.getAllByRole("table");
     expect(within(variants).getAllByRole("columnheader").map((x) => x.textContent)).toEqual(["變體", "執行", "映像檔或程式", "釘選", "需求"]);
-    expect(within(variants).getByText("以摘要釘選")).toBeTruthy();
+    expect(within(variants).getByText("以 digest 釘選")).toBeTruthy();
     expect(within(variants).getByText("可離線使用")).toBeTruthy();
     expect(within(variants).getByText("發行封存檔（SHA-256）")).toBeTruthy();
     expect(within(variants).getByText("容器")).toBeTruthy();

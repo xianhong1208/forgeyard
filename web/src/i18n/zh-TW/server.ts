@@ -42,7 +42,7 @@ export default {
   "server.code.no_ready_replica": "這個模型沒有就緒的副本：{message}",
   "server.code.budget_exhausted": "本月的雲端請求預算已經用完：{message}",
   "server.code.budget_unpriced": "這個雲端模型沒有價格，而且有預算限制：{message}",
-  "server.code.managed_by_deployment": "這是某個部署在執行的：請在部署的頁面上停止或刪除。",
+  "server.code.managed_by_deployment": "這是由部署執行的：請到該部署的頁面停止或刪除它。",
   "server.code.not_found": "找不到：{message}",
   "server.event.changed": "已變更",
   "server.event.created": "已建立",
@@ -61,4 +61,6 @@ export default {
   "server.event.unreachable": "連不到",
   "server.event.waiting": "等待中",
   "server.event.woken": "已喚醒",
+  "server.event.ready": "已就緒",
+  "server.event.asleep": "已休眠",
 } satisfies Record<keyof typeof en, string>;

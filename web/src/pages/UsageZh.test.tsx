@@ -87,7 +87,7 @@ describe("Usage in Traditional Chinese", () => {
     routes();
     mount();
     expect(await screen.findByRole("heading", { level: 1, name: "用量" })).toBeTruthy();
-    expect(screen.getByText("你經由閘道送出的請求：用你的 API 金鑰和在試用區中。")).toBeTruthy();
+    expect(screen.getByText("你經由閘道送出的請求，包括用你的 API 金鑰和在試用區送出的。")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "請求" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "費用" })).toBeTruthy();
     expect(within(screen.getByRole("group", { name: "期間" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["今天", "7 天", "30 天"]);
@@ -97,7 +97,7 @@ describe("Usage in Traditional Chinese", () => {
     expect([...dl.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["請求", "錯誤", "Token 數", "延遲 p50", "延遲 p95"]);
     expect(dl.textContent).toContain("（20 個被限流）");
     expect(dl.textContent).toContain("輸入 200 · 輸出 400");
-    expect(await screen.findByText(/^2026-11-17 至 2026-11-23（UTC）。延遲由閘道計算/)).toBeTruthy();
+    expect(await screen.findByText(/^2026-11-17 至 2026-11-23（UTC）。延遲由閘道量測/)).toBeTruthy();
     for (const el of [...screen.getAllByRole("heading"), ...screen.getAllByRole("button")]) {
       if (el.closest(".topbar, nav")) continue;
       expect(el.textContent, el.textContent!).not.toMatch(LATIN_WORD);
@@ -172,7 +172,7 @@ describe("Usage in Traditional Chinese", () => {
     expect(screen.getByRole("link", { name: "為供應商的模型設定價格" })).toBeTruthy();
     const table = await screen.findByRole("table", { name: "依日期分組的費用" });
     expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["日期", "請求", "Token 數", "費用", "占比", "沒有價格"]);
-    expect(screen.getByText(/（UTC），以美元計。.*有 2 個請求是估算的.*這是供應商收費的估算，不是他們的帳單。$/)).toBeTruthy();
+    expect(screen.getByText(/（UTC），以美元計。.*有 2 個請求是估算的.*或缺少快取價格。這是供應商收費的估算，不是他們的帳單。$/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "費用隨時間變化" })).toBeTruthy();
   });
 
