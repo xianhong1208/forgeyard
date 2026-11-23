@@ -29,6 +29,14 @@ docker build -f Dockerfile.server -t forgeyard:dev . && scripts/server_image_smo
 
 執行 `uv lock`（或 Dependabot 更新 `uv.lock`）之後，請執行 `uv run --no-sync python -m forgeyard.install.requirements`：它會重寫 install.sh 安裝 agent 相依套件時使用的清單（含雜湊值，`forgeyard/install/agent-requirements*.txt`）；清單和 lock 不一致時 FY-INST-020 會失敗。
 
+**Dependency audit** workflow（`.github/workflows/dependency-audit.yml`）會在每個 pull request 和推送到 dev、main 時執行：用 pip-audit 檢查 uv.lock 的執行期套件（所有 extra，不含 dev 群組），並對網頁 UI 執行 `npm audit --omit=dev`。它不是必要的檢查：沒有人動過的套件被公布新的弱點時，不該擋住其他工作；但結果變紅，就表示有相依套件要另開 pull request 更新。在本機執行同樣的檢查：
+
+```bash
+uv export --locked --no-dev --all-extras --format requirements-txt -o /tmp/requirements-audit.txt
+uvx --from pip-audit==2.10.1 pip-audit -r /tmp/requirements-audit.txt --disable-pip
+cd web && npm audit --omit=dev
+```
+
 ## 以 digest 固定的推論引擎映像檔
 
 內建配方的每個容器 variant 都以 `repo:tag@sha256:<index digest>` 指定映像檔，`forgeyard/recipes/images.lock.json`

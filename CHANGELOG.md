@@ -8,6 +8,10 @@ version until 1.0.
 
 ### Added
 
+- **A dependency audit on every pull request** (`.github/workflows/dependency-audit.yml`): pip-audit on uv.lock's
+  runtime set (every extra, no dev group) and `npm audit --omit=dev` for the web UI. Information, not a required
+  check.
+
 - **Newer versions of the built-in engines (1.5.2, #95, part 1).** An admin's **Check for newer versions** on
   **Models → Engines** asks, now and only then, each built-in variant's own image repository (Docker Hub, GHCR) and
   GitHub, through the server's model-source rules. A newer version is a stable release published as an image in the
