@@ -92,7 +92,6 @@ def recipe_matches(db: DbSession, item: dict) -> list[dict]:
     from forgeyard.models.catalog import all_recipes
     from forgeyard.workloads.registry import full_name
 
-    lock = images.load_lock()
     content, image_id = item.get("content"), item.get("id")
     tags = {full_name(t) for t in item.get("tags") or []}
     out = []
@@ -100,8 +99,8 @@ def recipe_matches(db: DbSession, item: dict) -> list[dict]:
         for v in recipe.variants:
             if v.runtime != "container" or not v.image:
                 continue
-            entry = lock.get(v.image) if "@" in v.image else None
-            if isinstance(entry, dict):
+            entry = images.entry_for(v.image)
+            if entry is not None:
                 check = images.entry_check(entry)
                 if (content and content in check["content"]) or (image_id and image_id in check["ids"]):
                     out.append({"recipe": name, "variant": v.name, "image": v.image, "how": "checked"})

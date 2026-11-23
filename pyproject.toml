@@ -27,6 +27,10 @@ dependencies = [
     "markdown-it-py>=4",
     # GET /metrics in the Prometheus text format (1.4.5, #165). Apache-2.0, no dependencies of its own.
     "prometheus-client>=0.21",
+    # 1.5.2 (#95): verifying upstream signatures (GitHub artifact attestations, Sigstore bundles) when an admin tries a
+    # newer engine version. Server only: the agent never imports it (it runs the digest the server verified).
+    # Apache-2.0, maintained by the Sigstore project (OpenSSF).
+    "sigstore>=4.6,<5",
 ]
 
 [project.optional-dependencies]

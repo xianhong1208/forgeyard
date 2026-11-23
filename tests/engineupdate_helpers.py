@@ -46,6 +46,20 @@ def real_tags() -> dict[str, list[str]]:
     return tags
 
 
+def real_attestations() -> dict[str, dict]:
+    """{"sha256:…": GitHub's answer} of llama.cpp's real attestations (its 1.0.0 Vulkan image, its b12359 archive)."""
+    raw = json.loads((FIXTURES / "llama-attestations.json").read_text())
+    return {k: v for k, v in raw.items() if k.startswith("sha256:")}
+
+
+def real_llama_blobs() -> dict[str, bytes]:
+    """The registry's bytes of llama.cpp's 1.0.0 Vulkan image (index, manifests, configs), by digest."""
+    import base64
+
+    raw = json.loads((FIXTURES / "llama-vulkan-1.0.0-blobs.json").read_text())["blobs"]
+    return {k: base64.b64decode(v) for k, v in raw.items()}
+
+
 def real_releases() -> dict[str, list[dict]]:
     raw = json.loads((FIXTURES / "releases.json").read_text())
     out: dict[str, list[dict]] = {}
@@ -92,6 +106,8 @@ class FakeUpstream:
         self.delay = 0.0
         self.no_digest_header = False
         self.next_link: Optional[str] = None              # replaces the Link of every tag page (a test)
+        # 1.5.2 PR 2: GitHub's artifact attestations, {(repo, "sha256:…"): {"attestations": [...]}}.
+        self.attestations: dict[tuple[str, str], dict] = {}
         self.lock = threading.Lock()
         for tag, (rev, created) in SD_NOW.items():
             self.add_image(SD_REPO, tag, Image(rev, created))
@@ -182,6 +198,11 @@ class FakeUpstream:
             def _github(self, path, query):
                 bits = path.split("/")       # ['', 'repos', owner, repo, 'releases', ('tags', tag)]
                 repo = "/".join(bits[2:4])
+                if len(bits) == 6 and bits[4] == "attestations":
+                    found = reg.attestations.get((repo, bits[5]))
+                    if found is None:
+                        return self._send(404, b'{"message":"Not Found"}')
+                    return self._send(200, json.dumps(found).encode(), {"Content-Type": "application/json"})
                 listed = reg.releases.get(repo)
                 if listed is None or len(bits) < 5 or bits[4] != "releases":
                     return self._send(404, b'{"message":"Not Found"}')
