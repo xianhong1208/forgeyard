@@ -41,3 +41,16 @@ async def until(predicate: Callable[[], Union[T, Awaitable[T]]], what: str, time
             return got
         assert time.monotonic() < deadline, f"gave up after {timeout} s waiting for {what}"
         await asyncio.sleep(interval)
+
+
+class NoSleep:
+    """A stand-in for the `time` module of one module under test: sleep() returns at once, everything else is the
+    real time module. Patch that module's own attribute (`monkeypatch.setattr(mod, "time", NoSleep())`), never
+    `time.sleep` or `time.monotonic` themselves: those are shared by every thread in the pytest session, so a
+    background thread left by another test would spin, or use up a fake clock's values (#239)."""
+
+    def sleep(self, seconds: float) -> None:
+        return None
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)

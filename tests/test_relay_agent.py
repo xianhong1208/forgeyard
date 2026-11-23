@@ -24,7 +24,7 @@ from forgeyard.agent.relay import RelayClient, parse
 from forgeyard.models import fetch
 from tests.model_helpers import FakeHF, Repo, git_oid
 from tests.test_prefetch_agent import supervisor, want
-from tests.waits import until, wait_until
+from tests.waits import NoSleep, until, wait_until
 
 REV = "c" * 40
 BIG = b"GGUF" + os.urandom(400_000)
@@ -177,7 +177,7 @@ def test_fy_relay_010_through_the_server_with_the_credential_and_nothing_else(tm
 def test_fy_relay_011_a_cut_relay_resumes_and_a_changed_byte_is_refused(tmp_path, hf, relay, monkeypatch):
     """FY-RELAY-011: a relay cut after 100 000 bytes resumes from there (Range from the partial file); a relay
     that changes one byte fails the SHA-256 check: nothing is cached, the partial file is deleted."""
-    monkeypatch.setattr(am.time, "sleep", lambda s: None)
+    monkeypatch.setattr(am, "time", NoSleep())
     cache = cache_with(tmp_path, relay)
     model = validate_model(block(hf.url), [])
     relay.cut_after = 100_000

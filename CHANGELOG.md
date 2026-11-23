@@ -58,6 +58,7 @@ version until 1.0.
 
 - **Tests that held a fake engine busy for a fixed time** (FY-RT-003 failed on CI at 1.63 s against a 1.5 s bound) now
   hold it until the test lets it go, and check where a request went rather than how long the round took (#226).
+- **FY-ACC-020 errored when another thread read the clock**: tests patch only their module's `time` now (#239).
 
 ## [1.5.0] — 2026-11-23
 
