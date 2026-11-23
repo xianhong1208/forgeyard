@@ -546,6 +546,7 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .edit-outage p { margin: 0 0 6px; font-size: 13.5px; }
 .edit-outage ul { margin: 0; padding-left: 18px; font-size: 13.5px; display: grid; gap: 3px; }
 .edit-outage li { overflow-wrap: anywhere; }
+.dlg-title-text { min-width: 0; overflow-wrap: anywhere; }
 .rep-stuck { color: #8a1a12; }
 .notice .verdicts li { border-top-color: #f2c4c0; }
 

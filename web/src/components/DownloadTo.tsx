@@ -168,7 +168,7 @@ export function EngineDownloadDialog({ recipe, onClose, onStarted }: { recipe: s
     <div className="dlg-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dlg panel" role="dialog" aria-modal="true" aria-labelledby="edl-title" ref={box}>
         <div className="dlg-head">
-          <h2 id="edl-title"><IconDownload size={18} aria-hidden="true" /> {t.rich("enginepage.dl.title", { what: <span className="mono">{recipe}</span> })}</h2>
+          <h2 id="edl-title"><IconDownload size={18} aria-hidden="true" /> <span className="dlg-title-text">{t.rich("enginepage.dl.title", { what: <span className="mono">{recipe}</span> })}</span></h2>
           <button type="button" className="btn btn-quiet btn-small dlg-x" aria-label={t("common.close")} onClick={onClose}><IconX size={16} aria-hidden="true" /></button>
         </div>
         <p className="small muted dlg-lead">{t("enginepage.dl.lead")}</p>

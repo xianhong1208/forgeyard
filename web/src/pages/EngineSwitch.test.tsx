@@ -231,7 +231,7 @@ describe("Download to… for an engine alone (1.5.2)", () => {
     const dlg = await screen.findByRole("dialog");
     expect(within(dlg).getByText(/Only the engine is fetched: the image or program of the variant each machine would run/)).toBeTruthy();
     await within(dlg).findByText("gpu-01");
-    expect(within(dlg).getByText("No variant")).toBeTruthy();
+    expect(within(dlg).getByText("no variant")).toBeTruthy();
     expect(within(dlg).getByText("No variant of this engine runs here: no variant of vllm-0-34-0 for this machine's hardware")).toBeTruthy();
     expect(within(dlg).getByText(/through the server/)).toBeTruthy();
     const boxes = within(dlg).getAllByRole("checkbox") as HTMLInputElement[];

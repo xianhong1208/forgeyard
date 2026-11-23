@@ -105,6 +105,8 @@ export default {
   "admin.action.model.cache_removed": "Removed from a model cache",
   "admin.action.model.changed": "Model changed",
   "admin.action.model.checksum_recorded": "Model checksum recorded",
+  "admin.action.engine.download_cancelled": "Engine download cancelled",
+  "admin.action.engine.download_requested": "Engine download requested",
   "admin.action.model.download_cancelled": "Download cancelled",
   "admin.action.model.download_requested": "Download requested",
   "admin.action.model.removed": "Model removed",

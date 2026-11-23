@@ -103,6 +103,8 @@ export default {
   "admin.action.model.cache_removed": "已從模型快取移除",
   "admin.action.model.changed": "模型已變更",
   "admin.action.model.checksum_recorded": "已記錄模型的檢查碼",
+  "admin.action.engine.download_cancelled": "推論引擎下載已取消",
+  "admin.action.engine.download_requested": "已要求下載推論引擎",
   "admin.action.model.download_cancelled": "下載已取消",
   "admin.action.model.download_requested": "已要求下載",
   "admin.action.model.removed": "模型已移除",

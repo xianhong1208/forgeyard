@@ -210,7 +210,7 @@ def caught_up(recipe: Recipe) -> Optional[dict]:
     from forgeyard.models.engineversions import version_key
     from forgeyard.models.recipes import builtin_recipes
 
-    if recipe.builtin or not recipe.based_on:
+    if not recipe.based_on:   # a built-in recipe never has one
         return None
     found = builtin_recipes().get(recipe.based_on)
     if found is None:

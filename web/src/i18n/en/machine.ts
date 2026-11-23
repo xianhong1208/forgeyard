@@ -311,7 +311,7 @@ export default {
   "machine.img.copiedSize": " · {size} from {source}",
   "machine.img.copyingShort": "Copying…",
   "machine.img.copy": "Copy",
-  "machine.target.no_engine": "No variant",
+  "machine.target.no_engine": "no variant",
   "machine.target.noVariant": "No variant of this engine runs here: {note}",
   "machine.dl.engineOnly": "Engine {recipe}",
 } as const;

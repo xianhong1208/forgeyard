@@ -68,8 +68,8 @@ version until 1.0.
   (a copy's by the ids Try recorded), or its process program with its SHA-256; a machine no variant runs on is
   refused with why; progress and Cancel as for models; audited (`engine.download_requested`,
   `engine.download_cancelled`). Migration `0017_engine_downloads`: `model_downloads.model_id` becomes nullable (going
-  down deletes only engine-only rows). No agent change: agents with `prefetch` already take a download without a
-  model. A copy's page says when its built-in engine has caught up (the same version or a newer one), so its
+  down deletes only engine-only rows). Agents with `prefetch` already take a download without a model (a 1.5.2 agent
+  also names the engine in its log line). A copy's page says when its built-in engine has caught up (the same version or a newer one), so its
   deployments can switch back; nothing moves by itself. The edit page also shows what restarts in the reader's
   language (it was always English).
 
