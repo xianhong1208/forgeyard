@@ -31,7 +31,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
   and then can sleep when idle and give its memory back (1.5.0): the next request wakes it and waits for it.
 - **A page per model and per engine.** A catalog model's page shows which machines have it cached and
   where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
-  machines already have its image or program.
+  machines already have its image or program. An admin can check whether the built-in engines have newer
+  stable versions upstream (1.5.2): each newer version lists the variants that have an image of it, its
+  release notes, and the flags this engine passes that those notes mention. The built-in engine itself
+  does not change.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed

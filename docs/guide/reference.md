@@ -90,7 +90,7 @@ There is nothing to set; see [Deployments and the gateway](concepts.md#deploymen
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too) |
+| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | Allow model sources on private addresses and plain http (a LAN mirror; agents need `allow_private_hosts` too). Also applies to the check for newer engine versions |
 | `MODEL_URL_HOSTS` | — | Hosts allowed for `https://` GGUF sources, comma-separated. Only the first value: once an admin saves **Models → Sources**, the database wins. Until then the panel marks it *from .env* |
 | `MODEL_LOCAL_DIRS` | — | Directories allowed for `local://` models, comma-separated. Only the first value, like `MODEL_URL_HOSTS` |
 | `GPU_CONTEXT_MIB` | `400` | GPU memory a replica's CUDA context takes on top of its own |
@@ -1713,6 +1713,41 @@ CPU with 0.64 GiB of files, 1.4.4).
 A video recipe (1.3) has a `video` block: `request: vllm-omni` (vLLM-Omni's asynchronous jobs) and
 `frames_step` (4: the engine makes k x 4 + 1 frames). It serves only the `video` task, as
 `openai-videos`, and its `{keep_seconds}` placeholder is the deployment's `keep_minutes` and an hour.
+
+### Newer versions of the built-in recipes
+
+1.5.2 (#95). `POST /api/engine-updates/check` (admins) asks, now, every built-in recipe's own image
+repositories (`GET /v2/<repo>/tags/list`, following `Link: rel="next"`: GHCR answers 1,000 tags a page;
+`HEAD` of a candidate tag for its digest, which Docker Hub does not count as a pull) and GitHub's releases
+(anonymous: 60 requests an hour per address; a check makes about five). Through the server's model-source rules
+(https and public addresses; `MODEL_ALLOW_PRIVATE_HOSTS`), at most 20 seconds a request and 90 seconds in all,
+at most 30 pages of tags per repository. It answers 200 with the result even when a registry fails (that engine
+says `could_not_check`), and 409 `check_running` while another check runs. The `vision` recipe is not checked.
+
+`GET /api/engine-updates` (everyone signed in) returns `{"result": …, "can_check": bool}`, `result` being null
+before the first check. The result is kept in one `server_settings` row, `engine_updates` (no migration), and each
+check is audited as `recipe.updates_checked` with the newer versions per recipe.
+
+```json
+{"checked_at": "…", "checked_by": "admin", "seconds": 21.4, "github_requests": 5,
+ "engines": {"vllm": {"recipe": "vllm", "version": "0.32.0", "kind": "release", "status": "newer",
+   "newest": "0.34.0", "errors": [], "candidates": [
+     {"version": "0.34.0", "kind": "release",
+      "release": {"tag": "v0.34.0", "url": "https://github.com/vllm-project/vllm/releases/tag/v0.34.0", "published_at": "…"},
+      "variants": [
+        {"name": "cuda", "available": true, "tag": "v0.34.0", "digest": "sha256:…", "image": "vllm/vllm-openai:v0.34.0@sha256:…"},
+        {"name": "cuda-12.9", "available": false, "why": {"code": "no_image", "tag": "v0.34.0-cu129", "last": "0.32.0", "text": "…"}}],
+      "mentions": [{"flag": "--gpu-memory-utilization", "lines": 5, "excerpts": ["…"]}]}]}}}
+```
+
+| Field | Values |
+|---|---|
+| `status` | `newer`, `newer_build` (a moving tag points at a later image), `up_to_date`, `partly_checked`, `could_not_check`, `not_checked` (the vision image) |
+| `kind` | `release` (tags carry the version), `rolling` (moving tags only: stable-diffusion.cpp), `own` |
+| `candidates` | newest first, at most 8: stable versions greater than the recipe's `version`, found as tags of each variant's form (the built-in tag with its version replaced; llama.cpp's `-b<build>-<commit>` optional). Release candidates, nightlies and other tags never match |
+| `variants[].why.code` | `no_image`, `tag_unversioned`, `registry_error`, `digest_failed`; process variants: `installed_command`, `not_github`, `release_unknown`, `no_release`, `no_archive`, `no_sha256`, `github_error`; moving tags: `not_moved`, `not_newer`, `other_build` |
+| `mentions` | the recipe's `--flags` (also in `snake_case` when two words or more) and environment variables that the release notes name, up to three lines each; `notes` instead when the notes could not be read (`no_notes`, `github_error`) |
+| `upstream` | `release_without_image`: GitHub has a newer stable release whose images are not published yet |
 
 ## Container images
 

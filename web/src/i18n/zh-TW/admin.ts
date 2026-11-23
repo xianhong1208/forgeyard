@@ -123,6 +123,7 @@ export default {
   "admin.action.recipe.created": "引擎已新增",
   "admin.action.recipe.deleted": "引擎已刪除",
   "admin.action.recipe.updated": "引擎已變更",
+  "admin.action.recipe.updates_checked": "已檢查推論引擎有沒有新版本",
   "admin.action.route.changed": "路由已變更",
   "admin.action.route.created": "路由已建立",
   "admin.action.route.deleted": "路由已刪除",

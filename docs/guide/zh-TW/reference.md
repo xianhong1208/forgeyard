@@ -79,7 +79,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`） |
+| `MODEL_ALLOW_PRIVATE_HOSTS` | `false` | 允許使用私有位址和純 http 的模型來源（區域網路內的鏡像站；agent 也需要設定 `allow_private_hosts`）。檢查推論引擎新版本時也適用 |
 | `MODEL_URL_HOSTS` | — | `https://` GGUF 來源允許的主機，以逗號分隔。只是初始值：管理員一旦在 **模型 → 來源** 儲存過，就以資料庫為準。在那之前，面板會把它標示為 *from .env* |
 | `MODEL_LOCAL_DIRS` | — | `local://` 模型允許的目錄，以逗號分隔。和 `MODEL_URL_HOSTS` 一樣只是初始值 |
 | `GPU_CONTEXT_MIB` | `400` | 副本的 CUDA context 在它本身之外額外佔用的 GPU 記憶體 |
@@ -1228,6 +1228,33 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 `vision` 配方（1.4）用 `--task {task}`（模型的任務，專屬的佔位符）和 `--model {model_path}` 執行 Forgeyard 自己的視覺伺服器。它的映像檔和其他引擎一樣以 digest 固定（1.4.1），所以載入的副本會用記錄的 id 檢查，連不到 registry 的機器也能經由伺服器取得。升級伺服器不會改變它：某個 release 改了視覺伺服器時，固定的映像檔會在之後的版本移到新映像檔。自訂配方仍可用 `forgeyard_image: vision`（或 `vision-cuda`）代替 `image`，指定和伺服器同版本、只有 tag 的映像檔（1.4.0 的 `vision` 配方就是這樣寫的）；這種映像檔不會被檢查，也不會經由伺服器轉送。模型的 `config.json` 寫的是 `…ForObjectDetection` 架構（detect：RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1（segment），或 `…ForDepthEstimation`（depth：Depth Anything、DPT…）時，就是視覺模型。Hugging Face 上的視覺模型只接受寬鬆授權（Apache-2.0、MIT、BSD）：其他授權或沒有授權回 422 `not_a_vision_model`（Depth Anything V2 Base 與 Large 是 CC-BY-NC-4.0，Ultralytics 的 YOLO 權重是 AGPL-3.0）。零樣本（開放詞彙）偵測模型，也就是用 `model_type` 或架構認出的 transformers 零樣本偵測模型（Grounding DINO、MM-Grounding-DINO 與 LLMDet、OmDet-Turbo、OWL-ViT、OWLv2），是標上 `zero_shot` 的 detect 模型（1.4.4，#142；1.4.3 會拒絕它們，1.4.3 之前加入的靠目錄存下的 config 認出，不需要遷移）。OmDet-Turbo 和用 timm backbone 的 DETR 一樣被拒絕：它的 transformers 版本經由 timm 載入 backbone（加入時，或部署 1.4.3 之前加入的時候，回 422 `not_a_vision_model`）。圖片分類器（1.4.4，#141，任務 `image-classify`）是 `config.json` 寫的是 `…ForImageClassification` 架構（固定類別：ViT、ConvNeXt V2、DINOv2…；timm 權重 `timm_wrapper` 會被拒絕）或 CLIP 類架構（標上 `zero_shot`：CLIP、SigLIP、SigLIP 2、ALIGN、AltCLIP、Chinese-CLIP、MetaCLIP 2）的模型，以 `vision-classify` 提供。零樣本偵測模型和圖片分類器需要 1.4.4 起的視覺映像檔：配方的 `forgeyard-vision` 映像檔比較舊時，部署或估算會回 422 `vision_image_too_old`，寫出兩個版本（`1.4.4rc1` 這類預先發布版算作它之後的正式版，也就是 1.4.4）；其他名稱的映像檔（本機建置）照原樣接受。CLIP 儲存庫裡 transformers 權重旁邊的 OpenCLIP 權重（`open_clip_*`）不會被讀取，也不會下載。估算：檔案大小，GPU 上再加 1 GiB（和 CUDA context），CPU 上再加 1.25 GiB 記憶體，用三個推薦模型量的（CPU 上峰值 0.66 到 1.12 GiB）；Grounding DINO 和 MM-Grounding-DINO 再加 512 MiB（文字編碼器和 800 像素的特徵：0.64 GiB 的檔案在 CPU 上峰值 2.24 GiB，1.4.4）。
 
 影片配方（1.3）有一個 `video` 區塊：`request: vllm-omni`（vLLM-Omni 的非同步工作）和 `frames_step`（4：引擎做 k x 4 + 1 格）。它只提供 `video` 任務，以 `openai-videos` 提供，它的 `{keep_seconds}` 佔位符是部署的 `keep_minutes` 再加一小時。
+
+### 內建配方的新版本
+
+1.5.2（#95）。`POST /api/engine-updates/check`（管理員）會立刻向每個內建配方自己的映像檔儲存庫查詢（`GET /v2/<repo>/tags/list`，並跟著 `Link: rel="next"` 往下讀：GHCR 每頁回 1,000 個標籤；對候選標籤用 `HEAD` 取得 digest，Docker Hub 不把它算成一次拉取），以及 GitHub 的發布版本（匿名：每個位址每小時 60 次；一次檢查大約用 5 次）。它走伺服器的模型來源規則（https 和公開位址；`MODEL_ALLOW_PRIVATE_HOSTS`），每個請求最多 20 秒、整體最多 90 秒，每個儲存庫最多讀 30 頁標籤。就算某個 registry 失敗，它也會回 200 和結果（那個推論引擎標成 `could_not_check`）；另一個檢查正在進行時回 409 `check_running`。`vision` 配方不檢查。
+
+`GET /api/engine-updates`（所有登入的人）回傳 `{"result": …, "can_check": bool}`，第一次檢查之前 `result` 是 null。結果存在一筆 `server_settings`（`engine_updates`，不需要資料庫遷移），每次檢查都會以 `recipe.updates_checked` 記進稽核紀錄，附上每個配方找到的新版本。
+
+```json
+{"checked_at": "…", "checked_by": "admin", "seconds": 21.4, "github_requests": 5,
+ "engines": {"vllm": {"recipe": "vllm", "version": "0.32.0", "kind": "release", "status": "newer",
+   "newest": "0.34.0", "errors": [], "candidates": [
+     {"version": "0.34.0", "kind": "release",
+      "release": {"tag": "v0.34.0", "url": "https://github.com/vllm-project/vllm/releases/tag/v0.34.0", "published_at": "…"},
+      "variants": [
+        {"name": "cuda", "available": true, "tag": "v0.34.0", "digest": "sha256:…", "image": "vllm/vllm-openai:v0.34.0@sha256:…"},
+        {"name": "cuda-12.9", "available": false, "why": {"code": "no_image", "tag": "v0.34.0-cu129", "last": "0.32.0", "text": "…"}}],
+      "mentions": [{"flag": "--gpu-memory-utilization", "lines": 5, "excerpts": ["…"]}]}]}}}
+```
+
+| 欄位 | 值 |
+|---|---|
+| `status` | `newer`、`newer_build`（會移動的標籤指向較新的映像檔）、`up_to_date`、`partly_checked`、`could_not_check`、`not_checked`（視覺映像檔） |
+| `kind` | `release`（標籤帶版本號）、`rolling`（只有會移動的標籤：stable-diffusion.cpp）、`own` |
+| `candidates` | 最新的在前，最多 8 個：比配方的 `version` 大的穩定版本，以各變體的標籤形式找到（內建標籤把版本號換掉；llama.cpp 的 `-b<build>-<commit>` 可有可無）。候選版本、每日建置和其他標籤都不會符合 |
+| `variants[].why.code` | `no_image`、`tag_unversioned`、`registry_error`、`digest_failed`；行程變體：`installed_command`、`not_github`、`release_unknown`、`no_release`、`no_archive`、`no_sha256`、`github_error`；會移動的標籤：`not_moved`、`not_newer`、`other_build` |
+| `mentions` | 版本說明提到的、配方的 `--參數`（兩個字以上的也比對 `snake_case` 寫法）和環境變數，每個最多三行；讀不到說明時改成 `notes`（`no_notes`、`github_error`） |
+| `upstream` | `release_without_image`：GitHub 上有較新的穩定版本，但映像檔還沒發布 |
 
 ## 容器映像檔
 

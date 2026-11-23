@@ -739,3 +739,28 @@ export type EnginePage = {
   deployments: { id: number; name: string; model_id: number }[];
   models: { id: number; name: string; title: string | null }[];
 };
+
+// 1.5.2 (#95): newer versions of the built-in engines, as the last check found them (GET /api/engine-updates).
+export type EngineUpdateWhy = { code: string; text: string } & Record<string, string | string[] | number | null | undefined>;
+export type EngineUpdateVariant = {
+  name: string; runtime: "container" | "process"; vendor: string; available: boolean;
+  tag?: string; digest?: string; image?: string; url?: string; sha256?: string; archive?: string; release?: string;
+  why?: EngineUpdateWhy;
+};
+export type EngineUpdateCandidate = {
+  version: string; kind: "release" | "build"; revision?: string | null; created?: string | null;
+  release?: { tag: string; name: string | null; url: string | null; published_at: string | null };
+  variants: EngineUpdateVariant[];
+  mentions?: { flag: string; lines: number; excerpts: string[] }[];
+  notes?: EngineUpdateWhy;
+};
+export type EngineUpdateStatus = "newer" | "newer_build" | "up_to_date" | "partly_checked" | "could_not_check" | "not_checked";
+export type EngineUpdate = {
+  recipe: string; title: string; engine: string; version: string; kind: "release" | "rolling" | "own";
+  status: EngineUpdateStatus; newest?: string | null; candidates: EngineUpdateCandidate[];
+  errors: { where: string; text: string }[]; upstream?: EngineUpdateWhy; why?: EngineUpdateWhy;
+};
+export type EngineUpdatesResult = {
+  checked_at: string; checked_by: string; seconds: number; github_requests: number; engines: Record<string, EngineUpdate>;
+};
+export type EngineUpdatesResponse = { result: EngineUpdatesResult | null; can_check: boolean };

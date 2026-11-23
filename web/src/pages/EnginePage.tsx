@@ -6,6 +6,7 @@ import { IconCopy, IconCpu, IconEngine, IconPencil, IconRefresh, IconTrash } fro
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { CheckBar, EngineUpdates } from "../components/EngineUpdates";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Crumb, FoldButton, HardwareChips, Jump, MachineCell, ModelCards, Section } from "../components/LibraryPage";
 import { Notice } from "../components/ui";
@@ -17,7 +18,8 @@ import { engineDescription } from "../lib/engines";
 import { API_LABEL, TASK_LABEL, mediaText } from "../lib/models";
 import { digestOf, engineHref, pinned, stale, whereText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
-import type { CatalogResponse, Deployment, DeploymentsResponse, EnginePage as Page, Machine, MachinesResponse, Recipe, RecipeParam } from "../lib/types";
+import type { CatalogResponse, Deployment, DeploymentsResponse, EnginePage as Page, EngineUpdatesResponse, Machine, MachinesResponse, Recipe,
+  RecipeParam } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { EngineForm, OfflineImages } from "./Models";
 import { DeploymentRow } from "./Serving";
@@ -70,6 +72,17 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
   const r = p.recipe;
   const t = useT();
   const navigate = useNavigate();
+  // 1.5.2 (#95): newer versions of a built-in engine, as the last check found them.
+  const updates = useApi<EngineUpdatesResponse>(r.builtin ? "/engine-updates" : null);
+  const [checked, setChecked] = useState<EngineUpdatesResponse | null>(null);
+  const upd = checked ?? updates.data;
+  // A card's badge links here (#updates): once the result is in, the section is where it should be.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (!upd || scrolled.current || window.location.hash !== "#updates") return;
+    scrolled.current = true;
+    document.getElementById("updates")?.scrollIntoView?.({ block: "start" });
+  }, [upd]);
   const [form, setForm] = useState<"edit" | "copy" | null>(null);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
@@ -129,7 +142,8 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
         {r.share === "vram" ? <span className="chip chip-tone-wait">{t("library.sharesGpu")}</span> : <span className="muted">{t("enginepage.ownCard")}</span>}
         {!r.builtin && <span className="chip chip-tone-run">{t("library.custom")}</span>}
       </p>
-      <Jump links={[["overview", t("enginepage.jump.overview")], ["variants", t("enginepage.jump.variants")], ["machines", t("enginepage.jump.machines")],
+      <Jump links={[["overview", t("enginepage.jump.overview")], ["variants", t("enginepage.jump.variants")],
+        ...(r.builtin ? [["updates", t("engineupdates.title")] as [string, string]] : []), ["machines", t("enginepage.jump.machines")],
         ["params", t("enginepage.jump.params")], ["deployments", t("enginepage.jump.deployments")]]} />
 
       <Section id="overview" title={t("enginepage.jump.overview")}><EngineAbout r={r} /></Section>
@@ -137,6 +151,14 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
       <Section id="variants" title={t("enginepage.jump.variants")} count={r.variants.length} note={t("enginepage.variantsNote")}>
         <EngineVariants r={r} />
       </Section>
+
+      {r.builtin && (
+        <Section id="updates" title={t("engineupdates.title")}
+          count={upd?.result?.engines[r.name]?.candidates.length || undefined}
+          actions={<CheckBar compact data={upd} onChecked={(res) => setChecked({ result: res, can_check: true })} />}>
+          <EngineUpdates u={upd?.result?.engines[r.name]} version={r.version} />
+        </Section>
+      )}
 
       <Section id="machines" title={t("enginepage.jump.machines")} count={t("enginepage.thereOn", { count: String(here) })}
         actions={canList ? <button type="button" className="btn btn-quiet btn-small" onClick={relist} disabled={listing}
@@ -165,6 +187,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
       <HelpLinks>
         <HelpLink page="concepts" anchor="models-engines-and-estimates">{t("library.help.concepts")}</HelpLink>
         <HelpLink page="how-to" anchor="offline-machines">{t("library.help.offline")}</HelpLink>
+        {r.builtin && <HelpLink page="how-to" anchor="see-whether-an-engine-has-a-newer-version">{t("engineupdates.help")}</HelpLink>}
       </HelpLinks>
     </>
   );

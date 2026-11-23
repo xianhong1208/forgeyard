@@ -125,6 +125,7 @@ export default {
   "admin.action.recipe.created": "Engine added",
   "admin.action.recipe.deleted": "Engine deleted",
   "admin.action.recipe.updated": "Engine changed",
+  "admin.action.recipe.updates_checked": "Checked for newer engine versions",
   "admin.action.route.changed": "Route changed",
   "admin.action.route.created": "Route created",
   "admin.action.route.deleted": "Route deleted",

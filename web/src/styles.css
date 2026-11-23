@@ -435,6 +435,31 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .engine-details[open] > summary { margin-bottom: 4px; }
 .engine-actions { display: flex; gap: 2px; flex: none; }
 .engine-form textarea { width: 100%; }
+.eu-badge { flex: none; align-self: center; text-decoration: none; white-space: nowrap; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+.eu-badge:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* 1.5.2 (#95): the check for newer engine versions, and an engine page's Newer versions section. */
+.eu-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; }
+.eu-bar .eu-last { margin: 0; flex: 1 1 200px; min-width: 0; }
+.eu-bar .notice { flex-basis: 100%; margin: 0; }
+.panel-head .eu-bar { margin: 0; justify-content: flex-end; flex: 1 1 auto; }
+.panel-head .eu-bar .eu-last { flex: 0 1 auto; text-align: right; }
+.eu-errors { margin: 4px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+.eu-cand { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 0 0 12px; background: var(--surface-2); }
+.eu-cand-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 8px; }
+.eu-cand-head h3 { margin: 0; font-size: 15px; }
+.eu-cand-head .eu-actions { margin-left: auto; }
+.eu-cand-head .eu-actions:empty { display: none; }
+.eu-notes { display: inline-flex; align-items: center; gap: 3px; }
+.eu-variants td { vertical-align: top; }
+.eu-variants td:first-child, .eu-variants td:nth-child(2) { white-space: nowrap; }
+.eu-mentions { margin: 8px 0 0; }
+.eu-mentions p { margin: 0 0 4px; }
+.eu-mentions > ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.eu-mentions summary { cursor: pointer; }
+.eu-excerpts { margin: 4px 0 6px; padding-left: 18px; color: var(--ink-2); overflow-wrap: anywhere; }
+.spin { animation: eu-spin 1s linear infinite; }
+@keyframes eu-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
 .engine-form-lead { margin: 0 0 6px; }
 .variants { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
 .variants li { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; }
