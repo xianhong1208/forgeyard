@@ -128,7 +128,7 @@ export default {
   "deploy.scale.bounds": "1 to 16.",
   "deploy.scale.zeroHint": " 0 as the fewest: down to none only by sleeping when idle.",
   "deploy.scale.targetHint":
-    "Automatic replicas: of its Concurrent requests, counting requests in flight and waiting in the gateway's line. 20 to 100.",
+    "A percentage of its Concurrent requests, counting requests in flight and those waiting in the gateway's line. 20 to 100.",
   "deploy.scale.up": "Busy for (seconds) before one more",
   "deploy.scale.upHint": "10 to 600. At twice the target one is added after 10 s.",
   "deploy.scale.down": "Quiet for (minutes) before one fewer",

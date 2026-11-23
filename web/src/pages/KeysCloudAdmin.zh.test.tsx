@@ -126,7 +126,7 @@ describe("API keys in zh-TW", () => {
     expect(screen.getByText("base_url")).toBeTruthy();
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(
-      ["金鑰", "模型", "限制", "雲端", "預算", "上次使用", "到期", "狀態", "動作"]);
+      ["金鑰", "模型", "限制", "雲端", "預算", "上次使用", "到期", "狀態", "操作"]);
     const row = within(table).getByText("laptop").closest("tr") as HTMLElement;
     expect(within(row).getByText("所有部署")).toBeTruthy();
     expect(within(row).getByText("每分鐘 60 次請求")).toBeTruthy();
@@ -200,7 +200,7 @@ describe("API keys in zh-TW", () => {
     expect(within(row).getByText("已用完")).toBeTruthy();
     fireEvent.click(within(row).getByRole("button", { name: "限制" }));
     const form = screen.getByRole("form", { name: "ci 的限制" });
-    expect(within(form).getByText("已為 ursula 鎖定（由 owner 設定）。清空它即可解除鎖定。", { selector: "#f-rpm-k4-hint" })).toBeTruthy();
+    expect(within(form).getByText("已對 ursula 鎖定（由 owner 設定）。清空即可解除鎖定。", { selector: "#f-rpm-k4-hint" })).toBeTruthy();
     expect(within(form).getByRole("button", { name: "解除請求數鎖定" })).toBeTruthy();
     expect(within(form).getByRole("button", { name: "解除預算鎖定" })).toBeTruthy();
   });
@@ -284,7 +284,7 @@ describe("Cloud in zh-TW", () => {
     expect(why.textContent).toContain("OpenAI is a cloud API.");
     fireEvent.click(screen.getByRole("checkbox", { name: /在你的網路外/ }));
     expect(why.textContent).toContain("你改過這裡：它是手動取消勾選的。");
-    expect(screen.getByText("允許明文 HTTP（只限私人位址）。")).toBeTruthy();
+    expect(screen.getByText("允許明文 HTTP（只限私有位址）。")).toBeTruthy();
     headingsInChinese();
   });
 
@@ -304,7 +304,7 @@ describe("Cloud in zh-TW", () => {
     expect(screen.getByRole("meter", { name: "openai 的預算：US$45.00，預算 US$50.00" })).toBeTruthy();
     const models = screen.getByRole("heading", { name: "模型" }).closest("section") as HTMLElement;
     expect(within(models).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(
-      ["模型", "提供", "每 100 萬個 token 的價格", "上下文", "使用它的路由", "伺服器啟動以來", "動作"]);
+      ["模型", "提供", "每 100 萬個 token 的價格", "上下文", "使用它的路由", "伺服器啟動以來", "操作"]);
     expect(within(models).getByText("對話")).toBeTruthy();
     expect(within(models).getByText("輸入")).toBeTruthy();
     expect(within(models).getByText("快取")).toBeTruthy();
@@ -414,7 +414,7 @@ describe("admin pages in zh-TW", () => {
     mount("/users");
     expect(await screen.findByRole("heading", { level: 1, name: "使用者" })).toBeTruthy();
     expect(await screen.findByText("有 1 個帳號在等待核准。")).toBeTruthy();
-    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["使用者", "角色", "狀態", "上次登入", "動作"]);
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["使用者", "角色", "狀態", "上次登入", "操作"]);
     expect(screen.getByText("擁有者")).toBeTruthy();
     expect(screen.getByText("你")).toBeTruthy();
     expect(screen.getByText("尚未設定密碼")).toBeTruthy();
@@ -448,7 +448,7 @@ describe("admin pages in zh-TW", () => {
     const show = screen.getByLabelText("顯示") as HTMLSelectElement;
     expect([...show.options].slice(0, 3).map((o) => o.textContent)).toEqual(["全部", "登入與工作階段", "使用者變更"]);
     expect(screen.getByRole("button", { name: "載入更早的事件" })).toBeTruthy();
-    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["時間", "事件", "誰", "對象", "來源", "詳細資料"]);
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["時間", "事件", "操作者", "對象", "來源", "詳細資料"]);
     cleanup();
     localStorage.setItem(LANG_KEY, "en");
     const view = render(<ActionName action="auth.login_failed" />);
@@ -534,7 +534,7 @@ describe("admin pages in zh-TW", () => {
     const off = await screen.findByText("TLS=off");
     const box = off.closest("[role]") ?? off.parentElement!;
     expect(within(box as HTMLElement).getByText("這台伺服器沒有使用 HTTPS。").tagName).toBe("STRONG");
-    expect(box.textContent).toContain("密碼、工作階段 Cookie 和 API 金鑰都以未加密的方式在網路上傳送。");
+    expect(box.textContent).toContain("密碼、工作階段 cookie 和 API 金鑰都以未加密的方式在網路上傳送。");
     expect(off.tagName).toBe("CODE");
     expect(within(box as HTMLElement).getByText("TRUSTED_PROXIES").tagName).toBe("CODE");
   });

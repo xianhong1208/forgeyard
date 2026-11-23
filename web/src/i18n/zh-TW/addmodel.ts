@@ -11,8 +11,8 @@ export default {
   "addmodel.mode.source": "輸入來源",
 
   "addmodel.rec.loading": "清單載入中…",
-  "addmodel.rec.languages": "它會說的語言",
-  "addmodel.rec.licenceFrom": "{source} 的授權，這個模型是從它轉換來的",
+  "addmodel.rec.languages": "支援的語言",
+  "addmodel.rec.licenceFrom": "沿用 {source} 的授權（這個模型由它轉換而來）",
   "addmodel.rec.licence": "授權",
   "addmodel.rec.sizeRam": "大約要下載 {download} GiB；一個副本大約需要 {memory} GiB 的 RAM。",
   "addmodel.rec.sizeGpu": "大約要下載 {download} GiB；一個副本大約需要 {memory} GiB 的 GPU 記憶體。",
@@ -28,7 +28,7 @@ export default {
   "addmodel.group.vision.description":
     "也會讀圖片的對話模型（在部署上開啟時也會讀影片）。Qwen3-VL 有三種大小給 vLLM 用，也有附投影器的 GGUF 版本，在 CPU 或 AMD APU 上用 llama.cpp 執行。",
   "addmodel.group.speech.title": "語音轉文字",
-  "addmodel.group.speech.description": "轉換給 faster-whisper 用的 Whisper 模型，經由 speaches 提供服務。",
+  "addmodel.group.speech.description": "轉換成 faster-whisper 格式的 Whisper 模型，經由 speaches 提供服務。",
   "addmodel.group.tts.title": "文字轉語音",
   "addmodel.group.tts.description":
     "給 /v1/audio/speech 用的內建語音。Qwen3-TTS 會說中文（普通話和方言）、英文和另外八種語言，在 NVIDIA GPU 上用 vLLM-Omni 執行，或以 GGUF 在 AMD APU 或 CPU 上用 llama.cpp 執行；Kokoro 和 Chatterbox 是在 CPU 上就能跑的小型英文語音。不提供聲音複製。",
@@ -48,7 +48,7 @@ export default {
   "addmodel.group.retrieval.description": "通用的搜尋與檢索（RAG）模型，支援超過 100 種語言。",
   "addmodel.group.text-classification.title": "文字分類",
   "addmodel.group.text-classification.description":
-    "在 NVIDIA GPU 上用 vLLM 執行、在 /v1/classify 替文字標上固定一組標籤之一（情緒、語言、有害內容）的小模型。比問對話模型快得多。只收 MIT 和 Apache-2.0。",
+    "在 /v1/classify 替文字貼上一組固定標籤之一（情緒、語言、有害內容）的小模型，在 NVIDIA GPU 上用 vLLM 執行。比問對話模型快得多。只收 MIT 和 Apache-2.0。",
 
   "addmodel.search.aria": "在 Hugging Face 上搜尋",
   "addmodel.search.label": "搜尋 Hugging Face",
@@ -96,7 +96,7 @@ export default {
   "addmodel.review.tokenHint":
     "這個模型是受限的：先用你的帳號在 huggingface.co 接受它的授權，再貼上 Hugging Face 設定裡的讀取權杖。它只用來讀取這個模型，不會儲存。要讓每個受限模型的檢視和下載都用同一個權杖，請在「模型 → 來源」把它存成伺服器的權杖。",
   "addmodel.review.readWithToken": "用這個權杖讀取",
-  "addmodel.review.local": "伺服器無法查看本機目錄的內容：由擁有它的機器載入模型。請說明它是什麼格式；部署時再填入它需要的記憶體。",
+  "addmodel.review.local": "伺服器看不到機器上本機目錄的內容：模型由擁有這個目錄的機器載入。請選擇它的格式，部署時再填入它需要的記憶體。",
   "addmodel.review.format": "格式",
   "addmodel.review.choosePlaceholder": "請選擇…",
   "addmodel.review.localFile": "目錄中的 GGUF 檔案",
@@ -124,10 +124,10 @@ export default {
   "addmodel.mmproj.hint": "llama.cpp 透過這個檔案讀圖片（{flag}）。通常選 F16；Q8_0 只需要大約一半的記憶體。",
   "addmodel.name": "目錄中的名稱",
   "addmodel.nameHint": "小寫字母、數字、. _ -",
-  "addmodel.title": "標題",
+  "addmodel.title": "顯示名稱",
   "addmodel.titlePlaceholder": "選填",
   "addmodel.task": "用途",
-  "addmodel.engineArgs": "附帶給 {names} 的引擎參數：{args}",
+  "addmodel.engineArgs": "給 {names} 的引擎參數：{args}",
   "addmodel.foot": "加入時還不會下載任何東西。部署時機器才會取得模型。",
   "addmodel.adding": "加入中…",
   "addmodel.add": "加入目錄",
@@ -141,8 +141,8 @@ export default {
   "addmodel.suggest.end": "。",
   "addmodel.suggest.fits": "現在放得進：{where}。",
   "addmodel.suggest.noFit": "目前沒有機器放得下。",
-  "addmodel.suggest.stillAdd": "還是可以先加入；等有機器有空間時再部署。",
-  "addmodel.suggest.stillAddGpu": "還是可以先加入；等有機器有空間時再部署，或用更多張 GPU 部署。",
+  "addmodel.suggest.stillAdd": "還是可以先加入，等哪台機器有空間再部署。",
+  "addmodel.suggest.stillAddGpu": "還是可以先加入，等哪台機器有空間再部署，或用更多張 GPU 部署。",
   "addmodel.suggest.defaults": "以上是引擎的預設值（{also}上下文長度和並行數可在部署時變更）。",
   "addmodel.suggest.also": "也可以用：{list}；",
   "addmodel.fit.gpu": "{name} 的 GPU {gpus}",
@@ -169,7 +169,7 @@ export default {
   "addmodel.lang.it": "義大利文",
 
   "addmodel.terms.openrail": "OpenRAIL：允許商業使用，但授權禁止某些用途。部署前請先閱讀。",
-  "addmodel.terms.gemma": "Gemma 條款：在 Google 的禁止用途政策下允許商業使用。部署前請先閱讀。",
+  "addmodel.terms.gemma": "Gemma 條款：允許商業使用，但須遵守 Google 的禁止用途政策。部署前請先閱讀。",
   "addmodel.terms.llama31": "Llama 3.1 社群授權：每月使用者少於 7 億時可商業使用，須標示出處。",
   "addmodel.terms.llama32": "Llama 3.2 社群授權：每月使用者少於 7 億時可商業使用，須標示出處。",
 } satisfies Record<keyof typeof en, string>;

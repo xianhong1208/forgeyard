@@ -1,5 +1,8 @@
 // The Get started checklist (GET /api/onboarding) and the example call it shows.
 
+import { translateMaybe } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
+import { getLang, type Lang } from "../i18n/lang";
 import { snippets } from "./gateway";
 
 export type StepId = "machine" | "gpus" | "model" | "deploy" | "key" | "call" | "usage";
@@ -48,4 +51,34 @@ export function exampleCall(gatewayUrl: string, model: string, api: string, trus
 // The step to do next: the first one not done.
 export function currentStep(c: Checklist): Step | undefined {
   return c.steps.find((s) => !s.done);
+}
+
+// The details that count or list things: their numbers and names go into the reader's sentence.
+const DETAILS: [RegExp, string, (m: RegExpExecArray) => Record<string, string>][] = [
+  [/^(\d+) machines? online\.$/, "online", (m) => ({ n: m[1] })],
+  [/^(\d+) machines? online, (\d+) offline\.$/, "onlineOffline", (m) => ({ n: m[1], m: m[2] })],
+  [/^(.+) joined but (?:is|are) offline: start the agent there again\.$/, "joinedOffline", (m) => ({ names: m[1] })],
+  [/^Not chosen yet on (.+): until you choose, Forgeyard may use every GPU there\. Open the machine and use Change GPU access\.$/,
+    "notChosen", (m) => ({ names: m[1] })],
+  [/^Chosen on (\d+) machines? with GPUs\.$/, "chosen", (m) => ({ n: m[1] })],
+  [/^(\d+) models? in the catalog\.$/, "models", (m) => ({ n: m[1] })],
+  [/^Ready: (.+)\.$/, "ready", (m) => ({ names: m[1] })],
+  [/^Not ready yet: (.+)\. The first start downloads the model and the engine; that can take a while\.$/, "notReady", (m) => ({ list: m[1] })],
+  [/^You have (\d+) active keys?\.$/, "keys", (m) => ({ n: m[1] })],
+  [/^You have sent (\d+) requests? with your keys\.$/, "sent", (m) => ({ n: m[1] })],
+];
+
+// A step's detail in the reader's language: a counting or listing sentence by its pattern, a fixed one by its
+// text (start.sent.*), anything else as the server sent it.
+export function detailText(text: string, lang: Lang = getLang()): string {
+  if (lang === "en") return text;
+  for (const [re, key, vars] of DETAILS) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const v = vars(m);
+    if (v.n) v.n = formatNumber(Number(v.n), lang);
+    if (v.names) v.names = v.names.split(" (asleep)").join(translateMaybe(lang, "start.detail.asleep", " (asleep)"));
+    return translateMaybe(lang, `start.detail.${key}`, text, v);
+  }
+  return translateMaybe(lang, `start.sent.${text}`, text);
 }

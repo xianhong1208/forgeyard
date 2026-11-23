@@ -104,7 +104,7 @@ describe("a machine's page in zh-TW", () => {
     expect(screen.getByText("2 個檔案", { exact: false })).toBeTruthy();
     expect(screen.getByRole("button", { name: "移除未完成的下載" })).toBeTruthy();
     expect(screen.getByLabelText("下載時的網路連線")).toBeTruthy();
-    expect(await screen.findByText(/這台機器的引擎裡還有 1 個其他映像檔/)).toBeTruthy();
+    expect(await screen.findByText(/這台機器的容器引擎裡還有 1 個其他映像檔/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "從其他機器複製" })).toBeTruthy();
     headingsInChinese();
   });
@@ -213,7 +213,7 @@ const placement = { fits: true, machines: [{ machine_id: 1, name: "a100-box", st
   placed: [{ replica: 0, machine: "a100-box", machine_id: 1, variant: "cuda", runtime: "container", image: null, gpus: [0], cached: true,
     leftover: 30 * GIB, online: true, previous: false }] };
 
-function deploymentServer() {
+function deploymentServer(logs: object = { source: "live", text: "ready", note: null }) {
   return server((url, init) => {
     if (url === "/api/deployments/3" && init?.method === "PATCH") {
       const out = { estimate, params: {}, placement, restart: "all", restart_text: "Its replica restarts: the model does not answer until the new one is ready.",
@@ -221,7 +221,7 @@ function deploymentServer() {
       return { status: 200, body: out };
     }
     if (url === "/api/deployments/3") return { status: 200, body: { deployment: dep(), events: EVENTS, server_time: "", can_manage: true } };
-    if (url.startsWith("/api/workloads/11/replicas/0/logs")) return { status: 200, body: { source: "live", text: "ready", note: null } };
+    if (url.startsWith("/api/workloads/11/replicas/0/logs")) return { status: 200, body: logs };
     if (url === "/api/models") return { status: 200, body: catalog };
     if (url === "/api/machines") return { status: 200, body: { ...fixture, machines: fixture.machines.slice(0, 1) } };
     if (url === "/api/deployments") return { status: 200, body: { deployments: [], server_time: "", can_manage: true } };
@@ -238,19 +238,19 @@ describe("a deployment's page in zh-TW", () => {
     for (const name of ["經由閘道", "沒有使用時", "記憶體：估算與即時", "試試看", "事件", "輸出", "背後的副本", "目前在機器上"]) {
       expect(screen.getByRole("heading", { name })).toBeTruthy();
     }
-    expect(screen.getByText("1 個中 1 個就緒")).toBeTruthy();
+    expect(screen.getByText("1/1 就緒")).toBeTruthy();
     expect(document.querySelector(".wl-status .chip-big")?.textContent).toBe("執行中");
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual(["#", "狀態", "機器", "裝置", "執行內容", "保留", "開始時間"]);
     expect(within(table).getByText("健康")).toBeTruthy();
     expect(screen.getByText("開啟：30 分鐘沒有請求後休眠；請求最多等 300 秒讓它喚醒")).toBeTruthy();
     expect(screen.getByText("12 個請求 · 1 個進行中")).toBeTruthy();
-    expect(screen.getByText("金鑰防護")).toBeTruthy();
+    expect(screen.getByText("金鑰守門員")).toBeTruthy();
     const event = screen.getByText("Replica 0 placed on a100-box GPU #0.", { exact: false });
     expect(event.textContent).toBe("已放置Replica 0 placed on a100-box GPU #0.");
     expect(within(event).getByText("已放置").tagName).toBe("B");
     for (const name of ["編輯", "停止", "刪除"]) expect(screen.getByRole(name === "編輯" ? "link" : "button", { name })).toBeTruthy();
-    expect(await screen.findByText(/^即時來自 agent，每 2 秒更新；最後 300 行。$/)).toBeTruthy();
+    expect(await screen.findByText(/^即時取自 agent，每 2 秒更新；顯示最後 300 行。$/)).toBeTruthy();
     headingsInChinese();
   });
 
@@ -261,6 +261,17 @@ describe("a deployment's page in zh-TW", () => {
     expect(event.tagName).toBe("SPAN");
     expect(event.textContent).toBe("Replica 0 placed on a100-box GPU #0.");
     expect(screen.queryByText("Placed")).toBeNull();
+  });
+
+  it("FY-WEB-840 the output panel's note from the server in Chinese when it is a known sentence; English as sent", async () => {
+    const note = "Live output is not available: its machine is not connected. Showing the lines kept when it last ended.";
+    deploymentServer({ source: "stored", text: "old line", truncated: false, state: "exited", note });
+    mount("/serving/3");
+    expect(await screen.findByText("無法顯示即時輸出：它的機器沒有連線。下面是它上次結束時保留的輸出。")).toBeTruthy();
+    cleanup();
+    deploymentServer({ source: "stored", text: "old line", truncated: false, state: "exited", note });
+    mount("/serving/3", "en");
+    expect(await screen.findByText(note)).toBeTruthy();
   });
 });
 

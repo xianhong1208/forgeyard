@@ -4,7 +4,7 @@ export default {
   "playground.index": "05 · 試用區",
   "playground.title": "試用區",
   "playground.lead":
-    "以你自己的身分，經由閘道試用已部署的模型：路由和限制都和 API 金鑰相同，但不必建立金鑰。這些請求在「用量」中算作「console」。",
+    "以你自己的身分，經由閘道試用已部署的模型：路由和限制都和 API 金鑰相同，但不必建立金鑰。這些請求在「用量」中列為「主控台試用區」。",
   "playground.unreachable": "連不上 Forgeyard 伺服器。",
 
   "playground.empty.title": "還沒有可以試用的模型",
@@ -13,7 +13,7 @@ export default {
   "playground.empty.waiting.other": "有 {count} 個部署尚未就緒：<link>服務中</link>會顯示每個部署是已停止、啟動中，還是在等待機器。",
   "playground.empty.none": "還沒有部署任何模型。",
   "playground.empty.canDeploy": "從<strong>模型 → 目錄</strong>部署一個：對話、嵌入、語音、圖片、影片或視覺。就緒後就會出現在這裡。",
-  "playground.empty.cannot": "管理員和操作員才能部署模型；請請他們部署你需要的模型。",
+  "playground.empty.cannot": "只有管理員和操作員能部署模型；需要什麼模型，請找他們部署。",
   "playground.empty.deploy": "從目錄部署",
 
   "playground.bar.cloud": "由雲端供應商提供服務。",
@@ -142,7 +142,7 @@ export default {
     "影片是一個工作：先提出請求，在一個副本上製作，再取回。需要幾分鐘，有其他人在等待時會更久；這個頁面會持續追蹤，你離開後它也會繼續進行。",
   "playground.video.length": "長度",
   "playground.video.seconds": "{n} 秒",
-  "playground.video.frames": "{frames} 幀，每秒 {fps} 幀",
+  "playground.video.frames": "{frames} 個影格，每秒 {fps} 格",
   "playground.video.job": "影片工作",
   "playground.video.status.queued": "等待副本",
   "playground.video.status.in_progress": "製作中",

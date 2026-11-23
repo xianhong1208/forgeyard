@@ -58,7 +58,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 目前為止幾乎每一次都是測試固定等一段時間就以為事情發生了，或是在需要的資料到達之前就讀了頁面。
 
 - **等狀態，不要等時間。** `tests/waits.py` 有 `wait_until(predicate, what, timeout=10)`，非同步測試用
-  `await until(...)`：狀態一到就返回，超過期限才失敗並說出 `what`，所以期限可以放寬。要先有一個請求在處理中，
+  `await until(...)`：狀態一到就回傳，超過期限才失敗並說出 `what`，所以期限可以放寬。要先有一個請求在處理中，
   就在執行緒裡送出它，再等假的 engine 或 app 收到（FY-IGEN-007、FY-X-014、FY-PGV-008），不要
   `time.sleep(0.2)`。接著讓假的那一方一直留著它，直到測試放行（`threading.Event`），不要只留固定的時間：
   在忙碌的 runner 上，下一個請求可能比那段時間更晚才到，發現第一個已經結束了（FY-PGV-008 留了 1 秒，#204；
@@ -124,7 +124,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`）、它的執行方式（`how_it_runs.py`，用於更新指令） |
 | `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
 | `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
-| `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門、紀錄、健康檢查 |
+| `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門員、紀錄、健康檢查 |
 | `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | 協調迴圈：迴圈本身、期望清單與回報；它在記憶體裡的狀態；每種執行環境都實作的 `Runtime` 協定（以及 `ContainerEngine`） |
 | `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | 協調迴圈的各部分：副本的啟動、結束、停止與移除；啟動前的模型、引擎與映像檔；健康檢查；金鑰守門；管理員的快取與映像檔請求 |
 | `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、agent 的更新指令與是否落後（`update.py`）、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |

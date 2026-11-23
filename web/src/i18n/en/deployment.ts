@@ -142,6 +142,12 @@ export default {
   "deployment.out.kept": "Kept from when it ended.",
   "deployment.out.label": "Output of replica {ordinal}",
   "deployment.out.empty": "(no output yet)",
+  // The server's notes on the output panel, by their exact English text.
+  "deployment.out.sent.Live output is not available: not placed on a machine. Showing the lines kept when it last ended.": "Live output is not available: not placed on a machine. Showing the lines kept when it last ended.",
+  "deployment.out.sent.Live output is not available: its machine is not connected. Showing the lines kept when it last ended.": "Live output is not available: its machine is not connected. Showing the lines kept when it last ended.",
+  "deployment.out.sent.The agent did not answer in time. Showing the lines kept when it last ended.": "The agent did not answer in time. Showing the lines kept when it last ended.",
+  "deployment.out.sent.The agent has no output for this replica.": "The agent has no output for this replica.",
+  "deployment.out.sent.This agent is not running that replica (any more).": "This agent is not running that replica (any more).",
   "deployment.scale.wanted": " · the load asks for {wanted}",
   "deployment.scale.draining": "Draining replica #{replica}: it takes no new requests and is removed once {when}.",
   "deployment.scale.drainNothing": "nothing is in flight on it",

@@ -250,7 +250,7 @@ describe("server messages", () => {
     expect(findingTitle({ id: "a-check-from-a-newer-server", title: "Something new" }, "zh-TW")).toEqual({ title: "Something new", translated: false });
     expect(fixLabel("Open Machines")).toBe("Open Machines");
     setLang("zh-TW");
-    expect(fixLabel("Open Machines")).toBe("開啟機器");
+    expect(fixLabel("Open Machines")).toBe("前往「機器」");
     expect(fixLabel("Open the new page")).toBe("Open the new page");
   });
 });

@@ -43,7 +43,7 @@
 | 1.4.4 | 完整回歸測試（`accept_all.py`，分兩次執行：233 + 163） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 396 | 0 |
 | 1.4.4 | 零樣本物件偵測與影像分類（`accept_vision.py`） | A100 | 77 | 0 |
 | 1.4.4 | 零樣本物件偵測與影像分類（`accept_vision.py`） | Ryzen AI MAX+ 395，在 CPU 上 | 71 | 0 |
-| 1.4.4 | vLLM 0.32 上的文字分類：三個推薦模型、金鑰防護、Playground | A100 | 全部 | 0 |
+| 1.4.4 | vLLM 0.32 上的文字分類：三個推薦模型、金鑰守門員、Playground | A100 | 全部 | 0 |
 | 1.4.3 | 完整回歸測試（`accept_all.py`） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 303 | 0 |
 | 1.4.3 | 網頁主控台（`accept_all.py` 的 console 群組） | 同上 | 31 | 0 |
 

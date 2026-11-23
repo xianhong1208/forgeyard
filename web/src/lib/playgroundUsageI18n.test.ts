@@ -115,7 +115,7 @@ describe("Usage's charts", () => {
     expect(periodTitle(month, "month", "zh-TW")).toBe("2026年11月（至今）");
   });
 
-  it("FY-WEB-786 axis and table values in Chinese: compact numbers and Intl's time units; dollars and bytes stay", () => {
+  it("FY-WEB-786 axis and table values in Chinese: compact numbers and Intl's time units; dollars as the tables write them; bytes stay", () => {
     const en = [formatTick(1500, "count"), formatTick(90_000, "duration"), formatValue(7_200_000, "duration"), formatValue(12345, "count"), formatValue(0, "duration")];
     expect(en).toEqual(["1.5K", "1.5 min", "2 h", "12,345", "0 s"]);
     setLang("zh-TW");
@@ -125,7 +125,8 @@ describe("Usage's charts", () => {
     expect(formatValue(12_300, "duration")).toBe("12 秒");
     expect(formatValue(0, "duration")).toBe("0 秒");
     expect(formatValue(12345, "count")).toBe("12,345");
-    expect(formatTick(250_000, "usd")).toBe("$0.25");
+    expect(formatTick(250_000, "usd")).toBe("US$0.25");   // as the tables write dollars in Chinese
+    expect(formatTick(0, "usd")).toBe("US$0");
     expect(formatValue(3 * 1024 * 1024, "bytes")).toBe("3 MiB");
   });
 

@@ -82,7 +82,7 @@ export function Output({ w }: { w: Workload }) {
         {logs?.source === "live" ? (
           <><span className={`pulse${follow ? "" : " pulse-off"}`} aria-hidden="true" /> {t("deployment.out.live", {
             how: follow ? t("deployment.out.every", { seconds: LOGS_POLL_MS / 1000 }) : t("deployment.out.paused") })}</>
-        ) : logs ? (logs.note ?? t("deployment.out.kept")) : t("common.loading")}
+        ) : logs ? (logs.note ? t.maybe(`deployment.out.sent.${logs.note}`, logs.note) : t("deployment.out.kept")) : t("common.loading")}
       </p>
       {error && <Notice tone="error">{error}</Notice>}
       <pre className="logs" ref={pre} aria-label={t("deployment.out.label", { ordinal })}>{logs?.text || (logs ? t("deployment.out.empty") : "")}</pre>

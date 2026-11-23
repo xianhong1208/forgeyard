@@ -61,6 +61,18 @@ export default {
   "start.sent.Create a key": "Create a key",
   "start.sent.Try it in the playground": "Try it in the playground",
   "start.sent.Open Usage": "Open Usage",
+  // The details that count or list things, matched by their pattern (pages/GetStarted.tsx).
+  "start.detail.online": "{n} machines online.",
+  "start.detail.onlineOffline": "{n} machines online, {m} offline.",
+  "start.detail.joinedOffline": "{names} joined but is offline: start the agent there again.",
+  "start.detail.notChosen": "Not chosen yet on {names}: until you choose, Forgeyard may use every GPU there. Open the machine and use Change GPU access.",
+  "start.detail.chosen": "Chosen on {n} machines with GPUs.",
+  "start.detail.models": "{n} models in the catalog.",
+  "start.detail.ready": "Ready: {names}.",
+  "start.detail.notReady": "Not ready yet: {list}. The first start downloads the model and the engine; that can take a while.",
+  "start.detail.keys": "You have {n} active keys.",
+  "start.detail.sent": "You have sent {n} requests with your keys.",
+  "start.detail.asleep": " (asleep)",
   "start.example.title": "Call /v1",
   "start.example.lead":
     "Forgeyard speaks the OpenAI API at this address. Use it as the {baseUrl} of any OpenAI client, with your API key in {env} and a deployment's name as the {model}.",

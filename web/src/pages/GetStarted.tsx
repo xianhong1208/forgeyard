@@ -9,7 +9,7 @@ import { useT, type Translator } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { API_KIND } from "../lib/gateway";
 import { MACHINES } from "../lib/nav";
-import { KEY_ENV, currentStep, exampleCall, type Checklist, type Step } from "../lib/onboarding";
+import { KEY_ENV, currentStep, detailText, exampleCall, type Checklist, type Step } from "../lib/onboarding";
 import { useApi } from "../lib/useApi";
 import { usePoll } from "../lib/poll";
 
@@ -56,7 +56,7 @@ function stepText(t: Translator, s: Step) {
   return {
     title: t.lang === "en" ? s.title : t.maybe(`start.step.${s.id}.title`, s.title),
     why: t.lang === "en" ? s.why : t.maybe(`start.step.${s.id}.why`, s.why),
-    detail: sent(s.detail) ?? "",
+    detail: s.detail === null ? "" : detailText(s.detail, t.lang),
     who: sent(s.who),
     label: s.action ? sent(s.action.label) : null,
   };

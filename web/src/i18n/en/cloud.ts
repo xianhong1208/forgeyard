@@ -175,7 +175,7 @@ export default {
   "cloud.models.ctx": " · {n} ctx",
   "cloud.models.added": " · added",
   "cloud.models.addSelected": "Add {n} selected",
-  "cloud.models.addSelectedNone": "Add  selected",
+  "cloud.models.addSelectedNone": "Add selected",
   "cloud.api.openai-chat": "chat",
   "cloud.api.openai-embeddings": "embeddings",
 
@@ -220,7 +220,7 @@ export default {
   "cloud.refresh.compare": "Compare",
   "cloud.refresh.applying": "Applying…",
   "cloud.refresh.apply": "Apply {n} ticked",
-  "cloud.refresh.applyNone": "Apply  ticked",
+  "cloud.refresh.applyNone": "Apply ticked",
   "cloud.refresh.readAgain": "Read again",
   "cloud.refresh.note": "Suggested matches and prices entered by hand stay as they are unless you tick them.",
   "cloud.refresh.noPriceYet": "no price yet",

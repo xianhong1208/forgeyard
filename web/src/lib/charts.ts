@@ -190,14 +190,22 @@ export function formatValue(v: number, kind: Kind): string {
   return formatNumber(v);
 }
 
-// A value on the axis, short: "1.2K", "$0.25", "3 min".
+// The dollar sign as the reader's language writes US dollars, as the tables (usd) do: "$" in English,
+// "US$" in Chinese.
+function dollarSign(lang: Lang = getLang()): string {
+  return new Intl.NumberFormat(locale(lang), { style: "currency", currency: "USD" }).formatToParts(0)
+    .find((p) => p.type === "currency")?.value ?? "$";
+}
+
+// A value on the axis, short: "1.2K", "$0.25", "3 min" (in Chinese "1.2萬", "US$0.25", "3 分鐘").
 export function formatTick(v: number, kind: Kind): string {
   if (kind === "usd") {
     const dollars = v / 1_000_000;
-    if (v === 0) return "$0";
-    if (dollars >= 1000) return `$${compact(dollars)}`;
-    if (dollars >= 1) return `$${Number(dollars.toFixed(2))}`;
-    return `$${Number(dollars.toPrecision(2))}`;
+    const sign = dollarSign();
+    if (v === 0) return `${sign}0`;
+    if (dollars >= 1000) return `${sign}${compact(dollars)}`;
+    if (dollars >= 1) return `${sign}${Number(dollars.toFixed(2))}`;
+    return `${sign}${Number(dollars.toPrecision(2))}`;
   }
   if (kind === "duration") return duration(v);
   if (kind === "bytes") return v ? bytes(v) : "0";

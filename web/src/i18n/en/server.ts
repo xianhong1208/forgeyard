@@ -63,4 +63,6 @@ export default {
   "server.event.unreachable": "Unreachable",
   "server.event.waiting": "Waiting",
   "server.event.woken": "Woken",
+  "server.event.ready": "Ready",
+  "server.event.asleep": "Asleep",
 } as const;

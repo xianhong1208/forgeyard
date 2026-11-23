@@ -17,8 +17,8 @@ export default {
   "modelpage.jump.deployments": "部署",
   "modelpage.jump.engines": "引擎",
   "modelpage.jump.files": "檔案",
-  "modelpage.caches.one": "在 {count} 台的快取中",
-  "modelpage.caches.other": "在 {count} 台的快取中",
+  "modelpage.caches.one": "{count} 台的快取中有它",
+  "modelpage.caches.other": "{count} 台的快取中有它",
   "modelpage.machinesNote":
     "每台機器的模型快取裡有沒有它（依它的 agent 最近一次回報），以及用 {recipe} 的預設值，現在一個副本放不放得進去（估算）。<link>估算</link>",
   "modelpage.theEngine": "引擎",
@@ -31,7 +31,7 @@ export default {
 
   "modelpage.shownAs": "{name} 現在顯示為「{title}」。",
   "modelpage.shownByName": "{name} 現在以名稱顯示。",
-  "modelpage.renameHint": "控制台上顯示的模型名稱。它的名稱仍是 {name}：部署和 API 金鑰都用這個名稱。空白：顯示名稱。",
+  "modelpage.renameHint": "主控台上顯示的名稱。模型名稱仍是 {name}，部署和 API 金鑰都用它。留空：直接顯示模型名稱。",
   "modelpage.saving": "儲存中…",
   "modelpage.save": "儲存",
 
@@ -39,7 +39,7 @@ export default {
   "modelpage.fact.revision": "版本",
   "modelpage.fact.pinnedFrom": "（從 {ref} 釘選）",
   "modelpage.fact.licence": "授權",
-  "modelpage.fact.licenceFrom": " · {source} 的授權，這個模型是從它轉換來的",
+  "modelpage.fact.licenceFrom": " · 沿用 {source} 的授權（這個模型由它轉換而來）",
   "modelpage.fact.gated": " · 受限：需要 Hugging Face 權杖",
   "modelpage.fact.task": "用途",
   "modelpage.fact.at": "，路徑 ",
@@ -68,7 +68,7 @@ export default {
   "modelpage.with": "使用 {engine}",
   "modelpage.engineFor": "估算用的引擎",
   "modelpage.inCache": "在快取中",
-  "modelpage.usedBy": "被 {names} 使用",
+  "modelpage.usedBy": "{names} 正在使用",
   "modelpage.notCached": "不在快取中",
   "modelpage.noReport": "沒有回報",
   "modelpage.col.machine": "機器",
@@ -94,7 +94,7 @@ export default {
   "modelpage.presence.programNot": "程式不在這裡：部署時取得",
   "modelpage.presence.programUnknown": "程式：還不知道",
 
-  "modelpage.files.local": "機器本身上的目錄：{dir}。每台機器的快取回報會列出它有什麼。",
+  "modelpage.files.local": "各機器自己的目錄：{dir}。每台機器的快取回報會列出那裡有什麼。",
   "modelpage.files.notRecorded": "這個模型沒有記錄檔案清單。<muted>把它移除再重新加入，就會記錄。</muted>",
   "modelpage.files.downloaded.one": "已下載 {count} 個檔案",
   "modelpage.files.downloaded.other": "已下載 {count} 個檔案",

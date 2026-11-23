@@ -144,15 +144,15 @@ describe("the console's language", () => {
     const row = item.closest("li")!;
     expect(row.textContent).toContain("伺服器的原文： gpu-03 is offline with replicas on it");
     expect(within(row).getByText(/gpu-03 has been offline 2 h/).getAttribute("lang")).toBe("en");
-    expect(within(row).getByRole("link", { name: "開啟機器" }).getAttribute("href")).toBe("/machines/3");
+    expect(within(row).getByRole("link", { name: "前往「機器」" }).getAttribute("href")).toBe("/machines/3");
     expect(within(row).getByRole("button", { name: "隱藏 30 天" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "設定健康檢查：1 個警告" })).toBeTruthy();
-    // the checklist: titles by the step's id, fixed sentences by their text, the rest as sent
+    // the checklist: titles by the step's id, fixed and counting sentences in Chinese, the rest as sent
     expect(screen.getByRole("heading", { level: 1, name: "設定 Forgeyard" })).toBeTruthy();
     const model = screen.getByRole("listitem", { name: "步驟 2：加入模型" });
     expect(within(model).getByText("目錄是空的。")).toBeTruthy();
     expect(within(model).getByRole("link", { name: /加入模型/ }).getAttribute("href")).toBe("/models");
-    expect(screen.getByRole("listitem", { name: "步驟 1：加入機器（已完成）" }).textContent).toContain("1 machine online.");
+    expect(screen.getByRole("listitem", { name: "步驟 1：加入機器（已完成）" }).textContent).toContain("1 台機器上線。");
     expect(screen.getByText(/下一步：加入模型/)).toBeTruthy();
   });
 
