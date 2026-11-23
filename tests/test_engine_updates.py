@@ -387,7 +387,12 @@ def test_fy_eup_016_admins_check_everyone_reads_the_last_result(owner, client, a
     no data shape change (no migration)."""
     from forgeyard.db import ServerSetting, new_session
 
-    assert owner.get("/api/engine-updates").json() == {"result": None, "can_check": True}
+    first = owner.get("/api/engine-updates").json()
+    assert first["result"] is None and first["can_check"] is True
+    # 1.5.2 PR 2: what each built-in engine's project signs, for the Try dialog.
+    assert first["signatures"]["llama-cpp"] == {"signed": True, "kind": "github-attestation",
+                                                "repository": "ggml-org/llama.cpp"}
+    assert first["signatures"]["vllm"]["signed"] is False
     add_user(owner, "olga", role="operator")
     r = owner.post("/api/engine-updates/check")
     assert r.status_code == 200, r.text

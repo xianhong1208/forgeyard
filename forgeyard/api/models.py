@@ -36,7 +36,7 @@ from forgeyard.models.catalog import Context
 from forgeyard.models.estimate import EstimateError, estimate as compute_estimate
 from forgeyard.models.recipes import Recipe, RecipeError
 from forgeyard.security.ratelimit import limiter, retry_after
-from forgeyard.workloads import images, placement
+from forgeyard.workloads import images, pins, placement
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -150,6 +150,8 @@ def media_out(meta: dict, fmt: str) -> dict:
 def recipe_out(r: Recipe, text: Optional[str] = None) -> dict:
     out = {"name": r.name, "title": r.title, "description": r.description, "engine": r.engine, "version": r.version,
            "tasks": r.tasks, "formats": r.formats, "api": r.api, "share": r.share, "builtin": r.builtin,
+           # 1.5.2 (#95): a copy of a built-in engine ("Try this version"), and what the copy did.
+           "based_on": r.based_on, "copy": r.copy_of.model_dump() if r.copy_of is not None else None,
            "estimate": r.estimate.method,
            "media": r.media.model_dump() if r.media is not None else None,
            "tts": r.tts.model_dump() if r.tts is not None else None,
@@ -539,6 +541,9 @@ def _recipe_page(request: Request, name: str, listing: bool) -> dict | list:
         if listing:
             return [SimpleNamespace(id=n.id, name=n.name) for n in pages.listable(db)]
         return {"recipe": recipe_out(*found), **pages.engine_page(db, found[0]),
+                # 1.5.2 (#95): per variant, what the server recorded for its pinned image (a copy's: Try this version).
+                "pins": {v.name: got for v in found[0].variants
+                         if (got := pins.signatures(db, [v.image or ""]).get(v.image or "")) is not None},
                 "can_manage": caller.user.role == "admin"}
     finally:
         db.close()
@@ -604,7 +609,10 @@ def change_recipe(name: str, body: RecipeIn, caller: Caller = Depends(require_ad
     row.updated_at = utcnow()
     audit.record(db, "recipe.updated", actor=caller.user, target=name, ip=caller.ip,
                  images=[v.image or (v.engine.url if v.engine else v.command) for v in r.variants])
+    db.flush()
+    pins.prune(db)   # 1.5.2: an image the edit no longer names loses its recorded ids (when no other copy names it)
     db.commit()
+    pins.refresh(db)
     return {"recipe": recipe_out(r, body.yaml)}
 
 
@@ -620,7 +628,10 @@ def remove_recipe(name: str, caller: Caller = Depends(require_admin), db: DbSess
         raise fail(409, "recipe_in_use", f"{name} is used by {', '.join(used)}. Delete those deployments first.")
     db.delete(row)
     audit.record(db, "recipe.deleted", actor=caller.user, target=name, ip=caller.ip)
+    db.flush()
+    pins.prune(db)   # 1.5.2: a copy's images lose their recorded ids once no other copy names them
     db.commit()
+    pins.refresh(db)
     return {"ok": True}
 
 

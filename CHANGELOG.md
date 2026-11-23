@@ -21,8 +21,30 @@ version until 1.0.
   be reached is "could not check" for its engines only. The last result is kept in one `server_settings` row (no
   migration), shown with when and by whom, read by everyone signed in, and each check is audited
   (`recipe.updates_checked`). API: `POST /api/engine-updates/check`, `GET /api/engine-updates`. Nothing on a timer,
-  and the built-in engines do not change; trying a version comes next. On 2026-11-23 it found vLLM 0.33.0 and
+  and the built-in engines do not change. On 2026-11-23 it found vLLM 0.33.0 and
   0.34.0 (without the CUDA 12.9 variant) and a newer stable-diffusion.cpp build (without its process variant).
+
+- **Try this version (1.5.2, #95, part 2).** On a built-in engine's page each newer version has **Try this version**
+  (admins): a custom engine, `<engine>-x-y-z` (`vllm-0-34-0`), copied from the built-in with that version's images.
+  It takes a version from the last check, never an image; only the built-in variant's own repository is asked. Each
+  image's digest is resolved again (a tag that moved since the check refuses the copy) and pinned, and its recorded
+  ids are kept in a new `image_pins` table (migration `0016_image_pins`, additive), computed as
+  `scripts/pin_images.py` does for the built-in ones (`forgeyard/workloads/pinning.py`, now shared): a copy's image
+  comes through the server, runs after `docker load` offline, and is listed and removable on machine pages like a
+  built-in's. Variants without the new version are left out with the reason; a process variant follows when the
+  release has the same archive (its SHA-256 read again). **Signatures** are verified on the server where the project
+  publishes them (llama.cpp's GitHub artifact attestations, for its images and archives, with sigstore-python and a
+  trust root refreshed from Sigstore's TUF repository through the server's network rules): a signature that fails
+  or is missing refuses the copy. When signatures cannot be checked at all (no network to GitHub or Sigstore, or no
+  sigstore on the server), the copy is refused too, but an admin may make it anyway on purpose (**Create it without
+  verification**, `allow_unverified`): it is then marked *Not verified* everywhere and the override is audited. The
+  others are recorded as unsigned upstream. The copy keeps the
+  built-in's arguments, records `based_on` and what was done (`copy`), and is audited (`recipe.created`). A catalog
+  model's engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its
+  copies. The copy's page shows where it came from, each pinned digest and what was verified, and what was left out.
+  API: `POST /api/recipes/{name}/try`. New dependency: `sigstore` (Apache-2.0), as the server's own extra: a server
+  run from source now installs with `uv sync --extra server` (the server image has it; the agent's wheel and image do
+  not carry it).
 
 ### Changed
 

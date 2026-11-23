@@ -33,8 +33,10 @@ them where they fit, and every program calls them at `/v1` with an API key.
   where a copy fits now, its deployments, engines and files; an engine's page shows its variants and which
   machines already have its image or program. An admin can check whether the built-in engines have newer
   stable versions upstream (1.5.2): each newer version lists the variants that have an image of it, its
-  release notes, and the flags this engine passes that those notes mention. The built-in engine itself
-  does not change.
+  release notes, and the flags this engine passes that those notes mention. **Try this version** makes a
+  custom copy pinned to that version by digest (signatures verified where the project publishes them, such
+  as llama.cpp's), whose images come through the server and run offline like the built-in's; the built-in
+  engine itself does not change.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed
@@ -117,7 +119,7 @@ to build the web UI:
 git clone https://github.com/xianhong1208/forgeyard.git
 cd forgeyard
 cd web && npm ci && npm run build && cd ..
-uv sync
+uv sync --extra server
 HOST=0.0.0.0 PUBLIC_URL=https://192.168.1.20:7860 uv run python main.py
 ```
 

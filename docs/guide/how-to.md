@@ -1451,7 +1451,7 @@ the journal: `journalctl -u forgeyard -f`.
    ```bash
    git pull
    cd web && npm ci && npm run build && cd ..
-   uv sync
+   uv sync --extra server
    ```
 
    Then restart it (`sudo systemctl restart forgeyard`). Database changes run by themselves on
@@ -1922,6 +1922,43 @@ are never offered, and a GitHub release whose images are not out yet is only men
 is listed, so you can take the smaller step. An engine published only under moving tags (stable-diffusion.cpp's
 `master-cuda`) shows a **newer build** when its tag points at a later image. Forgeyard's own vision image is
 not checked: it moves with Forgeyard.
+
+## Try a newer version of an engine
+
+When a check found a newer version, an admin can try it without touching the built-in engine. On the engine's page,
+each version in **Newer versions** has **Try this version**. It makes a **custom engine**: a copy of the built-in
+with that version's images, named `<engine>-x-y-z` (`vllm-0-34-0`; you can change the name). Nothing else changes:
+the built-in stays as it is, and no deployment moves to the copy until you choose it.
+
+The dialog says, before anything is made:
+
+- **which variants the copy has**: those with an image of the new version. A variant without one is left out with
+  the reason (vLLM 0.34.0 has no CUDA 12.9 image); machines that need it keep using the built-in. A process
+  variant (`cpu-process`) is included when the release publishes the same archive with its SHA-256.
+- **signatures**: llama.cpp signs its images and release archives (GitHub artifact attestations). Forgeyard checks
+  each signature while it makes the copy, and makes no copy when one does not verify or is missing. When the
+  signatures cannot be checked at all (GitHub or Sigstore cannot be reached from the server), the dialog says why
+  and offers **Create it without verification**: the copy is then marked *Not verified* wherever its signatures are
+  shown, and the audit log says who chose it. vLLM, vLLM-Omni and speaches publish no signatures, and stable-diffusion.cpp only an unsigned build
+  record: their copies are pinned by digest only, and the dialog and the page say so.
+- **what to read first**: a new version can change flags, defaults and memory use. The copy keeps the built-in's
+  arguments as they are, and Forgeyard's estimates were measured on the built-in's version. The flags its release
+  notes mention are listed again, with a link to the notes.
+
+**Make the copy** resolves every image's tag again. If a tag points at another image than when you checked, nothing
+is made: check again, then try. Each image is pinned by its digest, and the ids Forgeyard needs to recognise it are
+recorded (the same ids the built-in images have). So a copy's image **comes through the server** to a machine that
+cannot reach the registry, **runs offline** after `docker load`, and is listed on machine pages and removable with
+**Remove** like a built-in's. The copy is in the audit log as `recipe.created`, with where it came from.
+
+The copy's page says where it came from, when it was made and by whom, each variant's pinned digest and what was
+verified about it (the signing workflow and the build, or *unsigned upstream*), and what was left out. The catalog's
+engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its copies too.
+
+To use the copy, deploy a model with it (pick it as the engine on the deploy page), and compare it with the built-in
+before you move other deployments. Delete the copy when you are done with it: it cannot be deleted while a
+deployment uses it. Remove its image from the machines first (their pages, **Engine images**): once the copy is
+deleted, Forgeyard no longer counts that image as one of its own.
 
 ## Download a model before deploying it
 

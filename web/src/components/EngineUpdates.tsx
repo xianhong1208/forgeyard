@@ -2,8 +2,9 @@
 // GitHub now (POST /api/engine-updates/check, up to a minute and a half); the last result is kept on the server and
 // read by everyone (GET /api/engine-updates). The engine cards show a badge, and an engine's page lists each newer
 // version: which variants have an image of it (and why the others do not), the release notes, and the flags this
-// engine passes that those notes mention. Trying a version (a copy of the engine pinned to it) comes next (PR 2): its
-// button goes in the candidate's header, where `.eu-actions` is kept.
+// engine passes that those notes mention. Trying a version (PR 2: a copy of the engine pinned to it,
+// components/EngineTry.tsx) is a button in each candidate's header (`.eu-actions`), given by the page as `action`.
+import type { ReactNode } from "react";
 import { IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { useState } from "react";
 import { Link } from "react-router";
@@ -84,7 +85,9 @@ export function UpdateBadge({ u }: { u: EngineUpdate | undefined }) {
 }
 
 // The Newer versions section's body on a built-in engine's page.
-export function EngineUpdates({ u, version }: { u: EngineUpdate | undefined; version: string }) {
+export function EngineUpdates({ u, version, action }: {
+  u: EngineUpdate | undefined; version: string; action?: (c: EngineUpdateCandidate) => ReactNode;
+}) {
   const t = useT();
   if (!u) return null;
   if (u.status === "not_checked") return <p className="muted small">{whyText(t, u.why)}</p>;
@@ -102,12 +105,12 @@ export function EngineUpdates({ u, version }: { u: EngineUpdate | undefined; ver
       )}
       {u.upstream && <p className="muted small">{whyText(t, u.upstream)}</p>}
       {u.candidates.length > 0 && <p className="muted small lp-note">{t("engineupdates.note", { version })}</p>}
-      {u.candidates.map((c) => <Candidate key={c.version} c={c} title={u.title} />)}
+      {u.candidates.map((c) => <Candidate key={c.version} c={c} title={u.title} action={action?.(c)} />)}
     </>
   );
 }
 
-function Candidate({ c, title }: { c: EngineUpdateCandidate; title: string }) {
+function Candidate({ c, title, action }: { c: EngineUpdateCandidate; title: string; action?: ReactNode }) {
   const t = useT();
   const have = c.variants.filter((v) => v.available).length;
   const date = c.release?.published_at ?? c.created;
@@ -122,8 +125,7 @@ function Candidate({ c, title }: { c: EngineUpdateCandidate; title: string }) {
             {t("engineupdates.notes")} <IconExternalLink size={13} aria-hidden="true" />
           </a>
         )}
-        {/* PR 2 (#95): "Try this version" goes here. */}
-        <span className="eu-actions" />
+        <span className="eu-actions">{action}</span>
       </header>
       <div className="table-wrap">
         <table className="table eu-variants">

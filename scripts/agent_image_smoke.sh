@@ -41,6 +41,9 @@ docker run --rm --entrypoint id "$IMAGE" forgeyard-run | grep -q "uid=990" || fa
 ok "forgeyard-run account"
 docker run --rm --entrypoint python "$IMAGE" -c "import pynvml" || fail "nvidia-ml-py"
 ok "nvidia-ml-py importable"
+# 1.5.2 (#95): signature verification is the server's alone (the `server` extra): never in the agent image.
+if docker run --rm --entrypoint python "$IMAGE" -c "import sigstore" 2>/dev/null; then fail "sigstore is in the agent image"; fi
+ok "no sigstore (the server's extra)"
 # What the host's libamd_smi.so dlopen()s (ROCm 7.0): without it amdsmi reads no ASIC information.
 docker run --rm --entrypoint sh "$IMAGE" -c 'ldconfig -p | grep -q "libdrm.so.2 " && ldconfig -p | grep -q "libdrm_amdgpu.so.1 "' \
     || fail "libdrm in ldconfig"
@@ -80,7 +83,7 @@ grep -q "^server .*192.168.1.20.*(file)" "$WORK/config.txt" || fail "config: fil
 ok "config: the file, the image's environment over it"
 
 # ------------------------------------------------------------------ 3. a real join
-uv sync --locked --quiet
+uv sync --locked --extra server --quiet
 DATA_DIR="$WORK/data" HOST=127.0.0.1 PORT="$PORT" ADMIN_USERNAME=smoke ADMIN_PASSWORD=quiet-meadow-4821 \
     uv run --no-sync python main.py > "$WORK/server.log" 2>&1 &
 SERVER_PID=$!

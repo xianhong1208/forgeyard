@@ -111,8 +111,9 @@ def can_relay_images(node: Node) -> bool:
 
 
 def relayable_image(image: Optional[str]) -> bool:
-    """An image the server can relay: pinned by digest, with its ids recorded (images.lock.json)."""
-    return bool(image) and "@" in str(image) and isinstance(images.load_lock().get(str(image)), dict)
+    """An image the server can relay: pinned by digest, with its ids recorded (images.lock.json, or the image_pins
+    of an engine copy, 1.5.2)."""
+    return images.entry_for(str(image) if image else None) is not None
 
 
 def relays(node: Node, phase: str, image: Optional[str] = None) -> bool:
@@ -224,8 +225,8 @@ def image_target(node: Node, image: Optional[str]) -> ImageTarget:
     """What the server relays for this machine's engine image, from the recorded ids only; else Refused."""
     if not image:
         raise Refused(404, "relay_not_wanted", "There is no engine image to fetch for that.")
-    entry = images.load_lock().get(image) if "@" in image else None
-    if not isinstance(entry, dict):
+    entry = images.entry_for(image)
+    if entry is None:
         raise Refused(409, "relay_image_not_pinned",
                       f"{oci.tag_ref(image)} is not an image Forgeyard pinned by digest, so it cannot come through "
                       "the server: upload the image file to the machine instead (its page: Upload an image), or "

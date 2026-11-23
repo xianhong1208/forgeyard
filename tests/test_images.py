@@ -160,7 +160,7 @@ def test_fy_img_003_the_server_image_is_pinned_non_root_and_keeps_its_data_in_a_
     assert external and all(re.fullmatch(r"[\w./:-]+@sha256:[0-9a-f]{64}", i) for i in external), external
     assert froms[0].startswith("--platform=$BUILDPLATFORM node:"), froms[0]
     assert "npm ci" in text and "npm run build" in text
-    assert "uv sync --locked --no-dev --extra postgres" in text and "uv==" in text
+    assert "uv sync --locked --no-dev --extra postgres --extra server" in text and "uv==" in text  # 1.5.2: sigstore
     final = text[text.rindex("\nFROM "):]
     users = [v for k, v in _instructions("Dockerfile.server") if k == "USER"]
     assert users == ["forgeyard"] and "useradd --system --uid 10001" in final

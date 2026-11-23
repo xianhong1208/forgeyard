@@ -50,7 +50,7 @@ from forgeyard.machines.protocol import CLOSE_RESTART
 from forgeyard.migrate import upgrade
 from forgeyard.security import crypto, tls
 from forgeyard.security.middleware import GuardMiddleware, WebSocketHostGuard
-from forgeyard.workloads import autoscale, sleep
+from forgeyard.workloads import autoscale, pins, sleep
 
 STATIC = Path(__file__).with_name("static")
 log = logging.getLogger("forgeyard")
@@ -88,6 +88,7 @@ async def lifespan(_app: FastAPI):
         liveness.mark_all_offline(db)  # no agent is connected to a server that just started
     finally:
         db.close()
+    pins.load_at_start()  # 1.5.2 (#95): the recorded ids of engine copies' images, beside the committed lock file
     sweeper = asyncio.create_task(liveness.run_forever())
     usage_writer = asyncio.create_task(usage_recorder.run_forever(USAGE_FLUSH_SECONDS))
     renewer = asyncio.create_task(tls.live.run_forever())  # does nothing unless the server listens with TLS

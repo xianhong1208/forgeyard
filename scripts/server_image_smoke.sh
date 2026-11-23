@@ -44,6 +44,8 @@ ok "$got"
 docker run --rm "$IMAGE" sh -c 'test -f forgeyard/static/index.html && test -f docs/guide/how-to.md && test -f docs/guide/zh-TW/how-to.md' \
     || fail "the built web UI or the user guide is missing"
 ok "web UI and user guide in the image"
+docker run --rm "$IMAGE" python -c "import sigstore, tuf" || fail "sigstore (the server extra) is not in the image"
+ok "sigstore, to verify upstream signatures (1.5.2)"
 docker inspect -f '{{json .Config.Labels}}' "$IMAGE" > "$WORK/labels.json"
 python3 - "$WORK/labels.json" <<'PY' || fail "OCI labels: $(cat "$WORK/labels.json")"
 import json, sys

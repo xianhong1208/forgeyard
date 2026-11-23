@@ -328,6 +328,29 @@ export type Recipe = {
   image?: { request: "fields" | "sd-cpp"; output_formats: string[]; max_n: number } | null;
   // 1.3, video generation: how the gateway asks the engine, and the frame counts it makes (k x step + 1).
   video?: { request: "vllm-omni"; frames_step: number } | null;
+  // 1.5.2 (#95): a copy of a built-in engine ("Try this version"): the built-in it came from, and what the copy did.
+  based_on?: string | null;
+  copy?: RecipeCopy | null;
+};
+
+// 1.5.2 (#95): what the server verified about an image or archive of a copy (forgeyard/models/signatures.py).
+export type EngineSignature = {
+  status: "verified" | "unsigned" | "not_verified"; note?: string | null; source?: string; repository?: string; workflow?: string;
+  // not_verified (an admin's override when signatures could not be checked): why, who, when.
+  reason?: string; overridden_by?: string; at?: string;
+  ref?: string | null; commit?: string | null; run?: string | null; predicate?: string; issuer?: string;
+  log_index?: number | null; signed_at?: string | null;
+};
+export type RecipeCopy = {
+  from_version: string; kind: "release" | "build"; made_at: string; made_by: string;
+  left_out: { variant: string; code: string; text: string; params: Record<string, string> }[];
+  archives: { variant: string; release: string | null; signature: EngineSignature | Record<string, never> }[];
+};
+export type EnginePin = { signature: EngineSignature | null; recorded_at: string | null; recorded_by: string };
+// What a built-in engine's project signs (GET /api/engine-updates: signatures).
+export type EngineSigned = { signed: true; kind: string; repository: string } | { signed: false; text: string };
+export type EngineTryResponse = {
+  recipe: Recipe; left_out: RecipeCopy["left_out"]; signatures: Record<string, EngineSignature>;
 };
 
 export type CatalogModel = {
@@ -738,6 +761,8 @@ export type EnginePage = {
   recipe: Recipe; can_manage: boolean; machines: EnginePageMachine[];
   deployments: { id: number; name: string; model_id: number }[];
   models: { id: number; name: string; title: string | null }[];
+  // 1.5.2 (#95): per variant, what the server recorded for its pinned image (a copy's).
+  pins?: Record<string, EnginePin>;
 };
 
 // 1.5.2 (#95): newer versions of the built-in engines, as the last check found them (GET /api/engine-updates).
@@ -763,4 +788,4 @@ export type EngineUpdate = {
 export type EngineUpdatesResult = {
   checked_at: string; checked_by: string; seconds: number; github_requests: number; engines: Record<string, EngineUpdate>;
 };
-export type EngineUpdatesResponse = { result: EngineUpdatesResult | null; can_check: boolean };
+export type EngineUpdatesResponse = { result: EngineUpdatesResult | null; can_check: boolean; signatures?: Record<string, EngineSigned> };

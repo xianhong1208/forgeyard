@@ -694,6 +694,24 @@ class ModelDownload(Base):
     source_node: Mapped[Optional[Node]] = relationship(foreign_keys=[source_node_id])
 
 
+class ImagePin(Base):
+    """The recorded ids of an engine copy's image (1.5.2, issue #95): what "Try this version" read from the registry
+    for a `repo:tag@sha256:…` it pinned, in the shape of forgeyard/recipes/images.lock.json's entries, so the copy's
+    image is relayed through the server, matched after `docker load`, shown on machine pages and removable like a
+    built-in's (forgeyard/workloads/images.py entry_for). One row per image, shared by every copy that names it; a
+    row no custom recipe names any more is removed. `signature`: what the server verified about it at Try time
+    (forgeyard/models/signatures.py): {"status": "verified", "repository", "workflow", …} or {"status": "unsigned",
+    …}; agents never verify, they run this digest."""
+
+    __tablename__ = "image_pins"
+
+    ref: Mapped[str] = mapped_column(String(255), primary_key=True)
+    entry: Mapped[dict] = mapped_column(JSON)
+    signature: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    recorded_by: Mapped[str] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 _engine = None
 _SessionLocal = None
 

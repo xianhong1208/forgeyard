@@ -128,12 +128,35 @@ def load_lock(path: Path = LOCK_PATH) -> dict:
     return images if isinstance(images, dict) else {}
 
 
-def check_for(image: Optional[str]) -> Optional[dict]:
-    """The recorded ids of a pinned image (exact reference, digest included), or None."""
+# 1.5.2 (#95): the ids the server recorded for the images of engine copies ("Try this version"), kept in the
+# `image_pins` table and held here, in the server's memory, by forgeyard/workloads/pins.py. Empty in an agent: an
+# agent gets the ids it needs with each desired replica or download (`image_ids`), never reads them itself.
+_pinned: dict[str, dict] = {}
+
+
+def set_pinned(entries: dict[str, dict]) -> None:
+    """Replace the recorded ids of the copies' images (forgeyard/workloads/pins.py, after each change)."""
+    global _pinned
+    _pinned = {k: v for k, v in entries.items() if isinstance(v, dict)}
+
+
+def entry_for(image: Optional[str]) -> Optional[dict]:
+    """The recorded ids of a pinned image by its exact reference (digest included): the committed lock file first
+    (the built-in recipes'), then the images an admin's "Try this version" pinned (1.5.2). Every reader of recorded
+    ids goes through here: the relay through the server, the check after `docker load`, upload matching, the
+    engine images listed and removed on a machine's page, an engine page's presence."""
     if not image or "@" not in image:
         return None
     entry = load_lock().get(image)
-    return entry_check(entry) if isinstance(entry, dict) else None
+    if not isinstance(entry, dict):
+        entry = _pinned.get(image)
+    return entry if isinstance(entry, dict) else None
+
+
+def check_for(image: Optional[str]) -> Optional[dict]:
+    """The recorded ids of a pinned image (exact reference, digest included), or None."""
+    entry = entry_for(image)
+    return entry_check(entry) if entry is not None else None
 
 
 def parse_check(raw: Any) -> Optional[dict]:

@@ -30,7 +30,7 @@ are fine for almost everyone.
 | `PORT` | `7860` | The port, for the web UI, the API, `/v1` and the agents |
 | `PUBLIC_URL` | — | The address people and agents use, e.g. `https://192.168.1.20:7860`. Join commands, set-password links and the gateway address use it; its host is always accepted and is in the certificate. Empty: the address each browser opened Forgeyard with, which other machines cannot use when that was `127.0.0.1` |
 | `DATA_DIR` | `data` | The database (SQLite), `secret.key`, `tls/` and the setup token. A relative path is relative to the folder the server starts in |
-| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra postgres`) |
+| `DATABASE_URL` | — | Empty: SQLite in `DATA_DIR`. PostgreSQL: `postgresql+psycopg://user:password@host:5432/forgeyard` (after `uv sync --extra server --extra postgres`) |
 | `TLS` | `on` | `on`: HTTPS with Forgeyard's own CA (made in `data/tls/`) or your certificate. `off`: plain HTTP, only behind a proxy that handles HTTPS |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | Your own certificate and key: both or neither (one alone stops the start). Checked every 12 hours and reloaded when they changed. Ignored with `TLS=off` |
 | `TLS_CA_FILE` | — | With your own certificate: the CA that issued it. Agents pin it and **Trust this server** offers it. Ignored without your own certificate |
@@ -1748,6 +1748,73 @@ check is audited as `recipe.updates_checked` with the newer versions per recipe.
 | `variants[].why.code` | `no_image`, `tag_unversioned`, `registry_error`, `digest_failed`; process variants: `installed_command`, `not_github`, `release_unknown`, `no_release`, `no_archive`, `no_sha256`, `github_error`; moving tags: `not_moved`, `not_newer`, `other_build` |
 | `mentions` | the recipe's `--flags` (also in `snake_case` when two words or more) and environment variables that the release notes name, up to three lines each; `notes` instead when the notes could not be read (`no_notes`, `github_error`) |
 | `upstream` | `release_without_image`: GitHub has a newer stable release whose images are not published yet |
+
+`GET /api/engine-updates` also returns `signatures`: per built-in recipe, what its engine's project signs
+(`{"signed": true, "kind": "github-attestation", "repository": "ggml-org/llama.cpp"}`, or `{"signed": false, "text": …}`).
+
+#### Trying a version: engine copies
+
+`POST /api/recipes/{name}/try {"version": "0.34.0", "name": "vllm-0-34-0"}` (admins; `name` optional) makes a custom
+recipe from the built-in `{name}` for a version the last check found, and answers 201 with the new recipe, the
+variants left out and the signatures. It takes a version, never an image: each variant's tag comes from the stored
+result, checked again against the built-in variant's own tag form; the registry and repository always come from
+the built-in variant's image. Each included image's digest is resolved again (a tag that moved since the check is a
+409 `digest_moved`), its recorded ids are read from the registry by digest, as `scripts/pin_images.py` does for
+the lock file (`forgeyard/workloads/pinning.py`), and its signature is verified where the project publishes one.
+A process archive's SHA-256 is read again from GitHub.
+
+| Answer | Code | When |
+|---|---|---|
+| 409 | `check_again` | no check result for that version, the built-in changed since the check, or the stored answer is not one Forgeyard can use |
+| 409 | `name_taken`, `builtin_name`, `not_builtin`, `try_running`, `digest_moved` | as named (`digest_moved` names the `variant`) |
+| 422 | `invalid_name`, `nothing_to_pin`, `signature_failed`, `signature_missing` | a signature that does not verify, or a signing project with no attestation for that digest |
+| 502 | `cannot_verify`, `registry_error`, `github_error` | GitHub, Sigstore's trust root or a registry could not be reached, or (`cannot_verify`) this server has no sigstore: nothing is made. `cannot_verify` carries `can_override` |
+
+`"allow_unverified": true` makes the copy although its signatures could not be checked (`cannot_verify` only, and only
+while `can_override` is true): each signed image and archive records `{"status": "not_verified", "reason",
+"overridden_by", "at"}`, the console shows it as *Not verified*, and `recipe.created` carries `"unverified_override":
+true` and the variants (`not_verified`). A signature that fails, or is missing for a project that signs, is never
+overridden.
+
+The copy is the built-in's YAML text with a header comment, `name`, `title` (`vLLM 0.34.0`), `version`, the new
+images (`repo:tag@sha256:…`) and archives, the left-out variants removed, and two fields (custom recipes only):
+
+| Field | Meaning |
+|---|---|
+| `based_on` | the built-in recipe (same `engine`) it came from. A catalog model's `engine_args` for that recipe apply to the copy too, unless the model has an entry of the copy's own name |
+| `copy` | `from_version`, `kind` (`release` or `build`), `made_at`, `made_by`, `left_out` (`variant`, `code`, `text`, `params`), `archives` (`variant`, `release`, `signature`) |
+
+Audited as `recipe.created` with `based_on`, `from_version`, `version`, `images`, `left_out` and `signatures`. Copies
+are changed and deleted as any custom recipe.
+
+**`image_pins`** (migration `0016_image_pins`, additive): one row per pinned image reference (`ref`, primary key),
+shared by the copies that name it: `entry` (`{"index", "platforms": {"linux/amd64": {"manifest", "config",
+"content"}}}`, the shape of `forgeyard/recipes/images.lock.json`), `signature`, `recorded_by`, `recorded_at`. Every
+reader of recorded ids reads the lock file first, then this table (`images.entry_for`): the relay through the
+server, the ids sent with a replica or a download for a `docker load`ed copy, a machine's engine images and their
+removal, an engine page's presence. The server holds the rows in memory (loaded at start, reloaded after each
+change); a row that no custom recipe names any more is removed when a recipe is changed or deleted. Going down to
+0015 drops the table: copies then pull their images directly, by digest. `GET /api/recipes/{name}` adds `pins`: per
+variant, the row's `signature`, `recorded_at` and `recorded_by`.
+
+**Signatures.** Verified on the server only (agents run the digest the server pinned), with
+[sigstore-python](https://github.com/sigstore/sigstore-python) (Apache-2.0). It is the server's own extra
+(`uv sync --extra server`; the server image has it): the agent's wheel and image do not carry it, and a server
+without it cannot check signatures (`cannot_verify`).
+
+| Engine | Published | Checked |
+|---|---|---|
+| llama.cpp | GitHub artifact attestations (SLSA provenance in a Sigstore bundle) for its images and release archives | the bundle from `GET https://api.github.com/repos/ggml-org/llama.cpp/attestations/sha256:<hex>` (anonymous): the certificate chains to Fulcio and was valid when the entry was logged in Rekor (inclusion proof and checkpoint), the DSSE signature, the OIDC issuer `https://token.actions.githubusercontent.com`, the source repository, the signer being a workflow file of that same repository, a SLSA provenance v1 statement whose subject is that digest |
+| vLLM, vLLM-Omni, speaches | nothing | recorded as `{"status": "unsigned", "note": …}` |
+| stable-diffusion.cpp | an unsigned BuildKit provenance manifest | recorded as unsigned |
+
+A verified image or archive records `{"status": "verified", "repository", "workflow", "ref", "commit", "run",
+"predicate", "issuer", "log_index", "signed_at"}`. The trust root (Fulcio's certificates, Rekor's and the CT logs'
+keys) comes from Sigstore's TUF repository, `https://tuf-repo-cdn.sigstore.dev`, refreshed through the same network
+rules (kept for 5 minutes, metadata in `DATA_DIR/sigstore/`); the first refresh starts from the root shipped with
+sigstore-python. A refresh that fails is `cannot_verify`. A server that reaches only its registries (an
+air-gapped site with a mirror) cannot verify a signed engine's version: an admin may make the copy anyway, and it
+stays marked *Not verified*.
 
 ## Container images
 

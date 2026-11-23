@@ -42,6 +42,7 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from forgeyard.workloads import images as image_ids  # noqa: E402
+from forgeyard.workloads import pinning  # noqa: E402  (the lock entry, shared with the server's "Try this version")
 from forgeyard.workloads.registry import split_image  # noqa: E402  (shared with the server's image relay)
 
 RECIPES = ROOT / "forgeyard" / "recipes"
@@ -129,26 +130,9 @@ def resolve(reg: Registry, image: str) -> str:
 def describe(reg: Registry, image: str) -> dict:
     """The lock entry of a pinned image (`repo:tag@sha256:…`), read from the registry by its digest:
     {"index": digest | None, "platforms": {"os/arch[/variant]": {"manifest", "config", "content"}}}.
-    Attestation manifests (platform unknown/unknown) are left out: nothing runs them."""
-    registry, repo, _, digest = split_image(image)
-    if not digest:
-        raise ValueError(f"{image} is not pinned by digest")
-    _, body = reg.manifest(registry, repo, digest)
-    if body["mediaType"] in INDEX_TYPES:
-        index, members = digest, [(m["digest"], m.get("platform") or {}) for m in body.get("manifests", [])]
-    else:
-        index, members = None, [(digest, None)]
-    platforms: dict[str, dict] = {}
-    for mdigest, plat in members:
-        if plat is not None and (not plat.get("os") or plat.get("os") == "unknown"):
-            continue
-        _, manifest = (reg.manifest(registry, repo, mdigest) if mdigest != digest or index else (digest, body))
-        config_digest = manifest["config"]["digest"]
-        config = reg.blob(registry, repo, config_digest)
-        name = "/".join(x for x in (config.get("os"), config.get("architecture"), config.get("variant")) if x)
-        platforms[name] = {"manifest": mdigest, "config": config_digest,
-                           "content": image_ids.content_of_config(config)}
-    return {"index": index, "platforms": dict(sorted(platforms.items()))}
+    Attestation manifests (platform unknown/unknown) are left out: nothing runs them. Shared with the server, which
+    records a copy's images the same way when an admin tries a newer engine version (1.5.2, #95)."""
+    return pinning.describe(reg, image)
 
 
 def _wanted_platforms(text: str, line_no: int) -> set[str]:

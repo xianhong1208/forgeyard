@@ -16,7 +16,7 @@ You need Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22.12+ for the 
 only to build the container images.
 
 ```bash
-uv sync
+uv sync --extra server
 cd web && npm ci && npm run build && cd ..
 uv run python main.py          # https://127.0.0.1:7860, prints a one-time setup token
 ```
