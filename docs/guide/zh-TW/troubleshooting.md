@@ -11,7 +11,7 @@
 **做法：**
 
 1. 先略過警告一次（*Advanced* → *Proceed* / *Accept the risk*）。
-2. 開啟 **Trust this server**（信任此伺服器，在登入頁面或帳號選單裡，或直接開 `/trust`）。
+2. 開啟 **信任這台伺服器**（在登入頁面或帳號選單裡，或直接開 `/trust`）。
 3. 把那裡顯示的指紋，和伺服器啟動紀錄裡的指紋（`HTTPS with Forgeyard's own CA. CA fingerprint sha256:…`）或加入指令裡的指紋比對。
 4. 下載 CA，並依照你裝置對應的步驟安裝。關掉瀏覽器再重新開啟。
 
@@ -316,7 +316,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 ### 401
 
-`missing_api_key`、`invalid_api_key`、`expired_api_key`、`revoked_api_key`、`account_disabled`：沒有帶金鑰（請送出 `Authorization: Bearer fyk_…`）、金鑰錯誤、過期或已撤銷，或金鑰擁有者的帳號已停用。請到 **API keys** 檢查金鑰；需要的話建立一把新的。
+`missing_api_key`、`invalid_api_key`、`expired_api_key`、`revoked_api_key`、`account_disabled`：沒有帶金鑰（請送出 `Authorization: Bearer fyk_…`）、金鑰錯誤、過期或已撤銷，或金鑰擁有者的帳號已停用。請到 **API 金鑰** 檢查金鑰；需要的話建立一把新的。
 
 ### 402
 
@@ -331,14 +331,14 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 **做法：**
 
-- `budget_exhausted`：等到 `resets_at`，或請人提高預算（金鑰的預算在 **API keys** → **Limits**，個人的預算在 **Usage** → **Cost** → **Budgets this month**，供應商的預算在它的頁面）。啟動這個模型的本機部署也有幫助。`max_tokens` 較低的請求預留得比較少，可能還放得進預算。OpenAI 的 SDK 不會重試 402，重試也沒有用。
-- `budget_unpriced`：由管理員在供應商的頁面設定模型的價格（**Prices**，或 **Refresh prices from OpenRouter**）。
+- `budget_exhausted`：等到 `resets_at`，或請人提高預算（金鑰的預算在 **API 金鑰** → **限制**，個人的預算在 **Usage** → **Cost** → **Budgets this month**，供應商的預算在它的頁面）。啟動這個模型的本機部署也有幫助。`max_tokens` 較低的請求預留得比較少，可能還放得進預算。OpenAI 的 SDK 不會重試 402，重試也沒有用。
+- `budget_unpriced`：由管理員在供應商的頁面設定模型的價格（**價格**，或 **從 OpenRouter 更新價格**）。
 
 更多內容請見[預算](cloud-providers.md#budgets)。
 
 ### 403
 
-`model_not_allowed`：這把金鑰被限制只能用某些模型，而這個模型不在其中。金鑰的擁有者（或管理員）可以在 **API keys** 修改清單。
+`model_not_allowed`：這把金鑰被限制只能用某些模型，而這個模型不在其中。金鑰的擁有者（或管理員）可以在 **API 金鑰** 修改清單。
 
 ### 429
 
@@ -356,9 +356,9 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 送往雲端供應商的模型會多出這些錯誤。回應的 `X-Forgeyard-Target` 會說明是不是由供應商回答的。
 
-- 模型明明列在 **Cloud models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
-- `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **Local only**），但這個模型只由雲端供應商提供。
-- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Cloud → Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
+- 模型明明列在 **雲端模型** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **允許**。
+- `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **僅本機**），但這個模型只由雲端供應商提供。
+- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **雲端 → 供應商** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
 - `429 provider_rate_limited`：雲端層的每個目標都達到速率限制；請依 `Retry-After` 等待。
 - `402 budget_exhausted`、`402 budget_unpriced`：每月預算；請見 [402](#402)。
 - 其他 4xx 會保留供應商的狀態碼、代碼和訊息，並在訊息前加上供應商的名稱。
@@ -369,7 +369,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 `/x/` 在 1.4 淘汰，1.5 移除（[應用程式（已淘汰）](reference.md#apps-deprecated)）。
 
-- **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
+- **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API 金鑰** 頁面修改。
 - **404 `workload_not_found`：** 名稱打錯、應用程式沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他應用程式。
 - **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或應用程式是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動應用程式。
 - **副本因「listens beyond loopback」被停止：** 在金鑰守門員後面，行程必須監聽 `127.0.0.1`。在它的參數裡用 `${BIND_ADDRESS}`，不要用 `0.0.0.0`。
@@ -382,7 +382,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 **原因：** 伺服器的憑證來自 Forgeyard 自己的 CA，而每個程式各自決定要信任哪些憑證授權單位。把 CA 裝進瀏覽器或系統，管不到自帶清單的程式：Python 的 `requests` 和 OpenAI SDK（透過 `httpx`）使用 `certifi` 套件的清單，而不是系統的清單；Node.js 也內建自己的清單。
 
-**做法：** 從 **Trust this server** 取得 `forgeyard-ca.pem`，核對它的指紋，再用下列其中一種方式交給程式：
+**做法：** 從 **信任這台伺服器** 取得 `forgeyard-ca.pem`，核對它的指紋，再用下列其中一種方式交給程式：
 
 | 程式 | 方式 |
 |---|---|
@@ -401,7 +401,7 @@ export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ```
 
-以上是 Debian 和 Ubuntu 的做法；其他系統的步驟請看 **Trust this server**。設定變數後請重新啟動程式。完全無法指定 CA 的程式，需要一張它本來就信任的憑證：請見[使用自己的憑證或反向代理](how-to.md#use-your-own-certificate-or-a-reverse-proxy)。
+以上是 Debian 和 Ubuntu 的做法；其他系統的步驟請看 **信任這台伺服器**。設定變數後請重新啟動程式。完全無法指定 CA 的程式，需要一張它本來就信任的憑證：請見[使用自己的憑證或反向代理](how-to.md#use-your-own-certificate-or-a-reverse-proxy)。
 
 ## 模型沒有出現在 /v1/models
 
@@ -411,10 +411,10 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 - **它的部署已停止**，而且沒有這把金鑰能使用的供應商提供它。啟動中的部署仍會列出；停止的部署會從清單消失，直到再次啟動；
 - 金鑰被限制只能用**其他模型**（這時呼叫會回 `403 model_not_allowed`）；
-- 只有**雲端供應商**提供它，而金鑰的雲端設定不是 **Allowed**：對這把金鑰來說，這個模型不存在；
+- 只有**雲端供應商**提供它，而金鑰的雲端設定不是 **允許**：對這把金鑰來說，這個模型不存在；
 - 部署或路由已被**刪除**，或名稱不是你以為的那個：程式使用的名稱是部署（或路由）的名稱，在它的頁面上標示為 *Model name*。
 
-**做法：** 打開 **Serving** 查看模型的狀態；停止的部署請按 **Start**。到 **API keys** 檢查金鑰的模型清單和它的 *Cloud providers* 設定。
+**做法：** 打開 **Serving** 查看模型的狀態；停止的部署請按 **Start**。到 **API 金鑰** 檢查金鑰的模型清單和它的 *雲端供應商* 設定。
 
 ## 模型有列出，卻回應 503
 
@@ -430,14 +430,14 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **原因**，依序檢查：
 
-1. **金鑰的雲端設定是 Never。** 除非有人改過，每把金鑰都是 **Never**，包括 1.2 之前建立的每把金鑰。這種金鑰絕不會送到雲端供應商，而是直接拿到本機的錯誤。
-2. 路由勾選了 **Local only**，或請求帶了 `X-Forgeyard-Local-Only: 1`（Playground 的 *Local only (never the cloud)* 會送出它）。
+1. **金鑰的雲端設定是「永不」。** 除非有人改過，每把金鑰都是 **永不**，包括 1.2 之前建立的每把金鑰。這種金鑰絕不會送到雲端供應商，而是直接拿到本機的錯誤。
+2. 路由勾選了 **僅本機**，或請求帶了 `X-Forgeyard-Local-Only: 1`（Playground 的 *Local only (never the cloud)* 會送出它）。
 3. 這個端點不會送往供應商：只有對話、補全和嵌入會；rerank、score 和語音轉文字只在本機。
 4. 原因不是會溢出的那幾種。請求只在回應開始之前、本機層無法使用、忙碌，或回應 429 或 503 時才會往下一層；提示太長、放不進本機上下文的情況，只有開啟 **Spill a prompt that is too long** 才會溢出。400、請求送出後逾時，或已經開始的串流，都絕不溢出。
 5. **預算**用完了：回應會帶 `X-Forgeyard-Budget-Exhausted`。
 6. 供應商，或它在路由裡的目標，已被**停用**。
 
-**做法：** 到 **API keys**，打開金鑰的 **Limits**，把 *Cloud providers* 設為 **Only to spill**（或 **Allowed**，連只有雲端的模型也能用），再按 **Save limits**。一般人最多只能選到管理員在 **Cloud policy** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
+**做法：** 到 **API 金鑰**，打開金鑰的 **限制**，把 *雲端供應商* 設為 **僅溢出時**（或 **允許**，連只有雲端的模型也能用），再按 **儲存限制**。一般人最多只能選到管理員在 **雲端政策** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
 
 ## 圖片被拒絕
 
@@ -534,7 +534,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 **原因：** 雲端請求在結束時，依它的供應商模型的價格計價。如果供應商沒有自己回報費用，而模型當時沒有輸入或輸出價格，或者供應商有回答卻沒有回報任何 token（例如用戶端在用量送達前就關閉了串流），這個請求就沒有價格。它的費用是未知，而不是 0。本機副本和你網路內的供應商一律是 0，絕不會沒有價格。
 
-**做法：** 由管理員打開供應商的頁面，設定模型的 **Prices**，或使用 **Refresh prices from OpenRouter**。價格從那之後的請求開始適用：已經計算過的請求仍然沒有價格。在預算之下，沒有價格的模型會被拒絕（`402 budget_unpriced`），直到它有價格為止。
+**做法：** 由管理員打開供應商的頁面，設定模型的 **價格**，或使用 **從 OpenRouter 更新價格**。價格從那之後的請求開始適用：已經計算過的請求仍然沒有價格。在預算之下，沒有價格的模型會被拒絕（`402 budget_unpriced`），直到它有價格為止。
 
 ## 在沒有 systemd 的容器裡執行 agent
 

@@ -625,7 +625,7 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 ## 加入雲端供應商
 
-管理員：打開 **Cloud → Providers**，選 **Add a provider**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **Test connection**。加入你要的模型，然後使用其中一個：打開一個部署，在 **Cloud fallback** 新增雲端層並放入雲端模型，再儲存；或用 **Cloud → Cloud models → New cloud model** 以自己的名稱提供它。在 **API keys** 把可以使用它的金鑰的雲端設定改成 **Never** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
+管理員：打開 **雲端 → 供應商**，選 **新增供應商**，挑選 OpenAI、Anthropic、Google Gemini、Azure OpenAI、OpenRouter 或 *OpenAI-compatible server*，貼上金鑰，再按 **測試連線**。加入你要的模型，然後使用其中一個：打開一個部署，在 **雲端備援** 新增雲端層並放入雲端模型，再儲存；或用 **雲端 → 雲端模型 → 新增雲端模型** 以自己的名稱提供它。在 **API 金鑰** 把可以使用它的金鑰的雲端設定改成 **永不** 以外的值，或選一個[雲端政策](#choose-the-cloud-policy-for-keys)。各供應商的步驟，以及各自端點做不到的事，請見[雲端供應商](cloud-providers.md#add-a-provider)。
 
 **Outside your network (cloud)** 會自動幫你勾好：OpenAI、Anthropic、Gemini、Azure 和 OpenRouter 一律勾選；*OpenAI-compatible server* 則在它的 base URL 是公開位址（或解析成公開位址的名稱）時勾選。私有位址（`10.x`、`172.16–31.x`、`192.168.x`、`100.64–127.x`、loopback、link-local、IPv6 `fc00::/7`），或像 `gpu-box`、`*.local`、`*.lan`、`*.internal` 這樣的名稱則不勾選。表單會說明原因；判斷錯了就自己改。名稱在伺服器上解析不出來時，維持不勾選，並說明無法判斷。
 
@@ -635,13 +635,13 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 | 政策 | 新金鑰拿到 | 大家能把自己的金鑰設成 |
 |---|---|---|
-| **No cloud**（預設） | Never | Never |
-| **People may opt in to spill** | Never | Only to spill |
-| **Spill by default** | Only to spill | Only to spill |
-| **Cloud allowed** | Only to spill | Allowed |
-| **Custom** | 自己選 | 自己選 |
+| **不使用雲端**（預設） | 永不 | 永不 |
+| **個人可自行選擇溢出** | 永不 | 僅溢出時 |
+| **預設溢出** | 僅溢出時 | 僅溢出時 |
+| **允許雲端** | 僅溢出時 | 允許 |
+| **自訂** | 自己選 | 自己選 |
 
-*Only to spill* 只在本機部署無法使用、忙碌，或回應 429 或 503 時，才把請求送到雲端層；*Allowed* 也會使用排在本機之前的雲端層。改變政策不會改動既有金鑰自己的設定，但調低上限會立刻套用到大家設得比較高的金鑰。管理員可以把任何金鑰設成任何值，並對擁有者鎖定。預算仍然有效：[追蹤並限制雲端花費](#track-and-limit-cloud-spend)。
+*僅溢出時* 只在本機部署無法使用、忙碌，或回應 429 或 503 時，才把請求送到雲端層；*允許* 也會使用排在本機之前的雲端層。改變政策不會改動既有金鑰自己的設定，但調低上限會立刻套用到大家設得比較高的金鑰。管理員可以把任何金鑰設成任何值，並對擁有者鎖定。預算仍然有效：[追蹤並限制雲端花費](#track-and-limit-cloud-spend)。
 
 設了 `GATEWAY_CLOUD_DEFAULT` 或 `GATEWAY_CLOUD_MAX`、而還沒有人儲存過政策時，面板會把這些值標示為 *from .env*。儲存之後就永久取代它們。
 
@@ -649,13 +649,13 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 管理員在開始使用供應商之後：
 
-1. **設定價格。** 在 **Cloud → Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
+1. **設定價格。** 在 **雲端 → 供應商** 選 **從 OpenRouter 更新價格**。檢查建議的對應，勾選要採用的列，再選 **套用勾選的**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **價格**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **儲存價格**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
 2. **查看費用。** **Usage** → **Cost** 依日期、金鑰、個人、模型或供應商顯示費用，以及有多少由本機處理。
 3. **設定預算**，以日曆月（UTC）計，單位是美元：
-   - 金鑰：**API keys** → 金鑰的 **Limits** → **Monthly budget (USD)** → **Save limits**。管理員在別人金鑰上設定的值會對擁有者鎖定；**Unlock budget** 會移除它；
+   - 金鑰：**API 金鑰** → 金鑰的 **限制** → **每月預算（美元）** → **儲存限制**。管理員在別人金鑰上設定的值會對擁有者鎖定；**解除預算鎖定** 會移除它；
    - 個人：**Usage** → **Cost** → **Budgets this month**，選擇 **Everyone** → **Set budget**；
-   - 供應商：它的頁面 → **Monthly budget** → **Save budget**。
-4. **留意警示。** 預算用到 80% 和 100% 時，**Audit log** 會各記錄一筆事件（`budget.warning`、`budget.exhausted`），頁面也會顯示警告。不會寄電子郵件。
+   - 供應商：它的頁面 → **每月預算** → **儲存預算**。
+4. **留意警示。** 預算用到 80% 和 100% 時，**稽核紀錄** 會各記錄一筆事件（`budget.warning`、`budget.exhausted`），頁面也會顯示警告。不會寄電子郵件。
 
 費用怎麼算、預算如何預留金額、用完之後會怎樣：請見[費用與價格](cloud-providers.md#cost-and-prices)和[預算](cloud-providers.md#budgets)。
 
@@ -764,14 +764,14 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 
 ## 加入其他人
 
-管理員在 **Users**：
+管理員在 **使用者**：
 
-1. **Add user**：一個 **Username** 和 **Role**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **Create and get link**。
+1. **新增使用者**：一個 **使用者名稱** 和 **角色**（`user`、`operator` 或 `admin`；請見[角色](concepts.md#roles)）。選 **建立並取得連結**。
 2. 把一次性連結傳給對方。它用來設定對方的密碼，只能用一次，72 小時後失效。你永遠看不到對方的密碼。
 
-之後在同一份清單上：**Password link** 會給忘記密碼的人一個新連結（24 小時）；**Sign out** 會結束對方所有的工作階段；**Disable** 讓對方無法登入，他的 API 金鑰也會失效；**Delete** 會刪除對方。擁有者不能被停用、降級或刪除。
+之後在同一份清單上：**密碼連結** 會給忘記密碼的人一個新連結（24 小時）；**登出** 會結束對方所有的工作階段；**停用** 讓對方無法登入，他的 API 金鑰也會失效；**刪除** 會刪除對方。擁有者不能被停用、降級或刪除。
 
-如果要讓別人自己申請帳號，請以 `REGISTRATION=approval` 啟動伺服器。登入頁就會提供申請帳號的連結，申請會在 **Users** 等待，直到管理員選 **Approve** 或 **Reject**。
+如果要讓別人自己申請帳號，請以 `REGISTRATION=approval` 啟動伺服器。登入頁就會提供申請帳號的連結，申請會在 **使用者** 等待，直到管理員選 **核准** 或 **拒絕**。
 
 ## 使用繁體中文的主控台
 
@@ -793,7 +793,7 @@ TLS_KEY_FILE=/etc/forgeyard/tls/privkey.pem
 TLS_CA_FILE=/etc/forgeyard/tls/company-ca.pem
 ```
 
-`TLS_CA_FILE` 是簽發這張憑證的 CA；agent 會改為釘選這個 CA，**Trust this server** 也會提供它。如果是公開信任的憑證，就不要設定這一項：這樣加入指令不會帶指紋，agent 會使用系統的信任存放區。伺服器每 12 小時檢查一次這些檔案，憑證更新後不需重新啟動就會換用新的；想立刻換用就重新啟動伺服器。
+`TLS_CA_FILE` 是簽發這張憑證的 CA；agent 會改為釘選這個 CA，**信任這台伺服器** 也會提供它。如果是公開信任的憑證，就不要設定這一項：這樣加入指令不會帶指紋，agent 會使用系統的信任存放區。伺服器每 12 小時檢查一次這些檔案，憑證更新後不需重新啟動就會換用新的；想立刻換用就重新啟動伺服器。
 
 **放在已經處理 HTTPS 的反向代理後面**（nginx、Caddy）：
 
@@ -1042,7 +1042,7 @@ Forgeyard 會檢查自己的設定，找出壞掉、有風險或沒有作用的�
 
 升級之後，或要開始使用新版本之前，`scripts/accept_all.py` 會在你自己的伺服器和機器上檢查每一項功能：只要一個指令，每項檢查印出一行 PASS、FAIL 或 SKIP（SKIP 會說明原因），最後再印出總結。它用管理員帳號透過 API 操作，用官方 OpenAI SDK 呼叫 `/v1`，並用瀏覽器檢查網頁主控台。
 
-在 Forgeyard 的 checkout 裡執行它，所在的電腦要連得到伺服器（金鑰守門員的檢查還需要連得到機器上模型副本的連接埠），並準備好從 **Trust this server** 下載的伺服器 CA：
+在 Forgeyard 的 checkout 裡執行它，所在的電腦要連得到伺服器（金鑰守門員的檢查還需要連得到機器上模型副本的連接埠），並準備好從 **信任這台伺服器** 下載的伺服器 CA：
 
 ```bash
 FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.1.20:7860 \
@@ -1060,7 +1060,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `workloads` | 行程類服務、任務（成功、重試、`max_duration`）、機器有 Docker 或 Podman 時的容器任務；在 GPU 機器上，應用程式只看得到分配給它的卡 |
 | `models` | 部署小模型並等它們就緒：每台 CPU 機器上的 Qwen3-1.7B GGUF；GPU 機器上的對話、embedding、rerank 和語音模型（估算放不下的會跳過）；部署頁面上的估算；**Try it** |
 | `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；Playground；用量 |
-| `cloud` | 給了 `--cloud-provider` 才會執行：外溢到雲端、設為 **Never** 的金鑰、只用本地、雲端上限、費用，以及預算和它的警示 |
+| `cloud` | 給了 `--cloud-provider` 才會執行：外溢到雲端、設為 **永不** 的金鑰、只用本地、雲端上限、費用，以及預算和它的警示 |
 | `passthrough` | 一個公開在 `/x/` 的小型 HTTP 程式：在 CPU 機器上以行程執行，在 GPU 機器上以容器執行。金鑰（none、listed）、照原樣轉送的路徑、被拒絕的路徑、被替換的憑證與轉發標頭、強制的沙箱、轉址、串流、本文上限、rpm、同時請求數、讀取逾時、副本連接埠前的金鑰守門員、用量 |
 | `tts`、`img`、`video` | 在 GPU 機器上（有 CPU 引擎的也在 CPU 機器上）的語音、圖片和影片生成：SDK 的呼叫、格式、上限、佇列、用量和金鑰守門員 |
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
@@ -1118,7 +1118,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_scale.py --server https://192.16
 
 **誰可以讀取。**沒有設定 `METRICS_TOKEN` 時，只有來自伺服器本機、且沒有經過任何 proxy 的請求可以讀（沒有 `X-Forwarded-For`、`Forwarded` 或 `X-Real-IP`）；其他人會得到 403。設定了 `METRICS_TOKEN` 之後，每一次收集都需要 `Authorization: Bearer <token>`，不論從哪裡來，伺服器本機也一樣；沒帶或帶錯會得到 401。
 
-**Prometheus 在伺服器本機上**，不需要權杖。從 **Trust this server** 把伺服器的 CA 存成 `/etc/prometheus/forgeyard-ca.pem`；伺服器的憑證一定包含 `127.0.0.1`：
+**Prometheus 在伺服器本機上**，不需要權杖。從 **信任這台伺服器** 把伺服器的 CA 存成 `/etc/prometheus/forgeyard-ca.pem`；伺服器的憑證一定包含 `127.0.0.1`：
 
 ```yaml
 scrape_configs:
@@ -1185,7 +1185,7 @@ PostgreSQL：照常使用 `pg_dump`。
 
 **或從主控台下載金鑰**（1.4.2）。管理員可以把機密金鑰和伺服器的 CA（`ca.key` 和 `ca.crt`）下載成一個檔案，用自己選的通關密語加密：
 
-1. 在 **Get started → Setup health** 的提醒上按 **Download a backup…**，或在 **Trust this server** 頁面的 **For admins** 底下按 **Download a key backup…**。
+1. 在 **Get started → Setup health** 的提醒上按 **Download a backup…**，或在 **信任這台伺服器** 頁面的 **給管理員** 底下按 **下載金鑰備份…**。
 2. 再輸入一次你的密碼（輸錯的次數和登入失敗一起計算：錯幾次之後就要等一下），以及兩次備份通關密語：至少 12 個字元，而且不能是你的密碼。請把通關密語記下來：沒有它，任何東西都打不開這個檔案。
 3. 按 **Download the backup**。瀏覽器會存下 `forgeyard-key-backup-<金鑰 id>-<日期>.fykey`。
 
@@ -1367,7 +1367,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 ## 輪替金鑰
 
-- **API 金鑰**：在 **API keys** 建立一把新的金鑰，放進你的程式，然後把舊的 **Revoke**（撤銷）。被撤銷的金鑰從下一個請求開始就失效。
+- **API 金鑰**：在 **API 金鑰** 建立一把新的金鑰，放進你的程式，然後把舊的 **撤銷**。被撤銷的金鑰從下一個請求開始就失效。
 - **機器的憑據**：撤銷這台機器，建立一個加入指令，然後在機器上用 `--rejoin` 重新加入：
 
   ```bash
@@ -1376,7 +1376,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
   ```
 
   它會以一台新機器出現在頁面上；請移除舊的那一筆。
-- **CA**：只有在必須更換時才換（它的金鑰外洩，或你要改用自己的憑證）。每台裝置都要重新信任新的 CA，每個 agent 都要用新的指紋執行 `forgeyard agent trust`（管理員可以在 **Trust this server** 看到新指紋）。
+- **CA**：只有在必須更換時才換（它的金鑰外洩，或你要改用自己的憑證）。每台裝置都要重新信任新的 CA，每個 agent 都要用新的指紋執行 `forgeyard agent trust`（管理員可以在 **信任這台伺服器** 看到新指紋）。
 - **`secret.key`** 目前還不能就地輪替。請像保護密碼一樣保護它（權限 0600，和資料庫備份分開存放）。
 
 ## 撤銷機器

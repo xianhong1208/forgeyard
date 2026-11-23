@@ -163,14 +163,16 @@ describe("the console's language", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "服務中" })).toBeTruthy();
     expect(await screen.findByRole("heading", { level: 2, name: "還沒有部署" })).toBeTruthy();
     for (const kind of ["對話", "嵌入", "重排序", "語音轉文字", "文字轉語音", "圖片", "影片", "視覺"]) expect(screen.getByText(kind)).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: "部署模型" })[0].getAttribute("href")).toBe("/serving/deploy");
+    // The Deploy link waits for the catalog's can_deploy (its own request): found, not got, so a slow answer is no flake.
+    expect((await screen.findAllByRole("link", { name: "部署模型" }))[0].getAttribute("href")).toBe("/serving/deploy");
   });
 
-  it("FY-WEB-677 a page not translated yet still works in zh-TW: its own words in English, the frame in Chinese", async () => {
+  // The audit log was the untranslated example until #189's page group 4 translated it: now its words are Chinese too.
+  it("FY-WEB-677 a page in zh-TW works at its own address, the frame and the page in Chinese", async () => {
     localStorage.setItem(LANG_KEY, "zh-TW");
     server((url) => (url === "/api/audit" || url.startsWith("/api/audit?") ? { status: 200, body: { events: [], next_before: null } } : fleet(url)));
     mount("/audit");
-    expect(await screen.findByText("No events.")).toBeTruthy();
+    expect(await screen.findByText("沒有事件。")).toBeTruthy();
     expect(within(screen.getByRole("navigation", { name: "主選單" })).getByRole("link", { name: "稽核紀錄" })).toBeTruthy();
     expect(screen.getByTestId("where").textContent).toBe("/audit");
   });
