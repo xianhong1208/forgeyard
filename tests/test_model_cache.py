@@ -14,6 +14,7 @@ import pytest
 from forgeyard.agent.models import CacheError, Cancelled, ModelCache, validate_model
 from forgeyard.models import fetch, inspect
 from tests.model_helpers import TINY_REV, FakeHF, Repo, tiny_repo
+from tests.waits import NoSleep
 
 LOCAL = fetch.Policy(allow_private=True)
 
@@ -59,7 +60,7 @@ def test_fy_mc_001_download_layout_and_read_only(tmp_path, hf):
     assert info["ok"] and info["cached"] == cache.cached_keys() and info["free_bytes"] > 0
 
 
-def test_fy_mc_002_resume_after_a_cut_and_verify(tmp_path, hf):
+def test_fy_mc_002_resume_after_a_cut_and_verify(tmp_path, hf, monkeypatch):
     """FY-MC-002: a cut connection resumes with a Range request; a file that does not match its
     SHA-256 is thrown away and nothing broken is cached."""
     cache = ModelCache(tmp_path / "cache", allow_private=True)
@@ -67,12 +68,9 @@ def test_fy_mc_002_resume_after_a_cut_and_verify(tmp_path, hf):
     start = len(hf.requests)
     hf.fail_after = 100
     import forgeyard.agent.models as am
-    orig = am.time.sleep
-    am.time.sleep = lambda s: None
-    try:
+    with monkeypatch.context() as mp:
+        mp.setattr(am, "time", NoSleep())
         cache.ensure_model(model)
-    finally:
-        am.time.sleep = orig
     resumed = [r for r in hf.requests[start:] if r["range"] and "/cdn/" in r["path"]]
     assert len(resumed) == 1 and resumed[0]["range"] == "bytes=100-" and resumed[0]["path"].endswith("/config.json")
     bad = dict(model, files=[dict(f) for f in model["files"]])

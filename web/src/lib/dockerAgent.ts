@@ -2,6 +2,7 @@
 // directory, machine name, server address, port range), and the ways to get the image onto a machine
 // without registry access (`docker save | docker load`, or `docker build` from a checkout). Pure, so
 // every field and every guard is tested on its own; the page only shows what this returns.
+import { t } from "../i18n/core";
 
 export type DockerKind = "nvidia" | "amd" | "cpu";
 
@@ -38,31 +39,31 @@ const RANGE_RE = /^(\d{1,5})-(\d{1,5})$/;
 
 export function modelDirError(v: string): string | null {
   const dir = v.trim();
-  if (!dir) return "Enter the directory on that machine where models are kept, e.g. /srv/forgeyard-models.";
-  if (/[:]/.test(dir)) return "No colon: Docker's -v splits the mount at it.";
-  if (/\s/.test(dir)) return "No spaces: the command is pasted into a shell.";
-  if (/["'`]/.test(dir)) return "No quotes: the command is pasted into a shell.";
-  if (!dir.startsWith("/")) return "An absolute path, starting with /.";
-  if (!PATH_CHARS.test(dir)) return "Only letters, digits and . _ - + / in the path.";
-  if (dir.split("/").includes("..")) return "No .. in the path.";
-  if (cleanDir(dir) === "/") return "A directory for models, not / itself.";
+  if (!dir) return t("machines.check.dirEmpty");
+  if (/[:]/.test(dir)) return t("machines.check.dirColon");
+  if (/\s/.test(dir)) return t("machines.check.dirSpace");
+  if (/["'`]/.test(dir)) return t("machines.check.dirQuote");
+  if (!dir.startsWith("/")) return t("machines.check.dirAbsolute");
+  if (!PATH_CHARS.test(dir)) return t("machines.check.dirChars");
+  if (dir.split("/").includes("..")) return t("machines.check.dirDots");
+  if (cleanDir(dir) === "/") return t("machines.check.dirRoot");
   return null;
 }
 
 export function nameError(v: string): string | null {
   const name = v.trim();
   if (!name) return null; // optional: the machine's host name
-  if (name.length > 64) return "At most 64 characters.";
-  if (!NAME_RE.test(name)) return "Letters, digits, dots, dashes and underscores; not starting or ending with a dot or dash.";
+  if (name.length > 64) return t("machines.check.nameLong");
+  if (!NAME_RE.test(name)) return t("machines.check.nameChars");
   return null;
 }
 
 export function serverError(v: string): string | null {
   const url = cleanServer(v);
-  if (!url) return "Enter the address the machine uses to reach this server.";
+  if (!url) return t("machines.check.serverEmpty");
   const m = SERVER_RE.exec(url);
-  if (!m) return "An address like https://192.168.1.20:7860: http:// or https://, a host name or IP, an optional port.";
-  if (m[3] !== undefined && (Number(m[3]) < 1 || Number(m[3]) > 65535)) return "The port must be 1-65535.";
+  if (!m) return t("machines.check.serverShape");
+  if (m[3] !== undefined && (Number(m[3]) < 1 || Number(m[3]) > 65535)) return t("machines.check.serverPort");
   return null;
 }
 
@@ -70,9 +71,9 @@ export function portRangeError(v: string): string | null {
   const range = v.trim();
   if (!range) return null; // optional: the agent's default
   const m = RANGE_RE.exec(range);
-  if (!m) return "LOW-HIGH, e.g. 33000-33002.";
+  if (!m) return t("machines.check.rangeShape");
   const [lo, hi] = [Number(m[1]), Number(m[2])];
-  if (lo < 1024 || hi > 65535 || lo > hi) return "Within 1024-65535, low before high.";
+  if (lo < 1024 || hi > 65535 || lo > hi) return t("machines.check.rangeBounds");
   return null;
 }
 

@@ -10,8 +10,8 @@
 
 **做法：**
 
-1. 先略過警告一次（*Advanced* → *Proceed* / *Accept the risk*）。
-2. 開啟 **Trust this server**（信任此伺服器，在登入頁面或帳號選單裡，或直接開 `/trust`）。
+1. 先略過警告一次（*進階* → *繼續前往…* / *接受風險並繼續*；英文介面是 *Advanced* → *Proceed* / *Accept the risk*）。
+2. 開啟 **信任這台伺服器**（在登入頁面或帳號選單裡，或直接開 `/trust`）。
 3. 把那裡顯示的指紋，和伺服器啟動紀錄裡的指紋（`HTTPS with Forgeyard's own CA. CA fingerprint sha256:…`）或加入指令裡的指紋比對。
 4. 下載 CA，並依照你裝置對應的步驟安裝。關掉瀏覽器再重新開啟。
 
@@ -21,7 +21,7 @@
 
 ## agent 顯示離線
 
-**你會看到：** 在 **Machines** 上機器顯示 *offline*，並附上 *last heartbeat … ago*。
+**你會看到：** 在 **機器** 上機器顯示 *offline*，並附上 *last heartbeat … ago*。
 
 **做法：** 查看 agent 的紀錄。最後幾行會說明原因：
 
@@ -52,7 +52,7 @@ sudo forgeyard agent config
 
 **原因：** 機器收到的 CA 不是伺服器的。可能是指令來自另一台伺服器、伺服器的 CA 在指令產生後換了，或是機器和伺服器之間有別的東西代替伺服器回應。
 
-**做法：** 在 **Machines** 建立一個新的加入指令，並把指紋和伺服器的啟動紀錄比對。如果兩者一致，機器卻仍然拿到別的 CA，代表網路上有東西擋在中間（例如會檢查 TLS 的代理）：請從沒有這個代理的網路安裝，或者如果你信任那個代理，用 `--ca-file` 釘選它的 CA。
+**做法：** 在 **機器** 建立一個新的加入指令，並把指紋和伺服器的啟動紀錄比對。如果兩者一致，機器卻仍然拿到別的 CA，代表網路上有東西擋在中間（例如會檢查 TLS 的代理）：請從沒有這個代理的網路安裝，或者如果你信任那個代理，用 `--ca-file` 釘選它的 CA。
 
 ## 拉取映像檔失敗：error getting credentials
 
@@ -90,7 +90,7 @@ sudo forgeyard agent config
 
 **原因：** 這台機器上沒有引擎映像檔，用釘住的 digest 和用 tag 都找不到，而且機器連不到 registry。如果拉取已經開始過，訊息也會說它停在哪裡：`at layer 4f4fb700ef54, 3 of 7 layers done, 0.80 of 1.90 GiB`。
 
-**做法：** 用 1.4 的 agent 時，讓伺服器去抓：把機器的 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)），或從機器的頁面上傳映像檔（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。或者把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
+**做法：** 用 1.4 的 agent 時，讓伺服器去抓：把機器的 **下載時的網路連線** 設成 **自動** 或 **一律經由伺服器**（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)），或從機器的頁面上傳映像檔（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)）。或者把映像檔用檔案帶過去並載入：[離線機器](how-to.md#offline-machines)。recipe 的頁面列出了它每個映像檔的指令。agent 會自己再試；下一次啟動就會用載入的映像檔。如果這台機器本來應該連得到 registry，先檢查它的 DNS 和 proxy（在那台機器上 `docker pull` 這個映像檔必須成功）。
 
 如果訊息是 `… is loaded but Forgeyard has no recorded ids for this image`，表示映像檔來自自訂 recipe：Forgeyard 無法檢查它載入的副本，請在那個 recipe 裡只用 tag 指定它（不加 `@sha256:…`）。
 
@@ -139,9 +139,9 @@ sudo forgeyard agent config
 
 ## 機器連不到 Hugging Face
 
-**你會看到：** 那台機器上的副本停在 **backoff**，顯示 *Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co: …*（llama.cpp 引擎壓縮檔則是 *github.com*，映像檔則是 *could not be pulled*），接著部署的頁面顯示 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*。
+**你會看到：** 那台機器上的副本停在 **稍後重試**，顯示 *Qwen3-1.7B-Q4_K_M.gguf: download failed: cannot resolve huggingface.co: …*（llama.cpp 引擎壓縮檔則是 *github.com*，映像檔則是 *could not be pulled*），接著部署的頁面顯示 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*。
 
-**原因：** 這台機器設成 **Direct only**，或它的 agent 比 1.4 舊（不能經由伺服器下載）。設成 **Auto**（預設）或 **Always through the server** 時，1.4 的 agent 會改經由伺服器取得模型和引擎壓縮檔，就不會發生以下的情況（見下方）。
+**原因：** 這台機器設成 **只直接下載**，或它的 agent 比 1.4 舊（不能經由伺服器下載）。設成 **自動**（預設）或 **一律經由伺服器** 時，1.4 的 agent 會改經由伺服器取得模型和引擎壓縮檔，就不會發生以下的情況（見下方）。
 
 agent 會嘗試下載五次，總共大約一分鐘；如果還是連不到來源（名稱解析失敗、連線被拒或逾時、網路無法連線），伺服器就會記住這台機器一小時內連不到那個主機。沒有指定這台機器的部署，它的副本會重新放到另一台放得下的機器上；之後需要從那個主機下載的新副本，也會先放到其他機器。已經有這個模型（和引擎）的機器不需要下載，所以仍然會用來放它。
 
@@ -154,7 +154,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：**
 
-- 讓伺服器替這台機器下載：在機器的頁面把 **Internet access for downloads** 設成 **Auto** 或 **Always through the server**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)；這種機器的完整流程：[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)）。之後副本的進度會顯示 *via the server*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
+- 讓伺服器替這台機器下載：在機器的頁面把 **下載時的網路連線** 設成 **自動** 或 **一律經由伺服器**，如果頁面提示，就把它的 agent 更新到 1.4（[經由伺服器把模型送到離線機器](how-to.md#give-an-offline-machine-models-through-the-server)；這種機器的完整流程：[讓沒有網路的機器執行模型](how-to.md#run-a-machine-without-internet-access)）。之後副本的進度會顯示 *經由伺服器*。有釘選的引擎映像檔也一樣；只用 tag 指定的映像檔不行（請從機器的頁面上傳）；
 - 讓這台機器連得到那個主機（DNS、防火牆規則、proxy 路由）；Forgeyard 會在最後一次失敗一小時後，或伺服器重新啟動後，再把新的副本放到這台機器上試試；
 - 或把檔案帶過去：從已經有這個模型的機器複製模型快取（[搬移模型快取](how-to.md#move-a-model-cache)）、用 `docker load` 載入引擎映像檔（請看[副本失敗：映像檔不在這台機器上](#a-replica-fails-the-image-is-not-on-this-machine)），或把模型從本機目錄以 `local://` 模型的方式加入；
 - 或使用這台機器連得到的鏡像站（`HF_ENDPOINT`，請看 [Hugging Face 下載很慢](#hugging-face-downloads-are-slow)）。
@@ -162,8 +162,8 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 **經由伺服器仍然失敗：**
 
 - *download failed: through the server: the server could not reach huggingface.co: …*：伺服器也連不到來源。請修好伺服器的網路，或使用鏡像站（`HF_ENDPOINT`）。
-- *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **Models → Sources** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
-- *through the server: … does not download through the server*：下載途中這台機器被改成 **Direct only**。
+- *through the server: huggingface.co refused access (HTTP 401) …*：受限模型；請在 **模型 → 來源** 設定伺服器的 Hugging Face 權杖（經由伺服器時不會用機器自己的權杖），或給部署它自己的權杖。
+- *through the server: … does not download through the server*：下載途中這台機器被改成 **只直接下載**。
 - *SHA-256 mismatch*：資料在路上被改了（會改寫內容的 proxy、損壞的磁碟）。檔案已刪除，下次會重新下載。
 - *… could not pull …: This image is not pinned by digest, so it cannot come through the server*，或 *… is not an image Forgeyard pinned by digest*：自訂 recipe 只用 tag 指定的映像檔。請上傳它（[把引擎映像檔上傳到機器](how-to.md#upload-an-engine-image-to-a-machine)），或從有它的機器複製（[從另一台機器複製引擎映像檔](how-to.md#copy-an-engine-image-from-another-machine)）。
 - *… has no build for amd-01's architecture*：映像檔沒有那台機器平台（例如 arm64）的版本；請選有這個版本的 recipe 或變體。
@@ -180,7 +180,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **做法：**
 
-- 到 **Machines** 查看這張卡：以它的可用記憶體為準；
+- 到 **機器** 查看這張卡：以它的可用記憶體為準；
 - 停止再啟動這個部署：它會依照當下的可用記憶體重新放置；
 - 或降低它的需求：縮短 **Context length**、減少 **Concurrent requests**，或換一個較小的模型。部署頁面會在你部署前顯示新的估算。
 
@@ -191,11 +191,11 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **原因：** llama.cpp 1.0.0 對某些架構不接受 FP8 cache（MLA 模型，例如 DeepSeek，以及少數其他架構），而且完全沒有 Vulkan 的 FP8（llama-server 會直接中止），所以 Forgeyard 不會把 FP8 部署放到 `vulkan` variant 上。
 
-**做法：** 把 *KV cache type* 改回 `f16`（在部署頁面按 **Edit**，在 **Advanced** 裡）。在 ROCm 映像檔有編譯的 AMD 卡上，FP8 會用 `rocm` 執行。
+**做法：** 把 *KV cache type* 改回 `f16`（在部署頁面按 **編輯**，在 **進階** 裡）。在 ROCm 映像檔有編譯的 AMD 卡上，FP8 會用 `rocm` 執行。
 
 ## 部署放不下
 
-**你會看到：** *Deploy* 回應 *Nothing can take a replica that needs … GiB per GPU*，接著每台機器一行說明。
+**你會看到：** **部署** 回應 *Nothing can take a replica that needs … GiB per GPU*，接著每台機器一行說明。
 
 **原因：** Forgeyard 只會把副本放在估算結果放得進**目前**可用記憶體的地方，而且只用 Forgeyard 可以使用的卡。與其啟動一個注定會失敗的東西，它寧可拒絕。每台機器的那一行會說明它為什麼沒被選上：
 
@@ -204,7 +204,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 | `no allowed GPU that vllm supports` | GPU 允許清單上沒有任何卡，或沒有適合那張卡和驅動程式的 recipe（配方）變體 |
 | `needs 14.38 GiB per GPU; available: #0 12.07 GiB, … (2.31 GiB short)` | 最適合的那張卡可用記憶體還差這麼多 |
 | `needs 1 GPU it can have; in use: #1 (qwen)` | 卡都被不共用的副本佔走了 |
-| `…; fits if both share VRAM: #1 has 60.00 GiB available, held by qwen` | 記憶體夠，但那張卡被獨占：兩邊都打開 **Share VRAM**（[GPU 共用](concepts.md#gpu-sharing)） |
+| `…; fits if both share VRAM: #1 has 60.00 GiB available, held by qwen` | 記憶體夠，但那張卡被獨占：兩邊都打開 **共用 VRAM**（[GPU 共用](concepts.md#gpu-sharing)） |
 | `needs 3.08 GiB of RAM, 1.20 GiB available (1.88 GiB short)` | 這是 CPU 模型，而可用的 RAM 不夠 |
 | `no container runtime (…)` | recipe 需要 Docker 或 Podman，但這台機器沒有 |
 | `its agent does not serve models` | 這個 agent 沒有設定模型快取（設定裡的 `[models] cache`） |
@@ -215,23 +215,23 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 ## 副本一直停在 pending
 
-**你會看到：**部署或應用程式已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **pending**：沒有下載、也沒有啟動。2 分鐘後，部署和 workload 頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
+**你會看到：**部署或應用程式已經放到某台機器上（*Replica 0 placed on …*），機器也在線上，但副本一直是 **等待中**：沒有下載、也沒有啟動。2 分鐘後，部署和 workload 頁面會顯示 *Replica #0 was never picked up*，並說明是哪台機器、它的 agent 版本，以及該怎麼做，例如 *gpu-01's agent (1.2.0) has not taken this replica for 3 minutes; update the agent (the server is 1.3.1)*。agent 在副本放置（或連線）後一秒內就會拿到工作清單，並以每個副本的狀態回應每一份清單，所以一個已連線的 agent 沉默兩分鐘，並不是啟動得慢。
 
 **原因：**那台機器的 agent 沒有處理它的工作清單。1.2.0 以前的 agent 會跨連線記住最後收到的工作清單編號，而之後重新啟動過的伺服器又從 1 開始編號：agent 把這些清單全當成舊的，默默丟掉。1.3.0 起的伺服器編號方式不會再這樣，連舊版 agent 也一樣；1.3.0 起的 agent 每次連線都重新計數，丟掉清單時也會留下紀錄。
 
 缺少副本需要的功能而把它丟掉的 agent，或卡住的 agent，也會這樣。
 
-**怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。agent 已經是伺服器的版本時，訊息會請你重新啟動它並查看它的紀錄（`journalctl -u forgeyard-agent`，或 `docker logs forgeyard-agent`）。**Setup health** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
+**怎麼做：**讓 agent 跑和伺服器相同的版本（[升級](how-to.md#upgrade-the-server-and-the-agents)）；在那之前，重新啟動 agent（`sudo systemctl restart forgeyard-agent`，或 `docker restart forgeyard-agent`）就會立刻接手工作。agent 已經是伺服器的版本時，訊息會請你重新啟動它並查看它的紀錄（`journalctl -u forgeyard-agent`，或 `docker logs forgeyard-agent`）。**設定健康檢查** 會標示比伺服器舊的 agent，以及等機器超過 15 分鐘的副本。
 
 ## 自動副本數沒有加副本
 
-部署頁面的 **Replicas** 底下會說明原因：
+部署頁面的 **副本** 底下會說明原因：
 
-- *Wants 3 replicas, room for 2: …*：現在哪裡都放不下多一個；後面是每台機器的原因，和部署時一樣（[部署放不下](#a-deployment-does-not-fit)）。騰出機器上的記憶體、只在有空間的地方提高 *Most replicas*，或取消固定機器。Forgeyard 不會加一個要等空間的副本。
+- *Wants 3 replicas, room for 2: …*：現在哪裡都放不下多一個；後面是每台機器的原因，和部署時一樣（[部署放不下](#a-deployment-does-not-fit)）。騰出機器上的記憶體、只在有空間的地方提高 *最多副本數*，或取消固定機器。Forgeyard 不會加一個要等空間的副本。
 - *Not scaling now: …*：修改正在重新啟動它的副本、某個副本所在的機器離線，或它在 2 分鐘內被啟動、喚醒或修改。之後會自己繼續。
-- 什麼都沒寫，而且負載一直低於目標：負載是處理中和在閘道隊伍裡等待的請求，和 *Concurrent requests* × 目標（80%）比較。*Concurrent requests* 為 32 時，一個副本要承擔 25.6 個請求才會想多一個；在 **Advanced** 裡調低 *Concurrent requests* 或目標。
+- 什麼都沒寫，而且負載一直低於目標：負載是處理中和在閘道隊伍裡等待的請求，和 *Concurrent requests* × 目標（80%）比較。*Concurrent requests* 為 32 時，一個副本要承擔 25.6 個請求才會想多一個；在 **進階** 裡調低 *Concurrent requests* 或目標。
 - 有副本還在啟動：一次只啟動一個；等它就緒才考慮下一個。
-- 已經到 *Most replicas*，或它是影片部署（永遠不會自動調整）。
+- 已經到 *最多副本數*，或它是影片部署（永遠不會自動調整）。
 
 應該移除的副本在**排空**期間會留著：它先把正在處理的請求做完（最多 30 分鐘）。如果負載又升高，它會被留下（事件裡的 *Kept replica 1: …*）。
 
@@ -239,7 +239,7 @@ HTTP 錯誤（檔案不存在、受限模型回 401）、checksum 不符或磁�
 
 **你會看到：** 副本沒有被放到任何機器上，部署或應用程式頁面顯示 *Cannot be placed: gpu-02: no free port: 3 of 3 in use (host ports 33000-33002)*，或 *not enough free ports: 2 of 3 in use, it needs 2*。部署預覽中那台機器也會顯示同樣的一行。
 
-**原因：** agent 用它連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠公開服務和模型副本。模型副本佔用兩個（agent 的金鑰守衛聽一個，引擎聽另一個），應用程式每公開一個連接埠佔用一個（公開在 `/x/` 時是兩個）。伺服器會計算機器上副本已佔用的連接埠，並略過沒有足夠空連接埠的機器，就像略過記憶體不夠的機器一樣，而不是把副本送到只能在那裡等待的地方。透過 SSH tunnel 連線的機器常有很小的範圍，因為範圍內的每個連接埠都要轉送。1.4.2 之前的 agent 不會回報它的範圍，它們的連接埠不會被計算。
+**原因：** agent 用它連接埠範圍（`FORGEYARD_PORT_RANGE`，預設 `30000-32767`）內的主機連接埠公開服務和模型副本。模型副本佔用兩個（agent 的金鑰守門員聽一個，引擎聽另一個），應用程式每公開一個連接埠佔用一個（公開在 `/x/` 時是兩個）。伺服器會計算機器上副本已佔用的連接埠，並略過沒有足夠空連接埠的機器，就像略過記憶體不夠的機器一樣，而不是把副本送到只能在那裡等待的地方。透過 SSH tunnel 連線的機器常有很小的範圍，因為範圍內的每個連接埠都要轉送。1.4.2 之前的 agent 不會回報它的範圍，它們的連接埠不會被計算。
 
 agent 給不出連接埠的副本（在伺服器開始計算連接埠之前就被放上去的）會回報 *no free host port left in 33000-33002*。如果伺服器的計算也這麼認為，就把它從那台機器拿下來：它會被放到有空間的機器，或帶著上面的原因等待。如果計算結果還有空間，代表 Forgeyard 以外的程式佔用了範圍內的連接埠：agent 會跳過它們，並在 backoff 後再試一次。
 
@@ -251,7 +251,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 ## 機器把副本公開在 loopback 位址上
 
-**你會看到：** **Get started → Setup health** 和機器的頁面出現 *gpu-02 publishes its replicas on 127.0.0.1*，部署在那台機器上的模型可能回應 502 或意料之外的內容。
+**你會看到：** **開始使用 → 設定健康檢查** 和機器的頁面出現 *gpu-02 publishes its replicas on 127.0.0.1*，部署在那台機器上的模型可能回應 502 或意料之外的內容。
 
 **原因：** agent 把副本公開在它朝向伺服器的位址上：也就是它連線的本機端，除非 `FORGEYARD_BIND_ADDRESS` 指定了別的位址。透過 SSH tunnel 或自己主機上的 proxy 連到伺服器的 agent，連的是 `127.0.0.1`，所以它回報的就是這個位址，閘道就會在**伺服器**的主機上連 `127.0.0.1`：連到的是伺服器自己的連接埠，而不是那台機器的。1.4.5 起 agent 也會告訴伺服器它那一端的連線；如果那一端就是伺服器看到的對方，代表中間沒有任何東西，agent 在伺服器自己的主機上，loopback 就是對的。只有其他機器會被檢查，而且只檢查 1.4.5 的 agent。如果範圍最多 64 個連接埠、而且每個連接埠都已轉送到伺服器的主機（伺服器的 loopback 上每個連接埠都有東西在聽），就像指南中的 [SSH tunnel](how-to.md#run-a-machine-without-internet-access)，就不會出現這個警告。
 
@@ -260,20 +260,20 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 - 也把機器的連接埠範圍透過 tunnel 轉送回來：選一個小範圍（`FORGEYARD_PORT_RANGE=33000-33002`），並在承載 agent 連線的 `ssh` 指令中，每個連接埠加一個 `-L`（[做法](how-to.md#run-a-machine-without-internet-access)）。
 - 或用 `FORGEYARD_BIND_ADDRESS`（`--bind-address`）給 agent 一個伺服器連得到的位址（它的 LAN 或 VPN 位址），並在那裡開放連接埠範圍。
 
-然後重新啟動 agent。如果伺服器其實能以 Forgeyard 看不到的方式連到那個位址（例如伺服器主機上的 proxy），就對這個警告按 **Snooze 30 days**。
+然後重新啟動 agent。如果伺服器其實能以 Forgeyard 看不到的方式連到那個位址（例如伺服器主機上的 proxy），就對這個警告按 **隱藏 30 天**。
 
-## 機器上的新程序打不開它的 GPU
+## 機器上的新行程打不開它的 GPU
 
-**你會看到：** **Get started → Setup health** 和機器的頁面出現錯誤 *New processes on gpu-01 cannot open its GPUs
-(/dev/nvidia0: Operation not permitted)*。那台機器上的程序引擎或應用程式一啟動就失敗，出現
-`cuInit: CUDA_ERROR_NO_DEVICE` 或 `Failed to initialize NVML: Unknown Error`，但同一台機器上容器裡的模型照常回應，機器的頁面也仍列出每張 GPU。需要在那些 GPU 上執行程序的部署會等待，原因是 *new processes there cannot open its NVIDIA GPUs*。
+**你會看到：** **開始使用 → 設定健康檢查** 和機器的頁面出現錯誤 *New processes on gpu-01 cannot open its GPUs
+(/dev/nvidia0: Operation not permitted)*。那台機器上的行程引擎或應用程式一啟動就失敗，出現
+`cuInit: CUDA_ERROR_NO_DEVICE` 或 `Failed to initialize NVML: Unknown Error`，但同一台機器上容器裡的模型照常回應，機器的頁面也仍列出每張 GPU。需要在那些 GPU 上執行行程的部署會等待，原因是 *new processes there cannot open its NVIDIA GPUs*。
 
-**原因：** agent 每 5 分鐘（以及啟動時）檢查一次：以它的工作負載帳號執行的新程序，能不能打開 GPU 的裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm` 和每個 `/dev/nvidiaN`；AMD 是 `/dev/kfd` 和 render 節點）。用 `docker run --gpus all` 時，NVIDIA runtime hook 是在 Docker 和 systemd 不知道的情況下，把 GPU 裝置交給 agent 的容器。主機執行 `systemctl daemon-reload` 時（安裝套件、自動更新、任何 unit 變更：在共用主機上很常發生），systemd 會依它知道的內容重新套用容器的 cgroup，那份裝置存取權就沒了。已經打開的照常運作（agent 讀 GPU 的數值、原本在跑的引擎）；那個容器裡每一次新的開啟都會被拒絕。新的容器會重新拿到存取權，所以容器裡的模型不受影響。AMD 的 agent 也不受影響：它的指令以 `--device` 傳入 `/dev/kfd` 和 `/dev/dri`。檢查失敗期間，Forgeyard 不會把程序類工作負載放到那些 GPU 上。
+**原因：** agent 每 5 分鐘（以及啟動時）檢查一次：以它的workload 帳號執行的新行程，能不能打開 GPU 的裝置節點（`/dev/nvidiactl`、`/dev/nvidia-uvm` 和每個 `/dev/nvidiaN`；AMD 是 `/dev/kfd` 和 render 節點）。用 `docker run --gpus all` 時，NVIDIA runtime hook 是在 Docker 和 systemd 不知道的情況下，把 GPU 裝置交給 agent 的容器。主機執行 `systemctl daemon-reload` 時（安裝套件、自動更新、任何 unit 變更：在共用主機上很常發生），systemd 會依它知道的內容重新套用容器的 cgroup，那份裝置存取權就沒了。已經打開的照常運作（agent 讀 GPU 的數值、原本在跑的引擎）；那個容器裡每一次新的開啟都會被拒絕。新的容器會重新拿到存取權，所以容器裡的模型不受影響。AMD 的 agent 也不受影響：它的指令以 `--device` 傳入 `/dev/kfd` 和 `/dev/dri`。檢查失敗期間，Forgeyard 不會把行程類 workload放到那些 GPU 上。
 
 **做法：**
 
 1. 重新啟動 agent 容器：`sudo docker restart forgeyard-agent`。它會拿回裝置，錯誤會在下一次檢查時消失（連上伺服器時會再檢查一次）。容器裡的模型會繼續執行。
-2. 用機器頁面上 **Update the agent** 的指令更新它（錯誤上的 **Update command** 會開啟它）。從 1.4.5 起，這個指令會在 `--gpus all` 旁邊，再以 `--device` 傳入 NVIDIA 的裝置節點；Docker 會記下它們，所以 reload 不會再把它們拿走：
+2. 用機器頁面上 **更新 agent** 的指令更新它（錯誤上的 **更新指令** 會開啟它）。從 1.4.5 起，這個指令會在 `--gpus all` 旁邊，再以 `--device` 傳入 NVIDIA 的裝置節點；Docker 會記下它們，所以 reload 不會再把它們拿走：
 
    ```bash
      --gpus all \
@@ -288,19 +288,19 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 如果加了裝置參數還是發生：某些 `runc` 版本搭配 systemd 的 cgroup driver，在主機沒有 NVIDIA 裝置的 `/dev/char` 連結時，仍會丟掉這些規則。用 NVIDIA Container Toolkit 建立它們（`sudo nvidia-ctk system create-dev-char-symlinks --create-all`；NVIDIA 在 nvidia-container-toolkit 的 discussion #1133 有一條 udev 規則，讓它們在重開機後仍在），或改用 CDI 啟動 agent，取代 `--gpus all`（`--device nvidia.com/gpu=all`，先執行 `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`）。把 Docker 的 cgroup driver 改成 cgroupfs 也能避免，但會重新啟動主機上的每個容器：共用主機上不要這樣做。
 
-不在容器裡（install.sh 或 checkout）時，同樣的錯誤代表工作負載帳號本身不能打開這些裝置：檢查它們的權限和那個帳號的群組（`video`、`render`），然後重新啟動 agent。
+不在容器裡（install.sh 或 checkout）時，同樣的錯誤代表workload 帳號本身不能打開這些裝置：檢查它們的權限和那個帳號的群組（`video`、`render`），然後重新啟動 agent。
 
 ## 送往機器的流量沒有加密
 
-**你會看到：** **Get started → Setup health** 和機器的頁面出現 *Traffic to gpu-02 is not encrypted: update the agent*。
+**你會看到：** **開始使用 → 設定健康檢查** 和機器的頁面出現 *Traffic to gpu-02 is not encrypted: update the agent*。
 
 **原因：** 從 1.4.5 起，閘道以 TLS 連每個副本，但 gpu-02 的 agent 比較舊，只能以純 HTTP 提供副本。所以副本的內部金鑰、提示詞和回答，在伺服器和 gpu-02 之間都以明文經過網路。它會繼續服務：在你更新之前，什麼都不會停。
 
-**做法：** 更新 agent（警告上的 **Update command** 會開啟那台機器的指令；[更新 agent](how-to.md#update-an-agent)）。新的 agent 連上後一秒內就會拿到憑證，警告就會消失。部署在那裡的模型在更新期間會繼續執行（agent 會接手它們）。
+**做法：** 更新 agent（警告上的 **更新指令** 會開啟那台機器的指令；[更新 agent](how-to.md#update-an-agent)）。新的 agent 連上後一秒內就會拿到憑證，警告就會消失。部署在那裡的模型在更新期間會繼續執行（agent 會接手它們）。
 
 ## 機器沒有副本的憑證
 
-**你會看到：** **Get started → Setup health** 出現錯誤：*gpu-02 has no certificate for its replicas*、*gpu-02's replica certificate has expired* 或 *… is not being renewed*；只部署在那台機器上的模型回應 503，其他模型則由其他機器上的副本回應。
+**你會看到：** **開始使用 → 設定健康檢查** 出現錯誤：*gpu-02 has no certificate for its replicas*、*gpu-02's replica certificate has expired* 或 *… is not being renewed*；只部署在那台機器上的模型回應 503，其他模型則由其他機器上的副本回應。
 
 **原因：** 1.4.5 的 agent 只以 TLS 提供副本，用的是伺服器替那台機器簽發的憑證。它在連線時申請，並在到期前 10 天更新（有效 30 天）。對這樣的機器，閘道絕不會退回純 HTTP，所以沒有有效憑證時就連不到它的副本。如果伺服器拒絕了申請，錯誤會寫出原因（伺服器紀錄裡也有）。常見原因：
 
@@ -316,7 +316,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 ### 401
 
-`missing_api_key`、`invalid_api_key`、`expired_api_key`、`revoked_api_key`、`account_disabled`：沒有帶金鑰（請送出 `Authorization: Bearer fyk_…`）、金鑰錯誤、過期或已撤銷，或金鑰擁有者的帳號已停用。請到 **API keys** 檢查金鑰；需要的話建立一把新的。
+`missing_api_key`、`invalid_api_key`、`expired_api_key`、`revoked_api_key`、`account_disabled`：沒有帶金鑰（請送出 `Authorization: Bearer fyk_…`）、金鑰錯誤、過期或已撤銷，或金鑰擁有者的帳號已停用。請到 **API 金鑰** 檢查金鑰；需要的話建立一把新的。
 
 ### 402
 
@@ -331,14 +331,14 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 **做法：**
 
-- `budget_exhausted`：等到 `resets_at`，或請人提高預算（金鑰的預算在 **API keys** → **Limits**，個人的預算在 **Usage** → **Cost** → **Budgets this month**，供應商的預算在它的頁面）。啟動這個模型的本機部署也有幫助。`max_tokens` 較低的請求預留得比較少，可能還放得進預算。OpenAI 的 SDK 不會重試 402，重試也沒有用。
-- `budget_unpriced`：由管理員在供應商的頁面設定模型的價格（**Prices**，或 **Refresh prices from OpenRouter**）。
+- `budget_exhausted`：等到 `resets_at`，或請人提高預算（金鑰的預算在 **API 金鑰** → **限制**，個人的預算在 **用量** → **費用** → **本月預算**，供應商的預算在它的頁面）。啟動這個模型的本機部署也有幫助。`max_tokens` 較低的請求預留得比較少，可能還放得進預算。OpenAI 的 SDK 不會重試 402，重試也沒有用。
+- `budget_unpriced`：由管理員在供應商的頁面設定模型的價格（**價格**，或 **從 OpenRouter 更新價格**）。
 
 更多內容請見[預算](cloud-providers.md#budgets)。
 
 ### 403
 
-`model_not_allowed`：這把金鑰被限制只能用某些模型，而這個模型不在其中。金鑰的擁有者（或管理員）可以在 **API keys** 修改清單。
+`model_not_allowed`：這把金鑰被限制只能用某些模型，而這個模型不在其中。金鑰的擁有者（或管理員）可以在 **API 金鑰** 修改清單。
 
 ### 429
 
@@ -348,17 +348,17 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 `no_ready_replica`：模型存在，但它沒有任何一個副本處於就緒狀態：還在下載或啟動、已停止，或所在的機器離線。錯誤訊息會列出每個副本的狀態。請查看這個部署的頁面；另見[模型有列出，卻回應 503](#a-model-is-listed-but-answers-503)。
 
-`model_waking`（1.5.0）：部署開啟了閒置時休眠；請求喚醒了它，但它沒有在 `wake_wait` 內就緒。照 `Retry-After` 重試；如果一直發生，就調高 `wake_wait`（以及客戶端的逾時）、給路由一個雲端分層，或關閉 *Sleep when idle*。`cannot_wake`：它現在無法啟動，原因如訊息所述（沒有機器有空間、指定的機器離線、引擎失敗）：請查看部署的事件（[閒置時休眠](concepts.md#sleep-when-idle)）。
+`model_waking`（1.5.0）：部署開啟了閒置時休眠；請求喚醒了它，但它沒有在 `wake_wait` 內就緒。照 `Retry-After` 重試；如果一直發生，就調高 `wake_wait`（以及用戶端的逾時）、給路由一個雲端分層，或關閉 *閒置時休眠*。`cannot_wake`：它現在無法啟動，原因如訊息所述（沒有機器有空間、指定的機器離線、引擎失敗）：請查看部署的事件（[閒置時休眠](concepts.md#sleep-when-idle)）。
 
-其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504 upstream_timeout`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒），以及只限串流請求的 `504 first_answer_timeout`（串流沒有在部署的 *Wait for the first answer* 內開始，預設 120 秒：在 **Advanced** 調高它）。每個錯誤碼都列在[參考資料](reference.md#errors)。
+其他錯誤：`404 model_not_found`（對這把金鑰沒有這個名稱的模型：請查看 `/v1/models` 和[模型沒有出現在 /v1/models](#a-model-is-missing-from-v1models)）、`502`（連不到某個副本，或副本拒絕了它的內部金鑰：通常是因為它的 agent 重新啟動了；幾秒內就會恢復）、`504 upstream_timeout`（在 `GATEWAY_READ_TIMEOUT` 內沒有回應，預設 600 秒），以及只限串流請求的 `504 first_answer_timeout`（串流沒有在部署的 *等待首次回應* 內開始，預設 120 秒：在 **進階** 調高它）。每個錯誤碼都列在[參考資料](reference.md#errors)。
 
 ### 來自雲端供應商的錯誤
 
 送往雲端供應商的模型會多出這些錯誤。回應的 `X-Forgeyard-Target` 會說明是不是由供應商回答的。
 
-- 模型明明列在 **Cloud models** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **Allowed**。
-- `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **Local only**），但這個模型只由雲端供應商提供。
-- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **Cloud → Providers** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
+- 模型明明列在 **雲端模型** 上卻回應 `404 model_not_found`：它是只有雲端的模型，而金鑰的雲端設定不是 **允許**。
+- `400 cloud_only_model`：請求帶了 `X-Forgeyard-Local-Only: 1`（或路由勾選了 **僅本機**），但這個模型只由雲端供應商提供。
+- `502 provider_auth_failed`：供應商拒絕了 Forgeyard 給它的金鑰；請管理員到 **雲端 → 供應商** 修正。`502 provider_blocked`：對外連線規則拒絕了供應商的位址。`502 provider_redirect`：供應商回應了重新導向，而 Forgeyard 絕不跟隨；請檢查它的 base URL。
 - `429 provider_rate_limited`：雲端層的每個目標都達到速率限制；請依 `Retry-After` 等待。
 - `402 budget_exhausted`、`402 budget_unpriced`：每月預算；請見 [402](#402)。
 - 其他 4xx 會保留供應商的狀態碼、代碼和訊息，並在訊息前加上供應商的名稱。
@@ -369,7 +369,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 `/x/` 在 1.4 淘汰，1.5 移除（[應用程式（已淘汰）](reference.md#apps-deprecated)）。
 
-- **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API keys** 頁面修改。
+- **403 `workloads_not_allowed`：** 金鑰的 **Apps at /x/** 是預設值 *None*。到 **API 金鑰** 頁面修改。
 - **404 `workload_not_found`：** 名稱打錯、應用程式沒有公開（它的頁面，**Gateway**），或金鑰的清單裡是其他應用程式。
 - **503 `no_ready_replica`，訊息說「runs without the agent's key guard」：** 副本的 agent 比 1.3 舊，或應用程式是在執行中才公開、還沒有在守門員後面重新啟動。更新 agent，或停止再啟動應用程式。
 - **副本因「listens beyond loopback」被停止：** 在金鑰守門員後面，行程必須監聽 `127.0.0.1`。在它的參數裡用 `${BIND_ADDRESS}`，不要用 `0.0.0.0`。
@@ -382,7 +382,7 @@ sudo forgeyard agent runtimes   # the last line shows the range the agent uses
 
 **原因：** 伺服器的憑證來自 Forgeyard 自己的 CA，而每個程式各自決定要信任哪些憑證授權單位。把 CA 裝進瀏覽器或系統，管不到自帶清單的程式：Python 的 `requests` 和 OpenAI SDK（透過 `httpx`）使用 `certifi` 套件的清單，而不是系統的清單；Node.js 也內建自己的清單。
 
-**做法：** 從 **Trust this server** 取得 `forgeyard-ca.pem`，核對它的指紋，再用下列其中一種方式交給程式：
+**做法：** 從 **信任這台伺服器** 取得 `forgeyard-ca.pem`，核對它的指紋，再用下列其中一種方式交給程式：
 
 | 程式 | 方式 |
 |---|---|
@@ -401,7 +401,7 @@ export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ```
 
-以上是 Debian 和 Ubuntu 的做法；其他系統的步驟請看 **Trust this server**。設定變數後請重新啟動程式。完全無法指定 CA 的程式，需要一張它本來就信任的憑證：請見[使用自己的憑證或反向代理](how-to.md#use-your-own-certificate-or-a-reverse-proxy)。
+以上是 Debian 和 Ubuntu 的做法；其他系統的步驟請看 **信任這台伺服器**。設定變數後請重新啟動程式。完全無法指定 CA 的程式，需要一張它本來就信任的憑證：請見[使用自己的憑證或反向代理](how-to.md#use-your-own-certificate-or-a-reverse-proxy)。
 
 ## 模型沒有出現在 /v1/models
 
@@ -411,10 +411,10 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 - **它的部署已停止**，而且沒有這把金鑰能使用的供應商提供它。啟動中的部署仍會列出；停止的部署會從清單消失，直到再次啟動；
 - 金鑰被限制只能用**其他模型**（這時呼叫會回 `403 model_not_allowed`）；
-- 只有**雲端供應商**提供它，而金鑰的雲端設定不是 **Allowed**：對這把金鑰來說，這個模型不存在；
-- 部署或路由已被**刪除**，或名稱不是你以為的那個：程式使用的名稱是部署（或路由）的名稱，在它的頁面上標示為 *Model name*。
+- 只有**雲端供應商**提供它，而金鑰的雲端設定不是 **允許**：對這把金鑰來說，這個模型不存在；
+- 部署或路由已被**刪除**，或名稱不是你以為的那個：程式使用的名稱是部署（或路由）的名稱，在它的頁面上標示為 *模型名稱*。
 
-**做法：** 打開 **Serving** 查看模型的狀態；停止的部署請按 **Start**。到 **API keys** 檢查金鑰的模型清單和它的 *Cloud providers* 設定。
+**做法：** 打開 **服務中** 查看模型的狀態；停止的部署請按 **啟動**。到 **API 金鑰** 檢查金鑰的模型清單和它的 *雲端供應商* 設定。
 
 ## 模型有列出，卻回應 503
 
@@ -430,14 +430,14 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 **原因**，依序檢查：
 
-1. **金鑰的雲端設定是 Never。** 除非有人改過，每把金鑰都是 **Never**，包括 1.2 之前建立的每把金鑰。這種金鑰絕不會送到雲端供應商，而是直接拿到本機的錯誤。
-2. 路由勾選了 **Local only**，或請求帶了 `X-Forgeyard-Local-Only: 1`（Playground 的 *Local only (never the cloud)* 會送出它）。
+1. **金鑰的雲端設定是「永不」。** 除非有人改過，每把金鑰都是 **永不**，包括 1.2 之前建立的每把金鑰。這種金鑰絕不會送到雲端供應商，而是直接拿到本機的錯誤。
+2. 路由勾選了 **僅本機**，或請求帶了 `X-Forgeyard-Local-Only: 1`（試用區的 *僅本機（絕不使用雲端）* 會送出它）。
 3. 這個端點不會送往供應商：只有對話、補全和嵌入會；rerank、score 和語音轉文字只在本機。
-4. 原因不是會溢出的那幾種。請求只在回應開始之前、本機層無法使用、忙碌，或回應 429 或 503 時才會往下一層；提示太長、放不進本機上下文的情況，只有開啟 **Spill a prompt that is too long** 才會溢出。400、請求送出後逾時，或已經開始的串流，都絕不溢出。
+4. 原因不是會溢出的那幾種。請求只在回應開始之前、本機層無法使用、忙碌，或回應 429 或 503 時才會往下一層；提示太長、放不進本機上下文的情況，只有開啟 **提示詞太長時溢出** 才會溢出。400、請求送出後逾時，或已經開始的串流，都絕不溢出。
 5. **預算**用完了：回應會帶 `X-Forgeyard-Budget-Exhausted`。
 6. 供應商，或它在路由裡的目標，已被**停用**。
 
-**做法：** 到 **API keys**，打開金鑰的 **Limits**，把 *Cloud providers* 設為 **Only to spill**（或 **Allowed**，連只有雲端的模型也能用），再按 **Save limits**。一般人最多只能選到管理員在 **Cloud policy** 允許的程度。在 Playground 裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
+**做法：** 到 **API 金鑰**，打開金鑰的 **限制**，把 *雲端供應商* 設為 **僅溢出時**（或 **允許**，連只有雲端的模型也能用），再按 **儲存限制**。一般人最多只能選到管理員在 **雲端政策** 允許的程度。在試用區裡，管理員可以使用雲端，其他人則是那個上限。詳細內容請見[請求何時溢出](cloud-providers.md#when-a-request-spills)。
 
 ## 圖片被拒絕
 
@@ -445,12 +445,12 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 | `code` | 原因 | 怎麼做 |
 |---|---|---|
-| `media_not_supported` | 模型不接受這種媒體：純文字模型、加入時沒有 projector 檔的 GGUF 模型，或部署的 *Videos per request* 為 0 時送影片 | 改用視覺模型；重新加入 GGUF 模型並附上 projector；在 **Advanced** 開啟影片 |
+| `media_not_supported` | 模型不接受這種媒體：純文字模型、加入時沒有 projector 檔的 GGUF 模型，或部署的 *Videos per request* 為 0 時送影片 | 改用視覺模型；重新加入 GGUF 模型並附上 projector；在 **進階** 開啟影片 |
 | `too_many_media_items` | 圖片多於部署的 *Images per request*（4） | 少送一些，或調高它 |
 | `media_url_refused` | 網址是 `file://` 或其他 scheme、帶有帳密，或主機是（或轉址到）私有、loopback、link-local 或 metadata 位址 | 改送公開的 `https://` 網址或 `data:` URI。區網內的圖片伺服器，請在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true` |
 | `media_fetch_failed` | 閘道下載不到：對方回應的狀態碼不是 200、超過 20 秒、轉址超過 3 次，或傳回的不是圖片 | 自己打開網址看看；有些網站拒絕程式下載。改以 `data:` URI 送出檔案 |
 | `media_too_large`（413） | 檔案大於 `MEDIA_FETCH_MAX_MB`（20） | 送小一點的圖片，或調高設定 |
-| `request_too_large`（413） | 圖片以 base64 內嵌後（比檔案大三分之一），請求超過部署的 *Largest request*（64 MiB） | 送小一點的圖片，或在 **Advanced** 調高 |
+| `request_too_large`（413） | 圖片以 base64 內嵌後（比檔案大三分之一），請求超過部署的 *Largest request*（64 MiB） | 送小一點的圖片，或在 **進階** 調高 |
 | `file_input_not_supported` | `file` 區塊（PDF）：內建引擎都不接受檔案，閘道也不會轉換 | 改送頁面圖片或文字 |
 | `media_local_only` | 模型只由雲端供應商提供；媒體只留在你自己的部署上 | 改用本機的視覺模型 |
 
@@ -463,7 +463,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 | `code` | 原因 | 怎麼做 |
 |---|---|---|
 | `voice_cloning_not_supported` | 請求帶了參考錄音（`ref_audio`、`speaker_ref_b64` 等）、以音訊或連結當聲音，或 `task_type: "Base"`；或程式試圖上傳聲音 | 使用模型自己的聲音：`GET /v1/audio/voices?model=…` |
-| `input_too_long` | 字元數超過部署的 *Longest input*（vLLM-Omni 與 llama.cpp 預設為上下文的四分之一，即 1,024；speaches 為 4,096） | 把文字按句子或段落拆開，或在 **Advanced** 調高它（上下文也一起調高） |
+| `input_too_long` | 字元數超過部署的 *Longest input*（vLLM-Omni 與 llama.cpp 預設為上下文的四分之一，即 1,024；speaches 為 4,096） | 把文字按句子或段落拆開，或在 **進階** 調高它（上下文也一起調高） |
 | `unsupported_response_format` | 引擎不產生這種格式（llama.cpp 的 mp3 或 opus、speaches 的 opus 或 aac） | 改用它能產生的格式；訊息會列出來 |
 | `stream_format_not_supported` | 對 llama.cpp 或 speaches 用了 `stream_format: sse` | 改用 `audio`，或拿掉它 |
 | `language_not_supported` | 把中文、日文或韓文送給 speaches：它已發布的版本會刪掉這些字 | 改用 Qwen3-TTS 部署 |
@@ -484,7 +484,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 |---|---|---|
 | `response_format_not_supported` | `response_format: url`。Forgeyard 不保留圖片，所以沒有網址可給 | 拿掉它（或用 `b64_json`），並解碼 `data[].b64_json` |
 | `too_many_images` | `n` 超過部署的 *Images per request* | 少要幾張，或調高它（在 vLLM-Omni 上記憶體會跟著變大） |
-| `image_too_large` | 某一邊超過 *Largest side*（預設是模型自己的尺寸） | 要小一點的尺寸，或在 **Advanced** 調高 *Largest side* |
+| `image_too_large` | 某一邊超過 *Largest side*（預設是模型自己的尺寸） | 要小一點的尺寸，或在 **進階** 調高 *Largest side* |
 | `invalid_size` | 不是 `WIDTHxHEIGHT`，或邊長不是 16 的倍數（Stable Diffusion 的 UNet 為 64） | 使用訊息建議的尺寸 |
 | `too_many_steps` | `num_inference_steps` 超過 *Most steps* | 少一點步數 |
 | `invalid_request` | 沒有提示，或提示裡有 `<sd_cpp_extra_args>` | 送出提示；改用 `num_inference_steps`、`seed`、`negative_prompt` |
@@ -493,7 +493,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 **504 `upstream_timeout`：** 產生圖片花的時間超過部署的 *Timeout*（vLLM-Omni 為 600 秒，stable-diffusion.cpp 為 1,800 秒）。在 CPU 上，請要小一點的尺寸、少一點步數或少幾張圖片，或調高 *Timeout*。
 
-**關於記憶體的 `engine_error`：** vLLM-Omni 部署會一直占著它最大的請求所需要的記憶體。如果共用的卡記憶體不夠，調低 *Images per request* 或 *Largest side*，或在 **Advanced** 開啟 *Offload to host memory*（較慢）或 *VAE tiling*。
+**關於記憶體的 `engine_error`：** vLLM-Omni 部署會一直占著它最大的請求所需要的記憶體。如果共用的卡記憶體不夠，調低 *Images per request* 或 *Largest side*，或在 **進階** 開啟 *Offload to host memory*（較慢）或 *VAE tiling*。
 
 **圖片看起來不像模型的範例：** stable-diffusion.cpp 的取樣設定來自目錄項目的引擎參數（Z-Image-Turbo：`--cfg-scale 1 --steps 8`）。從搜尋加入的模型沒有這些設定：請加到它的項目裡。
 
@@ -511,7 +511,7 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 | `input_reference_not_supported` | 帶了圖片或影片參考：1.3 只支援文字轉影片 | 改在提示裡描述 |
 | `too_many_steps`、`prompt_too_long` | 超過 *Most steps* 或 *Longest prompt* | 少一點步數，或縮短提示 |
 
-**429 `too_many_jobs`：** 你的金鑰（或在 Playground 裡的你）在那個部署上已經有 *Jobs per key* 段影片在等待或製作中。**429 `queue_full`：** 部署已經有 *Jobs at once* 個工作。等待 `Retry-After` 秒，或刪掉不再需要的工作。
+**429 `too_many_jobs`：** 你的金鑰（或在試用區裡的你）在那個部署上已經有 *Jobs per key* 段影片在等待或製作中。**429 `queue_full`：** 部署已經有 *Jobs at once* 個工作。等待 `Retry-After` 秒，或刪掉不再需要的工作。
 
 **一直是 `queued`：** 一個副本一次做一段影片；其他的在它上面排隊。每段要幾分鐘。加一個副本，或要短一點、小一點的影片。
 
@@ -526,15 +526,15 @@ vLLM 上的視覺模型**開啟影片後無法啟動**：vLLM 啟動時會為一
 
 **410 `video_expired`：** 影片超過 *Keep results* 已被刪除。**410 `video_lost`：** 影片做好之後，它的副本重新啟動或被停止了。兩種情況都請重新要求。
 
-**共用的卡 GPU 記憶體不足：** 調低 *Longest video* 或 *Largest side*，或在 **Advanced** 開啟 *Offload to host memory*（光是文字編碼器就有 11 GB；影片會變慢）。
+**共用的卡 GPU 記憶體不足：** 調低 *Longest video* 或 *Largest side*，或在 **進階** 開啟 *Offload to host memory*（光是文字編碼器就有 11 GB；影片會變慢）。
 
 ## 費用顯示有請求沒有價格
 
-**你會看到：** **Usage** → **Cost** 把一些請求算在 *Without a price* 底下，並說明上面的費用沒有包含它們。
+**你會看到：** **用量** → **費用** 把一些請求算在 *沒有價格* 底下，並說明上面的費用沒有包含它們。
 
 **原因：** 雲端請求在結束時，依它的供應商模型的價格計價。如果供應商沒有自己回報費用，而模型當時沒有輸入或輸出價格，或者供應商有回答卻沒有回報任何 token（例如用戶端在用量送達前就關閉了串流），這個請求就沒有價格。它的費用是未知，而不是 0。本機副本和你網路內的供應商一律是 0，絕不會沒有價格。
 
-**做法：** 由管理員打開供應商的頁面，設定模型的 **Prices**，或使用 **Refresh prices from OpenRouter**。價格從那之後的請求開始適用：已經計算過的請求仍然沒有價格。在預算之下，沒有價格的模型會被拒絕（`402 budget_unpriced`），直到它有價格為止。
+**做法：** 由管理員打開供應商的頁面，設定模型的 **價格**，或使用 **從 OpenRouter 更新價格**。價格從那之後的請求開始適用：已經計算過的請求仍然沒有價格。在預算之下，沒有價格的模型會被拒絕（`402 budget_unpriced`），直到它有價格為止。
 
 ## 在沒有 systemd 的容器裡執行 agent
 
@@ -558,10 +558,10 @@ limits = "rlimit"
 **伺服器有啟動，但出現像 `Settings: GATEWAY_CLOUD_DEFUALT is not a setting` 這樣的紀錄**：伺服器會忽略那個名稱。每一行都會說明原因和該怎麼做：
 
 - *is not a setting… Did you mean …?*：打錯字，或是其他版本的設定。請在 `.env` 或環境變數裡改正名稱。
-- *is ignored*：另一個設定讓它沒有作用，例如沒有自己的憑證卻設了 `TLS_CA_FILE`，或管理員已經儲存過 **Models → Sources** 之後的 `MODEL_URL_HOSTS`（以儲存的值為準：請在網頁介面修改）。
+- *is ignored*：另一個設定讓它沒有作用，例如沒有自己的憑證卻設了 `TLS_CA_FILE`，或管理員已經儲存過 **模型 → 來源** 之後的 `MODEL_URL_HOSTS`（以儲存的值為準：請在網頁介面修改）。
 - *ADMIN_PASSWORD is still set*：它只在第一次啟動時讀取。請把它從 `.env` 移除。
 
-管理員也會在 **Get started → Setup health** 看到同樣的內容，並附上修正位置的連結（[檢查設定健康狀態](how-to.md#check-the-setup-health)）。
+管理員也會在 **開始使用 → 設定健康檢查** 看到同樣的內容，並附上修正位置的連結（[檢查設定健康狀態](how-to.md#check-the-setup-health)）。
 
 ## 回報問題時要附上的資訊
 

@@ -1,5 +1,7 @@
 // Monthly cloud budgets (1.2): per API key, person and provider, in micro-USD per UTC calendar month.
 
+import { labels, t } from "../i18n/core";
+import { getLang, locale } from "../i18n/lang";
 import { parsePrice, priceText, usd } from "./prices";
 
 export type BudgetLevel = "ok" | "warning" | "exhausted";
@@ -20,7 +22,7 @@ export type BudgetsResponse = {
   keys: BudgetKey[]; people: BudgetPerson[]; providers: BudgetProvider[];
 };
 
-export const LEVEL_LABEL: Record<BudgetLevel, string> = { ok: "within budget", warning: "past 80%", exhausted: "used up" };
+export const LEVEL_LABEL: Record<BudgetLevel, string> = labels({ ok: "cloud.level.ok", warning: "cloud.level.warning", exhausted: "cloud.level.exhausted" });
 export const LEVEL_TONE: Record<BudgetLevel, string> = { ok: "ok", warning: "run", exhausted: "bad" };
 
 // How full the meter is, 0..100.
@@ -32,14 +34,15 @@ export function percent(b: Budget): number {
 
 // "$1.20 of $5.00" (or "$1.20 this month, no budget").
 export function spendText(b: Budget): string {
-  return b.budget_micros === null ? `${usd(b.spent_micros)} this month, no budget` : `${usd(b.spent_micros)} of ${usd(b.budget_micros)}`;
+  return b.budget_micros === null ? t("cloud.spend.none", { spent: usd(b.spent_micros) })
+    : t("cloud.spend.of", { spent: usd(b.spent_micros), budget: usd(b.budget_micros) });
 }
 
 // "December 1" in UTC, when this month's budgets start again.
 export function resetText(resetsAt: string | undefined): string {
-  if (!resetsAt) return "the first of next month";
+  if (!resetsAt) return t("cloud.spend.resetUnknown");
   const d = new Date(resetsAt);
-  return `${d.toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}, 00:00 UTC`;
+  return t("cloud.spend.reset", { date: d.toLocaleDateString(locale(getLang()), { month: "long", day: "numeric", timeZone: "UTC" }) });
 }
 
 // What someone typed (USD, up to 6 decimals) to micro-USD; "" is no budget.

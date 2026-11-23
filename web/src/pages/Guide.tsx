@@ -1,5 +1,5 @@
 import { IconBook2 } from "@tabler/icons-react";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router";
 
 import { useAuth } from "../auth";
@@ -7,16 +7,23 @@ import { Mark } from "../components/Mark";
 import { Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 import { type GuideLang, type GuidePageData, isGuideLang, preferredLang, rememberLang } from "../lib/guide";
+import { translate } from "../i18n/core";
+import { LANG_NAME } from "../i18n/lang";
 import { useDocumentTitle } from "../lib/title";
 
 // The user guide, public like "Trust this server": it explains how to install the server and its
 // agents, before anyone can sign in. The server renders the Markdown (no raw HTML, nothing from
 // elsewhere), so it works offline.
 
-const UI: Record<GuideLang, { guide: string; contents: string; onThisPage: string; back: string; signIn: string; copy: string; copied: string }> = {
-  en: { guide: "Guide", contents: "Contents", onThisPage: "On this page", back: "Back to Forgeyard", signIn: "Sign in", copy: "Copy", copied: "Copied" },
-  "zh-TW": { guide: "使用指南", contents: "目錄", onThisPage: "本頁內容", back: "回到 Forgeyard", signIn: "登入", copy: "複製", copied: "已複製" },
-};
+// The page's own words follow its address's language (a link to /guide/zh-TW/… reads in Chinese), from the
+// console's dictionaries.
+function ui(lang: GuideLang) {
+  return {
+    guide: translate(lang, "guide.title"), contents: translate(lang, "guide.contents"), onThisPage: translate(lang, "guide.onThisPage"),
+    back: translate(lang, "guide.back"), signIn: translate(lang, "guide.signIn"), language: translate(lang, "guide.language"),
+    copy: translate(lang, "common.copy"), copied: translate(lang, "common.copied"),
+  };
+}
 
 export function GuideRedirect() {
   const { lang } = useParams();
@@ -32,7 +39,7 @@ export function GuidePage() {
   const [data, setData] = useState<GuidePageData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const article = useRef<HTMLDivElement>(null);
-  const t = UI[lang];
+  const t = useMemo(() => ui(lang), [lang]);
   useDocumentTitle(data?.title ?? t.guide);
 
   useEffect(() => {
@@ -98,8 +105,8 @@ export function GuidePage() {
           </Link>
           <span className="topbar-title"><IconBook2 size={18} stroke={1.7} aria-hidden="true" /> {t.guide}</span>
           <span className="topbar-spacer" />
-          <nav className="guide-langs" aria-label="Language">
-            {(data?.languages ?? [{ code: "en", name: "English", available: true }, { code: "zh-TW", name: "繁體中文", available: true }]).map((l) => (
+          <nav className="guide-langs" aria-label={t.language}>
+            {(data?.languages ?? [{ code: "en", name: LANG_NAME.en, available: true }, { code: "zh-TW", name: LANG_NAME["zh-TW"], available: true }]).map((l) => (
               <Link
                 key={l.code}
                 to={`/guide/${l.code}/${l.available ? slug : "index"}${l.available ? location.hash : ""}`}

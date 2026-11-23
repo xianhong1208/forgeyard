@@ -1,3 +1,4 @@
+import { t, tMaybe } from "../i18n/core";
 import type { Accelerator, Machine, Replica, ReplicaState, RuntimeInfo, WorkloadStatus } from "./types";
 
 // ---------------------------------------------------------------- display
@@ -12,8 +13,13 @@ export const STATUS_TONE: Record<WorkloadStatus, "ok" | "run" | "wait" | "bad" |
 };
 
 export function stateLabel(r: Replica): string {
-  if (r.state === "exited" && r.exit_code !== null) return `exited ${r.exit_code}`;
-  return r.state;
+  if (r.state === "exited" && r.exit_code !== null) return t("fleet.state.exitedCode", { code: String(r.exit_code) });
+  return statusLabel(r.state);
+}
+
+// A replica's state or a workload's status ("running", "asleep") in the reader's language.
+export function statusLabel(s: string): string {
+  return tMaybe(`fleet.state.${s}`, s);
 }
 
 export function gpuLabel(r: Replica): string {
@@ -33,12 +39,12 @@ export function allowedCards(m: Machine): Accelerator[] {
 // "all 8 GPUs", "only #4", "no GPU", "#2, #3 of 8"
 export function allowlistSummary(m: Machine): string {
   const cards = gpuCards(m);
-  if (!cards.length) return "no GPUs";
+  if (!cards.length) return t("machine.allow.noGpus");
   const allowed = allowedCards(m);
-  if (m.gpu_allowlist === null || m.gpu_allowlist === undefined) return cards.length === 1 ? "its GPU" : `all ${cards.length} GPUs`;
-  if (!allowed.length) return "no GPU";
+  if (m.gpu_allowlist === null || m.gpu_allowlist === undefined) return cards.length === 1 ? t("machine.allow.its") : t("machine.allow.all", { count: cards.length });
+  if (!allowed.length) return t("machine.allow.none");
   const names = allowed.map((a) => `#${a.index}`).join(", ");
-  return allowed.length === 1 ? `only ${names}` : `${names} of ${cards.length}`;
+  return allowed.length === 1 ? t("machine.allow.only", { names }) : t("machine.allow.of", { names, count: cards.length });
 }
 
 export function canRunWorkloads(m: Machine): boolean {
@@ -46,8 +52,12 @@ export function canRunWorkloads(m: Machine): boolean {
 }
 
 export function runtimeLine(info: RuntimeInfo | undefined, name: "process" | "container"): string {
-  if (!info) return `${name}: unknown`;
-  if (!info.ok) return `${name}: ${info.reason ?? "not available"}`;
-  if (name === "process") return `process as ${info.user ?? "?"} (${info.limits === "systemd" ? "systemd limits" : "rlimits"})`;
-  return `container: ${info.engine ?? "?"}${info.version ? ` ${info.version}` : ""}${info.nvidia ? " with NVIDIA GPUs" : ""}`;
+  const label = name === "process" ? t("machine.runtime.process") : t("machine.runtime.container");
+  if (!info) return t("machine.runtime.unknown", { name: label });
+  if (!info.ok) return t("machine.runtime.notAvailable", { name: label, reason: info.reason ?? t("machine.runtime.notAvailableReason") });
+  if (name === "process") {
+    return t("machine.runtime.processAs", { user: info.user ?? "?", limits: info.limits === "systemd" ? t("machine.runtime.systemd") : t("machine.runtime.rlimits") });
+  }
+  return t("machine.runtime.containerEngine", { engine: info.engine ?? "?", version: info.version ? ` ${info.version}` : "",
+    nvidia: info.nvidia ? t("machine.runtime.nvidia") : "" });
 }

@@ -1,20 +1,11 @@
+import { t } from "../i18n/core";
+import { formatAgo, formatBytes } from "../i18n/format";
 import type { Accelerator, Machine } from "./types";
 
-const GIB = 1024 ** 3;
-const MIB = 1024 ** 2;
 
-// 85899345920 -> "80 GiB", 4023779328 -> "3.7 GiB", 536870912 -> "512 MiB".
+// 85899345920 -> "80 GiB", 4023779328 -> "3.7 GiB", 536870912 -> "512 MiB" (the number in the reader's language).
 export function bytes(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
-  if (n >= 1024 * GIB) return `${trim(n / (1024 * GIB))} TiB`;
-  if (n >= GIB) return `${trim(n / GIB)} GiB`;
-  if (n >= MIB) return `${Math.round(n / MIB)} MiB`;
-  return `${Math.round(n / 1024)} KiB`;
-}
-
-function trim(v: number): string {
-  if (v >= 100) return String(Math.round(v));
-  return v.toFixed(1).replace(/\.0$/, "");
+  return formatBytes(n);
 }
 
 export function toMs(ts: string): number {
@@ -28,11 +19,7 @@ export function ageSeconds(serverTime: string, ts: string | null): number | null
 }
 
 export function ago(seconds: number | null): string {
-  if (seconds === null) return "never";
-  if (seconds < 60) return `${seconds} s ago`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)} h ago`;
-  return `${Math.round(seconds / 86400)} d ago`;
+  return formatAgo(seconds);
 }
 
 export function usedFraction(a: Accelerator): number | null {
@@ -81,5 +68,5 @@ export function isLoopback(address: string): boolean {
 export function replicaAddressNote(m: Machine): string | null {
   const info = m.runtime_info;
   if (!info?.address || !isLoopback(info.address)) return null;
-  return info.same_host ? "loopback, on the server's host" : "loopback: the gateway dials it on the server's host";
+  return info.same_host ? t("machine.loopbackSameHost") : t("machine.loopbackElsewhere");
 }

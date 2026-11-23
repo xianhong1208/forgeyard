@@ -48,7 +48,7 @@ server 不需要能連到機器。
 
 ## Workload
 
-**workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重啟）或 **task**（跑完就結束，
+**workload** 是要在機器上跑的東西：**service**（一直跑到被停止，有健康檢查、會重新啟動）或 **task**（跑完就結束，
 可重試、有時間上限）。每個 workload 有 1 到 16 個 **replica**，每個 replica 跑在一台機器上。模型部署以
 workload（runtime 為 `model`）執行；微調（1.8）也會。
 
@@ -74,8 +74,8 @@ workload（runtime 為 `model`）執行；微調（1.8）也會。
 | `env` | 只有明確宣告的變數（見〈隔離〉） |
 | `resources` | `cpu`（核心數）、`memory`（`4Gi`、`512Mi` 或位元組數）、`gpus`：`{"count": n}` 或 `{"indices": [2]}`（要先選機器），可加 `"vendor": "nvidia"/"amd"` |
 | `ports` | service：`[{"name", "port"}]`。agent 從自己的範圍（預設 30000-32767）挑 **host port**，頁面上會顯示位址。行程要聽在這個 port：`$PORT`，或在參數裡寫 `${PORT}`／`${PORT_<NAME>}` |
-| `health` | service：`{"type": "http" 或 "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay", "start_period"}`。只顯示 healthy／unhealthy，不會因此重啟任何東西。`start_period` 內（第一次成功之前）的失敗不算 |
-| `restart` | service：`always`（預設）、`on-failure`、`never`。重啟間隔 1、2、4… 秒，最多 60 秒 |
+| `health` | service：`{"type": "http" 或 "tcp", "port", "path", "interval", "timeout", "failure_threshold", "initial_delay", "start_period"}`。只顯示 healthy／unhealthy，不會因此重新啟動任何東西。`start_period` 內（第一次成功之前）的失敗不算 |
+| `restart` | service：`always`（預設）、`on-failure`、`never`。重新啟動間隔 1、2、4… 秒，最多 60 秒 |
 | `max_duration`、`retries`、`retry_backoff` | task：跑超過 `max_duration` 秒會被停止並判定失敗（不重試）；非 0 結束會重試 `retries` 次，間隔 `retry_backoff` 秒、每次加倍、最多 5 分鐘 |
 | `replicas`、`machine_id` | 要幾份；指定一台機器，或 `null` 表示第一台有空間的線上機器 |
 
@@ -117,11 +117,11 @@ replica 會停在 *pending* 並寫明原因，一有空間就自動放上去。w
 ### 期望狀態與 agent
 
 server 為每台機器保存「應該在跑的 replica 完整清單」（spec 與 generation），在 agent 連上時與每次變動時送出
-（`desired`）。agent 比對實際在跑的東西：停掉不要的、啟動缺少的、套用重啟／重試／時間上限規則，並回報每個
-replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，所以掉訊息、重連或 agent 重啟後都只是再收斂一次。
+（`desired`）。agent 比對實際在跑的東西：停掉不要的、啟動缺少的、套用重新啟動／重試／時間上限規則，並回報每個
+replica 的狀態（`status`）。它不會收到「啟動 X」這種指令，所以掉訊息、重連或 agent 重新啟動後都只是再收斂一次。
 
 - **接管（adopt）：** agent 把每個 replica 記在 `<state dir>/replicas/`（pid、核心記錄的啟動時間與 boot id；
-  容器名稱）。重啟後的 agent 會找到自己的行程（同一個 pid；pid 被別人重用也不會認錯）與容器（label
+  容器名稱）。重新啟動後的 agent 會找到自己的行程（同一個 pid；pid 被別人重用也不會認錯）與容器（label
   `forgeyard.agent`、`forgeyard.replica`、`forgeyard.generation`），直接接管，不會重複啟動。收到 server 的第一份
   清單之前只觀察、不動作。**停掉 agent 不會停掉 workload**；要停請從 UI 停。
 - **輸出：** 行程直接寫到 `<state dir>/logs/<replica>/output.log`，只保留最後 `--log-max-mb` MB（預設 10）；
@@ -185,7 +185,7 @@ Cloud、Playground、API keys、Usage、Users、Audit log，各頁編號 01 到 
   |---|---|---|---|
   | `vllm` | chat（safetensors） | NVIDIA、AMD | `vllm/vllm-openai:v0.32.0`（CUDA 13.0，driver ≥ 580）、`-cu129`（≥ 575）、`vllm/vllm-openai-rocm:v0.32.0` |
   | `vllm-pooling` | embeddings、rerank | NVIDIA、AMD，預設共用 GPU | 同樣的映像，`--runner pooling` |
-  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD（Instinct 與 ROCm 映像有編譯的獨立顯卡用 ROCm；APU 與其他 AMD GPU 用 Vulkan，只給 render node）、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-v1.0.0-b12359-b1b770d` 與 `server-v1.0.0-b12359-b1b770d`（llama.cpp 1.0.0，1.3.1；之前是 b12242），行程用 release `b12359` |
+  | `llama-cpp` | chat（GGUF） | NVIDIA、AMD（Instinct 與 ROCm 映像有編譯的獨立顯示卡用 ROCm；APU 與其他 AMD GPU 用 Vulkan，只給 render node）、CPU（容器或行程） | `ghcr.io/ggml-org/llama.cpp:server-{cuda,rocm,vulkan}-v1.0.0-b12359-b1b770d` 與 `server-v1.0.0-b12359-b1b770d`（llama.cpp 1.0.0，1.3.1；之前是 b12242），行程用 release `b12359` |
   | `faster-whisper` | 語音轉文字 | NVIDIA、CPU，預設共用 GPU | `ghcr.io/speaches-ai/speaches:0.8.3-cuda` / `-cuda-12.4.1` / `-cpu` |
   | `speaches-tts`（1.3） | 文字轉語音（ONNX：Kokoro、Piper），英文 | 只用 CPU（容器）：即使在 CUDA 映像檔裡，ONNX Runtime 也是用 CPU 跑 Kokoro | speaches 的 CPU 映像 |
   | `vllm-omni-tts`（1.3） | 文字轉語音（safetensors：Qwen3-TTS） | NVIDIA，單張 GPU，預設共用 | `vllm/vllm-omni:v0.32.0`（CUDA 13.0，driver ≥ 580），`vllm serve <model> --omni` |
@@ -262,7 +262,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
   就換下一個，失敗的那個排到最後，直到它的 agent 回報它又 ready（最多 15 秒）。client 中途斷線會關掉往上游的連線，引擎就停止生成。
   逾時：連線 5 秒；等回應 header 或串流的下一段 600 秒（`GATEWAY_CONNECT_TIMEOUT`、`GATEWAY_READ_TIMEOUT`）。
 - **`/v1/models`** 只列出符合以下條件的路由：這把 key 看得到它（它有在你網路內的目標，或 key 的雲端設定是 `on`）、key 的模型
-  清單包含它，而且它能提供服務：某一層有應該在執行的部署（啟動中、重啟中都算）或啟用中的網路內供應商；或者有這把 key 能用的啟用中
+  清單包含它，而且它能提供服務：某一層有應該在執行的部署（啟動中、重新啟動中都算）或啟用中的網路內供應商；或者有這把 key 能用的啟用中
   雲端目標：`on` 的 key 在路由不是 local only 時可以用；`fallback` 的 key 只有在雲端那層之前有本機層時才能用（跟實際呼叫時能用的層
   一樣）。所以停止的模型會從清單消失；`GET /v1/models/{id}` 回 404「…is stopped」，
   硬要呼叫則回 503 `no_ready_replica`「The deployment is stopped.」
@@ -316,7 +316,7 @@ client.chat.completions.create(model="qwen3-4b", messages=[{"role": "user", "con
     loopback 以外（配方沒用 `{host}`），會被停掉並標為失敗。
   - 引擎仍然會從**環境變數**拿到 key（vLLM `VLLM_API_KEY`、llama.cpp `LLAMA_API_KEY`、speaches `API_KEY`；配方用 `api_key_env`
     指定變數名），絕不放在命令列，多一層防護。沒有 `api_key_env` 的配方一樣有 guard。
-  - guard 在 agent 裡。**agent 停著的時候，它的 replica 從外面連不到**（引擎繼續跑）；agent 重啟後會接手它們，server 一送來 key
+  - guard 在 agent 裡。**agent 停著的時候，它的 replica 從外面連不到**（引擎繼續跑）；agent 重新啟動後會接手它們，server 一送來 key
     就重新打開 guard。能在那台機器上執行程式的人（包括跑在那裡的 Forgeyard workload）連得到 loopback port；在那裡，引擎自己的 key
     仍然守著它的 `/v1` 路徑。
   - 舊版 agent 啟動的 replica，新 agent 拿到 key 後會重新啟動在 guard 後面（對外 port 不變）；M4 之前的則要重新放置才有 key
@@ -482,7 +482,7 @@ Kong 與 GPUStack 之後決定。
     `budget` 物件（範圍、名稱、預算、已花費、已預留與這個請求的金額，單位微美元，以及月份與 `resets_at`），以及
     `X-Forgeyard-Budget-Exhausted`（`key`、`person`、`provider:<name>`）；由其他目標成功回答時也會帶這個 header。用 402 是因為
     OpenAI 的 SDK 會重試 429 但不重試 402，而在月底之前重試也沒有用。
-  - **警示。** 預算到 80% 與 100% 時，每個範圍、月份與門檻各一次：`budget_alerts` 資料表（唯一，所以重啟後也只有一次），以及稽核
+  - **警示。** 預算到 80% 與 100% 時，每個範圍、月份與門檻各一次：`budget_alerts` 資料表（唯一，所以重新啟動後也只有一次），以及稽核
     事件 `budget.warning` 或 `budget.exhausted`（操作者 `forgeyard`）。在請求預留與結算時檢查，所以預算調低到本月花費以下時，下一個
     請求就會警示；花費加預留已超過 80% 時被拒絕的請求，算作到達 100%。和用量一起，每 5 秒以及關機時寫入。
   - `GET /api/budgets`（admin：`?everyone=true`）回傳月份、`resets_at`，以及每個 key、個人與供應商的預算、已花費、已預留、使用比例
@@ -513,7 +513,7 @@ Kong 與 GPUStack 之後決定。
 - **靜態加密的機密：** Hugging Face token、replica 內部金鑰、workload 環境變數的值與雲端供應商的 API key 以 AES-256-GCM 加密儲存，金鑰不在資料庫裡
   （`data/secret.key`，權限 0600；或 `FORGEYARD_SECRET_KEY_FILE`／`FORGEYARD_SECRET_KEY`）。金鑰不見或不對時 server 拒絕啟動，
   而不是另做一把新的蓋過舊的機密。金鑰真的遺失時，`python -m forgeyard secrets reset --yes` 重新開始：token 與供應商金鑰要重新輸入，
-  replica 換新金鑰重啟。密碼、session、API key 與加入 token 是雜湊，不是加密。
+  replica 換新金鑰重新啟動。密碼、session、API key 與加入 token 是雜湊，不是加密。
 - UI 只在 **401** 時跳到登入頁（403、429、5xx 都不會），登入後回到原本那一頁。
 
 ## 容器映像檔

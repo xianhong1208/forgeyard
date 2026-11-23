@@ -1,5 +1,7 @@
 // The setup advisor (GET /api/advisor, admins only): findings about the setup, with where to fix them.
 
+import { hasKey, labels, lookup, t, tMaybe, tPlural } from "../i18n/core";
+import { getLang, type Lang } from "../i18n/lang";
 import { guideHref, type GuideLang } from "./guide";
 
 export type Severity = "error" | "warning" | "info";
@@ -37,7 +39,7 @@ export function asReport(value: unknown): AdvisorReport | null {
   return { ...r, snoozed: Array.isArray(r.snoozed) ? r.snoozed : [] } as AdvisorReport;
 }
 
-export const SEVERITY_LABEL: Record<Severity, string> = { error: "Error", warning: "Warning", info: "Note" };
+export const SEVERITY_LABEL: Record<Severity, string> = labels({ error: "advisor.severity.error", warning: "advisor.severity.warning", info: "advisor.severity.info" });
 
 // The findings a page shows as its banner: those tagged with the page ("keys") or with one of its
 // objects ("route:4").
@@ -68,8 +70,23 @@ export function backupKid(f: Finding): string | null {
 
 export function summary(counts: Record<Severity, number>): string {
   const parts: string[] = [];
-  if (counts.error) parts.push(`${counts.error} error${counts.error === 1 ? "" : "s"}`);
-  if (counts.warning) parts.push(`${counts.warning} warning${counts.warning === 1 ? "" : "s"}`);
-  if (counts.info) parts.push(`${counts.info} note${counts.info === 1 ? "" : "s"}`);
-  return parts.length ? parts.join(", ") : "Nothing to look at";
+  if (counts.error) parts.push(tPlural("advisor.count.error", counts.error));
+  if (counts.warning) parts.push(tPlural("advisor.count.warning", counts.warning));
+  if (counts.info) parts.push(tPlural("advisor.count.info", counts.info));
+  return parts.length ? parts.join(t("advisor.listJoin")) : t("advisor.nothingShort");
 }
+
+// A finding in the reader's language (#189): the server writes them in English and the API does not change, so
+// another language names what the finding is about by its id, and keeps the server's own words (with its
+// machine and model names) as the detail. English: the server's title as sent.
+export function findingTitle(f: Pick<Finding, "id" | "title">, lang: Lang = getLang()): { title: string; translated: boolean } {
+  const key = `advisor.finding.${f.id}`;
+  if (lang === "en" || !hasKey(key)) return { title: f.title, translated: false };
+  return { title: lookup(lang, key), translated: true };
+}
+
+// The fix button's words: the server's labels are a small fixed set.
+export function fixLabel(label: string): string {
+  return tMaybe(`advisor.fix.${label}`, label);
+}
+

@@ -166,7 +166,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
 ```
 
 The `$(for d in …)` line passes each NVIDIA device node of the host (`/dev/nvidiactl`, `/dev/nvidia-uvm`,
@@ -208,7 +208,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
 ```
 
 The host's ROCm is mounted read-only so the agent can use `amdsmi`, `amd-smi` and `rocm-smi` to
@@ -223,7 +223,7 @@ To check what the agent sees before it joins, run its `inventory` command with t
 sudo docker run --rm --device /dev/kfd --device /dev/dri \
   --group-add "$(getent group video | cut -d: -f3)" --group-add "$(getent group render | cut -d: -f3)" \
   -v /opt/rocm:/opt/rocm:ro \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.0 inventory
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.1 inventory
 ```
 
 ### CPU only
@@ -237,7 +237,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
 ```
 
 ### Why these options
@@ -270,8 +270,8 @@ internet access, or a DNS filter) gets the image as a file. On a machine that ca
 it:
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
-  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip > forgeyard-agent.tar.gz
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
+  sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip > forgeyard-agent.tar.gz
 ```
 
 Copy `forgeyard-agent.tar.gz` to the new machine (`scp`, a USB disk) and load it there:
@@ -290,18 +290,18 @@ Or build the image on that machine, in a Forgeyard checkout of the server's vers
 name:
 
 ```bash
-sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.0 .
+sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent:1.5.1 .
 ```
 
 A server that names no published image ([Container images](reference.md#container-images)) puts a
-local build, `forgeyard-agent:1.5.0`, in the command, and the page shows that `docker build` as its
+local build, `forgeyard-agent:1.5.1`, in the command, and the page shows that `docker build` as its
 first step.
 
 ### Move an installed agent into Docker
 
 A machine that already joined keeps its identity if the container gets its state directory:
 
-1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0` (or bring it
+1. Pull the image: `sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1` (or bring it
    over, as above).
 2. Stop the old agent: `sudo systemctl disable --now forgeyard-agent` (installed), or stop the
    process you started. Its models and apps in containers keep running.
@@ -315,7 +315,7 @@ A machine that already joined keeps its identity if the container gets its state
      -v /var/lib/forgeyard-agent:/var/lib/forgeyard-agent \
      -v /srv/forgeyard-models:/srv/forgeyard-models \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.1
    ```
 
 4. `sudo docker logs -f forgeyard-agent` shows `Adopted replica …` for every running model: the new
@@ -442,8 +442,8 @@ carries the agent image instead of pulling it. Run its first step on a machine t
 (replace `USER`, and the host name if you reach the machine by another):
 
 ```bash
-sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
-sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
+sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
+sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.1 | gzip | ssh USER@amd-01 'gunzip -c | sudo docker load'
 ```
 
 Then run its second step on `amd-01`: the `docker rm -f` and the same `docker run` on the loaded image.
@@ -1222,6 +1222,27 @@ To let people ask for an account themselves, start the server with `REGISTRATION
 sign-in page then offers to request an account, and requests wait on **Users** until an admin chooses
 **Approve** or **Reject**.
 
+## Use the console in Traditional Chinese
+
+The console speaks English and Traditional Chinese (1.5.1). The first time a browser opens it, it follows the
+browser's language: any Chinese setting gives Traditional Chinese, anything else English. To change it, open the
+account menu (your name, top right) and choose **English** or **繁體中文** under **Language**; on a phone the
+same switch is at the end of the menu. The page changes at once, without reloading.
+
+- The choice is kept **in this browser**, not in your account: another browser or computer starts from its own
+  language again. Nothing is stored on the server, and nothing changes for API clients or scripts.
+- It is **the guide's choice too**: the language links at the top of a guide page and the switch in the console
+  set the same thing, and the console's help links open the guide in it.
+- Numbers, sizes, times and dates follow the language (*41 秒前*, *2026年11月23日*).
+- The server keeps writing its messages in English. The console translates the common ones by their code (for
+  example `model_waking`, `cannot_wake`, `budget_exhausted`) and names each **Setup health** finding's kind in
+  Chinese, with the server's own words (which name the machines and models) under it. A message without a
+  translation is shown as the server sent it.
+- Every page is translated: the frame (menus, sign-in, Get started and Setup health), **Machines**, **Serving**,
+  **Models**, **Cloud**, **Playground**, **API keys**, **Usage**, **Users**, the **Audit log**, your account and
+  **Trust this server**. Names you choose (machines, models, keys), what engines and agents print, and the API
+  itself stay as they are.
+
 ## Use your own certificate or a reverse proxy
 
 **Your own certificate** (a company CA, or a public certificate for a real domain). In the server's
@@ -1313,7 +1334,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.0
+  docker.io/tonyhuang1101/forgeyard:1.5.1
 sudo docker logs forgeyard
 ```
 
@@ -1347,7 +1368,7 @@ To read the token again later: `sudo docker logs forgeyard 2>&1 | grep -A 2 "set
 ```bash
 sudo docker stop forgeyard
 sudo docker run --rm --user 0 -v forgeyard-data:/data:ro -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.0 tar czf /backup/forgeyard-data.tar.gz -C /data .
+  docker.io/tonyhuang1101/forgeyard:1.5.1 tar czf /backup/forgeyard-data.tar.gz -C /data .
 sudo docker start forgeyard
 ```
 
@@ -1356,7 +1377,7 @@ owner, the server's account):
 
 ```bash
 sudo docker run --rm --user 0 -v forgeyard-data:/data -v "$PWD":/backup \
-  docker.io/tonyhuang1101/forgeyard:1.5.0 tar xzf /backup/forgeyard-data.tar.gz -C /data
+  docker.io/tonyhuang1101/forgeyard:1.5.1 tar xzf /backup/forgeyard-data.tar.gz -C /data
 ```
 
 As with any backup, keep `secret.key` apart from the database ([why](#back-up-and-restore)).
@@ -1381,7 +1402,7 @@ right after it ([how](#upgrade-the-server-and-the-agents)).
 **Pin a digest** when a tag must never change under you. Look it up:
 
 ```bash
-sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.0
+sudo docker buildx imagetools inspect docker.io/tonyhuang1101/forgeyard:1.5.1
 ```
 
 It prints, among other lines, `Digest: sha256:…`: run `docker.io/tonyhuang1101/forgeyard@sha256:…` instead of the tag. For
@@ -1389,7 +1410,7 @@ the agents, set `AGENT_IMAGE=docker.io/tonyhuang1101/forgeyard-agent@sha256:…`
 digest in every agent's command. Each image also carries its build provenance and an SBOM
 (`docker buildx imagetools inspect --format '{{ json .SBOM }}' …`).
 
-**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.0 .`
+**Build it yourself**, from a checkout: `sudo docker build -f Dockerfile.server -t forgeyard:1.5.1 .`
 
 ## Run the server as a service
 
@@ -1479,7 +1500,7 @@ that machine's agent to the server's version, made from what the agent reported 
   of the server's version, removes the old container and starts the same one on the new image:
 
    ```bash
-   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.0 && \
+   sudo docker pull docker.io/tonyhuang1101/forgeyard-agent:1.5.1 && \
    sudo docker rm -f forgeyard-agent && \
    sudo docker run -d \
      --name forgeyard-agent \
@@ -1498,7 +1519,7 @@ that machine's agent to the server's version, made from what the agent reported 
      -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
      -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
      -e HF_TOKEN="$HF_TOKEN" \
-     docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+     docker.io/tonyhuang1101/forgeyard-agent:1.5.1
    ```
 
    On an NVIDIA machine the command also passes the GPU device nodes with `--device` next to `--gpus` (from 1.4.5,

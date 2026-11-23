@@ -1,31 +1,22 @@
 // The user guide (docs/guide, rendered by the server at /api/guide): which language to show, and
-// links into it from the pages ("How do I…?").
+// links into it from the pages ("How do I…?"). Since 1.5.1 the guide and the console share one language
+// choice (i18n/lang.ts).
+import { getLang, isLang, LANGS, setLang, type Lang } from "../i18n/lang";
 
-export type GuideLang = "en" | "zh-TW";
-export const GUIDE_LANGS: GuideLang[] = ["en", "zh-TW"];
-const KEY = "forgeyard.guide.lang";
+export type GuideLang = Lang;
+export const GUIDE_LANGS: GuideLang[] = [...LANGS];
 
 export function isGuideLang(v: string | undefined): v is GuideLang {
-  return v === "en" || v === "zh-TW";
+  return isLang(v);
 }
 
-// The language chosen on the guide before, else the browser's (Chinese -> zh-TW), else English.
-export function preferredLang(languages: readonly string[] = navigator.languages ?? [navigator.language]): GuideLang {
-  try {
-    const saved = localStorage.getItem(KEY) ?? undefined;
-    if (isGuideLang(saved)) return saved;
-  } catch {
-    // storage blocked: fall back to the browser's language
-  }
-  return languages.some((l) => /^zh\b/i.test(l)) ? "zh-TW" : "en";
+// The language chosen before (on the guide or in the console), else the browser's (Chinese -> zh-TW), else English.
+export function preferredLang(languages?: readonly string[]): GuideLang {
+  return getLang(languages);
 }
 
 export function rememberLang(lang: GuideLang): void {
-  try {
-    localStorage.setItem(KEY, lang);
-  } catch {
-    // not remembered; nothing else depends on it
-  }
+  setLang(lang);
 }
 
 export function guideHref(page: string, anchor?: string, lang: GuideLang = preferredLang()): string {

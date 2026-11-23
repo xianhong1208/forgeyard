@@ -58,7 +58,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 目前為止幾乎每一次都是測試固定等一段時間就以為事情發生了，或是在需要的資料到達之前就讀了頁面。
 
 - **等狀態，不要等時間。** `tests/waits.py` 有 `wait_until(predicate, what, timeout=10)`，非同步測試用
-  `await until(...)`：狀態一到就返回，超過期限才失敗並說出 `what`，所以期限可以放寬。要先有一個請求在處理中，
+  `await until(...)`：狀態一到就回傳，超過期限才失敗並說出 `what`，所以期限可以放寬。要先有一個請求在處理中，
   就在執行緒裡送出它，再等假的 engine 或 app 收到（FY-IGEN-007、FY-X-014、FY-PGV-008），不要
   `time.sleep(0.2)`。接著讓假的那一方一直留著它，直到測試放行（`threading.Event`），不要只留固定的時間：
   在忙碌的 runner 上，下一個請求可能比那段時間更晚才到，發現第一個已經結束了（FY-PGV-008 留了 1 秒，#204；
@@ -72,7 +72,11 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
   沒有 heartbeat 的機器在慢的測試裡會變成離線，下一次部署就得到 409。
 - **結束 process 不是瞬間的。** 用 `tests/leaks.py` 的 `kill_group()` 結束 process group，它會等到每個成員都消失；
   否則每個測試之後的遺留檢查會看到一個還在結束中的 process。
-- **時間本身就是測試對象時，sleep 沒問題**：逾時、停滯、「0.5 秒內什麼都不會發生」。
+- **時間本身就是測試對象時，sleep 沒問題**：逾時、停滯、「0.5 秒內什麼都不會發生」。即使如此，不該及時到達的東西
+  要用 `threading.Event` 留住，不要用比逾時稍長的 sleep，這樣能結束請求的就只有逾時：一個被拖慢、晚了才去看的 gateway，
+  會發現 sleep 之後的回應已經在那裡，就把它傳下去（FY-RT-006、FY-FA-006、FY-FA-010、FY-X-009）。下限只斷言程式保證的
+  （「至少等了 `wait_ms`」）；上限只用來分辨「逾時」與「永遠不會」，要放寬，並在註解寫出理由。FY-RT-003 的 `< 1.5 秒`
+  在 1.63 秒失敗過；現在改成檢查溢出到雲端的回應回來時，第一個請求仍被留著（#226）。
 - **UI 測試：API 的東西都比較晚到，而且順序不定。** 來自 fetch 的東西（資料到了才顯示的表單、另一個 endpoint 提供的
   select 選項、回應到達時才設定的值）一律用 `await screen.findBy…` 或 `waitFor`，`getBy…` 只用在已知已經在頁面上的東西。
   儲存之後，先等它的訊息出現再點下一步。`npm run test:jitter` 讓每個假 fetch 隨機延遲 0–150 ms 再回應
@@ -120,7 +124,7 @@ CI 跑在小機器上（兩個核心、常常很忙；PostgreSQL 那個 job 最�
 | `forgeyard/agent/` | agent：硬體偵測（NVML、AMD SMI、CPU）、連線、狀態、信任（`agent trust`）、它的執行方式（`how_it_runs.py`，用於更新指令） |
 | `forgeyard/agent/config.py`, `setup.py` | agent 的設定（`agent.toml`、`FORGEYARD_*`、旗標）與 `agent init` |
 | `forgeyard/agent/models.py` | agent 的模型快取：下載、驗證、引擎 |
-| `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門、紀錄、健康檢查 |
+| `forgeyard/agent/workloads/` | agent 的協調迴圈、行程與容器執行環境、副本的金鑰守門員、紀錄、健康檢查 |
 | `forgeyard/agent/workloads/supervisor.py`, `state.py`, `runtime.py` | 協調迴圈：迴圈本身、期望清單與回報；它在記憶體裡的狀態；每種執行環境都實作的 `Runtime` 協定（以及 `ContainerEngine`） |
 | `forgeyard/agent/workloads/lifecycle.py`, `fetching.py`, `checks.py`, `keyguards.py`, `admin.py` | 協調迴圈的各部分：副本的啟動、結束、停止與移除；啟動前的模型、引擎與映像檔；健康檢查；金鑰守門；管理員的快取與映像檔請求 |
 | `forgeyard/install/` | 由執行中程式碼建置的 agent wheel、`install.sh`、Machines 頁上的指令、agent 的更新指令與是否落後（`update.py`）、已發布映像檔的名稱（`images.py`）、伺服器映像檔的健康檢查 |

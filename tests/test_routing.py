@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from forgeyard.config import get_settings
-from forgeyard.gateway import cloud, proxy
+from forgeyard.gateway import cloud, proxy, waiting
 from forgeyard.gateway.balancer import balancer
 from forgeyard.gateway.usage import recorder
 from tests.cloud_helpers import (CLOUD_KEY, FakeCloud, add_provider, cloud_key, deployment_id, model_id, route_id,
@@ -107,25 +107,43 @@ def test_fy_rt_002_busy_spills_the_second_request(mixed):
 def test_fy_rt_003_wait_ms_waits_for_a_local_slot_first(mixed):
     """FY-RT-003: with wait_ms, a request that finds local busy waits for a slot and stays local when
     one frees up in time; when none does, it spills after the wait."""
-    set_tiers(mixed.owner, "chat", [[("local", mixed.dep)], [("provider", mixed.pm)]], wait_ms=3000)
-    mixed.engine.hold = 0.5
-    t, _ = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    started = time.monotonic()
-    r = chat(mixed.api)
+    # The engine keeps the first request until the test lets it go, not for a fixed time, and the test checks where
+    # the second one went and that it waited, not how long the whole round took: a busy runner took 1.63 s against a
+    # 1.5 s bound (#226).
+    set_tiers(mixed.owner, "chat", [[("local", mixed.dep)], [("provider", mixed.pm)]], wait_ms=10000)
+    gate = mixed.engine.gate = threading.Event()   # wait_ms is the most a route takes: only the gate frees the slot
+    try:
+        t, first = background(lambda: chat(mixed.api))
+        wait_until(lambda: mixed.engine.held, "the first request held at the engine")
+        t2, second = background(lambda: chat(mixed.api))
+        wait_until(lambda: waiting.lengths().get("chat#0"), "the second request in line for the local slot")
+        assert second == {} and len(mixed.engine.posts()) == 1 and mixed.cloud.posts() == []   # it waits
+    finally:
+        gate.set()
     t.join()
-    assert r.headers["x-forgeyard-target"] == "local:chat#0" and time.monotonic() - started >= 0.2
+    t2.join()
+    assert first["r"].status_code == 200
+    r = second["r"]
+    assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0" and "x-forgeyard-spilled" not in r.headers
     assert mixed.cloud.posts() == []
     set_tiers(mixed.owner, "chat", [[("local", mixed.dep)], [("provider", mixed.pm)]], wait_ms=300)
-    mixed.engine.hold = 2.0
-    t, _ = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    started = time.monotonic()
-    r = chat(mixed.api)
-    waited = time.monotonic() - started
+    gate = mixed.engine.gate = threading.Event()   # the slot does not free up until after the answer
+    try:
+        t, first = background(lambda: chat(mixed.api))
+        in_flight_soon()
+        started = time.monotonic()
+        r = chat(mixed.api)
+        waited = time.monotonic() - started
+        still_held = t.is_alive()
+    finally:
+        gate.set()
     t.join()
     assert r.headers["x-forgeyard-target"] == "provider:cloudy/gpt-mini" and r.headers["x-forgeyard-spilled"] == "busy"
-    assert 0.25 <= waited < 1.5
+    assert still_held and first["r"].headers["x-forgeyard-target"] == "local:chat#0"
+    # It waited the route's 300 ms first (the gateway's deadline starts after `started`, so this cannot fail on a
+    # slow runner). No upper bound: the first request still held when the spill came back shows it did not wait for
+    # that slot, and a slow runner only adds time.
+    assert waited >= 0.3
 
 
 def test_fy_rt_004_unavailable_spills(mixed):
@@ -170,8 +188,13 @@ def test_fy_rt_006_what_never_spills(mixed, monkeypatch):
     monkeypatch.setenv("GATEWAY_READ_TIMEOUT", "0.3")
     get_settings.cache_clear()
     proxy._clients.clear()                 # a client with the shorter timeout
-    mixed.engine.hold = 1.0
-    r = chat(mixed.api)
+    # The engine does not answer until the test lets it go, so only the read timeout can end the request: with a
+    # fixed 1 s hold a starved gateway looked for the answer after it had come, and passed it on (#226).
+    mixed.engine.gate = threading.Event()
+    try:
+        r = chat(mixed.api)
+    finally:
+        mixed.engine.gate.set()
     assert r.status_code == 504 and r.json()["error"]["code"] == "upstream_timeout"
     assert mixed.cloud.posts() == []
 
@@ -253,13 +276,22 @@ def test_fy_rt_010_local_only_header(mixed):
     """FY-RT-010: X-Forgeyard-Local-Only: 1 never spills: a busy local tier makes it wait, an
     unavailable one gives the local error, and a cloud-only model is refused."""
     only = {"X-Forgeyard-Local-Only": "1"}
-    mixed.engine.hold = 0.5
-    t, _ = background(lambda: chat(mixed.api))
-    in_flight_soon()
-    r = chat(mixed.api, headers=only)
+    # The first request is held at the engine until the test lets it go (not for a fixed 0.5 s, which a slow runner
+    # could outlast, leaving local idle again, #226): the local-only one goes to that busy replica and waits there.
+    gate = mixed.engine.gate = threading.Event()
+    try:
+        t, first = background(lambda: chat(mixed.api))
+        in_flight_soon()
+        t2, second = background(lambda: chat(mixed.api, headers=only))
+        wait_until(lambda: len(mixed.engine.held) == 2, "the local-only request at the busy replica")
+    finally:
+        gate.set()
     t.join()
-    assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0"
-    mixed.engine.hold = 0
+    t2.join()
+    r = second["r"]
+    assert first["r"].status_code == 200
+    assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0" and "x-forgeyard-spilled" not in r.headers
+    mixed.engine.gate = None
     set_state("chat", 0, "starting", "loading")
     r = chat(mixed.api, headers=only)
     assert r.status_code == 503 and r.json()["error"]["code"] == "no_ready_replica"

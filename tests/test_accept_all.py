@@ -475,7 +475,8 @@ def test_fy_acc_020_a_broken_off_download_leaves_nothing_but_never_takes_others(
     agent's cache report shows it (it comes with the heartbeat) and once the agent stops refusing (cache_busy); a
     finished download needs nothing; a machine that had partial downloads before the run keeps them all (Remove
     partial downloads would take those too), and the report says so."""
-    monkeypatch.setattr(acc.time, "sleep", lambda s: None)
+    ft = FakeTime()     # accept_all's own clock only: patching time.sleep/monotonic would reach every thread (#239)
+    monkeypatch.setattr(acc, "time", ft)
     run = acc.Run(acc.parse_args(["--server", "https://127.0.0.1:9"]), None)
     box = {"id": 4, "name": "box"}
     reports = iter([0, 0, 1, 1, 1])
@@ -497,12 +498,11 @@ def test_fy_acc_020_a_broken_off_download_leaves_nothing_but_never_takes_others(
     fake.calls.clear()
     acc._partials_after(run, box, 9, 2)
     assert all(m == "GET" for m, _, _ in fake.calls) and "box keeps the partial downloads" in run.report.notes[-1]
-    clock = iter(range(0, 1000, 10))
-    monkeypatch.setattr(acc.time, "monotonic", lambda: next(clock))
-    reports = iter([0] * 10)
+    reports = iter([0] * 20)    # a wait that never ends runs out of reports and fails
     fake.calls.clear()
+    start = ft.t
     acc._remove_partials(run, box, "x", wait=25)    # nothing shows within the wait: nothing asked
-    assert all(m == "GET" for m, _, _ in fake.calls)
+    assert all(m == "GET" for m, _, _ in fake.calls) and 25 < ft.t - start <= 27
 
 
 # ------------------------------------------------------------------ waits with a limit for room (1.4.5, #203)

@@ -1,0 +1,32 @@
+import type en from "../en/shell";
+
+export default {
+  "shell.nav.main": "主選單",
+  "shell.nav.machines": "機器",
+  "shell.nav.serving": "服務中",
+  "shell.nav.models": "模型",
+  "shell.nav.cloud": "雲端",
+  "shell.nav.playground": "試用區",
+  "shell.nav.keys": "API 金鑰",
+  "shell.nav.usage": "用量",
+  "shell.nav.users": "使用者",
+  "shell.nav.audit": "稽核紀錄",
+  "shell.nav.start": "開始使用",
+  "shell.nav.guide": "使用指南",
+  "shell.nav.account": "我的帳號",
+  "shell.menu.open": "開啟選單",
+  "shell.menu.close": "關閉選單",
+  "shell.menu.start": "開始使用",
+  "shell.menu.guide": "使用指南",
+  "shell.menu.account": "我的帳號與工作階段",
+  "shell.menu.trust": "信任這台伺服器（HTTPS）",
+  "shell.menu.signOut": "登出",
+  "shell.menu.language": "語言",
+  "shell.plainHttp":
+    "<strong>Forgeyard 目前沒有使用 HTTPS。</strong>它以 {off} 啟動，這個頁面也是經由一般 HTTP 傳來的，所以密碼、工作階段 cookie 和 API 金鑰都以未加密的方式在網路上傳送。拿掉 {off}，改用 Forgeyard 自己的憑證授權單位；或在它前面放一台負責 TLS 的代理伺服器。<link>該怎麼做</link>",
+  "shell.notFound.title": "這裡沒有東西",
+  "shell.notFound.lead": "這個頁面不存在。",
+  "shell.adminsOnly.title": "限管理員",
+  "shell.adminsOnly.lead": "你的角色不能開啟這個頁面。如果需要，請洽管理員。",
+  "shell.goToMachines": "前往機器",
+} satisfies Record<keyof typeof en, string>;

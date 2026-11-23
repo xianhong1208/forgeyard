@@ -1,6 +1,7 @@
 // 1.4.3 (#140): a page per catalog model (/models/<name>) and per engine (/models/engines/<name>). The words the
 // console uses beside them under /models (deploy, deployments, routes, engines…) are refused as model names by the
 // API, so a model's page never hides another page.
+import { t } from "../i18n/core";
 import type { ModelKind } from "./fleet";
 import { isVisionTask } from "./models";
 import type { CatalogModel, DeviceFit, EnginePage, EngineOn, MachineVerdict, ModelFile, ModelPage, RecipeVariant } from "./types";
@@ -65,16 +66,16 @@ export function filesLine(files: ModelPage["files"], used: string | null): { cou
 // What a machine has of an engine, in words: its image or program is there, is not (it is fetched when a deployment
 // starts there), or is not known yet (never listed, no cache report).
 export function presenceText(kind: EngineOn["kind"], present: boolean | null): string {
-  if (kind === "command") return "installed command";
+  if (kind === "command") return t("modelpage.presence.command");
   const what = kind === "program" ? "program" : "image";
-  return present === true ? `${what} here` : present === false ? `${what} not here: fetched on deploy` : `${what}: not known yet`;
+  return t(`modelpage.presence.${what}${present === true ? "Here" : present === false ? "Not" : "Unknown"}`);
 }
 
 // The same on an engine's page, under its chip (here / not here): where it is, or when it comes.
 export function whereText(kind: EngineOn["kind"], present: boolean | null): string {
-  if (kind === "command") return "installed command";
-  if (kind === "program") return present === true ? "in its model cache" : present === false ? "downloaded when a deployment starts there" : "no cache report yet";
-  return present === true ? "in its container engine" : present === false ? "pulled when a deployment starts there" : "not listed yet";
+  if (kind === "command") return t("enginepage.where.command");
+  const what = kind === "program" ? "program" : "image";
+  return t(`enginepage.where.${what}${present === true ? "Here" : present === false ? "Not" : "Unknown"}`);
 }
 
 // A machine's image listing older than this is listed again when an engine's page opens (connected machines only).

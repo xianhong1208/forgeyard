@@ -36,8 +36,11 @@
   --mark-plate: #121a22;
   --mark-ink: #f2f5f8;
   --radius: 6px;
-  --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* Schibsted Grotesk and Martian Mono have no CJK glyphs: Chinese text (1.5.1) falls through to a Traditional
+     Chinese face of the system (macOS, then Linux, then Windows), before the generic family. */
+  --cjk: "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", "Source Han Sans TC", "Microsoft JhengHei", "Heiti TC";
+  --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", var(--cjk), sans-serif;
+  --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, var(--cjk), monospace;
   color-scheme: light;
 }
 
@@ -151,6 +154,17 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .usermenu-panel a, .usermenu-panel button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; border-radius: 4px;
   background: none; color: var(--ink); font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; text-align: left; }
 .usermenu-panel a:hover, .usermenu-panel button:hover { background: var(--surface-2); }
+/* The language switch (1.5.1): both languages named in themselves, the one in use ticked. */
+.langswitch { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.langswitch-label { display: inline-flex; align-items: center; gap: 8px; }
+.langswitch-options { display: inline-flex; gap: 4px; }
+.usermenu-panel .langswitch { margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.usermenu-panel .langswitch-options button { width: auto; padding: 4px 9px; border: 1px solid var(--line); font-size: 13px; color: var(--ink); gap: 4px; }
+.usermenu-panel .langswitch-options button.on { border-color: var(--heat); background: var(--heat-soft); color: var(--heat-ink); }
+.nav-langs { padding: 10px 16px 12px; color: var(--steel-ink); font-size: 15px; border-top: 1px solid var(--steel-3); }
+.nav-langs .langswitch-options button { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: 4px; cursor: pointer;
+  background: var(--steel-2); border: 1px solid var(--steel-3); color: #fff; font: inherit; font-size: 14px; }
+.nav-langs .langswitch-options button.on { border-color: var(--heat); }
 
 .content { max-width: 1180px; margin: 0 auto; padding: 36px 24px 64px; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 26px;
@@ -334,6 +348,7 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .event { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .event:last-child { border-bottom: 0; }
 .event time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.event-kind { font-weight: 600; margin-right: 6px; }
 .event-placed span, .event-created span { color: var(--ink-2); }
 .event-unplaced span { color: var(--bad); }
 .fact { display: contents; }
@@ -391,7 +406,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .examples { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 0 0 6px; color: var(--muted); }
 .catalog-table td { vertical-align: top; }
-.catalog-table td[data-label="Format"], .catalog-table td[data-label="Size"] { white-space: nowrap; }
+/* Columns by class, not by data-label: the labels are translated (#189). */
+.catalog-table td.cat-format, .catalog-table td.cat-size { white-space: nowrap; }
 .catalog-table .mono.small { overflow-wrap: anywhere; }
 .inspect-facts { margin: 16px 0 4px; }
 .recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
@@ -1575,12 +1591,13 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 /* The catalog's Model column kept collapsing to a few characters at desktop widths (long sources). */
 @media (min-width: 761px) {
   .catalog-wrap { overflow-x: auto; }
-  .catalog-table td[data-label="Model"] { min-width: 220px; }
-  .catalog-table td[data-label="Model"] .mono.small { word-break: break-all; }
-  .catalog-table td[data-label="Architecture"] { overflow-wrap: anywhere; min-width: 150px; }
-  .catalog-table td[data-label="Task"] .chip { white-space: normal; height: auto; min-height: 22px; }
-  .catalog-table td[data-label="Licence"] .nowrap { white-space: normal; overflow-wrap: anywhere; }
-  .catalog-table td[data-label="Engines"] { min-width: 110px; }
+  .catalog-table td.cat-model { min-width: 220px; }
+  .catalog-table td.cat-model .mono.small { word-break: break-all; }
+  .catalog-table td.cat-arch { overflow-wrap: anywhere; min-width: 150px; }
+  .catalog-table td.cat-task .chip { white-space: normal; height: auto; min-height: 22px; }
+  .catalog-table td.cat-licence .nowrap { white-space: normal; overflow-wrap: anywhere; }
+  .catalog-table td.cat-licence { min-width: 88px; }
+  .catalog-table td.cat-engines { min-width: 110px; }
   /* The actions stack in one column: three side by side were clipped at the table's edge at 1440 px. */
   .catalog-table td.cell-actions { white-space: normal; width: 1%; }
   .catalog-table .catalog-actions { flex-direction: column; align-items: stretch; }

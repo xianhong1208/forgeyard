@@ -92,20 +92,24 @@ def test_fy_gw_002_requests_alternate_between_replicas(gw):
 
 def test_fy_gw_003_least_in_flight_wins(gw):
     """FY-GW-003: while replica 0 holds a slow request, the next ones go to replica 1."""
-    gw.e1.hold = 1.5
-    first = chat(gw.api)  # replica 0 or 1 first; make sure the slow one is busy
+    first = chat(gw.api)  # replica 0 or 1 first: that one is made slow
     slow_replica = first.headers["x-forgeyard-replica"]
     slow = gw.e1 if slow_replica == "chat#0" else gw.e2
     fast_name = "chat#1" if slow is gw.e1 else "chat#0"
-    slow.hold, (gw.e2 if slow is gw.e1 else gw.e1).hold = 1.5, 0.0
     # Point the next turn at the slow replica: one quick request goes to the other one first.
     while chat(gw.api).headers["x-forgeyard-replica"] != fast_name:
         pass
+    # The slow replica keeps its request until the test lets it go, not for a fixed 1.5 s: on a busy runner the four
+    # requests below could outlast that, and with both replicas idle again they rightly take turns (#226).
+    slow.gate = threading.Event()
     results = {}
     t = threading.Thread(target=lambda: results.setdefault("slow", chat(gw.api)))
-    t.start()
-    wait_until(lambda: sum(balancer.inflight.values()) >= 1, "the slow request in flight")
-    during = [chat(gw.api).headers["x-forgeyard-replica"] for _ in range(4)]
+    try:
+        t.start()
+        wait_until(lambda: slow.held, "the slow request held at its replica")
+        during = [chat(gw.api).headers["x-forgeyard-replica"] for _ in range(4)]
+    finally:
+        slow.gate.set()
     t.join()
     assert results["slow"].headers["x-forgeyard-replica"] == slow_replica
     assert during == [fast_name] * 4

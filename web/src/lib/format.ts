@@ -1,25 +1,18 @@
+import { t } from "../i18n/core";
+import { formatDateTime, formatRelative } from "../i18n/format";
+
+// A server timestamp relative to now ("5 min ago"), and in full for a tooltip, in the reader's language.
 export function when(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  const seconds = Math.round((Date.now() - d.getTime()) / 1000);
-  const abs = Math.abs(seconds);
-  const suffix = seconds >= 0 ? "ago" : "from now";
-  if (abs < 45) return seconds >= 0 ? "just now" : "in a moment";
-  if (abs < 3600) return `${Math.round(abs / 60)} min ${suffix}`;
-  if (abs < 86400) return `${Math.round(abs / 3600)} h ${suffix}`;
-  if (abs < 86400 * 14) return `${Math.round(abs / 86400)} d ${suffix}`;
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return formatRelative(value);
 }
 
 export function exact(value: string | null | undefined): string {
-  if (!value) return "";
-  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return d.toLocaleString();
+  return formatDateTime(value);
 }
 
 // "Chrome on Linux" from a user agent string; good enough to tell sessions apart.
 export function device(ua: string | null | undefined): string {
-  if (!ua) return "Unknown device";
+  if (!ua) return t("admin.device.unknown");
   const browser = /Edg\//.test(ua)
     ? "Edge"
     : /Firefox\//.test(ua)
@@ -30,7 +23,7 @@ export function device(ua: string | null | undefined): string {
           ? "Safari"
           : /curl\//i.test(ua)
             ? "curl"
-            : "Browser";
+            : t("admin.device.browser");
   const os = /iPhone|iPad/.test(ua)
     ? "iOS"
     : /Android/.test(ua)
@@ -42,7 +35,7 @@ export function device(ua: string | null | undefined): string {
           : /Linux/.test(ua)
             ? "Linux"
             : "";
-  return os ? `${browser} on ${os}` : browser;
+  return os ? t("admin.device.on", { browser, os }) : browser;
 }
 
 // An engine image as people read it: "vllm/vllm-openai:v0.32.0" for "vllm/vllm-openai:v0.32.0@sha256:…".

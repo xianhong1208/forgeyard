@@ -1,4 +1,5 @@
 // The Engines tab (1.4, #92): what a card says at a glance, and the YAML helpers of "Add a custom engine".
+import { sentText } from "./models";
 import type { Recipe } from "./types";
 
 export type Hardware = "nvidia" | "amd" | "cpu";
@@ -20,4 +21,10 @@ export function renameRecipe(yaml: string, name: string): string {
 export function freeName(base: string, taken: string[]): string {
   if (!taken.includes(base)) return base;
   for (let n = 2; ; n += 1) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`;
+}
+
+// A built-in engine's description in the reader's language, while the server sends the English it was translated
+// from; a custom engine's (or a changed one) as sent.
+export function engineDescription(r: Pick<Recipe, "name" | "builtin" | "description">): string {
+  return r.builtin ? sentText(`library.engineDesc.${r.name}`, r.description) : r.description;
 }

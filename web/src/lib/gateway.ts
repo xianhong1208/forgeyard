@@ -1,3 +1,6 @@
+import { labels, t, tPlural } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
+import { getLang, locale } from "../i18n/lang";
 // The gateway (M4): snippets for a new key, numbers for usage, and reading a streamed answer.
 
 import type { ApiKey } from "./types";
@@ -17,20 +20,20 @@ export const API_ENDPOINT: Record<string, string> = {
   classify: "/classify",
 };
 
-export const API_KIND: Record<string, string> = {
-  "openai-chat": "chat",
-  "openai-embeddings": "embeddings",
-  rerank: "rerank",
-  "openai-audio": "speech to text",
-  "openai-speech": "text to speech",
-  "openai-images": "images",
-  "openai-videos": "video",
-  "vision-detect": "object detection",
-  "vision-segment": "segmentation",
-  "vision-depth": "depth",
-  "vision-classify": "image classification",
-  classify: "text classification",
-};
+export const API_KIND: Record<string, string> = labels({
+  "openai-chat": "fleet.api.openai-chat",
+  "openai-embeddings": "fleet.api.openai-embeddings",
+  rerank: "fleet.api.rerank",
+  "openai-audio": "fleet.api.openai-audio",
+  "openai-speech": "fleet.api.openai-speech",
+  "openai-images": "fleet.api.openai-images",
+  "openai-videos": "fleet.api.openai-videos",
+  "vision-detect": "fleet.api.vision-detect",
+  "vision-segment": "fleet.api.vision-segment",
+  "vision-depth": "fleet.api.vision-depth",
+  "vision-classify": "fleet.api.vision-classify",
+  classify: "fleet.api.classify",
+});
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
 // trustUrl (the server's own certificate authority), both trust that CA's file, forgeyard-ca.pem.
@@ -114,19 +117,24 @@ export function num(n: number | null | undefined): string {
   return n.toLocaleString("en-US");
 }
 
+// "350 ms", "1.2 s"; in Chinese Intl's units ("350 毫秒", "1.2 秒").
 export function ms(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)} s` : `${Math.round(n)} ms`;
+  const [v, unit] = n >= 1000 ? [Number((n / 1000).toFixed(n >= 10000 ? 0 : 1)), "second"] : [Math.round(n), "millisecond"];
+  if (getLang() === "en") return `${v} ${unit === "second" ? "s" : "ms"}`;
+  return formatNumber(v, getLang(), { style: "unit", unit, unitDisplay: "short", maximumFractionDigits: 1 });
 }
 
 export function keyModels(k: ApiKey): string {
-  return k.models === null ? "All deployments" : k.models.join(", ");
+  return k.models === null ? t("keys.allDeployments") : k.models.join(", ");
 }
 
 // A per-minute limit, short: "3 requests/min", "10k tokens/min", "1.5M tokens/min" (1.4).
 export function perMinute(n: number, unit: "request" | "token"): string {
-  const short = n < 1000 ? String(n) : new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n).replace(/K$/, "k");
-  return `${short} ${unit}${n === 1 ? "" : "s"}/min`;
+  const lang = getLang();
+  const compact = new Intl.NumberFormat(lang === "en" ? "en-US" : locale(lang), { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  const short = n < 1000 ? String(n) : compact.replace(/K$/, "k");
+  return tPlural(unit === "request" ? "keys.requestsPerMin" : "keys.tokensPerMin", n, { n: short });
 }
 
 // The limits a key works with, one line each: only the ones set, or "No limits" (1.4). Each line carries
@@ -141,7 +149,7 @@ export function keyLimits(k: Pick<ApiKey, "effective_rpm" | "effective_tpm" | "r
   };
   add(k.effective_rpm, "request", k.rpm_locked_by);
   add(k.effective_tpm, "token", k.tpm_locked_by);
-  if (!lines.length) lines.push({ text: "No limits", none: true, locks: [] });
+  if (!lines.length) lines.push({ text: t("keys.noLimits"), none: true, locks: [] });
   lines[lines.length - 1].locks.push(...loose);
   return lines;
 }
@@ -155,9 +163,9 @@ export function splitKeys<T extends Pick<ApiKey, "status">>(keys: T[]): { active
 export function foldLabel(keys: Pick<ApiKey, "status">[], open: boolean): string {
   const revoked = keys.some((k) => k.status === "revoked");
   const expired = keys.some((k) => k.status === "expired");
-  const what = revoked && expired ? "revoked or expired" : expired ? "expired" : "revoked";
-  if (open) return `Hide ${what} keys`;
-  return `Show ${keys.length} ${what} key${keys.length === 1 ? "" : "s"}`;
+  const what = revoked && expired ? "Both" : expired ? "Expired" : "Revoked";
+  if (open) return t(`keys.fold.hide${what}`);
+  return tPlural(`keys.fold.show${what}`, keys.length);
 }
 
 // Server-sent events from a fetch() body: calls onData with each `data:` payload as it arrives.

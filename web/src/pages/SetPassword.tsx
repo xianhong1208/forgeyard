@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 
 import { AuthFrame } from "../components/AuthFrame";
+import { useT } from "../i18n/react";
 import { Field, Notice } from "../components/ui";
 import { api, errorText } from "../lib/api";
 
@@ -10,9 +11,10 @@ function tokenFromHash(): string {
 }
 
 export function SetPasswordPage() {
+  const t = useT();
   const [token] = useState(tokenFromHash);
   const [username, setUsername] = useState<string | null>(null);
-  const [invalid, setInvalid] = useState<string | null>(token ? null : "This link is incomplete. Open the full link you were sent.");
+  const [invalid, setInvalid] = useState<string | null>(token ? null : "incomplete");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -44,25 +46,25 @@ export function SetPasswordPage() {
   };
 
   return (
-    <AuthFrame title="Set your password" lead={username ? <>For the account <strong>{username}</strong>.</> : undefined}>
+    <AuthFrame title={t("auth.setPassword.title")} lead={username ? t.rich("auth.setPassword.lead", { username: <strong>{username}</strong> }) : undefined}>
       {invalid ? (
-        <Notice tone="error">{invalid}</Notice>
+        <Notice tone="error">{invalid === "incomplete" ? t("auth.setPassword.incomplete") : invalid}</Notice>
       ) : done ? (
-        <Notice tone="ok">Password set. <Link to="/login">Sign in</Link></Notice>
+        <Notice tone="ok">{t("auth.setPassword.done")} <Link to="/login">{t("auth.setPassword.signIn")}</Link></Notice>
       ) : username ? (
         <>
           {error && <Notice tone="error">{error}</Notice>}
           <form onSubmit={submit} className="stack">
             <input type="text" name="username" autoComplete="username" value={username} readOnly hidden />
-            <Field label="New password" name="password" type="password" required minLength={12} autoComplete="new-password"
-              value={password} onChange={(e) => setPassword(e.target.value)} hint="At least 12 characters; common passwords are refused." />
-            <Field label="Repeat password" name="confirm" type="password" required autoComplete="new-password"
-              value={confirm} onChange={(e) => setConfirm(e.target.value)} error={mismatch ? "The passwords do not match." : null} />
-            <button className="btn btn-primary btn-wide" disabled={busy || mismatch}>{busy ? "Saving…" : "Set password"}</button>
+            <Field label={t("auth.newPassword")} name="password" type="password" required minLength={12} autoComplete="new-password"
+              value={password} onChange={(e) => setPassword(e.target.value)} hint={t("auth.passwordHint")} />
+            <Field label={t("auth.repeatPassword")} name="confirm" type="password" required autoComplete="new-password"
+              value={confirm} onChange={(e) => setConfirm(e.target.value)} error={mismatch ? t("auth.mismatch") : null} />
+            <button className="btn btn-primary btn-wide" disabled={busy || mismatch}>{busy ? t("auth.setPassword.busy") : t("auth.setPassword.submit")}</button>
           </form>
         </>
       ) : (
-        <p className="muted">Checking the link…</p>
+        <p className="muted">{t("auth.setPassword.checking")}</p>
       )}
     </AuthFrame>
   );

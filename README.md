@@ -67,6 +67,11 @@ Each start is timed, and vLLM keeps its compile cache between starts, so a resta
 long. Sleep and automatic replicas are off until you turn them on; update the agents after the server. Every
 change is in the [CHANGELOG](CHANGELOG.md).
 
+1.5.1 brings the whole console in **Traditional Chinese** as well as English, every page of it: it follows the
+browser's language the first time, and the account menu switches it
+([how](docs/guide/how-to.md#use-the-console-in-traditional-chinese)). Only the server changes: the agents need
+no update.
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for
@@ -98,7 +103,7 @@ sudo docker run -d --name forgeyard --restart always --hostname forgeyard \
   -p 7860:7860 \
   -v forgeyard-data:/data \
   -e PUBLIC_URL=https://192.168.1.20:7860 \
-  docker.io/tonyhuang1101/forgeyard:1.5.0
+  docker.io/tonyhuang1101/forgeyard:1.5.1
 sudo docker logs forgeyard
 ```
 
@@ -144,7 +149,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
   -e FORGEYARD_CA_FINGERPRINT=sha256:3f9a… \
   -e FORGEYARD_JOIN_TOKEN=fyj_… \
   -e FORGEYARD_MODEL_CACHE=/srv/forgeyard-models \
-  docker.io/tonyhuang1101/forgeyard-agent:1.5.0
+  docker.io/tonyhuang1101/forgeyard-agent:1.5.1
 ```
 
 The join token works once, within 15 minutes. AMD and CPU-only machines:

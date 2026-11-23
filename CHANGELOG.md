@@ -6,6 +6,75 @@ version until 1.0.
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-11-23
+
+The console in Traditional Chinese (#189): every page of it now speaks English and Traditional Chinese. The
+browser's language decides the first time, and **Language** in the account menu switches it at once; the choice is
+kept in the browser, and the guide follows it. The server and its API keep writing English: the console translates
+what it can name (the common error codes, the setup-health findings, the audit log's actions…) and shows the rest
+as the server sent it, such as an error's details, the names you choose and the models' answers. The Chinese of
+the console and of the guide had a wording pass for natural Taiwan usage, with one term for each thing. Flaky
+tests were fixed (#226, #239).
+
+**Update the server only.** No agent or server code changed since 1.5.0: only the console, the guide and the
+tests did, so **the agents need no update** and a 1.5.0 agent works with a 1.5.1 server as it is. Setup health
+still lists a 1.5.0 agent as older than the server; its **Update the agent** command brings the same agent code
+under the 1.5.1 version, so it can wait. **No migration.**
+
+### Added
+
+- **The console in Traditional Chinese (#189).** The whole console now speaks English and Traditional Chinese.
+  - **Choosing the language.** The browser's language decides the first time (any Chinese setting gives
+    Traditional Chinese), and **Language** in the account menu (at the end of the menu on a phone) switches it at
+    once. The choice is kept in the browser, not on the server (no migration), and is the guide's language choice
+    too.
+  - **Every page:** the frame (top bar, menus, sign-in and first-run pages, Get started and Setup health, the
+    secret-key backup dialog, the HTTPS warning); **Machines** and a machine's page (memory map, what runs there,
+    the model cache and downloads, engine images with upload and copy, GPU access, the agent and its update);
+    **Serving**, a deployment's page (state, sleep when idle, the gateway, replicas, memory, Try it, output and
+    events) and the deploy and edit forms (automatic replicas, sleep when idle, the estimate); **Models** (Catalog,
+    Engines, Sources and the server's Hugging Face token), **Add a model** (the recommended list, Hugging Face
+    search, a typed source and the review with its estimate), a model's page and an engine's page; **Cloud**
+    (providers, prices and Refresh prices from OpenRouter, budgets, what leaves this server, cloud models, a
+    route's tiers, the cloud fallback panel); every **Playground** panel (chat, embeddings, rerank, text
+    classification, speech to text, speak, image, video and vision) with its wake notice and errors; **Usage**
+    (tabs, totals, the breakdown tables, the charts and the budgets); **API keys** (limits, cloud levels and the
+    cloud policy, budgets, the key shown once); **Users**, the **Audit log**, **My account** and **Trust this
+    server**.
+  - **Numbers, money and dates** follow the language through the browser's `Intl`: times and units ("41 秒前",
+    "350 毫秒"), chart dates and axis numbers ("11月12日", "1.5萬"), parameter and download counts with 萬 and 億.
+    Money stays in US dollars, written `US$1.20` in Chinese (tables and the cost chart's axis alike) and `$1.20`
+    as before in English.
+  - **The API does not change.** The server keeps writing English; the console translates what it can name: the
+    common error codes (with the server's specifics), the setup-health findings and their buttons (by id, with the
+    server's own words under them), the Get started steps, a deployment's event kinds (before the server's own
+    message), the replica output panel's notes, the audit log's actions (in Chinese with the code beside it, so
+    admins can still search by code), the names the server gives a few usage groups (*Console playground*, *Other
+    (3)*), and the recommended list's groups and the built-in engines' descriptions (a changed server text is shown
+    as sent). Everything else is shown as the server sent it: names you choose, a model's note, an engine's
+    parameter help, the estimate's parts, the entries' details in the audit log, the model's answers and your
+    prompts. English shows the server's text as before.
+  - **The guide** in Traditional Chinese names the console's buttons, tabs and fields by their Chinese labels, and
+    its wording was reviewed for natural Taiwan usage along with the console's (one term for each thing: 用戶端,
+    行程, 本機, 金鑰守門員, 重新啟動…).
+  - Under the hood: a hand-written `t()` with typed keys and one dictionary module per area of the console
+    (`web/src/i18n/`), a test that fails when a key, a placeholder or a translation is missing, and a glossary of
+    the terms (`web/src/i18n/GLOSSARY.md`). No new dependency.
+  - Fixed on the way: an offline machine's page showed its status twice in Chinese (the heartbeat line only dropped
+    an English prefix); two English buttons read "Add  selected" and "Apply  ticked" with a double space; the
+    automatic-replicas target hint now reads as a sentence.
+
+### Changed
+
+- The console's fonts fall back to a Traditional Chinese system font (PingFang TC, Noto Sans TC, Microsoft
+  JhengHei…) for Chinese text: Schibsted Grotesk and Martian Mono have no CJK glyphs.
+
+### Fixed
+
+- **Tests that held a fake engine busy for a fixed time** (FY-RT-003 failed on CI at 1.63 s against a 1.5 s bound) now
+  hold it until the test lets it go, and check where a request went rather than how long the round took (#226).
+- **FY-ACC-020 errored when another thread read the clock**: tests patch only their module's `time` now (#239).
+
 ## [1.5.0] — 2026-11-23
 
 Scale to zero and autoscaling (#37): GPUs are used only while they are needed. A deployment can sleep when nobody
