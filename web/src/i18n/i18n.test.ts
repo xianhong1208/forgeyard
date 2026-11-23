@@ -150,8 +150,10 @@ describe("the language", () => {
   });
 
   it("FY-WEB-665 the guide and the console share one choice; the guide's choice from before 1.5.1 carries over", () => {
-    rememberLang("zh-TW"); // the guide's language links
+    setLang("en"); // chosen in the console before
+    rememberLang("zh-TW"); // then the guide's language links
     expect(getLang(["en-US"])).toBe("zh-TW");
+    expect(localStorage.getItem(LANG_KEY)).toBe("zh-TW");
     expect(guideHref("how-to")).toBe("/guide/zh-TW/how-to");
     setLang("en"); // the console's switch
     expect(preferredLang(["zh-TW"])).toBe("en");
