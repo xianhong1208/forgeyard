@@ -1,3 +1,4 @@
+import { labels, t, tMaybe } from "../i18n/core";
 import { IDLE_DEFAULT } from "./sleep";
 import { bytes } from "./machines";
 import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task } from "./types";
@@ -5,9 +6,9 @@ import type { CatalogModel, Deployment, DownloadProgress, Medium, Recipe, Task }
 // Anything with a download in progress: a replica (M3, 1.3.1) or a download ahead of a deployment (1.4).
 type WithDownload = { download?: DownloadProgress | null };
 
-export const TASK_LABEL: Record<Task, string> = { chat: "Chat", embed: "Embeddings", rerank: "Rerank", asr: "Speech to text", tts: "Text to speech", image: "Images", video: "Video",
-  detect: "Object detection", segment: "Segmentation", depth: "Depth estimation", classify: "Text classification",
-  "image-classify": "Image classification" };
+export const TASK_LABEL: Record<Task, string> = labels({ chat: "fleet.task.chat", embed: "fleet.task.embed", rerank: "fleet.task.rerank",
+  asr: "fleet.task.asr", tts: "fleet.task.tts", image: "fleet.task.image", video: "fleet.task.video", detect: "fleet.task.detect",
+  segment: "fleet.task.segment", depth: "fleet.task.depth", classify: "fleet.task.classify", "image-classify": "fleet.task.image-classify" });
 
 // 1.4: the tasks of vision models, and the licences they are added with (as the server checks).
 export const VISION_TASKS: Task[] = ["detect", "segment", "depth", "image-classify"];
@@ -56,25 +57,26 @@ export function downloadText(r: WithDownload): string | null {
   const d = r.download;
   if (!d) return null;
   const done = d.total ? Math.min(d.done, d.total) : d.done;
+  const layers = d.layers ? t("fleet.layers", { done: d.layers_done ?? 0, total: d.layers }) : "";
   if (d.phase === "image" && d.via === "server") {
     // 1.4: a pinned image through the server's relay, layer by layer, then loaded into the engine.
-    const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
-    if (d.unpacking) return `Pulling the image via the server: loading it${d.layers ? `, ${d.layers} layers` : ""}`;
-    if (d.total) return `Pulling the image via the server: ${bytes(done)} of ${bytes(d.total)}${layers ? `, ${layers}` : ""}`;
-    return layers ? `Pulling the image via the server: ${layers}` : "Pulling the image via the server";
+    if (d.unpacking) return d.layers ? t("fleet.pull.relayLoadingLayers", { layers: d.layers }) : t("fleet.pull.relayLoading");
+    if (d.total) return layers ? t("fleet.pull.relayBytesLayers", { done: bytes(done), total: bytes(d.total), layers })
+      : t("fleet.pull.relayBytes", { done: bytes(done), total: bytes(d.total) });
+    return layers ? t("fleet.pull.relayLayers", { layers }) : t("fleet.pull.relay");
   }
   if (d.phase === "image") {
-    const layers = d.layers ? `${d.layers_done ?? 0} of ${d.layers} layers` : "";
-    if (d.unpacking) return `Pulling the image: unpacking, ${layers}`;
-    if (d.total) return `Pulling the image: ${bytes(done)} of ${bytes(d.total)}`;
-    if (done && layers) return `Pulling the image: ${bytes(done)}, ${layers}`;
-    return layers ? `Pulling the image: ${layers}` : "Pulling the image";
+    if (d.unpacking) return t("fleet.pull.unpacking", { layers });
+    if (d.total) return t("fleet.pull.bytes", { done: bytes(done), total: bytes(d.total) });
+    if (done && layers) return t("fleet.pull.bytesLayers", { done: bytes(done), layers });
+    return layers ? t("fleet.pull.layers", { layers }) : t("fleet.pull.plain");
   }
   // 1.4: through the server's relay, for a machine that cannot reach the source itself; 1.4.1: from another
   // machine's cache, through the server.
-  const from = d.via === "server" && d.source ? `, from ${d.source}` : "";
-  const what = `${d.phase === "engine" ? "engine" : "model"}${d.via === "server" ? ` via the server${from}` : ""}`;
-  return d.total ? `Downloading the ${what}: ${bytes(done)} of ${bytes(d.total)}` : `Downloading the ${what}: ${bytes(done)}`;
+  const what = d.phase === "engine" ? "engine" : "model";
+  const how = d.via === "server" ? (d.source ? "From" : "Relay") : "";
+  const sizes = { done: bytes(done), total: d.total ? bytes(d.total) : "", source: d.source ?? "" };
+  return tMaybe(`fleet.download.${what}${how}${d.total ? "Of" : ""}`, "", sizes);
 }
 
 export function compatibleRecipes(model: CatalogModel | undefined, recipes: Recipe[]): Recipe[] {

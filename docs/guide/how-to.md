@@ -1222,6 +1222,25 @@ To let people ask for an account themselves, start the server with `REGISTRATION
 sign-in page then offers to request an account, and requests wait on **Users** until an admin chooses
 **Approve** or **Reject**.
 
+## Use the console in Traditional Chinese
+
+The console speaks English and Traditional Chinese (1.5.1). The first time a browser opens it, it follows the
+browser's language: any Chinese setting gives Traditional Chinese, anything else English. To change it, open the
+account menu (your name, top right) and choose **English** or **繁體中文** under **Language**; on a phone the
+same switch is at the end of the menu. The page changes at once, without reloading.
+
+- The choice is kept **in this browser**, not in your account: another browser or computer starts from its own
+  language again. Nothing is stored on the server, and nothing changes for API clients or scripts.
+- It is **the guide's choice too**: the language links at the top of a guide page and the switch in the console
+  set the same thing, and the console's help links open the guide in it.
+- Numbers, sizes, times and dates follow the language (*41 秒前*, *2026年11月23日*).
+- The server keeps writing its messages in English. The console translates the common ones by their code (for
+  example `model_waking`, `cannot_wake`, `budget_exhausted`) and names each **Setup health** finding's kind in
+  Chinese, with the server's own words (which name the machines and models) under it. A message without a
+  translation is shown as the server sent it.
+- In 1.5.1 the frame (menus, sign-in, Get started and Setup health) and the **Machines** and **Serving** lists are
+  translated; the other pages follow in the next releases and are English until then.
+
 ## Use your own certificate or a reverse proxy
 
 **Your own certificate** (a company CA, or a public certificate for a real domain). In the server's

@@ -36,8 +36,11 @@
   --mark-plate: #121a22;
   --mark-ink: #f2f5f8;
   --radius: 6px;
-  --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* Schibsted Grotesk and Martian Mono have no CJK glyphs: Chinese text (1.5.1) falls through to a Traditional
+     Chinese face of the system (macOS, then Linux, then Windows), before the generic family. */
+  --cjk: "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", "Source Han Sans TC", "Microsoft JhengHei", "Heiti TC";
+  --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", var(--cjk), sans-serif;
+  --mono: "Martian Mono", ui-monospace, "SFMono-Regular", Menlo, var(--cjk), monospace;
   color-scheme: light;
 }
 
@@ -151,6 +154,17 @@ select:disabled { color: var(--muted); background-color: var(--surface-2); }
 .usermenu-panel a, .usermenu-panel button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 10px; border: 0; border-radius: 4px;
   background: none; color: var(--ink); font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; text-align: left; }
 .usermenu-panel a:hover, .usermenu-panel button:hover { background: var(--surface-2); }
+/* The language switch (1.5.1): both languages named in themselves, the one in use ticked. */
+.langswitch { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.langswitch-label { display: inline-flex; align-items: center; gap: 8px; }
+.langswitch-options { display: inline-flex; gap: 4px; }
+.usermenu-panel .langswitch { margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+.usermenu-panel .langswitch-options button { width: auto; padding: 4px 9px; border: 1px solid var(--line); font-size: 13px; color: var(--ink); gap: 4px; }
+.usermenu-panel .langswitch-options button.on { border-color: var(--heat); background: var(--heat-soft); color: var(--heat-ink); }
+.nav-langs { padding: 10px 16px 12px; color: var(--steel-ink); font-size: 15px; border-top: 1px solid var(--steel-3); }
+.nav-langs .langswitch-options button { display: inline-flex; align-items: center; gap: 4px; padding: 6px 11px; border-radius: 4px; cursor: pointer;
+  background: var(--steel-2); border: 1px solid var(--steel-3); color: #fff; font: inherit; font-size: 14px; }
+.nav-langs .langswitch-options button.on { border-color: var(--heat); }
 
 .content { max-width: 1180px; margin: 0 auto; padding: 36px 24px 64px; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 26px;

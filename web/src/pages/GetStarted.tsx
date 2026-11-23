@@ -5,6 +5,7 @@ import { Link, Navigate } from "react-router";
 import { SetupHealth } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { CopyBox, Notice, PageHeader, TrustHint } from "../components/ui";
+import { useT, type Translator } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { API_KIND } from "../lib/gateway";
 import { MACHINES } from "../lib/nav";
@@ -29,7 +30,7 @@ export function HomePage() {
   const [show, setShow] = useState<boolean | null>(null);
   if (show === null && data) setShow(!data.hidden && !data.complete);
   if (error && !data) return <Navigate to={MACHINES} replace />;
-  if (!data || show === null) return <p className="muted">Loading…</p>;
+  if (!data || show === null) return <Loading />;
   if (!show) return <Navigate to={MACHINES} replace />;
   return <GetStarted c={data} reload={reload} />;
 }
@@ -38,11 +39,31 @@ export function HomePage() {
 export function GetStartedPage() {
   const { data, error, reload } = useChecklist();
   if (error && !data) return <Notice tone="error">{error}</Notice>;
-  if (!data) return <p className="muted">Loading…</p>;
+  if (!data) return <Loading />;
   return <GetStarted c={data} reload={reload} />;
 }
 
+function Loading() {
+  const t = useT();
+  return <p className="muted">{t("common.loading")}</p>;
+}
+
+// The server writes the steps in English (GET /api/onboarding, unchanged): another language takes a step's
+// title and why by its id, and its fixed sentences (who does it, the button, the details that name nothing) by
+// their text. A detail that names machines or models stays as the server wrote it.
+function stepText(t: Translator, s: Step) {
+  const sent = (text: string | null) => (text === null ? null : t.lang === "en" ? text : t.maybe(`start.sent.${text}`, text));
+  return {
+    title: t.lang === "en" ? s.title : t.maybe(`start.step.${s.id}.title`, s.title),
+    why: t.lang === "en" ? s.why : t.maybe(`start.step.${s.id}.why`, s.why),
+    detail: sent(s.detail) ?? "",
+    who: sent(s.who),
+    label: s.action ? sent(s.action.label) : null,
+  };
+}
+
 function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void }) {
+  const t = useT();
   const [saved, setSaved] = useState<Checklist | null>(null);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   // What a change answered, until the next poll says the same.
@@ -55,9 +76,7 @@ function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void })
     try {
       setSaved(await api<Checklist>("/onboarding", { method: "PUT", body: { hidden } }));
       reload();
-      setMessage({ tone: "ok", text: hidden
-        ? "Hidden. Forgeyard now opens on Machines; Get started stays in your account menu."
-        : "Forgeyard will open on this list again until every step is done." });
+      setMessage({ tone: "ok", text: hidden ? t("start.hidden") : t("start.shown") });
     } catch (e) {
       setMessage({ tone: "error", text: errorText(e) });
     }
@@ -65,24 +84,22 @@ function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void })
 
   return (
     <>
-      <PageHeader index="Get started" title={setup ? "Set up Forgeyard" : "Use the models"}
-        lead={setup
-          ? "Six steps from a fresh install to your first API call. Each step ticks itself off as soon as it is really done."
-          : "Three steps to call the models on this server from your own programs. Each step ticks itself off when it is done."} />
+      <PageHeader index={t("start.index")} title={setup ? t("start.titleSetup") : t("start.titleUse")}
+        lead={setup ? t("start.leadSetup") : t("start.leadUse")} />
       <HelpLinks>
-        <HelpLink page="quick-start">The quick start, every step with its commands</HelpLink>
-        <HelpLink page="concepts">How Forgeyard fits together</HelpLink>
-        <HelpLink page="troubleshooting">Troubleshooting</HelpLink>
+        <HelpLink page="quick-start">{t("start.help.quick")}</HelpLink>
+        <HelpLink page="concepts">{t("start.help.concepts")}</HelpLink>
+        <HelpLink page="troubleshooting">{t("start.help.troubleshooting")}</HelpLink>
       </HelpLinks>
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
 
-      <section className="onb-progress" aria-label="Progress">
+      <section className="onb-progress" aria-label={t("start.progress")}>
         <ol className="onb-track" aria-hidden="true">
           {c.steps.map((s) => <li key={s.id} className={s.done ? "on" : s === next ? "next" : ""} />)}
         </ol>
         <p className="onb-count">
-          {c.complete ? <><strong>All {c.total} steps done.</strong> Forgeyard is ready to use.</>
-            : <><strong>{c.done} of {c.total} done.</strong> Next step: {next?.title}.</>}
+          {c.complete ? t.rich("start.allDone", { total: c.total, strong: (text) => <strong>{text}</strong> })
+            : t.rich("start.someDone", { done: c.done, total: c.total, next: next ? stepText(t, next).title : "", strong: (text) => <strong>{text}</strong> })}
         </p>
       </section>
 
@@ -97,13 +114,13 @@ function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void })
       <div className="onb-foot">
         {c.hidden ? (
           <>
-            <p className="muted small">This list is hidden from your home page. You can always open it from your account menu.</p>
-            <button type="button" className="btn btn-quiet" onClick={() => void setHidden(false)}>Show it when I open Forgeyard</button>
+            <p className="muted small">{t("start.hiddenNote")}</p>
+            <button type="button" className="btn btn-quiet" onClick={() => void setHidden(false)}>{t("start.showIt")}</button>
           </>
         ) : (
           <>
-            <p className="muted small">{c.complete ? "Done with setup? Forgeyard opens on Machines once every step is done." : "Know your way around already? Hide this list; it stays in your account menu."}</p>
-            <button type="button" className="btn btn-quiet" onClick={() => void setHidden(true)}>Hide this list</button>
+            <p className="muted small">{c.complete ? t("start.doneNote") : t("start.hideNote")}</p>
+            <button type="button" className="btn btn-quiet" onClick={() => void setHidden(true)}>{t("start.hideIt")}</button>
           </>
         )}
       </div>
@@ -112,21 +129,23 @@ function GetStarted({ c: polled, reload }: { c: Checklist; reload: () => void })
 }
 
 function StepRow({ s, n, current }: { s: Step; n: number; current: boolean }) {
+  const t = useT();
+  const text = stepText(t, s);
   const state = s.done ? "done" : current ? "current" : "open";
   return (
-    <li className={`onb-step onb-${state}`} aria-label={`Step ${n}: ${s.title}${s.done ? " (done)" : ""}`}>
+    <li className={`onb-step onb-${state}`} aria-label={`${t("start.stepLabel", { n, title: text.title })}${s.done ? t("start.stepDoneSuffix") : ""}`}>
       <span className="onb-mark" aria-hidden="true">{s.done ? <IconCheck size={16} stroke={2.4} /> : n}</span>
       <div className="onb-body">
-        <h2>{s.title}</h2>
-        <p className="onb-why">{s.why}</p>
+        <h2>{text.title}</h2>
+        <p className="onb-why">{text.why}</p>
         <p className={`onb-detail${s.done ? " onb-detail-done" : ""}`}>
-          {s.done ? "Done. " : ""}{s.detail}
+          {s.done ? `${t("start.doneMark")} ` : ""}{text.detail}
         </p>
-        {s.who && !s.done && <p className="onb-who small">{s.who}</p>}
+        {text.who && !s.done && <p className="onb-who small">{text.who}</p>}
       </div>
       {s.action && (
         <Link to={s.action.to} className={`btn ${current && !s.who ? "btn-primary" : s.done ? "btn-quiet" : ""} onb-action`}>
-          {s.done ? "Open" : s.action.label}{current && !s.who ? <IconArrowRight size={16} aria-hidden="true" /> : null}
+          {s.done ? t("common.open") : text.label}{current && !s.who ? <IconArrowRight size={16} aria-hidden="true" /> : null}
         </Link>
       )}
     </li>
@@ -134,29 +153,28 @@ function StepRow({ s, n, current }: { s: Step; n: number; current: boolean }) {
 }
 
 function ExampleCall({ c }: { c: Checklist }) {
+  const t = useT();
   const [tab, setTab] = useState<"python" | "curl">("python");
   const model = c.example?.model ?? "MODEL_NAME";
   const call = exampleCall(c.gateway_url, model, c.example?.api ?? "openai-chat", c.trust_url);
   return (
     <section className="panel onb-example" aria-labelledby="example-title">
-      <h2 id="example-title">Call /v1</h2>
-      <p>
-        Forgeyard speaks the OpenAI API at this address. Use it as the <code>base_url</code> of any OpenAI client, with your API key
-        in <code>{KEY_ENV}</code> and a deployment's name as the <code>model</code>.
-      </p>
-      <CopyBox value={c.gateway_url} label="Gateway address" />
+      <h2 id="example-title">{t("start.example.title")}</h2>
+      <p>{t.rich("start.example.lead", { baseUrl: <code>base_url</code>, env: <code>{KEY_ENV}</code>, model: <code>model</code> })}</p>
+      <CopyBox value={c.gateway_url} label={t("start.example.address")} />
       {c.trust_url && <TrustHint url={c.trust_url} />}
       <p className="muted small">
         {c.example
-          ? <>The example uses <code>{c.example.model}</code> ({API_KIND[c.example.api] ?? c.example.api}){c.example.ready ? "." : ", which is not ready yet."}</>
-          : <>Nothing is deployed yet: replace <code>MODEL_NAME</code> once a model is deployed. Deployed names are listed under API keys.</>}
+          ? t.rich(c.example.ready ? "start.example.uses" : "start.example.usesNotReady",
+            { model: <code>{c.example.model}</code>, kind: API_KIND[c.example.api] ?? c.example.api })
+          : t.rich("start.example.nothing", { placeholder: <code>MODEL_NAME</code> })}
       </p>
-      <div className="tabs snippet-tabs" role="tablist" aria-label="Example">
+      <div className="tabs snippet-tabs" role="tablist" aria-label={t("start.example.tabs")}>
         <button type="button" role="tab" aria-selected={tab === "python"} className={tab === "python" ? "on" : ""} onClick={() => setTab("python")}>Python (openai)</button>
         <button type="button" role="tab" aria-selected={tab === "curl"} className={tab === "curl" ? "on" : ""} onClick={() => setTab("curl")}>curl</button>
       </div>
-      <pre className="snippet" aria-label={`${tab} example`}>{tab === "python" ? call.python : call.curl}</pre>
-      <p className="muted small">Python needs <code>pip install {c.example && (c.example.api === "rerank" || c.example.api === "classify" || c.example.api.startsWith("vision-")) ? "httpx" : "openai"}</code>. Requests show up under Usage within a few seconds.</p>
+      <pre className="snippet" aria-label={t("start.example.snippet", { tab })}>{tab === "python" ? call.python : call.curl}</pre>
+      <p className="muted small">{t.rich("start.example.needs", { install: <code>pip install {c.example && (c.example.api === "rerank" || c.example.api === "classify" || c.example.api.startsWith("vision-")) ? "httpx" : "openai"}</code> })}</p>
     </section>
   );
 }

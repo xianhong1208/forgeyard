@@ -4,6 +4,10 @@
 // the browser to the sign-in page. 403, 429 and 5xx are errors to show where they happen —
 // a rate limit or a server hiccup must never sign anyone out.
 
+import { hasKey, translate } from "../i18n/core";
+import { getLang } from "../i18n/lang";
+import { serverMessage } from "../i18n/server";
+
 export type ErrorDetail = { code?: string; message?: string; reason?: string; retry_after?: string; [extra: string]: unknown };
 
 export class ApiError extends Error {
@@ -73,7 +77,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     const detail: ErrorDetail =
       typeof raw === "object" && raw !== null && !Array.isArray(raw)
         ? (raw as ErrorDetail)
-        : { message: Array.isArray(raw) ? "Some fields are not valid." : undefined };
+        : Array.isArray(raw) ? { code: "invalid_fields", message: "Some fields are not valid." } : {};
     const retry = Number(res.headers.get("Retry-After"));
     const error = new ApiError(res.status, detail, Number.isFinite(retry) && retry > 0 ? retry : undefined);
     if (res.status === 401 && !opts.expect401) unauthorized?.(detail.reason);
@@ -82,11 +86,16 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   return data as T;
 }
 
-export function errorText(e: unknown): string {
+// What to show for a failed request, in the reader's language: English shows the server's message as it came;
+// zh-TW translates the common codes (i18n/en/server.ts) and shows any other message as sent.
+export function errorText(e: unknown, lang = getLang()): string {
   if (e instanceof ApiError) {
-    if (e.status === 429 && e.retryAfter) return `${e.message} (about ${e.retryAfter} s)`;
-    if (e.status >= 500) return "The server had a problem. Try again in a moment.";
-    return e.message;
+    const failed = translate(lang, "server.failed", { status: String(e.status) });
+    const said = e.detail.message ? serverMessage(e.code, e.detail.message, lang)
+      : lang !== "en" && e.detail.code && hasKey(`server.code.${e.code}`) ? serverMessage(e.code, null, lang) : failed;
+    if (e.status === 429 && e.retryAfter) return translate(lang, "server.retryAbout", { message: said, seconds: e.retryAfter });
+    if (e.status >= 500) return translate(lang, "server.serverProblem");
+    return said;
   }
-  return "Something went wrong.";
+  return translate(lang, "server.generic");
 }

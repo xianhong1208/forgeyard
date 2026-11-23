@@ -1,5 +1,6 @@
 // What runs where (1.4): machines, deployments and workloads joined, so a page can ask "what holds
 // this card" and "where does this model run". Pure functions; the icons are in components/Fleet.tsx.
+import { labels, t, tPlural } from "../i18n/core";
 import { bytes } from "./machines";
 import { isVisionTask } from "./models";
 import { asleepOn, type AsleepHere } from "./sleep";
@@ -9,21 +10,26 @@ import type { Accelerator, Deployment, Machine, Replica, Workload } from "./type
 
 export type MachineKind = "nvidia" | "amd-gpu" | "amd-apu" | "cpu";
 
+// The labels are read in the reader's language each time (i18n labels()).
+const KIND_LABEL = labels({ nvidia: "fleet.machineKind.nvidia", "amd-gpu": "fleet.machineKind.amd-gpu", "amd-apu": "fleet.machineKind.amd-apu",
+  cpu: "fleet.machineKind.cpu" });
 export const MACHINE_KIND: Record<MachineKind, { label: string; short: string }> = {
-  nvidia: { label: "NVIDIA GPU", short: "NVIDIA" },
-  "amd-gpu": { label: "AMD GPU", short: "AMD" },
-  "amd-apu": { label: "AMD APU", short: "APU" },
-  cpu: { label: "CPU only", short: "CPU" },
+  nvidia: { get label() { return KIND_LABEL.nvidia; }, short: "NVIDIA" },
+  "amd-gpu": { get label() { return KIND_LABEL["amd-gpu"]; }, short: "AMD" },
+  "amd-apu": { get label() { return KIND_LABEL["amd-apu"]; }, short: "APU" },
+  cpu: { get label() { return KIND_LABEL.cpu; }, short: "CPU" },
 };
 export const MACHINE_KIND_ORDER: MachineKind[] = ["nvidia", "amd-gpu", "amd-apu", "cpu"];
 
 // The summary above the machine tiles counts machines, not cards (1.4): "1 NVIDIA machine",
 // "2 CPU-only machines". AMD GPU and APU machines are both "AMD" unless both kinds are there.
-const MACHINE_NOUN: Record<MachineKind, string> = { nvidia: "NVIDIA", "amd-gpu": "AMD", "amd-apu": "AMD", cpu: "CPU-only" };
+const MACHINE_NOUN = { nvidia: "fleet.machineNoun.nvidia", "amd-gpu": "fleet.machineNoun.amd", "amd-apu": "fleet.machineNoun.amd",
+  cpu: "fleet.machineNoun.cpu" } as const;
 export function machineCount(kind: MachineKind, n: number, kinds: MachineKind[] = [kind]): string {
   const bothAmd = kinds.includes("amd-gpu") && kinds.includes("amd-apu");
-  const noun = bothAmd && kind === "amd-gpu" ? "AMD GPU" : bothAmd && kind === "amd-apu" ? "AMD APU" : MACHINE_NOUN[kind];
-  return `${noun} machine${n === 1 ? "" : "s"}`;
+  const noun = bothAmd && kind === "amd-gpu" ? "fleet.machineNoun.amd-gpu" : bothAmd && kind === "amd-apu" ? "fleet.machineNoun.amd-apu"
+    : MACHINE_NOUN[kind];
+  return tPlural(noun, n);
 }
 
 export function cards(m: Machine): Accelerator[] {
@@ -68,17 +74,21 @@ export function memoryRows(m: Machine): Accelerator[] {
 
 export type ModelKind = "chat" | "multimodal" | "embed" | "rerank" | "classify" | "asr" | "tts" | "image" | "video" | "vision";
 
+const MODEL_API: Record<ModelKind, string> = {
+  chat: "/v1/chat/completions", multimodal: "/v1/chat/completions", embed: "/v1/embeddings", rerank: "/v1/rerank", classify: "/v1/classify",
+  asr: "/v1/audio/transcriptions", tts: "/v1/audio/speech", image: "/v1/images/generations", video: "/v1/videos", vision: "/v1/vision/…",
+};
+function modelKindEntry(k: ModelKind): { label: string; api: string; hint: string } {
+  return {
+    get label() { return t(`fleet.modelKind.${k}`); },
+    api: MODEL_API[k],
+    get hint() { return t(`fleet.modelHint.${k}`); },
+  };
+}
 export const MODEL_KIND: Record<ModelKind, { label: string; api: string; hint: string }> = {
-  chat: { label: "Chat", api: "/v1/chat/completions", hint: "Text in, text out" },
-  multimodal: { label: "Multimodal chat", api: "/v1/chat/completions", hint: "Chat that also reads images, audio or video" },
-  embed: { label: "Embeddings", api: "/v1/embeddings", hint: "Text to vectors, for search" },
-  rerank: { label: "Rerank", api: "/v1/rerank", hint: "Orders documents by relevance" },
-  classify: { label: "Text classification", api: "/v1/classify", hint: "Labels a text: sentiment, language, toxicity…" },
-  asr: { label: "Speech to text", api: "/v1/audio/transcriptions", hint: "Transcription" },
-  tts: { label: "Text to speech", api: "/v1/audio/speech", hint: "Voices" },
-  image: { label: "Images", api: "/v1/images/generations", hint: "Text to image" },
-  video: { label: "Video", api: "/v1/videos", hint: "Text to video, as jobs" },
-  vision: { label: "Vision", api: "/v1/vision/…", hint: "Object detection, segmentation, depth and image classification" },
+  chat: modelKindEntry("chat"), multimodal: modelKindEntry("multimodal"), embed: modelKindEntry("embed"), rerank: modelKindEntry("rerank"),
+  classify: modelKindEntry("classify"), asr: modelKindEntry("asr"), tts: modelKindEntry("tts"), image: modelKindEntry("image"),
+  video: modelKindEntry("video"), vision: modelKindEntry("vision"),
 };
 export const MODEL_KIND_ORDER: ModelKind[] = ["chat", "multimodal", "embed", "rerank", "classify", "asr", "tts", "image", "video", "vision"];
 
@@ -153,7 +163,7 @@ export function placement(workloads: Workload[], deployments: Deployment[]): Pla
 // 1.4 (#88): an app is named where it holds a card, so the card is never shown free, but not linked:
 // apps left the console (deprecated, removed in 1.5).
 export function appTitle(name: string): string {
-  return `App ${name}: apps are deprecated and removed in 1.5 (API only until then)`;
+  return t("fleet.appTitle", { name });
 }
 
 // One entry per name: a deployment with two replicas on a machine counts once.
@@ -190,7 +200,7 @@ export function share(n: number, total: number): string {
 }
 
 export function memoryLabel(mem: CardMemory): string {
-  return `${bytes(mem.forgeyard)} reserved by Forgeyard, ${bytes(mem.other)} other use, ${bytes(mem.free)} free of ${bytes(mem.total)}`;
+  return t("fleet.memory", { forgeyard: bytes(mem.forgeyard), other: bytes(mem.other), free: bytes(mem.free), total: bytes(mem.total) });
 }
 
 // "GPU #0 #1", "CPU", or "" for a replica not placed.

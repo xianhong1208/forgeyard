@@ -67,6 +67,9 @@ Each start is timed, and vLLM keeps its compile cache between starts, so a resta
 long. Sleep and automatic replicas are off until you turn them on; update the agents after the server. Every
 change is in the [CHANGELOG](CHANGELOG.md).
 
+1.5.1 (in progress) brings the console in **Traditional Chinese** as well as English: it follows the browser's
+language the first time, and the account menu switches it ([how](docs/guide/how-to.md#use-the-console-in-traditional-chinese)).
+
 ## What's new in 1.4
 
 1.4 makes Forgeyard easier to see: machine tiles and pages with a memory map, a **Serving** page for

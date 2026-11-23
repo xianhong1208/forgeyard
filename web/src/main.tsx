@@ -11,7 +11,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 
 import App from "./App";
+import { applyHtmlLang } from "./i18n/lang";
 import { AuthProvider } from "./auth";
+
+applyHtmlLang(); // before the first paint, so the browser picks CJK fonts for zh-TW at once
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
