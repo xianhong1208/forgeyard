@@ -13,7 +13,7 @@
 - **[`scripts/accept_vision.py`](../scripts/accept_vision.py)**，視覺模型：每個模型都以內建的 `vision` 配方部署，用一張已知的照片呼叫
   `/v1/vision/*`，再檢查各種拒絕情況與它記錄的用量。
 - **[`scripts/accept_scale.py`](../scripts/accept_scale.py)**（1.5.0），閒置時休眠、喚醒和自動副本數：模型休眠並釋放記憶體，請求只會喚醒它一次，
-  允許外溢的金鑰在這段時間由雲端服務，負載會增加一個副本，而在它上面的串流會在排空時完整結束。它也是 `accept_all.py` 的 `scale` 群組。
+  允許溢出的金鑰在這段時間由雲端服務，負載會增加一個副本，而在它上面的串流會在排空時完整結束。它也是 `accept_all.py` 的 `scale` 群組。
 - 其他 `scripts/accept_*.py` 腳本更深入地檢查單一功能（對話中的圖片、音訊與影片；文字轉語音；圖片與影片生成）；
   [docs/development.zh-TW.md](development.zh-TW.md) 列出了它們。
 
