@@ -10,6 +10,7 @@ is removed when a recipe is changed or deleted (`prune`).
 from __future__ import annotations
 
 import logging
+from datetime import timezone
 from typing import Optional
 
 from sqlalchemy import delete, select
@@ -55,8 +56,15 @@ def signatures(db: DbSession, refs: list[str]) -> dict[str, dict]:
     if not refs:
         return {}
     rows = db.scalars(select(ImagePin).where(ImagePin.ref.in_(refs))).all()
-    return {r.ref: {"signature": r.signature, "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
-                    "recorded_by": r.recorded_by} for r in rows}
+    return {r.ref: {"signature": r.signature, "recorded_at": _iso(r.recorded_at), "recorded_by": r.recorded_by}
+            for r in rows}
+
+
+def _iso(at) -> Optional[str]:
+    """In UTC with its offset (SQLite hands back a naive time)."""
+    if at is None:
+        return None
+    return (at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)).isoformat()
 
 
 def record(db: DbSession, ref: str, entry: dict, signature: Optional[dict], by: str) -> None:

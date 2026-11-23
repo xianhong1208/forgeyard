@@ -68,6 +68,8 @@ export function TryDialog({ recipe, candidate, signed, onClose }: {
   const included = candidate.variants.filter((v) => v.available);
   const left = candidate.variants.filter((v) => !v.available);
   const mentions = candidate.mentions ?? [];
+  // Between two sentences: a space in English, none after Chinese full-width punctuation.
+  const gap = t.lang === "en" ? " " : "";
 
   const make = async () => {
     setBusy(true);
@@ -129,8 +131,9 @@ export function TryDialog({ recipe, candidate, signed, onClose }: {
             </div>
             <Notice tone="warn">
               {t("enginetry.warn", { name: recipe.name, from: recipe.version })}
-              {mentions.length > 0 && <> {t("enginetry.mentions", { list: mentions.map((m) => m.flag).join(", ") })}</>}
-              {candidate.release?.url && <> <a href={candidate.release.url} target="_blank" rel="noreferrer noopener">{t("enginetry.notes")} <IconExternalLink size={12} aria-hidden="true" /></a></>}
+              {mentions.length > 0 && <>{gap}{t.rich("enginetry.mentions", { list: <>{mentions.map((m, i) => (
+                <span key={m.flag}>{i ? t("library.listSep") : ""}<code className="et-flag">{m.flag}</code></span>))}</> })}</>}
+              {candidate.release?.url && <>{gap}<a href={candidate.release.url} target="_blank" rel="noreferrer noopener">{t("enginetry.notes")} <IconExternalLink size={12} aria-hidden="true" /></a></>}
             </Notice>
             {error && <Notice tone="error">{error}</Notice>}
             <div className="dlg-foot">

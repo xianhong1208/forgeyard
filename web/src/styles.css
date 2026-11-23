@@ -483,6 +483,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .et-pins td { vertical-align: top; }
 .et-pins td:first-child { white-space: nowrap; }
 .et-pins .chip svg { vertical-align: -2px; }
+.table-wrap + .et-block { margin-top: 14px; }
+.et-flag { white-space: nowrap; }
 .spin { animation: eu-spin 1s linear infinite; }
 @keyframes eu-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

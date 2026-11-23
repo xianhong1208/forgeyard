@@ -125,7 +125,9 @@ describe("Try this version (1.5.2, #95 PR 2)", () => {
     expect(within(dlg).getByText("No v0.34.0-cu129 image in docker.io/vllm/vllm-openai; this variant's images stop at 0.32.0.")).toBeTruthy();
     expect(within(dlg).getByText("Machines that need a variant left out keep using the built-in vllm.")).toBeTruthy();
     expect(within(dlg).getByText("vLLM publishes no signatures or attestations for its images. The copy is pinned by digest only.")).toBeTruthy();
-    expect(within(dlg).getByText(/can change flags, defaults and memory use.*measured on 0.32.0.*--gpu-memory-utilization/)).toBeTruthy();
+    const warn = within(dlg).getByText(/can change flags, defaults and memory use/).closest(".notice")!;
+    expect(warn.textContent).toMatch(/measured on 0.32.0\. Try it on one deployment before moving others\. Its release notes mention flags or settings this engine uses: --gpu-memory-utilization\. Read the release notes/);
+    expect(within(warn as HTMLElement).getByText("--gpu-memory-utilization").tagName).toBe("CODE");
     expect(within(dlg).getByRole("link", { name: /Read the release notes/ }).getAttribute("href")).toBe("https://github.com/vllm-project/vllm/releases/tag/v0.34.0");
     fireEvent.change(within(dlg).getByLabelText("Name of the copy"), { target: { value: "vllm-next " } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Make the copy" }));
@@ -211,6 +213,9 @@ describe("Try this version (1.5.2, #95 PR 2)", () => {
     expect(within(dlg).getByText("docker.io/vllm/vllm-openai 沒有 v0.34.0-cu129 映像檔；這個變體的映像檔只到 0.32.0。")).toBeTruthy();
     expect(within(dlg).getByText("vLLM 的映像檔沒有提供簽章或建置證明。這個複本只以 digest 釘選。")).toBeTruthy();
     expect(within(dlg).getByRole("button", { name: "建立複本" })).toBeTruthy();
+    // No space after Chinese full-width punctuation between the warning's sentences.
+    expect(within(dlg).getByText(/新版本可能改變參數/).closest(".notice")!.textContent)
+      .toContain("再把其他部署換過去。版本說明提到這個推論引擎使用的參數或設定：--gpu-memory-utilization。閱讀版本說明");
     cleanup();
     serve();
     mount("/models/engines/vllm-0-34-0");

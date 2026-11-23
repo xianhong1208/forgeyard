@@ -184,7 +184,7 @@ def test_fy_etry_001_vllm_0_34_0_copied_with_the_built_ins_arguments_and_its_ima
     assert audit["signatures"] == {"cuda": "unsigned", "rocm": "unsigned"}
     page = owner.get("/api/recipes/vllm-0-34-0").json()
     assert page["recipe"]["based_on"] == "vllm" and page["pins"]["cuda"]["signature"]["status"] == "unsigned"
-    assert page["pins"]["cuda"]["recorded_by"] == "owner"
+    assert page["pins"]["cuda"]["recorded_by"] == "owner" and page["pins"]["cuda"]["recorded_at"].endswith("+00:00")
     listed = {x["name"]: x for x in owner.get("/api/recipes").json()["recipes"]}
     assert listed["vllm-0-34-0"]["based_on"] == "vllm" and listed["vllm"]["based_on"] is None
     # The built-in stays as it is.
