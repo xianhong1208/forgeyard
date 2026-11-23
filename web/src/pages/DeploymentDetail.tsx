@@ -5,8 +5,10 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { useAuth } from "../auth";
 
 import { AdvisorBanner } from "../components/Advisor";
+import { EngineImage } from "../components/EngineImage";
 import { Notice, PageHeader } from "../components/ui";
 import { api, errorText } from "../lib/api";
+import { deploymentRuns } from "../lib/engines";
 import { MODEL_KIND, modelKind } from "../lib/fleet";
 import { exact, imageTag, when } from "../lib/format";
 import { ms, num } from "../lib/gateway";
@@ -14,7 +16,7 @@ import { FALLBACK_ANCHOR, routeHome, targetName, tiers } from "../lib/routing";
 import { bytes } from "../lib/machines";
 import { API_LABEL, downloadFraction, downloadText, gib } from "../lib/models";
 import { engineHref, modelHref } from "../lib/pages";
-import type { Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions, RoutesResponse, TryResponse } from "../lib/types";
+import type { CatalogResponse, Deployment, DeploymentResponse, LiveCard, RouteInfo, RouteOptions, RoutesResponse, TryResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 import { STATE_TONE, STATUS_TONE, gpuLabel, stateLabel, statusLabel } from "../lib/workloads";
 import { RoutingEditor } from "./RouteDetail";
@@ -66,11 +68,15 @@ export function DeploymentDetailPage() {
   };
 
   const w = d?.workload;
+  // 1.5.2 (#189): the image beside the engine's name: what the replicas run, or (none placed) the engine's own.
+  const placed = (w?.replica_list ?? []).map((r) => r.runs?.image).filter((x): x is string => Boolean(x));
+  const cat = useApi<CatalogResponse>(d && placed.length === 0 ? "/models" : null);
+  const runs = d ? deploymentRuns(placed, cat.data?.recipes.find((r) => r.name === d.recipe), d.estimate.device) : [];
   return (
     <>
       <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> {t("shell.nav.serving")}</Link></p>
       <PageHeader index={`02 · ${d ? MODEL_KIND[modelKind(d)].label : t("deployment.eyebrow")}`} title={d?.name ?? t("deployment.title")}
-        lead={d ? t.rich("deployment.lead", { model: <Link to={modelHref(d.model.name)}>{d.model.name}</Link>, recipe: <Link to={engineHref(d.recipe)}>{d.recipe}</Link>,
+        lead={d ? t.rich("deployment.lead", { model: <Link to={modelHref(d.model.name)}>{d.model.name}</Link>, recipe: <span className="engine-with-image"><Link to={engineHref(d.recipe)}>{d.recipe}</Link><EngineImage runs={runs} /></span>,
           served: d.served_name, by: d.created_by ?? "?", when: when(d.created_at) }) : undefined}
         actions={d && w && canManage && (
           <>

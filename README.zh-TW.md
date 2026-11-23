@@ -18,17 +18,17 @@
 ## ✨ 主要功能
 
 - **一個主控台管理 NVIDIA、AMD 與 CPU 機器。** 每台機器在你允許的顯示卡上執行模型副本；AMD
-  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和引擎映像檔以及它們的大小，可刪除那台機器上沒有部署在用的項目。**Download to…** 可以在部署之前，先把模型和引擎下載到選定的機器，並顯示進度。連不到 Hugging Face、GitHub 或映像檔 registry 的機器會經由伺服器取得檔案和有釘選的引擎映像檔，伺服器只轉送、不存檔，另一台機器的快取裡有模型檔時就從那台取得；管理員也可以把映像檔上傳到機器，或從另一台機器複製映像檔。比伺服器舊的 agent 會被標示出來，機器頁面上會顯示更新它的確切指令。
+  顯示卡使用 ROCm 或 Vulkan 版本。每台機器的頁面會畫出每張卡的記憶體分別被哪些部署佔用，並列出快取裡的模型和推論引擎的映像檔以及它們的大小，可刪除那台機器上沒有部署在用的項目。**Download to…** 可以在部署之前，先把模型和推論引擎下載到選定的機器，並顯示進度。連不到 Hugging Face、GitHub 或映像檔 registry 的機器會經由伺服器取得檔案和有釘選的推論引擎映像檔，伺服器只轉送、不存檔，另一台機器的快取裡有模型檔時就從那台取得；管理員也可以把映像檔上傳到機器，或從另一台機器複製映像檔。比伺服器舊的 agent 會被標示出來，機器頁面上會顯示更新它的確切指令。
 - **部署前先估算記憶體。** Forgeyard 不用下載模型就能讀到它的資訊，顯示一份副本需要多少記憶體、放得進哪些機器，小模型還能共用一張 GPU。偶爾才用的模型可以在閒置時休眠，把記憶體還回來（1.5.0）：下一個請求就會喚醒它並等它就緒。
-- **每個模型、每個引擎都有自己的頁面。** 目錄模型的頁面列出哪些機器已經快取它、一份副本現在放得進哪裡、它的部署、引擎和檔案；引擎的頁面列出它的變體，以及哪些機器已經有它的映像檔或程式。
-- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。`/metrics` 提供 Prometheus 指標。一直離線的機器，它的副本會重新放到放得下的機器上。模型每次啟動都會計時，並分出各部分（模型檔案、映像檔、引擎）；啟動中的副本每秒檢查一次，一就緒就開始服務。開啟自動副本數（1.5.0）時，閘道看到部署忙碌就在放得下的地方加一個副本，閒下來幾分鐘後先排空再移除一個。
+- **每個模型、每個推論引擎都有自己的頁面。** 目錄模型的頁面列出哪些機器已經快取它、一份副本現在放得進哪裡、它的部署、推論引擎和檔案；推論引擎的頁面列出它的變體，以及哪些機器已經有它的映像檔或程式。
+- **OpenAI 相容的閘道。** 每個部署都在 `/v1` 提供服務，有 API 金鑰、每個金鑰的限制、依金鑰、模型和人統計的用量與費用（可按日、週、月畫成折線圖），副本之間會自動容錯移轉。`/metrics` 提供 Prometheus 指標。一直離線的機器，它的副本會重新放到放得下的機器上。模型每次啟動都會計時，並分出各部分（模型檔案、映像檔、推論引擎）；啟動中的副本每秒檢查一次，一就緒就開始服務。開啟自動副本數（1.5.0）時，閘道看到部署忙碌就在放得下的地方加一個副本，閒下來幾分鐘後先排空再移除一個。
 - **本機優先，必要時才用雲端。** 只有本機副本忙碌或停擺時，而且只限允許的金鑰，請求才會在每月預算內溢出到
   OpenAI、Anthropic、Gemini、Azure 或 OpenRouter。
 - **只在需要時使用 GPU（1.5.0）。** 沒人呼叫的部署可以休眠，把記憶體還回來；下一個請求會喚醒它並等待回應（金鑰允許時，等待期間改由雲端服務），無法喚醒的模型會立刻說明原因。
 - **不只是對話。** 對話中的圖片、音訊與影片、embedding 與 rerank、`/v1/classify` 的文字分類（1.4.4）、語音轉文字、文字轉語音、圖片生成，以及以非同步工作產生的影片。
 - **視覺模型（1.4）。** 物件偵測（1.4.4 起也有找你說的東西的偵測模型）、影像分割、深度估計與（1.4.4）圖片分類在 `/v1/vision/…`，像其他模型一樣部署。
 - **開箱即用的 HTTPS。** 伺服器自己建立憑證授權單位（CA），agent 加入時釘選它的指紋，儲存的機密都經過加密。管理員可以從主控台把金鑰和 CA 下載成一個用通關密語加密的備份檔（1.4.2）。1.4.5 起，閘道也以 TLS 連每個副本，憑證由這個 CA 替那台機器簽發（金鑰絕不離開那台機器）。
-- **沒有網路的機器。** 用檔案帶過去的引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
+- **沒有網路的機器。** 用檔案帶過去的推論引擎映像檔，就能照原樣執行內建的 recipe；agent 執行前會先核對載入的映像檔是不是釘選的那一個。放置副本時，會優先選已經有模型和推論引擎的機器，避開連不到 Hugging Face、GitHub 或映像檔 registry 的機器，並把卡在這種下載上的副本移到連得到的機器。
 
 ## 1.5 的新功能
 
@@ -43,10 +43,10 @@
 
 1.4 讓 Forgeyard 更容易看清楚：機器以圖塊呈現，每台機器有自己的頁面和記憶體分布圖；**Serving** 頁面列出正在執行的模型，模型庫分成
 Catalog、Engines、Sources；用量與費用有折線圖；視覺模型（物件偵測、影像分割、深度估計）像其他模型一樣部署。**Download to…**
-可以在部署前先把模型和引擎下載到機器上；連不上網際網路的機器會經由伺服器取得，管理員也能上傳映像檔給它。應用程式（Apps）離開了主控台，它們的
-API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器的快取取得模型檔，管理員也能把引擎映像檔從一台機器複製到另一台，
-兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的引擎映像檔並能刪除舊的，
-安排副本時也會計算還有多少空的主機連接埠。1.4.3 讓目錄裡的每個模型和每個引擎都有自己的頁面：
+可以在部署前先把模型和推論引擎下載到機器上；連不上網際網路的機器會經由伺服器取得，管理員也能上傳映像檔給它。應用程式（Apps）離開了主控台，它們的
+API 已標為淘汰，1.5 移除。1.4.1 讓這種機器可以從另一台機器的快取取得模型檔，管理員也能把推論引擎的映像檔從一台機器複製到另一台，
+兩者都仍然經由伺服器。1.4.2 在機器的頁面上列出更新它 agent 的完整指令，列出它的推論引擎映像檔並能刪除舊的，
+安排副本時也會計算還有多少空的主機連接埠。1.4.3 讓目錄裡的每個模型和每個推論引擎都有自己的頁面：
 它在哪些機器上、每台機器放不放得下、誰在使用它。1.4.4 加入零樣本物件偵測（找出你指定的東西）、
 文字分類和影像分類。1.4.5 修正外部審閱找到的問題：閘道以 TLS 連到每個副本、副本會移出一直離線的機器、Prometheus 指標、
 記憶體的估算與保留都站得住，請求也不會被執行兩次（伺服器升級後請更新 agent）。所有變更見 [CHANGELOG](CHANGELOG.md)（英文）。
@@ -166,7 +166,7 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 | 頁面 | 內容 |
 |---|---|
 | [快速入門](docs/guide/zh-TW/quick-start.md) | 從零開始，大約十分鐘完成第一次 `/v1` 呼叫 |
-| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、模型、引擎與估算、部署與閘道、金鑰、角色 |
+| [概念](docs/guide/zh-TW/concepts.md) | 機器與 agent、GPU 存取、模型、推論引擎與估算、部署與閘道、金鑰、角色 |
 | [操作指南](docs/guide/zh-TW/how-to.md) | AMD 與純 CPU 機器、用 Docker 跑伺服器與 agent、共用 GPU、自己的憑證、升級、備份 |
 | [雲端供應商](docs/guide/zh-TW/cloud-providers.md) | 把 OpenAI、Anthropic、Gemini、Azure、OpenRouter 或你自己的伺服器放到 `/v1` 後面；請求何時溢出；哪些金鑰可以使用雲端 |
 | [疑難排解](docs/guide/zh-TW/troubleshooting.md) | 在真實機器上遇過的問題與解法 |
@@ -188,14 +188,14 @@ sudo docker run -d --name forgeyard-agent --restart always --network host \
 |---|---|---|
 | NVIDIA A100 80GB PCIe（8 卡主機，使用 GPU 允許清單） | driver 580、CUDA 13.0、Docker | 加入伺服器與 GPU 允許清單；服務和任務以行程或容器執行，各自只看到分配到的顯示卡；vLLM 0.32（Qwen3-4B 對話、Qwen3 embedding 與 reranker、用 Qwen3-VL-2B 在對話中處理圖片與影片、用 Gemma 4 12B 在對話中處理音訊）、speaches 0.8.3（faster-whisper）、vLLM-Omni（Qwen3-TTS 文字轉語音、Stable Diffusion XL 與 Z-Image-Turbo 生成圖片、Wan2.1 生成影片）、llama.cpp 1.0.0 的 CUDA 版本（用 Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF 在對話中處理圖片、音訊與影片，用 Qwen3-TTS 1.7B 與 Chatterbox Turbo GGUF 做文字轉語音）；用官方 OpenAI SDK 呼叫閘道；以容器映像檔執行 agent |
 | AMD Ryzen AI MAX+ 395 與 Radeon 8060S（Strix Halo，gfx1151 APU，BIOS 切出 96 GiB 給 VRAM） | Ubuntu 24.04、ROCm 7.0.2、amd-smi 26.0.2 | 透過 `amdsmi` 函式庫偵測硬體（統一記憶體）、加入伺服器，並在連不到 Hugging Face 和 `ghcr.io` 的機器上用 llama.cpp 的 Vulkan 版本（在 b12242 上驗收）跑 Qwen3-1.7B GGUF，透過 `/v1` 提供服務；在 llama.cpp 1.0.0 的 Vulkan 版本上（同樣離線）測了對話中的圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）以及文字轉語音（Qwen3-TTS 1.7B 與 Chatterbox Turbo GGUF）；用 stable-diffusion.cpp 的 Vulkan 版本生成圖片（Z-Image-Turbo GGUF），映像檔從檔案載入 |
-| 沒有 GPU 的 x86-64 | Linux | llama.cpp 1.0.0 以行程執行（Qwen3-1.7B GGUF），同時跑在兩個 agent 上：負載分配，一台的引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp 1.0.0（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以行程方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
+| 沒有 GPU 的 x86-64 | Linux | llama.cpp 1.0.0 以行程執行（Qwen3-1.7B GGUF），同時跑在兩個 agent 上：負載分配，一台的推論引擎掛掉時自動轉到另一台；用 llama.cpp 在對話中處理圖片、音訊與影片（Qwen3-VL-2B 與 Qwen2.5-Omni-3B GGUF）；llama.cpp 1.0.0（Qwen3-TTS 1.7B GGUF 說中文與英文、Chatterbox Turbo）與 speaches（Kokoro 82M）的文字轉語音，並以 faster-whisper 聽寫確認內容；用 stable-diffusion.cpp 以行程方式生成圖片（Stable Diffusion 1.5 與 Z-Image-Turbo GGUF） |
 | Google Gemini（`gemini-2.5-flash`） | 它的 OpenAI 相容端點 | 請求超過本機模型的 context 時溢出到雲端、串流、費用（含思考 tokens）與預算 |
 
 還沒在真實硬體上檢查的：`vllm` 和 `llama-cpp` 配方的 ROCm 映像檔、獨立 AMD 顯示卡，在有 systemd 的主機上用單行指令安裝，以及 Wan2.2-TI2V-5B 的影片生成。影片生成已用 vLLM-Omni 檢查過（A100 上的 Wan2.1-T2V-1.3B，832x480、5 秒）。NVIDIA 上的圖片生成已用 vLLM-Omni（A100 上的 Stable Diffusion XL 與 Z-Image-Turbo）與 stable-diffusion.cpp 的 CUDA 版本（A100 上的 Stable Diffusion 1.5 與 Z-Image-Turbo GGUF）檢查過。歡迎回報在其他機器上的結果（見 [CONTRIBUTING.md](CONTRIBUTING.md)，英文）。
 
 ### 實測過的模型
 
-| 模型 | 引擎（配方） | 硬體 |
+| 模型 | 推論引擎（配方） | 硬體 |
 |---|---|---|
 | **對話** | | |
 | Qwen3-4B | vLLM 0.32（`vllm`） | NVIDIA A100 |

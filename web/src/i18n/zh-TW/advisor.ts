@@ -70,7 +70,7 @@ export default {
   "advisor.finding.deployment-waiting": "有部署還在等空間",
   "advisor.finding.deployment-wakes-often": "有部署一天被喚醒很多次",
   "advisor.finding.env-seed-ignored": "有設定被資料庫裡的值覆蓋",
-  "advisor.finding.extra-args-override": "額外的引擎參數覆蓋了 Forgeyard 的設定",
+  "advisor.finding.extra-args-override": "額外的推論引擎參數覆蓋了 Forgeyard 的設定",
   "advisor.finding.gated-model-no-token": "受限模型需要 Hugging Face 權杖",
   "advisor.finding.gpus-shared-no-allowlist": "有機器的 GPU 被其他程式使用",
   "advisor.finding.heartbeat-flapping": "有機器一直離線又回來",

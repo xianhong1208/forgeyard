@@ -72,22 +72,22 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 - **無法使用（unavailable）**：沒有任何副本就緒，或連不上任何副本；
 - **忙碌（busy）**：每個就緒副本經由這台伺服器處理中的請求數，都已達到它所屬部署的 *Concurrent requests* 設定。如果設了 **等待空出本機位置**，會先最多等待那麼多毫秒（上限 10,000；預設 0）。請求會排隊，先到先處理：空出來的位置一定給等最久的那個，絕不會給剛到的。每一層最多 256 個在等；再多一個就不等，直接往下走；
-- **拒絕（refusing）**：引擎回應 429 或 503；
+- **拒絕（refusing）**：推論引擎回應 429 或 503；
 - **太小（too small）**，只在路由勾選 **提示詞太長時溢出** 時：提示的大小（以每個 token 約 3 bytes 偏高估算）加上 `max_tokens`，超過部署的 context。
 
 下列情況**絕不**會往下走：
 
-- 引擎回應其他錯誤，例如請求有誤的 400（換到哪裡都會失敗，還會在上游花錢）；
+- 推論引擎回應其他錯誤，例如請求有誤的 400（換到哪裡都會失敗，還會在上游花錢）；
 - 請求已送出，但沒有及時回應（504）：再試一次會讓工作加倍；
 - 副本拒絕閘道的內部金鑰（502）；
 - 用戶端已經離開；
 - 回答已經開始串流。
 
-如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會送到本機副本，不再受 *Concurrent requests* 限制：由引擎排隊處理。
+如果本機這層是忙碌，而雲端也接不下這個請求，請求最後還是會送到本機副本，不再受 *Concurrent requests* 限制：由推論引擎排隊處理。
 
 **結構化輸出不會在路上遺失。** 要求特定回答形狀的請求（`json_object` 或 `json_schema` 的 `response_format`、vLLM 的 `structured_outputs` 或 `guided_json`、`guided_regex`、`guided_choice`、`guided_grammar`、llama.cpp 的 `grammar` 或 `json_schema`，或帶 `strict: true` 的工具），會略過每個會拿掉或忽略該參數的供應商目標，而不是拿回一個沒有受限的回答：
 
-- 每種雲端都會拿掉只有引擎才有的那些（`structured_outputs`、`guided_*`、`grammar`、`json_schema`），以及只有引擎認得的 `response_format` 類型；
+- 每種雲端都會拿掉只有推論引擎才有的那些（`structured_outputs`、`guided_*`、`grammar`、`json_schema`），以及只有推論引擎認得的 `response_format` 類型；
 - Anthropic 另外會忽略 `json_object`、沒有 `strict: true` 的 `json_schema`，以及工具上的 `strict`；
 - *OpenAI-compatible server* 全部保留；
 - 供應商模型自己的拿掉清單（`drop_params`，透過 API 設定）列到其中一個時，也會為它略過。
@@ -160,7 +160,7 @@ Anthropic 表示它的 OpenAI 相容層並非大多數用途的長期或正式�
 
 ### OpenRouter 和其他伺服器
 
-只有它們背後某個供應商特有的功能。OpenRouter 接受 `top_k`、`min_p` 和 `repetition_penalty` 並往下傳；對其他雲端種類，請求送出時 Forgeyard 會拿掉這些以及其他只有引擎才有的參數（vLLM 的 `chat_template_kwargs`、`guided_*`，llama.cpp 的取樣設定），並寫在 `X-Forgeyard-Dropped-Params`。結構化輸出會被拿掉的請求根本不會送到那裡（[請求何時溢出](#when-a-request-spills)）。
+只有它們背後某個供應商特有的功能。OpenRouter 接受 `top_k`、`min_p` 和 `repetition_penalty` 並往下傳；對其他雲端種類，請求送出時 Forgeyard 會拿掉這些以及其他只有推論引擎才有的參數（vLLM 的 `chat_template_kwargs`、`guided_*`，llama.cpp 的取樣設定），並寫在 `X-Forgeyard-Dropped-Params`。結構化輸出會被拿掉的請求根本不會送到那裡（[請求何時溢出](#when-a-request-spills)）。
 
 ## 費用與價格
 
@@ -231,7 +231,7 @@ prompt size (about 3 bytes a token, on the high side) × input price
 
 路由對**這個範圍變成只用本機**；只要還有別的目標能服務，就不會失敗：
 
-- 請求原本因為本機**忙碌**而要溢出：最後還是送到本機副本，由引擎排隊處理；
+- 請求原本因為本機**忙碌**而要溢出：最後還是送到本機副本，由推論引擎排隊處理；
 - 雲端那一層還有別的供應商有額度：由那個供應商服務；
 - 回應會帶 `X-Forgeyard-Budget-Exhausted`，說明是哪個預算讓請求沒有送到某個供應商：`key`、`person` 或 `provider:<name>`。
 
@@ -304,4 +304,4 @@ prompt size (about 3 bytes a token, on the high side) × input price
 
 ### 請求送到雲端的次數比預期多
 
-每個副本都達到了它的 *Concurrent requests*。可以調高這個值（如果引擎和記憶體允許）、增加副本，或把 **等待空出本機位置** 設成幾百毫秒。`X-Forgeyard-Spilled` 和用量（**本機或雲端**）會顯示溢出的次數和原因。
+每個副本都達到了它的 *Concurrent requests*。可以調高這個值（如果推論引擎和記憶體允許）、增加副本，或把 **等待空出本機位置** 設成幾百毫秒。`X-Forgeyard-Spilled` 和用量（**本機或雲端**）會顯示溢出的次數和原因。

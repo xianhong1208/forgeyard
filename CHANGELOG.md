@@ -6,6 +6,11 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it
+  runs is shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#189).
+
 ## [1.5.1] — 2026-11-23
 
 The console in Traditional Chinese (#189): every page of it now speaks English and Traditional Chinese. The

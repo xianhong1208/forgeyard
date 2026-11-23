@@ -7,7 +7,7 @@
 
 ## 一個版本怎麼驗收
 
-- **[`scripts/accept_all.py`](../scripts/accept_all.py)**，完整的回歸測試：在一台執行中的伺服器上，搭配真實的 agent 與真實的引擎，透過
+- **[`scripts/accept_all.py`](../scripts/accept_all.py)**，完整的回歸測試：在一台執行中的伺服器上，搭配真實的 agent 與真實的推論引擎，透過
   伺服器的 API、用官方 OpenAI SDK 呼叫 `/v1`，以及操作網頁主控台，檢查每一項已發布的功能。每項檢查回報 PASS、FAIL 或 SKIP 並附上原因；
   在那裡無法執行的檢查（例如共用的顯示卡上可用記憶體不夠）會被跳過，絕不算成通過。執行完會移除它建立的東西。
 - **[`scripts/accept_vision.py`](../scripts/accept_vision.py)**，視覺模型：每個模型都以內建的 `vision` 配方部署，用一張已知的照片呼叫
@@ -24,9 +24,9 @@
 
 | 機器 | 用途 |
 |---|---|
-| NVIDIA A100 80GB PCIe，與其他工作共用的 8 卡主機（以 GPU 允許清單限制 Forgeyard 使用的卡） | GPU 引擎：vLLM、vLLM-Omni、llama.cpp（CUDA）、stable-diffusion.cpp（CUDA）、speaches、視覺映像檔 |
+| NVIDIA A100 80GB PCIe，與其他工作共用的 8 卡主機（以 GPU 允許清單限制 Forgeyard 使用的卡） | GPU 推論引擎：vLLM、vLLM-Omni、llama.cpp（CUDA）、stable-diffusion.cpp（CUDA）、speaches、視覺映像檔 |
 | AMD Ryzen AI MAX+ 395 與 Radeon 8060S（Strix Halo APU） | llama.cpp 與 stable-diffusion.cpp 的 Vulkan 版本，以及 CPU；檔案與映像檔經由伺服器取得，代表沒有網際網路的機器 |
-| 沒有 GPU 的 x86-64 機器 | 以行程與容器執行的 CPU 引擎 |
+| 沒有 GPU 的 x86-64 機器 | 以行程與容器執行的 CPU 推論引擎 |
 | Google Gemini（`gemini-2.5-flash`） | 雲端層：溢出、費用與預算 |
 
 ## 各版本的結果
@@ -38,10 +38,10 @@
 | 1.5.0 | 1.5.0rc1 的完整回歸測試（`accept_all.py`，包括新的 `scale` 群組；15 項略過） | A100 主機、x86-64 CPU 機器、Gemini | 488 | 0 |
 | 1.5.0 | 1.5.0rc1 上的閒置休眠、喚醒與自動調整副本數（`accept_scale.py`），自動調整副本數在兩台 CPU 機器上；1 項略過 | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | 73 | 0 |
 | 1.5.0 | 開發期間：同上（`accept_scale.py`；1 項略過：等待喚醒逾時的檢查，CPU 模型 3 秒就啟動好，比最短的等待時間還快；vLLM 模型涵蓋了這一項） | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | 73 | 0 |
-| 1.5.0 | 開發期間：vLLM 0.32 在啟動之間保留編譯快取（#232），重新啟動時引擎的啟動時間，各取 3 或 4 次的平均：`vllm` 上的 Qwen3-0.6B 沒有快取 114 秒、有快取 57 秒；`vllm-pooling` 上的文字分類模型（xlm-roberta-language-detection）為 78 秒與 53 秒 | A100 | 2 | 0 |
+| 1.5.0 | 開發期間：vLLM 0.32 在啟動之間保留編譯快取（#232），重新啟動時推論引擎的啟動時間，各取 3 或 4 次的平均：`vllm` 上的 Qwen3-0.6B 沒有快取 114 秒、有快取 57 秒；`vllm-pooling` 上的文字分類模型（xlm-roberta-language-detection）為 78 秒與 53 秒 | A100 | 2 | 0 |
 | 1.4.5 | 1.4.5rc1 的完整回歸測試（`accept_all.py`，13 項略過），兩台機器都用 rc 版 agent，所以閘道以 TLS 連到每個副本 | A100 主機、x86-64 CPU 機器、Gemini | 432 | 0 |
 | 1.4.5 | 開發期間：閘道與 agent supervisor 拆成較小的部分後的完整回歸測試（#173；29 項略過） | A100 主機、x86-64 CPU 機器、Gemini | 380 | 0 |
-| 1.4.5 | 開發期間：vLLM 0.32 上 16k context 的 Gemma 4 12B，KV cache 估算對照引擎自己的數字（#201）：估算 2.091 GiB，vLLM 2.09 GiB | A100 | 1 | 0 |
+| 1.4.5 | 開發期間：vLLM 0.32 上 16k context 的 Gemma 4 12B，KV cache 估算對照推論引擎自己的數字（#201）：估算 2.091 GiB，vLLM 2.09 GiB | A100 | 1 | 0 |
 | 1.4.4 | 完整回歸測試（`accept_all.py`，分兩次執行：233 + 163） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 396 | 0 |
 | 1.4.4 | 零樣本物件偵測與影像分類（`accept_vision.py`） | A100 | 77 | 0 |
 | 1.4.4 | 零樣本物件偵測與影像分類（`accept_vision.py`） | Ryzen AI MAX+ 395，在 CPU 上 | 71 | 0 |
