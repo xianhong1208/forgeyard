@@ -26,6 +26,14 @@ version until 1.0.
   account and Trust this server. Money stays in US dollars, written by `Intl` (`US$1.20` in Chinese, `$1.20` as
   before in English). The audit log names each action in Chinese with its code beside it (admins search by the
   code); English shows the code as before, and the entries' details stay as recorded.
+- **The console in Traditional Chinese (#189, machines and deployments).** A machine's page (memory map, what
+  runs there, the model cache and downloads, engine images with upload and copy, GPU access, the agent and its
+  update), a deployment's page (state, sleep when idle, the gateway, replicas, memory, Try it, output and events) and
+  the deploy and edit forms (with automatic replicas, sleep when idle and the estimate) are now in Traditional
+  Chinese too. A deployment's events name their kind in Chinese before the server's own message; English shows the
+  message alone, as before. Fixed on the way: an offline machine's page showed its status twice in Chinese (the
+  heartbeat line only dropped an English prefix). The zh-TW guide names these pages' buttons and fields by their
+  Chinese labels.
 
 ### Changed
 

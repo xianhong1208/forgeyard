@@ -7,9 +7,12 @@ import enAdvisor from "./en/advisor";
 import enAuth from "./en/auth";
 import enCloud from "./en/cloud";
 import enCommon from "./en/common";
+import enDeploy from "./en/deploy";
+import enDeployment from "./en/deployment";
 import enFleet from "./en/fleet";
 import enGuide from "./en/guide";
 import enKeys from "./en/keys";
+import enMachine from "./en/machine";
 import enMachines from "./en/machines";
 import enServer from "./en/server";
 import enServing from "./en/serving";
@@ -20,9 +23,12 @@ import zhAdvisor from "./zh-TW/advisor";
 import zhAuth from "./zh-TW/auth";
 import zhCloud from "./zh-TW/cloud";
 import zhCommon from "./zh-TW/common";
+import zhDeploy from "./zh-TW/deploy";
+import zhDeployment from "./zh-TW/deployment";
 import zhFleet from "./zh-TW/fleet";
 import zhGuide from "./zh-TW/guide";
 import zhKeys from "./zh-TW/keys";
+import zhMachine from "./zh-TW/machine";
 import zhMachines from "./zh-TW/machines";
 import zhServer from "./zh-TW/server";
 import zhServing from "./zh-TW/serving";
@@ -33,16 +39,20 @@ export const EN_MODULES = {
   admin: enAdmin, cloud: enCloud, keys: enKeys,
   advisor: enAdvisor, auth: enAuth, common: enCommon, fleet: enFleet, guide: enGuide, machines: enMachines, server: enServer,
   serving: enServing, shell: enShell, start: enStart,
+  // Machines and deployments (#189, group 1)
+  deploy: enDeploy, deployment: enDeployment, machine: enMachine,
 };
 export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, string>> = {
   admin: zhAdmin, cloud: zhCloud, keys: zhKeys,
   advisor: zhAdvisor, auth: zhAuth, common: zhCommon, fleet: zhFleet, guide: zhGuide, machines: zhMachines, server: zhServer,
   serving: zhServing, shell: zhShell, start: zhStart,
+  deploy: zhDeploy, deployment: zhDeployment, machine: zhMachine,
 };
 
 export const en = {
   ...enAdmin, ...enCloud, ...enKeys,
   ...enAdvisor, ...enAuth, ...enCommon, ...enFleet, ...enGuide, ...enMachines, ...enServer, ...enServing, ...enShell, ...enStart,
+  ...enDeploy, ...enDeployment, ...enMachine,
 };
 export type Key = keyof typeof en;
 
@@ -50,4 +60,5 @@ export type Key = keyof typeof en;
 export const zhTW: Record<Key, string> = {
   ...zhAdmin, ...zhCloud, ...zhKeys,
   ...zhAdvisor, ...zhAuth, ...zhCommon, ...zhFleet, ...zhGuide, ...zhMachines, ...zhServer, ...zhServing, ...zhShell, ...zhStart,
+  ...zhDeploy, ...zhDeployment, ...zhMachine,
 };
