@@ -405,7 +405,8 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
   text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .examples { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 0 0 6px; color: var(--muted); }
 .catalog-table td { vertical-align: top; }
-.catalog-table td[data-label="Format"], .catalog-table td[data-label="Size"] { white-space: nowrap; }
+/* Columns by class, not by data-label: the labels are translated (#189). */
+.catalog-table td.cat-format, .catalog-table td.cat-size { white-space: nowrap; }
 .catalog-table .mono.small { overflow-wrap: anywhere; }
 .inspect-facts { margin: 16px 0 4px; }
 .recipes { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
@@ -1589,12 +1590,13 @@ a.chip-update:hover { border-color: var(--heat-ink); }
 /* The catalog's Model column kept collapsing to a few characters at desktop widths (long sources). */
 @media (min-width: 761px) {
   .catalog-wrap { overflow-x: auto; }
-  .catalog-table td[data-label="Model"] { min-width: 220px; }
-  .catalog-table td[data-label="Model"] .mono.small { word-break: break-all; }
-  .catalog-table td[data-label="Architecture"] { overflow-wrap: anywhere; min-width: 150px; }
-  .catalog-table td[data-label="Task"] .chip { white-space: normal; height: auto; min-height: 22px; }
-  .catalog-table td[data-label="Licence"] .nowrap { white-space: normal; overflow-wrap: anywhere; }
-  .catalog-table td[data-label="Engines"] { min-width: 110px; }
+  .catalog-table td.cat-model { min-width: 220px; }
+  .catalog-table td.cat-model .mono.small { word-break: break-all; }
+  .catalog-table td.cat-arch { overflow-wrap: anywhere; min-width: 150px; }
+  .catalog-table td.cat-task .chip { white-space: normal; height: auto; min-height: 22px; }
+  .catalog-table td.cat-licence .nowrap { white-space: normal; overflow-wrap: anywhere; }
+  .catalog-table td.cat-licence { min-width: 88px; }
+  .catalog-table td.cat-engines { min-width: 110px; }
   /* The actions stack in one column: three side by side were clipped at the table's edge at 1440 px. */
   .catalog-table td.cell-actions { white-space: normal; width: 1%; }
   .catalog-table .catalog-actions { flex-direction: column; align-items: stretch; }

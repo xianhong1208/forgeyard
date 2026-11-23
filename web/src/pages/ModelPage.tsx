@@ -10,9 +10,10 @@ import { ModelKindIcon } from "../components/Fleet";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Crumb, EngineCards, FoldButton, Jump, MachineCell, Section } from "../components/LibraryPage";
 import { Notice } from "../components/ui";
+import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { bytes } from "../lib/machines";
-import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource } from "../lib/models";
+import { API_LABEL, VISION_TASKS, gib, mediaText, params, shortSource, taskLabel } from "../lib/models";
 import { catalogKind, engineHref, filesLine, headlineEstimate, hfRepo, machineFit, presenceText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
 import type { CatalogModel, Deployment, DeploymentsResponse, Machine, MachinesResponse, ModelPage as Page, ModelPageMachine } from "../lib/types";
@@ -21,16 +22,17 @@ import { DeploymentRow } from "./Serving";
 
 export function ModelPage() {
   const { name = "" } = useParams();
+  const t = useT();
   const page = useApi<Page>(`/models/${encodeURIComponent(name)}`);
   const ms = useApi<MachinesResponse>("/machines");
   const deps = useApi<DeploymentsResponse>("/deployments");
   const m = page.data?.model ?? null;
-  useDocumentTitle(m ? (m.title ?? m.name) : "Model");
+  useDocumentTitle(m ? (m.title ?? m.name) : t("modelpage.doc"));
   return (
     <>
-      <Crumb to="/models" label="Catalog" />
+      <Crumb to="/models" label={t("library.tab.catalog")} />
       {page.error && <Notice tone="error">{page.error}</Notice>}
-      {!page.data && !page.error && <p className="muted">Loading…</p>}
+      {!page.data && !page.error && <p className="muted">{t("common.loading")}</p>}
       {page.data && (
         <ModelView key={page.data.model.id} p={page.data} machines={ms.data?.machines ?? null}
           deployments={deps.data?.deployments ?? null} reload={() => { page.reload(); deps.reload(); }} />
@@ -50,6 +52,7 @@ function ModelView({ p, machines, deployments, reload }: {
   p: Page; machines: Machine[] | null; deployments: Deployment[] | null; reload: () => void;
 }) {
   const m = p.model;
+  const t = useT();
   const navigate = useNavigate();
   const [recipe, setRecipe] = useState<string | null>(m.recipes[0] ?? null);
   const [dialog, setDialog] = useState<{ machineId?: number } | null>(null);
@@ -64,7 +67,7 @@ function ModelView({ p, machines, deployments, reload }: {
   const downloading = p.machines.flatMap((x) => (x.download ? [x.download] : []));
 
   const remove = async () => {
-    if (!window.confirm(`Remove ${m.name} from the catalog? Machines keep their cached copy.`)) return;
+    if (!window.confirm(t("library.removeConfirm", { name: m.name }))) return;
     try {
       await api(`/models/${m.id}`, { method: "DELETE" });
       navigate("/models");
@@ -77,23 +80,23 @@ function ModelView({ p, machines, deployments, reload }: {
         <div className="mk-title">
           <span className="kindicon lp-kindicon"><ModelKindIcon kind={catalogKind(m)} size={26} /></span>
           <div className="lp-head-text">
-            <p className="eyebrow">Model · {m.task_label}</p>
+            <p className="eyebrow">{t("modelpage.eyebrow", { task: taskLabel(m) })}</p>
             <h1>{m.title ?? m.name}</h1>
             {/* The name under a display name (the name itself is the heading otherwise). */}
             <p className="mono small muted lp-sub">{m.title && m.title !== m.name ? `${m.name} · ` : ""}{shortSource(m).text}</p>
             {p.can_manage && !renaming && (
               <button type="button" className="btn btn-quiet btn-small lp-rename" onClick={() => setRenaming(true)}>
-                <IconPencil size={14} aria-hidden="true" /> Display name
+                <IconPencil size={14} aria-hidden="true" /> {t("modelpage.displayName")}
               </button>
             )}
           </div>
         </div>
         <div className="page-actions">
-          {p.can_deploy && m.recipes.length > 0 && <Link className="btn btn-primary" to={deployHref}><IconPlus size={16} aria-hidden="true" /> Deploy</Link>}
-          {canDownload && <button type="button" className="btn" onClick={() => setDialog({})}><IconDownload size={16} aria-hidden="true" /> Download to…</button>}
+          {p.can_deploy && m.recipes.length > 0 && <Link className="btn btn-primary" to={deployHref}><IconPlus size={16} aria-hidden="true" /> {t("modelpage.deploy")}</Link>}
+          {canDownload && <button type="button" className="btn" onClick={() => setDialog({})}><IconDownload size={16} aria-hidden="true" /> {t("library.downloadTo")}</button>}
           {p.can_manage && (
-            <button type="button" className="btn btn-quiet" disabled={m.deployments > 0} title={m.deployments ? "Deployed: delete its deployments first" : undefined}
-              onClick={() => void remove()}><IconTrash size={15} aria-hidden="true" /> Remove</button>
+            <button type="button" className="btn btn-quiet" disabled={m.deployments > 0} title={m.deployments ? t("library.deployedFirst") : undefined}
+              onClick={() => void remove()}><IconTrash size={15} aria-hidden="true" /> {t("library.remove")}</button>
           )}
         </div>
       </header>
@@ -102,46 +105,47 @@ function ModelView({ p, machines, deployments, reload }: {
       {dialog && <DownloadDialog model={m} machineId={dialog.machineId} onClose={() => setDialog(null)}
         onStarted={(text) => { setNote({ tone: "ok", text }); reload(); }} />}
       <p className="mk-facts">
-        <span className="chip">{m.task_label}</span>
+        <span className="chip">{taskLabel(m)}</span>
         {m.modalities && m.modalities.length > 0 && <span className="chip chip-tone-run"><IconPhoto size={11} aria-hidden="true" /> {mediaText(m.modalities)}</span>}
         <span><strong>{bytes(m.size_bytes)}</strong> {m.format}</span>
-        {m.summary.params ? <span><strong>{params(m.summary.params)}</strong> params</span> : null}
-        <span className="mono">{m.license ?? "no licence recorded"}{m.license_from ? "*" : ""}</span>
-        {m.gated && <span><IconLock size={12} aria-hidden="true" /> gated</span>}
-        {est && recipe && <span>needs <strong>{est.device === "gpu" ? `${gib(est.per_gpu)} per GPU` : `${gib(est.ram)} RAM`}</strong> with {recipe}'s defaults</span>}
-        <span>{m.deployments ? <strong>{m.deployments} deployed</strong> : "not deployed"}</span>
+        {m.summary.params ? <span>{t.rich("modelpage.params", { params: <strong>{params(m.summary.params)}</strong> })}</span> : null}
+        <span className="mono">{m.license ?? t("modelpage.noLicence")}{m.license_from ? "*" : ""}</span>
+        {m.gated && <span><IconLock size={12} aria-hidden="true" /> {t("modelpage.gated")}</span>}
+        {est && recipe && <span>{t.rich("modelpage.needs", { amount: <strong>{est.device === "gpu" ? t("modelpage.perGpu", { size: gib(est.per_gpu) }) : t("modelpage.ram", { size: gib(est.ram) })}</strong>, recipe })}</span>}
+        <span>{m.deployments ? <strong>{t("modelpage.deployed", { count: String(m.deployments) })}</strong> : t("modelpage.notDeployed")}</span>
       </p>
-      <Jump links={[["overview", "Overview"], ["machines", "Machines"], ["deployments", "Deployments"], ["engines", "Engines"], ["files", "Files"]]} />
+      <Jump links={[["overview", t("modelpage.jump.overview")], ["machines", t("modelpage.jump.machines")], ["deployments", t("modelpage.jump.deployments")],
+        ["engines", t("modelpage.jump.engines")], ["files", t("modelpage.jump.files")]]} />
 
-      <Section id="overview" title="Overview"><ModelAbout p={p} /></Section>
+      <Section id="overview" title={t("modelpage.jump.overview")}><ModelAbout p={p} /></Section>
 
-      <Section id="machines" title="Machines" count={`in ${cachedOn} cache${cachedOn === 1 ? "" : "s"}`}
+      <Section id="machines" title={t("modelpage.jump.machines")} count={t.plural("modelpage.caches", cachedOn)}
         actions={<RecipePicker m={m} recipe={recipe} setRecipe={setRecipe} />}
-        note={<>Whether each machine has it in its model cache (as its agent last reported), and whether a replica with {recipe ?? "the engine"}'s
-          defaults fits there now (the estimate). <HelpLink page="concepts" anchor="models-engines-and-estimates">Estimates</HelpLink></>}>
+        note={t.rich("modelpage.machinesNote", { recipe: recipe ?? t("modelpage.theEngine"),
+          link: (x) => <HelpLink page="concepts" anchor="models-engines-and-estimates">{x}</HelpLink> })}>
         {downloading.length > 0 && <DownloadList list={downloading} show="machine" canCancel={p.can_deploy}
           onChanged={(text) => { setNote({ tone: "ok", text }); reload(); }} onError={(text) => setNote({ tone: "error", text })} />}
         <ModelMachines p={p} recipe={recipe} machines={machines} onDownload={(id) => setDialog({ machineId: id })} />
       </Section>
 
-      <Section id="deployments" title="Deployments" count={m.deployments}
-        actions={p.can_deploy && m.recipes.length > 0 ? <Link className="btn btn-small" to={deployHref}><IconPlus size={14} aria-hidden="true" /> Deploy</Link> : undefined}>
-        {deployments === null ? <p className="muted small">Loading…</p> : mine.length === 0
-          ? <p className="empty-line">Not deployed.{canDownload ? " Download it to machines first, and a deployment there starts at once." : ""}</p>
+      <Section id="deployments" title={t("modelpage.jump.deployments")} count={m.deployments}
+        actions={p.can_deploy && m.recipes.length > 0 ? <Link className="btn btn-small" to={deployHref}><IconPlus size={14} aria-hidden="true" /> {t("modelpage.deploy")}</Link> : undefined}>
+        {deployments === null ? <p className="muted small">{t("common.loading")}</p> : mine.length === 0
+          ? <p className="empty-line">{t("modelpage.notDeployedLine")}{canDownload ? t("modelpage.downloadFirst") : ""}</p>
           : <div className="lp-deps">{mine.map((d) => <DeploymentRow key={d.id} d={d} machines={machines ?? []} cloud={[]} />)}</div>}
       </Section>
 
-      <Section id="engines" title="Engines that run it" count={p.recipes.length}>
-        <EngineCards list={p.recipes} empty="No engine runs this format and task." />
+      <Section id="engines" title={t("modelpage.enginesTitle")} count={p.recipes.length}>
+        <EngineCards list={p.recipes} empty={t("modelpage.noEngine")} />
       </Section>
 
-      <Section id="files" title="Files" actions={p.files.files.length ? <FoldButton open={filesOpen} setOpen={setFilesOpen} what="files" controls="files-list" /> : undefined}>
+      <Section id="files" title={t("modelpage.jump.files")} actions={p.files.files.length ? <FoldButton open={filesOpen} setOpen={setFilesOpen} what={t("modelpage.filesWhat")} controls="files-list" /> : undefined}>
         <FilesLine p={p} />
         {filesOpen && <div id="files-list" className="lp-fold-body"><FileTable p={p} /></div>}
       </Section>
       <HelpLinks>
-        <HelpLink page="concepts" anchor="models-engines-and-estimates">Models, engines and estimates</HelpLink>
-        <HelpLink page="how-to" anchor="download-a-model-before-deploying-it">Download a model before deploying it</HelpLink>
+        <HelpLink page="concepts" anchor="models-engines-and-estimates">{t("library.help.concepts")}</HelpLink>
+        <HelpLink page="how-to" anchor="download-a-model-before-deploying-it">{t("library.help.download")}</HelpLink>
       </HelpLinks>
     </>
   );
@@ -149,6 +153,7 @@ function ModelView({ p, machines, deployments, reload }: {
 
 // An admin changes the name the console shows; the catalog name stays, because deployments record it.
 function RenameForm({ m, onDone, onCancel }: { m: CatalogModel; onDone: (text: string) => void; onCancel: () => void }) {
+  const t = useT();
   const [title, setTitle] = useState(m.title ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,20 +162,20 @@ function RenameForm({ m, onDone, onCancel }: { m: CatalogModel; onDone: (text: s
     setError(null);
     try {
       const r = await api<{ model: CatalogModel }>(`/models/${m.id}`, { method: "PATCH", body: { title: title.trim() } });
-      onDone(r.model.title ? `${m.name} is shown as “${r.model.title}”.` : `${m.name} is shown by its name.`);
+      onDone(r.model.title ? t("modelpage.shownAs", { name: m.name, title: r.model.title }) : t("modelpage.shownByName", { name: m.name }));
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   return (
-    <form className="panel lp-rename-form" aria-label="Display name" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+    <form className="panel lp-rename-form" aria-label={t("modelpage.displayName")} onSubmit={(e) => { e.preventDefault(); void save(); }}>
       <div className={`field${error ? " has-error" : ""}`}>
-        <label htmlFor="model-title">Display name</label>
+        <label htmlFor="model-title">{t("modelpage.displayName")}</label>
         <input id="model-title" value={title} maxLength={120} placeholder={m.name} onChange={(e) => setTitle(e.target.value)} autoFocus />
         {error ? <p className="field-error" role="alert">{error}</p>
-          : <p className="field-hint">What the console shows for this model. Its name stays <code>{m.name}</code>: deployments and API keys refer to it. Empty: the name.</p>}
+          : <p className="field-hint">{t.rich("modelpage.renameHint", { name: <code>{m.name}</code> })}</p>}
       </div>
       <div className="row-gap">
-        <button type="submit" className="btn btn-primary btn-small" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
-        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="btn btn-primary btn-small" disabled={busy}>{busy ? t("modelpage.saving") : t("modelpage.save")}</button>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onCancel}>{t("common.cancel")}</button>
       </div>
     </form>
   );
@@ -178,35 +183,38 @@ function RenameForm({ m, onDone, onCancel }: { m: CatalogModel; onDone: (text: s
 
 function ModelAbout({ p }: { p: Page }) {
   const m = p.model;
+  const t = useT();
   const repo = hfRepo(m);
   const path = apiPath(p);
+  const added = new Date(m.created_at.endsWith("Z") || m.created_at.includes("+") ? m.created_at : `${m.created_at}Z`);
   return (
     <dl className="facts lp-facts">
-      <div className="fact"><dt>Source</dt><dd className="mono small lp-break">{m.source}{m.file ? ` · ${m.file}` : ""}{repo && (
+      <div className="fact"><dt>{t("modelpage.fact.source")}</dt><dd className="mono small lp-break">{m.source}{m.file ? ` · ${m.file}` : ""}{repo && (
         <> <a href={`https://huggingface.co/${repo}`} target="_blank" rel="noreferrer" className="lp-ext">Hugging Face <IconExternalLink size={12} aria-hidden="true" /></a></>
       )}</dd></div>
-      {m.kind !== "local" && <div className="fact"><dt>Revision</dt><dd className="mono small" title={m.revision ?? undefined}>{m.revision ? m.revision.slice(0, 12) : "—"}{m.ref && m.ref !== m.revision ? <span className="muted"> (pinned from {m.ref})</span> : null}</dd></div>}
-      <div className="fact"><dt>Licence</dt><dd><span className="mono small">{m.license ?? "—"}</span>{m.license_from ? <span className="muted small"> · the licence of {m.license_from.replace("hf://", "")}, which this is converted from</span> : null}{m.gated ? <span className="muted small"> · gated: needs a Hugging Face token</span> : null}</dd></div>
-      <div className="fact"><dt>Task</dt><dd>{m.task_label}{path && <><span className="muted small"> at </span><code>{path}</code></>}</dd></div>
-      {m.task === "chat" && <div className="fact"><dt>Takes</dt><dd>{m.modalities === null || m.modalities === undefined ? <span className="muted">not recorded</span> : m.modalities.length ? `Text, ${mediaText(m.modalities)?.toLowerCase()}` : "Text"}</dd></div>}
-      <div className="fact"><dt>Architecture</dt><dd>{m.summary.architecture ?? m.vision?.architecture ?? "—"}{m.summary.params ? ` · ${params(m.summary.params)} params` : ""}{m.summary.dtype ? ` · ${m.summary.dtype}` : ""}</dd></div>
+      {m.kind !== "local" && <div className="fact"><dt>{t("modelpage.fact.revision")}</dt><dd className="mono small" title={m.revision ?? undefined}>{m.revision ? m.revision.slice(0, 12) : "—"}{m.ref && m.ref !== m.revision ? <span className="muted">{t("modelpage.fact.pinnedFrom", { ref: m.ref })}</span> : null}</dd></div>}
+      <div className="fact"><dt>{t("modelpage.fact.licence")}</dt><dd><span className="mono small">{m.license ?? "—"}</span>{m.license_from ? <span className="muted small">{t("modelpage.fact.licenceFrom", { source: m.license_from.replace("hf://", "") })}</span> : null}{m.gated ? <span className="muted small">{t("modelpage.fact.gated")}</span> : null}</dd></div>
+      <div className="fact"><dt>{t("modelpage.fact.task")}</dt><dd>{taskLabel(m)}{path && <><span className="muted small">{t("modelpage.fact.at")}</span><code>{path}</code></>}</dd></div>
+      {m.task === "chat" && <div className="fact"><dt>{t("modelpage.fact.takes")}</dt><dd>{m.modalities === null || m.modalities === undefined ? <span className="muted">{t("modelpage.fact.notRecorded")}</span> : m.modalities.length ? t("modelpage.fact.textAnd", { media: String(mediaText(m.modalities)?.toLowerCase()) }) : t("modelpage.fact.text")}</dd></div>}
+      <div className="fact"><dt>{t("modelpage.fact.architecture")}</dt><dd>{m.summary.architecture ?? m.vision?.architecture ?? "—"}{m.summary.params ? t("modelpage.fact.paramsSuffix", { params: params(m.summary.params) }) : ""}{m.summary.dtype ? ` · ${m.summary.dtype}` : ""}</dd></div>
       {(m.summary.layers || m.summary.max_context) ? (
-        <div className="fact"><dt>Shape</dt><dd>{[m.summary.layers && `${m.summary.layers} layers`, m.summary.kv_heads && `${m.summary.kv_heads} KV heads`, m.summary.head_dim && `head ${m.summary.head_dim}`, m.summary.max_context && `${m.summary.max_context.toLocaleString()} tokens of context`].filter(Boolean).join(" · ")}</dd></div>
+        <div className="fact"><dt>{t("modelpage.fact.shape")}</dt><dd>{[m.summary.layers && t("modelpage.fact.layers", { count: String(m.summary.layers) }), m.summary.kv_heads && t("modelpage.fact.kvHeads", { count: String(m.summary.kv_heads) }), m.summary.head_dim && t("modelpage.fact.head", { count: String(m.summary.head_dim) }), m.summary.max_context && t("modelpage.fact.context", { count: t.num(m.summary.max_context) })].filter(Boolean).join(" · ")}</dd></div>
       ) : null}
-      {m.classify?.labels ? <div className="fact"><dt>Labels</dt><dd>{m.classify.labels}{m.classify.label_names?.length ? <span className="muted small"> · {m.classify.label_names.slice(0, 8).join(", ")}{m.classify.label_names.length > 8 ? ", …" : ""}</span> : null}{m.classify.problem === "multi_label_classification" ? <span className="muted small"> · each label scored on its own</span> : null}</dd></div> : null}
-      {m.vision?.zero_shot ? <div className="fact"><dt>Classes</dt><dd>Finds what you name <span className="muted small">· zero-shot: each request lists what to find (<code>labels</code>)</span></dd></div> : null}
-      {!m.vision?.zero_shot && m.vision?.labels ? <div className="fact"><dt>Classes</dt><dd>{m.vision.labels}{m.vision.label_examples?.length ? <span className="muted small"> · {m.vision.label_examples.slice(0, 6).join(", ")}…</span> : null}</dd></div> : null}
-      {m.image?.size ? <div className="fact"><dt>Native size</dt><dd>{m.image.size} × {m.image.size} px{m.image.pipeline ? <span className="muted small"> · {m.image.pipeline}</span> : null}</dd></div> : null}
-      {m.voices && m.voices.length ? <div className="fact"><dt>Voices</dt><dd>{m.voices.join(", ")}</dd></div> : null}
-      <div className="fact"><dt>Added</dt><dd>{m.created_by ? `by ${m.created_by} · ` : ""}{new Date(m.created_at.endsWith("Z") || m.created_at.includes("+") ? m.created_at : `${m.created_at}Z`).toLocaleDateString()}</dd></div>
+      {m.classify?.labels ? <div className="fact"><dt>{t("modelpage.fact.labels")}</dt><dd>{m.classify.labels}{m.classify.label_names?.length ? <span className="muted small"> · {m.classify.label_names.slice(0, 8).join(", ")}{m.classify.label_names.length > 8 ? ", …" : ""}</span> : null}{m.classify.problem === "multi_label_classification" ? <span className="muted small">{t("modelpage.fact.multiLabel")}</span> : null}</dd></div> : null}
+      {m.vision?.zero_shot ? <div className="fact"><dt>{t("modelpage.fact.classes")}</dt><dd>{t("modelpage.fact.findsWhatYouName")} <span className="muted small">{t.rich("modelpage.fact.zeroShot", { labels: <code>labels</code> })}</span></dd></div> : null}
+      {!m.vision?.zero_shot && m.vision?.labels ? <div className="fact"><dt>{t("modelpage.fact.classes")}</dt><dd>{m.vision.labels}{m.vision.label_examples?.length ? <span className="muted small"> · {m.vision.label_examples.slice(0, 6).join(", ")}…</span> : null}</dd></div> : null}
+      {m.image?.size ? <div className="fact"><dt>{t("modelpage.fact.nativeSize")}</dt><dd>{t("modelpage.fact.nativeSizeValue", { size: String(m.image.size) })}{m.image.pipeline ? <span className="muted small"> · {m.image.pipeline}</span> : null}</dd></div> : null}
+      {m.voices && m.voices.length ? <div className="fact"><dt>{t("modelpage.fact.voices")}</dt><dd>{m.voices.join(", ")}</dd></div> : null}
+      <div className="fact"><dt>{t("modelpage.fact.added")}</dt><dd>{m.created_by ? t("modelpage.fact.addedBy", { name: m.created_by }) : ""}{t.lang === "en" ? added.toLocaleDateString() : t.date(added)}</dd></div>
     </dl>
   );
 }
 
 function RecipePicker({ m, recipe, setRecipe }: { m: CatalogModel; recipe: string | null; setRecipe: (r: string) => void }) {
-  if (m.recipes.length < 2) return m.recipes.length ? <span className="small muted">with <Link to={engineHref(m.recipes[0])} className="mono">{m.recipes[0]}</Link></span> : null;
+  const t = useT();
+  if (m.recipes.length < 2) return m.recipes.length ? <span className="small muted">{t.rich("modelpage.with", { engine: <Link to={engineHref(m.recipes[0])} className="mono">{m.recipes[0]}</Link> })}</span> : null;
   return (
-    <div className="segmented lp-seg" role="radiogroup" aria-label="Engine for the estimate">
+    <div className="segmented lp-seg" role="radiogroup" aria-label={t("modelpage.engineFor")}>
       {m.recipes.map((r) => (
         <button key={r} type="button" role="radio" aria-checked={recipe === r} className={recipe === r ? "on" : ""} onClick={() => setRecipe(r)}>{r}</button>
       ))}
@@ -215,23 +223,25 @@ function RecipePicker({ m, recipe, setRecipe }: { m: CatalogModel; recipe: strin
 }
 
 function CacheCell({ x }: { x: ModelPageMachine }) {
+  const t = useT();
   const c = x.cache;
   if (c.cached) {
     return (
       <div className="cell-stack">
-        <span><span className="chip chip-tone-ok">in cache</span> {c.bytes !== null ? bytes(c.bytes) : ""}</span>
-        {c.used_by.length > 0 && <span className="muted">used by {c.used_by.map((u) => u.name).join(", ")}</span>}
+        <span><span className="chip chip-tone-ok">{t("modelpage.inCache")}</span> {c.bytes !== null ? bytes(c.bytes) : ""}</span>
+        {c.used_by.length > 0 && <span className="muted">{t("modelpage.usedBy", { names: c.used_by.map((u) => u.name).join(", ") })}</span>}
       </div>
     );
   }
-  return <span className="muted">{c.reported ? "not cached" : "no report"}</span>;
+  return <span className="muted">{c.reported ? t("modelpage.notCached") : t("modelpage.noReport")}</span>;
 }
 
 function ModelMachines({ p, recipe, machines, onDownload }: {
   p: Page; recipe: string | null; machines: Machine[] | null; onDownload: (machineId: number) => void;
 }) {
   const m = p.model;
-  if (!p.machines.length) return <p className="empty-line">No machine has joined yet. <Link to="/machines">Add a machine</Link>.</p>;
+  const t = useT();
+  if (!p.machines.length) return <p className="empty-line">{t.rich("library.noMachines", { link: (x) => <Link to="/machines">{x}</Link> })}</p>;
   const fit = recipe ? p.fits[recipe] : undefined;
   const errors = fit ? Object.values(fit).flatMap((f) => (f?.error ? [f.error] : [])) : [];
   return (
@@ -239,7 +249,8 @@ function ModelMachines({ p, recipe, machines, onDownload }: {
       {errors.length > 0 && <p className="field-error">{errors.join(" ")}</p>}
       <div className="table-wrap">
         <table className="table lp-machines">
-          <thead><tr><th>Machine</th><th>Cache</th><th>Fits?</th><th>Engine there</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th>{t("modelpage.col.machine")}</th><th>{t("modelpage.col.cache")}</th><th>{t("modelpage.col.fits")}</th><th>{t("modelpage.col.engine")}</th>
+            <th><span className="sr-only">{t("modelpage.col.actions")}</span></th></tr></thead>
           <tbody>{p.machines.map((x) => {
             const f = machineFit(fit, x.machine_id);
             const v = f?.verdict ?? null;
@@ -247,34 +258,34 @@ function ModelMachines({ p, recipe, machines, onDownload }: {
             const online = x.status === "online";
             return (
               <tr key={x.machine_id}>
-                <td data-label="Machine"><MachineCell id={x.machine_id} name={x.name} status={x.status} machines={machines} /></td>
-                <td data-label="Cache" className="small"><CacheCell x={x} /></td>
-                <td data-label="Fits?" className="small">
+                <td data-label={t("modelpage.col.machine")}><MachineCell id={x.machine_id} name={x.name} status={x.status} machines={machines} /></td>
+                <td data-label={t("modelpage.col.cache")} className="small"><CacheCell x={x} /></td>
+                <td data-label={t("modelpage.col.fits")} className="small">
                   {!v ? <span className="muted">—</span> : (
                     <div className="cell-stack">
                       <span>{v.fits
-                        ? <span className={`chip ${online ? "chip-tone-ok" : "chip-tone-wait"}`}>{online ? "fits" : "would fit"}{f?.device === "cpu" ? " on the CPU" : ""}</span>
-                        : v.share_fits ? <span className="chip chip-tone-wait">fits if shared</span> : <span className="chip chip-tone-bad">does not fit</span>}
-                        {v.fits && v.leftover != null ? <span className="muted"> {gib(v.leftover)} left{v.gpus?.length ? ` on GPU #${v.gpus.join(", #")}` : ""}</span> : null}</span>
+                        ? <span className={`chip ${online ? "chip-tone-ok" : "chip-tone-wait"}`}>{online ? t("modelpage.fits") : t("modelpage.wouldFit")}{f?.device === "cpu" ? t("modelpage.onCpu") : ""}</span>
+                        : v.share_fits ? <span className="chip chip-tone-wait">{t("modelpage.fitsShared")}</span> : <span className="chip chip-tone-bad">{t("modelpage.noFit")}</span>}
+                        {v.fits && v.leftover != null ? <span className="muted">{v.gpus?.length ? t("modelpage.leftOnGpu", { size: gib(v.leftover), gpus: v.gpus.join(", #") }) : t("modelpage.left", { size: gib(v.leftover) })}</span> : null}</span>
                       {(!v.fits || !online) && v.reason && <span className="muted lp-reason" title={v.reason}>{v.reason}</span>}
                     </div>
                   )}
                 </td>
-                <td data-label="Engine there" className="small">
+                <td data-label={t("modelpage.col.engine")} className="small">
                   {eng?.variant ? (
                     <div className="cell-stack">
                       <span><Link to={engineHref(recipe!)} className="mono">{recipe}</Link> <span className="muted">· {eng.variant}</span></span>
                       <span className="muted">{presenceText(eng.kind, eng.present)}</span>
                     </div>
-                  ) : <span className="muted" title={eng?.note ?? undefined}>{recipe ? "no variant for its hardware" : "—"}</span>}
+                  ) : <span className="muted" title={eng?.note ?? undefined}>{recipe ? t("modelpage.noVariant") : "—"}</span>}
                 </td>
                 <td className="cell-actions">
                   <div className="catalog-actions">
                     {p.can_deploy && recipe && v?.fits && online && (
-                      <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}&recipe=${encodeURIComponent(recipe)}&machine=${x.machine_id}${f?.device === "cpu" ? "&device=cpu" : ""}`}>Deploy here</Link>
+                      <Link className="btn btn-small" to={`/serving/deploy?model=${encodeURIComponent(m.name)}&recipe=${encodeURIComponent(recipe)}&machine=${x.machine_id}${f?.device === "cpu" ? "&device=cpu" : ""}`}>{t("modelpage.deployHere")}</Link>
                     )}
                     {p.can_deploy && m.kind !== "local" && !x.cache.cached && !x.download && x.connected && (
-                      <button type="button" className="btn btn-quiet btn-small" onClick={() => onDownload(x.machine_id)}>Download here</button>
+                      <button type="button" className="btn btn-quiet btn-small" onClick={() => onDownload(x.machine_id)}>{t("modelpage.downloadHere")}</button>
                     )}
                   </div>
                 </td>
@@ -290,34 +301,36 @@ function ModelMachines({ p, recipe, machines, onDownload }: {
 function FilesLine({ p }: { p: Page }) {
   const f = p.files;
   const m = p.model;
+  const t = useT();
   if (!f.recorded) {
     return <p className="lp-fold-line">{m.kind === "local"
-      ? <>A directory on the machines themselves: <span className="mono small">{m.source.replace(/^local:\/\//, "")}</span>. Each machine's cache report lists what it holds.</>
-      : <>The file list was not recorded for this model. <span className="muted">Remove it and add it again to record it.</span></>}</p>;
+      ? t.rich("modelpage.files.local", { dir: <span className="mono small">{m.source.replace(/^local:\/\//, "")}</span> })
+      : t.rich("modelpage.files.notRecorded", { muted: (x) => <span className="muted">{x}</span> })}</p>;
   }
   const line = filesLine(f, m.file);
   return (
     <p className="lp-fold-line">
-      <strong>{line.count} file{line.count === 1 ? "" : "s"} downloaded</strong> · {bytes(f.downloaded_bytes)}
-      {line.used ? <> · uses <span className="mono small">{line.used.path}</span></> : null}
-      {line.others > 0 ? <span className="muted"> · {line.others} other file{line.others === 1 ? "" : "s"} in the repository, not downloaded</span> : null}
+      <strong>{t.plural("modelpage.files.downloaded", line.count)}</strong> · {bytes(f.downloaded_bytes)}
+      {line.used ? t.rich("modelpage.files.uses", { path: <span className="mono small">{line.used.path}</span> }) : null}
+      {line.others > 0 ? <span className="muted">{t.plural("modelpage.files.others", line.others)}</span> : null}
     </p>
   );
 }
 
 function FileTable({ p }: { p: Page }) {
+  const t = useT();
   return (
     <div className="table-wrap">
       <table className="table lp-files">
-        <thead><tr><th>File</th><th>Size</th><th>What it is</th></tr></thead>
+        <thead><tr><th>{t("modelpage.files.col.file")}</th><th>{t("modelpage.files.col.size")}</th><th>{t("modelpage.files.col.what")}</th></tr></thead>
         <tbody>{p.files.files.map((f) => (
           <tr key={f.path}>
-            <td data-label="File" className="mono small lp-break">{f.path}</td>
-            <td data-label="Size" className="small nowrap">{f.size === null ? "—" : bytes(f.size)}</td>
-            <td data-label="What it is" className="small">
+            <td data-label={t("modelpage.files.col.file")} className="mono small lp-break">{f.path}</td>
+            <td data-label={t("modelpage.files.col.size")} className="small nowrap">{f.size === null ? "—" : bytes(f.size)}</td>
+            <td data-label={t("modelpage.files.col.what")} className="small">
               {f.downloaded
-                ? <span className="chip chip-tone-ok">{f.role ? `${f.role} · downloaded` : "downloaded"}</span>
-                : <span className="muted">{f.role}, not downloaded</span>}
+                ? <span className="chip chip-tone-ok">{f.role ? t("modelpage.files.roleDownloaded", { role: f.role }) : t("modelpage.files.downloadedChip")}</span>
+                : <span className="muted">{t("modelpage.files.roleNot", { role: f.role ?? "" })}</span>}
             </td>
           </tr>
         ))}</tbody>

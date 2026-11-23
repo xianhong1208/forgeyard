@@ -43,7 +43,7 @@ agent 讀取 AMD 顯示卡時，能匯入 `amdsmi` 函式庫就用它（先找 a
 
 Vulkan 容器只會拿到自己那張卡的 render node（`/dev/dri/renderD*`）和擁有它的群組，不會拿到 `/dev/kfd`。它的記憶體和 ROCm 一樣，用同一個記憶體池檢查：APU 取 carve-out 和 GTT 中較大的那個。部署的事件會寫出它用哪個 variant（`… (vulkan; reserves …)`）。
 
-部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂引擎（**Models → Engines → Add a custom engine**，*Start from a built-in engine* 選 `llama-cpp`）：複本會換一個名字；`variants` 底下只留你要的那個，再儲存。自訂引擎的卡片上有 **Edit** 和 **Delete**（還有部署在用時會被拒絕）。
+部署本身不能選 variant。要讓某張卡改用另一個，就加一個自訂引擎（**模型 → 引擎 → 加入自訂引擎**，*從內建引擎開始* 選 `llama-cpp`）：複本會換一個名字；`variants` 底下只留你要的那個，再儲存。自訂引擎的卡片上有 **Edit** 和 **Delete**（還有部署在用時會被拒絕）。
 
 **從自訂的 `llama-cpp-vulkan` 配方換過來。** 1.3 之前，Vulkan 要用自訂配方；內建的現在取代了它。部署會一直用建立時的配方，所以請用 `llama-cpp` 重新部署這個模型，再刪掉舊的部署；沒有部署在用之後，再刪掉自訂配方。
 
@@ -251,15 +251,15 @@ sudo docker build -f Dockerfile.agent -t docker.io/tonyhuang1101/forgeyard-agent
 
 ### 把模型送到機器上
 
-照常部署，或用 **Download to…** 預先把模型放進機器的模型快取，預設也會一起抓引擎（[部署之前先下載模型](#download-a-model-before-deploying-it)）。不論哪一種，每個檔案都經由伺服器，來自以下兩個地方之一：
+照常部署，或用 **下載到…** 預先把模型放進機器的模型快取，預設也會一起抓引擎（[部署之前先下載模型](#download-a-model-before-deploying-it)）。不論哪一種，每個檔案都經由伺服器，來自以下兩個地方之一：
 
 - **另一台機器的快取**：agent 是 1.4.1 以後的機器（`gpu-01`）快取裡有這個模型時，它把檔案送給伺服器，伺服器再轉過去。那台機器同樣只往外連，不開任何 port。只有在沒有機器能送這個檔案時，才會用到網際網路（[從另一台機器](#give-an-offline-machine-models-through-the-server)）。
-- **網際網路**：伺服器從 Hugging Face 或模型的 URL 下載檔案，再轉過去。受限模型需要伺服器的 Hugging Face 權杖（**Models → Sources**）或部署自己的權杖。
+- **網際網路**：伺服器從 Hugging Face 或模型的 URL 下載檔案，再轉過去。受限模型需要伺服器的 Hugging Face 權杖（**模型 → 來源**）或部署自己的權杖。
 
 是哪一種，可以在這些地方看到：
 
-- 進度，在部署的頁面、Catalog 裡模型的下方和機器的頁面上：從網際網路是 *Downloading the model via the server: … of …*，從那台機器的快取是 *Downloading the model via the server, from gpu-01: … of …*，完成時是 *Downloaded … via the server* 或 *Downloaded … via the server, from gpu-01*；
-- **Download to…**，開始之前在機器那一行顯示 *via the server* 或 *via the server, from gpu-01*；
+- 進度，在部署的頁面、目錄裡模型的下方和機器的頁面上：從網際網路是 *Downloading the model via the server: … of …*，從那台機器的快取是 *Downloading the model via the server, from gpu-01: … of …*，完成時是 *Downloaded … via the server* 或 *Downloaded … via the server, from gpu-01*；
+- **下載到…**，開始之前在機器那一行顯示 *via the server* 或 *via the server, from gpu-01*；
 - 下載的 API：`via` 是 `direct`、`server` 或 `machine`，送出的機器在 `source` 裡（[參考資料](reference.md#download-a-model-ahead-through-the-api)）；
 - 伺服器的 log，每個檔案一行：*Relayed … to amd-01: …*，或 *… from gpu-01 to amd-01: …*。
 
@@ -302,8 +302,7 @@ sudo docker save docker.io/tonyhuang1101/forgeyard-agent:1.5.0 | gzip | ssh USER
 
 1.4 起，用 1.4 的 agent 有兩個更簡單的做法：內建 recipe 的映像檔（全部都有釘選）會自動**經由伺服器**一層一層送過去（[經由伺服器把模型送到離線機器](#give-an-offline-machine-models-through-the-server)），任何映像檔也都可以從機器的頁面**上傳**（[把引擎映像檔上傳到機器](#upload-an-engine-image-to-a-machine)）。以下步驟仍然可用，適合較舊的 agent 或不經過伺服器的情況。
 
-1. **找出映像檔。** 在 **Models → Engines**，打開引擎上的 **Machine without registry access:
-   load the image**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
+1. **找出映像檔。** 在 **模型 → 引擎**，打開引擎上的 **無法連到映像檔登錄的機器：載入映像檔**：它列出每個容器 variant 的映像檔，以及填好的下列指令。機器會用第一個 `when` 符合它顯示卡的
    variant（[內建 recipe](reference.md#built-in-recipes)）：例如 llama.cpp 在 AMD APU（gfx1151、gfx1150……）
    上用 `vulkan`。部署頁面上的 replica 也會顯示它執行的映像檔。
 2. **在連得到 registry 的機器上**，用 digest 拉映像檔、加上它的 tag，再存成檔案。以 llama.cpp 的 Vulkan variant
@@ -340,9 +339,9 @@ agent；舊版 agent 會試著去拉。
 
 ## 部署物件偵測模型
 
-物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**Models**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
+物件偵測、影像分割和深度估計是各自的模型種類（1.4）：像其他模型一樣加入目錄（**模型**），再從 **Serving** 部署。它們在 Forgeyard 自己的視覺伺服器上執行（配方 `vision`）：NVIDIA GPU 上用 CUDA 版（以記憶體共用一張卡），任何機器（包括 AMD 機器）都能用 CPU 版。模型來自機器的模型快取，所以只下載一次，快取裡有了之後離線機器也能用。
 
-1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。1.4.4 起清單裡還有三個**找你說的東西**的偵測模型（Grounding DINO tiny、MM-Grounding-DINO tiny、OWLv2 base）：沒有固定類別，每個請求說要找什麼（見下文）。它們需要 1.4.4 起的視覺映像檔。
+1. **模型 → 加入模型 → 推薦**：*物件偵測、影像分割與深度* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。1.4.4 起清單裡還有三個**找你說的東西**的偵測模型（Grounding DINO tiny、MM-Grounding-DINO tiny、OWLv2 base）：沒有固定類別，每個請求說要找什麼（見下文）。它們需要 1.4.4 起的視覺映像檔。
 2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
 3. 部署會出現在 **Serving → Vision**，標出它的路徑。部署頁的 **Try it** 會送一張測試圖片；**Playground**（選單 *Vision* 底下的模型）可以用你自己的照片。
 
@@ -403,7 +402,7 @@ with httpx.Client(base_url="https://192.168.1.20:7860/v1", verify=ca, timeout=12
 - **固定類別：** ViT、ConvNeXt V2、DINOv2 分類器…（`…ForImageClassification` 模型）有自己的類別清單，常見的是 ImageNet 的 1,000 類，回應其中最符合的幾個。
 - **零樣本：** CLIP 和 SigLIP 2 把圖片分到每個請求送來的標籤（`labels`）之中，每個標籤讀成「This is a photo of …」（`template` 可以改）。SigLIP 每個標籤各自評分（`multi_label: true`：可能好幾個都符合，也可能都不符合）；CLIP 的分數加起來是 1。
 
-1. **Models → Add a model → Recommended → Image classification** 列出 SigLIP 2 base 和 LAION 的 CLIP ViT-B/32（零樣本）、ViT base、ConvNeXt V2 tiny 和 DINOv2 small（ImageNet 類別），都是 Apache-2.0 或 MIT。也可以用 **Image classification** 任務搜尋 Hugging Face。
+1. **模型 → 加入模型 → 推薦 → 圖片分類** 列出 SigLIP 2 base 和 LAION 的 CLIP ViT-B/32（零樣本）、ViT base、ConvNeXt V2 tiny 和 DINOv2 small（ImageNet 類別），都是 Apache-2.0 或 MIT。也可以用 **Image classification** 任務搜尋 Hugging Face。
 2. 像其他視覺模型一樣**部署**：CPU 就夠了（四個執行緒每張圖片 0.1 到 0.4 秒）。需要 1.4.4 起的視覺映像檔。
 3. 呼叫它：
 
@@ -434,7 +433,7 @@ Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一�
 
 ## 把圖片送給模型
 
-1. **加入能讀圖片的模型。** 在 **Models → Add a model → Recommended** 的 **Vision** 群組裡，有給 vLLM 用的 Qwen3-VL 2B、4B 和 8B，以及給 llama.cpp（CPU 或 AMD APU）用、附 projector 檔的 Qwen3-VL GGUF。只要目錄項目標示 *Images* 的模型都可以：目錄會從模型的 `config.json` 讀出來。GGUF 儲存庫還要選它的 **Projector** 檔（有 F16 就預設選它；選 *None* 就只能處理文字）。
+1. **加入能讀圖片的模型。** 在 **模型 → 加入模型 → 推薦** 的 **視覺（對話中讀圖片）** 群組裡，有給 vLLM 用的 Qwen3-VL 2B、4B 和 8B，以及給 llama.cpp（CPU 或 AMD APU）用、附 projector 檔的 Qwen3-VL GGUF。只要目錄項目標示 *Images* 的模型都可以：目錄會從模型的 `config.json` 讀出來。GGUF 儲存庫還要選它的 **Projector** 檔（有 F16 就預設選它；選 *None* 就只能處理文字）。
 2. 照平常的方式**部署**。*Images per request*（4）、*Videos per request*（0，關閉）和 *Largest request*（64 MiB）都在 **Advanced** 底下，預設值就能用。估算會把視覺編碼器（vLLM）或 projector（llama.cpp）列成獨立的一項。
 3. **呼叫它**，圖片用 `data:` URI 或 `https://` 網址：
 
@@ -465,12 +464,12 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 把文字轉成語音
 
-1. **加入語音模型。** 在 **Models → Add a model → Recommended** 的 **Text to speech** 群組裡有：
+1. **加入語音模型。** 在 **模型 → 加入模型 → 推薦** 的 **文字轉語音** 群組裡有：
    - 給 NVIDIA GPU 用的 Qwen3-TTS 0.6B 或 1.7B CustomVoice（vLLM-Omni）：中文與英文，九種聲音。大約需要 10 與 12 GiB 的 GPU 記憶體。
    - 給 llama.cpp 用的 Qwen3-TTS 1.7B GGUF：在 AMD APU 或 CPU 上說中文與英文；它只有自己的一種聲音。
    - Kokoro 82M（speaches）與 Chatterbox Turbo（llama.cpp）：CPU 就跑得動的小型英文聲音。
 
-   從 **Search Hugging Face** 找到的模型，只要標了 *text-to-speech*、且有配方支援它的格式就能用：safetensors 的 Qwen3-TTS 用 vLLM-Omni，附 projector（`mmproj-*.gguf`）的 TTS GGUF 用 llama.cpp，ONNX 格式的 Kokoro 或 Piper 用 speaches。
+   從 **搜尋 Hugging Face** 找到的模型，只要標了 *text-to-speech*、且有配方支援它的格式就能用：safetensors 的 Qwen3-TTS 用 vLLM-Omni，附 projector（`mmproj-*.gguf`）的 TTS GGUF 用 llama.cpp，ONNX 格式的 Kokoro 或 Piper 用 speaches。
 2. **照常部署。** *Longest input* 在 **Advanced** 裡，預設值就能用。
 3. **用 OpenAI SDK 呼叫：**
 
@@ -490,12 +489,12 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 生成圖片
 
-1. **加入圖片模型。** 在 **Models → Add a model → Recommended** 的 **Images** 群組裡有：
+1. **加入圖片模型。** 在 **模型 → 加入模型 → 推薦** 的 **圖片（文字生成圖片）** 群組裡有：
    - 給 NVIDIA GPU 用的 Z-Image-Turbo、Stable Diffusion XL 與 FLUX.1-schnell（vLLM-Omni）。在預設上限下，大約各需要 30、17 與 42 GiB 的 GPU 記憶體；FLUX.1-schnell 是 gated（要在 Hugging Face 接受它的條款並提供 token）。
    - 給 stable-diffusion.cpp 用的 GGUF 版 Z-Image-Turbo 與 FLUX.1-schnell：AMD GPU 或 APU（Vulkan）或 NVIDIA GPU（CUDA），1024x1024 時大約 18 與 19 GiB，或是 CPU（很慢）。
    - 給 CPU 用的 GGUF 版 Stable Diffusion 1.5：又小又舊（512x512），用來確認圖片生成能用。
 
-   從 **Search Hugging Face** 找到的模型，只要標了 *text-to-image*，而且是 diffusers 儲存庫（vLLM-Omni）或 GGUF / safetensors 檔案（stable-diffusion.cpp；選模型檔，旁邊的文字編碼器與 VAE 檔會依名稱找到）就能用。目錄會顯示它的授權；使用產生的圖片之前請先確認。
+   從 **搜尋 Hugging Face** 找到的模型，只要標了 *text-to-image*，而且是 diffusers 儲存庫（vLLM-Omni）或 GGUF / safetensors 檔案（stable-diffusion.cpp；選模型檔，旁邊的文字編碼器與 VAE 檔會依名稱找到）就能用。目錄會顯示它的授權；使用產生的圖片之前請先確認。
 2. **照常部署。** *Images per request* 和 *Default size* 在表單上；最長邊、步數、佇列、逾時和卸載在 **Advanced** 底下。預設值就能用。
 3. **用 OpenAI SDK 呼叫：**
 
@@ -520,7 +519,7 @@ media: {inputs: [image, audio, video], files: false}
 
 ## 生成影片
 
-1. **加入影片模型。** 在 **Models → Add a model → Recommended** 的 **Video** 群組裡有 Wan2.1-T2V-1.3B（832x480、16 fps，在預設上限下大約需要 22 GiB 的 GPU 記憶體）和 Wan2.2-TI2V-5B（1280x704、24 fps，大約 33 GiB；它的估算還沒實測），兩個都是 Apache-2.0，給 NVIDIA GPU 用（vLLM-Omni）。從 **Search Hugging Face** 找到的模型，只要是 diffusers 儲存庫，而且 `model_index.json` 寫的是文字轉影片 pipeline（`WanPipeline`）就能用。
+1. **加入影片模型。** 在 **模型 → 加入模型 → 推薦** 的 **影片（文字生成影片）** 群組裡有 Wan2.1-T2V-1.3B（832x480、16 fps，在預設上限下大約需要 22 GiB 的 GPU 記憶體）和 Wan2.2-TI2V-5B（1280x704、24 fps，大約 33 GiB；它的估算還沒實測），兩個都是 Apache-2.0，給 NVIDIA GPU 用（vLLM-Omni）。從 **搜尋 Hugging Face** 找到的模型，只要是 diffusers 儲存庫，而且 `model_index.json` 寫的是文字轉影片 pipeline（`WanPipeline`）就能用。
 2. **照常部署。** *Default size*、*Default length* 和 *Longest video* 在表單上；最長邊、每秒影格數、步數、同時的工作數、每把金鑰的工作數、結果保留多久、最長的工作和卸載在 **Advanced** 底下。預設值就能用。
 3. **用 OpenAI SDK 呼叫：**要求影片、輪詢它，然後下載。
 
@@ -557,7 +556,7 @@ media: {inputs: [image, audio, video], files: false}
 
 文字分類（1.4.4）用小而快的模型替文字加上標籤：情緒、語言、有害內容。它在 GPU 上用 vLLM 的 pooling runner（配方 `vllm-pooling`）執行，以記憶體共用一張卡。
 
-1. **Models → Add a model → Recommended**：*Text classification* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **Text classification** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
+1. **模型 → 加入模型 → 推薦**：*文字分類* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **Text classification** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
 2. **Deploy**。模型本身的最大長度比引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
 3. 它會出現在 **Serving → Text classification**。部署頁面的 **Try it** 會送一句話；**Playground** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
 
@@ -616,10 +615,10 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 有些模型（Llama、Gemma 3、FLUX.1-schnell……）是 *gated*：Hugging Face 只提供給接受了它授權條款的帳號。Forgeyard 需要這種帳號的權杖才能檢查和下載它們，而整台伺服器有一個權杖就夠了：
 
 1. 在 huggingface.co 登入，打開模型的頁面並接受它的授權條款。然後在 **Settings → Access Tokens** 建立一個有 *Read* 權限的權杖。
-2. 管理員：打開 **Models → Sources**，把它貼進 **Hugging Face token**，再選 **Save token**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
+2. 管理員：打開 **模型 → 來源**，把它貼進 **Hugging Face 權杖**，再選 **儲存權杖**。它用伺服器的機密金鑰加密儲存，之後不會再顯示，只會顯示最後四個字元。
 3. 照常加入並部署模型。檢查模型時會用伺服器的權杖，下載它的 agent 會隨下載工作拿到權杖（agent 不會儲存它）。
 
-部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**Add a model** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
+部署仍然可以帶自己的權杖：**Deploy a model → Advanced → Hugging Face token**。它只對那個部署優先於伺服器的權杖，1.3.1 之前建立的部署也保留各自的權杖。**加入模型** 裡的權杖欄位也一樣，只用於那一次檢查。**Remove token** 會移除伺服器的權杖；有自己權杖的部署照常運作。
 
 權杖只會送到 Hugging Face（`HF_ENDPOINT`），絕不會送到 `https://` 的 GGUF 主機。受限模型的部署沒有可用的權杖時，Setup health 會提醒（`gated-model-no-token`）。
 
@@ -697,7 +696,7 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton 編譯它的 kernel），寫到容器裡的一個目錄，容器沒了它就會跟著沒了。從 1.5.0 起，`vllm` 和 `vllm-pooling` 配方會把這個目錄保留在機器上（`engine_cache: {env: VLLM_CACHE_ROOT, enabled: true}`），所以只有副本的第一次啟動需要編譯；之後的啟動（包括[休眠](#let-a-deployment-sleep-when-nobody-uses-it)後被喚醒）都會載入編譯好的結果。在 A100 上用 Qwen3-0.6B 量過：第一次啟動兩者都是 118 秒；重新啟動沒有快取要 114 秒，有快取只要 57 秒，兩者的回答相同；目錄大小 44 MiB。在部署的事件裡可以看到：重新啟動後 *ready in …* 的 `engine` 部分。
 
-使用它不需要做任何事。如果要不用它啟動（例如追查問題時想先排除它），在 **Models → Engines** 選 **Add an engine**，從內建的 `vllm` 開始，取個名字（例如 `vllm-nocache`），把它的 `engine_cache` 那一行改成 `enabled: false`，再用它部署。開啟或關閉都不會重新啟動正在執行的副本：從副本的下一次啟動開始生效。
+使用它不需要做任何事。如果要不用它啟動（例如追查問題時想先排除它），在 **模型 → 引擎** 選 **加入自訂引擎**，從內建的 `vllm` 開始，取個名字（例如 `vllm-nocache`），把它的 `engine_cache` 那一行改成 `enabled: false`，再用它部署。開啟或關閉都不會重新啟動正在執行的副本：從副本的下一次啟動開始生效。
 
 每個副本在它的機器上都有自己的目錄 `<model cache>/engine-cache/<key>`，以可寫入的方式掛載在 `/forgeyard/engine-cache`，`VLLM_CACHE_ROOT` 指向它；其他部署或副本都不會用到。vLLM 依模型、會改變計算圖的設定、它自己的程式碼和編譯器的雜湊值保存編譯結果，所以改了參數就會重新編譯，不會載入錯的計算圖。刪除部署（或它的配方不再保留快取）時目錄會被移除；副本以新的映像檔（新的配方版本）啟動時，它較舊的目錄也會被移除。需要有模型快取和容器引擎的 1.5.0 agent；行程 variant，以及較舊 agent 上的副本，啟動方式和以前一樣。不以 root 執行的映像檔無法寫入這個目錄。
 
@@ -1064,7 +1063,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `passthrough` | 一個公開在 `/x/` 的小型 HTTP 程式：在 CPU 機器上以行程執行，在 GPU 機器上以容器執行。金鑰（none、listed）、照原樣轉送的路徑、被拒絕的路徑、被替換的憑證與轉發標頭、強制的沙箱、轉址、串流、本文上限、rpm、同時請求數、讀取逾時、副本連接埠前的金鑰守門員、用量 |
 | `tts`、`img`、`video` | 在 GPU 機器上（有 CPU 引擎的也在 CPU 機器上）的語音、圖片和影片生成：SDK 的呼叫、格式、上限、佇列、用量和金鑰守門員 |
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
-| `relay` | 經由伺服器取得模型：把 CPU 機器的 **Internet access for downloads** 設為 **Always through the server**，用 **Download to…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
+| `relay` | 經由伺服器取得模型：把 CPU 機器的 **Internet access for downloads** 設為 **Always through the server**，用 **下載到…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
 | `images` | 在有 Docker 或 Podman 的機器上（`--engine-machine`，預設是 GPU 機器）：它的引擎映像清單；腳本自己做出一個只有幾 KB 的映像檔，上傳、複製到第二台可以接收映像的機器（`--second-engine-machine`），再用 **Remove engine image** 移除（因為只有 recipe 指名的映像才能移除，會有一個 recipe 暫時指名它幾秒鐘） |
 | `scale` | 閒置時休眠、喚醒（由請求、**Wake now**、Playground）、喚醒期間轉到雲端、`model_waking`、`cannot_wake`、**Stop**、自動副本數與排空、啟動時間，以及它們的指標（[見下方](#check-sleep-waking-and-automatic-replicas)） |
 | `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
@@ -1213,24 +1212,24 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 
 ## 查看模型或引擎
 
-打開 **Models**，在 **Catalog** 點模型的名稱，或在 **Engines** 分頁點引擎的名稱（其他地方的名稱也都連到這些頁面：**Serving**、部署的頁面、機器的模型快取、**Download to…**）。所有登入的人都可以查看。
+打開 **模型**，在 **目錄** 點模型的名稱，或在 **引擎** 分頁點引擎的名稱（其他地方的名稱也都連到這些頁面：**Serving**、部署的頁面、機器的模型快取、**下載到…**）。所有登入的人都可以查看。
 
 **模型頁面**（`/models/<name>`）最上面一行是重點（任務、大小、授權、用第一個引擎的預設值一份副本需要多少、有幾個部署），下面是跳到各區段的連結：
 
-- **Overview**：來源與版本（附 Hugging Face 連結）、授權、任務和它在 `/v1` 底下回應的路徑、架構。
-- **Machines**：每台機器的模型快取裡有沒有這個模型（以它的 agent 最後一次回報為準，附在那裡的大小和誰在用）、一份副本現在**放不放得下**（先看 GPU，再看 CPU；和部署頁面同一個估算，用引擎的預設值），以及它會用的引擎變體和那個映像檔或程式是否已經在那裡。在表格上方選另一個引擎，就會看到那個引擎的結果。**Deploy here** 和 **Download here** 會從那台機器開始。
-- 這個模型的 **Deployments**，和能執行它的 **Engines**（各自連到引擎頁面）。
-- **Files**，收成一行（機器會下載幾個檔案、總大小、模型檔）；**Show files** 會列出每個檔案和大小，以及儲存庫裡不會下載的其他檔案（其他量化版本和投影器檔）。
+- **概覽**：來源與版本（附 Hugging Face 連結）、授權、任務和它在 `/v1` 底下回應的路徑、架構。
+- **機器**：每台機器的模型快取裡有沒有這個模型（以它的 agent 最後一次回報為準，附在那裡的大小和誰在用）、一份副本現在**放不放得下**（先看 GPU，再看 CPU；和部署頁面同一個估算，用引擎的預設值），以及它會用的引擎變體和那個映像檔或程式是否已經在那裡。在表格上方選另一個引擎，就會看到那個引擎的結果。**部署到這裡** 和 **下載到這裡** 會從那台機器開始。
+- 這個模型的 **部署**，和 **可以執行它的引擎**（各自連到引擎頁面）。
+- **檔案**，收成一行（機器會下載幾個檔案、總大小、模型檔）；**顯示檔案** 會列出每個檔案和大小，以及儲存庫裡不會下載的其他檔案（其他量化版本和投影器檔）。
 
-**Deploy**、**Download to…** 和 **Remove** 在最上面，和目錄裡一樣。管理員可以在這裡設定**顯示名稱**（**Display name**），例如把 `accept-qwen3-4b` 顯示成 *Qwen3 4B*；留空就顯示名稱。名稱本身不會改變。
+**部署**、**下載到…** 和 **移除** 在最上面，和目錄裡一樣。管理員可以在這裡設定**顯示名稱**，例如把 `accept-qwen3-4b` 顯示成 *Qwen3 4B*；留空就顯示名稱。名稱本身不會改變。
 
-**引擎頁面**（`/models/engines/<name>`）有 **Overview**（它服務什麼、在哪個路徑、讀哪些格式、怎麼共用 GPU）、**Variants**（每種硬體的映像檔或程式、映像檔是否以 digest 釘選、機器需要什麼，以及把映像檔帶到連不到 registry 的機器的指令）、**Machines**（每台機器會用的變體，以及映像檔是否已在那台機器的容器引擎裡（以它最後一次列出的映像檔為準），或程式是否在模型快取裡）、**Parameters**（收成一行：預設值和範圍），以及使用它的**部署**和**目錄模型**。打開頁面時，連線中的機器如果上次列出映像檔已超過十分鐘，會重新列一次；**List again** 會立刻再問一次。離線的機器顯示它最後一次的清單。管理員可以在這裡**編輯**或**刪除**自訂引擎，或把內建引擎**複製**成自訂引擎（例如試用較新的映像檔）。
+**引擎頁面**（`/models/engines/<name>`）有 **概覽**（它服務什麼、在哪個路徑、讀哪些格式、怎麼共用 GPU）、**變體**（每種硬體的映像檔或程式、映像檔是否以 digest 釘選、機器需要什麼，以及把映像檔帶到連不到 registry 的機器的指令）、**機器**（每台機器會用的變體，以及映像檔是否已在那台機器的容器引擎裡（以它最後一次列出的映像檔為準），或程式是否在模型快取裡）、**參數**（收成一行：預設值和範圍），以及使用它的**部署**和**目錄模型**。打開頁面時，連線中的機器如果上次列出映像檔已超過十分鐘，會重新列一次；**重新列出** 會立刻再問一次。離線的機器顯示它最後一次的清單。管理員可以在這裡**編輯**或**刪除**自訂引擎，或把內建引擎**複製**成自訂引擎（例如試用較新的映像檔）。
 
 ## 部署之前先下載模型
 
-**Download to…**（下載到…）會現在就把模型，以及預設也把它的引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
+**下載到…**會現在就把模型，以及預設也把它的引擎，放進你選的機器的模型快取，這樣在那台機器上部署時就不用等下載。不會啟動任何東西。admin 和 operator 可以使用。
 
-1. 打開 **Models**（**Catalog** 分頁），在模型那一列按 **Download to…**。或打開機器的頁面，在 **Models in cache** 上方按 **Download a model here…**，再選模型。
+1. 打開 **模型**（**目錄** 分頁），在模型那一列按 **下載到…**。或打開機器的頁面，在 **Models in cache** 上方按 **Download a model here…**，再選模型。
 2. 勾選機器。每一行會說明那台機器能不能下載：
    - **fits**：要下載多少、可用的磁碟空間，以及會一起抓的引擎；
    - **already here**：模型（和引擎）已經在那台機器的快取裡；
@@ -1240,7 +1239,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 3. **Also the engine, for the recipe** 預設是勾選的。依你選的配方（預設是第一個能跑這個模型的配方，和部署頁面一樣），抓那台機器會用到的東西：process 變體的引擎壓縮檔，或容器變體的映像檔（和部署時一樣 pull）。取消勾選就只下載模型。
 4. 按 **Download to N machines**。
 
-進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**Cancel** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **Download to…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **Models in cache** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
+進度會顯示在目錄裡模型那一列的下方，以及每台機器的頁面上，文字和進度條與部署的下載相同。**Cancel** 會立刻停止那台機器上的下載；已經在磁碟上的部分會保留，再按一次 **下載到…** 就從那裡繼續。如果機器下線，下載會等 agent 回來後繼續。下載完成後，機器的 **Models in cache** 會列出這個模型，部署這個模型時排程也會優先選這台機器。
 
 每次要求和取消都會記入稽核紀錄（`model.download_requested`、`model.download_cancelled`）。從 URL 下載的單一 GGUF 檔沒有公布的 checksum：第一次完整下載後會記下它的 SHA-256，之後每次下載都必須相符（`model.checksum_recorded`）。API 見[參考資料](reference.md#download-a-model-ahead-through-the-api)。
 
@@ -1254,15 +1253,15 @@ uv run --no-sync python -m forgeyard secrets reset --yes
    - **Auto**（預設）：先直接下載；一旦那台機器連不到來源（名稱解析失敗、連線被拒、被重設或逾時、網路無法連線），這次下載剩下的部分，以及之後一小時內從那個主機的下載，都改經由伺服器。HTTP 錯誤（檔案不存在、權杖被拒）或 checksum 不符不會切換：伺服器也會得到同樣的結果。
    - **Always through the server**：給完全沒有網路的機器。它不會先直接試，所以不用先等一次失敗。
    - **Direct only**：永遠不經由伺服器。
-2. 照常部署，或使用 **Download to…**。進度會在部署的頁面、Catalog 裡模型的下方和機器的頁面上顯示 *Downloading the model via the server: … of …*，完成的下載會顯示 *Downloaded … via the server*。對設成一律經由伺服器的機器，**Download to…** 對話框會標示 *via the server*。
+2. 照常部署，或使用 **下載到…**。進度會在部署的頁面、目錄裡模型的下方和機器的頁面上顯示 *Downloading the model via the server: … of …*，完成的下載會顯示 *Downloaded … via the server*。對設成一律經由伺服器的機器，**下載到…** 對話框會標示 *via the server*。
 
 不變的部分：中斷後 agent 會從磁碟上已有的部分繼續下載（伺服器會把 `Range` 轉給來源）、會重試、按 **Cancel** 會立刻停止，而且每個檔案都像直接下載一樣檢查（大檔的 SHA-256、小檔的 git blob id、引擎壓縮檔釘選的 SHA-256、URL 模型記下的 SHA-256）。在路上被改過的檔案會被拒絕並刪除，所以伺服器並沒有因此多了任何它原本做不到的權限。
 
 不同的部分：
 
-- 受限模型由伺服器用它自己的 Hugging Face 權杖（**Models → Sources**），或部署自己的權杖下載。設成 **Always through the server** 的機器完全不會收到權杖。
+- 受限模型由伺服器用它自己的 Hugging Face 權杖（**模型 → 來源**），或部署自己的權杖下載。設成 **Always through the server** 的機器完全不會收到權杖。
 - 套用伺服器自己的模型來源規則：只限 https 和公開位址（除非設了 `MODEL_ALLOW_PRIVATE_HOSTS`），URL 模型只限允許的主機。
-- 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **Download to…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
+- 伺服器只轉送那台機器現在應該下載的東西（它上面部署的副本，以及它的 **下載到…** 要求）；取消下載或刪除部署後，幾秒內就會關閉。同時經由伺服器的下載每台機器最多兩個、全部最多四個；其他的會排隊等。
 - 每個位元組都會經過伺服器的網路兩次（從來源進來、送到機器出去），所以連得到網路的機器請維持 **Auto** 或 **Direct only**。
 - 排程不再因為某台機器自己下載不到模型而避開它：部署的頁面會顯示 *amd-01 could not reach huggingface.co just now; the model comes through the server*，或 *amd-01 downloads the model and the engine through the server (its internet access setting)*。
 
@@ -1271,7 +1270,7 @@ uv run --no-sync python -m forgeyard secrets reset --yes
 - **哪些機器會送**：任何一台 agent 是 1.4.1 以後、而且快取裡列出這個模型的其他機器，不論它自己能不能上網（完全沒有網路的機器也能送）。只會送它下載並檢查過的檔案，而且只依伺服器持有的 digest 指定。URL 模型要等它的 SHA-256 記錄下來後，才會從機器取得。
 - **選哪一台**：先選有那個 GGUF 檔本身的機器，再選正在送的檔案比較少的。沒有那個檔案、已經在送兩個，或 10 秒內沒開始送的機器會被跳過，改問下一台，最後才用網際網路；這些都發生在提出要求的機器收到第一個位元組之前。送到一半中斷的機器會讓那次回應提早結束；下載會從磁碟上已有的部分繼續，伺服器會重新選來源。
 - **檢查**：提出要求的機器照常檢查每個檔案。伺服器也會檢查經過的完整檔案，並保留最後一段直到相符才送出：副本不符的機器在一小時內不會再被要求送那個檔案，稽核紀錄會寫出是哪台（`node.relay_copy_refused`），檔案會從別處重新開始。請從那台送出檔案的機器的快取移除這個模型，再重新下載。
-- **你會看到**：*Downloading the model via the server, from gpu-host: … of …*、*Downloaded … via the server, from gpu-host*，有機器會送時 **Download to…** 會顯示 *via the server, from gpu-host*。
+- **你會看到**：*Downloading the model via the server, from gpu-host: … of …*、*Downloaded … via the server, from gpu-host*，有機器會送時 **下載到…** 會顯示 *via the server, from gpu-host*。
 - 只有經由伺服器取得檔案的機器會用到（**Always through the server**，或 **Auto** 且連不到來源之後）。連得到網際網路的機器仍然直接下載。
 - 受限模型可能這樣送到一台機器而不用到任何 Hugging Face 權杖，因為另一台機器已經有它。和以前一樣，每台機器拿到什麼由伺服器決定。
 - 引擎壓縮檔仍然經由伺服器從網際網路取得：agent 解開壓縮檔後就會刪掉它，所以沒有機器有壓縮檔可以送。
