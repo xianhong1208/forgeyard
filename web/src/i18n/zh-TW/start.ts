@@ -13,7 +13,7 @@ export default {
   "start.shown": "在每個步驟都完成之前，Forgeyard 會再開在這份清單上。",
   "start.progress": "進度",
   "start.allDone": "<strong>{total} 個步驟全部完成。</strong>Forgeyard 已經可以使用了。",
-  "start.someDone": "<strong>已完成 {done}／{total}。</strong>下一步：{next}。",
+  "start.someDone": "<strong>已完成 {done}/{total}。</strong>下一步：{next}。",
   "start.hiddenNote": "這份清單已從你的首頁隱藏。你隨時可以從帳號選單開啟它。",
   "start.showIt": "開啟 Forgeyard 時顯示它",
   "start.doneNote": "設定完成了嗎？每個步驟都完成後，Forgeyard 會開在「機器」頁。",

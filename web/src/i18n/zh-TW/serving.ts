@@ -33,7 +33,7 @@ export default {
   "serving.replicaTitle": "副本 #{n}：{state}",
   "serving.stopped": "已停止",
   "serving.waitingMachine": "正在等機器",
-  "serving.perGpu": "{size}／GPU",
+  "serving.perGpu": "{size} / GPU",
   "serving.ram": "{size} RAM",
   "serving.ready": "{ready}/{replicas} 就緒",
   "serving.holdsNothing": "不佔用任何資源",
