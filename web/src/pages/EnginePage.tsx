@@ -1,11 +1,13 @@
 // 1.4.3 (#140): an engine's page, /models/engines/<name>: what it serves, its variants (image or program per kind of
 // hardware, and how each is pinned), which machines have that image or program, its parameters (folded to one line),
 // and the deployments and catalog models that use it. Admins edit and delete a custom engine, and copy a built-in one
-// as a custom engine.
-import { IconCopy, IconCpu, IconEngine, IconPencil, IconRefresh, IconTrash } from "@tabler/icons-react";
+// as a custom engine. 1.5.2 (#95): operators and admins download the engine alone to machines ahead of time.
+import { IconCopy, IconCpu, IconDownload, IconEngine, IconPencil, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { DownloadList, EngineDownloadDialog } from "../components/DownloadTo";
+import { isActive } from "../lib/downloads";
 import { CopySection, TryButton } from "../components/EngineTry";
 import { CheckBar, EngineUpdates } from "../components/EngineUpdates";
 import { EngineImage } from "../components/EngineImage";
@@ -25,6 +27,8 @@ import type { CatalogResponse, Deployment, DeploymentsResponse, EnginePage as Pa
 import { useApi } from "../lib/useApi";
 import { EngineForm, OfflineImages } from "./Models";
 import { DeploymentRow } from "./Serving";
+
+const DOWNLOAD_POLL_MS = 3000;
 
 export function EnginePage() {
   const { name = "" } = useParams();
@@ -86,8 +90,16 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
     document.getElementById("updates")?.scrollIntoView?.({ block: "start" });
   }, [upd]);
   const [form, setForm] = useState<"edit" | "copy" | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [note, setNote] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // 1.5.2: while a download of this engine runs, the page follows it.
+  const running = (p.downloads ?? []).some(isActive);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(reload, DOWNLOAD_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [running, reload]);
   const paramList = Object.values(r.params);
   const advanced = paramList.filter((x) => x.advanced).length;
   const mine = (deployments ?? []).filter((d) => d.recipe === r.name);
@@ -115,19 +127,25 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
             <p className="engine-image-line lp-image"><EngineImage runs={engineRuns(r.variants)} /></p>
           </div>
         </div>
-        {p.can_manage && (
+        {(p.can_manage || p.can_download) && (
           <div className="page-actions">
-            {!r.builtin && <button type="button" className="btn" onClick={() => { setNote(null); setForm("edit"); }}><IconPencil size={15} aria-hidden="true" /> {t("library.edit")}</button>}
-            {!r.builtin && (
+            {p.can_download && p.machines.length > 0 && (
+              <button type="button" className="btn" onClick={() => { setNote(null); setDownloading(true); }} title={t("enginepage.dl.buttonTitle")}>
+                <IconDownload size={15} aria-hidden="true" /> {t("enginepage.dl.button")}</button>
+            )}
+            {p.can_manage && !r.builtin && <button type="button" className="btn" onClick={() => { setNote(null); setForm("edit"); }}><IconPencil size={15} aria-hidden="true" /> {t("library.edit")}</button>}
+            {p.can_manage && !r.builtin && (
               <button type="button" className="btn btn-quiet" disabled={p.deployments.length > 0} title={p.deployments.length ? t("enginepage.inUse") : undefined}
                 onClick={() => void remove()}><IconTrash size={15} aria-hidden="true" /> {t("library.delete")}</button>
             )}
-            {r.builtin && <button type="button" className="btn btn-quiet" onClick={() => { setNote(null); setForm("copy"); }}
+            {p.can_manage && r.builtin && <button type="button" className="btn btn-quiet" onClick={() => { setNote(null); setForm("copy"); }}
               title={t("enginepage.copyTitle")}><IconCopy size={15} aria-hidden="true" /> {t("enginepage.copy")}</button>}
           </div>
         )}
       </header>
       {note && <Notice tone={note.tone}>{note.text}</Notice>}
+      {downloading && <EngineDownloadDialog recipe={r.name} onClose={() => setDownloading(false)}
+        onStarted={(text) => { setNote({ tone: "ok", text }); reload(); }} />}
       {form && (
         <EngineForm key={form} edit={form === "edit" ? r.name : null} from={form === "copy" ? r.name : undefined} recipes={recipes}
           onCancel={() => setForm(null)}
@@ -155,6 +173,10 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
 
       {r.based_on && (
         <Section id="copy" title={t("enginetry.copyTitle", { name: r.based_on })}>
+          {p.caught_up && (
+            <Notice tone="info">{t.rich(p.caught_up.same ? "enginepage.caughtUp.same" : "enginepage.caughtUp.newer", {
+              builtin: <Link to={engineHref(p.caught_up.builtin)} className="mono">{p.caught_up.builtin}</Link>, version: p.caught_up.version })}</Notice>
+          )}
           <CopySection r={r} pins={p.pins} />
         </Section>
       )}
@@ -178,6 +200,13 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
           <IconRefresh size={14} aria-hidden="true" /> {listing ? t("enginepage.listing") : t("enginepage.listAgain")}</button> : undefined}
         note={t("enginepage.machinesNote")}>
         <EngineMachines p={p} machines={machines} />
+        {(p.downloads ?? []).length > 0 && (
+          <div className="et-block">
+            <h3 className="small">{t("enginepage.dl.listTitle")}</h3>
+            <DownloadList list={p.downloads ?? []} show="machine" canCancel={Boolean(p.can_download)}
+              onChanged={(text) => { setNote({ tone: "ok", text }); reload(); }} onError={(text) => setNote({ tone: "error", text })} />
+          </div>
+        )}
       </Section>
 
       <Section id="params" title={t("enginepage.jump.params")} actions={paramList.length ? <FoldButton open={paramsOpen} setOpen={setParamsOpen} what={t("enginepage.paramsWhat")} controls="params-list" /> : undefined}>
@@ -277,7 +306,8 @@ function EngineMachines({ p, machines }: { p: Page; machines: Machine[] | null }
             <td data-label={t("enginepage.col.thereShort")} className="small">
               {!x.variant ? <span className="muted">—</span> : (
                 <div className="cell-stack">
-                  <span>{x.present === true ? <span className="chip chip-tone-ok">{t("enginepage.here")}</span> : x.present === false ? <span className="chip">{t("enginepage.notHere")}</span> : <span className="chip chip-tone-wait">{t("enginepage.notKnown")}</span>}</span>
+                  <span>{x.present === true ? <span className="chip chip-tone-ok">{t("enginepage.here")}</span> : x.present === false ? <span className="chip">{t("enginepage.notHere")}</span> : <span className="chip chip-tone-wait">{t("enginepage.notKnown")}</span>}
+                    {x.download && <> <span className="chip chip-tone-wait">{t("enginepage.dl.under")}</span></>}</span>
                   <span className="muted">{x.present === null && x.note ? x.note : whereText(x.kind, x.present)}{x.listed_at ? t("enginepage.listed", { when: when(x.listed_at) }) : ""}</span>
                 </div>
               )}

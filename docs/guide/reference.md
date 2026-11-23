@@ -995,8 +995,9 @@ value.
 | `machine_id` | A machine's id pins the deployment there; `null` makes it automatic |
 | `wait` | `true`: save even though it does not fit now; the restarted replicas wait for room |
 | `dry_run` | `true`: only check. The answer is the same, without `deployment`, and nothing is saved |
+| `recipe` | (1.5.2) Another version of its engine: the built-in recipe it runs or was copied from, or a copy of that built-in (`based_on`), which serves the model with the same protocol. The name, served name, keys and routes stay; the estimate is made again with it; parameters it does not take are dropped (`dropped`) |
 
-The model, the recipe, the name and the served name cannot be changed (422). The answer:
+The model, the name and the served name cannot be changed (422). The answer:
 
 | Field | What it is |
 |---|---|
@@ -1005,6 +1006,9 @@ The model, the recipe, the name and the served name cannot be changed (422). The
 | `changes` | `{name: {before, after}}` for each parameter, `replicas` and `machine_id` that changes; `{}` when nothing does |
 | `restart` | `rolling` (one replica at a time), `all` (the only replica restarts), `none`, `on_start` (stopped: the settings apply when it starts), or (1.5.0) `on_wake` (asleep: the settings apply when it wakes) |
 | `restart_text` | The same in a sentence |
+| `recipe` | (1.5.2) The engine it would run |
+| `dropped` | (1.5.2) Parameters it had that this engine does not take: they are dropped |
+| `outage` | (1.5.2) When `restart` is `all` (the only running replica restarts): `{seconds, source, first_start, image_missing, avoid, cloud, text}`. `seconds` is about how long the model will not answer, from `source`: `last_start` (its own), `engine` (the middle value of the latest starts of the other deployments of this engine) or `typical`. `first_start`: the engine changes, and a new version can take longer on its first start. `image_missing`: machines of its replicas without the new engine's image. `avoid`: `add_replica`, `autoscale` (or `min_replicas` when automatic replicas are on), and `cloud` when its route has a cloud tier. Otherwise `null` |
 | `deployment` | The deployment after saving (not on a dry run) |
 
 | Status | `code` | When |
@@ -1013,11 +1017,14 @@ The model, the recipe, the name and the served name cannot be changed (422). The
 | 409 | `recipe_gone` | Its recipe no longer exists |
 | 422 | `invalid_params` | A parameter is unknown or out of its range |
 | 422 | `cannot_estimate` | The new parameters cannot be estimated for this model |
-| 404 | `not_found`, `machine_not_found` | No such deployment, or no such machine for `machine_id` |
+| 422 | `engine_not_related`, `incompatible`, `engine_not_compatible` | (1.5.2) `recipe` is not its built-in engine or a copy of it; does not serve the model; or answers it with another protocol, which would change the route |
+| 404 | `not_found`, `machine_not_found`, `recipe_not_found` | No such deployment, no such machine for `machine_id`, or no such engine for `recipe` |
 | 403 | | Not an admin or an operator |
 
-Each saved change is audited as `deployment.changed`, with the changes and the restart. `GET
-/api/deployments/{id}` also gives `pinned` (the machine chosen, or `null`), `rollout` (while replicas
+Each saved change is audited as `deployment.changed`, with the changes and the restart (1.5.2: with
+another engine, `recipe: {from, to}`, `engine_versions: {from, to}` and `dropped`). `GET
+/api/deployments/{id}` also gives (1.5.2) `engine` (`{name, title, version, builtin, based_on}`) and `engines` (the
+versions it can move to, with `current`), `pinned` (the machine chosen, or `null`), `rollout` (while replicas
 restart: `{generation, updated, total, next}`) and, per replica, `not_picked_up`: set when the replica
 was placed on a connected machine whose agent has not reported it for 2 minutes
 ([A replica stays pending](troubleshooting.md#a-replica-stays-pending)), and (1.4)
@@ -1182,19 +1189,21 @@ header). Everyone signed in can look; admins and operators start and cancel down
 |---|---|
 | `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | Each machine, and whether it can take this model (and the recipe's engine) |
 | `POST /api/downloads` with `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | Starts a download on each machine that can take it; `engine` is on by default, and `recipe` defaults to the first recipe that serves the model |
-| `GET /api/downloads?model_id=<id>&machine_id=<id>` | The downloads under way first, then the finished ones (the last 100) |
+| `GET /api/downloads/targets?recipe=<name>` | (1.5.2) Without `model_id`: each machine, and whether it can take this engine alone |
+| `POST /api/downloads` with `{"recipe": "<name>", "machine_ids": [<id>, …]}` | (1.5.2) Without `model_id`: the engine alone (the image or program of the variant each machine would run) |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>&engine=<name>` | The downloads under way first, then the finished ones (the last 100); `engine`: only those of that engine alone |
 | `POST /api/downloads/{id}/cancel` | Cancels one under way; its agent stops it at once and keeps what is on disk |
 | `PUT /api/machines/{id}/fetch-via` with `{"fetch_via": "auto"}` | Admins only: how that machine fetches models and engine archives: `auto` (directly, through the server after a network failure), `server` (always through the server) or `direct` (never through it). Its agent gets the new way at once |
 
 Each machine in `targets` has a `state`: `ok`, `cached` (already there), `downloading`, `too_old` (an
 agent before 1.4), `no_cache`, `offline`, `no_space` (the model plus a 1 GiB margin is more than the
-cache's free disk) or `revoked`, with a `note` saying why; `need_bytes` and `free_bytes`; and, with
+cache's free disk), `revoked` or (1.5.2, an engine alone) `no_engine` (no variant of it runs there), with a `note` saying why; `need_bytes` and `free_bytes`; and, with
 the engine, `variant` and `engine` (`kind` `archive` or `image`, `name`, `cached`), or `engine_note`
 when no variant of the recipe runs there; and `via`, how the model would come (`direct`, `auto` or
 `server`), with `from_machine` (1.4.1) naming the machine that would send it through the server, or null. The variant is the one the machine would run: a GPU variant
 when it has an allowed card that the variant supports, else a CPU one, and one its runtime can run.
 
-A download has `id`, `model`, `machine` (with `connected`), `file`, `recipe` (null: the model only),
+A download has `id`, `model` (null for an engine alone), `engine_only` (1.5.2), `machine` (with `connected`), `file`, `recipe` (null: the model only),
 `state` (`queued`, `downloading`, `done`, `failed` or `cancelled`), `download` (the progress, the same
 shape as a deployment replica's, with `via: "server"` while the bytes come through the server),
 `reason`, `via` (`direct`, `server` once it came through the server, or `machine` once the model came from
@@ -1208,11 +1217,13 @@ most 20 per machine.
 | 409 | `download_finished` | Cancel of a download that already ended |
 | 422 | `local_model` | A local model is a directory on the machines: there is nothing to download |
 | 422 | `recipe_not_compatible`, `bad_fetch_via` | The recipe does not serve the model; a `fetch_via` that is not one of the three |
+| 422 | `model_or_engine` | (1.5.2) Neither a model nor an engine named, or `engine: false` without a model |
 | 404 | `not_found` | No such model, machine or download |
 | 403 | | Not an admin or an operator (not an admin, for `fetch-via`) |
 
 Audit events: `model.download_requested` (one per machine, with the model and the engine),
-`model.download_cancelled`, `node.fetch_via_changed`, and `model.checksum_recorded` when the SHA-256 of
+`model.download_cancelled`, (1.5.2) `engine.download_requested` (one per machine, with `recipe`, `version`, `variant`
+and `engine`, the image or archive) and `engine.download_cancelled`, `node.fetch_via_changed`, and `model.checksum_recorded` when the SHA-256 of
 a URL model is recorded: a single GGUF file from a URL has no published checksum, so the first one an
 agent computes after a complete download is kept in the catalog entry (`files[0].sha256` of the model's
 metadata, with `sha256_from`, the machine, and `sha256_at`), and every later download must match it. A
@@ -1226,6 +1237,15 @@ locks, resume from partial files, checksums and cancel; an image with the pull p
 starts nothing, runs at most two at a time and reports `status.downloads` (`{id, state, reason,
 download}`); a download missing from the next list is cancelled. Migration `0015` adds the table
 `model_downloads` and the column `nodes.fetch_via` (`auto` for every existing machine).
+
+(1.5.2) An engine alone is a row without a model: its item in `desired.downloads` has no `model` block, only the
+`engine` archive (with its SHA-256) or the `image` (with `image_ids`, and `image_relay` where the machine fetches
+images through the server; a copy's image by the ids in `image_pins`). Agents with `prefetch` take it as it is. The
+engine page (`GET /api/recipes/{name}`) adds `can_download`, `downloads` (that engine's, newest first) and, per
+machine, `download` (one under way there), and for a copy `caught_up`: `{builtin, title, version, same}` when its
+built-in engine now runs the copy's version or a newer one, else `null`. Migration `0017_engine_downloads` makes
+`model_downloads.model_id` nullable (every existing row is unchanged; on SQLite the table is rebuilt, which is safe
+because nothing references it); going down deletes the engine-only rows and makes it NOT NULL again.
 
 ### Downloads through the server (the relay)
 

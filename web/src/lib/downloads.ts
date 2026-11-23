@@ -8,11 +8,12 @@ import { when } from "./format";
 export const TARGET_LABEL: Record<DownloadTarget["state"], string> = labels({
   ok: "machine.target.ok", cached: "machine.target.cached", downloading: "machine.target.downloading", too_old: "machine.target.too_old",
   no_cache: "machine.target.no_cache", offline: "machine.target.offline", no_space: "machine.target.no_space", revoked: "machine.target.revoked",
+  no_engine: "machine.target.no_engine",
 });
 
 export const TARGET_TONE: Record<DownloadTarget["state"], string> = {
   ok: "ok", cached: "run", downloading: "wait", too_old: "bad", no_cache: "off", offline: "off", no_space: "bad",
-  revoked: "off",
+  revoked: "off", no_engine: "bad",
 };
 
 export function pickable(t: DownloadTarget): boolean {
@@ -59,7 +60,8 @@ export function downloadLine(d: ModelDownload): string {
   if (d.state === "done") {
     const via = d.via === "machine" ? tr("machine.dl.viaMachine", { name: d.source?.name ?? tr("machine.dl.anotherMachine") })
       : d.via === "server" ? tr("machine.dl.viaServer") : "";
-    return tr("machine.dl.done", { when: when(d.finished_at), via, engine: d.recipe ? tr("machine.dl.withEngine", { recipe: d.recipe }) : "" });
+    // An engine alone (1.5.2): its name is the row's title already.
+    return tr("machine.dl.done", { when: when(d.finished_at), via, engine: d.recipe && !d.engine_only ? tr("machine.dl.withEngine", { recipe: d.recipe }) : "" });
   }
   // The server's reason as it sent it, else "Cancelled" in the reader's language.
   if (d.state === "cancelled") return (d.reason ? `${capital(d.reason)} ${when(d.finished_at)}` : tr("machine.dl.cancelled", { when: when(d.finished_at) })).trim();

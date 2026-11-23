@@ -474,6 +474,18 @@ export type Deployment = {
   last_start?: StartTime | null;
   // 1.5.0 (#37): automatic replicas: the bounds, the load and the last decision.
   autoscale?: DeploymentAutoscale;
+  // 1.5.2 (#95, detail only): the engine it runs (a copy names its built-in), and the versions Edit offers.
+  engine?: DeploymentEngine | null;
+  engines?: (DeploymentEngine & { current: boolean })[];
+};
+
+export type DeploymentEngine = { name: string; title: string; version: string; builtin: boolean; based_on: string | null };
+
+// 1.5.2 (#95): a change that restarts the only running replica: about how long the model does not answer, and how
+// to avoid it. source: its own last start, the other deployments of the engine, or a typical figure.
+export type EditOutage = {
+  seconds: number; source: "last_start" | "engine" | "typical"; first_start: boolean; image_missing: string[];
+  avoid: ("add_replica" | "autoscale" | "min_replicas" | "cloud")[]; cloud: boolean; text: string;
 };
 
 export type StartTime = {
@@ -511,6 +523,8 @@ export type RestartMode = "none" | "on_start" | "on_wake" | "rolling" | "all";
 export type EditResponse = {
   estimate: Estimate; placement: Placement; params: Record<string, unknown>;
   changes: Record<string, { before: unknown; after: unknown }>; restart: RestartMode; restart_text: string;
+  // 1.5.2 (#95): the engine it would run, the parameters that engine does not know (dropped), the one-replica notice.
+  recipe?: string; dropped?: string[]; outage?: EditOutage | null;
   deployment?: Deployment;
 };
 
@@ -657,6 +671,8 @@ export type DownloadProgress = {
 export type ModelDownload = {
   id: number;
   model: { id: number; name: string; title: string | null } | null;
+  // 1.5.2 (#95): the engine alone (its recipe), no model.
+  engine_only?: boolean;
   machine: { id: number; name: string; connected: boolean } | null;
   file: string | null;
   recipe: string | null;
@@ -675,7 +691,9 @@ export type ModelDownload = {
 
 export type DownloadsResponse = { downloads: ModelDownload[]; can_download: boolean };
 
-export type DownloadTargetState = "ok" | "cached" | "downloading" | "too_old" | "no_cache" | "offline" | "no_space" | "revoked";
+export type DownloadTargetState = "ok" | "cached" | "downloading" | "too_old" | "no_cache" | "offline" | "no_space" | "revoked"
+  // 1.5.2 (#95): an engine alone, and no variant of it runs on that machine.
+  | "no_engine";
 
 export type DownloadTarget = {
   machine_id: number; name: string; status: string; connected: boolean; state: DownloadTargetState; note: string;
@@ -691,7 +709,9 @@ export type DownloadTarget = {
 };
 
 export type DownloadTargets = {
-  model: { id: number; name: string; title: string | null; size_bytes: number; kind: string; file: string | null };
+  // null (1.5.2, #95): the engine alone, named in `engine`.
+  model: { id: number; name: string; title: string | null; size_bytes: number; kind: string; file: string | null } | null;
+  engine?: DeploymentEngine;
   recipes: string[];
   recipe: string | null;
   machines: DownloadTarget[];
@@ -755,7 +775,9 @@ export type ModelPage = {
   deployments: { id: number; name: string; recipe: string }[];
 };
 
-export type EnginePageMachine = EngineOn & { machine_id: number; name: string; status: string; connected: boolean; can_list: boolean };
+export type EnginePageMachine = EngineOn & { machine_id: number; name: string; status: string; connected: boolean; can_list: boolean;
+  // 1.5.2 (#95): a download of this engine alone under way there.
+  download?: ModelDownload | null };
 
 export type EnginePage = {
   recipe: Recipe; can_manage: boolean; machines: EnginePageMachine[];
@@ -763,6 +785,11 @@ export type EnginePage = {
   models: { id: number; name: string; title: string | null }[];
   // 1.5.2 (#95): per variant, what the server recorded for its pinned image (a copy's).
   pins?: Record<string, EnginePin>;
+  // 1.5.2 (#95): Download to… for the engine alone (operators and admins), its downloads, and for a copy whose
+  // built-in engine has moved to its version or past it, that built-in.
+  can_download?: boolean;
+  downloads?: ModelDownload[];
+  caught_up?: { builtin: string; title: string; version: string; same: boolean } | null;
 };
 
 // 1.5.2 (#95): newer versions of the built-in engines, as the last check found them (GET /api/engine-updates).

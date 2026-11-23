@@ -3,6 +3,9 @@ before deploying it (forgeyard/models/prefetch.py).
 
 Everyone signed in sees the downloads; operators and admins start and cancel them (D9, the same people who
 deploy). Each request and cancel is audited.
+
+1.5.2 (#95): an engine alone, from an engine's page: `recipe` and no `model_id` (the targets, the request and the
+list), for a built-in engine or a copy made by "Try this version".
 """
 
 from __future__ import annotations
@@ -50,12 +53,26 @@ def _recipe(db: DbSession, model: CatalogModel, name: Optional[str]):
     return all_recipes(db)[names[0]][0] if names else None
 
 
+def _engine(db: DbSession, name: Optional[str]):
+    """1.5.2: the engine to download alone (a built-in recipe or a custom one, a copy included)."""
+    if not name:
+        raise fail(422, "model_or_engine", "Name a model (model_id), or an engine (recipe) to download alone.")
+    found = all_recipes(db).get(name)
+    if found is None:
+        raise fail(404, "recipe_not_found", f"No engine {name!r}.")
+    return found[0]
+
+
 @router.get("")
 def list_downloads(model_id: Optional[int] = Query(default=None), machine_id: Optional[int] = Query(default=None),
+                   engine: Optional[str] = Query(default=None, max_length=40),
                    caller: Caller = Depends(current), db: DbSession = Depends(get_db)):
-    """The downloads under way first, then the finished ones, newest first."""
+    """The downloads under way first, then the finished ones, newest first. `engine`: the downloads of that engine
+    alone (1.5.2)."""
     q = (select(ModelDownload).options(selectinload(ModelDownload.model), selectinload(ModelDownload.node))
          .order_by(ModelDownload.id.desc()).limit(LIST_LIMIT))
+    if engine is not None:
+        q = q.where(ModelDownload.model_id.is_(None), ModelDownload.recipe == engine)
     if model_id is not None:
         q = q.where(ModelDownload.model_id == model_id)
     if machine_id is not None:
@@ -66,11 +83,18 @@ def list_downloads(model_id: Optional[int] = Query(default=None), machine_id: Op
 
 
 @router.get("/targets")
-def download_targets(model_id: int = Query(), recipe: Optional[str] = Query(default=None, max_length=40),
+def download_targets(model_id: Optional[int] = Query(default=None), recipe: Optional[str] = Query(default=None, max_length=40),
                      engine: bool = Query(default=True), caller: Caller = Depends(current),
                      db: DbSession = Depends(get_db)):
     """For the dialog: each machine, and whether it can take this model (and the recipe's engine): it fits,
-    it is already there, it is offline, its agent is too old, its disk is too small."""
+    it is already there, it is offline, its agent is too old, its disk is too small. Without a model (1.5.2): the
+    recipe's engine alone, and whether a variant of it runs on each machine."""
+    if model_id is None:
+        r = _engine(db, recipe)
+        return {"model": None, "engine": {"name": r.name, "title": r.title, "version": r.version,
+                                          "based_on": r.based_on, "builtin": r.builtin},
+                "recipes": [r.name], "recipe": r.name, "machines": prefetch.engine_targets(db, r),
+                "can_download": can_run_workloads(caller.user)}
     model = _model(db, model_id)
     chosen = _recipe(db, model, recipe)
     return {"model": {"id": model.id, "name": model.name, "title": model.title, "size_bytes": model.size_bytes,
@@ -81,7 +105,8 @@ def download_targets(model_id: int = Query(), recipe: Optional[str] = Query(defa
 
 
 class DownloadIn(BaseModel):
-    model_id: int
+    # None (1.5.2, #95): the engine of `recipe` alone.
+    model_id: Optional[int] = None
     machine_ids: list[int] = Field(min_length=1, max_length=64)
     # D7: also the engine of this recipe (default: the first recipe that serves the model), on by default.
     engine: bool = True
@@ -90,15 +115,24 @@ class DownloadIn(BaseModel):
 
 @router.post("", status_code=201)
 def start_downloads(body: DownloadIn, caller: Caller = Depends(require_operator), db: DbSession = Depends(get_db)):
-    model = _model(db, body.model_id)
-    recipe = _recipe(db, model, body.recipe) if body.engine else None
+    if body.model_id is None:
+        if not body.engine:
+            raise fail(422, "model_or_engine", "Without a model there is only the engine to download.")
+        model, recipe = None, _engine(db, body.recipe)
+    else:
+        model = _model(db, body.model_id)
+        recipe = _recipe(db, model, body.recipe) if body.engine else None
     ids = list(dict.fromkeys(body.machine_ids))
     nodes = list(db.scalars(select(Node).options(selectinload(Node.accelerators)).where(Node.id.in_(ids))).all())
     missing = sorted(set(ids) - {n.id for n in nodes})
     if missing:
         raise fail(404, "not_found", f"No machine with id {missing[0]}.")
-    created, skipped = prefetch.start(db, model, sorted(nodes, key=lambda n: n.name), recipe, caller.user.username,
-                                      actor=caller.user, ip=caller.ip)
+    if model is None:
+        created, skipped = prefetch.start_engine(db, recipe, sorted(nodes, key=lambda n: n.name), caller.user.username,
+                                                 actor=caller.user, ip=caller.ip)
+    else:
+        created, skipped = prefetch.start(db, model, sorted(nodes, key=lambda n: n.name), recipe, caller.user.username,
+                                          actor=caller.user, ip=caller.ip)
     if not created:
         db.rollback()
         first = skipped[0] if skipped else {"name": "", "reason": "nothing to do"}

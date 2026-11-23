@@ -1011,9 +1011,11 @@ On the deployment's page, choose **Edit** (admins and operators). You can change
 - **Replicas**: more are added without touching the running ones; fewer remove the
   highest-numbered ones;
 - **Machine**: *Automatic* (Forgeyard chooses) or *Pinned to* one machine. Pinning it to another
-  machine moves its replicas there; going back to *Automatic* moves nothing.
+  machine moves its replicas there; going back to *Automatic* moves nothing;
+- (1.5.2) **Engine version**: the built-in engine or a copy of it made with **Try this version**
+  ([Move a deployment to another engine version](#move-a-deployment-to-another-engine-version)).
 
-The model, the recipe and the names stay: deploy a new one to change them. Before you save, the page
+The model and the names stay: deploy a new one to change them. Before you save, the page
 shows the new estimate, where each replica would go and what saving does. A change that does not fit
 is refused like a deploy ([A deployment does not fit](troubleshooting.md#a-deployment-does-not-fit)).
 A stopped deployment is only saved: the new settings apply when it starts.
@@ -1023,9 +1025,11 @@ Saving restarts the replicas on the new settings:
 - **several replicas** restart one at a time: the next one only once the one before it is ready on
   the new settings, so the model keeps answering. The page shows *updating: 1 of 2 on the new
   settings* until all are done;
-- **one replica** stops and starts again: the model does not answer until the new one is ready. To
-  avoid that, raise **Replicas** to 2 in the same change: the new replica starts first, then the old
-  one restarts, and you can lower it again afterwards;
+- **one replica** stops and starts again: the model does not answer until the new one is ready. Before
+  you save, the page says about how long (1.5.2; its last start, else the other deployments of its
+  engine, else a typical start) and how to avoid it. To avoid it, raise **Replicas** to 2 in the same
+  change when there is room for two: the new replica starts first, then the old one restarts, and you
+  can lower it again afterwards;
 - changing only the number of replicas, or going back to *Automatic*, restarts nothing.
 
 A replica that restarts (after an edit, or **Stop** then **Start**) goes back to the machine it ran on
@@ -1955,10 +1959,70 @@ The copy's page says where it came from, when it was made and by whom, each vari
 verified about it (the signing workflow and the build, or *unsigned upstream*), and what was left out. The catalog's
 engine arguments for the built-in (Qwen3-Reranker's `--hf-overrides` for `vllm-pooling`) apply to its copies too.
 
-To use the copy, deploy a model with it (pick it as the engine on the deploy page), and compare it with the built-in
-before you move other deployments. Delete the copy when you are done with it: it cannot be deleted while a
+To use the copy, move a deployment to it on the deployment's **Edit** page ([next section](#move-a-deployment-to-another-engine-version)),
+or deploy a model with it (pick it as the engine on the deploy page), and compare it with the built-in before you move
+other deployments. **Download to…** on the copy's page fetches its image to the machines first
+([Download an engine ahead of time](#download-an-engine-ahead-of-time)). Delete the copy when you are done with it: it cannot be deleted while a
 deployment uses it. Remove its image from the machines first (their pages, **Engine images**): once the copy is
 deleted, Forgeyard no longer counts that image as one of its own.
+
+## Move a deployment to another engine version
+
+A deployment can move between a built-in engine and its copies made with [Try this version](#try-a-newer-version-of-an-engine),
+for example from `vllm` (vLLM 0.32.0) to `vllm-0-34-0` and back. Its name, served model name, API keys and routes stay,
+so clients see only the restart.
+
+1. On the deployment's page choose **Edit** (admins and operators).
+2. Under **Engine**, pick the version in **Engine version**: the built-in one and each copy of it that serves the model
+   the same way. An engine without copies shows only itself, with a link to its page, where you can check for newer
+   versions.
+3. The form shows the new version's parameters. **What saving does** lists the engine change, the parameters the new
+   version does not take (they are dropped), how the replicas restart, and on the right the new estimate (a copy can
+   count memory differently). A version that does not fit now is refused like any other change.
+4. **Save and restart**.
+
+The replicas restart as for any change: with several, one at a time, so the model keeps answering. With one running
+replica the model does not answer until the new one is ready, and the form says so before you save:
+
+- about how long: its last start, from its events; else the middle value of the latest starts of the other
+  deployments of this engine on this server; else a typical start for the engine (vLLM about two minutes on an A100,
+  llama.cpp a few seconds);
+- that a new engine version can take longer on its first start (it may compile first), and, when its image is not on
+  the machine yet, that it is downloaded first ([download it ahead](#download-an-engine-ahead-of-time));
+- how to avoid the gap: raise **Replicas** to 2 in the same change when there is room for two (the new replica
+  starts first), or turn on automatic replicas; and, when the deployment's route has a cloud tier, that keys allowed
+  to use the cloud are answered there meanwhile.
+
+It only says so: saving does what it always did. Starting the new version beside the old one needs room for both on
+the card, which a shared GPU often does not have, so Forgeyard does not do it for you.
+
+To go back, choose the built-in engine again. The change is in the audit log as `deployment.changed`, with `recipe`
+(from and to), both versions and the dropped parameters, and the deployment's events say *engine vllm →
+vllm-0-34-0*. A deployment's page says when it runs a copy (*Runs a copy: vLLM 0.34.0 (based on vllm)*). When a
+later Forgeyard release moves the built-in engine to the copy's version or past it, the copy's page says so: move the
+deployments back, then delete the copy. Nothing moves by itself.
+
+From a script: `PATCH /api/deployments/{id}` with `"recipe"` ([reference](reference.md#change-a-deployment-through-the-api)).
+
+## Download an engine ahead of time
+
+**Download to…** on an engine's page (a built-in engine or a copy) fetches only the engine to the machines you
+choose: the image of the variant each machine would run, by its pinned digest, or its process program, checked
+against its SHA-256. No model, and nothing is started. Admins and operators can do it. Use it to put a 9 GiB vLLM
+image on a machine before you move a deployment there.
+
+1. Open the engine's page (**Models**, the **Engines** tab, then the engine) and click **Download to…**.
+2. Tick the machines. Each line says the variant it would get and whether it can: **fits**, **already here**,
+   **downloading**, **offline**, **update the agent**, or **No variant**, with why, on a machine no variant of this
+   engine runs on (vLLM on a machine without a supported card, for example).
+3. Click **Download to N machines**.
+
+The progress shows on the engine's page (in its machines table and under **Downloads of this engine**) and on each
+machine's page, with **Cancel**. A machine set to fetch through the server gets the image that way
+([Give an offline machine models through the server](#give-an-offline-machine-models-through-the-server)): a copy's
+image comes through the server like a built-in's, by the ids recorded when it was made. Each request and cancel is in
+the audit log (`engine.download_requested`, `engine.download_cancelled`), and deleting the engine ends its downloads
+under way. The API is in [the reference](reference.md#download-a-model-ahead-through-the-api).
 
 ## Download a model before deploying it
 

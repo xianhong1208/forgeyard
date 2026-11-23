@@ -36,7 +36,9 @@ them where they fit, and every program calls them at `/v1` with an API key.
   release notes, and the flags this engine passes that those notes mention. **Try this version** makes a
   custom copy pinned to that version by digest (signatures verified where the project publishes them, such
   as llama.cpp's), whose images come through the server and run offline like the built-in's; the built-in
-  engine itself does not change.
+  engine itself does not change. A deployment moves to the copy, and back, from its Edit page, keeping its name,
+  keys and routes; **Download to…** on an engine's page fetches only its image or program to chosen machines
+  first.
 - **An OpenAI-compatible gateway.** Every deployment answers at `/v1`, with API keys, per-key limits,
   usage and cost per key, model and person (charted by day, week and month), and failover between
   replicas. Prometheus metrics at `/metrics`. A machine that stays offline has its replicas placed

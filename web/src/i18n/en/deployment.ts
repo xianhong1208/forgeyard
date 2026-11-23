@@ -155,4 +155,5 @@ export default {
   "deployment.scale.drainFinish.other": "the {count} in flight finish",
   "deployment.scale.paused": "Not scaling now: {reason}.",
   "deployment.scale.last": "Last: {text}",
+  "deployment.runsCopy": "Runs a copy: {engine} (based on {builtin}).",
 } as const;

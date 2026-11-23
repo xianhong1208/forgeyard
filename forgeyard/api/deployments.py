@@ -9,6 +9,11 @@ Changing a deployment (PATCH, 1.3.1) checks the new estimate and placement like 
 restarts the replicas on the new settings: one at a time when there are several (the next one once the
 restarted one is ready), so the model keeps answering; a single replica is stopped and started again.
 Each replica goes back to the machine it ran on when that machine still takes it.
+
+1.5.2 (#95): a change may also move the deployment to another version of its engine: the built-in engine and its
+copies ("Try this version"). The name, served name, keys and routes stay; the replicas restart as for any other
+change. A change that restarts the only replica of a running deployment says first about how long the model will
+not answer, and how to avoid it (`outage`).
 """
 
 from __future__ import annotations
@@ -349,6 +354,10 @@ def deployment_out(db: DbSession, d: Deployment, caller: Caller, *, detail: bool
 
         out["cards"] = live_cards(db, w)
         out["usage"] = deployment_usage(db, d)
+        # 1.5.2 (#95): the engine it runs (a copy says which built-in it is based on), and the versions Edit offers.
+        recipe = catalog.get_recipe(db, d.recipe)
+        out["engine"] = engine_out(recipe) if recipe is not None else None
+        out["engines"] = engine_choices(db, d)
     return out
 
 
@@ -490,10 +499,13 @@ COMMON_PARAMS = ("gpus", "share", "vram", "extra_args") + GATEWAY_PARAMS
 class DeploymentEdit(BaseModel):
     """What a change may set. A field left out keeps its value; in `params`, only the names sent
     change, and a name sent as null goes back to the recipe's default (`vram`: back to the estimate).
-    The model, the recipe, the name and the served name stay: deploy a new one to change them."""
+    The model, the name and the served name stay: deploy a new one to change them. The engine (`recipe`) may move
+    between a built-in engine and its copies (1.5.2, #95)."""
     model_config = ConfigDict(extra="forbid")
 
     params: dict[str, Any] = Field(default_factory=dict)
+    # 1.5.2 (#95): another version of the same engine: the built-in one or a copy of it ("Try this version").
+    recipe: Optional[str] = Field(default=None, max_length=40)
     replicas: Optional[int] = Field(default=None, ge=1, le=16)
     # Sent as null: Forgeyard chooses (automatic). Sent as an id: pinned to that machine.
     machine_id: Optional[int] = Field(default=None, ge=1)
@@ -501,6 +513,127 @@ class DeploymentEdit(BaseModel):
     wait: bool = False
     # Only check: the estimate, where it would go and what would restart. Nothing is saved.
     dry_run: bool = False
+
+
+# ------------------------------------------------------------------ another version of the engine (1.5.2, #95)
+def engine_family(r: Recipe) -> str:
+    """The built-in engine a recipe is (its own name) or was copied from (`based_on`)."""
+    return r.based_on or r.name
+
+
+def switch_problem(current: Recipe, new: Recipe, m: CatalogModel) -> Optional[tuple[str, str]]:
+    """Why a deployment on `current` cannot move to `new` (code, text), or None. Only between a built-in engine and its
+    copies, and only to one that serves this model the same way (the route, the keys and the served name stay)."""
+    family = engine_family(current)
+    if engine_family(new) != family:
+        return ("engine_not_related", f"{new.name} is not {family} or a copy of it: a deployment moves only between a "
+                                      f"built-in engine and its copies. Deploy {m.name} again to use another engine.")
+    if m.format not in new.formats or m.task not in new.tasks:
+        return ("incompatible", f"{new.name} does not serve {m.name} ({m.task}, {m.format}).")
+    if new.api_for(m.task) != current.api_for(m.task) or new.upstream_model != current.upstream_model:
+        return ("engine_not_compatible", f"{new.name} answers {m.task} requests another way than {current.name}, so the "
+                                         "deployment's route would change. Deploy the model again with it.")
+    return None
+
+
+def engine_out(r: Recipe) -> dict:
+    return {"name": r.name, "title": r.title, "version": r.version, "builtin": r.builtin, "based_on": r.based_on}
+
+
+def engine_choices(db: DbSession, d: Deployment) -> list[dict]:
+    """The engines the deployment can move to in Edit (its own first): its built-in engine and the copies of it that
+    serve its model the same way."""
+    recipe = catalog.get_recipe(db, d.recipe)
+    if recipe is None or d.model is None:
+        return []
+    out = []
+    for r, _ in catalog.all_recipes(db).values():
+        if r.name == recipe.name or switch_problem(recipe, r, d.model) is None:
+            out.append({**engine_out(r), "current": r.name == recipe.name})
+    out.sort(key=lambda e: (not e["builtin"], _version_key(e["version"]), e["name"]))
+    return out
+
+
+def _version_key(text: str) -> tuple:
+    from forgeyard.models.engineversions import version_key
+
+    return version_key(text or "")
+
+
+# What a start is expected to take when this deployment has none measured and no other deployment of the engine
+# has either: rough figures from the real runs (vLLM on an A100: 116-126 s for a 4B model, 1.5.0 acceptance;
+# llama.cpp a few seconds once its image is there). Anything else: the gateway's START_DEFAULT.
+TYPICAL_START = {"vllm": 120, "vllm-omni": 150, "llama.cpp": 15, "stable-diffusion.cpp": 30, "speaches": 20,
+                 "forgeyard-vision": 20}
+TYPICAL_SAMPLES = 20
+
+
+def engine_start(db: DbSession, engine: str, but: int) -> Optional[float]:
+    """The median of the latest starts of the other deployments of this engine on this server, if any."""
+    names = {n for n, (r, _) in catalog.all_recipes(db).items() if r.engine == engine}
+    ids = [w for w in db.scalars(select(Deployment.workload_id).where(Deployment.recipe.in_(names))).all() if w != but]
+    if not ids:
+        return None
+    from forgeyard.db import WorkloadEvent
+
+    found = []
+    for e in db.scalars(select(WorkloadEvent).where(WorkloadEvent.workload_id.in_(ids),
+                                                    WorkloadEvent.kind == starts.READY_KIND)
+                        .order_by(WorkloadEvent.id.desc()).limit(TYPICAL_SAMPLES)).all():
+        got = starts.parse(e.message)
+        if got is not None:
+            found.append(float(got["seconds"]))
+    if not found:
+        return None
+    found.sort()
+    return found[len(found) // 2]
+
+
+def outage(db: DbSession, d: Deployment, w: Workload, recipe: Recipe, *, switched: bool, auto_on: bool) -> dict:
+    """1.5.2 (#95): the one running replica restarts, so the model does not answer for about `seconds`: from its last
+    start, else the other deployments of the engine, else a typical figure. Another engine version may take longer
+    on its first start (it may compile; its image may have to come first), and the ways to avoid the gap: a second
+    replica first, automatic replicas, and, when its route has a cloud tier, keys that may use the cloud are answered
+    there meanwhile. Only says so: nothing else changes."""
+    from forgeyard.gateway import waking
+    from forgeyard.models.pages import engine_on
+
+    last = starts.last_start(db, w.id)
+    if last is not None:
+        seconds, source = float(last["seconds"]), "last_start"
+    elif (seen := engine_start(db, recipe.engine, w.id)) is not None:
+        seconds, source = seen, "engine"
+    else:
+        seconds, source = float(TYPICAL_START.get(recipe.engine, waking.START_DEFAULT)), "typical"
+    missing = []
+    if switched:
+        for r in w.replicas:
+            if r.node is not None and not r.final and engine_on(r.node, recipe)["present"] is False:
+                missing.append(r.node.name)
+    route = routes.own_route(db, d.id)
+    cloud = route is not None and any(t.enabled and routes.is_cloud(t) for t in route.targets)
+    avoid = ["add_replica", "min_replicas" if auto_on else "autoscale"]
+    if autoscale.is_video(recipe):
+        avoid = ["add_replica"]
+    if cloud:
+        avoid.append("cloud")
+    secs = max(1, round(seconds))
+    text = f"It has one replica: the model does not answer for about {secs} s while it restarts"
+    text += (" (its last start)" if source == "last_start" else " (other deployments of this engine)"
+             if source == "engine" else " (a typical start of this engine)")
+    if switched:
+        text += "; a new engine version can take longer on its first start (it may compile first)"
+    if missing:
+        text += f", and its image is not on {', '.join(sorted(set(missing)))} yet: Download to… fetches it ahead"
+    text += ". To avoid it, raise the replicas to 2 in this change when there is room for two (the new one starts first)"
+    if "autoscale" in avoid:
+        text += " or turn on automatic replicas"
+    if "min_replicas" in avoid:
+        text += " (a minimum of 2 automatic replicas)"
+    if cloud:
+        text += "; keys that may use the cloud are answered by its cloud tier meanwhile"
+    return {"seconds": secs, "source": source, "first_start": switched, "image_missing": sorted(set(missing)),
+            "avoid": avoid, "cloud": cloud, "text": text + "."}
 
 
 def _restart_mode(running: bool, restart: bool, replicas: int, asleep: bool = False) -> str:
@@ -527,12 +660,23 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     replicas and the machine (pinned or automatic). Checked like a deploy before anything is saved."""
     d = _get(db, dep_id)
     w = d.workload
-    recipe = catalog.get_recipe(db, d.recipe)
-    if recipe is None:
+    current = catalog.get_recipe(db, d.recipe)
+    if current is None:
         raise fail(409, "recipe_gone", f"Its recipe {d.recipe} no longer exists, so it cannot be changed. "
                                        "Deploy the model again with another recipe.")
+    recipe = current
+    if body.recipe is not None and body.recipe != d.recipe:
+        # 1.5.2 (#95): another version of its engine (the built-in one, or a copy of it).
+        recipe = catalog.get_recipe(db, body.recipe)
+        if recipe is None:
+            raise fail(404, "recipe_not_found", f"No engine {body.recipe!r}.")
+        if why := switch_problem(current, recipe, d.model):
+            raise fail(422, *why)
+    switched = recipe.name != d.recipe
     known = set(recipe.params) | set(COMMON_PARAMS)
     params = {k: v for k, v in (d.params or {}).items() if k in known}  # names an updated recipe dropped
+    # 1.5.2: what the deployment set that this engine does not know (another version may have dropped a parameter).
+    dropped = sorted(k for k in (d.params or {}) if k not in known and k not in body.params)
     for k, v in body.params.items():
         if v is None:
             params.pop(k, None)
@@ -541,7 +685,7 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     spec = dict(w.spec or {})
     machine_id = body.machine_id if "machine_id" in body.model_fields_set else spec.get("machine_id")
     replicas = body.replicas if body.replicas is not None else len(w.replicas)
-    ctx, _, m = build_context(db, DeploymentIn(name=d.name, model=d.model.name, recipe=d.recipe, params=params,
+    ctx, _, m = build_context(db, DeploymentIn(name=d.name, model=d.model.name, recipe=recipe.name, params=params,
                                                replicas=replicas, machine_id=machine_id))
     ctx.deployment = d
     auto = autoscale.setting(ctx.params)
@@ -562,9 +706,11 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     # restarts nothing.
     engine_changed = for_engine(ctx.params) != for_engine(d.params or {})
     moved = machine_id is not None and any(r.node_id is not None and r.node_id != machine_id for r in live)
-    restart = running and (engine_changed or moved)
+    restart = running and (engine_changed or moved or switched)
     mode = _restart_mode(running, restart, replicas, asleep=w.desired_state == sleep.ASLEEP)
     changes: dict[str, dict] = {}
+    if switched:
+        changes["recipe"] = {"before": d.recipe, "after": recipe.name}
     for k in sorted(set(ctx.params) | set(d.params or {})):
         if (d.params or {}).get(k) != ctx.params.get(k):
             changes[k] = {"before": (d.params or {}).get(k), "after": ctx.params.get(k)}
@@ -576,7 +722,9 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
         plan = scheduler.preview(db, ctx, release={r.id for r in w.replicas},
                                  prefer={r.ordinal: r.node_id for r in w.replicas if r.node_id is not None})
     out = {"estimate": ctx.estimate.as_dict(), "placement": plan, "params": ctx.params, "changes": changes,
-           "restart": mode, "restart_text": RESTART_TEXT[mode]}
+           "restart": mode, "restart_text": RESTART_TEXT[mode], "recipe": recipe.name, "dropped": dropped,
+           # 1.5.2 (#95): its only replica restarts: about how long the model does not answer, and how to avoid it.
+           "outage": outage(db, d, w, recipe, switched=switched, auto_on=auto.on) if mode == "all" else None}
     if body.dry_run:
         return out
     if running and (restart or replicas > len(w.replicas)) and not plan["fits"] and not body.wait:
@@ -584,10 +732,18 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
     if not changes:
         return {**out, "deployment": deployment_out(db, d, caller)}
     nodes: set[int] = set()
-    if params_changed or ctx.estimate.as_dict() != d.estimate:
+    if params_changed or switched or ctx.estimate.as_dict() != d.estimate:
         # 1.4.5 (#166): the estimate from the recipe as it is now, even when no parameter changed (no restart for it).
         d.params = ctx.params
         d.estimate = ctx.estimate.as_dict()
+    if switched:
+        # 1.5.2 (#95): the replicas render the new engine (models/catalog.py reads deployments.recipe); its health
+        # check comes with it. The route, its keys and the served name stay.
+        d.recipe = recipe.name
+        spec["runtime"] = {**(spec.get("runtime") or {}), "recipe": recipe.name}
+        spec["health"] = {**(spec.get("health") or {}), "path": recipe.health.path, "interval": recipe.health.interval,
+                          "timeout": recipe.health.timeout, "failure_threshold": recipe.health.failure_threshold,
+                          "start_period": recipe.health.start_period}
     spec["replicas"], spec["machine_id"] = replicas, machine_id
     w.spec = spec
     w.updated_at = utcnow()
@@ -612,13 +768,17 @@ def edit_deployment(dep_id: int, body: DeploymentEdit, caller: Caller = Depends(
             return "automatic" if value is None else (node.name if node is not None else f"machine {value}")
         return str(value)
 
-    said = ", ".join(f"{'machine' if k == 'machine_id' else k} {shown(k, v['before'])} → {shown(k, v['after'])}"
+    said = ", ".join(f"{'machine' if k == 'machine_id' else 'engine' if k == 'recipe' else k} "
+                     f"{shown(k, v['before'])} → {shown(k, v['after'])}"
                      for k, v in changes.items() if k != "extra_args")
     if "extra_args" in changes:
         said = ", ".join(x for x in (said, "extra engine arguments") if x)
     wstate.event(db, w, "changed", f"Changed by {caller.user.username}: {said}. {RESTART_TEXT[mode]}")
     audit.record(db, "deployment.changed", actor=caller.user, target=d.name, ip=caller.ip, deployment_id=d.id,
-                 workload_id=w.id, changes=changes, restart=mode, estimate=ctx.estimate.amount, model=m.name)
+                 workload_id=w.id, changes=changes, restart=mode, estimate=ctx.estimate.amount, model=m.name,
+                 **({"recipe": {"from": changes["recipe"]["before"], "to": recipe.name},
+                     "engine_versions": {"from": current.version, "to": recipe.version}} if switched else {}),
+                 **({"dropped": dropped} if dropped else {}))
     db.commit()
     proxy.forget_ceiling()  # max_body_mb may have changed
     for node_id in nodes:

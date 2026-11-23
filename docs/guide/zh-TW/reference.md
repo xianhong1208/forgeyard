@@ -786,8 +786,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `machine_id` | 機器的 id 會把部署固定在那台機器；`null` 讓它變成自動 |
 | `wait` | `true`：即使目前放不下也儲存；重新啟動的副本會等到有空間 |
 | `dry_run` | `true`：只檢查。回應內容相同，但沒有 `deployment`，也不會儲存任何東西 |
+| `recipe` | （1.5.2）它的推論引擎的其他版本：它執行的、或被複製來源的內建配方，或是那個內建配方的複本（`based_on`），而且要用同樣的協定提供這個模型。名稱、對外的模型名稱、金鑰和路由都不變；會用它重新估算；它不接受的參數會被拿掉（`dropped`） |
 
-模型、recipe、名稱和對外的模型名稱都不能改（422）。回應：
+模型、名稱和對外的模型名稱都不能改（422）。回應：
 
 | 欄位 | 內容 |
 |---|---|
@@ -796,6 +797,9 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | `changes` | 每個會改變的參數、`replicas` 和 `machine_id`：`{name: {before, after}}`；沒有任何改變時是 `{}` |
 | `restart` | `rolling`（一次一個副本）、`all`（唯一的副本重新啟動）、`none`、`on_start`（已停止：啟動時才套用），或（1.5.0）`on_wake`（休眠中：喚醒時才套用） |
 | `restart_text` | 用一句話說明同一件事 |
+| `recipe` | （1.5.2）它會執行的推論引擎 |
+| `dropped` | （1.5.2）它原本有、但這個推論引擎不接受的參數：會被拿掉 |
+| `outage` | （1.5.2）`restart` 為 `all`（唯一執行中的副本會重新啟動）時：`{seconds, source, first_start, image_missing, avoid, cloud, text}`。`seconds` 是模型大約多久不會回應，依據是 `source`：`last_start`（它自己的）、`engine`（同一個推論引擎其他部署最近幾次啟動時間的中間值）或 `typical`。`first_start`：推論引擎換了，新版本第一次啟動可能比較久。`image_missing`：副本所在、還沒有新推論引擎映像檔的機器。`avoid`：`add_replica`、`autoscale`（開啟自動副本數時是 `min_replicas`），路由有雲端層時再加上 `cloud`。其他情況是 `null` |
 | `deployment` | 儲存後的部署（dry run 時沒有） |
 
 | 狀態 | `code` | 什麼時候 |
@@ -804,10 +808,11 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 409 | `recipe_gone` | 它的 recipe 已經不存在 |
 | 422 | `invalid_params` | 有不認得的參數，或超出範圍 |
 | 422 | `cannot_estimate` | 無法為這個模型估算新參數 |
-| 404 | `not_found`、`machine_not_found` | 沒有這個部署，或沒有 `machine_id` 指定的機器 |
+| 422 | `engine_not_related`、`incompatible`、`engine_not_compatible` | （1.5.2）`recipe` 不是它的內建推論引擎或那個推論引擎的複本；不能提供這個模型；或是用別的協定提供它，路由會因此改變 |
+| 404 | `not_found`、`machine_not_found`、`recipe_not_found` | 沒有這個部署、沒有 `machine_id` 指定的機器，或沒有 `recipe` 指定的推論引擎 |
 | 403 | | 不是管理員或操作員 |
 
-每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式。`GET /api/deployments/{id}` 另外提供 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
+每次儲存的修改都會以 `deployment.changed` 記入稽核紀錄，包含改了什麼和重新啟動的方式（1.5.2：換了推論引擎時，還有 `recipe: {from, to}`、`engine_versions: {from, to}` 和 `dropped`）。`GET /api/deployments/{id}` 另外提供（1.5.2）`engine`（`{name, title, version, builtin, based_on}`）和 `engines`（它可以換過去的版本，含 `current`）、 `pinned`（選定的機器，或 `null`）、`rollout`（副本重新啟動期間：`{generation, updated, total, next}`），以及每個副本的 `not_picked_up`：副本被放到一台已連線的機器上，而它的 agent 超過 2 分鐘都沒有回報這個副本時才會有（[副本一直停在 pending](troubleshooting.md#a-replica-stays-pending)），和（1.4）`placement_note`：當一台無法取得所需檔案的機器影響了副本的放置位置時，說明副本為什麼在這台機器上，例如 *cpu-01 could not reach huggingface.co; placed on cpu-02 instead*（[機器連不到 Hugging Face](troubleshooting.md#a-machine-cannot-reach-hugging-face)）。部署的 `workload`（與 `GET /api/workloads/{id}` 相同）會反過來指出它：`deployment: {id, name}`。在 `placement` 裡，每台機器和每個已放置的副本會列出 `needs`（在那裡要下載的東西：`model`、`engine`、`image`），如果那台機器在過去一小時內連不到其中某個來源，還會有 `unreachable`。
 
 （1.5.0）每個部署（列表裡和單獨查詢時）還有 `last_start`：最近一次啟動花了多久，`{seconds, phases, source, at, replica}`，取自它的事件。`phases` 是 agent 分得出來的各部分：`model`、`waiting`、`image` 和 `engine`，加起來就是 `seconds`；`source` 是 `agent`，或是 `server`（agent 比 1.5.0 舊，由伺服器只量了推論引擎的部分）。1.5.0 之後還沒有副本就緒過時是 `null`（[查看模型啟動花了多久](how-to.md#see-how-long-a-model-takes-to-start)）。
 
@@ -917,13 +922,15 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 |---|---|
 | `GET /api/downloads/targets?model_id=<id>&recipe=<name>&engine=true` | 每台機器，以及它能不能下載這個模型（和配方的推論引擎） |
 | `POST /api/downloads` 加上 `{"model_id": <id>, "machine_ids": [<id>, …], "engine": true, "recipe": "<name>"}` | 在每台能下載的機器上開始下載；`engine` 預設開啟，`recipe` 預設是第一個能跑這個模型的配方 |
-| `GET /api/downloads?model_id=<id>&machine_id=<id>` | 先列出進行中的下載，再列出已結束的（最近 100 筆） |
+| `GET /api/downloads/targets?recipe=<name>` | （1.5.2）不帶 `model_id`：每台機器，以及它能不能只下載這個推論引擎 |
+| `POST /api/downloads` 加上 `{"recipe": "<name>", "machine_ids": [<id>, …]}` | （1.5.2）不帶 `model_id`：只下載推論引擎（每台機器會執行的變體的映像檔或程式） |
+| `GET /api/downloads?model_id=<id>&machine_id=<id>&engine=<name>` | 先列出進行中的下載，再列出已結束的（最近 100 筆）；`engine`：只列出單獨下載那個推論引擎的 |
 | `POST /api/downloads/{id}/cancel` | 取消一個進行中的下載；它的 agent 會立刻停止，並保留已在磁碟上的部分 |
 | `PUT /api/machines/{id}/fetch-via` 加上 `{"fetch_via": "auto"}` | 只限 admin：那台機器怎麼取得模型和推論引擎的壓縮檔：`auto`（直接下載，遇到網路錯誤後改經由伺服器）、`server`（一律經由伺服器）或 `direct`（永不經由伺服器）。它的 agent 會立刻收到新的方式 |
 
-`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）或 `revoked`，並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有推論引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`），和 `from_machine`（1.4.1）：會經由伺服器把模型送過來的機器，沒有則為 null。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
+`targets` 裡的每台機器有 `state`：`ok`、`cached`（已經在那裡）、`downloading`、`too_old`（1.4 以前的 agent）、`no_cache`、`offline`、`no_space`（模型加上 1 GiB 的保留空間超過快取磁碟的可用空間）、`revoked` 或（1.5.2，只下載推論引擎時）`no_engine`（它沒有能在那裡執行的變體），並以 `note` 說明原因；`need_bytes` 和 `free_bytes`；有推論引擎時還有 `variant` 和 `engine`（`kind` 為 `archive` 或 `image`、`name`、`cached`），沒有配方的變體能在那裡執行時則是 `engine_note`；以及 `via`：模型會怎麼取得（`direct`、`auto` 或 `server`），和 `from_machine`（1.4.1）：會經由伺服器把模型送過來的機器，沒有則為 null。變體是那台機器會執行的那一個：機器有變體支援、且允許使用的 GPU 時用 GPU 變體，否則用 CPU 變體，而且是它的 runtime 能執行的。
 
-一筆下載有 `id`、`model`、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`，模型經由伺服器從另一台機器的快取取得則是 `machine`，並帶 `source: {id, name}`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
+一筆下載有 `id`、`model`（只下載推論引擎時為 null）、`engine_only`（1.5.2）、`machine`（含 `connected`）、`file`、`recipe`（null：只下載模型）、`state`（`queued`、`downloading`、`done`、`failed` 或 `cancelled`）、`download`（進度，格式與部署副本的相同；資料經由伺服器時帶有 `via: "server"`）、`reason`、`via`（`direct`，經由伺服器下載過則是 `server`，模型經由伺服器從另一台機器的快取取得則是 `machine`，並帶 `source: {id, name}`）、`requested_by`、`created_at`、`finished_at` 和 `waiting`（機器離線）。已結束的保留 30 天，每台機器最多 20 筆。
 
 | 狀態碼 | `code` | 何時 |
 |---|---|---|
@@ -931,12 +938,15 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 | 409 | `download_finished` | 取消一個已經結束的下載 |
 | 422 | `local_model` | 本機模型是機器上的目錄：沒有東西要下載 |
 | 422 | `recipe_not_compatible`、`bad_fetch_via` | 配方不能跑這個模型；`fetch_via` 不是這三個之一 |
+| 422 | `model_or_engine` | （1.5.2）沒有指定模型也沒有指定推論引擎，或沒有模型卻送了 `engine: false` |
 | 404 | `not_found` | 沒有這個模型、機器或下載 |
 | 403 | | 不是 admin 或 operator（`fetch-via` 要 admin） |
 
-稽核事件：`model.download_requested`（每台機器一筆，含模型和推論引擎）、`model.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
+稽核事件：`model.download_requested`（每台機器一筆，含模型和推論引擎）、`model.download_cancelled`、（1.5.2）`engine.download_requested`（每台機器一筆，含 `recipe`、`version`、`variant` 和 `engine`，也就是映像檔或壓縮檔）和 `engine.download_cancelled`、`node.fetch_via_changed`，以及記下 URL 模型 SHA-256 時的 `model.checksum_recorded`：從 URL 下載的單一 GGUF 檔沒有公布的 checksum，所以會把第一個 agent 在完整下載後算出的值記在目錄項目裡（模型 metadata 的 `files[0].sha256`，並有 `sha256_from`（哪台機器）和 `sha256_at`），之後每次下載都必須相符。之後回報的不同值只會記到 log，不會取代它。
 
 背後是 agent 協定的 feature `prefetch`（1.4 起的 agent 和伺服器）。伺服器把每筆排隊中或下載中的列放在 `desired.downloads`，與副本並列：`{id, model, engine?, image?, image_ids?}`（Hugging Face 模型的區塊會帶伺服器用於受限 repository 的 token，和副本一樣只存在記憶體）。agent 用副本下載的同一套程式抓取（相同的鎖、從部分檔案續傳、checksum 和取消；映像檔用 1.3.1 的 pull 進度），不啟動任何東西，同時最多跑兩個，並回報 `status.downloads`（`{id, state, reason, download}`）；下一份清單裡沒有的下載會被取消。Migration `0015` 新增資料表 `model_downloads` 和欄位 `nodes.fetch_via`（所有既有機器都是 `auto`）。
+
+（1.5.2）只下載推論引擎，就是一筆沒有模型的列：它在 `desired.downloads` 裡的項目沒有 `model` 區塊，只有 `engine` 壓縮檔（含 SHA-256）或 `image`（含 `image_ids`，機器經由伺服器取得映像檔時還有 `image_relay`；複本的映像檔依 `image_pins` 裡的 ID）。有 `prefetch` 的 agent 原本就能處理。推論引擎的頁面（`GET /api/recipes/{name}`）多了 `can_download`、`downloads`（這個推論引擎的下載，最新的在前）和每台機器的 `download`（那裡進行中的下載）；複本還有 `caught_up`：內建推論引擎現在已經是複本的版本或更新時為 `{builtin, title, version, same}`，否則為 `null`。Migration `0017_engine_downloads` 讓 `model_downloads.model_id` 可以是 null（既有的列都不變；在 SQLite 上會重建這個資料表，因為沒有其他資料表參照它，所以是安全的）；降版時會刪除只下載推論引擎的列，並把它改回 NOT NULL。
 
 ### 經由伺服器下載（轉送）
 

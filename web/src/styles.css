@@ -542,6 +542,10 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .edit-plan { margin: 0 0 10px; font-size: 13.5px; }
 .edit-changes { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .edit-changes li { overflow-wrap: anywhere; }
+/* 1.5.2 (#95): the one-replica notice before a change that restarts the only replica. */
+.edit-outage p { margin: 0 0 6px; font-size: 13.5px; }
+.edit-outage ul { margin: 0; padding-left: 18px; font-size: 13.5px; display: grid; gap: 3px; }
+.edit-outage li { overflow-wrap: anywhere; }
 .rep-stuck { color: #8a1a12; }
 .notice .verdicts li { border-top-color: #f2c4c0; }
 
