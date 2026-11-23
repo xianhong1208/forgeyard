@@ -1,3 +1,4 @@
+import { t } from "../i18n/core";
 import { formatDateTime, formatRelative } from "../i18n/format";
 
 // A server timestamp relative to now ("5 min ago"), and in full for a tooltip, in the reader's language.
@@ -11,7 +12,7 @@ export function exact(value: string | null | undefined): string {
 
 // "Chrome on Linux" from a user agent string; good enough to tell sessions apart.
 export function device(ua: string | null | undefined): string {
-  if (!ua) return "Unknown device";
+  if (!ua) return t("admin.device.unknown");
   const browser = /Edg\//.test(ua)
     ? "Edge"
     : /Firefox\//.test(ua)
@@ -22,7 +23,7 @@ export function device(ua: string | null | undefined): string {
           ? "Safari"
           : /curl\//i.test(ua)
             ? "curl"
-            : "Browser";
+            : t("admin.device.browser");
   const os = /iPhone|iPad/.test(ua)
     ? "iOS"
     : /Android/.test(ua)
@@ -34,7 +35,7 @@ export function device(ua: string | null | undefined): string {
           : /Linux/.test(ua)
             ? "Linux"
             : "";
-  return os ? `${browser} on ${os}` : browser;
+  return os ? t("admin.device.on", { browser, os }) : browser;
 }
 
 // An engine image as people read it: "vllm/vllm-openai:v0.32.0" for "vllm/vllm-openai:v0.32.0@sha256:…".

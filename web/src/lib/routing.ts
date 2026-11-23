@@ -1,23 +1,26 @@
 // Routes with tiers and cloud providers (1.2): labels shared by the routes, providers, keys and
 // playground pages.
 
+import { labels, t } from "../i18n/core";
+
+const tr = t;
 import type { CloudLevel, RouteInfo, RouteKind, RouteTarget } from "./types";
 
 export const CLOUD_LEVELS: CloudLevel[] = ["off", "fallback", "on"];
 
-export const CLOUD_LABEL: Record<CloudLevel, string> = {
-  off: "Never",
-  fallback: "Only to spill",
-  on: "Allowed",
-};
+export const CLOUD_LABEL: Record<CloudLevel, string> = labels({
+  off: "keys.cloud.off",
+  fallback: "keys.cloud.fallback",
+  on: "keys.cloud.on",
+});
 
-export const CLOUD_HELP: Record<CloudLevel, string> = {
-  off: "Requests never leave your network. Cloud-only models do not exist for this key.",
-  fallback: "A local model may spill to the cloud when local is busy or down. Cloud-only models do not exist for this key.",
-  on: "Also cloud-only models (listed in /v1/models).",
-};
+export const CLOUD_HELP: Record<CloudLevel, string> = labels({
+  off: "keys.cloud.off.help",
+  fallback: "keys.cloud.fallback.help",
+  on: "keys.cloud.on.help",
+});
 
-export const ROUTE_KIND_LABEL: Record<RouteKind, string> = { local: "local", mixed: "local, then cloud", cloud: "cloud only" };
+export const ROUTE_KIND_LABEL: Record<RouteKind, string> = labels({ local: "cloud.route.local", mixed: "cloud.route.mixed", cloud: "cloud.route.cloud" });
 
 export const ROUTE_KIND_TONE: Record<RouteKind, string> = { local: "ok", mixed: "run", cloud: "wait" };
 
@@ -28,14 +31,19 @@ export function cloudAbove(a: CloudLevel, b: CloudLevel): boolean {
 export function targetName(t: RouteTarget): string {
   if (t.deployment) return t.deployment.name;
   if (t.provider_model) return `${t.provider_model.provider.name}/${t.provider_model.upstream_model}`;
-  return "(removed)";
+  return tr("cloud.route.removed");
 }
 
 export function targetWhere(t: RouteTarget): string {
-  if (t.deployment) return `${t.deployment.ready}/${t.deployment.replicas} ready${t.deployment.concurrency ? ` · ${t.deployment.concurrency} at once each` : ""}`;
+  if (t.deployment) {
+    const d = t.deployment;
+    const counts = { ready: String(d.ready), replicas: String(d.replicas) };
+    return d.concurrency ? tr("cloud.route.readyEach", { ...counts, n: String(d.concurrency) }) : tr("cloud.route.ready", counts);
+  }
   if (t.provider_model) {
     const p = t.provider_model.provider;
-    return `${p.external ? "cloud" : "inside your network"}${p.enabled ? "" : " · provider disabled"}`;
+    const where = tr(p.external ? "cloud.route.providerCloud" : "cloud.route.providerInside");
+    return p.enabled ? where : tr("cloud.route.withDisabled", { where });
   }
   return "";
 }
@@ -57,17 +65,15 @@ export function tierSummary(route: RouteInfo): string {
 }
 
 export function spillRules(route: RouteInfo): string {
-  if (route.local_only) return "Never leaves your network (local only).";
-  if (tiers(route).length < 2) return "One tier: nothing to spill to.";
-  const when = ["no local replica is ready", "every replica is busy", "the engine answers 429 or 503"];
-  if (route.spill_on_long_prompt) when.push("the prompt is longer than the local context");
-  const wait = route.wait_ms ? ` (after waiting up to ${route.wait_ms} ms for a slot)` : "";
-  return `Moves to the next tier when ${when.join(", ")}${wait}. Never once the answer has started.`;
+  if (route.local_only) return t("cloud.spill.localOnly");
+  if (tiers(route).length < 2) return t("cloud.spill.oneTier");
+  const wait = route.wait_ms ? t("cloud.spill.wait", { ms: String(route.wait_ms) }) : "";
+  return t(route.spill_on_long_prompt ? "cloud.spill.rulesLong" : "cloud.spill.rules", { wait });
 }
 
 export function targetHeader(target: string | null): string | null {
   if (!target) return null;
-  if (target.startsWith("local:")) return `local ${target.slice(6)}`;
+  if (target.startsWith("local:")) return t("cloud.route.targetLocal", { name: target.slice(6) });
   if (target.startsWith("provider:")) return target.slice(9);
   return target;
 }

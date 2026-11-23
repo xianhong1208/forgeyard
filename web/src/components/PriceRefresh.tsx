@@ -1,25 +1,14 @@
 import { IconRefresh, IconX } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { PRICE_FIELDS, PRICE_LABEL, perMillion, SOURCE_LABEL } from "../lib/prices";
 import type { PriceApplied, PricePreview, PriceRow } from "../lib/types";
 import { Notice } from "./ui";
 
-const MATCH: Record<string, { label: string; tone: string; title: string }> = {
-  exact: { label: "same id", tone: "ok", title: "An OpenRouter model, by its own id." },
-  confirmed: { label: "confirmed", tone: "ok", title: "The OpenRouter model chosen for it before (or just now)." },
-  suggested: { label: "suggested", tone: "wait", title: "A guess from its name: check that it is the same model before you tick it." },
-  not_listed: { label: "not listed", tone: "bad", title: "OpenRouter does not list this id (any more)." },
-  none: { label: "no match", tone: "off", title: "Nothing on OpenRouter matched its name. Enter the OpenRouter id to compare." },
-};
-
-const SKIPPED: Record<string, string> = {
-  manual: "kept the price entered by hand",
-  changed: "OpenRouter's price changed since you looked; refresh again",
-  not_listed: "OpenRouter does not list it",
-  not_found: "the model was removed",
-};
+// How a model matched on OpenRouter: the chip's tone; its label and tooltip are cloud.refresh.match.<match>[.title].
+const MATCH_TONE: Record<string, string> = { exact: "ok", confirmed: "ok", suggested: "wait", not_listed: "bad", none: "off" };
 
 // Ticked at first: a confirmed or exact match whose prices change, unless someone entered them by hand.
 function ticked(r: PriceRow): boolean {
@@ -27,9 +16,10 @@ function ticked(r: PriceRow): boolean {
 }
 
 function Diff({ row }: { row: PriceRow }) {
+  const t = useT();
   const after = row.after;
   const fields = PRICE_FIELDS.filter((f) => row.before[f] !== null || (after && after[f] !== null));
-  if (!after) return <span className="muted small">{row.before.price_input === null && row.before.price_output === null ? "no price yet" : "kept as is"}</span>;
+  if (!after) return <span className="muted small">{row.before.price_input === null && row.before.price_output === null ? t("cloud.refresh.noPriceYet") : t("cloud.refresh.kept")}</span>;
   return (
     <ul className="price-diff">
       {fields.map((f) => {
@@ -38,8 +28,8 @@ function Diff({ row }: { row: PriceRow }) {
           <li key={f} className={same ? "muted" : ""}>
             <span className="price-diff-name">{PRICE_LABEL[f]}</span>{" "}
             {same ? <span className="mono">{perMillion(after[f])}</span> : (
-              <>{row.before[f] === null ? <span className="muted">not set</span> : <s className="mono muted">{perMillion(row.before[f])}</s>}{" "}
-                <span aria-label="becomes">→</span> <strong className="mono">{perMillion(after[f])}</strong></>
+              <>{row.before[f] === null ? <span className="muted">{t("cloud.refresh.notSet")}</span> : <s className="mono muted">{perMillion(row.before[f])}</s>}{" "}
+                <span aria-label={t("cloud.refresh.becomes")}>→</span> <strong className="mono">{perMillion(after[f])}</strong></>
             )}
           </li>
         );
@@ -50,6 +40,7 @@ function Diff({ row }: { row: PriceRow }) {
 
 // "Refresh prices from OpenRouter": a preview of old -> new per model; nothing changes until Apply.
 export function PriceRefresh({ providerId, onClose, onApplied }: { providerId?: number; onClose: () => void; onApplied: (text: string) => void }) {
+  const t = useT();
   const [data, setData] = useState<PricePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,8 +82,8 @@ export function PriceRefresh({ providerId, onClose, onApplied }: { providerId?: 
       const items = chosen.map((r) => ({ model_id: r.model_id, ref: r.ref, ...r.after, overwrite_manual: r.manual }));
       const out = await api<PriceApplied>("/prices/openrouter/apply", { method: "POST", body: { items } });
       const name = (id: number) => rows.find((r) => r.model_id === id)?.upstream_model ?? `#${id}`;
-      const skipped = out.skipped.map((s) => `${name(s.model_id)}: ${SKIPPED[s.reason] ?? s.reason}`);
-      onApplied(`Prices from OpenRouter applied to ${out.applied.length} model${out.applied.length === 1 ? "" : "s"}.${skipped.length ? ` Skipped ${skipped.join("; ")}.` : ""}`);
+      const skipped = out.skipped.map((s) => `${name(s.model_id)}: ${t.maybe(`cloud.refresh.skip.${s.reason}`, s.reason)}`);
+      onApplied(`${t.plural("cloud.refresh.applied", out.applied.length)}${skipped.length ? t("cloud.refresh.skipped", { list: skipped.join("; ") }) : ""}`);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -103,52 +94,57 @@ export function PriceRefresh({ providerId, onClose, onApplied }: { providerId?: 
   return (
     <section className="panel price-refresh" role="dialog" aria-modal="false" aria-labelledby="price-refresh-title">
       <div className="panel-head">
-        <h2 id="price-refresh-title">Refresh prices from OpenRouter</h2>
-        <button type="button" className="btn btn-quiet btn-small" onClick={onClose}><IconX size={14} aria-hidden="true" /> Close</button>
+        <h2 id="price-refresh-title">{t("cloud.refresh.title")}</h2>
+        <button type="button" className="btn btn-quiet btn-small" onClick={onClose}><IconX size={14} aria-hidden="true" /> {t("common.close")}</button>
       </div>
-      <p className="muted small">
-        Read from OpenRouter's public model list (no key is sent). Nothing changes until you apply the rows you tick. OpenRouter's prices are usually
-        the provider's list price, but not always: spot-check them against the provider's pricing page.
-      </p>
+      <p className="muted small">{t("cloud.refresh.lead")}</p>
       {error && <Notice tone="error">{error}</Notice>}
-      {loading && !data && <p className="muted">Reading OpenRouter's model list…</p>}
-      {data && rows.length === 0 && <p className="muted">No models of providers outside your network. A provider inside your network costs nothing.</p>}
+      {loading && !data && <p className="muted">{t("cloud.refresh.reading")}</p>}
+      {data && rows.length === 0 && <p className="muted">{t("cloud.refresh.empty")}</p>}
       {data && rows.length > 0 && (
         <>
-          <p className="small">{data.listed} models listed on OpenRouter · {data.matched} of yours matched · {data.changed} with a different price.</p>
+          <p className="small">{t("cloud.refresh.summary", { listed: String(data.listed), matched: String(data.matched), changed: String(data.changed) })}</p>
           <div className="table-wrap">
             <table className="table price-table">
-              <thead><tr><th><span className="sr-only">Apply</span></th><th>Model</th><th>Match on OpenRouter</th><th>Per million tokens</th></tr></thead>
+              <thead>
+                <tr>
+                  <th><span className="sr-only">{t("cloud.refresh.col.apply")}</span></th><th>{t("cloud.refresh.col.model")}</th>
+                  <th>{t("cloud.refresh.col.match")}</th><th>{t("cloud.refresh.col.prices")}</th>
+                </tr>
+              </thead>
               <tbody>
                 {rows.map((r) => {
-                  const m = MATCH[r.match] ?? MATCH.none;
+                  const match = r.match in MATCH_TONE ? r.match : "none";
+                  const model = `${r.provider}/${r.upstream_model}`;
                   return (
                     <tr key={r.model_id} className={r.after ? "" : "row-off"}>
-                      <td data-label="Apply" className="price-pick">
+                      <td data-label={t("cloud.refresh.col.apply")} className="price-pick">
                         <label className="check">
                           <input type="checkbox" disabled={!r.after} checked={!!picked[r.model_id]}
-                            aria-label={`Apply OpenRouter's prices to ${r.provider}/${r.upstream_model}${r.manual ? ", replacing the prices entered by hand" : ""}`}
+                            aria-label={r.manual ? t("cloud.refresh.applyAriaManual", { model }) : t("cloud.refresh.applyAria", { model })}
                             onChange={() => setPicked((x) => ({ ...x, [r.model_id]: !x[r.model_id] }))} />
-                          {r.manual && <span className="small">overwrite</span>}
+                          {r.manual && <span className="small">{t("cloud.refresh.overwrite")}</span>}
                         </label>
                       </td>
-                      <td data-label="Model">
+                      <td data-label={t("cloud.refresh.col.model")}>
                         <div>
                           <div className="mono">{r.upstream_model}</div>
-                          <div className="muted small">{r.provider}{r.source ? ` · now ${SOURCE_LABEL[r.source] ?? r.source}` : ""}</div>
+                          <div className="muted small">{r.provider}{r.source ? t("cloud.refresh.now", { source: SOURCE_LABEL[r.source] ?? r.source }) : ""}</div>
                         </div>
                       </td>
-                      <td data-label="Match"><div>
-                        <span className={`chip chip-tone-${m.tone}`} title={m.title}>{m.label}</span>{r.ref && <> <code className="egress-host">{r.ref}</code></>}
+                      <td data-label={t("cloud.refresh.col.matchShort")}><div>
+                        <span className={`chip chip-tone-${MATCH_TONE[match]}`} title={t.maybe(`cloud.refresh.match.${match}.title`, "")}>
+                          {t.maybe(`cloud.refresh.match.${match}`, match)}
+                        </span>{r.ref && <> <code className="egress-host">{r.ref}</code></>}
                         {(r.match === "none" || r.match === "suggested" || r.match === "not_listed") && (
                           <form className="price-ref" onSubmit={(e) => { e.preventDefault(); void load(refs); }}>
-                            <input aria-label={`OpenRouter id for ${r.upstream_model}`} placeholder="vendor/model on OpenRouter" value={refs[r.model_id] ?? ""}
+                            <input aria-label={t("cloud.refresh.idAria", { model: r.upstream_model })} placeholder={t("cloud.refresh.idPlaceholder")} value={refs[r.model_id] ?? ""}
                               onChange={(e) => setRefs((x) => ({ ...x, [r.model_id]: e.target.value }))} />
-                            <button type="submit" className="btn btn-quiet btn-small" disabled={loading || !(refs[r.model_id] ?? "").trim()}>Compare</button>
+                            <button type="submit" className="btn btn-quiet btn-small" disabled={loading || !(refs[r.model_id] ?? "").trim()}>{t("cloud.refresh.compare")}</button>
                           </form>
                         )}
                       </div></td>
-                      <td data-label="Prices"><Diff row={r} /></td>
+                      <td data-label={t("cloud.refresh.col.pricesShort")}><Diff row={r} /></td>
                     </tr>
                   );
                 })}
@@ -157,10 +153,10 @@ export function PriceRefresh({ providerId, onClose, onApplied }: { providerId?: 
           </div>
           <div className="row-gap price-actions">
             <button type="button" className="btn btn-primary" disabled={applying || chosen.length === 0} onClick={() => void apply()}>
-              {applying ? "Applying…" : `Apply ${chosen.length || ""} ticked`}
+              {applying ? t("cloud.refresh.applying") : chosen.length ? t("cloud.refresh.apply", { n: String(chosen.length) }) : t("cloud.refresh.applyNone")}
             </button>
-            <button type="button" className="btn btn-quiet" disabled={loading} onClick={() => void load(refs)}><IconRefresh size={15} aria-hidden="true" /> Read again</button>
-            <span className="muted small">Suggested matches and prices entered by hand stay as they are unless you tick them.</span>
+            <button type="button" className="btn btn-quiet" disabled={loading} onClick={() => void load(refs)}><IconRefresh size={15} aria-hidden="true" /> {t("cloud.refresh.readAgain")}</button>
+            <span className="muted small">{t("cloud.refresh.note")}</span>
           </div>
         </>
       )}

@@ -24,7 +24,7 @@
 | `DATABASE_URL` | — | 留空：SQLite，放在 `DATA_DIR`。PostgreSQL：`postgresql+psycopg://user:password@host:5432/forgeyard`（先執行 `uv sync --extra postgres`） |
 | `TLS` | `on` | `on`：以 Forgeyard 自己的 CA（建立在 `data/tls/`）或你的憑證提供 HTTPS。`off`：純 HTTP，只能用在處理 HTTPS 的代理後面 |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | — | 你自己的憑證和私鑰：兩個都設或都不設（只設一個會停止啟動）。每 12 小時檢查一次，有變更就重新載入。`TLS=off` 時會被忽略 |
-| `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**Trust this server** 也會提供它。沒有自己的憑證時會被忽略 |
+| `TLS_CA_FILE` | — | 使用自己的憑證時：簽發它的 CA。agent 會釘選它，**信任這台伺服器** 也會提供它。沒有自己的憑證時會被忽略 |
 | `REGISTRATION` | `off` | `approval`：使用者可以申請帳號，申請會等待管理員核准 |
 | `HF_ENDPOINT` | `https://huggingface.co` | 從哪裡查詢和下載 Hugging Face 模型（可以填鏡像站） |
 | `EGRESS_PROXY` | — | 送往供應商的請求改經由這個 proxy（`http://host:port`）。絕不使用環境變數裡的 proxy |
@@ -92,7 +92,7 @@
 | `GATEWAY_CONNECT_TIMEOUT` | `5` | 連線到副本的秒數上限，超過就改試下一個 |
 | `GATEWAY_READ_TIMEOUT` | `600` | 副本回傳非串流回應標頭，或串流第一段之後每一段的秒數上限（串流的第一批位元組：部署的 *Wait for the first answer*，預設 120 秒，請見[重試與等待第一個回應](#retries-and-the-wait-for-a-first-answer)） |
 | `GATEWAY_MAX_BODY_MB` | `32` | 請求本文的大小上限（用來轉錄的音訊檔是最大的）。部署的配方有 *Largest request* 參數（`max_body_mb`，vLLM 與 llama.cpp 預設 64）時，改以該值為上限 |
-| `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API keys** 修改 |
+| `GATEWAY_DEFAULT_RPM`, `GATEWAY_DEFAULT_TPM` | `0` | 沒有自己限制的金鑰，每分鐘的請求數和 token 數（0：不限制）。管理員可以在 **API 金鑰** 修改 |
 | `GATEWAY_MAX_RPM`, `GATEWAY_MAX_TPM` | `0` | 任何人能為自己的金鑰設定的最大值（0：沒有上限） |
 
 ### 對話中的媒體
@@ -109,7 +109,7 @@
 
 | 變數 | 預設值 | 用途 |
 |---|---|---|
-| `GATEWAY_CLOUD_DEFAULT` | `off` | 新 API 金鑰拿到的雲端設定：`off`、`fallback` 或 `on`。管理員可以在 **API keys** 修改（存在資料庫裡）；既有的金鑰維持原本的設定 |
+| `GATEWAY_CLOUD_DEFAULT` | `off` | 新 API 金鑰拿到的雲端設定：`off`、`fallback` 或 `on`。管理員可以在 **API 金鑰** 修改（存在資料庫裡）；既有的金鑰維持原本的設定 |
 | `GATEWAY_CLOUD_MAX` | `off` | 任何人能為自己的金鑰設定的最大值，每個請求也會套用到既有的金鑰。管理員可以為任何金鑰設定任何值 |
 | `EGRESS_ALLOWED_HOSTS` | 空白 | 只允許這些供應商主機，以逗號分隔（`*.example.org` 代表子網域）。空白：不限 |
 | `EGRESS_CA_FILE` | 空白 | 除了系統的 CA 之外，供應商連線額外信任的 CA 檔（例如會檢查 TLS 的公司 proxy） |
@@ -118,7 +118,7 @@
 | `PROVIDER_READ_TIMEOUT` | `300` | 供應商回傳回應標頭或串流下一段內容的秒數上限（每個供應商可以另外設定） |
 | `BUDGET_DEFAULT_MAX_TOKENS` | `4096` | 預算會在雲端請求送出前先預留它的估計費用。沒有 `max_tokens` 的請求，以這個 token 數估計它的回應 |
 
-`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API keys → Limits for keys** 或 **Cloud policy** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。在管理員儲存之前，這些面板會把來自環境的值標示為 *from .env*。
+`EGRESS_PROXY` 在[常用設定](#common-settings)裡。`GATEWAY_DEFAULT_*`、`GATEWAY_MAX_*`、`GATEWAY_CLOUD_DEFAULT` 和 `GATEWAY_CLOUD_MAX` 也都只是初始值：管理員一旦在 **API 金鑰 → 金鑰的限制** 或 **雲端政策** 儲存過，就以資料庫為準；如果環境裡還留著另一個值，Setup health 會提醒。在管理員儲存之前，這些面板會把來自環境的值標示為 *from .env*。
 
 ### 已移除的設定
 
@@ -130,7 +130,7 @@
 - `USAGE_FLUSH_SECONDS`：記憶體中統計的用量每 5 秒寫入資料庫一次。
 - `PROVIDER_COOLDOWN_SECONDS`：回應 429 或 5xx、或連不上的供應商目標，30 秒內排到最後才嘗試（如果它的 `Retry-After` 更長就照它，最多 5 分鐘）。
 - `PROVIDER_RETRY_AFTER_CAP`：沒有其他目標可試時，不超過 2 秒的 `Retry-After` 會等一次再試。
-- `OPENROUTER_MODELS_URL`：**Refresh prices from OpenRouter** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰）。
+- `OPENROUTER_MODELS_URL`：**從 OpenRouter 更新價格** 一律讀取 OpenRouter 的公開清單（只在管理員要求時讀取，不送出金鑰）。
 
 ### 單位、零與空白
 
@@ -224,7 +224,7 @@ local_dirs = ["/data/models"]
 
 | 端點 | 提供什麼 | 雲端供應商 |
 |---|---|---|
-| `GET /v1/models` | 這把金鑰可以使用的模型。以下模型不會列出：對這把金鑰不存在的模型（只有雲端，而金鑰的雲端設定不是 **Allowed**）、不在金鑰模型清單內的模型，以及部署全部停止的模型（除非還有這把金鑰可用的供應商能提供它） | — |
+| `GET /v1/models` | 這把金鑰可以使用的模型。以下模型不會列出：對這把金鑰不存在的模型（只有雲端，而金鑰的雲端設定不是 **允許**）、不在金鑰模型清單內的模型，以及部署全部停止的模型（除非還有這把金鑰可用的供應商能提供它） | — |
 | `GET /v1/models/{model}` | 單一模型，格式相同。模型不存在、對這把金鑰隱藏或已停止時回 404 `model_not_found`；不在金鑰模型清單內時回 403 `model_not_allowed` | — |
 | `POST /v1/chat/completions` | 對話模型（vLLM、llama.cpp、供應商的對話模型）。`stream: true` 會以 server-sent events 串流 | 是 |
 | `POST /v1/completions` | 同樣的模型，使用單純的 `prompt` | 是 |
@@ -541,7 +541,7 @@ local_dirs = ["/data/models"]
 | 400 | `variant_not_supported` | 影片：`variant=thumbnail` 或 `spritesheet`；引擎只做影片 | 改用 `variant=video` |
 | 4xx/5xx | `engine_error` | 圖片與影片：引擎拒絕了請求或處理失敗；會轉送它的狀態碼和訊息 | 看訊息；記憶體不足的錯誤代表要用小一點的尺寸或少幾張圖片 |
 | 400 | `structured_output_not_supported` | 請求要求結構化輸出（JSON 的 `response_format`、`structured_outputs`、`guided_*`、`grammar`、`json_schema`、strict 工具），但提供這個模型的每個供應商都會拿掉或忽略它。訊息會列出它們和參數 | 拿掉這個參數，或改用接受它的目標（OpenAI 相容伺服器、本機部署） |
-| 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **Local only** | 拿掉標頭，或改用本機模型 |
+| 400 | `cloud_only_model` | 只有雲端供應商提供這個模型，但請求帶了 `X-Forgeyard-Local-Only`，或路由設為 **僅本機** | 拿掉標頭，或改用本機模型 |
 | 401 | `missing_api_key` | 沒有 `Authorization: Bearer` 標頭 | 送出金鑰 |
 | 401 | `invalid_api_key` | 不是 Forgeyard 金鑰，或沒有這把金鑰 | 檢查金鑰 |
 | 401 | `revoked_api_key` | 金鑰已被撤銷 | 建立新金鑰 |
@@ -550,7 +550,7 @@ local_dirs = ["/data/models"]
 | 402 | `budget_exhausted` | 每月預算讓請求無法送往任何能提供服務的供應商，本機也無法接手。`budget` 物件會說明是哪個預算、何時重置 | 等到月底、提高預算，或改用本機模型。不要重試 |
 | 402 | `budget_unpriced` | 有預算適用，但供應商的模型沒有價格，所以無法預留它的費用 | 由管理員設定它的價格 |
 | 403 | `model_not_allowed` | 金鑰只能使用其他模型 | 改用允許的模型，或修改金鑰的模型清單 |
-| 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **Allowed**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
+| 404 | `model_not_found` | 對這把金鑰沒有這個模型：它不存在，或它只在雲端而金鑰的雲端設定不是 **允許**。在 `GET /v1/models/{model}` 也包括已停止的模型 | 查看 `GET /v1/models` |
 | 404 | `unknown_endpoint` | 閘道沒有這個路徑 | 使用上面列出的端點 |
 | 404 | `endpoint_not_supported` | `/v1/images/edits`、`/v1/images/variations`、`/v1/videos/sync` 或 `/v1/videos/{id}/remix`：1.3 不提供 | 改用 `/v1/images/generations`，或 `/v1/videos` 的工作 |
 | 404 | `video_not_found` | 影片：這把金鑰沒有這段影片（別的金鑰的 id 也一樣回應） | 查看 `GET /v1/videos` |
@@ -1104,10 +1104,10 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 | `provider-no-key` | 錯誤 | 某個已啟用、而且種類需要 API 金鑰的供應商沒有金鑰 |
 | `provider-blocked-by-egress` | 錯誤 | 某個供應商的主機不在 `EGRESS_ALLOWED_HOSTS` 裡 |
 | `provider-inside-public-address` | 警告 | 某個標示為在你網路內的供應商，只解析得到公開位址 |
-| `cloud-default-open` | 提示 | 新金鑰拿到的設定高於 **Never**，或使用者可以把自己的金鑰設為 **Allowed**。如果某把金鑰同時沒有預算，則是警告 |
+| `cloud-default-open` | 提示 | 新金鑰拿到的設定高於 **永不**，或使用者可以把自己的金鑰設為 **允許**。如果某把金鑰同時沒有預算，則是警告 |
 | `cloud-unreachable` | 提示 | 路由有雲端目標，卻沒有任何金鑰可以使用雲端 |
 | `route-cloud-before-local` | 警告 | 某條路由的雲端層排在它的第一個本機層之前 |
-| `route-cloud-never-used` | 提示 | 勾選了 **Local only** 的路由有雲端目標，或某條溢出規則在本機層之後沒有其他層 |
+| `route-cloud-never-used` | 提示 | 勾選了 **僅本機** 的路由有雲端目標，或某條溢出規則在本機層之後沒有其他層 |
 | `route-no-target` | 錯誤 | 某條路由沒有任何目標能回應：每個目標都被停用，或它的供應商被停用 |
 | `route-local-stopped` | 警告 | 某條同時有本機層和雲端層的路由，它的本機部署全部停止 |
 | `budget-zero` | 提示 | 某個預算是 $0，會擋下它適用的每個雲端請求 |

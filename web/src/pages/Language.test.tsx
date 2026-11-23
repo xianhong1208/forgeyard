@@ -167,11 +167,12 @@ describe("the console's language", () => {
     expect((await screen.findAllByRole("link", { name: "部署模型" }))[0].getAttribute("href")).toBe("/serving/deploy");
   });
 
-  it("FY-WEB-677 a page not translated yet still works in zh-TW: its own words in English, the frame in Chinese", async () => {
+  // The audit log was the untranslated example until #189's page group 4 translated it: now its words are Chinese too.
+  it("FY-WEB-677 a page in zh-TW works at its own address, the frame and the page in Chinese", async () => {
     localStorage.setItem(LANG_KEY, "zh-TW");
     server((url) => (url === "/api/audit" || url.startsWith("/api/audit?") ? { status: 200, body: { events: [], next_before: null } } : fleet(url)));
     mount("/audit");
-    expect(await screen.findByText("No events.")).toBeTruthy();
+    expect(await screen.findByText("沒有事件。")).toBeTruthy();
     expect(within(screen.getByRole("navigation", { name: "主選單" })).getByRole("link", { name: "稽核紀錄" })).toBeTruthy();
     expect(screen.getByTestId("where").textContent).toBe("/audit");
   });

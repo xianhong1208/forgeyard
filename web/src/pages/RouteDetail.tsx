@@ -5,6 +5,8 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from "react-route
 import { AdvisorBanner } from "../components/Advisor";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Field, Notice, PageHeader } from "../components/ui";
+import { t as tNow } from "../i18n/core";
+import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { API_KIND } from "../lib/gateway";
 import { FALLBACK_ANCHOR, ROUTE_KIND_LABEL, ROUTE_KIND_TONE, isCloudModel, routeHome, spillRules, targetName, targetWhere, tiers } from "../lib/routing";
@@ -18,7 +20,7 @@ function fromTarget(t: RouteTarget): Draft {
   return {
     key: `${t.kind}:${t.deployment?.id ?? t.provider_model?.id}`, kind: t.kind, ref: (t.deployment?.id ?? t.provider_model?.id) as number,
     // The chip already says local, cloud or own server; the line adds what is not obvious.
-    name: targetName(t), where: t.provider_model ? (t.provider_model.provider.enabled ? "" : "provider disabled") : targetWhere(t),
+    name: targetName(t), where: t.provider_model ? (t.provider_model.provider.enabled ? "" : tNow("cloud.route.providerDisabled")) : targetWhere(t),
     cloud: t.cloud, weight: t.weight, enabled: t.enabled,
   };
 }
@@ -45,6 +47,7 @@ export function OldProviders() {
 // page is for the names an admin made: cloud models, and other names for deployments. It lives under
 // Cloud → Cloud models; /models/routes/<id> (before 1.4) opens wherever the route lives now.
 export function RouteDetailPage() {
+  const t = useT();
   const { id } = useParams();
   const isNew = id === "new";
   const route = useApi<{ route: RouteInfo; is_admin: boolean }>(isNew ? null : `/routes/${id}`);
@@ -53,13 +56,13 @@ export function RouteDetailPage() {
   const options = useApi<RouteOptions>(admin && r?.deployment_id == null ? "/route-options" : null);
   if (r && r.deployment_id !== null) return <Navigate to={routeHome(r)} replace />;
   const crumb = admin
-    ? <p className="crumb"><Link to="/cloud?tab=models"><IconArrowLeft size={14} aria-hidden="true" /> Cloud models</Link></p>
-    : <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> Serving</Link></p>;
+    ? <p className="crumb"><Link to="/cloud?tab=models"><IconArrowLeft size={14} aria-hidden="true" /> {t("cloud.tab.models")}</Link></p>
+    : <p className="crumb"><Link to="/serving"><IconArrowLeft size={14} aria-hidden="true" /> {t("cloud.route.crumbServing")}</Link></p>;
   if (!isNew && !r) {
     return (
       <>
         {crumb}
-        {route.error ? <Notice tone="error">{route.error}</Notice> : <p className="muted">Loading…</p>}
+        {route.error ? <Notice tone="error">{route.error}</Notice> : <p className="muted">{t("common.loading")}</p>}
       </>
     );
   }
@@ -67,14 +70,15 @@ export function RouteDetailPage() {
   return (
     <>
       {crumb}
-      <PageHeader index={`04 · Cloud · ${cloud ? "Cloud model" : "Model name"}`} title={isNew ? "New cloud model" : r?.served_name ?? "Cloud model"}
-        lead={isNew ? "A model name of its own: a cloud model behind Forgeyard's keys and limits, or several deployments and providers in tiers."
-          : r ? `${API_KIND[r.api] ?? r.api} · made by ${r.created_by ?? "an admin"}` : undefined} />
+      <PageHeader index={t("cloud.route.index", { what: cloud ? t("cloud.route.cloudModel") : t("cloud.route.modelName") })}
+        title={isNew ? t("cloud.route.new") : r?.served_name ?? t("cloud.route.cloudModel")}
+        lead={isNew ? t("cloud.route.newLead")
+          : r ? t("cloud.route.lead", { api: API_KIND[r.api] ?? r.api, who: r.created_by ?? t("cloud.route.anAdmin") }) : undefined} />
       {r && <AdvisorBanner pages={[`route:${r.id}`]} />}
       <HelpLinks>
-        <HelpLink page="cloud-providers" anchor="serve-a-cloud-model-under-a-name-of-its-own">How do I serve a cloud model under a name of its own?</HelpLink>
-        <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request move to the next tier?</HelpLink>
-        <HelpLink page="cloud-providers" anchor="who-may-use-the-cloud">Which keys may use the cloud?</HelpLink>
+        <HelpLink page="cloud-providers" anchor="serve-a-cloud-model-under-a-name-of-its-own">{t("cloud.help.ownName")}</HelpLink>
+        <HelpLink page="cloud-providers" anchor="when-a-request-spills">{t("cloud.help.nextTier")}</HelpLink>
+        <HelpLink page="cloud-providers" anchor="who-may-use-the-cloud">{t("cloud.help.keys")}</HelpLink>
       </HelpLinks>
       <RoutingEditor key={r?.id ?? "new"} r={r} admin={admin} opts={options.data} reload={route.reload} />
     </>
@@ -87,6 +91,7 @@ export function RouteDetailPage() {
 export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
   r: RouteInfo | null; admin: boolean; opts: RouteOptions | null; reload: () => void; embedded?: boolean;
 }) {
+  const t = useT();
   const isNew = r === null;
   const navigate = useNavigate();
   const [served, setServed] = useState("");
@@ -101,10 +106,10 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
   const used = new Set(draft.flat().map((d) => d.key));
   const choices = [
     ...(opts?.deployments ?? []).filter((d) => d.api === apiName).map((d) => ({ key: `local:${d.id}`, kind: "local" as const, ref: d.id, name: d.name,
-      where: `local deployment (${d.served_name})`, cloud: false })),
+      where: t("cloud.route.localDeployment", { name: d.served_name }), cloud: false })),
     ...(["openai-chat", "openai-embeddings"].includes(apiName) ? opts?.provider_models ?? [] : []).filter((m) => m.api === apiName)
       .map((m) => ({ key: `provider:${m.id}`, kind: "provider" as const, ref: m.id, name: `${m.provider.name}/${m.upstream_model}`,
-        where: m.provider.external ? "cloud" : "inside your network", cloud: m.provider.external })),
+        where: m.provider.external ? t("cloud.route.providerCloud") : t("cloud.route.providerInside"), cloud: m.provider.external })),
   ].filter((c) => !used.has(c.key));
 
   const addTo = (tier: number, key: string) => {
@@ -130,7 +135,7 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
         navigate(`/cloud/models/${out.route.id}`, { replace: true });
       } else {
         await api(`/routes/${r.id}`, { method: "PUT", body });
-        setMsg({ tone: "ok", text: embedded ? "Cloud fallback saved. It applies to the next request." : "Saved. It applies to the next request." });
+        setMsg({ tone: "ok", text: embedded ? t("cloud.route.savedFallback") : t("cloud.route.saved") });
         reload();
       }
     } catch (err) {
@@ -140,7 +145,7 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
     }
   };
   const remove = async () => {
-    if (!r || !window.confirm(`Delete the model name ${r.served_name}? Requests for it get 404 from then on.`)) return;
+    if (!r || !window.confirm(t("cloud.route.deleteConfirm", { name: r.served_name }))) return;
     try {
       await api(`/routes/${r.id}`, { method: "DELETE" });
       navigate("/cloud?tab=models", { replace: true });
@@ -150,33 +155,35 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
   const H = embedded ? "h3" : "h2";
   const tiersBlock = (
     <>
-      <div className="panel-head"><H id="tiers-title">Tiers</H><span className="muted small">tried in order; a request moves on only before its answer starts</span></div>
+      <div className="panel-head"><H id="tiers-title">{t("cloud.route.tiers")}</H><span className="muted small">{t("cloud.route.tiersNote")}</span></div>
       <ol className="tiers">
         {draft.map((tier, i) => (
           <li key={i} className="tier">
             <div className="tier-head">
-              <span className="tier-n">{i === 0 ? "First" : `Then, tier ${i + 1}`}</span>
+              <span className="tier-n">{i === 0 ? t("cloud.route.first") : t("cloud.route.thenTier", { n: i + 1 })}</span>
               {admin && draft.length > 1 && (
-                <button type="button" className="btn btn-quiet btn-small" onClick={() => removeTier(i)} aria-label={`Remove tier ${i + 1}`}>
-                  <IconX size={14} aria-hidden="true" /> Remove tier
+                <button type="button" className="btn btn-quiet btn-small" onClick={() => removeTier(i)} aria-label={t("cloud.route.removeTierAria", { n: i + 1 })}>
+                  <IconX size={14} aria-hidden="true" /> {t("cloud.route.removeTier")}
                 </button>
               )}
             </div>
-            {tier.length === 0 && <p className="muted small">Nothing in this tier yet.</p>}
+            {tier.length === 0 && <p className="muted small">{t("cloud.route.emptyTier")}</p>}
             <ul className="tier-targets">
-              {tier.map((t) => (
-                <li key={t.key} className={t.enabled ? "" : "row-off"}>
-                  <span className={`chip ${t.kind === "local" ? "chip-tone-ok" : t.cloud ? "chip-tone-wait" : "chip-tone-ok"}`}>{t.kind === "local" ? "local" : t.cloud ? "cloud" : "own server"}</span>
-                  <span className="mono tier-name">{t.name}</span>
-                  <span className="muted small">{t.where}</span>
+              {tier.map((d) => (
+                <li key={d.key} className={d.enabled ? "" : "row-off"}>
+                  <span className={`chip ${d.kind === "local" ? "chip-tone-ok" : d.cloud ? "chip-tone-wait" : "chip-tone-ok"}`}>
+                    {d.kind === "local" ? t("cloud.route.chip.local") : d.cloud ? t("cloud.route.chip.cloud") : t("cloud.route.chip.own")}
+                  </span>
+                  <span className="mono tier-name">{d.name}</span>
+                  <span className="muted small">{d.where}</span>
                   {admin && (
                     <span className="tier-edit">
-                      {t.kind === "provider" && (
-                        <label className="small">Weight <input type="number" min={1} max={100} value={t.weight} aria-label={`Weight of ${t.name}`}
-                          onChange={(e) => change(i, t.key, { weight: Math.max(1, Number(e.target.value) || 1) })} /></label>
+                      {d.kind === "provider" && (
+                        <label className="small">{t("cloud.route.weight")} <input type="number" min={1} max={100} value={d.weight} aria-label={t("cloud.route.weightOf", { name: d.name })}
+                          onChange={(e) => change(i, d.key, { weight: Math.max(1, Number(e.target.value) || 1) })} /></label>
                       )}
-                      <label className="check small"><input type="checkbox" checked={t.enabled} onChange={(e) => change(i, t.key, { enabled: e.target.checked })} /> on</label>
-                      <button type="button" className="btn btn-quiet btn-small" aria-label={`Remove ${t.name}`} onClick={() => drop(i, t.key)}><IconX size={14} aria-hidden="true" /></button>
+                      <label className="check small"><input type="checkbox" checked={d.enabled} onChange={(e) => change(i, d.key, { enabled: e.target.checked })} /> {t("cloud.route.on")}</label>
+                      <button type="button" className="btn btn-quiet btn-small" aria-label={t("cloud.route.removeAria", { name: d.name })} onClick={() => drop(i, d.key)}><IconX size={14} aria-hidden="true" /></button>
                     </span>
                   )}
                 </li>
@@ -184,10 +191,10 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
             </ul>
             {admin && choices.length > 0 && (
               <div className="tier-add">
-                <label htmlFor={`add-${i}`} className="sr-only">Add to tier {i + 1}</label>
+                <label htmlFor={`add-${i}`} className="sr-only">{t("cloud.route.addToAria", { n: i + 1 })}</label>
                 <select id={`add-${i}`} value="" onChange={(e) => addTo(i, e.target.value)}>
-                  <option value="">Add to this tier…</option>
-                  {choices.map((c) => <option key={c.key} value={c.key}>{c.name} ({c.where})</option>)}
+                  <option value="">{t("cloud.route.addTo")}</option>
+                  {choices.map((c) => <option key={c.key} value={c.key}>{t("cloud.route.choice", { name: c.name, where: c.where })}</option>)}
                 </select>
               </div>
             )}
@@ -197,43 +204,40 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
       </ol>
       {admin && (
         <button type="button" className="btn btn-quiet btn-small" onClick={() => setDraft((d) => [...d, []])}>
-          <IconPlus size={14} aria-hidden="true" /> {embedded ? "Add a cloud tier" : "Add a tier"}
+          <IconPlus size={14} aria-hidden="true" /> {embedded ? t("cloud.route.addCloudTier") : t("cloud.route.addTier")}
         </button>
       )}
       {admin && opts && opts.provider_models.length === 0 && ["openai-chat", "openai-embeddings"].includes(apiName) && (
-        <p className="muted small">No provider models yet: <Link to="/cloud">add a provider</Link> and its models first.</p>
+        <p className="muted small">{t.rich("cloud.route.noProviderModels", { link: (s) => <Link to="/cloud">{s}</Link> })}</p>
       )}
     </>
   );
   const rulesBlock = (
     <>
-      <H id="rules-title">When to move on</H>
+      <H id="rules-title">{t("cloud.route.rules")}</H>
       <label className="check provider-check">
         <input type="checkbox" checked={localOnly} disabled={!admin} onChange={(e) => setLocalOnly(e.target.checked)} />
-        <span><strong>Local only.</strong> Never leaves your network, whatever a key allows: cloud targets are skipped.</span>
+        <span>{t.rich("cloud.route.localOnly", { strong: (s) => <strong>{s}</strong> })}</span>
       </label>
       <label className="check provider-check">
         <input type="checkbox" checked={longPrompt} disabled={!admin} onChange={(e) => setLongPrompt(e.target.checked)} />
-        <span><strong>Spill a prompt that is too long</strong> for the local deployment's context (estimated from its size, plus max_tokens).</span>
+        <span>{t.rich("cloud.route.longPrompt", { strong: (s) => <strong>{s}</strong> })}</span>
       </label>
       <div className="grid-2">
-        <Field label="Wait for a free local slot (ms)" name="rt-wait" type="number" min={0} max={10000} value={waitMs} disabled={!admin}
-          onChange={(e) => setWaitMs(e.target.value)} hint="In milliseconds. 0: spill at once when every local replica is at its concurrency. At most 10,000 (10 s)." />
+        <Field label={t("cloud.route.wait")} name="rt-wait" type="number" min={0} max={10000} value={waitMs} disabled={!admin}
+          onChange={(e) => setWaitMs(e.target.value)} hint={t("cloud.route.waitHint")} />
       </div>
-      <p className="muted small">
-        A request always moves on when the tier has no ready replica, cannot be connected to, or answers 429 or 503. It never moves on for
-        another error, a timeout once the request was sent, or once the answer has started. Keys decide whether cloud tiers are used at all.
-      </p>
+      <p className="muted small">{t("cloud.route.always")}</p>
     </>
   );
   const buttons = admin && (
     <div className="row-gap">
       <button type="submit" className="btn btn-primary" disabled={busy || (isNew && !served.trim()) || draft.flat().length === 0}>
-        {busy ? "Saving…" : isNew ? "Create" : embedded ? "Save cloud fallback" : "Save"}
+        {busy ? t("cloud.route.saving") : isNew ? t("cloud.route.create") : embedded ? t("cloud.route.saveFallback") : t("cloud.route.save")}
       </button>
-      {!embedded && <Link className="btn btn-quiet" to="/cloud?tab=models">Cancel</Link>}
+      {!embedded && <Link className="btn btn-quiet" to="/cloud?tab=models">{t("cloud.route.cancel")}</Link>}
       {!embedded && r && (
-        <button type="button" className="btn btn-danger fallback-delete" onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> Delete</button>
+        <button type="button" className="btn btn-danger fallback-delete" onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> {t("cloud.route.delete")}</button>
       )}
     </div>
   );
@@ -242,13 +246,14 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
     return (
       <section className="panel" id={FALLBACK_ANCHOR} aria-labelledby="fallback-title">
         <div className="panel-head">
-          <h2 id="fallback-title">Cloud fallback</h2>
+          <h2 id="fallback-title">{t("cloud.route.fallback")}</h2>
           <span className={`chip chip-tone-${ROUTE_KIND_TONE[r.kind]}`}>{ROUTE_KIND_LABEL[r.kind]}</span>
         </div>
         <p className="muted small">
-          When this deployment is busy or down, a request can move on to a cloud provider's model in a later tier; API keys decide whether
-          it may use the cloud at all. {spillRules(r)}{" "}
-          <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">How do I let a model spill to the cloud?</HelpLink>
+          {t.rich("cloud.route.fallbackLead", {
+            rules: spillRules(r),
+            help: <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">{t("cloud.help.modelSpill")}</HelpLink>,
+          })}
         </p>
         {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
         <form onSubmit={save} className="fallback-form">
@@ -266,7 +271,7 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
       {r && (
         <div className="wl-status">
           <span className={`chip chip-big chip-tone-${ROUTE_KIND_TONE[r.kind]}`}>{ROUTE_KIND_LABEL[r.kind]}</span>
-          {r.local_only && <span className="chip chip-tone-ok">local only</span>}
+          {r.local_only && <span className="chip chip-tone-ok">{t("cloud.route.localOnlyChip")}</span>}
           <span className="muted small">{spillRules(r)}</span>
         </div>
       )}
@@ -274,14 +279,14 @@ export function RoutingEditor({ r, admin, opts, reload, embedded = false }: {
         {isNew && (
           <section className="panel">
             <div className="grid-2">
-              <Field label="Model name" name="rt-name" value={served} onChange={(e) => setServed(e.target.value)} required maxLength={128}
-                placeholder="gpt-4o-mini" hint="What clients send as model. Letters, digits and . _ : / -" />
+              <Field label={t("cloud.route.modelName")} name="rt-name" value={served} onChange={(e) => setServed(e.target.value)} required maxLength={128}
+                placeholder="gpt-4o-mini" hint={t("cloud.route.nameHint")} />
               <div className="field">
-                <label htmlFor="rt-api">Serves</label>
+                <label htmlFor="rt-api">{t("cloud.route.serves")}</label>
                 <select id="rt-api" value={apiName} onChange={(e) => { setApiName(e.target.value); setDraft([[]]); }}>
                   {APIS.map((a) => <option key={a} value={a}>{API_KIND[a] ?? a}</option>)}
                 </select>
-                <p className="field-hint">Cloud providers serve chat and embeddings.</p>
+                <p className="field-hint">{t("cloud.route.servesHint")}</p>
               </div>
             </div>
           </section>

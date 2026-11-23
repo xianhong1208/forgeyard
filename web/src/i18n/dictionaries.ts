@@ -3,8 +3,10 @@
 // To add an area: write en/<area>.ts and zh-TW/<area>.ts, and add both here; the parity test (i18n.test.ts)
 // finds every module file on its own and fails until the pair is complete and registered.
 import enAddmodel from "./en/addmodel";
+import enAdmin from "./en/admin";
 import enAdvisor from "./en/advisor";
 import enAuth from "./en/auth";
+import enCloud from "./en/cloud";
 import enCommon from "./en/common";
 import enDeploy from "./en/deploy";
 import enDeployment from "./en/deployment";
@@ -12,6 +14,7 @@ import enEnginepage from "./en/enginepage";
 import enFleet from "./en/fleet";
 import enGuide from "./en/guide";
 import enLibrary from "./en/library";
+import enKeys from "./en/keys";
 import enMachine from "./en/machine";
 import enMachines from "./en/machines";
 import enModelpage from "./en/modelpage";
@@ -22,8 +25,10 @@ import enShell from "./en/shell";
 import enStart from "./en/start";
 import enUsage from "./en/usage";
 import zhAddmodel from "./zh-TW/addmodel";
+import zhAdmin from "./zh-TW/admin";
 import zhAdvisor from "./zh-TW/advisor";
 import zhAuth from "./zh-TW/auth";
+import zhCloud from "./zh-TW/cloud";
 import zhCommon from "./zh-TW/common";
 import zhDeploy from "./zh-TW/deploy";
 import zhDeployment from "./zh-TW/deployment";
@@ -31,6 +36,7 @@ import zhEnginepage from "./zh-TW/enginepage";
 import zhFleet from "./zh-TW/fleet";
 import zhGuide from "./zh-TW/guide";
 import zhLibrary from "./zh-TW/library";
+import zhKeys from "./zh-TW/keys";
 import zhMachine from "./zh-TW/machine";
 import zhMachines from "./zh-TW/machines";
 import zhModelpage from "./zh-TW/modelpage";
@@ -42,6 +48,7 @@ import zhStart from "./zh-TW/start";
 import zhUsage from "./zh-TW/usage";
 
 export const EN_MODULES = {
+  admin: enAdmin, cloud: enCloud, keys: enKeys,
   addmodel: enAddmodel, advisor: enAdvisor, auth: enAuth, common: enCommon, enginepage: enEnginepage, fleet: enFleet, guide: enGuide, library: enLibrary, machines: enMachines, modelpage: enModelpage, server: enServer,
   serving: enServing, shell: enShell, start: enStart,
   // Machines and deployments (#189, group 1)
@@ -49,6 +56,7 @@ export const EN_MODULES = {
   playground: enPlayground, usage: enUsage,
 };
 export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, string>> = {
+  admin: zhAdmin, cloud: zhCloud, keys: zhKeys,
   addmodel: zhAddmodel, advisor: zhAdvisor, auth: zhAuth, common: zhCommon, enginepage: zhEnginepage, fleet: zhFleet, guide: zhGuide, library: zhLibrary, machines: zhMachines, modelpage: zhModelpage, server: zhServer,
   serving: zhServing, shell: zhShell, start: zhStart,
   deploy: zhDeploy, deployment: zhDeployment, machine: zhMachine,
@@ -56,6 +64,7 @@ export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, strin
 };
 
 export const en = {
+  ...enAdmin, ...enCloud, ...enKeys,
   ...enAddmodel, ...enAdvisor, ...enAuth, ...enCommon, ...enEnginepage, ...enFleet, ...enGuide, ...enLibrary, ...enMachines, ...enModelpage, ...enServer, ...enServing, ...enShell, ...enStart,
   ...enDeploy, ...enDeployment, ...enMachine,
   ...enPlayground, ...enUsage,
@@ -64,6 +73,7 @@ export type Key = keyof typeof en;
 
 // TypeScript already holds each zh-TW module to its English one (`satisfies`); this keeps the merge complete.
 export const zhTW: Record<Key, string> = {
+  ...zhAdmin, ...zhCloud, ...zhKeys,
   ...zhAddmodel, ...zhAdvisor, ...zhAuth, ...zhCommon, ...zhEnginepage, ...zhFleet, ...zhGuide, ...zhLibrary, ...zhMachines, ...zhModelpage, ...zhServer, ...zhServing, ...zhShell, ...zhStart,
   ...zhDeploy, ...zhDeployment, ...zhMachine,
   ...zhPlayground, ...zhUsage,

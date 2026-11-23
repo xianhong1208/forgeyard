@@ -9,6 +9,8 @@ import { BudgetMeter } from "../components/BudgetMeter";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { PriceRefresh } from "../components/PriceRefresh";
 import { Field, Notice, PageHeader } from "../components/ui";
+import { labels, t as tNow, tPlural } from "../i18n/core";
+import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { budgetInput, LEVEL_LABEL, LEVEL_TONE, parseBudget, type Budget } from "../lib/budgets";
 import { exact, when } from "../lib/format";
@@ -20,7 +22,7 @@ import { CloudModels } from "./CloudModels";
 
 type Msg = { tone: "ok" | "error"; text: string } | null;
 
-const API_NAME: Record<string, string> = { "openai-chat": "chat", "openai-embeddings": "embeddings" };
+const API_NAME: Record<string, string> = labels({ "openai-chat": "cloud.api.openai-chat", "openai-embeddings": "cloud.api.openai-embeddings" });
 
 function headersText(h: Record<string, string> | undefined): string {
   return Object.entries(h ?? {}).map(([k, v]) => `${k}: ${v}`).join("\n");
@@ -36,28 +38,34 @@ function parseHeaders(text: string): Record<string, string> {
 }
 
 function testText(r: TestResult): string {
-  return r.ok ? `Connected in ${r.ms} ms: ${r.models} model${r.models === 1 ? "" : "s"} listed${r.sample.length ? ` (${r.sample.join(", ")}${r.models > r.sample.length ? ", …" : ""})` : ""}.`
-    : `HTTP ${r.status}: ${r.message ?? "the provider refused"}`;
+  if (!r.ok) return tNow("cloud.test.failed", { status: String(r.status), message: r.message ?? tNow("cloud.test.refused") });
+  const vars = { ms: String(r.ms), n: String(r.models) };
+  return r.sample.length
+    ? tPlural("cloud.test.okSample", r.models, { ...vars, sample: `${r.sample.join(", ")}${r.models > r.sample.length ? ", …" : ""}` })
+    : tPlural("cloud.test.ok", r.models, vars);
 }
 
 function WhereChip({ p }: { p: Pick<Provider, "external" | "enabled"> }) {
+  const t = useT();
   return (
     <>
-      <span className={`chip ${p.external ? "chip-tone-wait" : "chip-tone-ok"}`}>{p.external ? "cloud" : "inside your network"}</span>
-      {!p.enabled && <> <span className="chip chip-tone-off">disabled</span></>}
+      <span className={`chip ${p.external ? "chip-tone-wait" : "chip-tone-ok"}`}>{p.external ? t("cloud.where.cloud") : t("cloud.where.inside")}</span>
+      {!p.enabled && <> <span className="chip chip-tone-off">{t("cloud.where.disabled")}</span></>}
     </>
   );
 }
 
 function EgressPanel({ egress }: { egress: Egress }) {
+  const t = useT();
+  const how = egress.proxy ? t("cloud.egress.viaProxy") : t("cloud.egress.direct");
   return (
     <section className="panel" aria-labelledby="egress-title">
-      <h2 id="egress-title">What leaves this server</h2>
+      <h2 id="egress-title">{t("cloud.egress.title")}</h2>
       <dl className="facts">
-        <dt>Connection</dt><dd>{egress.proxy ? "through EGRESS_PROXY" : "direct (no proxy)"}; TLS verified{egress.ca_file ? ", plus EGRESS_CA_FILE" : ""}; redirects never followed</dd>
-        <dt>Hosts</dt><dd>{egress.allowed_hosts.length ? egress.allowed_hosts.map((h) => <code key={h} className="egress-host">{h}</code>) : "any host (EGRESS_ALLOWED_HOSTS is empty)"}</dd>
-        <dt>Refused</dt><dd>plain http and private addresses for cloud providers{egress.private_hosts ? " (allowed on this server: PROVIDER_ALLOW_PRIVATE_HOSTS, for testing)" : ""}; link-local and cloud metadata addresses always</dd>
-        <dt>A failing target</dt><dd>is tried last for {egress.cooldown_s} s; answers may take {egress.read_timeout_s} s</dd>
+        <dt>{t("cloud.egress.connection")}</dt><dd>{egress.ca_file ? t("cloud.egress.tlsCa", { how }) : t("cloud.egress.tls", { how })}</dd>
+        <dt>{t("cloud.egress.hosts")}</dt><dd>{egress.allowed_hosts.length ? egress.allowed_hosts.map((h) => <code key={h} className="egress-host">{h}</code>) : t("cloud.egress.anyHost")}</dd>
+        <dt>{t("cloud.egress.refused")}</dt><dd>{egress.private_hosts ? t("cloud.egress.refusedPrivate") : t("cloud.egress.refusedText")}</dd>
+        <dt>{t("cloud.egress.failing")}</dt><dd>{t("cloud.egress.failingText", { cooldown: String(egress.cooldown_s), timeout: String(egress.read_timeout_s) })}</dd>
       </dl>
     </section>
   );
@@ -68,6 +76,7 @@ function EgressPanel({ egress }: { egress: Egress }) {
 // limits). A deployment's cloud fallback lives on the deployment's page. Before 1.4 this was the
 // Providers page at /providers, which still opens it.
 export function CloudPage() {
+  const t = useT();
   const [search, setSearch] = useSearchParams();
   const tab = search.get("tab") === "models" ? "models" : "providers";
   const { data, error, reload } = useApi<ProvidersResponse>(tab === "providers" ? "/providers" : null);
@@ -94,44 +103,44 @@ export function CloudPage() {
 
   return (
     <>
-      <PageHeader index="04 · Cloud" title="Cloud"
-        lead="Model APIs outside Forgeyard: OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter, or any OpenAI-compatible server. A deployment can send requests there when its replicas are busy or down (its cloud fallback, on the deployment's page), and a cloud model can be served under a name of its own."
+      <PageHeader index={t("cloud.index")} title={t("cloud.title")}
+        lead={t("cloud.lead")}
         actions={admin && (tab === "providers" ? data && (
           <>
             {priced && (
               <button type="button" className="btn" aria-expanded={refreshing} onClick={() => setRefreshing((v) => !v)}>
-                <IconCurrencyDollar size={16} aria-hidden="true" /> Refresh prices from OpenRouter
+                <IconCurrencyDollar size={16} aria-hidden="true" /> {t("cloud.refreshPrices")}
               </button>
             )}
             <button type="button" className="btn btn-primary" aria-expanded={adding} onClick={() => setAdding((v) => !v)}>
-              <IconPlus size={16} aria-hidden="true" /> Add a provider
+              <IconPlus size={16} aria-hidden="true" /> {t("cloud.addProvider")}
             </button>
           </>
         ) : (
-          <Link to="/cloud/models/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> New cloud model</Link>
+          <Link to="/cloud/models/new" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> {t("cloud.newCloudModel")}</Link>
         ))} />
       <AdvisorBanner pages={[tab === "providers" ? "providers" : "cloud-models"]} />
       <HelpLinks>
         {tab === "providers" ? (
           <>
-            <HelpLink page="cloud-providers" anchor="add-a-provider">How do I add OpenAI, Anthropic, Gemini or Azure?</HelpLink>
-            <HelpLink page="cloud-providers" anchor="when-a-request-spills">When does a request go to the cloud?</HelpLink>
-            <HelpLink page="cloud-providers" anchor="what-each-providers-endpoint-cannot-do">What each provider's endpoint cannot do</HelpLink>
-            <HelpLink page="cloud-providers" anchor="cost-and-prices">How cost is counted</HelpLink>
+            <HelpLink page="cloud-providers" anchor="add-a-provider">{t("cloud.help.add")}</HelpLink>
+            <HelpLink page="cloud-providers" anchor="when-a-request-spills">{t("cloud.help.spill")}</HelpLink>
+            <HelpLink page="cloud-providers" anchor="what-each-providers-endpoint-cannot-do">{t("cloud.help.cannot")}</HelpLink>
+            <HelpLink page="cloud-providers" anchor="cost-and-prices">{t("cloud.help.cost")}</HelpLink>
           </>
         ) : (
           <>
-            <HelpLink page="cloud-providers" anchor="serve-a-cloud-model-under-a-name-of-its-own">How do I serve a cloud model under a name of its own?</HelpLink>
-            <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">How do I let a deployment spill to the cloud?</HelpLink>
-            <HelpLink page="cloud-providers" anchor="who-may-use-the-cloud">Which keys may use the cloud?</HelpLink>
+            <HelpLink page="cloud-providers" anchor="serve-a-cloud-model-under-a-name-of-its-own">{t("cloud.help.ownName")}</HelpLink>
+            <HelpLink page="cloud-providers" anchor="give-a-deployment-a-cloud-fallback">{t("cloud.help.fallback")}</HelpLink>
+            <HelpLink page="cloud-providers" anchor="who-may-use-the-cloud">{t("cloud.help.keys")}</HelpLink>
           </>
         )}
       </HelpLinks>
-      <div className="tabs" role="tablist" aria-label="Cloud">
+      <div className="tabs" role="tablist" aria-label={t("cloud.tabs")}>
         <button type="button" role="tab" aria-selected={tab === "providers"} className={tab === "providers" ? "on" : ""}
-          onClick={() => setSearch({})}>Providers</button>
+          onClick={() => setSearch({})}>{t("cloud.tab.providers")}</button>
         <button type="button" role="tab" aria-selected={tab === "models"} className={tab === "models" ? "on" : ""}
-          onClick={() => setSearch({ tab: "models" })}>Cloud models</button>
+          onClick={() => setSearch({ tab: "models" })}>{t("cloud.tab.models")}</button>
       </div>
       {tab === "models" ? <CloudModels /> : (
       <>
@@ -140,43 +149,40 @@ export function CloudPage() {
       {refreshing && <PriceRefresh onClose={() => setRefreshing(false)}
         onApplied={(text) => { setRefreshing(false); setMsg({ tone: "ok", text }); reload(); }} />}
       {adding && data && <AddProvider kinds={data.kinds} onCancel={() => setAdding(false)}
-        onAdded={(p) => { setAdding(false); setMsg({ tone: "ok", text: `${p.name} added. Test it, then add its models.` }); reload(); }} />}
+        onAdded={(p) => { setAdding(false); setMsg({ tone: "ok", text: t("cloud.added", { name: p.name }) }); reload(); }} />}
       {data && data.providers.length === 0 && !adding && (
         <section className="panel empty-keys">
           <IconCloud size={22} aria-hidden="true" />
-          <p className="muted">
-            No providers yet. {admin ? "Add one to give a local model somewhere to go when it is busy, or to serve a cloud model through Forgeyard's keys and limits."
-              : "Admins add providers."} API keys decide whether their requests may leave your network: every key is “never” until someone allows it.
-          </p>
+          <p className="muted">{admin ? t("cloud.empty.admin") : t("cloud.empty.user")}</p>
         </section>
       )}
       {data && data.providers.length > 0 && (
         <div className="table-wrap">
           <table className="table providers-table">
-            <thead><tr><th>Provider</th><th>Base URL</th><th>Key</th><th>Where</th><th>Models</th>{admin && <th><span className="sr-only">Actions</span></th>}</tr></thead>
+            <thead><tr><th>{t("cloud.col.provider")}</th><th>{t("cloud.col.baseUrl")}</th><th>{t("cloud.col.key")}</th><th>{t("cloud.col.where")}</th><th>{t("cloud.col.models")}</th>{admin && <th><span className="sr-only">{t("cloud.col.actions")}</span></th>}</tr></thead>
             <tbody>
               {data.providers.map((p) => (
                 <tr key={p.id} className={p.enabled ? "" : "row-off"}>
-                  <td data-label="Provider"><div className="strong"><Link to={`/cloud/providers/${p.id}`}>{p.name}</Link></div><div className="muted small">{p.kind_label}</div></td>
-                  <td data-label="Base URL" className="mono small cell-url">{p.base_url}</td>
-                  <td data-label="Key" className="mono small">{p.key_hint ?? <span className="muted">none</span>}</td>
-                  <td data-label="Where"><WhereChip p={p} />
-                    {p.budget?.level && p.budget.level !== "ok" && <> <span className={`chip chip-tone-${LEVEL_TONE[p.budget.level]}`}>budget {LEVEL_LABEL[p.budget.level]}</span></>}</td>
-                  <td data-label="Models" className="small">
+                  <td data-label={t("cloud.col.provider")}><div className="strong"><Link to={`/cloud/providers/${p.id}`}>{p.name}</Link></div><div className="muted small">{p.kind_label}</div></td>
+                  <td data-label={t("cloud.col.baseUrl")} className="mono small cell-url">{p.base_url}</td>
+                  <td data-label={t("cloud.col.key")} className="mono small">{p.key_hint ?? <span className="muted">{t("cloud.none")}</span>}</td>
+                  <td data-label={t("cloud.col.where")}><WhereChip p={p} />
+                    {p.budget?.level && p.budget.level !== "ok" && <> <span className={`chip chip-tone-${LEVEL_TONE[p.budget.level]}`}>{t("cloud.budgetChip", { level: LEVEL_LABEL[p.budget.level] })}</span></>}</td>
+                  <td data-label={t("cloud.col.models")} className="small">
                     <div>
                     {p.models.length ? p.models.map((m) => (
                       <div key={m.id}><span className="mono">{m.upstream_model}</span>
-                        {p.external && <span className="muted"> · {m.price_input === null && m.price_output === null ? "no price" : `${perMillion(m.price_input)} / ${perMillion(m.price_output)}`}</span>}
-                        {m.cooldown_s > 0 && <> <span className="chip chip-tone-bad" title="It failed recently and is tried last">cooling {Math.ceil(m.cooldown_s)} s</span></>}</div>
-                    )) : <span className="muted">none yet</span>}
+                        {p.external && <span className="muted"> · {m.price_input === null && m.price_output === null ? t("cloud.noPrice") : `${perMillion(m.price_input)} / ${perMillion(m.price_output)}`}</span>}
+                        {m.cooldown_s > 0 && <> <span className="chip chip-tone-bad" title={t("cloud.coolingTitle")}>{t("cloud.cooling", { s: String(Math.ceil(m.cooldown_s)) })}</span></>}</div>
+                    )) : <span className="muted">{t("cloud.noneYet")}</span>}
                     </div>
                   </td>
                   {admin && (
                     <td className="cell-actions">
                       <button type="button" className="btn btn-small" disabled={testing === p.id} onClick={() => void test(p)}>
-                        <IconPlugConnected size={14} aria-hidden="true" /> {testing === p.id ? "Testing…" : "Test"}
+                        <IconPlugConnected size={14} aria-hidden="true" /> {testing === p.id ? t("cloud.testing") : t("cloud.test")}
                       </button>
-                      <Link className="btn btn-quiet btn-small" to={`/cloud/providers/${p.id}`}>Open</Link>
+                      <Link className="btn btn-quiet btn-small" to={`/cloud/providers/${p.id}`}>{t("cloud.open")}</Link>
                     </td>
                   )}
                 </tr>
@@ -195,6 +201,7 @@ export function CloudPage() {
 export const WHERE_DELAY_MS = 400;
 
 function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCancel: () => void; onAdded: (p: Provider) => void }) {
+  const t = useT();
   const [kind, setKind] = useState(kinds[0]?.kind ?? "openai");
   const k = kinds.find((x) => x.kind === kind) ?? kinds[0];
   const [name, setName] = useState("");
@@ -239,11 +246,11 @@ function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCa
 
   return (
     <section className="panel panel-link" aria-labelledby="add-provider-title">
-      <h2 id="add-provider-title">Add a provider</h2>
+      <h2 id="add-provider-title">{t("cloud.add.title")}</h2>
       <form onSubmit={submit}>
         <fieldset className="allowlist">
-          <legend>Kind</legend>
-          <div className="kind-picks" role="radiogroup" aria-label="Kind of provider">
+          <legend>{t("cloud.add.kind")}</legend>
+          <div className="kind-picks" role="radiogroup" aria-label={t("cloud.add.kindAria")}>
             {kinds.map((x) => (
               <label key={x.kind} className={`card-pick kind-pick${x.kind === kind ? " on" : ""}`}>
                 <input type="radio" name="provider-kind" checked={x.kind === kind} onChange={() => { setKind(x.kind); setExternal(null); }} />
@@ -254,42 +261,42 @@ function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCa
           {k && <p className="muted small kind-note">{k.note}</p>}
         </fieldset>
         <div className="grid-2">
-          <Field label="Name" name="p-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder={k?.label}
-            hint="Shown in routes and in X-Forgeyard-Target." />
-          <Field label="Base URL" name="p-base" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={k?.base_url || k?.base_url_hint}
-            hint={k?.base_url ? "Empty: the address above." : "Required for this kind."} required={!k?.base_url} />
-          <Field label="API key" name="p-key" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)}
-            hint="Stored encrypted. It is never shown again, only its last four characters." required={k?.key_required} />
+          <Field label={t("cloud.add.name")} name="p-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder={k?.label}
+            hint={t("cloud.add.nameHint")} />
+          <Field label={t("cloud.add.baseUrl")} name="p-base" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={k?.base_url || k?.base_url_hint}
+            hint={k?.base_url ? t("cloud.add.baseEmpty") : t("cloud.add.baseRequired")} required={!k?.base_url} />
+          <Field label={t("cloud.add.key")} name="p-key" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)}
+            hint={t("cloud.add.keyHint")} required={k?.key_required} />
           <div className="field">
-            <label htmlFor="p-headers">Extra headers (optional, not secret)</label>
+            <label htmlFor="p-headers">{t("cloud.add.headers")}</label>
             <textarea id="p-headers" className="mono" rows={2} value={headers} onChange={(e) => setHeaders(e.target.value)}
-              placeholder={kind === "anthropic" ? "anthropic-workspace-id: wrkspc_…" : kind === "openrouter" ? "X-Title: Forgeyard" : "Name: value"} />
-            <p className="field-hint">One per line. The key never goes here.</p>
+              placeholder={kind === "anthropic" ? "anthropic-workspace-id: wrkspc_…" : kind === "openrouter" ? "X-Title: Forgeyard" : t("cloud.add.headersPlaceholder")} />
+            <p className="field-hint">{t("cloud.add.headersHint")}</p>
           </div>
         </div>
         <label className="check provider-check">
           <input type="checkbox" checked={ext} onChange={(e) => setExternal(e.target.checked)} />
-          <span><strong>Outside your network (cloud).</strong> Only keys allowed to use the cloud reach it. Untick for a server of your own, e.g. a vLLM on your VPN.</span>
+          <span>{t.rich("cloud.add.outside", { strong: (s) => <strong>{s}</strong> })}</span>
         </label>
         {where && (
-          <p className="where-hint small muted" role="status" aria-label="Why this is ticked">
+          <p className="where-hint small muted" role="status" aria-label={t("cloud.add.whyAria")}>
             <span className={`chip ${where.external ? "chip-tone-wait" : where.basis === "unknown" ? "" : "chip-tone-ok"}`}>
-              {where.basis === "unknown" ? "cannot tell" : where.external ? "outside" : "inside"}
+              {where.basis === "unknown" ? t("cloud.add.cannotTell") : where.external ? t("cloud.add.outsideChip") : t("cloud.add.insideChip")}
             </span>
             {where.reason}
-            {external !== null && external !== where.external && <> You changed this: it is {external ? "ticked" : "unticked"} by hand.</>}
+            {external !== null && external !== where.external && (external ? t("cloud.add.changedTicked") : t("cloud.add.changedUnticked"))}
           </p>
         )}
         {!ext && (
           <label className="check provider-check">
             <input type="checkbox" checked={allowHttp} onChange={(e) => setAllowHttp(e.target.checked)} />
-            <span>Allow plain HTTP (only to a private address).</span>
+            <span>{t("cloud.add.allowHttp")}</span>
           </label>
         )}
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
         <div className="row-gap" style={{ marginTop: 16 }}>
-          <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Adding…" : "Add provider"}</button>
-          <button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? t("cloud.add.adding") : t("cloud.add.submit")}</button>
+          <button type="button" className="btn btn-quiet" onClick={onCancel}>{t("common.cancel")}</button>
         </div>
       </form>
     </section>
@@ -297,6 +304,7 @@ function AddProvider({ kinds, onCancel, onAdded }: { kinds: ProviderKind[]; onCa
 }
 
 export function ProviderDetailPage() {
+  const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
   const { data, error, reload } = useApi<ProviderResponse>(`/providers/${id}`);
@@ -316,32 +324,32 @@ export function ProviderDetailPage() {
   });
   const toggle = () => run(async () => {
     await api(`/providers/${id}`, { method: "PATCH", body: { enabled: !p?.enabled } });
-    setMsg({ tone: "ok", text: p?.enabled ? "Disabled: routes skip its models." : "Enabled." });
+    setMsg({ tone: "ok", text: p?.enabled ? t("cloud.detail.disabled") : t("cloud.detail.enabled") });
     reload();
   });
   const clone = () => run(async () => {
-    const name = window.prompt("Name of the copy (its key is not copied; enter one for it):", `${p?.name} copy`);
+    const name = window.prompt(t("cloud.detail.clonePrompt"), t("cloud.detail.cloneName", { name: String(p?.name) }));
     if (!name) return;
     const r = await api<{ provider: Provider }>(`/providers/${id}/clone`, { method: "POST", body: { name } });
     navigate(`/cloud/providers/${r.provider.id}`);
   });
   const remove = () => run(async () => {
-    if (!window.confirm(`Delete ${p?.name} and its models? Its key is deleted with it.`)) return;
+    if (!window.confirm(t("cloud.detail.deleteConfirm", { name: String(p?.name) }))) return;
     await api(`/providers/${id}`, { method: "DELETE" });
     navigate("/cloud", { replace: true });
   });
 
   return (
     <>
-      <p className="crumb"><Link to="/cloud"><IconArrowLeft size={14} aria-hidden="true" /> Cloud providers</Link></p>
-      <PageHeader index={`04 · ${p?.kind_label ?? "Provider"}`} title={p?.name ?? "Provider"}
-        lead={p ? `${p.base_url} · added by ${p.created_by ?? "?"} ${when(p.created_at)}` : undefined}
+      <p className="crumb"><Link to="/cloud"><IconArrowLeft size={14} aria-hidden="true" /> {t("cloud.detail.crumb")}</Link></p>
+      <PageHeader index={`04 · ${p?.kind_label ?? t("cloud.detail.provider")}`} title={p?.name ?? t("cloud.detail.provider")}
+        lead={p ? t("cloud.detail.lead", { url: p.base_url, who: p.created_by ?? "?", when: when(p.created_at) }) : undefined}
         actions={p && admin && (
           <>
-            <button type="button" className="btn" disabled={busy} onClick={() => void test()}><IconPlugConnected size={16} aria-hidden="true" /> Test connection</button>
-            <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void clone()}><IconCopy size={16} aria-hidden="true" /> Clone</button>
-            <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void toggle()}>{p.enabled ? "Disable" : "Enable"}</button>
-            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> Delete</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => void test()}><IconPlugConnected size={16} aria-hidden="true" /> {t("cloud.detail.test")}</button>
+            <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void clone()}><IconCopy size={16} aria-hidden="true" /> {t("cloud.detail.clone")}</button>
+            <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => void toggle()}>{p.enabled ? t("cloud.detail.disable") : t("cloud.detail.enable")}</button>
+            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => void remove()}><IconTrash size={16} aria-hidden="true" /> {t("cloud.detail.delete")}</button>
           </>
         )} />
       <AdvisorBanner pages={[`provider:${id}`]} />
@@ -349,7 +357,7 @@ export function ProviderDetailPage() {
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       {p && (
         <>
-          <div className="wl-status"><WhereChip p={p} /><span className="mono small">{p.key_hint ? `key ${p.key_hint}` : "no key"}</span></div>
+          <div className="wl-status"><WhereChip p={p} /><span className="mono small">{p.key_hint ? t("cloud.detail.keyHint", { hint: p.key_hint }) : t("cloud.detail.noKey")}</span></div>
           {p.budget && <ProviderBudget p={p} budget={p.budget} admin={admin} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
           <Models p={p} admin={admin} kinds={data.kinds} onChanged={reload} />
           {admin && <Settings p={p} defaultTimeout={data?.egress?.read_timeout_s} onSaved={(text) => { setMsg({ tone: "ok", text }); reload(); }} />}
@@ -360,38 +368,36 @@ export function ProviderDetailPage() {
 }
 
 function ProviderBudget({ p, budget, admin, onSaved }: { p: Provider; budget: Budget; admin: boolean; onSaved: (text: string) => void }) {
+  const t = useT();
   const [value, setValue] = useState(budgetInput(budget.budget_micros));
   const [error, setError] = useState<string | null>(null);
   const save = async (e: FormEvent) => {
     e.preventDefault();
     const micros = parseBudget(value);
     if (micros === "bad") {
-      setError("US dollars, like 100 or 12.50; empty: no budget.");
+      setError(t("cloud.budget.bad"));
       return;
     }
     setError(null);
     try {
       await api(`/budgets/providers/${p.id}`, { method: "PUT", body: { budget_micros: micros } });
-      onSaved(micros === null ? "Budget removed." : "Budget saved.");
+      onSaved(micros === null ? t("cloud.budget.removed") : t("cloud.budget.saved"));
     } catch (err) {
       setError(errorText(err));
     }
   };
   return (
     <section className="panel budget-panel" aria-labelledby="budget-title">
-      <h2 id="budget-title">Monthly budget</h2>
-      <p className="muted small">
-        What requests to {p.name} may cost per calendar month (UTC), reserved before each one is sent. When it is used up, routes skip {p.name}: other
-        providers or local replicas serve the requests they can.
-      </p>
-      {budget.level === "exhausted" && <Notice tone="error">This month's budget is used up: {p.name} is skipped until the month ends.</Notice>}
-      {budget.level === "warning" && <Notice tone="info">Over 80% of this month's budget is spent.</Notice>}
-      <BudgetMeter b={budget} label={`Budget of ${p.name}`} />
+      <h2 id="budget-title">{t("cloud.budget.title")}</h2>
+      <p className="muted small">{t("cloud.budget.lead", { name: p.name })}</p>
+      {budget.level === "exhausted" && <Notice tone="error">{t("cloud.budget.exhausted", { name: p.name })}</Notice>}
+      {budget.level === "warning" && <Notice tone="info">{t("cloud.budget.warning")}</Notice>}
+      <BudgetMeter b={budget} label={t("cloud.budget.of", { name: p.name })} />
       {admin && (
         <form onSubmit={(e) => void save(e)} className="row-gap" style={{ marginTop: 12, alignItems: "flex-end" }}>
-          <Field label="Monthly budget (USD)" name="pb-budget" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)}
-            placeholder="no budget" error={error} hint="$0 blocks every cloud request to it; leave it empty for no budget." />
-          <button type="submit" className="btn">Save budget</button>
+          <Field label={t("cloud.budget.field")} name="pb-budget" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)}
+            placeholder={t("cloud.budget.noBudget")} error={error} hint={t("cloud.budget.hint")} />
+          <button type="submit" className="btn">{t("cloud.budget.save")}</button>
         </form>
       )}
     </section>
@@ -399,6 +405,7 @@ function ProviderBudget({ p, budget, admin, onSaved }: { p: Provider; budget: Bu
 }
 
 function Settings({ p, defaultTimeout, onSaved }: { p: Provider; defaultTimeout?: number; onSaved: (text: string) => void }) {
+  const t = useT();
   const [baseUrl, setBaseUrl] = useState(p.base_url);
   const [key, setKey] = useState("");
   const [external, setExternal] = useState(p.external);
@@ -416,41 +423,41 @@ function Settings({ p, defaultTimeout, onSaved }: { p: Provider; defaultTimeout?
       else if (key.trim()) body.api_key = key.trim();
       await api(`/cloud/providers/${p.id}`, { method: "PATCH", body });
       setKey("");
-      onSaved(clearKey ? "Key removed." : key.trim() ? "Saved, with the new key." : "Saved.");
+      onSaved(clearKey ? t("cloud.settings.keyRemoved") : key.trim() ? t("cloud.settings.savedKey") : t("cloud.settings.saved"));
     } catch (err) {
       setError(errorText(err));
     }
   };
   return (
     <section className="panel" aria-labelledby="settings-title">
-      <h2 id="settings-title">Settings</h2>
+      <h2 id="settings-title">{t("cloud.settings.title")}</h2>
       <form onSubmit={(e) => void save(e)}>
         <div className="grid-2">
-          <Field label="Base URL" name="ps-base" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required />
-          <Field label={p.has_key ? `Replace the key (now ${p.key_hint})` : "API key"} name="ps-key" type="password" autoComplete="off" value={key}
-            onChange={(e) => setKey(e.target.value)} placeholder="leave empty to keep it" hint="Write-only: the key is never shown." />
+          <Field label={t("cloud.add.baseUrl")} name="ps-base" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} required />
+          <Field label={p.has_key ? t("cloud.settings.replaceKey", { hint: String(p.key_hint) }) : t("cloud.add.key")} name="ps-key" type="password" autoComplete="off" value={key}
+            onChange={(e) => setKey(e.target.value)} placeholder={t("cloud.settings.keepKey")} hint={t("cloud.settings.writeOnly")} />
           <div className="field">
-            <label htmlFor="ps-headers">Extra headers (not secret)</label>
+            <label htmlFor="ps-headers">{t("cloud.settings.headers")}</label>
             <textarea id="ps-headers" className="mono" rows={2} value={headers} onChange={(e) => setHeaders(e.target.value)} />
           </div>
-          <Field label="Answer timeout (seconds)" name="ps-timeout" type="number" min={1} max={3600} value={timeout}
-            onChange={(e) => setTimeoutS(e.target.value)} placeholder={defaultTimeout ? `default ${defaultTimeout} s` : "server default"}
-            hint="Empty: PROVIDER_READ_TIMEOUT, the server's default." />
+          <Field label={t("cloud.settings.timeout")} name="ps-timeout" type="number" min={1} max={3600} value={timeout}
+            onChange={(e) => setTimeoutS(e.target.value)} placeholder={defaultTimeout ? t("cloud.settings.timeoutDefault", { s: String(defaultTimeout) }) : t("cloud.settings.serverDefault")}
+            hint={t("cloud.settings.timeoutHint")} />
         </div>
         <label className="check provider-check">
           <input type="checkbox" checked={external} onChange={(e) => setExternal(e.target.checked)} />
-          <span><strong>Outside your network (cloud).</strong> Only keys allowed to use the cloud reach it.</span>
+          <span>{t.rich("cloud.settings.outside", { strong: (s) => <strong>{s}</strong> })}</span>
         </label>
         {!external && (
           <label className="check provider-check">
             <input type="checkbox" checked={allowHttp} onChange={(e) => setAllowHttp(e.target.checked)} />
-            <span>Allow plain HTTP (only to a private address).</span>
+            <span>{t("cloud.add.allowHttp")}</span>
           </label>
         )}
         {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
         <div className="row-gap" style={{ marginTop: 14 }}>
-          <button type="submit" className="btn">Save settings</button>
-          {p.has_key && <button type="button" className="btn btn-quiet" onClick={(e) => void save(e as unknown as FormEvent, true)}>Remove the key</button>}
+          <button type="submit" className="btn">{t("cloud.settings.save")}</button>
+          {p.has_key && <button type="button" className="btn btn-quiet" onClick={(e) => void save(e as unknown as FormEvent, true)}>{t("cloud.settings.removeKey")}</button>}
         </div>
       </form>
     </section>
@@ -458,6 +465,7 @@ function Settings({ p, defaultTimeout, onSaved }: { p: Provider; defaultTimeout?
 }
 
 function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; kinds: ProviderKind[]; onChanged: () => void }) {
+  const t = useT();
   const k = kinds.find((x) => x.kind === p.kind);
   const [model, setModel] = useState("");
   const [apiName, setApiName] = useState("openai-chat");
@@ -487,7 +495,7 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
     } catch (err) { setError(errorText(err)); } finally { setLoading(false); }
   };
   const remove = async (m: ProviderModel) => {
-    if (!window.confirm(`Remove ${m.upstream_model}?`)) return;
+    if (!window.confirm(t("cloud.models.removeConfirm", { name: m.upstream_model }))) return;
     try { await api(`/provider-models/${m.id}`, { method: "DELETE" }); onChanged(); } catch (err) { setError(errorText(err)); }
   };
   const shown = (listing ?? []).filter((m) => !filter || m.id.toLowerCase().includes(filter.toLowerCase())).slice(0, 200);
@@ -495,40 +503,49 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
   return (
     <section className="panel" aria-labelledby="models-title">
       <div className="panel-head">
-        <h2 id="models-title">Models</h2>
+        <h2 id="models-title">{t("cloud.models.title")}</h2>
         {admin && p.external && p.models.length > 0 ? (
           <button type="button" className="btn btn-small" aria-expanded={refreshing} onClick={() => setRefreshing((v) => !v)}>
-            <IconCurrencyDollar size={14} aria-hidden="true" /> Refresh prices from OpenRouter
+            <IconCurrencyDollar size={14} aria-hidden="true" /> {t("cloud.refreshPrices")}
           </button>
-        ) : <span className="muted small">what routes may send to {p.name}</span>}
+        ) : <span className="muted small">{t("cloud.models.what", { name: p.name })}</span>}
       </div>
-      {!p.external && p.models.length > 0 && <p className="muted small">Inside your network: requests here cost nothing, so its models have no prices.</p>}
+      {!p.external && p.models.length > 0 && <p className="muted small">{t("cloud.models.free")}</p>}
       {note && <Notice tone="ok">{note}</Notice>}
       {refreshing && <PriceRefresh providerId={p.id} onClose={() => setRefreshing(false)}
         onApplied={(text) => { setRefreshing(false); setNote(text); onChanged(); }} />}
-      {p.models.length === 0 ? <p className="muted small">No models yet. {admin ? "Add them by name, or import the provider's list." : ""}</p> : (
+      {p.models.length === 0 ? <p className="muted small">{admin ? t("cloud.models.noneAdmin") : t("cloud.models.none")}</p> : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Model</th><th>Serves</th>{p.external && <th>Price per 1M tokens</th>}<th>Context</th><th>Used by</th><th>Since the server started</th>{admin && <th><span className="sr-only">Actions</span></th>}</tr></thead>
+            <thead>
+              <tr>
+                <th>{t("cloud.models.col.model")}</th><th>{t("cloud.models.col.serves")}</th>{p.external && <th>{t("cloud.models.col.price")}</th>}
+                <th>{t("cloud.models.col.context")}</th><th>{t("cloud.models.col.usedBy")}</th><th>{t("cloud.models.col.since")}</th>
+                {admin && <th><span className="sr-only">{t("cloud.col.actions")}</span></th>}
+              </tr>
+            </thead>
             <tbody>
               {p.models.map((m) => (
                 <Fragment key={m.id}>
                 <tr>
-                  <td data-label="Model"><div><span className="mono">{m.upstream_model}</span>{m.display_name && <div className="muted small">{m.display_name}</div>}</div></td>
-                  <td data-label="Serves" className="small">{API_NAME[m.api] ?? m.api}</td>
-                  {p.external && <td data-label="Price per 1M" className="small"><Prices m={m} /></td>}
-                  <td data-label="Context" className="small">{m.context_length ? num(m.context_length) : "—"}</td>
-                  <td data-label="Used by" className="small">{m.routes.length ? m.routes.map((r) => <code key={r} className="egress-host">{r}</code>) : <span className="muted">no route</span>}</td>
-                  <td data-label="Since start" className="small">{num(m.sent)} sent{m.in_flight ? ` · ${m.in_flight} in flight` : ""}{m.cooldown_s > 0 ? ` · cooling down ${Math.ceil(m.cooldown_s)} s` : ""}</td>
+                  <td data-label={t("cloud.models.col.model")}><div><span className="mono">{m.upstream_model}</span>{m.display_name && <div className="muted small">{m.display_name}</div>}</div></td>
+                  <td data-label={t("cloud.models.col.serves")} className="small">{API_NAME[m.api] ?? m.api}</td>
+                  {p.external && <td data-label={t("cloud.models.col.priceShort")} className="small"><Prices m={m} /></td>}
+                  <td data-label={t("cloud.models.col.context")} className="small">{m.context_length ? num(m.context_length) : "—"}</td>
+                  <td data-label={t("cloud.models.col.usedBy")} className="small">{m.routes.length ? m.routes.map((r) => <code key={r} className="egress-host">{r}</code>) : <span className="muted">{t("cloud.models.noRoute")}</span>}</td>
+                  <td data-label={t("cloud.models.col.sinceShort")} className="small">
+                    {t("cloud.models.sent", { n: num(m.sent) })}{m.in_flight ? t("cloud.models.inFlight", { n: String(m.in_flight) }) : ""}
+                    {m.cooldown_s > 0 ? t("cloud.models.coolingDown", { s: String(Math.ceil(m.cooldown_s)) }) : ""}
+                  </td>
                   {admin && <td className="cell-actions">
                     {p.external && <button type="button" className="btn btn-quiet btn-small" aria-expanded={editing === m.id}
-                      onClick={() => setEditing(editing === m.id ? null : m.id)}>Prices</button>}
+                      onClick={() => setEditing(editing === m.id ? null : m.id)}>{t("cloud.models.prices")}</button>}
                     <button type="button" className="btn btn-quiet btn-small" disabled={m.routes.length > 0}
-                    title={m.routes.length ? "Remove it from its routes first" : undefined} onClick={() => void remove(m)}>Remove</button></td>}
+                    title={m.routes.length ? t("cloud.models.removeFirst") : undefined} onClick={() => void remove(m)}>{t("cloud.models.remove")}</button></td>}
                 </tr>
                 {editing === m.id && (
                   <tr className="price-edit-row"><td colSpan={7}>
-                    <PriceEditor m={m} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); setNote(`Prices of ${m.upstream_model} saved.`); onChanged(); }} />
+                    <PriceEditor m={m} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); setNote(t("cloud.models.pricesSaved", { name: m.upstream_model })); onChanged(); }} />
                   </td></tr>
                 )}
                 </Fragment>
@@ -540,28 +557,28 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
       {admin && (
         <>
           <form className="model-add" onSubmit={(e) => { e.preventDefault(); void add([{ upstream_model: model.trim(), api: apiName, context_length: context ? Number(context) : null }]); }}>
-            <Field label={p.kind === "azure" ? "Deployment name" : "Model name"} name="pm-name" value={model} onChange={(e) => setModel(e.target.value)}
+            <Field label={p.kind === "azure" ? t("cloud.models.deploymentName") : t("cloud.models.modelName")} name="pm-name" value={model} onChange={(e) => setModel(e.target.value)}
               placeholder={p.kind === "anthropic" ? "claude-sonnet-4-5" : p.kind === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"} required />
             <div className="field">
-              <label htmlFor="pm-api">Serves</label>
+              <label htmlFor="pm-api">{t("cloud.models.serves")}</label>
               <select id="pm-api" value={apiName} onChange={(e) => setApiName(e.target.value)}>
-                <option value="openai-chat">chat and completions</option>
-                {k?.embeddings !== false && <option value="openai-embeddings">embeddings</option>}
+                <option value="openai-chat">{t("cloud.models.servesChat")}</option>
+                {k?.embeddings !== false && <option value="openai-embeddings">{t("cloud.models.servesEmbeddings")}</option>}
               </select>
             </div>
-            <Field label="Context (tokens, optional)" name="pm-ctx" type="number" min={1} value={context} onChange={(e) => setContext(e.target.value)} />
+            <Field label={t("cloud.models.context")} name="pm-ctx" type="number" min={1} value={context} onChange={(e) => setContext(e.target.value)} />
             <div className="model-add-actions">
-              <button type="submit" className="btn" disabled={!model.trim()}><IconPlus size={15} aria-hidden="true" /> Add model</button>
+              <button type="submit" className="btn" disabled={!model.trim()}><IconPlus size={15} aria-hidden="true" /> {t("cloud.models.add")}</button>
               {k?.models_endpoint && <button type="button" className="btn btn-quiet" disabled={loading} onClick={() => void load()}>
-                <IconDownload size={15} aria-hidden="true" /> {loading ? "Asking…" : "Import from /models"}</button>}
+                <IconDownload size={15} aria-hidden="true" /> {loading ? t("cloud.models.asking") : t("cloud.models.import")}</button>}
             </div>
           </form>
-          {p.kind === "azure" && <p className="muted small">Azure lists base models at /models, not your deployments: add your deployment names by hand.</p>}
+          {p.kind === "azure" && <p className="muted small">{t("cloud.models.azure")}</p>}
           {listing && (
             <div className="import-list">
               <div className="row-gap">
-                <input aria-label="Filter models" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-                <span className="muted small">{listing.length} listed</span>
+                <input aria-label={t("cloud.models.filterAria")} placeholder={t("cloud.models.filter")} value={filter} onChange={(e) => setFilter(e.target.value)} />
+                <span className="muted small">{t("cloud.models.listed", { n: String(listing.length) })}</span>
               </div>
               <ul>
                 {shown.map((m) => (
@@ -570,7 +587,7 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
                       <input type="checkbox" disabled={m.added} checked={m.added || m.id in picked}
                         onChange={() => setPicked((x) => { const y = { ...x }; if (m.id in y) delete y[m.id]; else y[m.id] = m.api; return y; })} />
                       <span className="mono">{m.id}</span>
-                      <span className="muted small">{API_NAME[m.api]}{m.context_length ? ` · ${num(m.context_length)} ctx` : ""}{m.added ? " · added" : ""}</span>
+                      <span className="muted small">{API_NAME[m.api]}{m.context_length ? t("cloud.models.ctx", { n: num(m.context_length) }) : ""}{m.added ? t("cloud.models.added") : ""}</span>
                     </label>
                   </li>
                 ))}
@@ -579,9 +596,9 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
                 <button type="button" className="btn btn-primary" disabled={!Object.keys(picked).length}
                   onClick={() => void add(Object.entries(picked).map(([id, a]) => ({ upstream_model: id, api: a,
                     context_length: listing.find((m) => m.id === id)?.context_length ?? null })))}>
-                  Add {Object.keys(picked).length || ""} selected
+                  {Object.keys(picked).length ? t("cloud.models.addSelected", { n: String(Object.keys(picked).length) }) : t("cloud.models.addSelectedNone")}
                 </button>
-                <button type="button" className="btn btn-quiet" onClick={() => { setListing(null); setPicked({}); }}>Close</button>
+                <button type="button" className="btn btn-quiet" onClick={() => { setListing(null); setPicked({}); }}>{t("common.close")}</button>
               </div>
             </div>
           )}
@@ -593,12 +610,13 @@ function Models({ p, admin, kinds, onChanged }: { p: Provider; admin: boolean; k
 }
 
 function Prices({ m }: { m: ProviderModel }) {
-  if (PRICE_FIELDS.every((f) => m[f] === null)) return <span className="chip chip-tone-wait" title="Requests to it are counted as unpriced until it has prices">no price</span>;
+  const t = useT();
+  if (PRICE_FIELDS.every((f) => m[f] === null)) return <span className="chip chip-tone-wait" title={t("cloud.price.noPriceTitle")}>{t("cloud.noPrice")}</span>;
   return (
     <div className="price-cell">
-      <div><span className="muted">in</span> <span className="mono">{perMillion(m.price_input)}</span> · <span className="muted">out</span> <span className="mono">{perMillion(m.price_output)}</span></div>
+      <div><span className="muted">{t("cloud.price.in")}</span> <span className="mono">{perMillion(m.price_input)}</span> · <span className="muted">{t("cloud.price.out")}</span> <span className="mono">{perMillion(m.price_output)}</span></div>
       {(m.price_cache_read !== null || m.price_cache_write !== null) && (
-        <div><span className="muted">cached</span> <span className="mono">{perMillion(m.price_cache_read)}</span>{m.price_cache_write !== null && <> · <span className="muted">write</span> <span className="mono">{perMillion(m.price_cache_write)}</span></>}</div>
+        <div><span className="muted">{t("cloud.price.cached")}</span> <span className="mono">{perMillion(m.price_cache_read)}</span>{m.price_cache_write !== null && <> · <span className="muted">{t("cloud.price.write")}</span> <span className="mono">{perMillion(m.price_cache_write)}</span></>}</div>
       )}
       {m.price_source && (
         <div className="muted" title={m.price_checked_at ? exact(m.price_checked_at) : undefined}>
@@ -610,6 +628,7 @@ function Prices({ m }: { m: ProviderModel }) {
 }
 
 function PriceEditor({ m, onCancel, onSaved }: { m: ProviderModel; onCancel: () => void; onSaved: () => void }) {
+  const t = useT();
   const [text, setText] = useState<Record<string, string>>(() => Object.fromEntries(PRICE_FIELDS.map((f) => [f, priceText(m[f])])));
   const [error, setError] = useState<string | null>(null);
   const save = async (e: FormEvent) => {
@@ -618,7 +637,7 @@ function PriceEditor({ m, onCancel, onSaved }: { m: ProviderModel; onCancel: () 
     const body: Record<string, number | null> = {};
     for (const f of PRICE_FIELDS) {
       const v = parsePrice(text[f]);
-      if (v === "bad") { setError(`${PRICE_LABEL[f]}: a number of US dollars per million tokens, like 2.50.`); return; }
+      if (v === "bad") { setError(t("cloud.price.bad", { label: PRICE_LABEL[f] })); return; }
       body[f] = v;
     }
     try {
@@ -627,16 +646,16 @@ function PriceEditor({ m, onCancel, onSaved }: { m: ProviderModel; onCancel: () 
     } catch (err) { setError(errorText(err)); }
   };
   return (
-    <form className="price-edit" onSubmit={(e) => void save(e)} aria-label={`Prices of ${m.upstream_model}`}>
-      <p className="muted small">US dollars per million tokens, as on the provider's pricing page. Leave a field empty when it does not apply; without an input or output price, requests are counted as unpriced. Cached input and cache writes fall back to the input price.</p>
+    <form className="price-edit" onSubmit={(e) => void save(e)} aria-label={t("cloud.price.editAria", { name: m.upstream_model })}>
+      <p className="muted small">{t("cloud.price.editLead")}</p>
       <div className="grid-4">
         {PRICE_FIELDS.map((f) => (
-          <Field key={f} label={`${PRICE_LABEL[f]} ($)`} name={`${f}-${m.id}`} inputMode="decimal" value={text[f]}
-            onChange={(e) => setText((x) => ({ ...x, [f]: e.target.value }))} placeholder="unknown" />
+          <Field key={f} label={t("cloud.price.field", { label: PRICE_LABEL[f] })} name={`${f}-${m.id}`} inputMode="decimal" value={text[f]}
+            onChange={(e) => setText((x) => ({ ...x, [f]: e.target.value }))} placeholder={t("cloud.price.unknown")} />
         ))}
       </div>
       {error && <Notice tone="error">{error}</Notice>}
-      <div className="row-gap"><button type="submit" className="btn">Save prices</button><button type="button" className="btn btn-quiet" onClick={onCancel}>Cancel</button></div>
+      <div className="row-gap"><button type="submit" className="btn">{t("cloud.price.save")}</button><button type="button" className="btn btn-quiet" onClick={onCancel}>{t("common.cancel")}</button></div>
     </form>
   );
 }

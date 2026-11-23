@@ -1,5 +1,6 @@
 import { Navigate, useLocation, useParams } from "react-router";
 
+import { useT } from "../i18n/react";
 import type { DeploymentsResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
 
@@ -8,12 +9,13 @@ import { useApi } from "../lib/useApi";
 // is where an app holding a card is still named. The deployments say which workload is whose, so the
 // deprecated apps API is not asked.
 export function OldApps() {
+  const t = useT();
   const rest = useParams()["*"] ?? "";
   const { hash } = useLocation();
   const id = /^(\d+)\/?$/.exec(rest)?.[1];
   const deps = useApi<DeploymentsResponse>(id ? "/deployments" : null);
   if (!id) return <Navigate to="/machines" replace />;
-  if (!deps.data && !deps.error) return <p className="muted">Loading…</p>;
+  if (!deps.data && !deps.error) return <p className="muted">{t("common.loading")}</p>;
   const dep = deps.data?.deployments.find((d) => String(d.workload.id) === id);
   return <Navigate to={dep ? `/serving/${dep.id}${hash}` : "/machines"} replace />;
 }

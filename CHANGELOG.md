@@ -20,6 +20,12 @@ version until 1.0.
   Under the hood: a hand-written `t()` with typed keys and one dictionary module per area of the console
   (`web/src/i18n/`), a test that fails when a key, a placeholder or a translation is missing, and a glossary of
   the guide's terms (`web/src/i18n/GLOSSARY.md`). No new dependency.
+- The console in Traditional Chinese (#189, keys, cloud and admin): API keys (limits, cloud levels and the cloud
+  policy, budgets, the key shown once), Cloud (providers, prices and Refresh prices from OpenRouter, budgets,
+  what leaves this server, cloud models and a route's tiers, the cloud fallback panel), Users, the audit log, My
+  account and Trust this server. Money stays in US dollars, written by `Intl` (`US$1.20` in Chinese, `$1.20` as
+  before in English). The audit log names each action in Chinese with its code beside it (admins search by the
+  code); English shows the code as before, and the entries' details stay as recorded.
 - **The console in Traditional Chinese (#189, machines and deployments).** A machine's page (memory map, what
   runs there, the model cache and downloads, engine images with upload and copy, GPU access, the agent and its
   update), a deployment's page (state, sleep when idle, the gateway, replicas, memory, Try it, output and events) and
