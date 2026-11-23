@@ -28,6 +28,13 @@ version until 1.0.
   message alone, as before. Fixed on the way: an offline machine's page showed its status twice in Chinese (the
   heartbeat line only dropped an English prefix). The zh-TW guide names these pages' buttons and fields by their
   Chinese labels.
+- The console in Traditional Chinese (#189, Playground and Usage): every Playground panel (chat, embeddings,
+  rerank, text classification, speech to text, speak, image, video and vision), its wake notice and its errors
+  (a known error code in Chinese with the server's specifics, anything else as sent), and the Usage page (tabs,
+  totals, the breakdown tables, the charts and the budgets). Chart dates, weekdays and axis numbers come from the
+  browser's `Intl` ("11月12日", "1.5萬"); the names the server gives a few groups (*Console playground*, *Other (3)*)
+  are translated by their id. The model's answers, your prompts and the sample texts in the boxes are not
+  translated. The zh-TW guide names these pages' labels in Chinese.
 
 ### Changed
 

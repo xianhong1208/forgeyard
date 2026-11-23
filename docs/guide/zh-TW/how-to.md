@@ -344,7 +344,7 @@ agent；舊版 agent 會試著去拉。
 
 1. **Models → Add a model → Recommended**：*Object detection, segmentation and depth* 列出 RT-DETRv2 R18（偵測 COCO 的 80 個類別）、SAM 2.1 Hiera tiny（分割）和 Depth Anything V2 Small（深度），都是 Apache-2.0。也可以用 **Object detection**、**Segmentation** 或 **Depth estimation** 任務搜尋 Hugging Face：任何 transformers 偵測模型（RT-DETR、D-FINE、不用 timm backbone 的 DETR…）、SAM 2 或 2.1，或深度模型（Depth Anything、DPT…），授權要寬鬆（Apache-2.0、MIT、BSD）。其他授權或沒有授權的不能加入。1.4.4 起清單裡還有三個**找你說的東西**的偵測模型（Grounding DINO tiny、MM-Grounding-DINO tiny、OWLv2 base）：沒有固定類別，每個請求說要找什麼（見下文）。它們需要 1.4.4 起的視覺映像檔。
 2. **Deploy**：建議是 CPU（約 1.3 GiB 記憶體，四個執行緒上每張圖片零點幾秒到一秒半）或 NVIDIA GPU（檔案大小再加約 1.5 GiB，共用一張卡）。
-3. 部署會出現在 **服務中 → 視覺**，標出它的路徑。部署頁的 **試試看** 會送一張測試圖片；**Playground**（選單 *Vision* 底下的模型）可以用你自己的照片。
+3. 部署會出現在 **服務中 → 視覺**，標出它的路徑。部署頁的 **試試看** 會送一張測試圖片；**試用區**（選單 *視覺* 底下的模型）可以用你自己的照片。
 
 用 API 金鑰呼叫 `/v1/vision/detect`（或 `/segment`、`/depth`），`model` 填模型名稱，照片放在檔案欄位 `image`。找你說的東西的偵測模型另外接受 `labels`，也就是要找的名稱（以逗號分隔的欄位，或 JSON 清單），沒給時會拒絕（400 `labels_required`）：
 
@@ -418,17 +418,17 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/vision/classify \
 
 回應：`labels`，最好的在前，每個是 `{"label", "score"}`，以及 `multi_label`。零樣本分類器沒給 `labels` 時回 400 `labels_required`；固定類別的分類器收到 `labels` 回 400 `labels_not_supported`。
 
-## 在 Playground 試用視覺
+## 在試用區試用視覺
 
-Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **Usage** 裡以 `console` 記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在 Playground 唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
+試用區的視覺面板以你自己的身分、不需要 API 金鑰，把一張圖片送給視覺模型（[像其他模型一樣部署的](#deploy-an-object-detection-model)）。任何已登入的人都可以使用；請求在 **用量** 裡以 `console` 記在那個模型底下。1.4 起沒有 Vision 分頁：視覺模型在試用區唯一的模型選單裡，1.3 的網址（`/playground?tab=vision`）會開出第一個視覺模型。從 1.3 範本做的應用程式不會列在這裡（1.4 起應用程式離開主控台，[1.5 移除](reference.md#apps-deprecated)）。
 
-1. 打開 **Model** 選單，在 **Vision** 底下選一個模型：每一個都標出任務。只會列出已就緒的模型；完全沒有時，Playground 會這樣說明，管理員和操作員會看到前往目錄的連結。
-2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **Choose an image**（最多 20 MiB）。
+1. 打開 **模型** 選單，在 **視覺** 底下選一個模型：每一個都標出任務。只會列出已就緒的模型；完全沒有時，試用區會這樣說明，管理員和操作員會看到前往目錄的連結。
+2. 把 PNG、JPEG 或 WebP 圖片拖到框裡，或按 **選擇圖片**（最多 20 MiB）。
 3. 接著依任務而定：
-   - **Object detection：** 按 **Detect objects**，模型找到的每樣東西都會畫出框、標籤和分數；**Score at least** 會隱藏分數較低的，不必重新送出。找你說的東西的偵測模型（1.4.4）會先問 **Find these**：輸入名稱、以逗號分隔（*cat, remote control*），再按 **Find**；滑桿從 0.3 開始，因為這類模型的分數較低。
-   - **Segmentation：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
-   - **Depth estimation：** 按 **Estimate depth**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **Colour** 或 **Grey**。深度是相對的，不是公尺。
-   - **Image classification（1.4.4）：** 按 **Classify**，列出最符合的類別，每個分數有一條長條。零樣本分類器會先要你輸入 **Labels**，以逗號分隔（*a cat, a dog, a screenshot*）。
+   - **物件偵測：** 按 **偵測物件**，模型找到的每樣東西都會畫出框、標籤和分數；**分數至少** 會隱藏分數較低的，不必重新送出。找你說的東西的偵測模型（1.4.4）會先問 **要找的東西**：輸入名稱、以逗號分隔（*cat, remote control*），再按 **尋找**；滑桿從 0.3 開始，因為這類模型的分數較低。
+   - **影像分割：** 在東西上點一下，或拖出一個框把它圈起來。最好的遮罩會疊在圖片上；上方的按鈕可以切換模型給的其他遮罩。再點一下或再拖一次就換一個。
+   - **深度估計：** 按 **估計深度**，深度圖會顯示在照片旁邊，越近越亮或越暖，可選 **彩色** 或 **灰階**。深度是相對的，不是公尺。
+   - **圖片分類（1.4.4）：** 按 **分類**，列出最符合的類別，每個分數有一條長條。零樣本分類器會先要你輸入 **標籤**，以逗號分隔（*a cat, a dog, a screenshot*）。
 
 結果下方會顯示是哪個副本回答、圖片大小，以及模型和整個請求花的時間。模型停止了，或讀不了這張圖片時，會用白話說明。主控台把它送到 `/api/playground/vision/<task>`，對已登入的人來說和 `/v1/vision/<task>` 一樣（[參考資料](reference.md#vision)）。
 
@@ -450,7 +450,7 @@ Playground 的視覺面板以你自己的身分、不需要 API 金鑰，把一�
    ```
 
    `https://` 網址由閘道下載（只連公開位址，每張圖片最多 `MEDIA_FETCH_MAX_MB`），再以資料形式轉送。區網內的圖片伺服器需要在伺服器上設定 `MEDIA_ALLOW_PRIVATE_HOSTS=true`。
-4. **在 Playground 試用：** 訊息框旁的圖片按鈕可以附上圖片。
+4. **在試用區試用：** 訊息框旁的圖片按鈕可以附上圖片。
 
 **影片：** 在 **進階** 把 *Videos per request* 設成 1 以上，再送 `video_url` 區塊。在 vLLM 上，這會讓引擎啟動時為一段長影片預留記憶體，KV cache 能用的就變少：啟動不了的話就調低上下文長度。在 llama.cpp 上，請把部署的上下文長度設成 8,192 以上：Qwen3-VL 用它自己的每秒 2 幀讀影片（*Video frames per second* 只對其他模型有效），一段 6 秒的影片用了 5,345 個 token。
 
@@ -482,7 +482,7 @@ media: {inputs: [image, audio, video], files: false}
    ```
 
    `GET /v1/audio/voices?model=qwen3-tts-1-7b` 會列出聲音與模型能產生的格式。要一邊產生一邊收音訊，加上 `extra_body={"stream_format": "audio"}`，並使用 `pcm` 或 `wav`。
-4. **在 Playground 試試看：** 語音模型會有一個 **Speak** 區塊，可以選聲音、格式，並附播放器。
+4. **在試用區試試看：** 語音模型會有一個 **朗讀** 區塊，可以選聲音、格式，並附播放器。
 
 **要用哪種格式：** vLLM-Omni 產生 wav、pcm、flac、mp3 與 opus；llama.cpp 產生 wav 與 pcm；speaches 產生 mp3、flac、wav 與 pcm。沒指定 `response_format` 時得到的是引擎的預設（wav，speaches 為 mp3），不是 OpenAI 的 mp3。`pcm` 是 16 位元單聲道，取樣率見回應（`x-audio-sample-rate`，或 `Content-Type` 裡的 `rate=`）。
 
@@ -510,7 +510,7 @@ media: {inputs: [image, audio, video], files: false}
 
    步數、負面提示和 seed 放在 `extra_body`：
    `extra_body={"num_inference_steps": 8, "negative_prompt": "blurry", "seed": 7}`。
-4. **在 Playground 試試看：** 圖片模型（選單的 *Images* 底下）會有一個 **Image** 面板，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
+4. **在試用區試試看：** 圖片模型（選單的 *圖片* 底下）會有一個 **圖片** 面板，可以輸入提示、選部署接受的尺寸和張數，每張圖片下方都有下載連結。
 
 **要多久：** 在 A100 上每張幾秒；在 CPU 上要幾分鐘。在一台忙碌的 x86-64 機器上用 16 到 32 個核心量測：Stable Diffusion 1.5、512x512、20 步大約 100 秒；Z-Image-Turbo（Q4_0）8 步在 512x512 大約 2 分鐘，1024x1024 大約 8.5 分鐘。機器較慢或尺寸較大時，在 **進階** 調高 *Timeout*。
 
@@ -549,7 +549,7 @@ media: {inputs: [image, audio, video], files: false}
    curl https://192.168.1.20:7860/v1/videos/<id>/content -H "Authorization: Bearer $FORGEYARD_KEY" -o kite.mp4
    ```
 
-4. **在 Playground 試試看：** 影片模型會有一個 **Video** 面板，可以輸入提示、選部署接受的尺寸和長度、看工作的進度，完成的影片會直接在頁面上播放並附下載連結。你之前用這個模型做的影片列在下方。
+4. **在試用區試試看：** 影片模型會有一個 **影片** 面板，可以輸入提示、選部署接受的尺寸和長度、看工作的進度，完成的影片會直接在頁面上播放並附下載連結。你之前用這個模型做的影片列在下方。
 
 **要多久：** 每段影片要幾分鐘，每個副本一次做一段；其他的在它上面排隊。影片長或尺寸大時，在 **進階** 調高 *Longest job*。
 
@@ -559,7 +559,7 @@ media: {inputs: [image, audio, video], files: false}
 
 1. **Models → Add a model → Recommended**：*Text classification* 列出多語言情緒模型（1 到 5 顆星）、語言偵測模型（20 種語言，包含中文）和有害內容模型（6 個標籤，各自評分），授權都是 MIT 或 Apache-2.0。也可以用任務 **Text classification** 搜尋 Hugging Face：有兩個以上標籤的 BERT、RoBERTa、XLM-RoBERTa 或 ModernBERT 分類模型都能加入。目錄會顯示它的標籤；reranker（只有一個輸出）、零樣本（NLI）模型和 DeBERTa 或 DistilBERT 分類模型會被拒絕，並說明原因。
 2. **Deploy**。模型本身的最大長度比引擎預設短時，context 會從模型的最大值開始（這些 BERT 大小的模型是 512 個 token）。在共用的卡上大約 2 GiB。
-3. 它會出現在 **服務中 → 文字分類**。部署頁面的 **試試看** 會送一句話；**Playground** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
+3. 它會出現在 **服務中 → 文字分類**。部署頁面的 **試試看** 會送一句話；**試用區** 接受你自己的文字，一行一段，並顯示每個標籤的機率。
 
 用 API 金鑰呼叫 `/v1/classify`（Forgeyard 自己的 API，格式和 vLLM 一樣；OpenAI SDK 沒有）：
 
@@ -649,11 +649,11 @@ curl --cacert forgeyard-ca.pem https://192.168.1.20:7860/v1/chat/completions \
 
 管理員在開始使用供應商之後：
 
-1. **設定價格。** 在 **Cloud → Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *without a price*，而且在任何預算之下都會被拒絕。
-2. **查看費用。** **Usage** → **Cost** 依日期、金鑰、個人、模型或供應商顯示費用，以及有多少由本機處理。
+1. **設定價格。** 在 **Cloud → Providers** 選 **Refresh prices from OpenRouter**。檢查建議的對應，勾選要採用的列，再選 **Apply ticked**。OpenRouter 沒有列出的模型，請打開它的供應商，在模型上選 **Prices**，依供應商的價格頁面輸入價格（每百萬 token 的美元），再按 **Save prices**。沒有價格的雲端模型會算在 *沒有價格*，而且在任何預算之下都會被拒絕。
+2. **查看費用。** **用量** → **費用** 依日期、金鑰、個人、模型或供應商顯示費用，以及有多少由本機處理。
 3. **設定預算**，以日曆月（UTC）計，單位是美元：
    - 金鑰：**API keys** → 金鑰的 **Limits** → **Monthly budget (USD)** → **Save limits**。管理員在別人金鑰上設定的值會對擁有者鎖定；**Unlock budget** 會移除它；
-   - 個人：**Usage** → **Cost** → **Budgets this month**，選擇 **Everyone** → **Set budget**；
+   - 個人：**用量** → **費用** → **本月預算**，選擇 **所有人** → **設定預算**；
    - 供應商：它的頁面 → **Monthly budget** → **Save budget**。
 4. **留意警示。** 預算用到 80% 和 100% 時，**Audit log** 會各記錄一筆事件（`budget.warning`、`budget.exhausted`），頁面也會顯示警告。不會寄電子郵件。
 
@@ -708,7 +708,7 @@ vLLM 每次啟動都會編譯模型（torch.compile，以及 Inductor 和 Triton
 1. 在表單裡開啟它：**服務中 → 部署模型**，或部署頁面上的 **編輯**。在 *When not in use* 底下勾選 **閒置時休眠**，保留或修改 **閒置分鐘數**（預設 30，1 到 1,440）；**進階** 裡的 **喚醒等待** 是請求等它醒來的最長時間（預設 300 秒，10 到 1,800）。設定旁邊會寫上次啟動花了多久（在部署表單上是同一個模型和引擎的另一個部署上次啟動的時間），休眠後的第一個請求大約就要等這麼久。只改這些設定不會重新啟動任何東西。用腳本：對 `PATCH /api/deployments/{id}` 送 `{"params": {"sleep_when_idle": true, "idle_minutes": 30}}`（管理員和操作員；不送 `idle_minutes` 就是 30 分鐘；加上 `"wake_wait": 120`，請求最多等 2 分鐘而不是 5 分鐘）；部署時也接受這些參數。
 2. 部署頁面上有 *When not in use* 卡片：設定、它現在的狀況（*sleeps in 18 min unless a request comes*，或讓它保持清醒的原因：有請求正在處理、有副本正在啟動……）、最後一個請求、上次啟動的時間，以及過去 24 小時被喚醒了幾次。
 3. 在閒置時間內沒有請求，它的副本就會停止。**服務中** 會顯示 **休眠中**（月亮圖示），寫著 *holds nothing* 和它會在哪台機器上醒來；它的頁面會寫從什麼時候開始休眠，事件裡會有 *Asleep: no requests for 30 min; frees …*。**機器** 會在它會執行的那台機器底下列出它（*qwen3-4b asleep here (14.4 GiB on GPU #4 when awake)*）：這段期間那些記憶體可以給別人用。模型仍然列在 `/v1/models` 裡；機器保留模型檔案和引擎映像檔。
-4. 下一個請求會喚醒它：請求最多等到 wake wait，模型就緒後就得到回應（可以使用路由雲端分層的金鑰，等待期間由雲端服務）。事件裡會有 *Woken by a request (key …)*。也可以在它的頁面或 **Playground** 按 **立即喚醒** 自己喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在 Playground 的選單裡，它啟動期間到達的請求會等它。在就緒之前 Serving 會顯示 **喚醒中** 和喚醒後經過的時間；Playground 直接送出你的訊息，等待時會顯示 *Waking the model (about 74 s)…*。如果無法喚醒（沒有空間、機器離線、引擎失敗），請求會得到 503 `cannot_wake` 和原因。
+4. 下一個請求會喚醒它：請求最多等到 wake wait，模型就緒後就得到回應（可以使用路由雲端分層的金鑰，等待期間由雲端服務）。事件裡會有 *Woken by a request (key …)*。也可以在它的頁面或 **試用區** 按 **立即喚醒** 自己喚醒它（`POST /api/deployments/{id}/start`）；休眠中的模型仍會帶著月亮圖示留在試用區的選單裡，它啟動期間到達的請求會等它。在就緒之前 Serving 會顯示 **喚醒中** 和喚醒後經過的時間；試用區直接送出你的訊息，等待時會顯示 *正在喚醒模型（約 74 秒）…*。如果無法喚醒（沒有空間、機器離線、引擎失敗），請求會得到 503 `cannot_wake` 和原因。
 5. 對休眠中的部署按 **停止** 會真正停止它：在有人啟動它之前，它不會出現在 `/v1/models`。
 
 設定顧問兩個方向都會提醒：佔著沒人用的 GPU 記憶體的部署會出現 *had no requests for 3 days: let it sleep when idle?*；在收到的請求之間一直休眠、而且啟動要超過一分鐘的部署會出現 *woke 11 times in a day: raise its idle time*（[Setup health](reference.md#setup-health-checks)）。
@@ -1059,14 +1059,14 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_all.py --server https://192.168.
 | `machines` | 每台機器都在線上、硬體正確；GPU 允許清單確實生效；加入指令會釘選 CA |
 | `workloads` | 行程類服務、任務（成功、重試、`max_duration`）、機器有 Docker 或 Podman 時的容器任務；在 GPU 機器上，應用程式只看得到分配給它的卡 |
 | `models` | 部署小模型並等它們就緒：每台 CPU 機器上的 Qwen3-1.7B GGUF；GPU 機器上的對話、embedding、rerank 和語音模型（估算放不下的會跳過）；部署頁面上的估算；**試試看** |
-| `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；Playground；用量 |
+| `gateway` | `/v1`：對話、串流、embedding、rerank、語音轉文字；金鑰的模型允許清單、限制和撤銷；每個副本連接埠上的金鑰守門員；兩台 CPU 機器之間的負載平衡；試用區；用量 |
 | `cloud` | 給了 `--cloud-provider` 才會執行：外溢到雲端、設為 **Never** 的金鑰、只用本地、雲端上限、費用，以及預算和它的警示 |
 | `passthrough` | 一個公開在 `/x/` 的小型 HTTP 程式：在 CPU 機器上以行程執行，在 GPU 機器上以容器執行。金鑰（none、listed）、照原樣轉送的路徑、被拒絕的路徑、被替換的憑證與轉發標頭、強制的沙箱、轉址、串流、本文上限、rpm、同時請求數、讀取逾時、副本連接埠前的金鑰守門員、用量 |
 | `tts`、`img`、`video` | 在 GPU 機器上（有 CPU 引擎的也在 CPU 機器上）的語音、圖片和影片生成：SDK 的呼叫、格式、上限、佇列、用量和金鑰守門員 |
 | `vision` | 用 vision recipe 部署的偵測、分割和深度模型：結果、拒絕的請求、金鑰和用量 |
 | `relay` | 經由伺服器取得模型：把 CPU 機器的 **下載時的網路連線** 設為 **一律經由伺服器**，用 **Download to…** 下載一個小的 GGUF（26 MB），確認它經由伺服器送達；接著第二台機器（`--relay-second-machine`，預設是第二台 CPU 機器，否則是 GPU 機器）從第一台機器的快取取得它。兩台機器的設定都會改回原值，模型也會從它們的快取移除 |
 | `images` | 在有 Docker 或 Podman 的機器上（`--engine-machine`，預設是 GPU 機器）：它的引擎映像清單；腳本自己做出一個只有幾 KB 的映像檔，上傳、複製到第二台可以接收映像的機器（`--second-engine-machine`），再用 **Remove engine image** 移除（因為只有 recipe 指名的映像才能移除，會有一個 recipe 暫時指名它幾秒鐘） |
-| `scale` | 閒置時休眠、喚醒（由請求、**立即喚醒**、Playground）、喚醒期間轉到雲端、`model_waking`、`cannot_wake`、**停止**、自動副本數與排空、啟動時間，以及它們的指標（[見下方](#check-sleep-waking-and-automatic-replicas)） |
+| `scale` | 閒置時休眠、喚醒（由請求、**立即喚醒**、試用區）、喚醒期間轉到雲端、`model_waking`、`cannot_wake`、**停止**、自動副本數與排空、啟動時間，以及它們的指標（[見下方](#check-sleep-waking-and-automatic-replicas)） |
 | `console` | 以管理員和一般使用者身分，在 1440 和 390 px 寬度下打開每個主要頁面：能載入、分頁標題正確、沒有錯誤、不會左右捲動 |
 
 用 `--only gateway,cloud` 或 `--skip console` 選擇要跑的組別；即使沒選 `models`，`gateway` 和 `cloud` 也會部署它們需要的模型。全部沒有失敗時結束代碼是 0，有檢查失敗時是 1，無法開始執行時是 2。
@@ -1097,7 +1097,7 @@ FORGEYARD_PASSWORD='…' python3 scripts/accept_scale.py --server https://192.16
 
 1. **它會休眠：**副本停止、它們的連接埠不再回應，它在機器上的保留量被釋放（`/metrics`，扣掉機器上其他副本占用的部分來比對），`/v1/models` 仍然列出它而且不會因此喚醒它，模型也留在機器的快取裡。
 2. **請求會喚醒它，而且只喚醒一次：**同時送出 20 個請求（`--scale-parallel`）只會喚醒一次（一個 *Woken by a request* 事件，`forgeyard_deployment_wakes_total{by="request"}` 多 1），而且全部都得到回應。
-3. **立即喚醒**（Start）和 Playground 的請求也會喚醒它，事件會寫出是誰喚醒的。
+3. **立即喚醒**（Start）和試用區的請求也會喚醒它，事件會寫出是誰喚醒的。
 4. **喚醒期間轉到雲端**，只有給了 `--cloud-provider` 才會執行：供應商成為模型路由的第 1 層；可以外溢的金鑰立刻由雲端回應（`X-Forgeyard-Spilled: waking`，這是唯一會送到供應商的請求），同一把金鑰的結構化輸出請求會等待並由本地回應，模型就緒後這把金鑰又回到本地服務。
 5. **很短的等待：***Wait while it wakes* 設為 10 秒（`--scale-wake-wait`）時，請求會得到 503 `model_waking`，`Retry-After` 至少 5 秒、最多是上次啟動的時間，而喚醒會繼續進行。只有啟動比這更慢的模型才看得出來：CPU 上的 llama.cpp 模型幾秒就就緒，所以這一步在那裡會跳過並說明原因。給了 `--gpu-machine` 時，這次執行也會在那台機器上用 vLLM 部署 Qwen3-0.6B，並對它檢查第 1、2、5 步。
 6. **無法喚醒**，只有在你指定一台允許這次執行停止 agent 的機器時才會執行：`--stoppable-agent cpu-01` 加上 `--agent-stop` 和 `--agent-start`，這兩個 shell 指令在執行腳本的電腦上執行（啟動指令必須立刻返回，讓 agent 繼續執行）。模型休眠時，把它固定在那台機器上，再停止 agent；請求會立刻得到 503 `cannot_wake`，並指出那台機器；agent 回來後，模型會啟動並回應。沒有這些選項時這一步會跳過：腳本絕不會停止沒有被告知可以停止的機器。

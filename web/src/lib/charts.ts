@@ -1,7 +1,9 @@
 // Usage over time (1.4): the numbers behind the Usage page's line charts (GET /api/usage/series) and the
 // helpers that turn them into axes, labels and colours.
 
-import { num } from "./gateway";
+import { labels, translate } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
+import { getLang, locale, type Lang } from "../i18n/lang";
 import { bytes } from "./machines";
 import { usd } from "./prices";
 
@@ -17,37 +19,48 @@ export type SeriesResponse = {
 };
 
 // How far back each view looks: 30 days, 13 weeks (a quarter), 12 months.
-export const VIEWS: { step: Step; label: string; periods: number; range: string }[] = [
-  { step: "day", label: "Daily", periods: 30, range: "the last 30 days" },
-  { step: "week", label: "Weekly", periods: 13, range: "the last 13 weeks" },
-  { step: "month", label: "Monthly", periods: 12, range: "the last 12 months" },
-];
+// The words are read when used, so they follow the language (#189).
+const VIEW_LABEL = labels({ day: "usage.view.day", week: "usage.view.week", month: "usage.view.month" });
+const VIEW_RANGE = labels({ day: "usage.viewRange.day", week: "usage.viewRange.week", month: "usage.viewRange.month" });
+const view = (step: Step, periods: number) => ({
+  step, periods, get label() { return VIEW_LABEL[step]; }, get range() { return VIEW_RANGE[step]; },
+});
+export const VIEWS: { step: Step; label: string; periods: number; range: string }[] = [view("day", 30), view("week", 13), view("month", 12)];
 
-export const SPLITS: { id: Split; label: string; admin?: boolean }[] = [
-  { id: "none", label: "Total" },
-  { id: "key", label: "Key" },
-  { id: "model", label: "Model" },
-  { id: "provider", label: "Provider" },
-  { id: "user", label: "Person", admin: true },
-];
+const SPLIT_LABEL = labels({ none: "usage.split.none", key: "usage.split.key", model: "usage.split.model", provider: "usage.split.provider",
+  user: "usage.split.user" });
+const split = (id: Split, admin?: boolean) => ({ id, ...(admin ? { admin } : {}), get label() { return SPLIT_LABEL[id]; } });
+export const SPLITS: { id: Split; label: string; admin?: boolean }[] = [split("none"), split("key"), split("model"), split("provider"), split("user", true)];
+
+// One step as a word in a sentence ("per day") and as a column heading ("Day").
+export const STEP_WORD: Record<Step, string> = labels({ day: "usage.step.day", week: "usage.step.week", month: "usage.step.month" });
+export const STEP_HEAD: Record<Step, string> = labels({ day: "usage.stepHead.day", week: "usage.stepHead.week", month: "usage.stepHead.month" });
 
 type Kind = "count" | "usd" | "duration" | "bytes";
 
 // What a chart can show. `always`: offered even when nothing was counted yet; the others once the range has some.
+const METRIC_LABEL = labels({
+  requests: "usage.metric.requests", tokens: "usage.metric.tokens", prompt_tokens: "usage.metric.prompt_tokens",
+  completion_tokens: "usage.metric.completion_tokens", errors: "usage.metric.errors", media_items: "usage.metric.media_items",
+  characters: "usage.metric.characters", images: "usage.metric.images", media_ms: "usage.metric.media_ms", busy_ms: "usage.metric.busy_ms",
+  bytes_in: "usage.metric.bytes_in", bytes_out: "usage.metric.bytes_out", cost_micros: "usage.metric.cost_micros",
+});
+const metric = (id: keyof typeof METRIC_LABEL, kind: Kind, always?: boolean) =>
+  ({ id, kind, ...(always ? { always } : {}), get label() { return METRIC_LABEL[id]; } });
 export const METRICS: { id: string; label: string; kind: Kind; always?: boolean }[] = [
-  { id: "requests", label: "Requests", kind: "count", always: true },
-  { id: "tokens", label: "Tokens (in + out)", kind: "count", always: true },
-  { id: "prompt_tokens", label: "Tokens in", kind: "count", always: true },
-  { id: "completion_tokens", label: "Tokens out", kind: "count", always: true },
-  { id: "errors", label: "Errors", kind: "count", always: true },
-  { id: "media_items", label: "Media items sent", kind: "count" },
-  { id: "characters", label: "Characters spoken", kind: "count" },
-  { id: "images", label: "Images made", kind: "count" },
-  { id: "media_ms", label: "Audio and video made", kind: "duration" },
-  { id: "busy_ms", label: "Busy time", kind: "duration" },
-  { id: "bytes_in", label: "App bytes in", kind: "bytes" },
-  { id: "bytes_out", label: "App bytes out", kind: "bytes" },
-  { id: "cost_micros", label: "Cost (USD)", kind: "usd" },
+  metric("requests", "count", true),
+  metric("tokens", "count", true),
+  metric("prompt_tokens", "count", true),
+  metric("completion_tokens", "count", true),
+  metric("errors", "count", true),
+  metric("media_items", "count"),
+  metric("characters", "count"),
+  metric("images", "count"),
+  metric("media_ms", "duration"),
+  metric("busy_ms", "duration"),
+  metric("bytes_in", "bytes"),
+  metric("bytes_out", "bytes"),
+  metric("cost_micros", "usd"),
 ];
 
 export function metricKind(id: string): Kind {
@@ -102,16 +115,38 @@ function parts(iso: string): [number, number, number] {
   return [y, m, d];
 }
 
-// A period on the axis: "Nov 12" (a day, or the Monday a week starts on), "Nov 2026" (a month).
-export function periodLabel(p: Period, step: Step): string {
+const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m - 1, d));
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+function df(lang: Lang, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = `${lang}|${JSON.stringify(opts)}`;
+  let f = dateFormats.get(key);
+  if (!f) dateFormats.set(key, (f = new Intl.DateTimeFormat(locale(lang), { ...opts, timeZone: "UTC" })));
+  return f;
+}
+
+// A period on the axis: "Nov 12" (a day, or the Monday a week starts on), "Nov 2026" (a month); in Chinese
+// Intl's month and day ("11月12日", "2026年11月").
+export function periodLabel(p: Period, step: Step, lang: Lang = getLang()): string {
   const [y, m, d] = parts(p.start);
+  if (lang !== "en") {
+    return df(lang, step === "month" ? { year: "numeric", month: "short" } : { month: "short", day: "numeric" }).format(utc(y, m, d));
+  }
   return step === "month" ? `${MONTHS[m - 1]} ${y}` : `${MONTHS[m - 1]} ${d}`;
 }
 
 // The same in full, for tooltips and the table: "Thu, Nov 12, 2026", "Nov 9 – 15, 2026", "November 2026";
-// the period still going on says so.
-export function periodTitle(p: Period, step: Step): string {
+// the period still going on says so. In Chinese Intl's dates, weekday and range ("2026年11月12日 週四").
+export function periodTitle(p: Period, step: Step, lang: Lang = getLang()): string {
   const [y, m, d] = parts(p.start);
+  if (lang !== "en") {
+    const [ey, em, ed] = parts(p.end);
+    const text = step === "month" ? df(lang, { year: "numeric", month: "long" }).format(utc(y, m, 1))
+      : step === "week" ? translate(lang, "usage.chart.weekRange", {
+        start: df(lang, { year: "numeric", month: "short", day: "numeric" }).format(utc(y, m, d)),
+        end: df(lang, ey === y ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" }).format(utc(ey, em, ed)) })
+        : df(lang, { year: "numeric", month: "short", day: "numeric", weekday: "short" }).format(utc(y, m, d));
+    return p.partial ? translate(lang, "usage.chart.soFar", { period: text }) : text;
+  }
   let text: string;
   if (step === "month") {
     text = `${new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-US", { month: "long", timeZone: "UTC" })} ${y}`;
@@ -123,25 +158,36 @@ export function periodTitle(p: Period, step: Step): string {
     const wd = new Date(Date.UTC(y, m - 1, d)).toLocaleString("en-US", { weekday: "short", timeZone: "UTC" });
     text = `${wd}, ${MONTHS[m - 1]} ${d}, ${y}`;
   }
-  return p.partial ? `${text} (so far)` : text;
+  return p.partial ? translate(lang, "usage.chart.soFar", { period: text }) : text;
 }
 
-function duration(ms: number): string {
-  if (!ms) return "0 s";
+// "12.3 s", "4.5 min", "2 h"; in Chinese Intl's units ("12.3 秒", "4.5 分鐘", "2 小時").
+function duration(ms: number, lang: Lang = getLang()): string {
   const s = ms / 1000;
-  if (s < 60) return `${Number(s.toFixed(s < 10 ? 1 : 0))} s`;
-  if (s < 3600) return `${Number((s / 60).toFixed(s < 600 ? 1 : 0))} min`;
-  return `${Number((s / 3600).toFixed(s < 36000 ? 1 : 0))} h`;
+  const [v, unit, en] = !ms ? [0, "second", "s"] : s < 60 ? [Number(s.toFixed(s < 10 ? 1 : 0)), "second", "s"]
+    : s < 3600 ? [Number((s / 60).toFixed(s < 600 ? 1 : 0)), "minute", "min"] : [Number((s / 3600).toFixed(s < 36000 ? 1 : 0)), "hour", "h"];
+  if (lang === "en") return `${v} ${en}`;
+  return formatNumber(v as number, lang, { style: "unit", unit: unit as string, unitDisplay: "short", maximumFractionDigits: 1 });
 }
 
-const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+// A short number on the axis: "1.2K" / "1.2萬".
+function compact(v: number, lang: Lang = getLang()): string {
+  return formatNumber(v, lang, { notation: "compact", maximumFractionDigits: 1 });
+}
+
+// How wide a short text is on the chart, in Latin characters: a CJK character takes about one and a half.
+export function textUnits(s: string): number {
+  let n = 0;
+  for (const ch of s) n += /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch) ? 1.5 : 1;
+  return n;
+}
 
 // A value in full, for tooltips, the legend and the table.
 export function formatValue(v: number, kind: Kind): string {
   if (kind === "usd") return usd(v);
   if (kind === "duration") return duration(v);
   if (kind === "bytes") return v ? bytes(v) : "0";
-  return num(v);
+  return formatNumber(v);
 }
 
 // A value on the axis, short: "1.2K", "$0.25", "3 min".
@@ -149,13 +195,13 @@ export function formatTick(v: number, kind: Kind): string {
   if (kind === "usd") {
     const dollars = v / 1_000_000;
     if (v === 0) return "$0";
-    if (dollars >= 1000) return `$${COMPACT.format(dollars)}`;
+    if (dollars >= 1000) return `$${compact(dollars)}`;
     if (dollars >= 1) return `$${Number(dollars.toFixed(2))}`;
     return `$${Number(dollars.toPrecision(2))}`;
   }
   if (kind === "duration") return duration(v);
   if (kind === "bytes") return v ? bytes(v) : "0";
-  return COMPACT.format(v);
+  return compact(v);
 }
 
 export const SLOTS = 6;   // --series-1 to --series-6 in styles.css; "Other" has its own grey
@@ -188,4 +234,23 @@ export function assignSlots(ids: string[], kept: Map<string, number>): Map<strin
 export function isSeries(x: unknown): x is SeriesResponse {
   const r = x as SeriesResponse | null;
   return !!r && Array.isArray(r.periods) && Array.isArray(r.series) && Array.isArray(r.total);
+}
+
+// The name of a row or line as the reader reads it (#189). The server names a few groups itself, in English
+// ("Console playground", "Other (3)", "deleted key #4"); in Chinese those get their translation, every other
+// name (models, keys, people, providers, days) stays as it is.
+const ROW_NAME: Record<string, [string, "usage.row.total" | "usage.row.console" | "usage.row.api" | "usage.row.local" | "usage.row.deleted"]> = {
+  total: ["Total", "usage.row.total"], console: ["Console playground", "usage.row.console"], api: ["API keys", "usage.row.api"],
+  local: ["Local replicas", "usage.row.local"], deleted: ["Deleted providers", "usage.row.deleted"],
+};
+export function rowName(id: string, name: string, lang: Lang = getLang()): string {
+  if (lang === "en") return name;
+  const fixed = ROW_NAME[id];
+  if (fixed && fixed[0] === name) return translate(lang, fixed[1]);
+  let m = /^Other \((\d+)\)$/.exec(name);
+  if (id === "other" && m) return translate(lang, "usage.row.other", { count: Number(m[1]) });
+  if ((m = /^deleted key #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedKey", { id: m[1] });
+  if ((m = /^user #(\d+)$/.exec(name))) return translate(lang, "usage.row.user", { id: m[1] });
+  if ((m = /^deleted provider model #(\d+)$/.exec(name))) return translate(lang, "usage.row.deletedModel", { id: m[1] });
+  return name;
 }

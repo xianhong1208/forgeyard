@@ -5,11 +5,14 @@ import { Link, useSearchParams } from "react-router";
 import { useAuth } from "../auth";
 import { ModelKindIcon } from "../components/Fleet";
 import { Notice, PageHeader } from "../components/ui";
+import { labels, t as tNow } from "../i18n/core";
+import { pluralForm } from "../i18n/format";
+import { useT } from "../i18n/react";
 import { notifyUnauthorized } from "../lib/api";
-import { IMAGE_MIME, SPEECH_MIME, answerError, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
+import { IMAGE_MIME, SPEECH_MIME, chatContent, imageSizes, ms, pcmRate, pcmToWav, readEvents, readImage,
   type Attached, type ImageOptions, type Voice } from "../lib/gateway";
 import { MODEL_KIND, type ModelKind } from "../lib/fleet";
-import { firstVision, pickerDetail, pickerGroups, routeReady, routeSleep } from "../lib/playground";
+import { firstVision, imageProblem, pickerDetail, pickerGroups, playError, routeReady, routeSleep } from "../lib/playground";
 import { api, errorText } from "../lib/api";
 import { elapsed, seconds, sleepState, wakeSeconds } from "../lib/sleep";
 import { usePoll } from "../lib/poll";
@@ -41,10 +44,14 @@ async function post(endpoint: string, body: unknown, signal?: AbortSignal, form?
 
 async function failure(res: Response): Promise<string> {
   const data = await res.json().catch(() => null);
-  return answerError(res.status, data);
+  return playError(res.status, data);
 }
 
+// "asleep" / "waking" beside a model's name in the picker.
+const SLEEP_WORD: Record<"asleep" | "waking", string> = labels({ asleep: "playground.picker.asleep", waking: "playground.picker.waking" });
+
 export function PlaygroundPage() {
+  const t = useT();
   const { data, error, reload: reloadRoutes } = useApi<RoutesResponse>("/routes");
   // For the kind of a chat model (multimodal when its deployment reads images, audio or video).
   const deps = useApi<DeploymentsResponse>("/deployments");
@@ -89,31 +96,32 @@ export function PlaygroundPage() {
 
   return (
     <>
-      <PageHeader index="05 · Playground" title="Playground"
-        lead="Try a deployed model through the gateway, as yourself: the same routing and limits as an API key, without creating one. Requests count as “console” in Usage." />
+      <PageHeader index={t("playground.index")} title={t("playground.title")} lead={t("playground.lead")} />
       {error && <Notice tone="error">{error}</Notice>}
       {loaded && offered.length === 0 && (
         <section className="panel play-empty" aria-labelledby="play-empty-title">
-          <h2 id="play-empty-title">Nothing to try yet</h2>
+          <h2 id="play-empty-title">{t("playground.empty.title")}</h2>
           <p className="muted">
-            The Playground sends requests to a ready model, as you, without an API key.{" "}
-            {waiting > 0 ? <>{waiting === 1 ? "One deployment is" : `${waiting} deployments are`} not ready: <Link to="/serving">Serving</Link> shows whether each is stopped, starting or waiting for a machine.{" "}</>
-              : "No model is deployed yet. "}
-            {canDeploy ? <>Deploy one from <strong>Models → Catalog</strong>: chat, embeddings, speech, images, video or vision. It shows up here once it is ready.</>
-              : "Admins and operators deploy models; ask one to deploy the model you need."}
+            {t("playground.empty.intro")}{" "}
+            {waiting > 0 ? <>{pluralForm(waiting, t.lang) === "one"
+              ? t.rich("playground.empty.waiting.one", { link: (text) => <Link to="/serving">{text}</Link> })
+              : t.rich("playground.empty.waiting.other", { count: String(waiting), link: (text) => <Link to="/serving">{text}</Link> })}{" "}</>
+              : <>{t("playground.empty.none")}{" "}</>}
+            {canDeploy ? t.rich("playground.empty.canDeploy", { strong: (text) => <strong>{text}</strong> }) : t("playground.empty.cannot")}
           </p>
-          {canDeploy && <Link to="/models" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> Deploy from the catalog</Link>}
+          {canDeploy && <Link to="/models" className="btn btn-primary"><IconPlus size={16} aria-hidden="true" /> {t("playground.empty.deploy")}</Link>}
         </section>
       )}
       {route && (
         <div className="play-bar">
           <ModelPicker groups={groups} value={route} onPick={pick} startOpen={legacy === "vision" && !vision} sleepOf={sleepOf} />
           <p className="muted small play-ready">
-            {route.kind === "cloud" ? "Served by a cloud provider." : sleeping === "asleep" ? "Asleep: a request wakes it."
-              : sleeping === "waking" ? "Waking: no replica is ready yet." : `${route.endpoints.length} ready replica${route.endpoints.length > 1 ? "s" : ""}`}
-            {route.kind === "mixed" ? " Spills to the cloud when local is busy or down." : ""}{" "}
-            {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>Deployment</Link>
-              : route.id ? <Link to={`/cloud/models/${route.id}`}>Details</Link> : null}
+            {route.kind === "cloud" ? t("playground.bar.cloud") : sleeping === "asleep" ? t("playground.bar.asleep")
+              : sleeping === "waking" ? t("playground.bar.waking")
+                : t(route.endpoints.length > 1 ? "playground.bar.ready.other" : "playground.bar.ready.one", { count: String(route.endpoints.length) })}
+            {route.kind === "mixed" ? <>{" "}{t("playground.bar.spills")}</> : ""}{" "}
+            {route.deployment_id ? <Link to={`/serving/${route.deployment_id}`}>{t("playground.bar.deployment")}</Link>
+              : route.id ? <Link to={`/cloud/models/${route.id}`}>{t("playground.bar.details")}</Link> : null}
           </p>
         </div>
       )}
@@ -141,6 +149,7 @@ const SENT_EVENT = "forgeyard:playground-sent";
 // 1.5.0 (#37): the chosen model is asleep (a message wakes it; operators may also Wake now) or waking (about how
 // long, from the wake under way or its last start). The request itself is sent as to any model: the gateway holds it.
 function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; onWoken: () => void }) {
+  const t = useT();
   const state = sleepState(d);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +160,7 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
     return () => window.clearInterval(t);
   }, [state]);
   const expect = wakeSeconds(d);
-  const about = expect ? ` (about ${seconds(expect)})` : "";
+  const about = expect ? t("playground.wake.about", { time: seconds(expect) }) : "";
   const wait = d.sleep?.wake_wait ?? 300;
   const wake = async () => {
     setBusy(true);
@@ -170,8 +179,8 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
     return (
       <div className="play-wake" role="status" aria-live="polite">
         <IconMoon size={16} aria-hidden="true" />
-        <span><strong>Waking the model{about}…</strong> <span className="mono">{elapsed(d.sleep?.waking?.since)}</span>. A request sent to it waits
-          until a replica is ready (up to {wait} s){waiting ? `; ${waiting} waiting now` : ""}.</span>
+        <span>{t.rich("playground.wake.waking", { strong: (text) => <strong>{text}</strong>, about, elapsed: <span className="mono">{elapsed(d.sleep?.waking?.since)}</span>,
+          wait: String(wait), waiting: waiting ? t("playground.wake.waitingNow", { count: String(waiting) }) : "" })}</span>
       </div>
     );
   }
@@ -179,12 +188,12 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
     <div className="play-wake" role="status">
       <IconMoon size={16} aria-hidden="true" />
       <span>
-        <strong>{d.name} is asleep</strong>{d.sleep?.asleep_since ? ` since ${when(d.sleep.asleep_since)}` : ""}: nobody used it for {d.sleep?.idle_minutes ?? 30} min, so it holds no memory.{" "}
-        Send a request and it wakes: the request waits until it is ready{about}, up to {wait} s, or is answered by a cloud tier
-        meanwhile when you may use one.
+        {t.rich("playground.wake.asleep", { strong: (text) => <strong>{text}</strong>, name: d.name,
+          since: d.sleep?.asleep_since ? t("playground.wake.since", { when: when(d.sleep.asleep_since) }) : "", minutes: String(d.sleep?.idle_minutes ?? 30) })}{" "}
+        {t("playground.wake.send", { about, wait: String(wait) })}
         {error && <span className="field-error"> {error}</span>}
       </span>
-      {canWake && <button type="button" className="btn" disabled={busy} onClick={() => void wake()}>{busy ? "Waking…" : "Wake now"}</button>}
+      {canWake && <button type="button" className="btn" disabled={busy} onClick={() => void wake()}>{busy ? t("playground.wake.busy") : t("playground.wake.now")}</button>}
     </div>
   );
 }
@@ -193,8 +202,9 @@ function WakeNotice({ d, canWake, onWoken }: { d: Deployment; canWake: boolean; 
 // by kind with Serving's labels and icons. A listbox: arrows move, Enter or Space picks, Escape closes.
 function ModelPicker({ groups, value, onPick, startOpen, sleepOf }: {
   groups: [ModelKind, RouteInfo[]][]; value: RouteInfo; onPick: (name: string) => void; startOpen: boolean;
-  sleepOf: (r: RouteInfo) => string | null;   // 1.5.0: "asleep" / "waking" beside the name
+  sleepOf: (r: RouteInfo) => "asleep" | "waking" | null;   // 1.5.0: "asleep" / "waking" beside the name
 }) {
+  const t = useT();
   const flat = groups.flatMap(([k, l]) => l.map((r) => ({ k, r })));
   const at = Math.max(0, flat.findIndex((x) => x.r.served_name === value.served_name));
   const kind = flat[at]?.k ?? "chat";
@@ -241,7 +251,7 @@ function ModelPicker({ groups, value, onPick, startOpen, sleepOf }: {
   let i = -1;
   return (
     <div className="field picker" ref={box}>
-      <label id="play-model-label" htmlFor="play-model">Model</label>
+      <label id="play-model-label" htmlFor="play-model">{t("playground.picker.model")}</label>
       <button id="play-model" ref={button} type="button" className="picker-button" aria-haspopup="listbox" aria-expanded={open}
         aria-controls={open ? "play-model-list" : undefined} aria-labelledby="play-model-label play-model"
         onClick={() => show(!open)}
@@ -269,7 +279,7 @@ function ModelPicker({ groups, value, onPick, startOpen, sleepOf }: {
                     className={`picker-option${n === active ? " active" : ""}`} onMouseMove={() => setActive(n)} onClick={() => choose(n)}>
                     <span className="mono picker-option-name">{r.served_name}</span>
                     {detail && <>{" "}<span className="picker-option-detail">{detail}</span></>}
-                    {sleepOf(r) && <>{" "}<span className="picker-option-detail picker-asleep"><IconMoon size={13} aria-hidden="true" /> {sleepOf(r)}</span></>}
+                    {sleepOf(r) && <>{" "}<span className="picker-option-detail picker-asleep"><IconMoon size={13} aria-hidden="true" /> {SLEEP_WORD[sleepOf(r)!]}</span></>}
                     {r.served_name === value.served_name && <IconCheck size={15} aria-hidden="true" className="picker-check" />}
                   </div>
                 );
@@ -283,6 +293,7 @@ function ModelPicker({ groups, value, onPick, startOpen, sleepOf }: {
 }
 
 function Chat({ model }: { model: string }) {
+  const t = useT();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [maxTokens, setMaxTokens] = useState(256);
@@ -306,7 +317,9 @@ function Chat({ model }: { model: string }) {
     e.target.value = "";
     setAttachError(null);
     try {
-      const read = await Promise.all(files.map(readImage));
+      const why = files.map(imageProblem).find(Boolean);
+      if (why) throw new Error(why);
+      const read = await Promise.all(files.map((f) => readImage(f).catch(() => { throw new Error(tNow("playground.image.unreadable", { name: f.name })); })));
       setAttached((cur) => [...cur, ...read]);
     } catch (err) {
       setAttachError((err as Error).message);
@@ -343,13 +356,13 @@ function Chat({ model }: { model: string }) {
       const replica = res.headers.get("X-Forgeyard-Replica");
       const target = res.headers.get("X-Forgeyard-Target");
       const spilled = res.headers.get("X-Forgeyard-Spilled");
-      const who = target && !target.startsWith("local:") ? targetHeader(target) : replica ? `replica ${replica.split("#")[1]}` : null;
+      const who = target && !target.startsWith("local:") ? targetHeader(target) : replica ? t("playground.meta.replica", { n: replica.split("#")[1] }) : null;
       await readEvents(res.body, (d) => {
         if (d === "[DONE]") return;
         let chunk: { choices?: { delta?: { content?: string; reasoning_content?: string } }[]; usage?: typeof usage; error?: { message?: string } };
         try { chunk = JSON.parse(d); } catch { return; }
         if (chunk.error) {
-          update((m) => ({ ...m, content: `${m.content}\n[${chunk.error?.message ?? "error"}]`, error: true }));
+          update((m) => ({ ...m, content: `${m.content}\n[${chunk.error?.message ?? t("playground.chat.error")}]`, error: true }));
           return;
         }
         if (chunk.usage) usage = chunk.usage;
@@ -363,14 +376,14 @@ function Chat({ model }: { model: string }) {
       const total = performance.now() - started;
       const u = usage as { prompt_tokens?: number; completion_tokens?: number } | null;
       const out = u?.completion_tokens;
-      const meta = [who, spilled ? `spilled: ${spilled}` : null, first !== null ? `first token ${ms(first - started)}` : null,
-        `${ms(total)}`, u ? `${u.prompt_tokens ?? 0} in · ${out ?? 0} out` : null,
+      const meta = [who, spilled ? t("playground.chat.spilled", { to: spilled }) : null, first !== null ? t("playground.chat.firstToken", { time: ms(first - started) }) : null,
+        `${ms(total)}`, u ? t("playground.chat.tokens", { in: String(u.prompt_tokens ?? 0), out: String(out ?? 0) }) : null,
         out && first !== null && total - (first - started) > 0 ? `${(out / ((total - (first - started)) / 1000)).toFixed(1)} tok/s` : null]
         .filter(Boolean).join(" · ");
       update((m) => ({ ...m, meta }));
     } catch (err) {
-      if ((err as Error).name === "AbortError") update((m) => ({ ...m, meta: "stopped" }));
-      else update((m) => ({ ...m, content: "Cannot reach the Forgeyard server.", error: true }));
+      if ((err as Error).name === "AbortError") update((m) => ({ ...m, meta: t("playground.chat.stopped") }));
+      else update((m) => ({ ...m, content: t("playground.unreachable"), error: true }));
     } finally {
       setBusy(false);
       abort.current = null;
@@ -380,23 +393,23 @@ function Chat({ model }: { model: string }) {
   return (
     <section className="panel play" aria-labelledby="chat-title">
       <div className="panel-head">
-        <h2 id="chat-title">Chat</h2>
+        <h2 id="chat-title">{t("playground.chat.title")}</h2>
         <button type="button" className="btn btn-quiet btn-small" disabled={busy || !messages.length} onClick={() => setMessages([])}>
-          <IconTrash size={15} aria-hidden="true" /> Clear
+          <IconTrash size={15} aria-hidden="true" /> {t("playground.chat.clear")}
         </button>
       </div>
-      <div className="transcript" aria-live="polite" aria-label="Conversation">
-        {messages.length === 0 && <p className="muted small">Ask something. Answers stream in as the model writes them.</p>}
+      <div className="transcript" aria-live="polite" aria-label={t("playground.chat.conversation")}>
+        {messages.length === 0 && <p className="muted small">{t("playground.chat.empty")}</p>}
         {messages.map((m, i) => (
           <div key={i} className={`msg msg-${m.role}${m.error ? " msg-error" : ""}`}>
-            <span className="msg-role">{m.role === "user" ? "You" : model}</span>
+            <span className="msg-role">{m.role === "user" ? t("playground.chat.you") : model}</span>
             {m.images && (
               <div className="msg-images">
-                {m.images.map((img, k) => <img key={k} src={img.uri} alt={`Attached: ${img.name}`} />)}
+                {m.images.map((img, k) => <img key={k} src={img.uri} alt={t("playground.chat.attachedAlt", { name: img.name })} />)}
               </div>
             )}
             {(m.content || m.role === "assistant") && (
-              <div className="msg-text">{m.content || (busy && i === messages.length - 1 ? <span className="cursor" aria-label="Writing" /> : "")}
+              <div className="msg-text">{m.content || (busy && i === messages.length - 1 ? <span className="cursor" aria-label={t("playground.chat.writing")} /> : "")}
                 {busy && i === messages.length - 1 && m.content && <span className="cursor" aria-hidden="true" />}</div>
             )}
             {m.meta && <span className="msg-meta">{m.meta}</span>}
@@ -405,12 +418,12 @@ function Chat({ model }: { model: string }) {
         <div ref={end} />
       </div>
       {(attached.length > 0 || attachError) && (
-        <div className="attached" aria-label="Images for the next message">
+        <div className="attached" aria-label={t("playground.chat.nextImages")}>
           {attached.map((img, i) => (
             <span key={i} className="attached-item">
               <img src={img.uri} alt="" />
               <span className="small mono attached-name">{img.name}</span>
-              <button type="button" className="btn btn-quiet btn-small" aria-label={`Remove ${img.name}`}
+              <button type="button" className="btn btn-quiet btn-small" aria-label={t("playground.chat.remove", { name: img.name })}
                 onClick={() => setAttached((cur) => cur.filter((_, j) => j !== i))}><IconX size={14} aria-hidden="true" /></button>
             </span>
           ))}
@@ -419,30 +432,31 @@ function Chat({ model }: { model: string }) {
       )}
       <form className="chat-form chat-form-media" onSubmit={send}>
         <input ref={picker} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(e) => void attach(e)}
-          aria-label="Attach images" data-testid="attach-input" />
-        <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => picker.current?.click()} title="Attach an image (for models that read images)">
-          <IconPhoto size={16} aria-hidden="true" /><span className="sr-only">Attach an image</span>
+          aria-label={t("playground.chat.attachInput")} data-testid="attach-input" />
+        <button type="button" className="btn btn-quiet" disabled={busy} onClick={() => picker.current?.click()} title={t("playground.chat.attachTitle")}>
+          <IconPhoto size={16} aria-hidden="true" /><span className="sr-only">{t("playground.chat.attach")}</span>
         </button>
-        <label htmlFor="chat-input" className="sr-only">Message</label>
-        <textarea id="chat-input" value={input} rows={2} placeholder="Write a message…" onChange={(e) => setInput(e.target.value)}
+        <label htmlFor="chat-input" className="sr-only">{t("playground.chat.message")}</label>
+        <textarea id="chat-input" value={input} rows={2} placeholder={t("playground.chat.placeholder")} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(e); } }} />
         {busy ? (
-          <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
+          <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> {t("playground.stop")}</button>
         ) : (
-          <button type="submit" className="btn btn-primary" disabled={!input.trim() && !attached.length}><IconSend size={16} aria-hidden="true" /> Send</button>
+          <button type="submit" className="btn btn-primary" disabled={!input.trim() && !attached.length}><IconSend size={16} aria-hidden="true" /> {t("playground.chat.send")}</button>
         )}
       </form>
       <div className="chat-settings">
-        <label>Max tokens <input type="number" min={1} max={32768} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value) || 1)} /></label>
-        <label>Temperature <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /></label>
-        <label className="check"><input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} /> Thinking (models that support it)</label>
-        <label className="check" title="Sends X-Forgeyard-Local-Only: 1"><input type="checkbox" checked={localOnly} onChange={(e) => setLocalOnly(e.target.checked)} /> Local only (never the cloud)</label>
+        <label>{t("playground.chat.maxTokens")} <input type="number" min={1} max={32768} value={maxTokens} onChange={(e) => setMaxTokens(Number(e.target.value) || 1)} /></label>
+        <label>{t("playground.chat.temperature")} <input type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} /></label>
+        <label className="check"><input type="checkbox" checked={thinking} onChange={(e) => setThinking(e.target.checked)} /> {t("playground.chat.thinking")}</label>
+        <label className="check" title={t("playground.chat.localOnlyTitle")}><input type="checkbox" checked={localOnly} onChange={(e) => setLocalOnly(e.target.checked)} /> {t("playground.chat.localOnly")}</label>
       </div>
     </section>
   );
 }
 
 function Embeddings({ model }: { model: string }) {
+  const t = useT();
   const [input, setInput] = useState("Forgeyard runs models on your own machines.");
   const [out, setOut] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -456,23 +470,24 @@ function Embeddings({ model }: { model: string }) {
       if (!res.ok) { setErr(await failure(res)); return; }
       const data = await res.json();
       const v: number[] = data.data?.[0]?.embedding ?? [];
-      setOut(`${v.length} dimensions in ${ms(performance.now() - started)} · ${data.usage?.prompt_tokens ?? "?"} tokens\n[${v.slice(0, 8).map((x) => x.toFixed(4)).join(", ")}, …]`);
-    } catch { setErr("Cannot reach the Forgeyard server."); } finally { setBusy(false); }
+      setOut(`${t("playground.emb.out", { dims: String(v.length), time: ms(performance.now() - started), tokens: String(data.usage?.prompt_tokens ?? "?") })}\n[${v.slice(0, 8).map((x) => x.toFixed(4)).join(", ")}, …]`);
+    } catch { setErr(t("playground.unreachable")); } finally { setBusy(false); }
   };
   return (
     <section className="panel play" aria-labelledby="emb-title">
-      <h2 id="emb-title">Embeddings</h2>
+      <h2 id="emb-title">{t("playground.emb.title")}</h2>
       <form onSubmit={go}>
-        <div className="field"><label htmlFor="emb-input">Text</label><textarea id="emb-input" rows={3} value={input} onChange={(e) => setInput(e.target.value)} /></div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !input.trim()} style={{ marginTop: 10 }}>{busy ? "Waiting…" : "Embed"}</button>
+        <div className="field"><label htmlFor="emb-input">{t("playground.text")}</label><textarea id="emb-input" rows={3} value={input} onChange={(e) => setInput(e.target.value)} /></div>
+        <button type="submit" className="btn btn-primary" disabled={busy || !input.trim()} style={{ marginTop: 10 }}>{busy ? t("playground.waiting") : t("playground.emb.embed")}</button>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
-      {out && <pre className="logs try-answer play-out" aria-label="Answer">{out}</pre>}
+      {out && <pre className="logs try-answer play-out" aria-label={t("playground.emb.answer")}>{out}</pre>}
     </section>
   );
 }
 
 function Rerank({ model }: { model: string }) {
+  const t = useT();
   const [query, setQuery] = useState("What is the capital of France?");
   const [docs, setDocs] = useState("Paris is the capital and largest city of France.\nThe Eiffel Tower was completed in 1889.\nBerlin is the capital of Germany.");
   const [out, setOut] = useState<{ index: number; relevance_score: number }[] | null>(null);
@@ -487,19 +502,19 @@ function Rerank({ model }: { model: string }) {
       if (!res.ok) { setErr(await failure(res)); return; }
       const data = await res.json();
       setOut([...(data.results ?? [])].sort((a, b) => b.relevance_score - a.relevance_score));
-    } catch { setErr("Cannot reach the Forgeyard server."); } finally { setBusy(false); }
+    } catch { setErr(t("playground.unreachable")); } finally { setBusy(false); }
   };
   return (
     <section className="panel play" aria-labelledby="rr-title">
-      <h2 id="rr-title">Rerank</h2>
+      <h2 id="rr-title">{t("playground.rr.title")}</h2>
       <form onSubmit={go}>
-        <div className="field"><label htmlFor="rr-query">Query</label><input id="rr-query" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
-        <div className="field" style={{ marginTop: 10 }}><label htmlFor="rr-docs">Documents, one per line</label><textarea id="rr-docs" rows={4} value={docs} onChange={(e) => setDocs(e.target.value)} /></div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !query.trim() || !list.length} style={{ marginTop: 10 }}>{busy ? "Waiting…" : "Rank"}</button>
+        <div className="field"><label htmlFor="rr-query">{t("playground.rr.query")}</label><input id="rr-query" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
+        <div className="field" style={{ marginTop: 10 }}><label htmlFor="rr-docs">{t("playground.rr.docs")}</label><textarea id="rr-docs" rows={4} value={docs} onChange={(e) => setDocs(e.target.value)} /></div>
+        <button type="submit" className="btn btn-primary" disabled={busy || !query.trim() || !list.length} style={{ marginTop: 10 }}>{busy ? t("playground.waiting") : t("playground.rr.rank")}</button>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
       {out && (
-        <ol className="ranked" aria-label="Ranked documents">
+        <ol className="ranked" aria-label={t("playground.rr.ranked")}>
           {out.map((r) => <li key={r.index}><span className="mono small">{r.relevance_score.toFixed(3)}</span><span>{list[r.index]}</span></li>)}
         </ol>
       )}
@@ -512,6 +527,7 @@ const CLASSIFY_SAMPLE = "I love how quiet this laptop is.\nThe delivery was late
 // Text classification (1.4.4): texts, one per line, to /v1/classify; for each, every label's probability, the
 // most likely first (the names come from the model's config.json, kept in the catalog).
 function Classify({ model, labels }: { model: string; labels: TextClassifier | null }) {
+  const t = useT();
   const [text, setText] = useState(CLASSIFY_SAMPLE);
   const [out, setOut] = useState<{ texts: string[]; answer: ClassifyAnswer; took: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -525,29 +541,29 @@ function Classify({ model, labels }: { model: string; labels: TextClassifier | n
       const res = await post("classify", { model, input: list });
       if (!res.ok) { setErr(await failure(res)); return; }
       setOut({ texts: list, answer: await res.json(), took: performance.now() - started });
-    } catch { setErr("Cannot reach the Forgeyard server."); } finally { setBusy(false); }
+    } catch { setErr(t("playground.unreachable")); } finally { setBusy(false); }
   };
   const multi = labels?.problem === "multi_label_classification";
   return (
     <section className="panel play" aria-labelledby="cls-title">
-      <h2 id="cls-title">Text classification</h2>
+      <h2 id="cls-title">{t("playground.cls.title")}</h2>
       <p className="muted small">
-        {labels?.labels ? `${labels.labels} labels${labels.label_names?.length ? `: ${labels.label_names.slice(0, 6).join(", ")}${labels.label_names.length > 6 ? ", …" : "."}` : "."} ` : ""}
-        {multi ? "Each label is scored on its own (multi-label), so the probabilities do not add up to 1." : "The probabilities of the labels add up to 1."}
+        {labels?.labels ? `${labelLine(t, labels.labels, labels.label_names ?? [])} ` : ""}
+        {multi ? t("playground.cls.multi") : t("playground.cls.single")}
       </p>
       <form onSubmit={go}>
-        <div className="field"><label htmlFor="cls-input">Texts, one per line</label><textarea id="cls-input" rows={4} value={text} onChange={(e) => setText(e.target.value)} /></div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !list.length} style={{ marginTop: 10 }}>{busy ? "Waiting…" : "Classify"}</button>
+        <div className="field"><label htmlFor="cls-input">{t("playground.cls.texts")}</label><textarea id="cls-input" rows={4} value={text} onChange={(e) => setText(e.target.value)} /></div>
+        <button type="submit" className="btn btn-primary" disabled={busy || !list.length} style={{ marginTop: 10 }}>{busy ? t("playground.waiting") : t("playground.cls.classify")}</button>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
       {out && (
         <>
-          <ol className="cls-results" aria-label="Labels">
+          <ol className="cls-results" aria-label={t("playground.cls.labels")}>
             {[...out.answer.data].sort((a, b) => a.index - b.index).map((d) => (
               <ClassifyResult key={d.index} text={out.texts[d.index] ?? ""} d={d} names={labels?.label_names ?? []} />
             ))}
           </ol>
-          <p className="muted small">{out.answer.usage?.prompt_tokens != null ? `${out.answer.usage.prompt_tokens} tokens · ` : ""}{ms(out.took)}</p>
+          <p className="muted small">{out.answer.usage?.prompt_tokens != null ? t("playground.cls.tokens", { count: String(out.answer.usage.prompt_tokens) }) : ""}{ms(out.took)}</p>
         </>
       )}
     </section>
@@ -556,18 +572,26 @@ function Classify({ model, labels }: { model: string; labels: TextClassifier | n
 
 const CLASSIFY_SHOWN = 5;
 
+// "3 labels: positive, negative, neutral." (at most six names, then "…").
+function labelLine(t: ReturnType<typeof useT>, count: number, names: string[]): string {
+  if (!names.length) return t("playground.cls.labelsOnly", { count: String(count) });
+  const list = names.slice(0, 6).join(t("playground.cls.join"));
+  return t(names.length > 6 ? "playground.cls.labelsMore" : "playground.cls.labelsNamed", { count: String(count), names: list });
+}
+
 function ClassifyResult({ text, d, names }: { text: string; d: ClassifyAnswer["data"][number]; names: string[] }) {
+  const t = useT();
   const [all, setAll] = useState(false);
   // Without the names (a local model), the engine still names the most likely label.
   const top = d.probs.indexOf(Math.max(...d.probs));
-  const ranked = d.probs.map((p, i) => ({ i, p, name: names[i] ?? (i === top && d.label ? d.label : `label ${i}`) }))
+  const ranked = d.probs.map((p, i) => ({ i, p, name: names[i] ?? (i === top && d.label ? d.label : t("playground.cls.label", { i: String(i) })) }))
     .sort((a, b) => b.p - a.p);
   const shown = all ? ranked : ranked.slice(0, CLASSIFY_SHOWN);
   return (
     <li className="cls-item">
       <p className="cls-text">{text}</p>
       <p className="cls-top"><strong>{d.label ?? ranked[0]?.name}</strong> <span className="mono small">{(ranked[0]?.p ?? 0).toFixed(3)}</span></p>
-      <ul className="cls-bars" aria-label={`Probabilities for text ${d.index + 1}`}>
+      <ul className="cls-bars" aria-label={t("playground.cls.probs", { n: String(d.index + 1) })}>
         {shown.map((r) => (
           <li key={r.i}>
             <span className="cls-name" title={r.name}>{r.name}</span>
@@ -578,7 +602,7 @@ function ClassifyResult({ text, d, names }: { text: string; d: ClassifyAnswer["d
       </ul>
       {ranked.length > CLASSIFY_SHOWN && (
         <button type="button" className="linkish small" onClick={() => setAll(!all)}>
-          {all ? "Show the top five" : `Show all ${ranked.length} labels`}
+          {all ? t("playground.cls.top") : t("playground.cls.all", { count: String(ranked.length) })}
         </button>
       )}
     </li>
@@ -586,6 +610,7 @@ function ClassifyResult({ text, d, names }: { text: string; d: ClassifyAnswer["d
 }
 
 function Transcribe({ model }: { model: string }) {
+  const t = useT();
   const [file, setFile] = useState<File | null>(null);
   const [out, setOut] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -604,18 +629,18 @@ function Transcribe({ model }: { model: string }) {
       if (!res.ok) { setErr(await failure(res)); return; }
       const data = await res.json();
       setOut(`${(data.text ?? "").trim()}\n\n(${ms(performance.now() - started)})`);
-    } catch { setErr("Cannot reach the Forgeyard server."); } finally { setBusy(false); }
+    } catch { setErr(t("playground.unreachable")); } finally { setBusy(false); }
   };
   return (
     <section className="panel play" aria-labelledby="asr-title">
-      <h2 id="asr-title">Speech to text</h2>
+      <h2 id="asr-title">{t("playground.asr.title")}</h2>
       <form onSubmit={go}>
-        <div className="field"><label htmlFor="asr-file">Audio file (mp3, wav, m4a…)</label>
+        <div className="field"><label htmlFor="asr-file">{t("playground.asr.file")}</label>
           <input id="asr-file" type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
-        <button type="submit" className="btn btn-primary" disabled={busy || !file} style={{ marginTop: 10 }}>{busy ? "Transcribing…" : "Transcribe"}</button>
+        <button type="submit" className="btn btn-primary" disabled={busy || !file} style={{ marginTop: 10 }}>{busy ? t("playground.asr.busy") : t("playground.asr.go")}</button>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
-      {out && <pre className="logs try-answer play-out" aria-label="Transcript">{out}</pre>}
+      {out && <pre className="logs try-answer play-out" aria-label={t("playground.asr.transcript")}>{out}</pre>}
     </section>
   );
 }
@@ -628,6 +653,7 @@ const SPEAK_SAMPLE = "Forgeyard runs models on your own machines. 歡迎使用 F
 // "Stream", the audio is asked for as it is made (stream_format audio) and the time to the first audio
 // is shown; the player still plays the whole file.
 function Speak({ model }: { model: string }) {
+  const t = useT();
   const [text, setText] = useState(SPEAK_SAMPLE);
   const [info, setInfo] = useState<VoicesAnswer | null>(null);
   const [infoErr, setInfoErr] = useState<string | null>(null);
@@ -652,7 +678,7 @@ function Speak({ model }: { model: string }) {
         setVoice(data.default ?? data.voices[0]?.id ?? "");
         setFormat(data.default_format ?? "");
       } catch {
-        if (live) setInfoErr("Cannot reach the Forgeyard server.");
+        if (live) setInfoErr(tNow("playground.unreachable"));
       }
     })();
     return () => { live = false; };
@@ -701,15 +727,16 @@ function Speak({ model }: { model: string }) {
       const blob = new Blob([data], { type: SPEECH_MIME[fmt] ?? "application/octet-stream" });
       const used = res.headers.get("X-Forgeyard-Voice");
       const replica = res.headers.get("X-Forgeyard-Replica");
-      const meta = [replica ? `replica ${replica.split("#")[1]}` : null, used ? `voice ${used}` : voice ? `voice ${voice}` : null,
-        stream && canStream && first !== null ? `first bytes ${ms(first - started)}` : null, `${ms(total)}`,
-        `${(size / 1024).toFixed(0)} KiB ${fmt}`, `${chars} characters`].filter(Boolean).join(" · ");
+      const meta = [replica ? t("playground.meta.replica", { n: replica.split("#")[1] }) : null,
+        used ? t("playground.speak.voiceUsed", { name: used }) : voice ? t("playground.speak.voiceUsed", { name: voice }) : null,
+        stream && canStream && first !== null ? t("playground.speak.firstBytes", { time: ms(first - started) }) : null, `${ms(total)}`,
+        `${(size / 1024).toFixed(0)} KiB ${fmt}`, t("playground.speak.characters", { count: String(chars) })].filter(Boolean).join(" · ");
       setAudio((cur) => {
         if (cur) URL.revokeObjectURL(cur.url);
         return { url: URL.createObjectURL(blob), name: `${model}.${fmt === "pcm" ? "wav" : fmt === "opus" ? "ogg" : fmt}`, meta };
       });
     } catch (e2) {
-      if ((e2 as Error).name !== "AbortError") setErr("Cannot reach the Forgeyard server.");
+      if ((e2 as Error).name !== "AbortError") setErr(t("playground.unreachable"));
     } finally {
       setBusy(false);
       abort.current = null;
@@ -718,51 +745,51 @@ function Speak({ model }: { model: string }) {
 
   return (
     <section className="panel play" aria-labelledby="speak-title">
-      <h2 id="speak-title">Speak</h2>
+      <h2 id="speak-title">{t("playground.speak.title")}</h2>
       {infoErr && <Notice tone="error">{infoErr}</Notice>}
       <form onSubmit={go} className="speak-form">
         <div className="field">
-          <label htmlFor="speak-text">Text</label>
+          <label htmlFor="speak-text">{t("playground.text")}</label>
           <textarea id="speak-text" rows={4} value={text} onChange={(e) => setText(e.target.value)} />
-          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{chars.toLocaleString("en-US")}{cap ? ` of at most ${cap.toLocaleString("en-US")}` : ""} characters</p>
+          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{cap ? t("playground.charsOf", { count: chars, max: cap }) : t("playground.chars", { count: chars })}</p>
         </div>
         <div className="speak-options">
           <div className="field">
-            <label htmlFor="speak-voice">Voice</label>
+            <label htmlFor="speak-voice">{t("playground.speak.voice")}</label>
             <select id="speak-voice" value={voice} onChange={(e) => setVoice(e.target.value)} disabled={!info}>
-              {info && info.voices.length === 0 && <option value="">The model's own voice</option>}
+              {info && info.voices.length === 0 && <option value="">{t("playground.speak.ownVoice")}</option>}
               {(info?.voices ?? []).map((v) => (
                 <option key={v.id} value={v.id}>{v.name}{v.language ? ` · ${v.language}` : ""}{v.gender ? ` · ${v.gender}` : ""}</option>
               ))}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="speak-format">Format</label>
+            <label htmlFor="speak-format">{t("playground.speak.format")}</label>
             <select id="speak-format" value={format} onChange={(e) => setFormat(e.target.value)} disabled={!info}>
               {formats.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
-          <label className="check speak-stream" title={canStream ? "Sends stream_format: audio" : "This model or format does not stream"}>
-            <input type="checkbox" checked={stream && canStream} disabled={!canStream} onChange={(e) => setStream(e.target.checked)} /> Stream
+          <label className="check speak-stream" title={canStream ? t("playground.speak.streamTitle") : t("playground.speak.noStream")}>
+            <input type="checkbox" checked={stream && canStream} disabled={!canStream} onChange={(e) => setStream(e.target.checked)} /> {t("playground.speak.stream")}
           </label>
         </div>
         <div className="row-gap">
           {busy ? (
-            <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
+            <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> {t("playground.stop")}</button>
           ) : (
             <button type="submit" className="btn btn-primary" disabled={!text.trim() || (cap !== undefined && chars > cap)}>
-              <IconSpeakerphone size={16} aria-hidden="true" /> Speak
+              <IconSpeakerphone size={16} aria-hidden="true" /> {t("playground.speak.go")}
             </button>
           )}
         </div>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
       {audio && (
-        <div className="speak-out" aria-label="Speech">
-          <audio controls src={audio.url} aria-label="The speech" />
+        <div className="speak-out" aria-label={t("playground.speak.out")}>
+          <audio controls src={audio.url} aria-label={t("playground.speak.player")} />
           <div className="speak-meta">
             <span className="msg-meta">{audio.meta}</span>
-            <a className="btn btn-quiet btn-small" href={audio.url} download={audio.name}><IconDownload size={14} aria-hidden="true" /> Download</a>
+            <a className="btn btn-quiet btn-small" href={audio.url} download={audio.name}><IconDownload size={14} aria-hidden="true" /> {t("playground.download")}</a>
           </div>
         </div>
       )}
@@ -785,6 +812,7 @@ function b64Blob(b64: string, mime: string): Blob {
 // base64 and are shown with a download link each. Requests wait in the gateway's queue while the model
 // is busy, so a long wait is normal on a CPU.
 function Imagine({ model }: { model: string }) {
+  const t = useT();
   const [prompt, setPrompt] = useState(IMAGE_SAMPLE);
   const [opts, setOpts] = useState<ImageOptions | null>(null);
   const [optsErr, setOptsErr] = useState<string | null>(null);
@@ -807,7 +835,7 @@ function Imagine({ model }: { model: string }) {
         setOpts(data);
         setSize(data.default_size);
       } catch {
-        if (live) setOptsErr("Cannot reach the Forgeyard server.");
+        if (live) setOptsErr(tNow("playground.unreachable"));
       }
     })();
     return () => { live = false; };
@@ -837,14 +865,14 @@ function Imagine({ model }: { model: string }) {
         url: URL.createObjectURL(b64Blob(d.b64_json, mime)), name: `${model}-${i + 1}.${fmt === "jpeg" ? "jpg" : fmt}`,
       }));
       const replica = res.headers.get("X-Forgeyard-Replica");
-      const meta = [replica ? `replica ${replica.split("#")[1]}` : null, `${images.length} image${images.length === 1 ? "" : "s"}`,
+      const meta = [replica ? t("playground.meta.replica", { n: replica.split("#")[1] }) : null, t.plural("playground.img.images", images.length),
         data.size ?? null, fmt.toUpperCase(), ms(performance.now() - started)].filter(Boolean).join(" · ");
       setMade((cur) => {
         cur?.images.forEach((i) => URL.revokeObjectURL(i.url));
         return { images, meta };
       });
     } catch (e2) {
-      if ((e2 as Error).name !== "AbortError") setErr("Cannot reach the Forgeyard server.");
+      if ((e2 as Error).name !== "AbortError") setErr(t("playground.unreachable"));
     } finally {
       setBusy(false);
       abort.current = null;
@@ -853,23 +881,23 @@ function Imagine({ model }: { model: string }) {
 
   return (
     <section className="panel play" aria-labelledby="img-title">
-      <h2 id="img-title">Image</h2>
+      <h2 id="img-title">{t("playground.img.title")}</h2>
       {optsErr && <Notice tone="error">{optsErr}</Notice>}
       <form onSubmit={go} className="img-form">
         <div className="field">
-          <label htmlFor="img-prompt">Prompt</label>
+          <label htmlFor="img-prompt">{t("playground.prompt")}</label>
           <textarea id="img-prompt" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{chars.toLocaleString("en-US")}{cap ? ` of at most ${cap.toLocaleString("en-US")}` : ""} characters</p>
+          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{cap ? t("playground.charsOf", { count: chars, max: cap }) : t("playground.chars", { count: chars })}</p>
         </div>
         <div className="img-options">
           <div className="field">
-            <label htmlFor="img-size">Size</label>
+            <label htmlFor="img-size">{t("playground.size")}</label>
             <select id="img-size" value={size} onChange={(e) => setSize(e.target.value)} disabled={!opts}>
-              {sizes.map((s) => <option key={s} value={s}>{s}{s === opts?.default_size ? " (default)" : ""}</option>)}
+              {sizes.map((s) => <option key={s} value={s}>{s}{s === opts?.default_size ? t("playground.default") : ""}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="img-n">Images</label>
+            <label htmlFor="img-n">{t("playground.img.count")}</label>
             <select id="img-n" value={n} onChange={(e) => setN(Number(e.target.value))} disabled={!opts}>
               {counts.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -878,26 +906,26 @@ function Imagine({ model }: { model: string }) {
         <div className="row-gap">
           {busy ? (
             <>
-              <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> Stop</button>
-              <span className="muted small" role="status">Making {n === 1 ? "the image" : `${n} images`}… this takes a while, longer on a CPU or when others are waiting.</span>
+              <button type="button" className="btn" onClick={() => abort.current?.abort()}><IconPlayerStop size={16} aria-hidden="true" /> {t("playground.stop")}</button>
+              <span className="muted small" role="status">{n === 1 ? t("playground.img.making.one") : t("playground.img.making.other", { count: String(n) })}</span>
             </>
           ) : (
             <button type="submit" className="btn btn-primary" disabled={!opts || !prompt.trim() || (cap !== undefined && chars > cap)}>
-              <IconPhotoAi size={16} aria-hidden="true" /> Generate
+              <IconPhotoAi size={16} aria-hidden="true" /> {t("playground.generate")}
             </button>
           )}
         </div>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
       {made && (
-        <div className="img-out" aria-label="Generated images">
+        <div className="img-out" aria-label={t("playground.img.made")}>
           <span className="msg-meta">{made.meta}</span>
           <div className="img-grid">
             {made.images.map((i, k) => (
               <figure key={i.url} className="img-item">
-                <img src={i.url} alt={`Image ${k + 1} for: ${prompt.slice(0, 80)}`} />
+                <img src={i.url} alt={t("playground.img.alt", { n: String(k + 1), prompt: prompt.slice(0, 80) })} />
                 <figcaption>
-                  <a className="btn btn-quiet btn-small" href={i.url} download={i.name}><IconDownload size={14} aria-hidden="true" /> Download</a>
+                  <a className="btn btn-quiet btn-small" href={i.url} download={i.name}><IconDownload size={14} aria-hidden="true" /> {t("playground.download")}</a>
                 </figcaption>
               </figure>
             ))}

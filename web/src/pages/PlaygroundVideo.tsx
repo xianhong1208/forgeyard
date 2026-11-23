@@ -2,8 +2,12 @@ import { IconDownload, IconMovie, IconPlayerPlay, IconTrash, IconX } from "@tabl
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { Notice } from "../components/ui";
+import { labels, t as tNow } from "../i18n/core";
+import { getLang, locale } from "../i18n/lang";
+import { useT } from "../i18n/react";
 import { notifyUnauthorized } from "../lib/api";
-import { answerError, elapsed, videoFrames, videoSizes, type Video, type VideoOptions } from "../lib/gateway";
+import { videoFrames, videoSizes, type Video, type VideoOptions } from "../lib/gateway";
+import { clock, playError } from "../lib/playground";
 
 // The Playground's Video panel (1.3): a video is a job. It is asked for at /api/playground/videos (the
 // gateway's /v1/videos rules, as the signed-in person: the session cookie and the CSRF header, counted as
@@ -24,21 +28,24 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
 }
 
 async function failure(res: Response): Promise<string> {
-  return answerError(res.status, await res.json().catch(() => null));
+  return playError(res.status, await res.json().catch(() => null));
 }
 
-const STATUS_LABEL: Record<Video["status"], string> = {
-  queued: "Waiting for the replica", in_progress: "Being made", completed: "Made", failed: "Failed",
-};
+const STATUS_LABEL: Record<Video["status"], string> = labels({
+  queued: "playground.video.status.queued", in_progress: "playground.video.status.in_progress", completed: "playground.video.status.completed",
+  failed: "playground.video.status.failed",
+});
 
 export const contentUrl = (id: string) => `/api/playground/videos/${encodeURIComponent(id)}/content`;
 
 function when(ts: number | null): string {
   if (!ts) return "—";
-  return new Date(ts * 1000).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const lang = getLang();
+  return new Date(ts * 1000).toLocaleString(lang === "en" ? "en-GB" : locale(lang), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export function Videos({ model }: { model: string }) {
+  const t = useT();
   const [prompt, setPrompt] = useState(SAMPLE);
   const [opts, setOpts] = useState<VideoOptions | null>(null);
   const [optsErr, setOptsErr] = useState<string | null>(null);
@@ -79,7 +86,7 @@ export function Videos({ model }: { model: string }) {
         setSize(data.default_size);
         setSeconds(data.seconds);
       } catch {
-        if (live.current) setOptsErr("Cannot reach the Forgeyard server.");
+        if (live.current) setOptsErr(tNow("playground.unreachable"));
       }
     })();
   }, [model, loadMine]);
@@ -93,7 +100,7 @@ export function Videos({ model }: { model: string }) {
       try {
         const res = await call(`/${encodeURIComponent(job.id)}`);
         if (!live.current) return;
-        if (res.status === 404) { setJob(null); setErr("The video is gone (deleted)."); return; }
+        if (res.status === 404) { setJob(null); setErr(tNow("playground.video.gone")); return; }
         if (!res.ok) return;
         const v = (await res.json()) as Video;
         setJob(v);
@@ -123,7 +130,7 @@ export function Videos({ model }: { model: string }) {
       setNow(Date.now() / 1000);
       void loadMine();
     } catch {
-      setErr("Cannot reach the Forgeyard server.");
+      setErr(t("playground.unreachable"));
     } finally {
       setSending(false);
     }
@@ -137,7 +144,7 @@ export function Videos({ model }: { model: string }) {
       if (job?.id === v.id) setJob(null);
       void loadMine();
     } catch {
-      setErr("Cannot reach the Forgeyard server.");
+      setErr(t("playground.unreachable"));
     }
   };
 
@@ -145,79 +152,79 @@ export function Videos({ model }: { model: string }) {
   const expired = shown?.expires_at ? shown.expires_at <= now : false;
   return (
     <section className="panel play" aria-labelledby="vid-title">
-      <h2 id="vid-title">Video</h2>
-      <p className="muted small vid-lead">A video is a job: it is asked for, made on one replica, then fetched. It takes minutes, longer when others
-        are waiting; this page follows it, and it keeps going if you leave.</p>
+      <h2 id="vid-title">{t("playground.video.title")}</h2>
+      <p className="muted small vid-lead">{t("playground.video.lead")}</p>
       {optsErr && <Notice tone="error">{optsErr}</Notice>}
       <form onSubmit={go} className="img-form">
         <div className="field">
-          <label htmlFor="vid-prompt">Prompt</label>
+          <label htmlFor="vid-prompt">{t("playground.prompt")}</label>
           <textarea id="vid-prompt" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{chars.toLocaleString("en-US")}{cap ? ` of at most ${cap.toLocaleString("en-US")}` : ""} characters</p>
+          <p className={`field-hint${cap && chars > cap ? " field-error" : ""}`}>{cap ? t("playground.charsOf", { count: chars, max: cap }) : t("playground.chars", { count: chars })}</p>
         </div>
         <div className="img-options">
           <div className="field">
-            <label htmlFor="vid-size">Size</label>
+            <label htmlFor="vid-size">{t("playground.size")}</label>
             <select id="vid-size" value={size} onChange={(e) => setSize(e.target.value)} disabled={!opts}>
-              {sizes.map((s) => <option key={s} value={s}>{s}{s === opts?.default_size ? " (default)" : ""}</option>)}
+              {sizes.map((s) => <option key={s} value={s}>{s}{s === opts?.default_size ? t("playground.default") : ""}</option>)}
             </select>
           </div>
           <div className="field">
-            <label htmlFor="vid-seconds">Length</label>
+            <label htmlFor="vid-seconds">{t("playground.video.length")}</label>
             <select id="vid-seconds" value={seconds} onChange={(e) => setSeconds(Number(e.target.value))} disabled={!opts}>
-              {lengths.map((s) => <option key={s} value={s}>{s} s</option>)}
+              {lengths.map((s) => <option key={s} value={s}>{t("playground.video.seconds", { n: String(s) })}</option>)}
             </select>
           </div>
-          {opts && <p className="field-hint vid-frames">{videoFrames(seconds || opts.seconds, opts.fps)} frames at {opts.fps} fps</p>}
+          {opts && <p className="field-hint vid-frames">{t("playground.video.frames", { frames: String(videoFrames(seconds || opts.seconds, opts.fps)), fps: String(opts.fps) })}</p>}
         </div>
         <div className="row-gap">
           <button type="submit" className="btn btn-primary" disabled={!opts || sending || active || !prompt.trim() || (cap !== undefined && chars > cap)}>
-            <IconMovie size={16} aria-hidden="true" /> Generate
+            <IconMovie size={16} aria-hidden="true" /> {t("playground.generate")}
           </button>
-          {active && <button type="button" className="btn" onClick={() => job && remove(job)}><IconX size={16} aria-hidden="true" /> Cancel</button>}
+          {active && <button type="button" className="btn" onClick={() => job && remove(job)}><IconX size={16} aria-hidden="true" /> {t("common.cancel")}</button>}
         </div>
       </form>
       {err && <div style={{ marginTop: 12 }}><Notice tone="error">{err}</Notice></div>}
       {shown && active && (
-        <div className="vid-job" role="status" aria-label="Video job">
+        <div className="vid-job" role="status" aria-label={t("playground.video.job")}>
           <div className="vid-job-head">
             <span className={`chip vid-chip vid-${shown.status}`}>{STATUS_LABEL[shown.status]}</span>
-            <span className="mono small">{elapsed(now - shown.created_at)}</span>
+            <span className="mono small">{clock(now - shown.created_at)}</span>
           </div>
           <span className={`bar vid-bar${shown.progress ? "" : " vid-bar-busy"}`} aria-hidden="true">
             <span style={shown.progress ? { width: `${shown.progress}%` } : undefined} />
           </span>
-          <p className="muted small">{shown.size} · {shown.seconds} s · <span className="mono">{shown.id}</span></p>
+          <p className="muted small">{t("playground.video.jobLine", { size: shown.size, seconds: shown.seconds })}<span className="mono">{shown.id}</span></p>
         </div>
       )}
       {shown && shown.status === "failed" && (
-        <div style={{ marginTop: 12 }}><Notice tone="error">{shown.error?.message ?? "The video failed."}</Notice></div>
+        <div style={{ marginTop: 12 }}><Notice tone="error">{shown.error?.message ?? t("playground.video.failed")}</Notice></div>
       )}
       {shown && shown.status === "completed" && (
-        <figure className="vid-out" aria-label="Generated video">
-          {expired ? <p className="muted">This video expired and was deleted.</p>
-            : <video src={contentUrl(shown.id)} controls playsInline preload="metadata" aria-label={`Video for: ${prompt.slice(0, 80)}`} />}
+        <figure className="vid-out" aria-label={t("playground.video.made")}>
+          {expired ? <p className="muted">{t("playground.video.expired")}</p>
+            : <video src={contentUrl(shown.id)} controls playsInline preload="metadata" aria-label={t("playground.video.alt", { prompt: prompt.slice(0, 80) })} />}
           <figcaption>
-            <span className="msg-meta">{shown.size} · {shown.seconds} s · made in {elapsed((shown.completed_at ?? now) - shown.created_at)} · kept until {when(shown.expires_at)}</span>
-            {!expired && <a className="btn btn-quiet btn-small" href={contentUrl(shown.id)} download={`${model}-${shown.id.slice(-8)}.mp4`}><IconDownload size={14} aria-hidden="true" /> Download</a>}
+            <span className="msg-meta">{t("playground.video.caption", { size: shown.size, seconds: shown.seconds, took: clock((shown.completed_at ?? now) - shown.created_at),
+              until: when(shown.expires_at) })}</span>
+            {!expired && <a className="btn btn-quiet btn-small" href={contentUrl(shown.id)} download={`${model}-${shown.id.slice(-8)}.mp4`}><IconDownload size={14} aria-hidden="true" /> {t("playground.download")}</a>}
           </figcaption>
         </figure>
       )}
       {mine.length > 0 && (
         <div className="vid-mine">
-          <h3 className="small">Your videos with this model</h3>
+          <h3 className="small">{t("playground.video.mine")}</h3>
           <ul className="vid-list">
             {mine.map((listed) => listed.id === shown?.id ? shown : listed).map((v) => (
               <li key={v.id} className={v.id === shown?.id ? "on" : ""}>
                 <span className={`chip vid-chip vid-${v.status}`}>{STATUS_LABEL[v.status]}</span>
-                <span className="small">{when(v.created_at)} · {v.size} · {v.seconds} s</span>
+                <span className="small">{t("playground.video.listLine", { when: when(v.created_at), size: v.size, seconds: v.seconds })}</span>
                 <span className="vid-list-actions">
                   {v.id !== shown?.id && (v.status === "completed" || v.status === "queued" || v.status === "in_progress") && (
                     <button type="button" className="btn btn-quiet btn-small" onClick={() => { setJob(v); setNow(Date.now() / 1000); }}>
-                      <IconPlayerPlay size={14} aria-hidden="true" /> {v.status === "completed" ? "Show" : "Follow"}
+                      <IconPlayerPlay size={14} aria-hidden="true" /> {v.status === "completed" ? t("playground.video.show") : t("playground.video.follow")}
                     </button>
                   )}
-                  <button type="button" className="btn btn-quiet btn-small" aria-label={`Delete the video of ${when(v.created_at)}`} onClick={() => remove(v)}>
+                  <button type="button" className="btn btn-quiet btn-small" aria-label={t("playground.video.delete", { when: when(v.created_at) })} onClick={() => remove(v)}>
                     <IconTrash size={14} aria-hidden="true" />
                   </button>
                 </span>
