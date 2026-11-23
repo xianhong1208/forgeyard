@@ -24,7 +24,7 @@ describe("the 1.5.1 wording pass", () => {
       ["20 models in the catalog.", "目錄裡有 20 個模型。"],
       ["Ready: chat-a, embed (asleep).", "已就緒：chat-a, embed（休眠中）。"],
       ["Not ready yet: chat-b (starting). The first start downloads the model and the engine; that can take a while.",
-        "還沒有就緒：chat-b (starting)。第一次啟動要下載模型和引擎，可能需要一段時間。"],
+        "還沒有就緒：chat-b (starting)。第一次啟動要下載模型和推論引擎，可能需要一段時間。"],
       ["You have 2 active keys.", "你有 2 把啟用中的金鑰。"],
       ["You have sent 10127 requests with your keys.", "你已經用你的金鑰送出 10,127 個請求。"],
       ["The catalog is empty.", "目錄是空的。"],

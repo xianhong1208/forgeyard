@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { CheckBar, EngineUpdates } from "../components/EngineUpdates";
+import { EngineImage } from "../components/EngineImage";
 import { HelpLink, HelpLinks } from "../components/HelpLink";
 import { Crumb, FoldButton, HardwareChips, Jump, MachineCell, ModelCards, Section } from "../components/LibraryPage";
 import { Notice } from "../components/ui";
@@ -14,7 +15,7 @@ import { pluralForm } from "../i18n/format";
 import { useT } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { imageTag, when } from "../lib/format";
-import { engineDescription } from "../lib/engines";
+import { engineDescription, engineRuns } from "../lib/engines";
 import { API_LABEL, TASK_LABEL, mediaText } from "../lib/models";
 import { digestOf, engineHref, pinned, stale, whereText } from "../lib/pages";
 import { useDocumentTitle } from "../lib/title";
@@ -110,6 +111,7 @@ function EngineView({ p, recipes, catalog, machines, deployments, listing, relis
             <p className="eyebrow">{t("enginepage.eyebrow", { kind: r.builtin ? t("enginepage.builtin") : t("enginepage.custom") })}</p>
             <h1 className="mono">{r.name}</h1>
             <p className="small muted lp-sub">{r.title} {r.version}</p>
+            <p className="engine-image-line lp-image"><EngineImage runs={engineRuns(r.variants)} /></p>
           </div>
         </div>
         {p.can_manage && (

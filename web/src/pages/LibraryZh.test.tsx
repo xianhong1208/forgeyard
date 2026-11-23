@@ -161,9 +161,9 @@ describe("the model library in Traditional Chinese", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "模型" })).toBeTruthy();
     const table = await screen.findByRole("table");
     const tabs = screen.getByRole("tablist", { name: "模型" });
-    expect(within(tabs).getAllByRole("tab").map((x) => x.textContent)).toEqual(["目錄（1）", "引擎", "來源"]);
+    expect(within(tabs).getAllByRole("tab").map((x) => x.textContent)).toEqual(["目錄（1）", "推論引擎", "來源"]);
     expect(within(table).getAllByRole("columnheader").map((x) => x.textContent).filter(Boolean))
-      .toEqual(["模型", "用途", "格式", "大小", "架構", "授權", "引擎"]);
+      .toEqual(["模型", "用途", "格式", "大小", "架構", "授權", "推論引擎"]);
     const row = within(table).getAllByRole("row")[1];
     expect(within(row).getByText("對話")).toBeTruthy();       // the task by its code, not the server's "Chat"
     expect(within(row).getByText("圖片")).toBeTruthy();        // what it takes besides text
@@ -182,18 +182,18 @@ describe("the model library in Traditional Chinese", () => {
   it("FY-WEB-741 Engines: a built-in engine's description is translated while the server sends the English it was made from", async () => {
     server();
     mount("/models?tab=engines");
-    const card = await screen.findByRole("article", { name: "引擎 llama-cpp" });
+    const card = await screen.findByRole("article", { name: "推論引擎 llama-cpp" });
     expect(within(card).getByText(lookup("zh-TW", "library.engineDesc.llama-cpp"))).toBeTruthy();
     expect(within(card).getByText("提供對話、文字轉語音")).toBeTruthy();
     expect(within(card).getByText("詳細資訊")).toBeTruthy();
     expect(within(card).getByText("運算能力 7.0")).toBeTruthy();
     expect(within(card).getByText("無法連到映像檔 registry 的機器：載入映像檔")).toBeTruthy();
     // A custom engine's description is its author's, shown as written.
-    const mine = screen.getByRole("article", { name: "引擎 llama-cpp-mine" });
+    const mine = screen.getByRole("article", { name: "推論引擎 llama-cpp-mine" });
     expect(within(mine).getByText("My own build of llama.cpp.")).toBeTruthy();
     expect(within(mine).getByText("自訂")).toBeTruthy();
     expect(within(mine).getByRole("button", { name: "編輯" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /加入自訂引擎/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /加入自訂推論引擎/ })).toBeTruthy();
     // The rule itself: English as sent; a text the server changed is shown as sent, not covered by the old translation.
     expect(engineDescription({ name: "llama-cpp", builtin: true, description: "A newer description." })).toBe("A newer description.");
     expect(engineDescription({ name: "llama-cpp", builtin: false, description: LLAMA_DESC })).toBe(LLAMA_DESC);
@@ -259,7 +259,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(within(form).getByText("輸入").nextElementSibling!.textContent).toBe("僅文字");
     expect(document.querySelector(".suggest-line")!.textContent).toBe("用 vllm-pooling 在 GPU 上執行；一個副本大約保留 3.38 GiB 的 GPU 記憶體。");
     expect(within(form).getByText("現在放得進：gpu-01 的 GPU #4、#5、cpu-01 的 CPU。")).toBeTruthy();
-    expect(within(form).getByText("以上是引擎的預設值（也可以用：vllm；上下文長度和並行數可在部署時變更）。")).toBeTruthy();
+    expect(within(form).getByText("以上是推論引擎的預設值（也可以用：vllm；上下文長度和並行數可在部署時變更）。")).toBeTruthy();
     expect(within(form).getByRole("group", { name: "估算對象" })).toBeTruthy();
     expect(within(form).getByLabelText("目錄中的名稱")).toBeTruthy();
     expect(within(form).getByRole("button", { name: "加入目錄" })).toBeTruthy();
@@ -304,12 +304,12 @@ describe("the model library in Traditional Chinese", () => {
     expect(facts.textContent).toContain("用 llama-cpp 的預設值需要每張 GPU 3.00 GiB");
     expect(facts.textContent).toContain("尚未部署");
     const jump = screen.getByRole("navigation", { name: "本頁內容" });
-    expect(within(jump).getAllByRole("link").map((a) => a.textContent)).toEqual(["概覽", "機器", "部署", "引擎", "檔案"]);
-    expect(headings()).toEqual([MODEL.name, "概覽", "機器 · 1 台的快取中有它", "部署 · 0", "可以執行它的引擎 · 2", "檔案"]);
+    expect(within(jump).getAllByRole("link").map((a) => a.textContent)).toEqual(["概覽", "機器", "部署", "推論引擎", "檔案"]);
+    expect(headings()).toEqual([MODEL.name, "概覽", "機器 · 1 台的快取中有它", "部署 · 0", "可以執行它的推論引擎 · 2", "檔案"]);
     expect(screen.getByText("加入時間").nextElementSibling!.textContent).toBe("由 owner 加入 · 2026年11月10日");
     expect(screen.getByText("結構").nextElementSibling!.textContent).toBe("28 層 · 上下文 40,960 個 token");
     const table = await screen.findByRole("table");
-    expect(within(table).getAllByRole("columnheader").map((x) => x.textContent)).toEqual(["機器", "快取", "放得下？", "那裡的引擎", "操作"]);
+    expect(within(table).getAllByRole("columnheader").map((x) => x.textContent)).toEqual(["機器", "快取", "放得下？", "那裡的推論引擎", "操作"]);
     const [, gpu, cpu] = within(table).getAllByRole("row");
     expect(within(gpu).getByText("放得下")).toBeTruthy();
     expect(gpu.textContent).toContain("GPU #4 上剩 40.00 GiB");
@@ -329,8 +329,8 @@ describe("the model library in Traditional Chinese", () => {
     server();
     mount("/models/engines/llama-cpp");
     expect(await screen.findByRole("heading", { level: 1, name: "llama-cpp" })).toBeTruthy();
-    expect(screen.getByText("引擎 · 內建")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /複製成自訂引擎/ })).toBeTruthy();
+    expect(screen.getByText("推論引擎 · 內建")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /複製成自訂推論引擎/ })).toBeTruthy();
     expect(document.querySelector(".mk-facts")!.textContent).toContain("2 個變體");
     expect(screen.getByText(lookup("zh-TW", "library.engineDesc.llama-cpp"))).toBeTruthy();
     expect(screen.getByText("GPU 用法").nextElementSibling!.textContent).toBe("獨占一張卡，除非部署設定為共用 · 也能在 CPU 上執行");
@@ -354,6 +354,24 @@ describe("the model library in Traditional Chinese", () => {
     expect(params.textContent).toContain("kv_cache · 進階");
     expect(headings()).toEqual(["llama-cpp", "概覽", "變體 · 2", "新版本", "機器 · 1 台已有", "參數", "部署 · 0", "它能執行的目錄模型 · 1"]);
     expect(englishIn([...page().querySelectorAll("h1, h2, th, dt, nav a")], /llama-cpp|GPU/g)).toEqual([]);
+  });
+
+  it("FY-WEB-872 the image an engine runs beside its name: on each card (the first by its tag, +N, all in the tooltip) and the engine's page", async () => {
+    server();
+    mount("/models?tab=engines");
+    const card = await screen.findByRole("article", { name: "推論引擎 llama-cpp" });
+    const img = within(card).getByTestId("engine-image");
+    expect(img.textContent).toBe("ghcr.io/ggml-org/llama.cpp:server-cuda+1");
+    expect(img.getAttribute("title")).toBe(`NVIDIA: ${LLAMA.variants[0].image}\nCPU: ${LLAMA.variants[1].engine}`);
+    // Before Details: the card shows it closed.
+    expect(img.closest("details")).toBeNull();
+    const mine = within(screen.getByRole("article", { name: "推論引擎 llama-cpp-mine" })).getByTestId("engine-image");
+    expect(mine.textContent).toBe("forgeyard-local/llama.cpp:server-vulkan-b11977");
+    cleanup();
+    mount("/models/engines/llama-cpp");
+    await screen.findByRole("heading", { level: 1, name: "llama-cpp" });
+    const head = document.querySelector(".lp-header")!;
+    expect(within(head as HTMLElement).getByTestId("engine-image").textContent).toBe("ghcr.io/ggml-org/llama.cpp:server-cuda+1");
   });
 
   it("FY-WEB-748 the library's words in lib code follow the language; English stays as it was", () => {
@@ -400,7 +418,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(within(row).getByText("Chat")).toBeTruthy();
     act(() => setLang("zh-TW"));
     await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "模型" })).toBeTruthy());
-    expect(screen.getAllByRole("tab").map((x) => x.textContent)).toEqual(["目錄（1）", "引擎", "來源"]);
+    expect(screen.getAllByRole("tab").map((x) => x.textContent)).toEqual(["目錄（1）", "推論引擎", "來源"]);
     expect(within(screen.getAllByRole("row")[1]).getByText("對話")).toBeTruthy();
   });
 

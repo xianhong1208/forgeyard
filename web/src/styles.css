@@ -428,6 +428,20 @@ h3.sub { margin: 18px 0 8px; font-size: 13px; font-weight: 650; color: var(--ink
 .engine-facts .vendor { display: inline-flex; align-items: center; gap: 3px; flex: none; }
 .engine-facts .chip { flex: none; }
 .recipe .engine-serves { margin: 6px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 1.5.2 (#189): the image (or program) an engine runs, beside its name: one line, the name cut with an ellipsis,
+   never the "+N". */
+.engine-image { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; max-width: 100%; vertical-align: bottom; font-size: 11.5px; }
+.engine-image-name { display: flex; min-width: 0; white-space: nowrap; }
+.engine-image-repo { flex: 0 4 auto; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
+.engine-image-tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.engine-image-more { flex: none; }
+.engine-image-line { display: flex; min-width: 0; height: 18px; line-height: 18px; margin: 4px 0 0; }
+.recipe p.engine-image-line { margin: 4px 0 0; }
+.lp-image { margin: 2px 0 0; }
+.lp-header .mk-title { max-width: 100%; }
+.field-hint.engine-image-line { height: auto; margin-top: 4px; }
+.engine-with-image { display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; }
+.engine-with-image .engine-image { max-width: min(42ch, 60vw); }
 .engine-foot { display: flex; align-items: flex-start; gap: 8px; margin-top: auto; padding-top: 6px; min-height: 36px; }
 .engine-details { flex: 1; min-width: 0; }
 .engine-details > summary { cursor: pointer; color: var(--ink-2); width: max-content; line-height: 30px; }

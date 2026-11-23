@@ -1,13 +1,13 @@
 import type en from "../en/enginepage";
 
 export default {
-  "enginepage.doc": "引擎",
-  "enginepage.eyebrow": "引擎 · {kind}",
+  "enginepage.doc": "推論引擎",
+  "enginepage.eyebrow": "推論引擎 · {kind}",
   "enginepage.builtin": "內建",
   "enginepage.custom": "自訂",
   "enginepage.inUse": "使用中：請先刪除它的部署",
-  "enginepage.copy": "複製成自訂引擎",
-  "enginepage.copyTitle": "從這個引擎的複本開始，加入一個自訂引擎",
+  "enginepage.copy": "複製成自訂推論引擎",
+  "enginepage.copyTitle": "從這個推論引擎的複本開始，加入自訂的推論引擎",
   "enginepage.serves": "提供 {tasks}",
   "enginepage.formats": "格式 {formats}",
   "enginepage.variants.one": "{count} 個變體",
@@ -31,11 +31,11 @@ export default {
   "enginepage.runsAsIs": " · 直接執行，沒有參數",
   "enginepage.paramsWhat": "參數",
   "enginepage.deployments": "部署",
-  "enginepage.noDeployment": "沒有部署使用這個引擎。",
+  "enginepage.noDeployment": "沒有部署使用這個推論引擎。",
   "enginepage.modelsTitle": "它能執行的目錄模型",
   "enginepage.noModel": "目錄裡還沒有模型用它執行。",
 
-  "enginepage.fact.engine": "引擎",
+  "enginepage.fact.engine": "推論引擎",
   "enginepage.fact.serves": "提供",
   "enginepage.fact.formats": "格式",
   "enginepage.fact.takes": "對話輸入",

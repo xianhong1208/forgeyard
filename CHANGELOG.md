@@ -24,6 +24,11 @@ version until 1.0.
   and the built-in engines do not change; trying a version comes next. On 2026-11-23 it found vLLM 0.33.0 and
   0.34.0 (without the CUDA 12.9 variant) and a newer stable-diffusion.cpp build (without its process variant).
 
+### Changed
+
+- **An engine is 推論引擎 in Traditional Chinese** (was 引擎; 容器引擎 stays Docker's), and the image (or program) it
+  runs is shown beside its name: on the engine cards, the engine's page, the deploy form and a deployment's page (#189).
+
 ## [1.5.1] — 2026-11-23
 
 The console in Traditional Chinese (#189): every page of it now speaks English and Traditional Chinese. The

@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { EngineImage } from "../components/EngineImage";
 import { ReplicasField, ScaleAdvancedFields } from "../components/Replicas";
 import { Notice, PageHeader } from "../components/ui";
 import { ApiError, api, errorText } from "../lib/api";
+import { engineRuns } from "../lib/engines";
 import { bytes } from "../lib/machines";
 import { FIRST_ANSWER_DEFAULT, TASK_LABEL, compatibleRecipes, deployBody, emptyDeploy, gib, recipeDefaults, slug, takesFirstAnswer, type DeployForm } from "../lib/models";
 import { sameModelStart } from "../lib/sleep";
@@ -131,6 +133,7 @@ export function ModelDeployPage() {
                 <select id="d-recipe" value={view.recipe} onChange={(e) => setF({ ...f, recipe: e.target.value, params: {} })} disabled={!model}>
                   {recipes.map((r) => <option key={r.name} value={r.name}>{r.title} ({r.engine} {r.version})</option>)}
                 </select>
+                {recipe && <p className="field-hint engine-image-line"><EngineImage runs={engineRuns(recipe.variants, view.device)} /></p>}
                 {model && recipes.length === 0 && <p className="field-error">{t("deploy.noEngine", { format: model.format, task: TASK_LABEL[model.task] })}</p>}
               </div>
             </div>
