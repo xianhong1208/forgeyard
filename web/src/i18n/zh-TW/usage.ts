@@ -166,6 +166,9 @@ export default {
   "usage.row.user": "使用者 #{id}",
   "usage.row.deletedModel": "已刪除的供應商模型 #{id}",
 
+  "usage.time.s": "{s} 秒",
+  "usage.time.ms": "{m} 分 {s} 秒",
+  "usage.time.hm": "{h} 小時 {m} 分",
   "usage.table.top": "只顯示前 {count} 個",
   "usage.table.all": "顯示全部 {count} 個",
   "usage.table.rest": "其餘 {count} 個加總在最後一列。",

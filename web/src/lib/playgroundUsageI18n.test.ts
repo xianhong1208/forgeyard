@@ -9,6 +9,7 @@ import { clock, imageProblem, pickerDetail, playError } from "./playground";
 import { TASK_HELP, ZERO_SHOT_HELP, checkImage, parseLabels, targets } from "./vision";
 import type { RouteInfo } from "./types";
 import { visionError } from "../pages/PlaygroundVision";
+import { audioLength, busyTime, megapixels } from "../pages/Usage";
 
 afterEach(() => {
   localStorage.clear();
@@ -154,5 +155,11 @@ describe("Usage's charts", () => {
     expect(textUnits("Nov 12")).toBe(6);
     expect(textUnits("11月12日")).toBe(7);
     expect(textUnits("1.5萬")).toBe(4.5);
+  });
+
+  it("FY-WEB-789 lengths of audio and busy time in Chinese words; megapixels keep their unit", () => {
+    expect([audioLength(12_300), audioLength(65_000), busyTime(7_500_000), megapixels(12_600)]).toEqual(["12.3 s", "1 min 05 s", "2 h 05 min", "12.6 MP"]);
+    setLang("zh-TW");
+    expect([audioLength(12_300), audioLength(65_000), busyTime(7_500_000), busyTime(0), megapixels(262)]).toEqual(["12.3 秒", "1 分 05 秒", "2 小時 05 分", "—", "0.26 MP"]);
   });
 });

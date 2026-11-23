@@ -173,6 +173,9 @@ export default {
   "usage.row.user": "user #{id}",
   "usage.row.deletedModel": "deleted provider model #{id}",
 
+  "usage.time.s": "{s} s",
+  "usage.time.ms": "{m} min {s} s",
+  "usage.time.hm": "{h} h {m} min",
   // The breakdown table
   "usage.table.top": "Show the top {count}",
   "usage.table.all": "Show all {count}",

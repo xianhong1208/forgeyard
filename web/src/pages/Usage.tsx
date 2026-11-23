@@ -6,6 +6,8 @@ import { BudgetMeter } from "../components/BudgetMeter";
 import { LineChart } from "../components/LineChart";
 import { Notice, PageHeader } from "../components/ui";
 import { labels, t as tNow } from "../i18n/core";
+import { formatNumber } from "../i18n/format";
+import { getLang } from "../i18n/lang";
 import { useT, type Translator } from "../i18n/react";
 import { api, errorText } from "../lib/api";
 import { alerting, budgetInput, LEVEL_LABEL, parseBudget, resetText, type BudgetPerson, type BudgetsResponse } from "../lib/budgets";
@@ -447,23 +449,23 @@ function PersonBudget({ p, admin, onSaved }: { p: BudgetPerson; admin: boolean; 
 // Kilopixels as megapixels: "12.6 MP".
 export function megapixels(kp: number | null | undefined): string {
   if (!kp) return "0 MP";
-  return `${(kp / 1000).toLocaleString("en-US", { maximumFractionDigits: kp < 10000 ? 2 : 1 })} MP`;
+  return `${formatNumber(kp / 1000, getLang(), { maximumFractionDigits: kp < 10000 ? 2 : 1 })} MP`;
 }
 
-// Busy milliseconds (GPU time on a GPU) as "2 h 05 min", "3 min 05 s" or "12.3 s".
+// Busy milliseconds (GPU time on a GPU) as "2 h 05 min", "3 min 05 s" or "12.3 s" ("2 小時 05 分" in Chinese).
 export function busyTime(ms: number | null | undefined): string {
   if (!ms) return "—";
   const s = ms / 1000;
   if (s < 3600) return audioLength(ms);
   const h = Math.floor(s / 3600);
-  return `${h} h ${String(Math.round((s - h * 3600) / 60)).padStart(2, "0")} min`;
+  return tNow("usage.time.hm", { h: String(h), m: String(Math.round((s - h * 3600) / 60)).padStart(2, "0") });
 }
 
 // Milliseconds of audio as "1 min 05 s" or "12.3 s".
 export function audioLength(ms: number | null | undefined): string {
   if (!ms) return "—";
   const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)} s`;
+  if (s < 60) return tNow("usage.time.s", { s: s.toFixed(1) });
   const m = Math.floor(s / 60);
-  return `${m} min ${String(Math.round(s - m * 60)).padStart(2, "0")} s`;
+  return tNow("usage.time.ms", { m: String(m), s: String(Math.round(s - m * 60)).padStart(2, "0") });
 }
