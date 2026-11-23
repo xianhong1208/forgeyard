@@ -168,7 +168,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(within(row).getByText("對話")).toBeTruthy();       // the task by its code, not the server's "Chat"
     expect(within(row).getByText("圖片")).toBeTruthy();        // what it takes besides text
     expect(within(row).getByText("受限")).toBeTruthy();
-    expect(row.textContent).toContain("qwen3 · 20.3億 參數");
+    expect(row.textContent).toContain("qwen3 · 20.3 億參數");
     expect(row.textContent).toContain("28 層");
     expect(within(row).getByRole("button", { name: "下載到…" })).toBeTruthy();
     expect(within(row).getByRole("link", { name: "部署" })).toBeTruthy();
@@ -254,7 +254,7 @@ describe("the model library in Traditional Chinese", () => {
     const form = await screen.findByRole("form", { name: "加入 Qwen3 Reranker 0.6B" });
     await within(form).findByText("結構");
     expect(within(form).getByText("結構").nextElementSibling!.textContent).toBe("28 層、8 個 KV 頭、最多 40,960 個 token、bfloat16");
-    expect(within(form).getByText("參數量").nextElementSibling!.textContent).toBe("5.96億");
+    expect(within(form).getByText("參數量").nextElementSibling!.textContent).toBe("5.96 億");
     expect(within(form).getByText("下載").nextElementSibling!.textContent).toBe("1.1 GiB，共 9 個檔案");
     expect(within(form).getByText("輸入").nextElementSibling!.textContent).toBe("僅文字");
     expect(document.querySelector(".suggest-line")!.textContent).toBe("用 vllm-pooling 在 GPU 上執行；一個副本大約保留 3.38 GiB 的 GPU 記憶體。");
@@ -285,8 +285,8 @@ describe("the model library in Traditional Chinese", () => {
     expect(within(table).getAllByRole("columnheader").map((x) => x.textContent)).toEqual(["模型", "內容", "大小", "下載次數", "更新時間", "操作"]);
     const [, qwen, det] = within(table).getAllByRole("row");
     expect(within(qwen).getByText("需要權杖")).toBeTruthy();
-    expect(qwen.textContent).toContain("40.2億 參數");
-    expect(qwen.textContent).toContain("123.5萬 · 1.5萬 個讚");
+    expect(qwen.textContent).toContain("40.2 億參數");
+    expect(qwen.textContent).toContain("123.5 萬 · 1.5 萬個讚");
     expect(within(det).getByText("授權 cc-by-nc-4.0：視覺模型需要寬鬆授權")).toBeTruthy();
     expect(det.textContent).toContain("物件偵測 · 其他");
     expect(screen.getByRole("option", { name: "任何用途" })).toBeTruthy();
@@ -300,7 +300,7 @@ describe("the model library in Traditional Chinese", () => {
     expect(screen.getByText("模型 · 對話")).toBeTruthy();
     expect(screen.getByRole("link", { name: /目錄/ }).getAttribute("href")).toBe("/models");
     const facts = document.querySelector(".mk-facts")!;
-    expect(facts.textContent).toContain("20.3億 參數");
+    expect(facts.textContent).toContain("20.3 億參數");
     expect(facts.textContent).toContain("用 llama-cpp 的預設值需要每張 GPU 3.00 GiB");
     expect(facts.textContent).toContain("尚未部署");
     const jump = screen.getByRole("navigation", { name: "本頁內容" });
@@ -359,10 +359,10 @@ describe("the model library in Traditional Chinese", () => {
   it("FY-WEB-748 the library's words in lib code follow the language; English stays as it was", () => {
     expect(mediaText(["image", "audio", "video"])).toBe("圖片、音訊、影片");
     expect(mediaText([])).toBe("僅文字");
-    expect(params(4022468096)).toBe("40.2億");
-    expect(params(595776512)).toBe("5.96億");
-    expect(billions(2031739904)).toBe("20.3億");
-    expect(compact(1234567)).toBe("123.5萬");
+    expect(params(4022468096)).toBe("40.2 億");
+    expect(params(595776512)).toBe("5.96 億");
+    expect(billions(2031739904)).toBe("20.3 億");
+    expect(compact(1234567)).toBe("123.5 萬");
     expect(compact(900)).toBe("900");
     expect(languagesText(["zh", "en", "ja", "ko"])).toBe("中文、英文 +2");
     expect(licenceTerms("OpenRAIL")).toMatch(/^OpenRAIL：允許商業使用/);
