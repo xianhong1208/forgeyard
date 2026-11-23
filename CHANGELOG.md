@@ -20,6 +20,13 @@ version until 1.0.
   Under the hood: a hand-written `t()` with typed keys and one dictionary module per area of the console
   (`web/src/i18n/`), a test that fails when a key, a placeholder or a translation is missing, and a glossary of
   the guide's terms (`web/src/i18n/GLOSSARY.md`). No new dependency.
+- The console in Traditional Chinese (#189, Playground and Usage): every Playground panel (chat, embeddings,
+  rerank, text classification, speech to text, speak, image, video and vision), its wake notice and its errors
+  (a known error code in Chinese with the server's specifics, anything else as sent), and the Usage page (tabs,
+  totals, the breakdown tables, the charts and the budgets). Chart dates, weekdays and axis numbers come from the
+  browser's `Intl` ("11月12日", "1.5萬"); the names the server gives a few groups (*Console playground*, *Other (3)*)
+  are translated by their id. The model's answers, your prompts and the sample texts in the boxes are not
+  translated. The zh-TW guide names these pages' labels in Chinese.
 
 ### Changed
 
