@@ -266,13 +266,21 @@ def test_fy_bdg_007_a_key_budget_reserves_settles_and_then_keeps_requests_local(
     assert err["budget"]["resets_at"] == budgets.resets_at(budgets.month_of(time.time())).isoformat().replace("+00:00", "Z")
     assert len(m.cloud.posts()) == 2
     # Local busy: the request would spill, but waits for the local replica instead.
+    # The engine keeps the first request until the test lets it go, not for a fixed 0.6 s: on a busy runner the
+    # second could arrive after it was done and go local with no budget in the way at all (#226).
     set_state("chat", 0, "healthy")
-    m.engine.hold = 0.6
-    t, first = background(lambda: send(m))
-    in_flight_soon()
-    r = send(m)
+    m.engine.gate = threading.Event()
+    try:
+        t, first = background(lambda: send(m))
+        in_flight_soon()
+        t2, second = background(lambda: send(m))
+        wait_until(lambda: len(m.engine.held) == 2, "the second request at the busy local replica")
+    finally:
+        m.engine.gate.set()
     t.join()
-    assert r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0"
+    t2.join()
+    r = second["r"]
+    assert first["r"].status_code == 200 and r.status_code == 200 and r.headers["x-forgeyard-target"] == "local:chat#0"
     assert r.headers["x-forgeyard-budget-exhausted"] == "key" and "x-forgeyard-spilled" not in r.headers
     assert len(m.cloud.posts()) == 2
     # Another key of the same person is not limited by this key's budget.
@@ -356,16 +364,19 @@ def test_fy_bdg_011_failures_release_and_in_flight_requests_hold(priced):
     m = priced
     m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": 1_000_000})
     set_state("chat", 0, "starting", "loading")
-    m.cloud.hold = 0.8
-    t, out = background(lambda: send(m))
-    deadline = time.monotonic() + 5
-    while not ledger._held and time.monotonic() < deadline:
-        time.sleep(0.01)
-    k = next(x for x in m.owner.get("/api/budgets").json()["keys"] if x["id"] == m.kid)
-    assert k["reserved_micros"] == pricing.micros_of(need())
+    # The provider keeps its answer until the test has looked, not for a fixed 0.8 s: on a busy runner the look
+    # came after the answer had settled the reservation (#226).
+    m.cloud.gate = threading.Event()
+    try:
+        t, out = background(lambda: send(m))
+        wait_until(lambda: ledger._held, "the request's reservation")
+        k = next(x for x in m.owner.get("/api/budgets").json()["keys"] if x["id"] == m.kid)
+        assert k["reserved_micros"] == pricing.micros_of(need())
+    finally:
+        m.cloud.gate.set()
     t.join()
+    m.cloud.gate = None
     assert out["r"].status_code == 200 and ledger._held == {}
-    m.cloud.hold = 0
     spent = ledger.snapshot().spent[("key", 1)]
     for status in (500, 429, 400):
         m.cloud.statuses = [status]
@@ -649,22 +660,24 @@ def test_fy_bdg_019_a_failed_cloud_attempt_holds_nothing_while_waiting_for_local
     after all, and its reservation is released at once, not held while it waits."""
     m = priced
     m.owner.patch(f"/api/keys/{m.kid}", json={"budget_micros": 1_000_000})
-    m.engine.hold = 2.0
-    t, first = background(lambda: send(m))
-    in_flight_soon()
-    m.cloud.status = 500
-    t2, second = background(lambda: send(m))
-    wait_until(lambda: m.cloud.posts(), "the cloud attempt")
-    # The cloud answers 500 and the request goes back to wait for the local replica, still busy with the
-    # first: its reservation must be gone while it waits (a fixed 0.2 s was sometimes too short to see it go
-    # on a busy machine). Held until the first request is done would fail here.
-    deadline = time.monotonic() + 10
-    while ledger._held and t.is_alive() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    held_while_waiting, still_waiting = dict(ledger._held), t.is_alive()
+    # The engine keeps the first request until the test lets it go, not for a fixed 2 s that a busy runner could
+    # outlast (#226). The cloud answers 500 and the second request goes back to wait for the local replica, still
+    # busy with the first: its reservation must be gone while it waits. Held until the first request is done would
+    # never be released here, and the wait gives up.
+    m.engine.gate = threading.Event()
+    try:
+        t, first = background(lambda: send(m))
+        in_flight_soon()
+        m.cloud.status = 500
+        t2, second = background(lambda: send(m))
+        wait_until(lambda: m.cloud.posts(), "the cloud attempt")
+        wait_until(lambda: not ledger._held, "the failed cloud attempt's reservation released")
+        assert t.is_alive() and t2.is_alive()      # both still at the replica that holds the first
+    finally:
+        m.engine.gate.set()
     t.join()
     t2.join()
-    assert held_while_waiting == {} and still_waiting
+    assert first["r"].status_code == 200
     assert second["r"].status_code == 200 and second["r"].headers["x-forgeyard-target"] == "local:chat#0"
 
 
