@@ -1,3 +1,4 @@
+import { t } from "../i18n/core";
 import { formatAgo, formatBytes } from "../i18n/format";
 import type { Accelerator, Machine } from "./types";
 
@@ -67,5 +68,5 @@ export function isLoopback(address: string): boolean {
 export function replicaAddressNote(m: Machine): string | null {
   const info = m.runtime_info;
   if (!info?.address || !isLoopback(info.address)) return null;
-  return info.same_host ? "loopback, on the server's host" : "loopback: the gateway dials it on the server's host";
+  return info.same_host ? t("machine.loopbackSameHost") : t("machine.loopbackElsewhere");
 }

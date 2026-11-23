@@ -72,8 +72,8 @@
 |---|---|---|
 | `AGENT_OFFLINE_SECONDS` | `30` | 超過這段時間沒收到任何訊息的機器會顯示離線。agent 每隔它的三分之一送出一次心跳（至少每 2 秒一次） |
 | `AGENT_OFFLINE_MOVE_SECONDS` | `600` | 離線這麼久的機器（從最後一次心跳起算，伺服器啟動得更晚時從伺服器啟動起算），它上面沒有固定機器的部署，副本會重新放到放得下的機器上；固定在它上面的部署會等它。`0`：副本永遠等原本的機器（[詳細說明](how-to.md#when-a-machine-stays-offline)） |
-| `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**Engine images** → **Upload an image**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
-| `AGENT_IMAGE` | — | **Add a machine** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
+| `IMAGE_UPLOAD_MAX_GB` | `64` | 管理員從機器頁面（**引擎映像檔** → **上傳映像檔**）上傳到機器的映像檔最大大小，單位 GiB。檔案經由伺服器串流給 agent，不會被儲存 |
+| `AGENT_IMAGE` | — | **加入機器** → **Docker** 指令裡的 agent 映像檔。留空：使用已發布的 `docker.io/tonyhuang1101/forgeyard-agent`，tag 是這台伺服器的版本；還沒有發布時則用本機建置的映像檔。可以設成鏡像站或私有 registry（`registry.example.org/forgeyard/forgeyard-agent`；tag 仍是伺服器的版本），或加上 `:TAG` 或 `@sha256:DIGEST` 指定特定版本。只接受單純的映像檔名稱 |
 
 ### 模型
 
@@ -264,7 +264,7 @@ local_dirs = ["/data/models"]
 ### 重試與等待第一個回應
 
 - **一個請求最多只執行一次。** 只有在請求確定沒有送到第一個副本時，閘道才會改試另一個副本（或供應商）：連線建立不起來（沒有程式在聽、被拒絕、`GATEWAY_CONNECT_TIMEOUT`）、沒有空出的連線，或副本的金鑰守衛回應它的引擎沒有在執行（503 帶 `X-Forgeyard-Not-Taken`，1.4.5 起的 agent）。請求送出之後才斷掉的連線（寫入請求時，或等待回應時）會回 502 `upstream_error`（供應商則為 `provider_error`），而且不會再送到別處：引擎可能已經開始處理，生成或付費的雲端請求會跑兩次。如果安全，請自己重試。1.4.5 之前的 agent 在引擎沒有執行時會直接關閉連線，現在會被當成這種斷線：請更新 agent，才能在 agent 回報引擎停止前的那幾秒內保有容錯移轉。
-- **串流的第一個回應。** 串流請求（`stream: true`，或帶 `stream_format` 的語音）寫入副本之後，副本有部署的 *Wait for the first answer*（`first_answer_timeout`，預設 **120 秒**，5 到 3,600）送出狀態列和串流的第一批位元組。超過時請求會被關閉，引擎跟著停止，回應是 504 `first_answer_timeout`；它絕不會送到另一個副本。串流開始之後，之後每一段最多可以等 `GATEWAY_READ_TIMEOUT`（600 秒）；設得比它長的等待，第一批位元組也會照設定等。**非串流的回答就是整個回答，所以這個等待不適用**：它維持 `GATEWAY_READ_TIMEOUT`（504 `upstream_timeout`），長的非串流生成和長錄音的轉錄不會被提早切斷。圖片請求維持部署自己的 *Timeout*；影片工作也是用自己的；這兩種部署不接受 `first_answer_timeout`。它在部署和修改表單的 **Advanced** 裡；修改它不會重新啟動任何東西。
+- **串流的第一個回應。** 串流請求（`stream: true`，或帶 `stream_format` 的語音）寫入副本之後，副本有部署的 *Wait for the first answer*（`first_answer_timeout`，預設 **120 秒**，5 到 3,600）送出狀態列和串流的第一批位元組。超過時請求會被關閉，引擎跟著停止，回應是 504 `first_answer_timeout`；它絕不會送到另一個副本。串流開始之後，之後每一段最多可以等 `GATEWAY_READ_TIMEOUT`（600 秒）；設得比它長的等待，第一批位元組也會照設定等。**非串流的回答就是整個回答，所以這個等待不適用**：它維持 `GATEWAY_READ_TIMEOUT`（504 `upstream_timeout`），長的非串流生成和長錄音的轉錄不會被提早切斷。圖片請求維持部署自己的 *Timeout*；影片工作也是用自己的；這兩種部署不接受 `first_answer_timeout`。它在部署和修改表單的 **進階** 裡；修改它不會重新啟動任何東西。
 
 ### 對話中的圖片、音訊與影片
 
@@ -283,7 +283,7 @@ local_dirs = ["/data/models"]
 - **1.3 中，帶媒體的請求絕不送往雲端供應商**（也不送往你網路內的供應商）。只由供應商提供的路由回 400 `media_local_only`；混合路由則不會溢出。
 - 用量會計算媒體項目數（`GET /api/usage` 的 `media_items`）。圖片的 token 依引擎回報，包含在 `prompt_tokens` 中。
 
-部署參數，位於部署表單的 **Advanced**（配方 `vllm` 與 `llama-cpp`）：
+部署參數，位於部署表單的 **進階**（配方 `vllm` 與 `llama-cpp`）：
 
 | 參數 | 預設值 | 用途 |
 |---|---|---|
@@ -664,7 +664,7 @@ Deprecation: @1794787200
 Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 ```
 
-替代做法：把要跑的東西當成模型在 **Serving** 部署；內建引擎跑不了的模型，加一個自訂引擎（**Models → Engines**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[試用區的視覺模型](#vision)取代 1.3 的視覺範本。
+替代做法：把要跑的東西當成模型在 **服務中** 部署；內建引擎跑不了的模型，加一個自訂引擎（**Models → Engines**，一份 recipe）。然後用 `DELETE /api/workloads/<id>` 刪除每個應用程式。[試用區的視覺模型](#vision)取代 1.3 的視覺範本。
 
 ## 直通（/x/）
 
@@ -777,7 +777,7 @@ Link: </guide/en/reference#apps-deprecated>; rel="deprecation"; type="text/html"
 
 ## 透過 API 修改部署
 
-`PATCH /api/deployments/{id}`，限管理員和操作員，使用主控台的登入工作階段（和 **Edit** 頁面送出的請求相同；寫入請求還要帶 `X-Forgeyard: 1` 標頭）。沒有送的欄位維持原值。
+`PATCH /api/deployments/{id}`，限管理員和操作員，使用主控台的登入工作階段（和 **編輯** 頁面送出的請求相同；寫入請求還要帶 `X-Forgeyard: 1` 標頭）。沒有送的欄位維持原值。
 
 | 欄位 | 值 |
 |---|---|
@@ -1213,7 +1213,7 @@ agent 遇到 401、403 和 404 會停止（並顯示伺服器的說明），遇�
 的映像檔與封存檔就是同一個 commit 的每日建置 `b12359`，所以映像檔 tag 同時寫出版本、build 和 commit
 （`server-vulkan-v1.0.0-b12359-b1b770d`），`llama-server --version` 顯示 `1.0.0-dev (build 12359)`。1.3.0
 以前跑的是 build `b12242`。配方傳的每個參數在兩者都一樣。它的 *KV cache type*（`kv_cache`，在
-**Advanced** 裡）預設是 `f16`；`f8_e4m3`（FP8，llama.cpp 1.0.0 新增）讓 KV cache 每個值只用一個位元組而不是兩個，
+**進階** 裡）預設是 `f16`；`f8_e4m3`（FP8，llama.cpp 1.0.0 新增）讓 KV cache 每個值只用一個位元組而不是兩個，
 所以估算的 KV cache 減半：Qwen3-4B 在上下文 8,192 時，每個序列從 1.125 GiB 變成 0.5625 GiB（每多一個同時請求少
 576 MiB）。FP8 在 CPU、CUDA 和 ROCm 上有對應的 kernel；llama.cpp 沒有 Vulkan 的版本，所以在 Vulkan 上請保持 `f16`。
 有些架構不接受它（MLA 模型，例如 DeepSeek），這時副本會啟動失敗：改回 `f16` 即可。
@@ -1241,7 +1241,7 @@ Variant 的欄位：`name`、`when`（`vendor`：`nvidia`、`amd` 或 `cpu`；`a
 - **tag**：`1.5.0`（就是那個版本）、`1.5`（它最新的修補版本）、`latest`（最新的正式版本）。預發布版本只會有它自己的版本號。每個映像檔都帶有 OCI 標籤（原始碼、授權、版本、revision）、建置來源證明（provenance）和 SBOM。
 - **伺服器映像檔**以帳號 `forgeyard`（uid 10001）執行 `python main.py`，設定 `DATA_DIR=/data`（一個 volume）、`HOST=0.0.0.0` 和 `PORT=7860`（對外公開），並有針對 `/api/health` 的健康檢查。見[用 Docker 執行伺服器](how-to.md#run-the-server-in-docker)。
 - **agent 映像檔**在 `tini` 底下執行 `forgeyard agent`，身分是 root（它要操作主機的 Docker），設定 `FORGEYARD_LIMITS=rlimit`、執行行程的帳號 `forgeyard-run`（uid 990），以及掛載在 `/var/lib/forgeyard-agent` 的 volume。見[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)。
-- **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**Add a machine** 會說明怎麼建置。
+- **伺服器指定哪個 agent 映像檔**：[`AGENT_IMAGE`](#machines)，否則就是伺服器版本的已發布映像檔。還沒有任何發布（`forgeyard/install/images.py` 裡的 namespace 是空的）而且沒有設定 `AGENT_IMAGE` 時，會指定本機建置的 `forgeyard-agent:<version>`，**加入機器** 會說明怎麼建置。
 
 ## 檔案與目錄
 

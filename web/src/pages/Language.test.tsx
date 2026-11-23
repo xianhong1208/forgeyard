@@ -163,7 +163,8 @@ describe("the console's language", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "服務中" })).toBeTruthy();
     expect(await screen.findByRole("heading", { level: 2, name: "還沒有部署" })).toBeTruthy();
     for (const kind of ["對話", "嵌入", "重排序", "語音轉文字", "文字轉語音", "圖片", "影片", "視覺"]) expect(screen.getByText(kind)).toBeTruthy();
-    expect((await screen.findAllByRole("link", { name: "部署模型" }))[0].getAttribute("href")).toBe("/serving/deploy");   // shown once the catalog is in
+    // The link waits for the catalog (can_deploy), which may answer after the deployments.
+    expect((await screen.findAllByRole("link", { name: "部署模型" }))[0].getAttribute("href")).toBe("/serving/deploy");
   });
 
   it("FY-WEB-677 a page not translated yet still works in zh-TW: its own words in English, the frame in Chinese", async () => {

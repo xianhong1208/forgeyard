@@ -67,8 +67,8 @@ Forgeyard 接著會顯示 **Get started**：一份接下來步驟的檢查清單
 
 ## 3. 加入一台機器
 
-1. 開啟 **Machines**（機器）→ **Add a machine** → **Create join command**。
-2. 保持選取 **One-line install**（單行安裝），然後複製指令。它長得像這樣：
+1. 開啟 **機器** → **加入機器** → **建立加入指令**。
+2. 保持選取 **一行安裝**，然後複製指令。它長得像這樣：
 
    ```bash
    curl -fsSk https://192.168.1.20:7860/api/tls/ca.pem -o forgeyard-ca.pem && \
@@ -134,13 +134,13 @@ Next, on https://192.168.1.20:7860:
 
 回到 Machines 頁面，幾秒內就會看到這台機器和它的 GPU。
 
-其他方式：**Docker** 分頁會把 agent 當成容器執行，一個 `docker run` 就會拉取和你的伺服器同版本的 agent 映像檔（[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)）；**Manual** 分頁則使用 Forgeyard 的原始碼和一個設定檔。AMD 和純 CPU 機器的做法相同（[AMD](how-to.md#add-an-amd-machine)、[純 CPU](how-to.md#add-a-cpu-only-machine)）。
+其他方式：**Docker** 分頁會把 agent 當成容器執行，一個 `docker run` 就會拉取和你的伺服器同版本的 agent 映像檔（[用 Docker 執行 agent](how-to.md#run-the-agent-in-docker)）；**手動（設定檔）** 分頁則使用 Forgeyard 的原始碼和一個設定檔。AMD 和純 CPU 機器的做法相同（[AMD](how-to.md#add-an-amd-machine)、[純 CPU](how-to.md#add-a-cpu-only-machine)）。
 
 ## 4. 選擇 Forgeyard 可以使用的 GPU
 
 預設情況下，Forgeyard 可以使用機器上的每一張 GPU。如果是和別人共用的機器：
 
-1. 在 **Machines** 點進這台機器，選擇 **Change GPU access**（變更 GPU 存取權）。
+1. 在 **機器** 點進這台機器，選擇 **變更 GPU 存取**。
 2. 勾選 Forgeyard 可以使用的卡，然後儲存。
 
 不在清單上的卡，絕不會分配給 Forgeyard 執行的任何東西；頁面上會把它們標成 *not for Forgeyard*。就算允許所有的卡，只要儲存一次選擇，這個步驟就會打勾。
@@ -156,12 +156,12 @@ Next, on https://192.168.1.20:7860:
 
 ## 6. 部署它
 
-1. 選擇 **Deploy it**（部署它），或從 **Serving** → **Deploy a model** 再挑選模型。
+1. 選擇 **Deploy it**（部署它），或從 **服務中** → **部署模型** 再挑選模型。
 2. 為這個部署取個名字，例如 `qwen`。這個名字就是程式呼叫時要用的**模型名稱**。
-3. 確認 **Runs on**（執行於）：Qwen3 0.6B 選 **GPU**，GGUF 模型選 **CPU only**（用 *Deploy it* 會自動幫你選好）。
-4. 頁面會顯示估算結果和它會在哪裡執行。選擇 **Deploy**。
+3. 確認 **執行於**：Qwen3 0.6B 選 **GPU**，GGUF 模型選 **僅 CPU**（用 *Deploy it* 會自動幫你選好）。
+4. 頁面會顯示估算結果和它會在哪裡執行。選擇 **部署**。
 
-部署頁面會先顯示下載進度，再顯示引擎啟動。當它的副本變成 **healthy**，就代表可以用了。第一次需要的時間和下載時間差不多；之後啟動只要幾秒。你可以直接在頁面上用 **Try it** 試試看，或到 **試用區** 試。
+部署頁面會先顯示下載進度，再顯示引擎啟動。當它的副本變成 **健康**，就代表可以用了。第一次需要的時間和下載時間差不多；之後啟動只要幾秒。你可以直接在頁面上用 **試試看** 試用，或到 **試用區** 試。
 
 ## 7. 建立 API 金鑰
 

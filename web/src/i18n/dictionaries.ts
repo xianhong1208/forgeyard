@@ -5,8 +5,11 @@
 import enAdvisor from "./en/advisor";
 import enAuth from "./en/auth";
 import enCommon from "./en/common";
+import enDeploy from "./en/deploy";
+import enDeployment from "./en/deployment";
 import enFleet from "./en/fleet";
 import enGuide from "./en/guide";
+import enMachine from "./en/machine";
 import enMachines from "./en/machines";
 import enPlayground from "./en/playground";
 import enServer from "./en/server";
@@ -17,8 +20,11 @@ import enUsage from "./en/usage";
 import zhAdvisor from "./zh-TW/advisor";
 import zhAuth from "./zh-TW/auth";
 import zhCommon from "./zh-TW/common";
+import zhDeploy from "./zh-TW/deploy";
+import zhDeployment from "./zh-TW/deployment";
 import zhFleet from "./zh-TW/fleet";
 import zhGuide from "./zh-TW/guide";
+import zhMachine from "./zh-TW/machine";
 import zhMachines from "./zh-TW/machines";
 import zhPlayground from "./zh-TW/playground";
 import zhServer from "./zh-TW/server";
@@ -30,16 +36,20 @@ import zhUsage from "./zh-TW/usage";
 export const EN_MODULES = {
   advisor: enAdvisor, auth: enAuth, common: enCommon, fleet: enFleet, guide: enGuide, machines: enMachines, server: enServer,
   serving: enServing, shell: enShell, start: enStart,
+  // Machines and deployments (#189, group 1)
+  deploy: enDeploy, deployment: enDeployment, machine: enMachine,
   playground: enPlayground, usage: enUsage,
 };
 export const ZH_TW_MODULES: Record<keyof typeof EN_MODULES, Record<string, string>> = {
   advisor: zhAdvisor, auth: zhAuth, common: zhCommon, fleet: zhFleet, guide: zhGuide, machines: zhMachines, server: zhServer,
   serving: zhServing, shell: zhShell, start: zhStart,
+  deploy: zhDeploy, deployment: zhDeployment, machine: zhMachine,
   playground: zhPlayground, usage: zhUsage,
 };
 
 export const en = {
   ...enAdvisor, ...enAuth, ...enCommon, ...enFleet, ...enGuide, ...enMachines, ...enServer, ...enServing, ...enShell, ...enStart,
+  ...enDeploy, ...enDeployment, ...enMachine,
   ...enPlayground, ...enUsage,
 };
 export type Key = keyof typeof en;
@@ -47,5 +57,6 @@ export type Key = keyof typeof en;
 // TypeScript already holds each zh-TW module to its English one (`satisfies`); this keeps the merge complete.
 export const zhTW: Record<Key, string> = {
   ...zhAdvisor, ...zhAuth, ...zhCommon, ...zhFleet, ...zhGuide, ...zhMachines, ...zhServer, ...zhServing, ...zhShell, ...zhStart,
+  ...zhDeploy, ...zhDeployment, ...zhMachine,
   ...zhPlayground, ...zhUsage,
 };
