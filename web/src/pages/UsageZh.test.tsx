@@ -172,7 +172,7 @@ describe("Usage in Traditional Chinese", () => {
     expect(screen.getByRole("link", { name: "為供應商的模型設定價格" })).toBeTruthy();
     const table = await screen.findByRole("table", { name: "依日期分組的費用" });
     expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["日期", "請求", "Token 數", "費用", "占比", "沒有價格"]);
-    expect(screen.getByText(/（UTC），以美元計。.*有 2 個請求是估算的.*這是供應商收費的估算，不是他們的帳單。$/)).toBeTruthy();
+    expect(screen.getByText(/（UTC），以美元計。.*有 2 個請求是估算的.*或缺少快取價格。這是供應商收費的估算，不是他們的帳單。$/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "費用隨時間變化" })).toBeTruthy();
   });
 

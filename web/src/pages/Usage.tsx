@@ -192,7 +192,7 @@ function CostView({ data, chart }: { data: UsageResponse; chart: ReactNode }) {
       <p className="muted small usage-foot">
         {t("usage.foot.cost", { range: dates(t, data.from, data.to) })}
         {estimated > 0 && t.plural("usage.estimated", estimated)}
-        {" "}{t("usage.notInvoice")}
+        {t.lang === "en" ? " " : ""}{t("usage.notInvoice")}
       </p>
     </>
   );
@@ -359,7 +359,7 @@ function Budgets({ everyone }: { everyone: boolean }) {
     <section className="panel budget-panel" aria-labelledby="budgets-title">
       <h2 id="budgets-title">{t("usage.budgets.title")}</h2>
       <p className="muted small">
-        {t("usage.budgets.lead", { month: data.month, reset })} {data.is_admin ? t("usage.budgets.admin")
+        {t("usage.budgets.lead", { month: data.month, reset })}{t.lang === "en" ? " " : ""}{data.is_admin ? t("usage.budgets.admin")
           : t.rich("usage.budgets.user", { link: (text) => <Link to="/keys">{text}</Link> })}
       </p>
       {warn.map((w) => (
