@@ -380,6 +380,28 @@ Update the agents after the server: the start-time phases, the health check ever
 compile cache directory need a 1.5.0 agent; an older one keeps working, and the server then measures the
 engine's part of a start itself. No migration.
 
+## Shipped: 1.5.1 (2026-11-23), the console in Traditional Chinese
+
+1. ✅ **Two languages, the frame, Machines and Serving** (#237, for #189): the browser's language decides the
+   first time and **Language** in the account menu switches it, kept in the browser and shared with the guide; a
+   typed `t()` with one dictionary per area of the console and a test that fails on a missing translation;
+   numbers, sizes and dates through the browser's `Intl`. The server keeps writing English, and the console
+   translates the common error codes and the setup-health findings.
+2. ✅ **Machines and deployments** (#241, for #189): a machine's page, a deployment's page, and the deploy and edit
+   forms.
+3. ✅ **The Playground and Usage** (#240, for #189): every Playground panel, the usage tables, charts and budgets.
+4. ✅ **The model library** (#242, for #189): Catalog, Engines and Sources, **Add a model**, a model's page and an
+   engine's page.
+5. ✅ **API keys, Cloud and the admin pages** (#243, for #189): keys and their limits, cloud providers, prices,
+   budgets and routes, Users, the audit log, My account and Trust this server.
+6. ✅ **A wording pass** (#245, #246, for #189): the Chinese of the console and of the guide read again for natural
+   Taiwan usage, with one term for each thing (`web/src/i18n/GLOSSARY.md`), and a space between a number and 萬 or 億,
+   the Taiwan way.
+7. ✅ **Steadier tests** (#238 for #226, #244 for #239): fake engines are held until the test lets them go, not for
+   a fixed time, and tests patch only their own module's clock.
+
+No agent or server code changed since 1.5.0: update the server only, the agents need no update. No migration.
+
 ## Community and enterprise editions
 
 Forgeyard is open source under the Apache License 2.0, and this repository is its **community edition**.
@@ -409,7 +431,6 @@ the rest one release at a time.
 
 | Version | What you get |
 |---|---|
-| **1.5.1: the console in Traditional Chinese** | The web console in Traditional Chinese as well as English. Today the console is in English only; the guide already has both (#189). |
 | **1.5.2: engine updates** | A newer version of an engine is pointed out, and can be tried as a pinned copy (#95). |
 | **1.5.3: apps removed** | The apps API, the templates and `/x/`, deprecated in 1.4, are removed, with a migration for the apps that are left (#89). |
 | **1.5.4: more kinds of models, part 2** | Image embeddings (#141), and text classification on the CPU with transformers, including zero-shot classification with NLI models (#144). |
