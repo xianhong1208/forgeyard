@@ -33,6 +33,8 @@
 
 | 版本 | 執行內容 | 機器 | 通過 | 失敗 |
 |---|---|---|---|---|
+| 1.5.1 | 完整回歸測試（`accept_all.py`；<<ALL_SKIPS>> 項略過） | A100 主機、x86-64 CPU 機器、Gemini | <<ALL_COUNTS>> |
+| 1.5.1 | 閒置休眠、喚醒與自動調整副本數（`accept_scale.py`），自動調整副本數在兩台 CPU 機器上；<<SCALE_SKIPS>> 項略過 | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | <<SCALE_COUNTS>> |
 | 1.5.0 | 1.5.0rc1 的完整回歸測試（`accept_all.py`，包括新的 `scale` 群組；15 項略過） | A100 主機、x86-64 CPU 機器、Gemini | 488 | 0 |
 | 1.5.0 | 1.5.0rc1 上的閒置休眠、喚醒與自動調整副本數（`accept_scale.py`），自動調整副本數在兩台 CPU 機器上；1 項略過 | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | 73 | 0 |
 | 1.5.0 | 開發期間：同上（`accept_scale.py`；1 項略過：等待喚醒逾時的檢查，CPU 模型 3 秒就啟動好，比最短的等待時間還快；vLLM 模型涵蓋了這一項） | A100 主機、x86-64 CPU 機器、以 A100 主機的 CPU 當第二台 CPU 機器、Gemini | 73 | 0 |
@@ -47,6 +49,6 @@
 | 1.4.3 | 完整回歸測試（`accept_all.py`） | A100 主機、x86-64 CPU 機器、Ryzen AI MAX+ 395、Gemini | 303 | 0 |
 | 1.4.3 | 網頁主控台（`accept_all.py` 的 console 群組） | 同上 | 31 | 0 |
 
-Ryzen AI MAX+ 395 那台機器沒有參加 1.4.5 與 1.5.0 的這些執行。
+Ryzen AI MAX+ 395 那台機器沒有參加 1.4.5、1.5.0 與 1.5.1 的這些執行。
 
 歡迎回報在其他機器上的結果：見 [CONTRIBUTING.md](../CONTRIBUTING.md)（英文）。
