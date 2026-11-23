@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router";
 
 import { useAuth } from "../auth";
+import { useT } from "../i18n/react";
 import { AuthFrame } from "../components/AuthFrame";
 import { Splash } from "../components/Splash";
 import { Field, Notice } from "../components/ui";
@@ -11,6 +12,7 @@ import type { User } from "../lib/types";
 
 export function LoginPage() {
   const { state, loadError, reload, user, setUser } = useAuth();
+  const t = useT();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
@@ -33,7 +35,7 @@ export function LoginPage() {
       setUser(r.user);
       navigate(next, { replace: true }); // back to the page that sent us here
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? "Wrong username or password." : errorText(err));
+      setError(err instanceof ApiError && err.status === 401 ? t("auth.login.wrong") : errorText(err));
       setPassword("");
     } finally {
       setBusy(false);
@@ -41,29 +43,29 @@ export function LoginPage() {
   };
 
   return (
-    <AuthFrame title="Sign in" lead={next !== HOME ? <>You'll go back to <code>{next}</code> afterwards.</> : undefined}>
+    <AuthFrame title={t("auth.login.title")} lead={next !== HOME ? t.rich("auth.login.lead", { next: <code>{next}</code> }) : undefined}>
       {ended && ENDED_TEXT[ended] && <Notice>{ENDED_TEXT[ended]}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
       <form onSubmit={submit} className="stack">
-        <Field label="Username" name="username" autoComplete="username" autoCapitalize="none" required
+        <Field label={t("auth.username")} name="username" autoComplete="username" autoCapitalize="none" required
           value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
-        <Field label="Password" name="password" type="password" autoComplete="current-password" required
+        <Field label={t("auth.password")} name="password" type="password" autoComplete="current-password" required
           value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+        <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? t("auth.login.busy") : t("auth.login.submit")}</button>
       </form>
       <p className="auth-foot">
-        New here? The <Link to="/guide">guide</Link> explains how to set Forgeyard up, step by step.
+        {t.rich("auth.login.guide", { link: (text) => <Link to="/guide">{text}</Link> })}
       </p>
       {state.tls?.mode === "forgeyard-ca" && (
         <p className="auth-foot auth-trust">
-          Did your browser warn about this site's certificate? <Link to="/trust">Trust this server</Link> once on this device.
+          {t.rich("auth.login.trust", { link: (text) => <Link to="/trust">{text}</Link> })}
         </p>
       )}
       <p className="auth-foot">
         {state.registration === "approval" ? (
-          <>No account? <Link to="/register">Request one</Link>; an admin approves it.</>
+          t.rich("auth.login.request", { link: (text) => <Link to="/register">{text}</Link> })
         ) : (
-          <>Accounts are created by an admin.</>
+          t("auth.login.byAdmin")
         )}
       </p>
     </AuthFrame>

@@ -4,6 +4,7 @@ import { IconMoon, IconSunrise } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
+import { useT } from "../i18n/react";
 import { when } from "../lib/format";
 import { bytes } from "../lib/machines";
 import { IDLE_DEFAULT, IDLE_MAX, IDLE_MIN, WAKE_WAIT_DEFAULT, WAKE_WAIT_MAX, WAKE_WAIT_MIN, elapsed, idleProblem, sleepState, startHint,
@@ -49,13 +50,14 @@ export function SleepSetting({ prefix, on, minutes, onChange, last, other }: {
 
 // 1.5.0 (#37): Asleep (moon) and Waking (with the time since it was woken) instead of the status chip.
 export function SleepBadge({ d, fallback, big }: { d: Deployment; fallback?: ReactNode; big?: boolean }) {
+  const t = useT();
   const s = sleepState(d);
   const cls = `chip deprow-state${big ? " chip-big" : ""}`;
   if (s === "asleep") {
-    return <span className={`${cls} chip-asleep`} title={d.sleep?.asleep_since ? `Asleep since ${when(d.sleep.asleep_since)}` : undefined}>
-      <IconMoon size={big ? 15 : 13} aria-hidden="true" /> Asleep</span>;
+    return <span className={`${cls} chip-asleep`} title={d.sleep?.asleep_since ? t("fleet.sleep.asleepSince", { when: when(d.sleep.asleep_since) }) : undefined}>
+      <IconMoon size={big ? 15 : 13} aria-hidden="true" /> {t("fleet.sleep.asleep")}</span>;
   }
-  if (s === "waking") return <span className={`${cls} chip-waking`}><IconSunrise size={big ? 15 : 13} aria-hidden="true" /> Waking {elapsed(d.sleep?.waking?.since)}</span>;
+  if (s === "waking") return <span className={`${cls} chip-waking`}><IconSunrise size={big ? 15 : 13} aria-hidden="true" /> {t("fleet.sleep.waking", { elapsed: elapsed(d.sleep?.waking?.since) })}</span>;
   return <>{fallback ?? null}</>;
 }
 
@@ -63,19 +65,22 @@ export function SleepBadge({ d, fallback, big }: { d: Deployment; fallback?: Rea
 // Machines (1.5.0, #37): the asleep deployments that would run on a machine. They hold nothing there (the memory
 // map shows the card free), so this says the card may be claimed while they sleep.
 export function AsleepHereLine({ list, compact }: { list: AsleepHere[]; compact?: boolean }) {
+  const t = useT();
   if (!list.length) return null;
   return (
-    <p className={`asleep-here${compact ? " asleep-here-compact" : ""}`} aria-label="Asleep here">
+    <p className={`asleep-here${compact ? " asleep-here-compact" : ""}`} aria-label={t("fleet.sleep.hereLabel")}>
       <IconMoon size={14} aria-hidden="true" />
       <span>
         {list.map((a, i) => (
           <span key={a.deployment.id}>
             {i > 0 ? "; " : ""}
-            <Link to={`/serving/${a.deployment.id}`} className="mono">{a.deployment.name}</Link> asleep here
-            {a.bytes ? ` (${bytes(a.bytes)}${a.gpus.length ? ` on GPU ${a.gpus.join(", ")}` : a.deployment.estimate.device === "cpu" ? " of RAM" : ""} when awake)` : ""}
+            {t.rich("fleet.sleep.here", { name: <Link to={`/serving/${a.deployment.id}`} className="mono">{a.deployment.name}</Link> })}
+            {a.bytes ? (a.gpus.length ? t("fleet.sleep.hereSizeGpu", { size: bytes(a.bytes), gpus: a.gpus.join(", ") })
+              : a.deployment.estimate.device === "cpu" ? t("fleet.sleep.hereSizeRam", { size: bytes(a.bytes) })
+                : t("fleet.sleep.hereSize", { size: bytes(a.bytes) })) : ""}
           </span>
         ))}
-        {compact ? "" : ". It holds nothing now, so others may use that memory meanwhile; if none is free when it wakes, it waits for room or starts on another machine."}
+        {compact ? "" : t("fleet.sleep.hereNote")}
       </span>
     </p>
   );

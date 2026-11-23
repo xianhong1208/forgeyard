@@ -6,6 +6,26 @@ version until 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **The console in Traditional Chinese** (#189, first part). The console now speaks English and Traditional
+  Chinese: the browser's language decides the first time (any Chinese setting gives Traditional Chinese), and
+  **Language** in the account menu (at the end of the menu on a phone) switches it at once. The choice is kept in
+  the browser, not on the server (no migration), and is the guide's language choice too. Numbers, sizes, times and
+  dates follow the language through the browser's `Intl`. The API does not change: the console translates the
+  server's common error codes, the setup-health findings (by their id, with the server's own words under them)
+  and the Get started steps, and shows anything else as the server sent it. This part translates the frame
+  (top bar, menus, sign-in and first-run pages, Get started and Setup health, the secret-key backup dialog, the
+  HTTPS warning) and the Machines and Serving lists; the other pages stay English until the next parts.
+  Under the hood: a hand-written `t()` with typed keys and one dictionary module per area of the console
+  (`web/src/i18n/`), a test that fails when a key, a placeholder or a translation is missing, and a glossary of
+  the guide's terms (`web/src/i18n/GLOSSARY.md`). No new dependency.
+
+### Changed
+
+- The console's fonts fall back to a Traditional Chinese system font (PingFang TC, Noto Sans TC, Microsoft
+  JhengHei…) for Chinese text: Schibsted Grotesk and Martian Mono have no CJK glyphs.
+
 ## [1.5.0] — 2026-11-23
 
 Scale to zero and autoscaling (#37): GPUs are used only while they are needed. A deployment can sleep when nobody

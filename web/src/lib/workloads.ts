@@ -1,3 +1,4 @@
+import { t, tMaybe } from "../i18n/core";
 import type { Accelerator, Machine, Replica, ReplicaState, RuntimeInfo, WorkloadStatus } from "./types";
 
 // ---------------------------------------------------------------- display
@@ -12,8 +13,13 @@ export const STATUS_TONE: Record<WorkloadStatus, "ok" | "run" | "wait" | "bad" |
 };
 
 export function stateLabel(r: Replica): string {
-  if (r.state === "exited" && r.exit_code !== null) return `exited ${r.exit_code}`;
-  return r.state;
+  if (r.state === "exited" && r.exit_code !== null) return t("fleet.state.exitedCode", { code: String(r.exit_code) });
+  return statusLabel(r.state);
+}
+
+// A replica's state or a workload's status ("running", "asleep") in the reader's language.
+export function statusLabel(s: string): string {
+  return tMaybe(`fleet.state.${s}`, s);
 }
 
 export function gpuLabel(r: Replica): string {

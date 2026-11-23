@@ -1,20 +1,12 @@
+import { formatDateTime, formatRelative } from "../i18n/format";
+
+// A server timestamp relative to now ("5 min ago"), and in full for a tooltip, in the reader's language.
 export function when(value: string | null | undefined): string {
-  if (!value) return "—";
-  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  const seconds = Math.round((Date.now() - d.getTime()) / 1000);
-  const abs = Math.abs(seconds);
-  const suffix = seconds >= 0 ? "ago" : "from now";
-  if (abs < 45) return seconds >= 0 ? "just now" : "in a moment";
-  if (abs < 3600) return `${Math.round(abs / 60)} min ${suffix}`;
-  if (abs < 86400) return `${Math.round(abs / 3600)} h ${suffix}`;
-  if (abs < 86400 * 14) return `${Math.round(abs / 86400)} d ${suffix}`;
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return formatRelative(value);
 }
 
 export function exact(value: string | null | undefined): string {
-  if (!value) return "";
-  const d = new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return d.toLocaleString();
+  return formatDateTime(value);
 }
 
 // "Chrome on Linux" from a user agent string; good enough to tell sessions apart.

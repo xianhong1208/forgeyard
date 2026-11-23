@@ -8,16 +8,18 @@ import { Link, useLocation } from "react-router";
 import { behindDetail, behindText, methodLine } from "../lib/agentUpdate";
 import { tlsChip } from "../lib/replicaTls";
 import type { AgentUpdate, Machine, UpdateStep } from "../lib/types";
+import { useT } from "../i18n/react";
 import { useApi } from "../lib/useApi";
 import { HelpLink } from "./HelpLink";
 import { CopyBlock, Notice } from "./ui";
 
 // The tile's and the page's hint: a link to the machine's update command.
 export function BehindChip({ m }: { m: Machine }) {
+  const t = useT();
   const text = behindText(m);
   if (!text) return null;
   return (
-    <Link to={`/machines/${m.id}#update`} className="chip chip-update" title="Open the command that updates this agent">
+    <Link to={`/machines/${m.id}#update`} className="chip chip-update" title={t("fleet.behind.title")}>
       <IconArrowUpCircle size={13} aria-hidden="true" /> {text}
     </Link>
   );

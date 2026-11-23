@@ -23,6 +23,7 @@ import {
   MACHINE_KIND, appTitle, memoryLabel, placement, share, uniqueHolders,
   type CardMemory, type Holder, type MachineKind, type ModelKind, type Placement,
 } from "../lib/fleet";
+import { useT } from "../i18n/react";
 import { bytes } from "../lib/machines";
 import type { DeploymentsResponse, Machine, WorkloadsResponse } from "../lib/types";
 import { useApi } from "../lib/useApi";
@@ -36,6 +37,7 @@ const MODEL_ICON: Record<ModelKind, Icon> = {
 
 // The machine's kind on a small plate: the shape says GPU, APU or CPU; the tint says NVIDIA, AMD or none.
 export function KindMark({ kind, size = 34 }: { kind: MachineKind; size?: number }) {
+  useT(); // re-render with the language: the label below is read in it
   const I = MACHINE_ICON[kind];
   const { label } = MACHINE_KIND[kind];
   return (
@@ -61,6 +63,7 @@ export function StatusDot({ status }: { status: Machine["status"] }) {
 // One bar: what Forgeyard reserved in heat, other use in steel, free empty. With `held`, Forgeyard's
 // part is split by what holds it, each named when there is room (the memory map).
 export function MemBar({ mem, held, size = "md" }: { mem: CardMemory; held?: Holder[]; size?: "sm" | "md" | "lg" }) {
+  useT(); // the label follows the language
   const named = (held ?? []).filter((h) => (h.reserved ?? 0) > 0);
   return (
     <span className={`membar membar-${size}`} role="img" aria-label={memoryLabel(mem)}>
@@ -78,17 +81,19 @@ export function MemBar({ mem, held, size = "md" }: { mem: CardMemory; held?: Hol
 }
 
 export function MemLegend() {
+  const t = useT();
   return (
     <span className="memlegend small muted">
-      <span><i className="sw sw-fy" /> Forgeyard</span>
-      <span><i className="sw sw-other" /> other use</span>
-      <span><i className="sw sw-free" /> free</span>
+      <span><i className="sw sw-fy" /> {t("fleet.legend.forgeyard")}</span>
+      <span><i className="sw sw-other" /> {t("fleet.legend.other")}</span>
+      <span><i className="sw sw-free" /> {t("fleet.legend.free")}</span>
     </span>
   );
 }
 
 // What runs on a machine: one chip per deployment (linking to it) or app; "+N more" past `max`.
-export function HolderChips({ list, max, empty = "Nothing runs here yet.", link = true }: { list: Holder[]; max?: number; empty?: string; link?: boolean }) {
+export function HolderChips({ list, max, empty, link = true }: { list: Holder[]; max?: number; empty?: string; link?: boolean }) {
+  const t = useT();
   const u = uniqueHolders(list);
   const shown = max === undefined ? u : u.slice(0, max);
   return (
@@ -101,8 +106,8 @@ export function HolderChips({ list, max, empty = "Nothing runs here yet.", link 
           <span key={h.key} className="holder-chip" title={title}><HolderIcon h={h} /><span>{h.name}</span></span>
         );
       })}
-      {shown.length < u.length && <span className="holder-chip holder-more">+{u.length - shown.length} more</span>}
-      {u.length === 0 && <span className="empty-line">{empty}</span>}
+      {shown.length < u.length && <span className="holder-chip holder-more">{t("fleet.more", { count: u.length - shown.length })}</span>}
+      {u.length === 0 && <span className="empty-line">{empty ?? t("fleet.nothingHere")}</span>}
     </div>
   );
 }

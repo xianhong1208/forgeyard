@@ -1,0 +1,26 @@
+// Words every page uses, and the shared components in components/ui.tsx, Splash, AuthFrame and HelpLink.
+export default {
+  "common.appTagline": "One control plane for the GPUs and CPUs you own.",
+  "common.loading": "Loading…",
+  "common.tryAgain": "Try again",
+  "common.copy": "Copy",
+  "common.copied": "Copied",
+  "common.cancel": "Cancel",
+  "common.close": "Close",
+  "common.done": "Done",
+  "common.open": "Open",
+  "common.advanced": "Advanced",
+  "common.help": "Help",
+  "common.trustHint":
+    "This server's HTTPS certificate comes from its own certificate authority: programs need its file, {file}, from <link>Trust this server</link>. The examples use it.",
+  "common.role.admin": "admin",
+  "common.role.operator": "operator",
+  "common.role.user": "user",
+  "common.status.active": "active",
+  "common.status.disabled": "disabled",
+  "common.status.pending": "pending",
+  "common.status.revoked": "revoked",
+  "common.status.expired": "expired",
+  "common.status.online": "online",
+  "common.status.offline": "offline",
+} as const;

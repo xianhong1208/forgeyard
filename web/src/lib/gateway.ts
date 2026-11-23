@@ -1,3 +1,4 @@
+import { labels } from "../i18n/core";
 // The gateway (M4): snippets for a new key, numbers for usage, and reading a streamed answer.
 
 import type { ApiKey } from "./types";
@@ -17,20 +18,20 @@ export const API_ENDPOINT: Record<string, string> = {
   classify: "/classify",
 };
 
-export const API_KIND: Record<string, string> = {
-  "openai-chat": "chat",
-  "openai-embeddings": "embeddings",
-  rerank: "rerank",
-  "openai-audio": "speech to text",
-  "openai-speech": "text to speech",
-  "openai-images": "images",
-  "openai-videos": "video",
-  "vision-detect": "object detection",
-  "vision-segment": "segmentation",
-  "vision-depth": "depth",
-  "vision-classify": "image classification",
-  classify: "text classification",
-};
+export const API_KIND: Record<string, string> = labels({
+  "openai-chat": "fleet.api.openai-chat",
+  "openai-embeddings": "fleet.api.openai-embeddings",
+  rerank: "fleet.api.rerank",
+  "openai-audio": "fleet.api.openai-audio",
+  "openai-speech": "fleet.api.openai-speech",
+  "openai-images": "fleet.api.openai-images",
+  "openai-videos": "fleet.api.openai-videos",
+  "vision-detect": "fleet.api.vision-detect",
+  "vision-segment": "fleet.api.vision-segment",
+  "vision-depth": "fleet.api.vision-depth",
+  "vision-classify": "fleet.api.vision-classify",
+  classify: "fleet.api.classify",
+});
 
 // A curl call and a Python call with the official OpenAI SDK, for the model's protocol. With a
 // trustUrl (the server's own certificate authority), both trust that CA's file, forgeyard-ca.pem.

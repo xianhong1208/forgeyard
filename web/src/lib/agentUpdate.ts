@@ -1,5 +1,6 @@
 // 1.4.2 (#121, #122): the "update the agent" hint on a machine's tile and page, and how its update command is
 // introduced. Pure, so each case is tested on its own.
+import { t } from "../i18n/core";
 import type { AgentBehind, AgentUpdate, Machine } from "./types";
 
 // "agent 1.4.0, server 1.4.2: update", or for a build of the server's version from older code
@@ -7,9 +8,9 @@ import type { AgentBehind, AgentUpdate, Machine } from "./types";
 export function behindText(m: Pick<Machine, "agent_behind">): string | null {
   const b = m.agent_behind;
   if (!b) return null;
-  if (b.older || b.old_protocol || b.missing.length === 0) return `agent ${b.agent ?? "?"}, server ${b.server}: update`;
+  if (b.older || b.old_protocol || b.missing.length === 0) return t("fleet.behind.version", { agent: b.agent ?? "?", server: b.server });
   const shown = b.missing.slice(0, 2).join(", ") + (b.missing.length > 2 ? ` +${b.missing.length - 2}` : "");
-  return `agent ${b.agent ?? "?"} lacks ${shown}: update`;
+  return t("fleet.behind.lacks", { agent: b.agent ?? "?", missing: shown });
 }
 
 // A sentence for the machine's page.
