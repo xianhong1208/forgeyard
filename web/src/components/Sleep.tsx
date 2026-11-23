@@ -19,18 +19,19 @@ export function SleepSetting({ prefix, on, minutes, onChange, last, other }: {
   last?: StartTime | null;            // its own last start (edit), or another deployment's of the same model (deploy)
   other?: string;                     // that other deployment's name
 }) {
+  const t = useT();
   const problem = on ? idleProblem(minutes) : null;
   return (
     <section className="panel" aria-labelledby={`${prefix}-sleep-title`}>
-      <h2 id={`${prefix}-sleep-title`}>When not in use</h2>
+      <h2 id={`${prefix}-sleep-title`}>{t("deployment.sleep.title")}</h2>
       <div className="sleep-set">
         <label className="check-line" htmlFor={`${prefix}-sleep`}>
           <input id={`${prefix}-sleep`} type="checkbox" checked={on}
             onChange={(e) => onChange(e.target.checked, e.target.checked && !minutes.trim() ? String(IDLE_DEFAULT) : minutes)} />
-          <span><IconMoon size={15} aria-hidden="true" /> Sleep when idle</span>
+          <span><IconMoon size={15} aria-hidden="true" /> {t("deployment.sleep.label")}</span>
         </label>
         <div className="field sleep-minutes">
-          <label htmlFor={`${prefix}-idle`}>Idle minutes</label>
+          <label htmlFor={`${prefix}-idle`}>{t("deploy.change.idle_minutes")}</label>
           <input id={`${prefix}-idle`} inputMode="numeric" value={minutes} disabled={!on} placeholder={String(IDLE_DEFAULT)}
             aria-invalid={problem ? true : undefined} aria-describedby={`${prefix}-sleep-hint`}
             onChange={(e) => onChange(on, e.target.value)} />
@@ -39,10 +40,10 @@ export function SleepSetting({ prefix, on, minutes, onChange, last, other }: {
       </div>
       <div id={`${prefix}-sleep-hint`} className="field-hint sleep-hint">
         <p>{on
-          ? `After ${minutes.trim() && !problem ? minutes.trim() : IDLE_DEFAULT} min without a request its replicas stop and free their memory; the model stays listed, and the next request (or Wake now) starts it again. That request waits up to the wake wait (Advanced); a key that may use a cloud tier is served there meanwhile.`
-          : `Off: it keeps its memory while nobody uses it. On, its replicas stop after the idle time (${IDLE_MIN} to ${IDLE_MAX.toLocaleString("en")} minutes) and start again when needed.`}</p>
+          ? t("deploy.sleep.onHint", { minutes: minutes.trim() && !problem ? minutes.trim() : String(IDLE_DEFAULT) })
+          : t("deploy.sleep.offHint", { min: IDLE_MIN, max: IDLE_MAX })}</p>
         <p>{startHint(last, other)}</p>
-        {on && <p>While it sleeps, its memory may be used by others; if none is free when it wakes, it cannot start until there is room.</p>}
+        {on && <p>{t("deploy.sleep.room")}</p>}
       </div>
     </section>
   );
@@ -88,13 +89,14 @@ export function AsleepHereLine({ list, compact }: { list: AsleepHere[]; compact?
 
 // Under Advanced on the deploy and edit forms (1.5.0 PR 3's parameter): how long a request waits for a wake.
 export function WakeWaitField({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  const t = useT();
   const problem = wakeWaitProblem(value);
   return (
-    <div className="field"><label htmlFor={id}>Wake wait (seconds)</label>
+    <div className="field"><label htmlFor={id}>{t("deploy.wake.label")}</label>
       <input id={id} inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value)} placeholder={String(WAKE_WAIT_DEFAULT)}
         aria-invalid={problem ? true : undefined} />
       {problem && <p className="field-error">{problem}</p>}
-      <p className="field-hint">Sleep when idle only: how long a request to it waits while it wakes ({WAKE_WAIT_MIN} to {WAKE_WAIT_MAX.toLocaleString("en")}).
-        Empty: {WAKE_WAIT_DEFAULT}. Then it gets 503 <code>model_waking</code> with Retry-After. Saving it restarts no replica.</p></div>
+      <p className="field-hint">{t.rich("deploy.wake.hint", { min: WAKE_WAIT_MIN, max: WAKE_WAIT_MAX, def: String(WAKE_WAIT_DEFAULT),
+        code: <code>model_waking</code> })}</p></div>
   );
 }

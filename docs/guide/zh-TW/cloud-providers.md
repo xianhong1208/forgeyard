@@ -52,11 +52,11 @@ Forgeyard 可以把請求送到它以外的模型 API：OpenAI、Anthropic、Goo
 
 讓某個部署在忙碌或停擺時溢出到雲端：
 
-1. 從 **Serving** 打開這個部署。它的頁面上有 **Cloud fallback** 區塊。
+1. 從 **服務中** 打開這個部署。它的頁面上有 **Cloud fallback** 區塊。
 2. 按 **Add a cloud tier**，把供應商的模型加進去。
 3. 選好規則（請見[請求何時溢出](#when-a-request-spills)），按 **Save cloud fallback**。
 
-在 **Serving** 清單裡，有雲端備援的部署會顯示一個標出供應商的小標記，例如 *→ Gemini*。
+在 **服務中** 清單裡，有雲端備援的部署會顯示一個標出供應商的小標記，例如 *→ Gemini*。
 
 ## 用自己的名稱提供雲端模型
 

@@ -1,5 +1,6 @@
 // Uploading an image file to a machine (1.4, issue #35), and copying one from another machine (1.4.1, #104): the
 // words of the dialogs.
+import { t as tr } from "../i18n/core";
 import { bytes } from "./machines";
 import type { Machine } from "./types";
 
@@ -12,18 +13,18 @@ export const UPLOAD_ACCEPT = ".tar,.tar.gz,.tgz,application/x-tar,application/gz
 
 // Why this machine cannot take an upload now (null: it can).
 export function uploadBlocked(m: Machine): string | null {
-  if (m.status === "revoked") return `${m.name} was revoked.`;
+  if (m.status === "revoked") return tr("machine.img.revoked", { name: m.name });
   if (!(m.features ?? []).includes("image_load")) {
-    return `${m.name}'s agent cannot load images: it has no container engine, or it is too old (update the agent).`;
+    return tr("machine.img.cannotLoad", { name: m.name });
   }
-  if (m.status !== "online") return `${m.name} is offline: an image can be uploaded once its agent is connected.`;
+  if (m.status !== "online") return tr("machine.img.offline", { name: m.name });
   return null;
 }
 
 export function uploadLine(phase: string, sent: number, total: number, machine: string): string {
-  if (phase === "loading") return `Loading it into ${machine}'s container engine…`;
+  if (phase === "loading") return tr("machine.img.loadingInto", { machine });
   const pct = total ? Math.floor((100 * Math.min(sent, total)) / total) : 0;
-  return `Sending ${bytes(sent)} of ${bytes(total)} (${pct}%)`;
+  return tr("machine.img.sending", { sent: bytes(sent), total: bytes(total), pct: String(pct) });
 }
 
 export function shortId(id: string): string {
@@ -38,12 +39,12 @@ export function matchLine(i: LoadedImage): string {
   if (checked.length) {
     const want = [...new Set(checked.map((x) => x.image.split("@")[0]))].filter((t) => !i.tags.includes(t));
     const then = want.length
-      ? ` Its tag is not the recipe's: run docker tag ${shortId(i.id)} ${want[0]} on the machine to use it.`
-      : " Deployments here use it without a pull.";
-    return `The pinned image of ${checked.map(name).join(", ")}, checked by its recorded ids.${then}`;
+      ? tr("machine.img.match.retag", { id: shortId(i.id), tag: want[0] })
+      : tr("machine.img.match.noPull");
+    return tr("machine.img.match.pinned", { recipes: checked.map(name).join(", "), then });
   }
-  if (tagged.length) return `Named as the image of ${tagged.map(name).join(", ")}. That recipe names it by a tag only, so it is used unchecked.`;
-  return "Not the image of any recipe. A custom recipe can name it by its tag.";
+  if (tagged.length) return tr("machine.img.match.tag", { recipes: tagged.map(name).join(", ") });
+  return tr("machine.img.match.none");
 }
 
 // 1.4.1 (#104): copying an image from another machine. An image as a machine's agent lists it.
@@ -63,7 +64,7 @@ export function copyBlocked(m: Machine, all: Machine[]): string | null {
   const blocked = uploadBlocked(m);
   if (blocked) return blocked;
   if (!copySources(m, all).length) {
-    return "No other machine can send an image now: it needs a connected agent of 1.4.1 or later with a container engine.";
+    return tr("machine.img.noSource");
   }
   return null;
 }
@@ -78,8 +79,8 @@ export function listedLine(i: ListedImage): string {
 
 // Whether what was loaded is the image the source has.
 export function sameLine(i: CopiedImage, source: string): string {
-  if (i.same_as_source === true) return `The same image as on ${source} (same content id).`;
-  if (i.same_as_source === false) return `Not the same image as on ${source}: what was loaded differs from what it has.`;
+  if (i.same_as_source === true) return tr("machine.img.same", { source });
+  if (i.same_as_source === false) return tr("machine.img.notSame", { source });
   return "";
 }
 
@@ -103,20 +104,20 @@ export type ImageRemoved = { ok: true; image: ListedImage; freed_bytes: number;
 // "llama.cpp (cpu), vision (cuda)": the recipes that name it.
 export function recipesLine(i: EngineImage): string {
   const seen = [...new Set(i.matches.map((x) => `${x.recipe} (${x.variant})`))];
-  const how = i.matches.some((x) => x.how === "checked") ? "pinned, checked by its recorded ids" : "named by its tag";
+  const how = i.matches.some((x) => x.how === "checked") ? tr("machine.img.howPinned") : tr("machine.img.howTag");
   return `${seen.join(", ")} · ${how}`;
 }
 
 // "40 GiB free of 100 GiB" where the engine keeps its images, when the agent can see it.
 export function engineDiskLine(v: { free_bytes: number | null; total_bytes: number | null }): string | null {
   if (v.free_bytes === null || v.free_bytes === undefined) return null;
-  return v.total_bytes ? `${bytes(v.free_bytes)} free of ${bytes(v.total_bytes)}` : `${bytes(v.free_bytes)} free`;
+  return v.total_bytes ? tr("machine.freeOf", { free: bytes(v.free_bytes), total: bytes(v.total_bytes) }) : tr("machine.free", { free: bytes(v.free_bytes) });
 }
 
 export function engineRemoveQuestion(machine: string, i: EngineImage): string {
   const name = i.tags[0] ?? shortId(i.id);
-  const size = i.size ? ` (${bytes(i.size)})` : "";
-  return `Remove ${name}${size} from ${machine}'s container engine? A deployment that needs it pulls or loads it again.`;
+  const size = i.size ? tr("machine.cache.size", { size: bytes(i.size) }) : "";
+  return tr("machine.img.removeQuestion", { name, size, machine });
 }
 
 // What the console says once an image is gone: up to its size came back (layers another image shares stay), and the
@@ -124,5 +125,5 @@ export function engineRemoveQuestion(machine: string, i: EngineImage): string {
 export function removedLine(machine: string, r: ImageRemoved): string {
   const name = r.image.tags[0] ?? shortId(r.image.id);
   const disk = engineDiskLine(r);
-  return `Removed ${name} from ${machine}: up to ${bytes(r.freed_bytes)} freed (layers another image shares stay)${disk ? `; now ${disk}` : ""}.`;
+  return tr("machine.img.removed", { name, machine, freed: bytes(r.freed_bytes), now: disk ? tr("machine.img.removedNow", { disk }) : "" });
 }
